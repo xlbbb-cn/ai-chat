@@ -63,8 +63,52 @@
   outline: none;
 }
 
-.settings-body input:focus {
+.settings-body textarea,
+.settings-body select {
+  padding: 8px 12px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  color: #e2e8f0;
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  resize: vertical;
+}
+
+.settings-body input:focus,
+.settings-body textarea:focus,
+.settings-body select:focus {
   border-color: #2563eb;
+}
+
+.settings-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding-top: 4px;
+  border-top: 1px solid #1e293b;
+}
+
+.settings-row {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 10px !important;
+}
+
+.settings-hint {
+  font-size: 11px;
+  color: #475569;
+  margin-left: auto;
+}
+
+.settings-hint code {
+  font-size: 10px;
+  background: #1e293b;
+  padding: 1px 4px;
+  border-radius: 3px;
 }
 
 .settings-footer {

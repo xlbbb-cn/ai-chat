@@ -39,7 +39,9 @@ export default function App() {
     setStreaming(true);
     setError(null);
 
-    const history = [...messages, userMsg].map((m) => ({ role: m.role, content: m.content }));
+    const history = [...messages, userMsg]
+      .filter((m) => !m.streaming)
+      .map((m) => ({ role: m.role, content: m.content }));
 
     saveHistory(sessionId, "user", text);
 
@@ -116,7 +118,12 @@ export default function App() {
           {sidebar === "history" && (
             <HistoryPanel
               currentSessionId={sessionId}
-              onLoad={(sid, msgs) => { setMessages(msgs); setSessionId(sid); }}
+              onLoad={(sid, msgs) => {
+                if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null; }
+                setStreaming(false);
+                setMessages(msgs);
+                setSessionId(sid);
+              }}
               onClose={() => setSidebar(null)}
             />
           )}

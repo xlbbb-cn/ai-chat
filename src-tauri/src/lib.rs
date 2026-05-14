@@ -17,6 +17,14 @@ pub struct AppConfig {
     pub api_base_url: String,
     pub api_key: String,
     pub model: String,
+    #[serde(default)]
+    pub temperature: Option<f64>,
+    #[serde(default)]
+    pub enable_thinking: bool,
+    #[serde(default)]
+    pub reasoning_effort: String,
+    #[serde(default)]
+    pub system_message: String,
 }
 
 impl Default for AppConfig {
@@ -25,6 +33,10 @@ impl Default for AppConfig {
             api_base_url: "https://api.openai.com/v1".into(),
             api_key: String::new(),
             model: "gpt-4o-mini".into(),
+            temperature: None,
+            enable_thinking: false,
+            reasoning_effort: String::new(),
+            system_message: String::new(),
         }
     }
 }
@@ -278,6 +290,11 @@ async fn chat_completion(
     let mut allow_commands = false;
     let mut all_messages: Vec<Value> = vec![];
 
+    // Global system message from config (base context)
+    if !config.system_message.is_empty() {
+        all_messages.push(json!({ "role": "system", "content": config.system_message }));
+    }
+
     if let Some(ref skill_name) = skill_id {
         if let Ok(skill) = load_skill_by_name(&state.skills_dir, skill_name) {
             all_messages.push(json!({ "role": "system", "content": skill.system_prompt }));
@@ -344,6 +361,15 @@ async fn chat_completion(
         if !tools.is_empty() {
             req_body["tools"] = json!(tools);
             req_body["tool_choice"] = json!("auto");
+        }
+        if let Some(temp) = config.temperature {
+            req_body["temperature"] = json!(temp);
+        }
+        if config.enable_thinking {
+            req_body["thinking"] = json!({ "type": "enabled" });
+        }
+        if !config.reasoning_effort.is_empty() {
+            req_body["reasoning_effort"] = json!(config.reasoning_effort);
         }
 
         let (finish_reason, tool_calls) =
