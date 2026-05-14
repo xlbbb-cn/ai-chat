@@ -6,6 +6,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
+use dirs::home_dir;
 
 // ─── App State ───────────────────────────────────────────────────────────────
 
@@ -149,8 +150,10 @@ fn load_skill_by_id(skills_dir: &PathBuf, id: &str) -> Result<Skill, String> {
 
 #[tauri::command]
 fn list_skills(state: State<'_, AppState>) -> Vec<Skill> {
-    let dir = &state.skills_dir;
-    fs::read_dir(dir)
+    let mut skills = Vec::new();
+
+    // Load skills from the app's skills directory
+    let app_skills = fs::read_dir(&state.skills_dir)
         .map(|entries| {
             entries
                 .filter_map(|e| e.ok())
@@ -159,9 +162,30 @@ fn list_skills(state: State<'_, AppState>) -> Vec<Skill> {
                     let content = fs::read_to_string(e.path()).ok()?;
                     serde_json::from_str::<Skill>(&content).ok()
                 })
-                .collect()
+                .collect::<Vec<Skill>>()
         })
-        .unwrap_or_default()
+        .unwrap_or_default();
+    skills.extend(app_skills);
+
+    // Load skills from the user's ~/.skills directory
+    if let Some(home_dir) = home_dir() {
+        let user_skills_dir = home_dir.join(".skills");
+        let user_skills = fs::read_dir(&user_skills_dir)
+            .map(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.path().extension().map(|x| x == "json").unwrap_or(false))
+                    .filter_map(|e| {
+                        let content = fs::read_to_string(e.path()).ok()?;
+                        serde_json::from_str::<Skill>(&content).ok()
+                    })
+                    .collect::<Vec<Skill>>()
+            })
+            .unwrap_or_default();
+        skills.extend(user_skills);
+    }
+
+    skills
 }
 
 #[tauri::command]

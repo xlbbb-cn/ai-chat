@@ -31,7 +31,37 @@
 .message-content {
   font-size: 14px;
   line-height: 1.6;
-  white-space: pre-wrap;
+}
+
+.message-content p {
+  margin-top: 0;
+  margin-bottom: 0.5em;
+}
+
+.message-content p:last-child {
+  margin-bottom: 0;
+}
+
+.message-content ul,
+.message-content ol {
+  margin-top: 0;
+  margin-bottom: 0.5em;
+  padding-left: 1.5em;
+}
+
+.message-content li {
+  margin-bottom: 0.25em;
+}
+
+.message-content li > p {
+  margin-bottom: 0;
+}
+
+.message-content pre.hljs {
+  margin: 0.5em 0;
+  padding: 1em;
+  border-radius: 4px;
+  overflow-x: auto;
 }
 
 .cursor {
