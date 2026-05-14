@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { chatCompletion, searchDuckduckgo, saveHistory, loadHistory, HistoryRecord } from "./api";
+import { chatCompletion, searchDuckduckgo, saveHistory, loadHistory, } from "./api";
+import type { } from "./api";
+ 
 import { ChatMessage } from "./components/ChatMessage";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { SkillsPanel } from "./components/SkillsPanel";
