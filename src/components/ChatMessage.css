@@ -6,6 +6,7 @@
   border-radius: 8px;
   max-width: 80%;
   word-break: break-word;
+  overflow: hidden;
 }
 
 .chat-message.user {
@@ -31,6 +32,8 @@
 .message-content {
   font-size: 14px;
   line-height: 1.6;
+  overflow-x: auto;
+  min-width: 0;
 }
 
 .message-content p {
@@ -62,6 +65,8 @@
   padding: 1em;
   border-radius: 4px;
   overflow-x: auto;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .cursor {

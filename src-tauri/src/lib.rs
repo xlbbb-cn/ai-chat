@@ -197,7 +197,7 @@ async fn execute_tool(app: &AppHandle, name: &str, args_str: &str) -> String {
         "execute_command" => {
             let cmd_type = args["type"].as_str().unwrap_or("bash").to_string();
             let code = args["code"].as_str().unwrap_or("").to_string();
-            let _ = app.emit("chat-token", format!("⚙️ *Running {}:*\n```{}\n{}\n```\n\n\r\n", cmd_type, cmd_type, code));
+            let _ = app.emit("chat-token", format!("⚙️ *Running {}:*\n```{}\n{}\n```\n\n", cmd_type, cmd_type, code));
             tokio::time::timeout(
                 std::time::Duration::from_secs(30),
                 run_command(cmd_type, code),
@@ -403,7 +403,7 @@ fn save_config(state: State<'_, AppState>, config: AppConfig) -> Result<(), Stri
 // ─── Skills commands ──────────────────────────────────────────────────────────
 
 fn load_skill_by_name(skills_dir: &PathBuf, name: &str) -> Result<Skill, String> {
-    let path = skills_dir.join(format!("{}.md", name));
+    let path = skills_dir.join(name).join("skill.md");
     let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
     parse_skill_md(&content)
 }
@@ -417,9 +417,10 @@ fn list_skills(state: State<'_, AppState>) -> Vec<Skill> {
             .map(|entries| {
                 entries
                     .filter_map(|e| e.ok())
-                    .filter(|e| e.path().extension().map(|x| x == "md").unwrap_or(false))
+                    .filter(|e| e.path().is_dir())
                     .filter_map(|e| {
-                        let content = fs::read_to_string(e.path()).ok()?;
+                        let skill_path = e.path().join("skill.md");
+                        let content = fs::read_to_string(skill_path).ok()?;
                         parse_skill_md(&content).ok()
                     })
                     .collect()
@@ -440,14 +441,15 @@ fn list_skills(state: State<'_, AppState>) -> Vec<Skill> {
 #[tauri::command]
 fn save_skill(state: State<'_, AppState>, skill: Skill) -> Result<(), String> {
     let md = skill_to_md(&skill)?;
-    let path = state.skills_dir.join(format!("{}.md", skill.name));
-    fs::write(path, md).map_err(|e| e.to_string())
+    let skill_dir = state.skills_dir.join(&skill.name);
+    fs::create_dir_all(&skill_dir).map_err(|e| e.to_string())?;
+    fs::write(skill_dir.join("skill.md"), md).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn delete_skill(state: State<'_, AppState>, name: String) -> Result<(), String> {
-    let path = state.skills_dir.join(format!("{}.md", name));
-    fs::remove_file(path).map_err(|e| e.to_string())
+    let skill_dir = state.skills_dir.join(&name);
+    fs::remove_dir_all(skill_dir).map_err(|e| e.to_string())
 }
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
