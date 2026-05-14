@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use rusqlite::Connection;
 mod search_db;
+mod tools;
 use tauri::{AppHandle, Emitter, Manager, State};
 use dirs::home_dir;
 
@@ -196,81 +197,6 @@ async fn stream_request(
     Ok((finish_reason, tool_calls))
 }
 
-/// Execute a named tool and return the result as a string.
-async fn execute_tool(app: &AppHandle, name: &str, args_str: &str) -> String {
-    let args: Value = serde_json::from_str(args_str).unwrap_or_default();
-    match name {
-        "web_search" => {
-            let query = args["query"].as_str().unwrap_or("").to_string();
-            let _ = app.emit("chat-token", format!("🔍 *Searching: {}...*\n\n", query));
-            search_db::search_duckduckgo(query).await
-                .unwrap_or_else(|e| format!("Search failed: {}", e))
-        }
-        "execute_command" => {
-            let cmd_type = args["type"].as_str().unwrap_or("bash").to_string();
-            let code = args["code"].as_str().unwrap_or("").to_string();
-            let _ = app.emit("chat-token", format!("⚙️ *Running {}:*\n```{}\n{}\n```\n\n", cmd_type, cmd_type, code));
-            tokio::time::timeout(
-                std::time::Duration::from_secs(30),
-                run_command(cmd_type, code),
-            )
-            .await
-            .unwrap_or_else(|_| Ok("Command timed out after 30 seconds.".to_string()))
-            .unwrap_or_else(|e| format!("Error: {}", e))
-        }
-        _ => format!("Unknown tool: {}", name),
-    }
-}
-
-async fn run_command(cmd_type: String, code: String) -> Result<String, String> {
-    let output = match cmd_type.as_str() {
-        "python" | "python3" => {
-            tokio::process::Command::new("python3")
-                .arg("-c")
-                .arg(&code)
-                .output()
-                .await
-        }
-        "bash" | "sh" => {
-            tokio::process::Command::new("bash")
-                .arg("-c")
-                .arg(&code)
-                .output()
-                .await
-        }
-        "powershell" | "pwsh" => {
-            tokio::process::Command::new("powershell")
-                .args(["-NoProfile", "-NonInteractive", "-Command", &code])
-                .output()
-                .await
-        }
-        _ => return Err(format!("Unsupported command type: {}", cmd_type)),
-    }
-    .map_err(|e| e.to_string())?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-    let mut result = String::new();
-    if !stdout.is_empty() {
-        result.push_str(&stdout);
-    }
-    if !stderr.is_empty() {
-        if !result.is_empty() {
-            result.push('\n');
-        }
-        result.push_str("STDERR:\n");
-        result.push_str(&stderr);
-    }
-    if !output.status.success() {
-        result.push_str(&format!("\nExit code: {}", output.status.code().unwrap_or(-1)));
-    }
-    if result.is_empty() {
-        result = "(no output)".to_string();
-    }
-    Ok(result)
-}
-
 // ─── Chat command ─────────────────────────────────────────────────────────────
 
 /// Stream a chat completion from any OpenAI-compatible endpoint.
@@ -289,6 +215,7 @@ async fn chat_completion(
 
     let mut allow_commands = false;
     let mut all_messages: Vec<Value> = vec![];
+    let mut skill_dir_path: Option<PathBuf> = None;
 
     // Global system message from config (base context)
     if !config.system_message.is_empty() {
@@ -299,6 +226,14 @@ async fn chat_completion(
         if let Ok(skill) = load_skill_by_name(&state.skills_dir, skill_name) {
             all_messages.push(json!({ "role": "system", "content": skill.system_prompt }));
             allow_commands = skill.allowed_tools.iter().any(|t| t.eq_ignore_ascii_case("bash"));
+            skill_dir_path = Some(state.skills_dir.join(skill_name));
+        } else if let Some(home_dir) = dirs::home_dir() {
+            let user_skills_dir = home_dir.join(".skills");
+            if let Ok(skill) = load_skill_by_name(&user_skills_dir, skill_name) {
+                all_messages.push(json!({ "role": "system", "content": skill.system_prompt }));
+                allow_commands = skill.allowed_tools.iter().any(|t| t.eq_ignore_ascii_case("bash"));
+                skill_dir_path = Some(user_skills_dir.join(skill_name));
+            }
         }
     }
     for m in &messages {
@@ -309,47 +244,7 @@ async fn chat_completion(
     let client = Client::new();
 
     // Build tools list from enabled capabilities
-    let mut tools: Vec<Value> = vec![];
-    if web_search {
-        tools.push(json!({
-            "type": "function",
-            "function": {
-                "name": "web_search",
-                "description": "Search the web for current information. Use when the user asks about recent events, current data, or anything requiring up-to-date information.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": { "type": "string", "description": "The search query" }
-                    },
-                    "required": ["query"]
-                }
-            }
-        }));
-    }
-    if allow_commands {
-        tools.push(json!({
-            "type": "function",
-            "function": {
-                "name": "execute_command",
-                "description": "Execute a bash, python, or powershell command/script on the user's machine. Use for calculations, file operations, data processing, system queries, or any task that benefits from running code locally.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "type": {
-                            "type": "string",
-                            "enum": ["bash", "python", "powershell"],
-                            "description": "The runtime to use"
-                        },
-                        "code": {
-                            "type": "string",
-                            "description": "The command or code to execute"
-                        }
-                    },
-                    "required": ["type", "code"]
-                }
-            }
-        }));
-    }
+    let tools = tools::get_all_tools(web_search, allow_commands, skill_dir_path.as_deref());
 
     // Tool calling loop — repeat until the model stops calling tools
     loop {
@@ -398,7 +293,7 @@ async fn chat_completion(
 
         // Execute each tool and append its result
         for (id, name, args) in &tool_calls {
-            let result = execute_tool(&app, name, args).await;
+            let result = tools::execute_tool(&app, name, args, skill_dir_path.clone()).await;
             all_messages.push(json!({
                 "role": "tool",
                 "tool_call_id": id,
