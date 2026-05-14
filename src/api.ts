@@ -31,7 +31,6 @@ export interface StreamCallbacks {
 export async function chatCompletion(
   messages: Pick<Message, "role" | "content">[],
   skillId: string | null,
-  webSearch: boolean,
   callbacks: StreamCallbacks
 ): Promise<UnlistenFn> {
   const unlisteners: UnlistenFn[] = [];
@@ -58,7 +57,6 @@ export async function chatCompletion(
   invoke("chat_completion", {
     messages: messages.map((m) => ({ role: m.role, content: m.content })),
     skillId,
-    webSearch,
   }).catch((err: string) => {
     callbacks.onError(err);
     cleanup();

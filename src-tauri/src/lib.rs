@@ -26,6 +26,8 @@ pub struct AppConfig {
     pub reasoning_effort: String,
     #[serde(default)]
     pub system_message: String,
+    #[serde(default)]
+    pub selected_tools: Vec<String>,
 }
 
 impl Default for AppConfig {
@@ -38,6 +40,7 @@ impl Default for AppConfig {
             enable_thinking: false,
             reasoning_effort: String::new(),
             system_message: String::new(),
+            selected_tools: vec!["web_search".to_string()],
         }
     }
 }
@@ -220,7 +223,6 @@ async fn chat_completion(
     app: AppHandle,
     messages: Vec<ChatMessage>,
     skill_id: Option<String>,
-    web_search: bool,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let config = state.config.lock().unwrap().clone();
@@ -237,6 +239,7 @@ async fn chat_completion(
     if let Some(ref skill_name) = skill_id {
         if let Ok(skill) = load_skill_by_name(&state.skills_dir, skill_name) {
             all_messages.push(json!({ "role": "system", "content": skill.system_prompt }));
+            // Skill can still force allow bash commands if it wants
             allow_commands = skill.allowed_tools.iter().any(|t| t.eq_ignore_ascii_case("bash"));
             skill_dir_path = Some(state.skills_dir.join(skill_name));
         } else if let Some(home_dir) = dirs::home_dir() {
@@ -255,8 +258,17 @@ async fn chat_completion(
     let url = format!("{}/chat/completions", config.api_base_url.trim_end_matches('/'));
     let client = Client::new();
 
+    // Enable web search if globally selected
+    let web_search = config.selected_tools.iter().any(|t| t == "web_search");
+    // Enable commands if globally selected, otherwise keep skill's choice
+    if config.selected_tools.iter().any(|t| t == "execute_command") {
+        allow_commands = true;
+    }
+    // For file tools, we pass the skill context or current dir context. For simplicity, just use skill_dir_path.
+    
     // Build tools list from enabled capabilities
-    let tools = tools::get_all_tools(web_search, allow_commands, skill_dir_path.as_deref());
+    // Let's pass the global selected tools
+    let tools = tools::get_all_tools(&config.selected_tools, allow_commands, skill_dir_path.as_deref());
 
     // Tool calling loop — repeat until the model stops calling tools
     loop {

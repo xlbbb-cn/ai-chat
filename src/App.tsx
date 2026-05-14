@@ -6,16 +6,16 @@ import { ChatMessage } from "./components/ChatMessage";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { SkillsPanel } from "./components/SkillsPanel";
 import { HistoryPanel } from "./components/HistoryPanel";
+import { ToolsPanel } from "./components/ToolsPanel";
 import type { Message } from "./types";
 import "./App.css";
 
-type Sidebar = "settings" | "skills" | "history" | null;
+type Sidebar = "settings" | "skills" | "history" | "tools" | null;
 
 export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
-  const [webSearch, setWebSearch] = useState(false);
   const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
   const [sidebar, setSidebar] = useState<Sidebar>(null);
   const [activeSkillId, setActiveSkillId] = useState<string | null>(null);
@@ -67,7 +67,7 @@ export default function App() {
 
     let accumulatedContent = "";
 
-    const cleanup = await chatCompletion(history, activeSkillId, webSearch, {
+    const cleanup = await chatCompletion(history, activeSkillId, {
       onToken(token) {
         accumulatedContent += token;
         setMessages((prev) =>
@@ -137,6 +137,12 @@ export default function App() {
               onClose={() => setSidebar(null)}
             />
           )}
+          {sidebar === "tools" && (
+            <ToolsPanel
+              onClose={() => setSidebar(null)}
+              onToolsChange={() => { }}
+            />
+          )}
           {sidebar === "history" && (
             <HistoryPanel
               currentSessionId={sessionId}
@@ -176,18 +182,21 @@ export default function App() {
               ✦ Skills
             </button>
             <button
+              className={`toolbar-btn ${sidebar === "tools" ? "active" : ""}`}
+              onClick={() => toggleSidebar("tools")}
+              title="Tools"
+            >
+              🛠 Tools
+            </button>
+            <button
               className={`toolbar-btn ${sidebar === "settings" ? "active" : ""}`}
               onClick={() => toggleSidebar("settings")}
               title="Settings"
             >
               ⚙ Settings
             </button>
-            <label className="toolbar-btn" style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-              <input type="checkbox" checked={webSearch} onChange={e => setWebSearch(e.target.checked)} />
-              Web Search
-            </label>
             <button className="toolbar-btn" onClick={clearChat} title="New chat">
-              ✕ Clear
+              ↻ New Chat
             </button>
           </div>
         </header>
@@ -234,7 +243,7 @@ export default function App() {
             {streaming ? "…" : "Send"}
           </button>
         </div>
-      </div>
-    </div>
+      </div >
+    </div >
   );
 }

@@ -1,0 +1,91 @@
+.tools-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: 20px;
+    background: #fdfdfd;
+    color: #333;
+}
+
+.tools-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.tools-header h2 {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 600;
+}
+
+.tools-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+}
+
+.tool-item {
+    padding: 12px;
+    border: 1px solid #eee;
+    border-radius: 6px;
+    background: white;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.tool-item:hover {
+    border-color: #ccc;
+}
+
+.tool-item.active {
+    border-color: #0066ff;
+    background: #eef5ff;
+}
+
+.tool-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.tool-name {
+    font-weight: 500;
+    font-size: 0.95rem;
+}
+
+.tool-desc {
+    font-size: 0.85rem;
+    color: #666;
+}
+
+/* Dark mode */
+@media (prefers-color-scheme: dark) {
+    .tools-panel {
+        background: #1e1e1e;
+        color: #eee;
+    }
+
+    .tool-item {
+        background: #252525;
+        border-color: #333;
+    }
+
+    .tool-item:hover {
+        border-color: #555;
+    }
+
+    .tool-item.active {
+        border-color: #0066ff;
+        background: #1a273b;
+    }
+
+    .tool-desc {
+        color: #999;
+    }
+}

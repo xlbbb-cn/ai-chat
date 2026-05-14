@@ -13,6 +13,7 @@ export interface AppConfig {
   enable_thinking?: boolean;
   reasoning_effort?: string;
   system_message?: string;
+  selected_tools?: string[];
 }
 
 export interface Skill {

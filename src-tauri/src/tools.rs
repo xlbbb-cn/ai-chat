@@ -3,10 +3,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter};
 
-pub fn get_all_tools(web_search: bool, allow_commands: bool, skill_dir: Option<&Path>) -> Vec<Value> {
+pub fn get_all_tools(selected_tools: &[String], allow_commands: bool, skill_dir: Option<&Path>) -> Vec<Value> {
     let mut tools = vec![];
 
-    if web_search {
+    if selected_tools.iter().any(|t| t == "web_search") {
         tools.push(json!({
             "type": "function",
             "function": {
@@ -48,50 +48,56 @@ pub fn get_all_tools(web_search: bool, allow_commands: bool, skill_dir: Option<&
         }));
     }
 
-    if skill_dir.is_some() {
-        tools.push(json!({
-            "type": "function",
-            "function": {
-                "name": "read_file",
-                "description": "Read the contents of a file inside the skill directory.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "path": { "type": "string", "description": "Relative path to the file" }
-                    },
-                    "required": ["path"]
+    if skill_dir.is_some() || selected_tools.iter().any(|t| t == "read_file" || t == "write_file" || t == "list_dir") {
+        if selected_tools.iter().any(|t| t == "read_file") || skill_dir.is_some() {
+            tools.push(json!({
+                "type": "function",
+                "function": {
+                    "name": "read_file",
+                    "description": "Read the contents of a file inside the skill directory (or the active process directory if no skill).",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": { "type": "string", "description": "Relative path to the file" }
+                        },
+                        "required": ["path"]
+                    }
                 }
-            }
-        }));
-        tools.push(json!({
-            "type": "function",
-            "function": {
-                "name": "write_file",
-                "description": "Write contents to a file inside the skill directory.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "path": { "type": "string", "description": "Relative path to the file" },
-                        "content": { "type": "string", "description": "Content to write" }
-                    },
-                    "required": ["path", "content"]
+            }));
+        }
+        if selected_tools.iter().any(|t| t == "write_file") || skill_dir.is_some() {
+            tools.push(json!({
+                "type": "function",
+                "function": {
+                    "name": "write_file",
+                    "description": "Write contents to a file inside the skill directory.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": { "type": "string", "description": "Relative path to the file" },
+                            "content": { "type": "string", "description": "Content to write" }
+                        },
+                        "required": ["path", "content"]
+                    }
                 }
-            }
-        }));
-        tools.push(json!({
-            "type": "function",
-            "function": {
-                "name": "list_dir",
-                "description": "List contents of a directory inside the skill directory.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "path": { "type": "string", "description": "Relative path to the directory (use '.' for root)" }
-                    },
-                    "required": ["path"]
+            }));
+        }
+        if selected_tools.iter().any(|t| t == "list_dir") || skill_dir.is_some() {
+            tools.push(json!({
+                "type": "function",
+                "function": {
+                    "name": "list_dir",
+                    "description": "List contents of a directory inside the skill directory.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": { "type": "string", "description": "Relative path to the directory (use '.' for root)" }
+                        },
+                        "required": ["path"]
+                    }
                 }
-            }
-        }));
+            }));
+        }
     }
 
     tools
