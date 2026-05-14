@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { chatCompletion, searchDuckduckgo, saveHistory, loadHistory } from "./api";
+import { chatCompletion, saveHistory, loadHistory } from "./api";
 import type { HistoryRecord } from "./api";
  
 import { ChatMessage } from "./components/ChatMessage";
@@ -50,18 +50,7 @@ export default function App() {
 
     saveHistory(sessionId, "user", text);
 
-    if (webSearch) {
-      try {
-        const searchCtx = await searchDuckduckgo(text);
-        if (searchCtx && history.length > 0) {
-          history[history.length - 1].content = "Web Context:\n" + searchCtx + "\n\nUser Question:\n" + text;
-        }
-      } catch (e) {
-        setError("Web search failed: " + String(e));
-      }
-    }
-
-    const cleanup = await chatCompletion(history, activeSkillId, {
+    const cleanup = await chatCompletion(history, activeSkillId, webSearch, {
       onToken(token) {
         setMessages((prev) =>
           prev.map((m) =>

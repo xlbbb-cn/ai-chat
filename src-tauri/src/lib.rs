@@ -56,11 +56,13 @@ pub struct ChatMessage {
 
 /// Stream a chat completion from any OpenAI-compatible endpoint.
 /// Emits "chat-token" events with each chunk, then "chat-done" or "chat-error".
+/// When web_search=true, includes a web_search tool and handles tool_calls automatically.
 #[tauri::command]
 async fn chat_completion(
     app: AppHandle,
     messages: Vec<ChatMessage>,
     skill_id: Option<String>,
+    web_search: bool,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let config = state.config.lock().unwrap().clone();
@@ -79,14 +81,37 @@ async fn chat_completion(
     let url = format!("{}/chat/completions", config.api_base_url.trim_end_matches('/'));
     let client = Client::new();
 
+    let mut req_body = json!({
+        "model": config.model,
+        "messages": all_messages,
+        "stream": true
+    });
+
+    if web_search {
+        req_body["tools"] = json!([{
+            "type": "function",
+            "function": {
+                "name": "web_search",
+                "description": "Search the web for current information about a topic. Use this when the user asks about recent events, current data, or anything that might require up-to-date information.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The search query to look up"
+                        }
+                    },
+                    "required": ["query"]
+                }
+            }
+        }]);
+        req_body["tool_choice"] = json!("auto");
+    }
+
     let res = client
         .post(&url)
         .bearer_auth(&config.api_key)
-        .json(&json!({
-            "model": config.model,
-            "messages": all_messages,
-            "stream": true
-        }))
+        .json(&req_body)
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -97,6 +122,11 @@ async fn chat_completion(
         return Err(err);
     }
 
+    // Stream first response — emit content tokens and detect tool calls
+    let mut tool_call_id = String::new();
+    let mut tool_call_args = String::new();
+    let mut finish_reason = String::new();
+
     let mut stream = res.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let bytes = chunk.map_err(|e| e.to_string())?;
@@ -105,20 +135,95 @@ async fn chat_completion(
         for line in text.lines() {
             let line = line.trim();
             if line == "data: [DONE]" {
-                let _ = app.emit("chat-done", ());
-                return Ok(());
+                break;
             }
-            if let Some(json_str) = line.strip_prefix("data: ") {
-                if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
-                    if let Some(delta) = parsed
-                        .get("choices")
-                        .and_then(|c| c.get(0))
-                        .and_then(|c| c.get("delta"))
-                        .and_then(|d| d.get("content"))
-                        .and_then(|v| v.as_str())
-                    {
-                        let _ = app.emit("chat-token", delta.to_string());
+            let Some(json_str) = line.strip_prefix("data: ") else { continue };
+            let Ok(parsed) = serde_json::from_str::<Value>(json_str) else { continue };
+            let Some(choice) = parsed["choices"].get(0) else { continue };
+            let delta = &choice["delta"];
+
+            if let Some(fr) = choice["finish_reason"].as_str() {
+                finish_reason = fr.to_string();
+            }
+            // Accumulate tool call id and arguments from streamed chunks
+            if let Some(tcs) = delta["tool_calls"].as_array() {
+                for tc in tcs {
+                    if let Some(id) = tc["id"].as_str() {
+                        tool_call_id = id.to_string();
                     }
+                    if let Some(args) = tc["function"]["arguments"].as_str() {
+                        tool_call_args.push_str(args);
+                    }
+                }
+            }
+            // Emit regular content tokens
+            if let Some(content) = delta["content"].as_str() {
+                let _ = app.emit("chat-token", content.to_string());
+            }
+        }
+    }
+
+    // If the model issued a tool call, execute the search and do a second streaming call
+    if finish_reason == "tool_calls" && !tool_call_id.is_empty() {
+        let query = serde_json::from_str::<Value>(&tool_call_args)
+            .ok()
+            .and_then(|v| v["query"].as_str().map(String::from))
+            .unwrap_or_default();
+
+        let _ = app.emit("chat-token", format!("🔍 *Searching: {}...*\n\n", query));
+
+        let search_result = search_db::search_duckduckgo(query).await
+            .unwrap_or_else(|e| format!("Search failed: {}", e));
+
+        all_messages.push(json!({
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [{
+                "id": tool_call_id,
+                "type": "function",
+                "function": { "name": "web_search", "arguments": tool_call_args }
+            }]
+        }));
+        all_messages.push(json!({
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "content": search_result
+        }));
+
+        let res2 = client
+            .post(&url)
+            .bearer_auth(&config.api_key)
+            .json(&json!({
+                "model": config.model,
+                "messages": all_messages,
+                "stream": true
+            }))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !res2.status().is_success() {
+            let err = res2.text().await.unwrap_or_default();
+            let _ = app.emit("chat-error", err.clone());
+            return Err(err);
+        }
+
+        let mut stream2 = res2.bytes_stream();
+        while let Some(chunk) = stream2.next().await {
+            let bytes = chunk.map_err(|e| e.to_string())?;
+            let text = String::from_utf8_lossy(&bytes);
+            for line in text.lines() {
+                let line = line.trim();
+                if line == "data: [DONE]" {
+                    let _ = app.emit("chat-done", ());
+                    return Ok(());
+                }
+                let Some(json_str) = line.strip_prefix("data: ") else { continue };
+                let Ok(parsed) = serde_json::from_str::<Value>(json_str) else { continue };
+                if let Some(content) = parsed["choices"].get(0)
+                    .and_then(|c| c["delta"]["content"].as_str())
+                {
+                    let _ = app.emit("chat-token", content.to_string());
                 }
             }
         }
