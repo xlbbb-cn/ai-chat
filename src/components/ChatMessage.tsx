@@ -21,7 +21,7 @@ const md = new MarkdownIt({
     if (lang && hljs.getLanguage(lang)) {
       try {
         return `<pre class="hljs"><code>${hljs.highlight(str, { language: lang }).value}</code></pre>`;
-      } catch (__) {}
+      } catch (__) { }
     }
     return `<pre class="hljs"><code>${escapeHtml(str)}</code></pre>`;
   },
@@ -39,6 +39,13 @@ export function ChatMessage({ message }: Props) {
       <div
         className="message-content"
         dangerouslySetInnerHTML={{ __html: md.render(message.content) }}
+        onClick={(e) => {
+          const target = e.target as HTMLElement;
+          const link = target.closest("a");
+          if (link) {
+            e.preventDefault();
+          }
+        }}
       />
       {message.streaming && <span className="cursor">|</span>}
     </div>
