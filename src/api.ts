@@ -75,6 +75,7 @@ export interface HistoryRecord {
   session_id: string;
   role: string;
   content: string;
+  timestamp: string;
 }
 
 export async function loadHistory(): Promise<HistoryRecord[]> {

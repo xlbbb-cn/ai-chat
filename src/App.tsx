@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect, useCallback } from "react";
-import { chatCompletion, searchDuckduckgo, saveHistory, loadHistory, } from "./api";
-import type { } from "./api";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { chatCompletion, searchDuckduckgo, saveHistory, loadHistory } from "./api";
+import type { HistoryRecord } from "./api";
  
 import { ChatMessage } from "./components/ChatMessage";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -15,16 +15,23 @@ export default function App() {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [webSearch, setWebSearch] = useState(false);
-  const [sessionId, setSessionId] = useState(() => crypto.randomUUID());
+  const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
   const [sidebar, setSidebar] = useState<Sidebar>(null);
   const [activeSkillId, setActiveSkillId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [historyRecords, setHistoryRecords] = useState<HistoryRecord[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    if (sidebar === "history") {
+      loadHistory().then(setHistoryRecords).catch(console.error);
+    }
+  }, [sidebar]);
 
   const sendMessage = useCallback(async () => {
     const text = input.trim();
@@ -46,11 +53,11 @@ export default function App() {
     if (webSearch) {
       try {
         const searchCtx = await searchDuckduckgo(text);
-        if (history.length > 0) {
-            history[history.length - 1].content = "Web Context:\n" + searchCtx + "\n\nUser Question:\n" + text;
+        if (searchCtx && history.length > 0) {
+          history[history.length - 1].content = "Web Context:\n" + searchCtx + "\n\nUser Question:\n" + text;
         }
       } catch (e) {
-        console.error(e);
+        setError("Web search failed: " + String(e));
       }
     }
 
@@ -109,6 +116,15 @@ export default function App() {
     setSessionId(crypto.randomUUID());
   }
 
+  const groupedSessions = useMemo(() => {
+    const map = new Map<string, HistoryRecord[]>();
+    for (const rec of historyRecords) {
+      if (!map.has(rec.session_id)) map.set(rec.session_id, []);
+      map.get(rec.session_id)!.push(rec);
+    }
+    return Array.from(map.entries()).reverse();
+  }, [historyRecords]);
+
   return (
     <div className="app-layout">
       {/* Sidebar */}
@@ -125,18 +141,49 @@ export default function App() {
             />
           )}          {sidebar === "history" && (
             <div className="settings-panel">
-               <div className="panel-header">
-                 <h2>History</h2>
-                 <button className="icon-btn" onClick={() => setSidebar(null)}>✕</button>
-               </div>
-               <div className="panel-content" style={{padding: '10px', overflowY: 'auto', maxHeight: '100%'}}>
-                 <button className="base-btn" onClick={async () => {
-                    const recs = await loadHistory();
-                    alert(recs.length + ' msgs saved in db. check console.');
-                    console.log(recs);
-                 }}>Load History to Console</button>
-                 <p style={{marginTop: '10px', fontSize:'0.9rem', color: '#888'}}>This displays db log to developers. Real UI implementation would map sessions here.</p>
-               </div>
+              <div className="panel-header">
+                <h2>History</h2>
+                <button className="icon-btn" onClick={() => setSidebar(null)}>✕</button>
+              </div>
+              <div className="panel-content" style={{padding: '10px', overflowY: 'auto', maxHeight: '100%', display: 'flex', flexDirection: 'column', gap: '6px'}}>
+                {groupedSessions.length === 0 ? (
+                  <p style={{color: '#888', fontSize: '0.9rem'}}>No history yet.</p>
+                ) : groupedSessions.map(([sid, records]) => {
+                  const preview = records.find(r => r.role === 'user')?.content ?? '(empty)';
+                  const isCurrent = sid === sessionId;
+                  return (
+                    <div
+                      key={sid}
+                      onClick={() => {
+                        if (!isCurrent) {
+                          const msgs = records.map(r => ({
+                            id: crypto.randomUUID(),
+                            role: r.role as 'user' | 'assistant',
+                            content: r.content,
+                          }));
+                          setMessages(msgs);
+                          setSessionId(sid);
+                        }
+                        setSidebar(null);
+                      }}
+                      style={{
+                        padding: '8px 10px',
+                        background: 'rgba(255,255,255,0.05)',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        borderLeft: isCurrent ? '3px solid #4a9eff' : '3px solid transparent',
+                      }}
+                    >
+                      <div style={{fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
+                        {preview.length > 60 ? preview.slice(0, 60) + '…' : preview}
+                      </div>
+                      <div style={{fontSize: '0.75rem', color: '#888', marginTop: '3px'}}>
+                        {records.length} messages{isCurrent ? ' · current' : ''}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}        </aside>
       )}
