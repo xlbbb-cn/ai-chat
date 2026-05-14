@@ -61,3 +61,22 @@ export async function chatCompletion(
 
   return cleanup;
 }
+
+export async function searchDuckduckgo(query: string): Promise<string> {
+  return invoke("search_duckduckgo", { query });
+}
+
+export async function saveHistory(sessionId: string, role: string, content: string): Promise<void> {
+  return invoke("save_history", { sessionId, role, content });
+}
+
+export interface HistoryRecord {
+  id: number;
+  session_id: string;
+  role: string;
+  content: string;
+}
+
+export async function loadHistory(): Promise<HistoryRecord[]> {
+  return invoke("load_history");
+}

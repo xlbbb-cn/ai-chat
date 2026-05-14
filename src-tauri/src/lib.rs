@@ -5,6 +5,8 @@ use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use rusqlite::Connection;
+mod search_db;
 use tauri::{AppHandle, Emitter, Manager, State};
 use dirs::home_dir;
 
@@ -31,6 +33,7 @@ pub struct AppState {
     pub config: Mutex<AppConfig>,
     pub config_path: PathBuf,
     pub skills_dir: PathBuf,
+    pub db: Mutex<Connection>,
 }
 
 // ─── Skill ───────────────────────────────────────────────────────────────────
@@ -135,7 +138,8 @@ fn get_config(state: State<'_, AppState>) -> AppConfig {
 #[tauri::command]
 fn save_config(state: State<'_, AppState>, config: AppConfig) -> Result<(), String> {
     let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
-    fs::write(&state.config_path, json).map_err(|e| e.to_string())?;
+    fs::write(&state.config_path,
+ json).map_err(|e| e.to_string())?;
     *state.config.lock().unwrap() = config;
     Ok(())
 }
@@ -217,6 +221,10 @@ pub fn run() {
             let skills_dir = data_dir.join("skills");
             fs::create_dir_all(&skills_dir).ok();
 
+            let db_path = data_dir.join("chat.db");
+            let db = Connection::open(db_path).unwrap();
+            db.execute("CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)", []).unwrap();
+
             let config_path = data_dir.join("config.json");
             let config = if config_path.exists() {
                 fs::read_to_string(&config_path)
@@ -230,6 +238,7 @@ pub fn run() {
             app.manage(AppState {
                 config: Mutex::new(config),
                 config_path,
+                db: Mutex::new(db),
                 skills_dir,
             });
             Ok(())
@@ -241,6 +250,9 @@ pub fn run() {
             list_skills,
             save_skill,
             delete_skill,
+            search_db::search_duckduckgo,
+            search_db::save_history,
+            search_db::load_history,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
