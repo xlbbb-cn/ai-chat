@@ -23,4 +23,5 @@ futures-util = "0.3"
 dirs = "5"
 rusqlite = { version = "0.39.0", features = ["bundled"] }
 scraper = "0.27.0"
+serde_yaml = "0.9"
 

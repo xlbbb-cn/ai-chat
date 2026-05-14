@@ -18,8 +18,8 @@ export async function saveSkill(skill: Skill): Promise<void> {
   return invoke("save_skill", { skill });
 }
 
-export async function deleteSkill(id: string): Promise<void> {
-  return invoke("delete_skill", { id });
+export async function deleteSkill(name: string): Promise<void> {
+  return invoke("delete_skill", { name });
 }
 
 export interface StreamCallbacks {

@@ -5,38 +5,58 @@ import "./SkillsPanel.css";
 
 interface Props {
   activeSkillId: string | null;
-  onSelect: (id: string | null) => void;
+  onSelect: (name: string | null) => void;
   onClose: () => void;
 }
 
 const emptySkill = (): Skill => ({
-  id: crypto.randomUUID(),
   name: "",
   description: "",
   system_prompt: "",
-  allow_commands: false,
+  allowed_tools: [],
 });
 
 export function SkillsPanel({ activeSkillId, onSelect, onClose }: Props) {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [editing, setEditing] = useState<Skill | null>(null);
+  const [originalName, setOriginalName] = useState<string | null>(null);
 
   useEffect(() => {
     listSkills().then(setSkills).catch(console.error);
   }, []);
 
   async function handleSave() {
-    if (!editing) return;
+    if (!editing || !editing.name.trim()) return;
     await saveSkill(editing);
+    // If name changed, delete the old file
+    if (originalName && originalName !== editing.name) {
+      await deleteSkill(originalName).catch(() => {});
+      if (activeSkillId === originalName) onSelect(editing.name);
+    }
     const updated = await listSkills();
     setSkills(updated);
     setEditing(null);
+    setOriginalName(null);
   }
 
-  async function handleDelete(id: string) {
-    await deleteSkill(id);
-    setSkills((s) => s.filter((x) => x.id !== id));
-    if (activeSkillId === id) onSelect(null);
+  function startEdit(skill: Skill) {
+    setEditing({ ...skill });
+    setOriginalName(skill.name);
+  }
+
+  async function handleDelete(name: string) {
+    await deleteSkill(name);
+    setSkills((s) => s.filter((x) => x.name !== name));
+    if (activeSkillId === name) onSelect(null);
+  }
+
+  function toggleTool(tool: string) {
+    if (!editing) return;
+    const tools = editing.allowed_tools ?? [];
+    const next = tools.includes(tool)
+      ? tools.filter((t) => t !== tool)
+      : [...tools, tool];
+    setEditing({ ...editing, allowed_tools: next });
   }
 
   return (
@@ -53,7 +73,7 @@ export function SkillsPanel({ activeSkillId, onSelect, onClose }: Props) {
             <input
               value={editing.name}
               onChange={(e) => setEditing({ ...editing, name: e.target.value })}
-              placeholder="e.g. Code Reviewer"
+              placeholder="e.g. code-reviewer"
             />
           </label>
           <label>
@@ -61,7 +81,7 @@ export function SkillsPanel({ activeSkillId, onSelect, onClose }: Props) {
             <input
               value={editing.description}
               onChange={(e) => setEditing({ ...editing, description: e.target.value })}
-              placeholder="Short description"
+              placeholder="Short description and trigger condition"
             />
           </label>
           <label>
@@ -73,17 +93,31 @@ export function SkillsPanel({ activeSkillId, onSelect, onClose }: Props) {
               placeholder="You are a helpful assistant that…"
             />
           </label>
-          <label style={{ flexDirection: 'row', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+          <label>
+            Version
+            <input
+              value={editing.version ?? ""}
+              onChange={(e) =>
+                setEditing({ ...editing, version: e.target.value || undefined })
+              }
+              placeholder="e.g. 1.0.0 (optional)"
+            />
+          </label>
+          <label style={{ flexDirection: "row", alignItems: "center", gap: "8px", cursor: "pointer" }}>
             <input
               type="checkbox"
-              checked={editing.allow_commands ?? false}
-              onChange={(e) => setEditing({ ...editing, allow_commands: e.target.checked })}
+              checked={(editing.allowed_tools ?? []).includes("Bash")}
+              onChange={() => toggleTool("Bash")}
             />
-            Allow command execution (bash / python / powershell)
+            Allow command execution — <code>Bash</code>
           </label>
           <div className="editor-actions">
-            <button className="btn-primary" onClick={handleSave}>Save</button>
-            <button className="btn-secondary" onClick={() => setEditing(null)}>Cancel</button>
+            <button className="btn-primary" onClick={handleSave} disabled={!editing.name.trim()}>
+              Save
+            </button>
+            <button className="btn-secondary" onClick={() => { setEditing(null); setOriginalName(null); }}>
+              Cancel
+            </button>
           </div>
         </div>
       ) : (
@@ -98,24 +132,26 @@ export function SkillsPanel({ activeSkillId, onSelect, onClose }: Props) {
             </div>
             {skills.map((skill) => (
               <div
-                key={skill.id}
-                className={`skill-item ${activeSkillId === skill.id ? "active" : ""}`}
-                onClick={() => onSelect(skill.id)}
+                key={skill.name}
+                className={`skill-item ${activeSkillId === skill.name ? "active" : ""}`}
+                onClick={() => onSelect(skill.name)}
               >
                 <span className="skill-name">
                   {skill.name}
-                  {skill.allow_commands && <span title="Command execution enabled" style={{ marginLeft: '6px', fontSize: '0.75rem', opacity: 0.7 }}>⚙️</span>}
+                  {(skill.allowed_tools ?? []).includes("Bash") && (
+                    <span title="Command execution enabled" style={{ marginLeft: "6px", fontSize: "0.75rem", opacity: 0.7 }}>⚙️</span>
+                  )}
                 </span>
                 <span className="skill-desc">{skill.description}</span>
                 <div className="skill-actions" onClick={(e) => e.stopPropagation()}>
-                  <button onClick={() => setEditing(skill)}>Edit</button>
-                  <button className="danger" onClick={() => handleDelete(skill.id)}>Delete</button>
+                  <button onClick={() => startEdit(skill)}>Edit</button>
+                  <button className="danger" onClick={() => handleDelete(skill.name)}>Delete</button>
                 </div>
               </div>
             ))}
           </div>
           <div className="skills-footer">
-            <button className="btn-primary" onClick={() => setEditing(emptySkill())}>
+            <button className="btn-primary" onClick={() => { setEditing(emptySkill()); setOriginalName(null); }}>
               + New Skill
             </button>
           </div>

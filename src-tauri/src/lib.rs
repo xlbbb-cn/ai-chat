@@ -38,14 +38,63 @@ pub struct AppState {
 
 // ─── Skill ───────────────────────────────────────────────────────────────────
 
+/// YAML frontmatter parsed from a SKILL.md file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SkillMeta {
+    name: String,
+    description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    author: Option<String>,
+    #[serde(rename = "allowed-tools", default, skip_serializing_if = "Vec::is_empty")]
+    allowed_tools: Vec<String>,
+}
+
+/// Full skill representation passed to/from the frontend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Skill {
-    pub id: String,
     pub name: String,
     pub description: String,
-    pub system_prompt: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
     #[serde(default)]
-    pub allow_commands: bool,
+    pub allowed_tools: Vec<String>,
+    pub system_prompt: String,
+}
+
+fn parse_skill_md(content: &str) -> Result<Skill, String> {
+    let content = content.trim_start_matches('\u{feff}');
+    let rest = content
+        .strip_prefix("---\n")
+        .or_else(|| content.strip_prefix("---\r\n"))
+        .ok_or("missing YAML frontmatter")?;
+    let end = rest.find("\n---").ok_or("unclosed frontmatter")?;
+    let frontmatter = &rest[..end];
+    let body = rest[end + 4..].trim_start_matches('\n').trim_start_matches('\r').trim();
+    let meta: SkillMeta = serde_yaml::from_str(frontmatter).map_err(|e| e.to_string())?;
+    Ok(Skill {
+        name: meta.name,
+        description: meta.description,
+        version: meta.version,
+        author: meta.author,
+        allowed_tools: meta.allowed_tools,
+        system_prompt: body.to_string(),
+    })
+}
+
+fn skill_to_md(skill: &Skill) -> Result<String, String> {
+    let meta = SkillMeta {
+        name: skill.name.clone(),
+        description: skill.description.clone(),
+        version: skill.version.clone(),
+        author: skill.author.clone(),
+        allowed_tools: skill.allowed_tools.clone(),
+    };
+    let frontmatter = serde_yaml::to_string(&meta).map_err(|e| e.to_string())?;
+    Ok(format!("---\n{}---\n\n{}", frontmatter, skill.system_prompt))
 }
 
 // ─── Chat ────────────────────────────────────────────────────────────────────
@@ -148,7 +197,7 @@ async fn execute_tool(app: &AppHandle, name: &str, args_str: &str) -> String {
         "execute_command" => {
             let cmd_type = args["type"].as_str().unwrap_or("bash").to_string();
             let code = args["code"].as_str().unwrap_or("").to_string();
-            let _ = app.emit("chat-token", format!("⚙️ *Running {}:*\n```{}\n{}\n```\n\n", cmd_type, cmd_type, code));
+            let _ = app.emit("chat-token", format!("⚙️ *Running {}:*\n```{}\n{}\n```\n\n\r\n", cmd_type, cmd_type, code));
             tokio::time::timeout(
                 std::time::Duration::from_secs(30),
                 run_command(cmd_type, code),
@@ -215,7 +264,7 @@ async fn run_command(cmd_type: String, code: String) -> Result<String, String> {
 /// Stream a chat completion from any OpenAI-compatible endpoint.
 /// Emits "chat-token" events with each chunk, then "chat-done" or "chat-error".
 /// Supports tool calling: web_search (when web_search=true) and
-/// execute_command (when the active skill has allow_commands=true).
+/// execute_command (when the active skill has "Bash" in allowed-tools).
 #[tauri::command]
 async fn chat_completion(
     app: AppHandle,
@@ -229,10 +278,10 @@ async fn chat_completion(
     let mut allow_commands = false;
     let mut all_messages: Vec<Value> = vec![];
 
-    if let Some(ref sid) = skill_id {
-        if let Ok(skill) = load_skill_by_id(&state.skills_dir, sid) {
+    if let Some(ref skill_name) = skill_id {
+        if let Ok(skill) = load_skill_by_name(&state.skills_dir, skill_name) {
             all_messages.push(json!({ "role": "system", "content": skill.system_prompt }));
-            allow_commands = skill.allow_commands;
+            allow_commands = skill.allowed_tools.iter().any(|t| t.eq_ignore_ascii_case("bash"));
         }
     }
     for m in &messages {
@@ -353,45 +402,36 @@ fn save_config(state: State<'_, AppState>, config: AppConfig) -> Result<(), Stri
 
 // ─── Skills commands ──────────────────────────────────────────────────────────
 
-fn load_skill_by_id(skills_dir: &PathBuf, id: &str) -> Result<Skill, String> {
-    let path = skills_dir.join(format!("{}.json", id));
+fn load_skill_by_name(skills_dir: &PathBuf, name: &str) -> Result<Skill, String> {
+    let path = skills_dir.join(format!("{}.md", name));
     let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&content).map_err(|e| e.to_string())
+    parse_skill_md(&content)
 }
 
 #[tauri::command]
 fn list_skills(state: State<'_, AppState>) -> Vec<Skill> {
     let mut skills = Vec::new();
 
-    let app_skills = fs::read_dir(&state.skills_dir)
-        .map(|entries| {
-            entries
-                .filter_map(|e| e.ok())
-                .filter(|e| e.path().extension().map(|x| x == "json").unwrap_or(false))
-                .filter_map(|e| {
-                    let content = fs::read_to_string(e.path()).ok()?;
-                    serde_json::from_str::<Skill>(&content).ok()
-                })
-                .collect::<Vec<Skill>>()
-        })
-        .unwrap_or_default();
-    skills.extend(app_skills);
-
-    if let Some(home_dir) = home_dir() {
-        let user_skills_dir = home_dir.join(".skills");
-        let user_skills = fs::read_dir(&user_skills_dir)
+    let read_dir_skills = |dir: &PathBuf| -> Vec<Skill> {
+        fs::read_dir(dir)
             .map(|entries| {
                 entries
                     .filter_map(|e| e.ok())
-                    .filter(|e| e.path().extension().map(|x| x == "json").unwrap_or(false))
+                    .filter(|e| e.path().extension().map(|x| x == "md").unwrap_or(false))
                     .filter_map(|e| {
                         let content = fs::read_to_string(e.path()).ok()?;
-                        serde_json::from_str::<Skill>(&content).ok()
+                        parse_skill_md(&content).ok()
                     })
-                    .collect::<Vec<Skill>>()
+                    .collect()
             })
-            .unwrap_or_default();
-        skills.extend(user_skills);
+            .unwrap_or_default()
+    };
+
+    skills.extend(read_dir_skills(&state.skills_dir));
+
+    if let Some(home_dir) = home_dir() {
+        let user_skills_dir = home_dir.join(".skills");
+        skills.extend(read_dir_skills(&user_skills_dir));
     }
 
     skills
@@ -399,14 +439,14 @@ fn list_skills(state: State<'_, AppState>) -> Vec<Skill> {
 
 #[tauri::command]
 fn save_skill(state: State<'_, AppState>, skill: Skill) -> Result<(), String> {
-    let path = state.skills_dir.join(format!("{}.json", skill.id));
-    let json = serde_json::to_string_pretty(&skill).map_err(|e| e.to_string())?;
-    fs::write(path, json).map_err(|e| e.to_string())
+    let md = skill_to_md(&skill)?;
+    let path = state.skills_dir.join(format!("{}.md", skill.name));
+    fs::write(path, md).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn delete_skill(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    let path = state.skills_dir.join(format!("{}.json", id));
+fn delete_skill(state: State<'_, AppState>, name: String) -> Result<(), String> {
+    let path = state.skills_dir.join(format!("{}.md", name));
     fs::remove_file(path).map_err(|e| e.to_string())
 }
 

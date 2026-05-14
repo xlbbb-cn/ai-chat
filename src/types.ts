@@ -12,9 +12,10 @@ export interface AppConfig {
 }
 
 export interface Skill {
-  id: string;
   name: string;
   description: string;
   system_prompt: string;
-  allow_commands?: boolean;
+  allowed_tools?: string[];
+  version?: string;
+  author?: string;
 }
