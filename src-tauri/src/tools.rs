@@ -150,6 +150,7 @@ pub async fn execute_tool(
         "read_file" => {
             if let Some(dir) = skill_dir {
                 let path_str = args["path"].as_str().unwrap_or("");
+                let _ = app.emit("chat-token", format!("📄 *Reading {}*\n\n", path_str));
                 match resolve_safe_path(&dir, path_str) {
                     Ok(p) => fs::read_to_string(&p).unwrap_or_else(|e| format!("Error reading file: {}", e)),
                     Err(e) => format!("Error: {}", e)
@@ -162,6 +163,7 @@ pub async fn execute_tool(
             if let Some(dir) = skill_dir {
                 let path_str = args["path"].as_str().unwrap_or("");
                 let content_str = args["content"].as_str().unwrap_or("");
+                let _ = app.emit("chat-token", format!("💾 *Writing {}*\n\n", path_str));
                 match resolve_safe_path(&dir, path_str) {
                     Ok(p) => {
                         if let Some(parent) = p.parent() {
@@ -181,6 +183,7 @@ pub async fn execute_tool(
         "list_dir" => {
             if let Some(dir) = skill_dir {
                 let path_str = args["path"].as_str().unwrap_or("");
+                let _ = app.emit("chat-token", format!("📂 *Listing {}*\n\n", path_str));
                 match resolve_safe_path(&dir, path_str) {
                     Ok(p) => {
                         match fs::read_dir(&p) {

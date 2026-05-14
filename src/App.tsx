@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { chatCompletion, saveHistory } from "./api";
 
 import { ChatMessage } from "./components/ChatMessage";
@@ -19,6 +20,7 @@ export default function App() {
   const [sidebar, setSidebar] = useState<Sidebar>(null);
   const [activeSkillId, setActiveSkillId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [usage, setUsage] = useState<{ prompt_tokens: number, completion_tokens: number } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -34,9 +36,19 @@ export default function App() {
     }
   }, [input]);
 
+  useEffect(() => {
+    const unlisten = listen<{ prompt_tokens: number; completion_tokens: number }>("chat-usage", (e) => {
+      setUsage(e.payload);
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
   const sendMessage = useCallback(async () => {
     const text = input.trim();
     if (!text || streaming) return;
+    setUsage(null);
 
     const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: text };
     const assistantId = crypto.randomUUID();
@@ -67,7 +79,7 @@ export default function App() {
       onDone() {
         saveHistory(sessionId, "assistant", accumulatedContent);
         setMessages((prev) =>
-           prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m))
+          prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m))
         );
         setStreaming(false);
         cleanupRef.current = null;
@@ -170,7 +182,7 @@ export default function App() {
             >
               ⚙ Settings
             </button>
-            <label className="toolbar-btn" style={{display: 'flex', alignItems: 'center', gap: '5px'}}>
+            <label className="toolbar-btn" style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
               <input type="checkbox" checked={webSearch} onChange={e => setWebSearch(e.target.checked)} />
               Web Search
             </label>
@@ -198,7 +210,12 @@ export default function App() {
         </div>
 
         {/* Input */}
-        <div className="input-area">
+        <div className="input-area" style={{ position: "relative" }}>
+          {usage && (
+            <div style={{ position: "absolute", top: "-15px", left: "10px", fontSize: "10px", color: "gray" }}>
+              Tokens: {usage.prompt_tokens} prompt / {usage.completion_tokens} completion
+            </div>
+          )}
           <textarea
             ref={textareaRef}
             className="chat-input"

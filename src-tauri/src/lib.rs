@@ -159,6 +159,18 @@ async fn stream_request(
             }
             let Some(json_str) = line.strip_prefix("data: ") else { continue };
             let Ok(parsed) = serde_json::from_str::<Value>(json_str) else { continue };
+
+            if let Some(usage) = parsed.get("usage") {
+                if !usage.is_null() {
+                    let prompt_tokens = usage.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                    let completion_tokens = usage.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                    let _ = app.emit("chat-usage", json!({
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens
+                    }));
+                }
+            }
+
             let Some(choice) = parsed["choices"].get(0) else { continue };
             let delta = &choice["delta"];
 
@@ -251,7 +263,8 @@ async fn chat_completion(
         let mut req_body = json!({
             "model": config.model,
             "messages": all_messages,
-            "stream": true
+            "stream": true,
+            "stream_options": { "include_usage": true }
         });
         if !tools.is_empty() {
             req_body["tools"] = json!(tools);
