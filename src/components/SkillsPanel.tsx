@@ -14,6 +14,7 @@ const emptySkill = (): Skill => ({
   name: "",
   description: "",
   system_prompt: "",
+  allow_commands: false,
 });
 
 export function SkillsPanel({ activeSkillId, onSelect, onClose }: Props) {
@@ -72,6 +73,14 @@ export function SkillsPanel({ activeSkillId, onSelect, onClose }: Props) {
               placeholder="You are a helpful assistant that…"
             />
           </label>
+          <label style={{ flexDirection: 'row', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={editing.allow_commands ?? false}
+              onChange={(e) => setEditing({ ...editing, allow_commands: e.target.checked })}
+            />
+            Allow command execution (bash / python / powershell)
+          </label>
           <div className="editor-actions">
             <button className="btn-primary" onClick={handleSave}>Save</button>
             <button className="btn-secondary" onClick={() => setEditing(null)}>Cancel</button>
@@ -93,7 +102,10 @@ export function SkillsPanel({ activeSkillId, onSelect, onClose }: Props) {
                 className={`skill-item ${activeSkillId === skill.id ? "active" : ""}`}
                 onClick={() => onSelect(skill.id)}
               >
-                <span className="skill-name">{skill.name}</span>
+                <span className="skill-name">
+                  {skill.name}
+                  {skill.allow_commands && <span title="Command execution enabled" style={{ marginLeft: '6px', fontSize: '0.75rem', opacity: 0.7 }}>⚙️</span>}
+                </span>
                 <span className="skill-desc">{skill.description}</span>
                 <div className="skill-actions" onClick={(e) => e.stopPropagation()}>
                   <button onClick={() => setEditing(skill)}>Edit</button>

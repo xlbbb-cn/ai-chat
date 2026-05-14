@@ -44,6 +44,8 @@ pub struct Skill {
     pub name: String,
     pub description: String,
     pub system_prompt: String,
+    #[serde(default)]
+    pub allow_commands: bool,
 }
 
 // ─── Chat ────────────────────────────────────────────────────────────────────
@@ -54,63 +56,20 @@ pub struct ChatMessage {
     pub content: String,
 }
 
-/// Stream a chat completion from any OpenAI-compatible endpoint.
-/// Emits "chat-token" events with each chunk, then "chat-done" or "chat-error".
-/// When web_search=true, includes a web_search tool and handles tool_calls automatically.
-#[tauri::command]
-async fn chat_completion(
-    app: AppHandle,
-    messages: Vec<ChatMessage>,
-    skill_id: Option<String>,
-    web_search: bool,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    let config = state.config.lock().unwrap().clone();
+// ─── Tool helpers ─────────────────────────────────────────────────────────────
 
-    // Build the message list, prepending the skill's system prompt if active
-    let mut all_messages: Vec<Value> = vec![];
-    if let Some(ref sid) = skill_id {
-        if let Ok(skill) = load_skill_by_id(&state.skills_dir, sid) {
-            all_messages.push(json!({ "role": "system", "content": skill.system_prompt }));
-        }
-    }
-    for m in &messages {
-        all_messages.push(json!({ "role": m.role, "content": m.content }));
-    }
-
-    let url = format!("{}/chat/completions", config.api_base_url.trim_end_matches('/'));
-    let client = Client::new();
-
-    let mut req_body = json!({
-        "model": config.model,
-        "messages": all_messages,
-        "stream": true
-    });
-
-    if web_search {
-        req_body["tools"] = json!([{
-            "type": "function",
-            "function": {
-                "name": "web_search",
-                "description": "Search the web for current information about a topic. Use this when the user asks about recent events, current data, or anything that might require up-to-date information.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "The search query to look up"
-                        }
-                    },
-                    "required": ["query"]
-                }
-            }
-        }]);
-        req_body["tool_choice"] = json!("auto");
-    }
-
+/// Stream one completion request. Emits "chat-token" for content chunks.
+/// Returns (finish_reason, tool_calls: vec of (id, name, accumulated_args)).
+async fn stream_request(
+    app: &AppHandle,
+    client: &Client,
+    url: &str,
+    api_key: &str,
+    req_body: Value,
+) -> Result<(String, Vec<(String, String, String)>), String> {
     let res = client
-        .post(&url)
-        .bearer_auth(&config.api_key)
+        .post(url)
+        .bearer_auth(api_key)
         .json(&req_body)
         .send()
         .await
@@ -122,10 +81,9 @@ async fn chat_completion(
         return Err(err);
     }
 
-    // Stream first response — emit content tokens and detect tool calls
-    let mut tool_call_id = String::new();
-    let mut tool_call_args = String::new();
     let mut finish_reason = String::new();
+    // Each entry: (id, name, accumulated_args)
+    let mut tool_calls: Vec<(String, String, String)> = Vec::new();
 
     let mut stream = res.bytes_stream();
     while let Some(chunk) = stream.next().await {
@@ -143,19 +101,30 @@ async fn chat_completion(
             let delta = &choice["delta"];
 
             if let Some(fr) = choice["finish_reason"].as_str() {
-                finish_reason = fr.to_string();
+                if !fr.is_empty() {
+                    finish_reason = fr.to_string();
+                }
             }
-            // Accumulate tool call id and arguments from streamed chunks
+
+            // Accumulate streamed tool call chunks by index
             if let Some(tcs) = delta["tool_calls"].as_array() {
                 for tc in tcs {
+                    let idx = tc["index"].as_u64().unwrap_or(0) as usize;
+                    while tool_calls.len() <= idx {
+                        tool_calls.push((String::new(), String::new(), String::new()));
+                    }
                     if let Some(id) = tc["id"].as_str() {
-                        tool_call_id = id.to_string();
+                        tool_calls[idx].0 = id.to_string();
+                    }
+                    if let Some(name) = tc["function"]["name"].as_str() {
+                        tool_calls[idx].1 = name.to_string();
                     }
                     if let Some(args) = tc["function"]["arguments"].as_str() {
-                        tool_call_args.push_str(args);
+                        tool_calls[idx].2.push_str(args);
                     }
                 }
             }
+
             // Emit regular content tokens
             if let Some(content) = delta["content"].as_str() {
                 let _ = app.emit("chat-token", content.to_string());
@@ -163,69 +132,203 @@ async fn chat_completion(
         }
     }
 
-    // If the model issued a tool call, execute the search and do a second streaming call
-    if finish_reason == "tool_calls" && !tool_call_id.is_empty() {
-        let query = serde_json::from_str::<Value>(&tool_call_args)
-            .ok()
-            .and_then(|v| v["query"].as_str().map(String::from))
-            .unwrap_or_default();
+    Ok((finish_reason, tool_calls))
+}
 
-        let _ = app.emit("chat-token", format!("🔍 *Searching: {}...*\n\n", query));
+/// Execute a named tool and return the result as a string.
+async fn execute_tool(app: &AppHandle, name: &str, args_str: &str) -> String {
+    let args: Value = serde_json::from_str(args_str).unwrap_or_default();
+    match name {
+        "web_search" => {
+            let query = args["query"].as_str().unwrap_or("").to_string();
+            let _ = app.emit("chat-token", format!("🔍 *Searching: {}...*\n\n", query));
+            search_db::search_duckduckgo(query).await
+                .unwrap_or_else(|e| format!("Search failed: {}", e))
+        }
+        "execute_command" => {
+            let cmd_type = args["type"].as_str().unwrap_or("bash").to_string();
+            let code = args["code"].as_str().unwrap_or("").to_string();
+            let _ = app.emit("chat-token", format!("⚙️ *Running {}:*\n```{}\n{}\n```\n\n", cmd_type, cmd_type, code));
+            tokio::time::timeout(
+                std::time::Duration::from_secs(30),
+                run_command(cmd_type, code),
+            )
+            .await
+            .unwrap_or_else(|_| Ok("Command timed out after 30 seconds.".to_string()))
+            .unwrap_or_else(|e| format!("Error: {}", e))
+        }
+        _ => format!("Unknown tool: {}", name),
+    }
+}
 
-        let search_result = search_db::search_duckduckgo(query).await
-            .unwrap_or_else(|e| format!("Search failed: {}", e));
+async fn run_command(cmd_type: String, code: String) -> Result<String, String> {
+    let output = match cmd_type.as_str() {
+        "python" | "python3" => {
+            tokio::process::Command::new("python3")
+                .arg("-c")
+                .arg(&code)
+                .output()
+                .await
+        }
+        "bash" | "sh" => {
+            tokio::process::Command::new("bash")
+                .arg("-c")
+                .arg(&code)
+                .output()
+                .await
+        }
+        "powershell" | "pwsh" => {
+            tokio::process::Command::new("powershell")
+                .args(["-NoProfile", "-NonInteractive", "-Command", &code])
+                .output()
+                .await
+        }
+        _ => return Err(format!("Unsupported command type: {}", cmd_type)),
+    }
+    .map_err(|e| e.to_string())?;
 
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    let mut result = String::new();
+    if !stdout.is_empty() {
+        result.push_str(&stdout);
+    }
+    if !stderr.is_empty() {
+        if !result.is_empty() {
+            result.push('\n');
+        }
+        result.push_str("STDERR:\n");
+        result.push_str(&stderr);
+    }
+    if !output.status.success() {
+        result.push_str(&format!("\nExit code: {}", output.status.code().unwrap_or(-1)));
+    }
+    if result.is_empty() {
+        result = "(no output)".to_string();
+    }
+    Ok(result)
+}
+
+// ─── Chat command ─────────────────────────────────────────────────────────────
+
+/// Stream a chat completion from any OpenAI-compatible endpoint.
+/// Emits "chat-token" events with each chunk, then "chat-done" or "chat-error".
+/// Supports tool calling: web_search (when web_search=true) and
+/// execute_command (when the active skill has allow_commands=true).
+#[tauri::command]
+async fn chat_completion(
+    app: AppHandle,
+    messages: Vec<ChatMessage>,
+    skill_id: Option<String>,
+    web_search: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let config = state.config.lock().unwrap().clone();
+
+    let mut allow_commands = false;
+    let mut all_messages: Vec<Value> = vec![];
+
+    if let Some(ref sid) = skill_id {
+        if let Ok(skill) = load_skill_by_id(&state.skills_dir, sid) {
+            all_messages.push(json!({ "role": "system", "content": skill.system_prompt }));
+            allow_commands = skill.allow_commands;
+        }
+    }
+    for m in &messages {
+        all_messages.push(json!({ "role": m.role, "content": m.content }));
+    }
+
+    let url = format!("{}/chat/completions", config.api_base_url.trim_end_matches('/'));
+    let client = Client::new();
+
+    // Build tools list from enabled capabilities
+    let mut tools: Vec<Value> = vec![];
+    if web_search {
+        tools.push(json!({
+            "type": "function",
+            "function": {
+                "name": "web_search",
+                "description": "Search the web for current information. Use when the user asks about recent events, current data, or anything requiring up-to-date information.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "The search query" }
+                    },
+                    "required": ["query"]
+                }
+            }
+        }));
+    }
+    if allow_commands {
+        tools.push(json!({
+            "type": "function",
+            "function": {
+                "name": "execute_command",
+                "description": "Execute a bash, python, or powershell command/script on the user's machine. Use for calculations, file operations, data processing, system queries, or any task that benefits from running code locally.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "type": {
+                            "type": "string",
+                            "enum": ["bash", "python", "powershell"],
+                            "description": "The runtime to use"
+                        },
+                        "code": {
+                            "type": "string",
+                            "description": "The command or code to execute"
+                        }
+                    },
+                    "required": ["type", "code"]
+                }
+            }
+        }));
+    }
+
+    // Tool calling loop — repeat until the model stops calling tools
+    loop {
+        let mut req_body = json!({
+            "model": config.model,
+            "messages": all_messages,
+            "stream": true
+        });
+        if !tools.is_empty() {
+            req_body["tools"] = json!(tools);
+            req_body["tool_choice"] = json!("auto");
+        }
+
+        let (finish_reason, tool_calls) =
+            stream_request(&app, &client, &url, &config.api_key, req_body).await?;
+
+        if finish_reason != "tool_calls" || tool_calls.is_empty() {
+            break;
+        }
+
+        // Append assistant message with tool_calls
+        let assistant_tcs: Vec<Value> = tool_calls
+            .iter()
+            .map(|(id, name, args)| {
+                json!({
+                    "id": id,
+                    "type": "function",
+                    "function": { "name": name, "arguments": args }
+                })
+            })
+            .collect();
         all_messages.push(json!({
             "role": "assistant",
             "content": null,
-            "tool_calls": [{
-                "id": tool_call_id,
-                "type": "function",
-                "function": { "name": "web_search", "arguments": tool_call_args }
-            }]
-        }));
-        all_messages.push(json!({
-            "role": "tool",
-            "tool_call_id": tool_call_id,
-            "content": search_result
+            "tool_calls": assistant_tcs
         }));
 
-        let res2 = client
-            .post(&url)
-            .bearer_auth(&config.api_key)
-            .json(&json!({
-                "model": config.model,
-                "messages": all_messages,
-                "stream": true
-            }))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
-
-        if !res2.status().is_success() {
-            let err = res2.text().await.unwrap_or_default();
-            let _ = app.emit("chat-error", err.clone());
-            return Err(err);
-        }
-
-        let mut stream2 = res2.bytes_stream();
-        while let Some(chunk) = stream2.next().await {
-            let bytes = chunk.map_err(|e| e.to_string())?;
-            let text = String::from_utf8_lossy(&bytes);
-            for line in text.lines() {
-                let line = line.trim();
-                if line == "data: [DONE]" {
-                    let _ = app.emit("chat-done", ());
-                    return Ok(());
-                }
-                let Some(json_str) = line.strip_prefix("data: ") else { continue };
-                let Ok(parsed) = serde_json::from_str::<Value>(json_str) else { continue };
-                if let Some(content) = parsed["choices"].get(0)
-                    .and_then(|c| c["delta"]["content"].as_str())
-                {
-                    let _ = app.emit("chat-token", content.to_string());
-                }
-            }
+        // Execute each tool and append its result
+        for (id, name, args) in &tool_calls {
+            let result = execute_tool(&app, name, args).await;
+            all_messages.push(json!({
+                "role": "tool",
+                "tool_call_id": id,
+                "content": result
+            }));
         }
     }
 
@@ -243,8 +346,7 @@ fn get_config(state: State<'_, AppState>) -> AppConfig {
 #[tauri::command]
 fn save_config(state: State<'_, AppState>, config: AppConfig) -> Result<(), String> {
     let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
-    fs::write(&state.config_path,
- json).map_err(|e| e.to_string())?;
+    fs::write(&state.config_path, json).map_err(|e| e.to_string())?;
     *state.config.lock().unwrap() = config;
     Ok(())
 }
@@ -261,7 +363,6 @@ fn load_skill_by_id(skills_dir: &PathBuf, id: &str) -> Result<Skill, String> {
 fn list_skills(state: State<'_, AppState>) -> Vec<Skill> {
     let mut skills = Vec::new();
 
-    // Load skills from the app's skills directory
     let app_skills = fs::read_dir(&state.skills_dir)
         .map(|entries| {
             entries
@@ -276,7 +377,6 @@ fn list_skills(state: State<'_, AppState>) -> Vec<Skill> {
         .unwrap_or_default();
     skills.extend(app_skills);
 
-    // Load skills from the user's ~/.skills directory
     if let Some(home_dir) = home_dir() {
         let user_skills_dir = home_dir.join(".skills");
         let user_skills = fs::read_dir(&user_skills_dir)

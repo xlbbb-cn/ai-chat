@@ -16,4 +16,5 @@ export interface Skill {
   name: string;
   description: string;
   system_prompt: string;
+  allow_commands?: boolean;
 }
