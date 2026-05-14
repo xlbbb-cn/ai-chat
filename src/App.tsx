@@ -20,11 +20,19 @@ export default function App() {
   const [activeSkillId, setActiveSkillId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = textareaRef.current.scrollHeight + "px";
+    }
+  }, [input]);
 
   const sendMessage = useCallback(async () => {
     const text = input.trim();
@@ -45,20 +53,22 @@ export default function App() {
 
     saveHistory(sessionId, "user", text);
 
+    let accumulatedContent = "";
+
     const cleanup = await chatCompletion(history, activeSkillId, webSearch, {
       onToken(token) {
+        accumulatedContent += token;
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === assistantId ? { ...m, content: m.content + token } : m
+            m.id === assistantId ? { ...m, content: accumulatedContent } : m
           )
         );
       },
       onDone() {
-        setMessages((prev) => {
-           let finalMsg = prev.find(m => m.id === assistantId);
-           if (finalMsg) saveHistory(sessionId, "assistant", finalMsg.content);
-           return prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m));
-        });
+        saveHistory(sessionId, "assistant", accumulatedContent);
+        setMessages((prev) =>
+           prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m))
+        );
         setStreaming(false);
         cleanupRef.current = null;
       },
@@ -190,6 +200,7 @@ export default function App() {
         {/* Input */}
         <div className="input-area">
           <textarea
+            ref={textareaRef}
             className="chat-input"
             rows={1}
             value={input}

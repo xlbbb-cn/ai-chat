@@ -36,6 +36,11 @@ export async function chatCompletion(
 ): Promise<UnlistenFn> {
   const unlisteners: UnlistenFn[] = [];
 
+  const cleanup = () => {
+    unlisteners.forEach((fn) => fn());
+    unlisteners.length = 0;
+  };
+
   const unToken = await listen<string>("chat-token", (e) =>
     callbacks.onToken(e.payload)
   );
@@ -49,8 +54,6 @@ export async function chatCompletion(
   });
 
   unlisteners.push(unToken, unDone, unError);
-
-  const cleanup = () => unlisteners.forEach((fn) => fn());
 
   invoke("chat_completion", {
     messages: messages.map((m) => ({ role: m.role, content: m.content })),
