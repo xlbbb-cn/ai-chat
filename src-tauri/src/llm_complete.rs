@@ -324,8 +324,13 @@ pub async fn chat_completion(
                     if let Some(sys_msg) = all_messages.get_mut(0) {
                         if sys_msg["role"] == "system" {
                             let old_content = sys_msg["content"].as_str().unwrap_or("");
-                            let new_content = format!("{}\n\n--- Skill (Dynamically Loaded): {} ---\n{}", old_content, skill.name, skill.system_prompt);
-                            sys_msg["content"] = json!(new_content);
+                            let dyn_marker = format!("--- Skill (Dynamically Loaded): {} ---", skill.name);
+                            let static_marker = format!("--- Skill: {} ---", skill.name);
+                            
+                            if !old_content.contains(&dyn_marker) && !old_content.contains(&static_marker) {
+                                let new_content = format!("{}\n\n{}\n{}", old_content, dyn_marker, skill.system_prompt);
+                                sys_msg["content"] = json!(new_content);
+                            }
                         }
                     }
                     format!("Skill '{}' detailed instructions have been successfully loaded and APPENDED TO YOUR SYSTEM PROMPT. You can now follow its instructions to fulfill the user's request. There is no need to call use_skill for this skill again.", skill_name)
