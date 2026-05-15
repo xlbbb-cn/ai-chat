@@ -46,20 +46,28 @@ async fn stream_request(
     let mut tool_calls: Vec<(String, String, String)> = Vec::new();
 
     let mut stream = res.bytes_stream();
-    while let Some(chunk) = stream.next().await {
+    let mut buffer = String::new();
+
+    'stream_loop: while let Some(chunk) = stream.next().await {
         if cancelled.load(Ordering::SeqCst) {
             return Ok(("cancelled".to_string(), vec![]));
         }
         let bytes = chunk.map_err(|e| e.to_string())?;
-        let text = String::from_utf8_lossy(&bytes);
+        buffer.push_str(&String::from_utf8_lossy(&bytes));
 
-        for line in text.lines() {
+        while let Some(idx) = buffer.find('\n') {
+            let line = buffer[..idx].to_string();
+            buffer.drain(..=idx);
+
             if cancelled.load(Ordering::SeqCst) {
                 return Ok(("cancelled".to_string(), vec![]));
             }
             let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
             if line == "data: [DONE]" {
-                break;
+                break 'stream_loop;
             }
             let Some(json_str) = line.strip_prefix("data: ") else { continue };
             let Ok(parsed) = serde_json::from_str::<Value>(json_str) else { continue };

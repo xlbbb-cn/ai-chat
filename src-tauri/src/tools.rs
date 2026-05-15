@@ -34,8 +34,8 @@ pub fn get_all_tools(selected_tools: &[String], allow_commands: bool, skill_dir:
                     "properties": {
                         "type": {
                             "type": "string",
-                            "enum": ["bash", "python", "powershell"],
-                            "description": "The runtime to use"
+                            "enum": ["bash", "cmd", "powershell", "python"],
+                            "description": "The runtime to use. ON WINDOWS, ALWAYS prefer 'powershell' or 'cmd'"
                         },
                         "code": {
                             "type": "string",
@@ -276,13 +276,18 @@ pub async fn execute_tool(
 pub async fn run_command(cmd_type: String, code: String, cwd: Option<PathBuf>) -> Result<String, String> {
     let mut cmd = match cmd_type.as_str() {
         "python" | "python3" => {
-            let mut c = tokio::process::Command::new("python3");
+            let mut c = tokio::process::Command::new(if cfg!(windows) { "python" } else { "python3" });
             c.arg("-c").arg(&code);
             c
         }
+        "cmd" => {
+            let mut c = tokio::process::Command::new("cmd");
+            c.args(["/C", &code]);
+            c
+        }
         "bash" | "sh" => {
-            let mut c = tokio::process::Command::new("bash");
-            c.arg("-c").arg(&code);
+            let mut c = tokio::process::Command::new(if cfg!(windows) { "cmd" } else { "bash" });
+            c.arg(if cfg!(windows) { "/C" } else { "-c" }).arg(&code);
             c
         }
         "powershell" | "pwsh" => {
