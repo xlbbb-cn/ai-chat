@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 pub fn get_all_tools(selected_tools: &[String], allow_commands: bool, skill_dir: Option<&Path>) -> Vec<Value> {
     let mut tools = vec![];
@@ -144,6 +144,19 @@ fn resolve_safe_path(skill_dir: &Path, rel_path: &str) -> Result<PathBuf, String
     Ok(resolved)
 }
 
+/// Resolve command working directory:
+/// - if launched from a skill, use the skill directory
+/// - otherwise prefer app data dir, fallback to current workspace dir
+fn resolve_cwd(app: &AppHandle, skill_dir: Option<PathBuf>) -> PathBuf {
+    if let Some(dir) = skill_dir {
+        dir
+    } else {
+        app.path()
+            .app_data_dir()
+            .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+    }
+}
+
 pub async fn execute_tool(
     app: &AppHandle,
     name: &str,
@@ -167,7 +180,7 @@ pub async fn execute_tool(
             let cmd_type = args["type"].as_str().unwrap_or("bash").to_string();
             let code = args["code"].as_str().unwrap_or("").to_string();
             let _ = app.emit("chat-token", format!("⚙️ *Running {}:*\n```{}\n{}\n```\n\n", cmd_type, cmd_type, code));
-            let cwd = resolve_cwd(skill_dir.clone());
+            let cwd = resolve_cwd(app, skill_dir.clone());
             tokio::time::timeout(
                 std::time::Duration::from_secs(30),
                 run_command(cmd_type, code, Some(cwd)),
@@ -175,16 +188,6 @@ pub async fn execute_tool(
             .await
             .unwrap_or_else(|_| Ok("Command timed out after 30 seconds.".to_string()))
             .unwrap_or_else(|e| format!("Error: {}", e))
-        }
-        /// 解析命令的工作目录：优先 skill_dir，否则用 app data 目录。
-        fn resolve_cwd(skill_dir: Option<PathBuf>) -> PathBuf {
-            if let Some(dir) = skill_dir {
-                dir
-            } else {
-                // 获取 app data 目录，若失败则 fallback 到当前工作目录
-                tauri::api::path::app_data_dir(&tauri::Config::default())
-                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
-            }
         }
         "fetch_web" => {
             let url = args["url"].as_str().unwrap_or("").to_string();
