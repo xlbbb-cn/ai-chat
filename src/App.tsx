@@ -53,7 +53,7 @@ export default function App() {
 
     for (const file of attachments) {
       const ext = file.name.split('.').pop() || '';
-      text += `\n\n[Attached File: ${file.name}]\n\`\`\`${ext}\n${file.content}\n\`\`\``;
+      text += `\n\n<details><summary>Attached File: ${file.name}</summary>\n\n\`\`\`${ext}\n${file.content}\n\`\`\`\n</details>`;
     }
     text = text.trim();
     setUsage(null);
