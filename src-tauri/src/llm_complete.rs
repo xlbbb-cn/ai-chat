@@ -179,6 +179,7 @@ pub async fn chat_completion(
         if !system_content.is_empty() {
             system_content.push_str("\n\n");
         }
+        system_content.push_str("IMPORTANT SKILL PATH ISOLATION RULE: Except for explicitly requested paths, any operation executed by a skill MUST use the directory containing the skill's SKILL.md as its root path. Operating on or referencing paths outside this root is STRICTLY FORBIDDEN. All paths referenced within a skill (e.g. read_file, write_file, list_dir, execute_command) are automatically evaluated relative to this root path.\n\n");
         system_content.push_str(&format!("The following skills are CURRENTLY ACTIVE and their detailed instructions are provided below:{}", loaded_skills_content));
     }
 

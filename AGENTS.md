@@ -17,7 +17,7 @@ Users can configure any OpenAI-compatible API endpoint, switch models, and use *
 
 - **`chat_completion`** Tauri command streams SSE from the API and emits `chat-token` / `chat-done` / `chat-error` events to the frontend.
 - **Config** (`get_config`/`save_config`) stored as `config.json` in the OS app data dir (`~/.local/share/ai-chat/` on Linux, `~/Library/Application Support/ai-chat/` on macOS).
-- **Skills** are JSON files in the `skills/` subdirectory of the app data dir. Each skill has an `id`, `name`, `description`, and `system_prompt` injected as the first `system` message.
+- **Skills** are configured locally. **Skill Path Isolation Rule**: Except for explicitly requested paths, any operation executed by a skill MUST use the directory containing the skill's `SKILL.md` as its root path. Operating on paths outside this root is strictly forbidden. All paths referenced within a skill are evaluated relative to this root path.
 - Frontend entrypoint: `src/App.tsx`. API layer: `src/api.ts`. Types: `src/types.ts`.
 - Components: `src/components/ChatMessage`, `SettingsPanel`, `SkillsPanel`.
 
