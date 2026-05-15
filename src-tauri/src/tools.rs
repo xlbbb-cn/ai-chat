@@ -302,6 +302,13 @@ pub async fn run_command(cmd_type: String, code: String, cwd: Option<PathBuf>) -
         cmd.current_dir(dir);
     }
 
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
     let output = cmd.output().await.map_err(|e| e.to_string())?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
