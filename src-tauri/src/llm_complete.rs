@@ -306,6 +306,7 @@ pub async fn chat_completion(
                     name,
                     args,
                     skill_dir_path.clone(),
+                    state.workspace_dir.clone(),
                     &config.search_engine,
                 )
                 .await

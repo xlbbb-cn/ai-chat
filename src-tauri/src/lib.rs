@@ -55,6 +55,7 @@ impl Default for AppConfig {
 pub struct AppState {
     pub config: Mutex<AppConfig>,
     pub config_path: PathBuf,
+    pub workspace_dir: PathBuf,
     pub skills_dir: PathBuf,
     pub db: Mutex<Connection>,
 }
@@ -106,7 +107,9 @@ pub fn run() {
                 .expect("failed to create app menu");
             let menu = Menu::with_items(app, &[&file_menu]).expect("failed to create app menu");
             app.set_menu(menu).expect("failed to set app menu");
-
+            let workspace_dir = data_dir.join("workspace");
+            fs::create_dir_all(&workspace_dir).ok();
+            
             let skills_dir = data_dir.join("skills");
             fs::create_dir_all(&skills_dir).ok();
 
@@ -127,6 +130,7 @@ pub fn run() {
             app.manage(AppState {
                 config: Mutex::new(config),
                 config_path,
+                workspace_dir,
                 db: Mutex::new(db),
                 skills_dir,
             });

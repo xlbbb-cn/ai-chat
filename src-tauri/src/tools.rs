@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 pub fn get_all_tools(selected_tools: &[String], allow_commands: bool, skill_dir: Option<&Path>) -> Vec<Value> {
     let mut tools = vec![];
@@ -28,7 +28,7 @@ pub fn get_all_tools(selected_tools: &[String], allow_commands: bool, skill_dir:
             "type": "function",
             "function": {
                 "name": "execute_command",
-                "description": "Execute a bash, python, or powershell command/script on the user's machine. Runs in the directory containing the skill's SKILL.md by default. Use for calculations, file operations, data processing, system queries, or any task that benefits from running locally.",
+                "description": "Execute a bash, python, or powershell command/script on the user's machine. If called by a skill, runs in the directory containing the skill's SKILL.md; otherwise runs in the app managed workspace directory. Use for calculations, file operations, data processing, system queries, or any task that benefits from running locally.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -71,7 +71,7 @@ pub fn get_all_tools(selected_tools: &[String], allow_commands: bool, skill_dir:
                 "type": "function",
                 "function": {
                     "name": "read_file",
-                    "description": "Read the contents of a file inside the skill directory (or the active process directory if no skill).",
+                    "description": "Read the contents of a file inside the current workspace root: skill directory when called by a skill, otherwise the app managed workspace directory.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -87,7 +87,7 @@ pub fn get_all_tools(selected_tools: &[String], allow_commands: bool, skill_dir:
                 "type": "function",
                 "function": {
                     "name": "write_file",
-                    "description": "Write contents to a file inside the skill directory.",
+                    "description": "Write contents to a file inside the current workspace root: skill directory when called by a skill, otherwise the app managed workspace directory.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -104,7 +104,7 @@ pub fn get_all_tools(selected_tools: &[String], allow_commands: bool, skill_dir:
                 "type": "function",
                 "function": {
                     "name": "list_dir",
-                    "description": "List contents of a directory inside the skill directory.",
+                    "description": "List contents of a directory inside the current workspace root: skill directory when called by a skill, otherwise the app managed workspace directory.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -144,16 +144,14 @@ fn resolve_safe_path(skill_dir: &Path, rel_path: &str) -> Result<PathBuf, String
     Ok(resolved)
 }
 
-/// Resolve command working directory:
+/// Resolve workspace root:
 /// - if launched from a skill, use the skill directory
-/// - otherwise prefer app data dir, fallback to current workspace dir
-fn resolve_cwd(app: &AppHandle, skill_dir: Option<PathBuf>) -> PathBuf {
+/// - otherwise use managed workspace_dir
+fn resolve_workspace_root(workspace_dir: &Path, skill_dir: Option<PathBuf>) -> PathBuf {
     if let Some(dir) = skill_dir {
         dir
     } else {
-        app.path()
-            .app_data_dir()
-            .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+        workspace_dir.to_path_buf()
     }
 }
 
@@ -162,6 +160,7 @@ pub async fn execute_tool(
     name: &str,
     args_str: &str,
     skill_dir: Option<PathBuf>,
+    workspace_dir: PathBuf,
     configured_search_engine: &str,
 ) -> String {
     let args: Value = serde_json::from_str(args_str).unwrap_or_default();
@@ -180,7 +179,7 @@ pub async fn execute_tool(
             let cmd_type = args["type"].as_str().unwrap_or("bash").to_string();
             let code = args["code"].as_str().unwrap_or("").to_string();
             let _ = app.emit("chat-token", format!("⚙️ *Running {}:*\n```{}\n{}\n```\n\n", cmd_type, cmd_type, code));
-            let cwd = resolve_cwd(app, skill_dir.clone());
+            let cwd = resolve_workspace_root(&workspace_dir, skill_dir.clone());
             tokio::time::timeout(
                 std::time::Duration::from_secs(30),
                 run_command(cmd_type, code, Some(cwd)),
@@ -195,66 +194,57 @@ pub async fn execute_tool(
             fetch_web_content(&url).await.unwrap_or_else(|e| format!("Failed to fetch web content: {}", e))
         }
         "read_file" => {
-            if let Some(dir) = skill_dir {
-                let path_str = args["path"].as_str().unwrap_or("");
-                let _ = app.emit("chat-token", format!("📄 *Reading {}*\n\n", path_str));
-                match resolve_safe_path(&dir, path_str) {
-                    Ok(p) => fs::read_to_string(&p).unwrap_or_else(|e| format!("Error reading file: {}", e)),
-                    Err(e) => format!("Error: {}", e)
-                }
-            } else {
-                "Error: No skill directory context".to_string()
+            let root_dir = resolve_workspace_root(&workspace_dir, skill_dir.clone());
+            let path_str = args["path"].as_str().unwrap_or("");
+            let _ = app.emit("chat-token", format!("📄 *Reading {}*\n\n", path_str));
+            match resolve_safe_path(&root_dir, path_str) {
+                Ok(p) => fs::read_to_string(&p).unwrap_or_else(|e| format!("Error reading file: {}", e)),
+                Err(e) => format!("Error: {}", e)
             }
         }
         "write_file" => {
-            if let Some(dir) = skill_dir {
-                let path_str = args["path"].as_str().unwrap_or("");
-                let content_str = args["content"].as_str().unwrap_or("");
-                let _ = app.emit("chat-token", format!("💾 *Writing {}*\n\n", path_str));
-                match resolve_safe_path(&dir, path_str) {
-                    Ok(p) => {
-                        if let Some(parent) = p.parent() {
-                            let _ = fs::create_dir_all(parent);
-                        }
-                        match fs::write(&p, content_str) {
-                            Ok(_) => format!("Successfully wrote to {}", path_str),
-                            Err(e) => format!("Error writing file: {}", e)
-                        }
+            let root_dir = resolve_workspace_root(&workspace_dir, skill_dir.clone());
+            let path_str = args["path"].as_str().unwrap_or("");
+            let content_str = args["content"].as_str().unwrap_or("");
+            let _ = app.emit("chat-token", format!("💾 *Writing {}*\n\n", path_str));
+            match resolve_safe_path(&root_dir, path_str) {
+                Ok(p) => {
+                    if let Some(parent) = p.parent() {
+                        let _ = fs::create_dir_all(parent);
                     }
-                    Err(e) => format!("Error: {}", e)
+                    match fs::write(&p, content_str) {
+                        Ok(_) => format!("Successfully wrote to {}", path_str),
+                        Err(e) => format!("Error writing file: {}", e)
+                    }
                 }
-            } else {
-                "Error: No skill directory context".to_string()
+                Err(e) => format!("Error: {}", e)
             }
         }
         "list_dir" => {
-            if let Some(dir) = skill_dir {
-                let path_str = args["path"].as_str().unwrap_or("");
-                let _ = app.emit("chat-token", format!("📂 *Listing {}*\n\n", path_str));
-                match resolve_safe_path(&dir, path_str) {
-                    Ok(p) => {
-                        match fs::read_dir(&p) {
-                            Ok(entries) => {
-                                let mut res = Vec::new();
-                                for entry in entries.flatten() {
-                                    if let Ok(name) = entry.file_name().into_string() {
-                                        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-                                        res.push(format!("{}{}", name, if is_dir { "/" } else { "" }));
-                                    }
-                                }
-                                if res.is_empty() {
-                                    "(empty directory)".to_string()
-                                } else {
-                                    res.join("\n")
+            let root_dir = resolve_workspace_root(&workspace_dir, skill_dir.clone());
+            let path_str = args["path"].as_str().unwrap_or("");
+            let _ = app.emit("chat-token", format!("📂 *Listing {}*\n\n", path_str));
+            match resolve_safe_path(&root_dir, path_str) {
+                Ok(p) => {
+                    match fs::read_dir(&p) {
+                        Ok(entries) => {
+                            let mut res = Vec::new();
+                            for entry in entries.flatten() {
+                                if let Ok(name) = entry.file_name().into_string() {
+                                    let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                                    res.push(format!("{}{}", name, if is_dir { "/" } else { "" }));
                                 }
                             }
-                            Err(e) => format!("Error listing directory: {}", e)
+                            if res.is_empty() {
+                                "(empty directory)".to_string()
+                            } else {
+                                res.join("\n")
+                            }
                         }
+                        Err(e) => format!("Error listing directory: {}", e)
                     }
-                    Err(e) => format!("Error: {}", e)
                 }
-            } else {
-                "Error: No skill directory context".to_string()
+                Err(e) => format!("Error: {}", e)
             }
         }
         _ => format!("Unknown tool: {}", name),
