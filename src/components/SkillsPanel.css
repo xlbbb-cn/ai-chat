@@ -2,8 +2,8 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: #0f172a;
-  color: #e2e8f0;
+  background: #FFFFFF;
+  color: #393C41;
 }
 
 .skills-header {
@@ -11,28 +11,29 @@
   align-items: center;
   justify-content: space-between;
   padding: 16px 20px;
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid #EEEEEE;
 }
 
 .skills-header h2 {
   margin: 0;
-  font-size: 16px;
-  font-weight: 600;
+  font-size: 17px;
+  font-weight: 500;
+  color: #171A20;
 }
 
 .close-btn {
-  background: none;
+  background: transparent;
   border: none;
-  color: #94a3b8;
+  color: #171A20;
   font-size: 16px;
   cursor: pointer;
   padding: 4px 8px;
   border-radius: 4px;
+  transition: background-color 0.33s;
 }
 
 .close-btn:hover {
-  background: #1e293b;
-  color: #e2e8f0;
+  background: #F4F4F4;
 }
 
 .skills-list {
@@ -46,33 +47,33 @@
 
 .skill-item {
   padding: 12px;
-  border-radius: 8px;
-  background: #1e293b;
+  border-radius: 4px;
+  background: transparent;
   cursor: pointer;
-  border: 2px solid transparent;
+  border: none;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  transition: border-color 0.15s;
+  transition: background-color 0.33s;
 }
 
 .skill-item:hover {
-  border-color: #334155;
+  background: #F4F4F4;
 }
 
 .skill-item.active {
-  border-color: #2563eb;
+  background: #F4F4F4;
 }
 
 .skill-name {
   font-size: 14px;
-  font-weight: 600;
-  color: #e2e8f0;
+  font-weight: 500;
+  color: #171A20;
 }
 
 .skill-desc {
-  font-size: 12px;
-  color: #64748b;
+  font-size: 14px;
+  color: #5C5E62;
 }
 
 .skill-actions {
@@ -84,31 +85,36 @@
 .skill-actions button {
   padding: 4px 10px;
   border-radius: 4px;
-  border: 1px solid #334155;
-  background: #0f172a;
-  color: #94a3b8;
-  font-size: 12px;
+  border: 1px solid #D0D1D2;
+  background: transparent;
+  color: #171A20;
+  font-size: 14px;
   cursor: pointer;
+  transition: background-color 0.33s, border-color 0.33s;
 }
 
 .skill-actions button:hover {
-  background: #1e293b;
-  color: #e2e8f0;
+  background: #F4F4F4;
 }
 
 .skill-actions button.danger {
-  color: #f87171;
-  border-color: #7f1d1d;
+  color: #E53E3E;
+  border-color: #E53E3E;
 }
 
 .skill-actions button.danger:hover {
-  background: #7f1d1d;
-  color: #fef2f2;
+  background: #FEE2E2;
+}
+
+.skill-actions input {
+  margin-left: auto;
+  margin-right: 10px;
+  pointer-events: none;
 }
 
 .skills-footer {
   padding: 16px;
-  border-top: 1px solid #1e293b;
+  border-top: 1px solid #EEEEEE;
 }
 
 /* Skill editor */
@@ -125,63 +131,73 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 13px;
-  color: #94a3b8;
+  font-size: 14px;
+  color: #171A20;
   font-weight: 500;
 }
 
 .skill-editor input,
 .skill-editor textarea {
   padding: 8px 12px;
-  background: #1e293b;
-  border: 1px solid #334155;
-  border-radius: 6px;
-  color: #e2e8f0;
+  background: transparent;
+  border: 1px solid #D0D1D2;
+  border-radius: 4px;
+  color: #171A20;
   font-size: 14px;
   font-family: inherit;
   outline: none;
   resize: vertical;
+  transition: border-color 0.33s;
 }
 
 .skill-editor input:focus,
 .skill-editor textarea:focus {
-  border-color: #2563eb;
+  border-color: #171A20;
 }
 
 .editor-actions {
   display: flex;
-  gap: 8px;
+  gap: 16px;
 }
 
 .btn-primary {
   flex: 1;
-  padding: 10px;
-  background: #2563eb;
-  color: #fff;
-  border: none;
-  border-radius: 6px;
+  padding: 4px 16px;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #3E6AE1;
+  color: #FFFFFF;
+  border: 3px solid transparent;
+  border-radius: 4px;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
+  transition: border-color 0.33s, background-color 0.33s, color 0.33s, box-shadow 0.25s;
 }
 
 .btn-primary:hover {
-  background: #1d4ed8;
+  background: rgb(50, 88, 191);
 }
 
 .btn-secondary {
   flex: 1;
-  padding: 10px;
-  background: #1e293b;
-  color: #94a3b8;
-  border: 1px solid #334155;
-  border-radius: 6px;
+  padding: 4px 16px;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: #171A20;
+  border: 1px solid #D0D1D2;
+  border-radius: 4px;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
+  transition: background-color 0.33s;
 }
 
 .btn-secondary:hover {
-  background: #334155;
-  color: #e2e8f0;
+  background: #F4F4F4;
 }

@@ -134,12 +134,7 @@ export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
                   className={`skill-item ${isActive ? "active" : ""}`}
                   onClick={() => onToggle(skill.name, !isActive)}
                 >
-                  <input
-                    type="checkbox"
-                    checked={isActive}
-                    readOnly
-                    style={{ marginRight: "10px", pointerEvents: "none" }}
-                  />
+
                   <div style={{ flex: 1 }}>
                     <span className="skill-name">
                       {skill.name}
@@ -152,6 +147,11 @@ export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
                   <div className="skill-actions" onClick={(e) => e.stopPropagation()}>
                     <button onClick={() => startEdit(skill)}>Edit</button>
                     <button className="danger" onClick={() => handleDelete(skill.name)}>Delete</button>
+                    <input
+                      type="checkbox"
+                      checked={isActive}
+                      readOnly
+                    />
                   </div>
                 </div>
               );
