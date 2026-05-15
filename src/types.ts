@@ -15,6 +15,7 @@ export interface AppConfig {
   system_message?: string;
   selected_tools?: string[];
   search_engine?: string;
+  kg_engine?: string;
 }
 
 export interface Skill {

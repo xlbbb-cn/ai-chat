@@ -39,29 +39,29 @@ const AVAILABLE_TOOLS = [
         description: "Execute generic Bash/Python/Powershell scripts globally",
     },
     {
-        id: "read_file",
-        name: "Read File",
-        description: "Read files from the workspace",
-    },
-    {
-        id: "write_file",
-        name: "Write File",
-        description: "Write files to the workspace",
-    },
-    {
-        id: "list_dir",
-        name: "List Directory",
-        description: "List directory contents in the workspace",
+        id: "file_actions",
+        name: "File Actions",
+        description: "Read, write, and list items in the workspace",
     },
     {
         id: "fetch_web",
         name: "Fetch Web",
         description: "Fetch true webpage content (bypassing anti-bot & JS rendering)",
+    },
+    {
+        id: "knowledge_graph",
+        name: "Knowledge Graph",
+        description: "Connect to a knowledge graph and perform queries",
     }
+];
+
+const KG_ENGINES = [
+    { value: "neo4j", label: "Neo4j" }
 ];
 
 export function ToolsPanel({ onClose, onToolsChange }: Props) {
     const [config, setConfig] = useState<AppConfig | null>(null);
+    const [expandedTool, setExpandedTool] = useState<string | null>(null);
 
     useEffect(() => {
         getConfig().then(setConfig).catch(console.error);
@@ -87,6 +87,13 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
         await saveConfig(newConfig);
     }
 
+    async function updateKgEngine(kg_engine: string) {
+        if (!config) return;
+        const newConfig = { ...config, kg_engine };
+        setConfig(newConfig);
+        await saveConfig(newConfig);
+    }
+
     if (!config) {
         return <div className="tools-panel">Loading...</div>;
     }
@@ -94,6 +101,8 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
     const selectedTools = config.selected_tools ?? [];
     const searchEngine = config.search_engine ?? "duckduckgo";
     const webSearchEnabled = selectedTools.includes("web_search");
+    const kgEngine = config.kg_engine ?? "neo4j";
+    const kgEnabled = selectedTools.includes("knowledge_graph");
 
     return (
         <div className="tools-panel">
@@ -103,20 +112,34 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
             </div>
             <div className="tools-list">
                 {AVAILABLE_TOOLS.map(tool => (
-                    <div
-                        key={tool.id}
-                        className={`tool-item ${selectedTools.includes(tool.id) ? "active" : ""}`}
-                        onClick={() => toggleTool(tool.id)}
-                    >
-                        <input
-                            type="checkbox"
-                            checked={selectedTools.includes(tool.id)}
-                            onChange={() => { }}
-                        />
-                        <div className="tool-info">
-                            <span className="tool-name">{tool.name}</span>
-                            <span className="tool-desc">{tool.description}</span>
+                    <div key={tool.id} className="tool-item-container">
+                        <div
+                            className={`tool-item ${selectedTools.includes(tool.id) ? "active" : ""}`}
+                            onClick={() => toggleTool(tool.id)}
+                        >
+                            <input
+                                type="checkbox"
+                                checked={selectedTools.includes(tool.id)}
+                                onChange={() => { }}
+                            />
+                            <div className="tool-info">
+                                <span className="tool-name">{tool.name}</span>
+                            </div>
+                            <button
+                                className="toggle-btn"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setExpandedTool(expandedTool === tool.id ? null : tool.id);
+                                }}
+                            >
+                                {expandedTool === tool.id ? "▲" : "▼"}
+                            </button>
                         </div>
+                        {expandedTool === tool.id && (
+                            <div className="tool-desc-expanded">
+                                {tool.description}
+                            </div>
+                        )}
                     </div>
                 ))}
             </div>
@@ -134,6 +157,26 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                     title={webSearchEnabled ? "Default engine for web_search" : "Enable Web Search tool first"}
                 >
                     {SEARCH_ENGINES.map(engine => (
+                        <option key={engine.value} value={engine.value}>
+                            {engine.label}
+                        </option>
+                    ))}
+                </select>
+            </div>
+
+            <div className="search-engine-section">
+                <label className="search-engine-label" htmlFor="kg-engine-select">
+                    Knowledge Graph Engine
+                </label>
+                <select
+                    id="kg-engine-select"
+                    className="search-engine-select"
+                    value={kgEngine}
+                    onChange={(e) => void updateKgEngine(e.target.value)}
+                    disabled={!kgEnabled}
+                    title={kgEnabled ? "Default engine for knowledge graph" : "Enable Knowledge Graph tool first"}
+                >
+                    {KG_ENGINES.map(engine => (
                         <option key={engine.value} value={engine.value}>
                             {engine.label}
                         </option>

@@ -32,6 +32,7 @@ pub struct AppConfig {
     pub selected_tools: Vec<String>,
     #[serde(default = "default_search_engine")]
     pub search_engine: String,
+    pub kg_engine: Option<String>,
 }
 
 fn default_search_engine() -> String {
@@ -49,6 +50,7 @@ impl Default for AppConfig {
             system_message: String::new(),
             selected_tools: vec!["web_search".to_string()],
             search_engine: default_search_engine(),
+            kg_engine: None,
         }
     }
 }

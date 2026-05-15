@@ -332,6 +332,7 @@ pub async fn chat_completion(
                     skill_dir_path.clone(),
                     state.workspace_dir.clone(),
                     &config.search_engine,
+                    config.kg_engine.as_deref().unwrap_or("neo4j"),
                 )
                 .await
             };

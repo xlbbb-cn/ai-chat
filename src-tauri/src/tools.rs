@@ -65,56 +65,50 @@ pub fn get_all_tools(selected_tools: &[String], allow_commands: bool, skill_dir:
         }));
     }
 
-    if skill_dir.is_some() || selected_tools.iter().any(|t| t == "read_file" || t == "write_file" || t == "list_dir") {
-        if selected_tools.iter().any(|t| t == "read_file") || skill_dir.is_some() {
-            tools.push(json!({
-                "type": "function",
-                "function": {
-                    "name": "read_file",
-                    "description": "Read the contents of a file inside the current workspace root: skill directory when called by a skill, otherwise the app managed workspace directory.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": { "type": "string", "description": "Relative path to the file" }
+    if skill_dir.is_some() || selected_tools.iter().any(|t| t == "file_actions") {
+        tools.push(json!({
+            "type": "function",
+            "function": {
+                "name": "file_actions",
+                "description": "Perform file operations (read, write, list) inside the current workspace root.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["read", "write", "list"],
+                            "description": "The file action to perform"
                         },
-                        "required": ["path"]
-                    }
-                }
-            }));
-        }
-        if selected_tools.iter().any(|t| t == "write_file") || skill_dir.is_some() {
-            tools.push(json!({
-                "type": "function",
-                "function": {
-                    "name": "write_file",
-                    "description": "Write contents to a file inside the current workspace root: skill directory when called by a skill, otherwise the app managed workspace directory.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": { "type": "string", "description": "Relative path to the file" },
-                            "content": { "type": "string", "description": "Content to write" }
+                        "path": {
+                            "type": "string",
+                            "description": "Relative path to the file or directory. Use '.' for root when listing."
                         },
-                        "required": ["path", "content"]
-                    }
+                        "content": {
+                            "type": "string",
+                            "description": "Content to write (only required for 'write' action)"
+                        }
+                    },
+                    "required": ["action", "path"]
                 }
-            }));
-        }
-        if selected_tools.iter().any(|t| t == "list_dir") || skill_dir.is_some() {
-            tools.push(json!({
-                "type": "function",
-                "function": {
-                    "name": "list_dir",
-                    "description": "List contents of a directory inside the current workspace root: skill directory when called by a skill, otherwise the app managed workspace directory.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": { "type": "string", "description": "Relative path to the directory (use '.' for root)" }
-                        },
-                        "required": ["path"]
-                    }
+            }
+        }));
+    }
+
+    if selected_tools.iter().any(|t| t == "knowledge_graph") {
+        tools.push(json!({
+            "type": "function",
+            "function": {
+                "name": "knowledge_graph",
+                "description": "Connect to a knowledge graph and perform queries.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "The cypher query or search query for the knowledge graph." }
+                    },
+                    "required": ["query"]
                 }
-            }));
-        }
+            }
+        }));
     }
 
     tools
@@ -162,6 +156,7 @@ pub async fn execute_tool(
     skill_dir: Option<PathBuf>,
     workspace_dir: PathBuf,
     configured_search_engine: &str,
+    configured_kg_engine: &str,
 ) -> String {
     let args: Value = serde_json::from_str(args_str).unwrap_or_default();
     match name {
@@ -193,59 +188,71 @@ pub async fn execute_tool(
             let _ = app.emit("chat-token", format!("🌐 *Fetching {}*\n\n", url));
             fetch_web_content(&url).await.unwrap_or_else(|e| format!("Failed to fetch web content: {}", e))
         }
-        "read_file" => {
-            let root_dir = resolve_workspace_root(&workspace_dir, skill_dir.clone());
+        "file_actions" => {
+            let action = args["action"].as_str().unwrap_or("");
             let path_str = args["path"].as_str().unwrap_or("");
-            let _ = app.emit("chat-token", format!("📄 *Reading {}*\n\n", path_str));
-            match resolve_safe_path(&root_dir, path_str) {
-                Ok(p) => fs::read_to_string(&p).unwrap_or_else(|e| format!("Error reading file: {}", e)),
-                Err(e) => format!("Error: {}", e)
-            }
-        }
-        "write_file" => {
             let root_dir = resolve_workspace_root(&workspace_dir, skill_dir.clone());
-            let path_str = args["path"].as_str().unwrap_or("");
-            let content_str = args["content"].as_str().unwrap_or("");
-            let _ = app.emit("chat-token", format!("💾 *Writing {}*\n\n", path_str));
-            match resolve_safe_path(&root_dir, path_str) {
-                Ok(p) => {
-                    if let Some(parent) = p.parent() {
-                        let _ = fs::create_dir_all(parent);
-                    }
-                    match fs::write(&p, content_str) {
-                        Ok(_) => format!("Successfully wrote to {}", path_str),
-                        Err(e) => format!("Error writing file: {}", e)
+            match action {
+                "read" => {
+                    let _ = app.emit("chat-token", format!("📄 *Reading {}*\n\n", path_str));
+                    match resolve_safe_path(&root_dir, path_str) {
+                        Ok(p) => fs::read_to_string(&p).unwrap_or_else(|e| format!("Error reading file: {}", e)),
+                        Err(e) => format!("Error: {}", e)
                     }
                 }
-                Err(e) => format!("Error: {}", e)
-            }
-        }
-        "list_dir" => {
-            let root_dir = resolve_workspace_root(&workspace_dir, skill_dir.clone());
-            let path_str = args["path"].as_str().unwrap_or("");
-            let _ = app.emit("chat-token", format!("📂 *Listing {}*\n\n", path_str));
-            match resolve_safe_path(&root_dir, path_str) {
-                Ok(p) => {
-                    match fs::read_dir(&p) {
-                        Ok(entries) => {
-                            let mut res = Vec::new();
-                            for entry in entries.flatten() {
-                                if let Ok(name) = entry.file_name().into_string() {
-                                    let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-                                    res.push(format!("{}{}", name, if is_dir { "/" } else { "" }));
-                                }
+                "write" => {
+                    let content_str = args["content"].as_str().unwrap_or("");
+                    let _ = app.emit("chat-token", format!("💾 *Writing {}*\n\n", path_str));
+                    match resolve_safe_path(&root_dir, path_str) {
+                        Ok(p) => {
+                            if let Some(parent) = p.parent() {
+                                let _ = fs::create_dir_all(parent);
                             }
-                            if res.is_empty() {
-                                "(empty directory)".to_string()
-                            } else {
-                                res.join("\n")
+                            match fs::write(&p, content_str) {
+                                Ok(_) => format!("Successfully wrote to {}", path_str),
+                                Err(e) => format!("Error writing file: {}", e)
                             }
                         }
-                        Err(e) => format!("Error listing directory: {}", e)
+                        Err(e) => format!("Error: {}", e)
                     }
                 }
-                Err(e) => format!("Error: {}", e)
+                "list" => {
+                    let _ = app.emit("chat-token", format!("📂 *Listing {}*\n\n", path_str));
+                    match resolve_safe_path(&root_dir, path_str) {
+                        Ok(p) => {
+                            match fs::read_dir(&p) {
+                                Ok(entries) => {
+                                    let mut res = Vec::new();
+                                    for entry in entries.flatten() {
+                                        if let Ok(name) = entry.file_name().into_string() {
+                                            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                                            res.push(format!("{}{}", name, if is_dir { "/" } else { "" }));
+                                        }
+                                    }
+                                    if res.is_empty() {
+                                        "(empty directory)".to_string()
+                                    } else {
+                                        res.join("\n")
+                                    }
+                                }
+                                Err(e) => format!("Error listing directory: {}", e)
+                            }
+                        }
+                        Err(e) => format!("Error: {}", e)
+                    }
+                }
+                _ => format!("Unknown action '{}' for file_actions tool.", action),
             }
+        }
+        "knowledge_graph" => {
+            let query = args["query"].as_str().unwrap_or("").to_string();
+            let engine = configured_kg_engine.to_string();
+            let _ = app.emit(
+                "chat-token",
+                format!("🧠 *Querying Knowledge Graph ({}) with: {}...*\n\n", engine, query),
+            );
+            // Example stub: you'd implement actual Neo4j querying here
+            format!("Knowledge graph {} query executed: {}. (Not fully implemented yet)", engine, query)
         }
         _ => format!("Unknown tool: {}", name),
     }
