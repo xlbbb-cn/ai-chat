@@ -11,35 +11,11 @@ pub fn get_all_tools(selected_tools: &[String], allow_commands: bool, skill_dir:
             "type": "function",
             "function": {
                 "name": "web_search",
-                "description": "Search the web for current information. Use when the user asks about recent events, current data, or anything requiring up-to-date information.",
+                "description": "Search the web for current information using the configured search engine. Use when the user asks about recent events, current data, or anything requiring up-to-date information.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "query": { "type": "string", "description": "The search query" },
-                        "engine": {
-                            "type": "string",
-                            "description": "Optional search engine override. If omitted, the configured engine from Tools settings is used.",
-                            "enum": [
-                                "baidu",
-                                "bing_cn",
-                                "bing_int",
-                                "bing",
-                                "360",
-                                "sogou",
-                                "wechat",
-                                "shenma",
-                                "google",
-                                "google_hk",
-                                "duckduckgo",
-                                "ddg",
-                                "yahoo",
-                                "startpage",
-                                "brave",
-                                "ecosia",
-                                "qwant",
-                                "wolframalpha"
-                            ]
-                        }
+                        "query": { "type": "string", "description": "The search query" }
                     },
                     "required": ["query"]
                 }
@@ -162,10 +138,7 @@ pub async fn execute_tool(
     match name {
         "web_search" => {
             let query = args["query"].as_str().unwrap_or("").to_string();
-            let engine = args["engine"]
-                .as_str()
-                .unwrap_or(configured_search_engine)
-                .to_string();
+            let engine = configured_search_engine.to_string();
             let _ = app.emit(
                 "chat-token",
                 format!("🔍 *Searching with {}: {}...*\n\n", engine, query),
