@@ -1,6 +1,7 @@
 ﻿use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 use rusqlite::Connection;
 use tauri::{menu::{Menu, MenuItem, Submenu}, Manager, State};
@@ -58,6 +59,7 @@ pub struct AppState {
     pub workspace_dir: PathBuf,
     pub skills_dir: PathBuf,
     pub db: Mutex<Connection>,
+    pub chat_cancelled: AtomicBool,
 }
 
 // ─── Config commands ──────────────────────────────────────────────────────────
@@ -73,6 +75,13 @@ fn save_config(state: State<'_, AppState>, config: AppConfig) -> Result<(), Stri
     fs::write(&state.config_path, json).map_err(|e| e.to_string())?;
     *state.config.lock().unwrap() = config;
     Ok(())
+}
+
+#[tauri::command]
+fn stop_chat_completion(state: State<'_, AppState>) {
+    state
+        .chat_cancelled
+        .store(true, std::sync::atomic::Ordering::SeqCst);
 }
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
@@ -133,11 +142,13 @@ pub fn run() {
                 workspace_dir,
                 db: Mutex::new(db),
                 skills_dir,
+                chat_cancelled: AtomicBool::new(false),
             });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             llm_complete::chat_completion,
+            stop_chat_completion,
             get_config,
             save_config,
             skills::list_skills,

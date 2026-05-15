@@ -3,6 +3,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::{AppState, tools, skills};
@@ -25,6 +26,7 @@ async fn stream_request(
     url: &str,
     api_key: &str,
     req_body: Value,
+    cancelled: &AtomicBool,
 ) -> Result<(String, Vec<(String, String, String)>), String> {
     let res = client
         .post(url)
@@ -45,10 +47,16 @@ async fn stream_request(
 
     let mut stream = res.bytes_stream();
     while let Some(chunk) = stream.next().await {
+        if cancelled.load(Ordering::SeqCst) {
+            return Ok(("cancelled".to_string(), vec![]));
+        }
         let bytes = chunk.map_err(|e| e.to_string())?;
         let text = String::from_utf8_lossy(&bytes);
 
         for line in text.lines() {
+            if cancelled.load(Ordering::SeqCst) {
+                return Ok(("cancelled".to_string(), vec![]));
+            }
             let line = line.trim();
             if line == "data: [DONE]" {
                 break;
@@ -119,6 +127,7 @@ pub async fn chat_completion(
     skill_ids: Vec<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    state.chat_cancelled.store(false, Ordering::SeqCst);
     let config = state.config.lock().unwrap().clone();
 
     let mut allow_commands = false;
@@ -251,7 +260,19 @@ pub async fn chat_completion(
         }
 
         let (finish_reason, tool_calls) =
-            stream_request(&app, &client, &url, &config.api_key, req_body).await?;
+            stream_request(
+                &app,
+                &client,
+                &url,
+                &config.api_key,
+                req_body,
+                &state.chat_cancelled,
+            )
+            .await?;
+
+        if finish_reason == "cancelled" {
+            break;
+        }
 
         if finish_reason != "tool_calls" || tool_calls.is_empty() {
             break;
@@ -274,6 +295,9 @@ pub async fn chat_completion(
         }));
 
         for (id, name, args) in &tool_calls {
+            if state.chat_cancelled.load(Ordering::SeqCst) {
+                break;
+            }
             let result = if name == "use_skill" {
                 let args_json: Value = serde_json::from_str(args).unwrap_or_default();
                 let skill_name = args_json["skill_name"].as_str().unwrap_or("");
@@ -320,6 +344,7 @@ pub async fn chat_completion(
         }
     }
 
+    state.chat_cancelled.store(false, Ordering::SeqCst);
     let _ = app.emit("chat-done", ());
     Ok(())
 }

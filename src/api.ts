@@ -22,6 +22,10 @@ export async function deleteSkill(name: string): Promise<void> {
   return invoke("delete_skill", { name });
 }
 
+export async function stopChatCompletion(): Promise<void> {
+  return invoke("stop_chat_completion");
+}
+
 export interface StreamCallbacks {
   onToken: (token: string) => void;
   onReasoningToken?: (token: string) => void;

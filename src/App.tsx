@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { chatCompletion, saveHistory } from "./api";
+import { chatCompletion, saveHistory, stopChatCompletion } from "./api";
 
 import { ChatMessage } from "./components/ChatMessage";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -127,14 +127,38 @@ export default function App() {
     setSidebar((s) => (s === panel ? null : panel));
   }
 
-  function clearChat() {
-    if (streaming && cleanupRef.current) {
-      cleanupRef.current();
-      setStreaming(false);
+  async function clearChat() {
+    if (streaming) {
+      await stopStreaming();
     }
     setMessages([]);
     setError(null);
     setSessionId(crypto.randomUUID());
+  }
+
+  async function stopStreaming() {
+    try {
+      await stopChatCompletion();
+    } catch (err) {
+      setError(String(err));
+    }
+
+    if (cleanupRef.current) {
+      cleanupRef.current();
+      cleanupRef.current = null;
+    }
+
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (!m.streaming) return m;
+        const stopSuffix = "\n\n[已停止生成]";
+        const content = m.content.includes("[已停止生成]")
+          ? m.content
+          : (m.content || "") + stopSuffix;
+        return { ...m, content, streaming: false };
+      })
+    );
+    setStreaming(false);
   }
 
   return (
@@ -256,10 +280,10 @@ export default function App() {
           />
           <button
             className="send-btn"
-            onClick={sendMessage}
-            disabled={!input.trim() || streaming}
+            onClick={streaming ? stopStreaming : sendMessage}
+            disabled={!streaming && !input.trim()}
           >
-            {streaming ? "…" : "Send"}
+            {streaming ? "Stop" : "Send"}
           </button>
         </div>
       </div >
