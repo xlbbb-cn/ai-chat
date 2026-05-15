@@ -67,7 +67,7 @@ export default function App() {
 
     let accumulatedContent = "";
 
-    const cleanup = await chatCompletion(history, activeSkillId, {
+    const cleanup = await chatCompletion(history, activeSkillId ? [activeSkillId] : [], {
       onToken(token) {
         accumulatedContent += token;
         setMessages((prev) =>
