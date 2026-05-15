@@ -36,6 +36,15 @@ export function ChatMessage({ message }: Props) {
   return (
     <div className={`chat-message ${isUser ? "user" : "assistant"}`}>
       <div className="message-role">{isUser ? "You" : "Assistant"}</div>
+      {message.reasoning_content && (
+        <details className="message-reasoning">
+          <summary>Thought Process</summary>
+          <div
+            className="message-reasoning-content"
+            dangerouslySetInnerHTML={{ __html: md.render(message.reasoning_content) }}
+          />
+        </details>
+      )}
       <div
         className="message-content"
         dangerouslySetInnerHTML={{ __html: md.render(message.content) }}

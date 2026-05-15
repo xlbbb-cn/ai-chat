@@ -31,6 +31,30 @@
   letter-spacing: normal;
 }
 
+.message-reasoning {
+  margin-bottom: 8px;
+  background-color: #F9F9F9;
+  border-left: 2px solid #D2D4D7;
+  padding: 8px 12px;
+  border-radius: 0 4px 4px 0;
+}
+
+.message-reasoning summary {
+  cursor: pointer;
+  color: #888;
+  font-weight: 500;
+  user-select: none;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.message-reasoning-content {
+  margin-top: 6px;
+  font-size: 14px;
+  color: #666;
+  line-height: 1.5;
+}
+
 .message-content {
   font-size: 14px;
   font-weight: 400;

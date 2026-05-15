@@ -2,6 +2,7 @@ export interface Message {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
+  reasoning_content?: string;
   streaming?: boolean;
 }
 

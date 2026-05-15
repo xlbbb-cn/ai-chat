@@ -66,6 +66,7 @@ export default function App() {
     saveHistory(sessionId, "user", text);
 
     let accumulatedContent = "";
+    let accumulatedReasoning = "";
 
     const cleanup = await chatCompletion(history, activeSkillIds, {
       onToken(token) {
@@ -76,8 +77,22 @@ export default function App() {
           )
         );
       },
+      onReasoningToken(token) {
+        accumulatedReasoning += token;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId ? { ...m, reasoning_content: accumulatedReasoning } : m
+          )
+        );
+      },
       onDone() {
-        saveHistory(sessionId, "assistant", accumulatedContent);
+        // Optionally save reasoning context as well, but for now we'll just save the final content
+        // Or append reasoning to content if we want it in history
+        const finalContentToSave = accumulatedReasoning 
+          ? `<details><summary>Thought Process</summary>\n\n${accumulatedReasoning}\n</details>\n\n${accumulatedContent}`
+          : accumulatedContent;
+        
+        saveHistory(sessionId, "assistant", finalContentToSave);
         setMessages((prev) =>
           prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m))
         );

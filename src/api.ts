@@ -24,6 +24,7 @@ export async function deleteSkill(name: string): Promise<void> {
 
 export interface StreamCallbacks {
   onToken: (token: string) => void;
+  onReasoningToken?: (token: string) => void;
   onDone: () => void;
   onError: (err: string) => void;
 }
@@ -43,6 +44,11 @@ export async function chatCompletion(
   const unToken = await listen<string>("chat-token", (e) =>
     callbacks.onToken(e.payload)
   );
+  const unReasoning = await listen<string>("chat-reasoning-token", (e) => {
+    if (callbacks.onReasoningToken) {
+      callbacks.onReasoningToken(e.payload);
+    }
+  });
   const unDone = await listen<void>("chat-done", () => {
     callbacks.onDone();
     cleanup();
@@ -52,7 +58,7 @@ export async function chatCompletion(
     cleanup();
   });
 
-  unlisteners.push(unToken, unDone, unError);
+  unlisteners.push(unToken, unReasoning, unDone, unError);
 
   invoke("chat_completion", {
     messages: messages.map((m) => ({ role: m.role, content: m.content })),

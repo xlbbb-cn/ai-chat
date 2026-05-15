@@ -76,6 +76,11 @@ async fn stream_request(
                 }
             }
 
+            // Consume reasoning content (DeepSeek/Qwen style)
+            if let Some(reasoning) = delta.get("reasoning_content").and_then(|v| v.as_str()) {
+                let _ = app.emit("chat-reasoning-token", reasoning.to_string());
+            }
+
             // Accumulate streamed tool call chunks by index
             if let Some(tcs) = delta["tool_calls"].as_array() {
                 for tc in tcs {
