@@ -28,7 +28,7 @@ pub fn get_all_tools(selected_tools: &[String], allow_commands: bool, skill_dir:
             "type": "function",
             "function": {
                 "name": "execute_command",
-                "description": "Execute a bash, python, or powershell command/script on the user's machine. Use for calculations, file operations, data processing, system queries, or any task that benefits from running code locally.",
+                "description": "Execute a bash, python, or powershell command/script on the user's machine. Runs in the directory containing the skill's SKILL.md by default. Use for calculations, file operations, data processing, system queries, or any task that benefits from running locally.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -169,7 +169,7 @@ pub async fn execute_tool(
             let _ = app.emit("chat-token", format!("⚙️ *Running {}:*\n```{}\n{}\n```\n\n", cmd_type, cmd_type, code));
             tokio::time::timeout(
                 std::time::Duration::from_secs(30),
-                run_command(cmd_type, code),
+                run_command(cmd_type, code, skill_dir.clone()),
             )
             .await
             .unwrap_or_else(|_| Ok("Command timed out after 30 seconds.".to_string()))
@@ -247,31 +247,31 @@ pub async fn execute_tool(
     }
 }
 
-pub async fn run_command(cmd_type: String, code: String) -> Result<String, String> {
-    let output = match cmd_type.as_str() {
+pub async fn run_command(cmd_type: String, code: String, cwd: Option<PathBuf>) -> Result<String, String> {
+    let mut cmd = match cmd_type.as_str() {
         "python" | "python3" => {
-            tokio::process::Command::new("python3")
-                .arg("-c")
-                .arg(&code)
-                .output()
-                .await
+            let mut c = tokio::process::Command::new("python3");
+            c.arg("-c").arg(&code);
+            c
         }
         "bash" | "sh" => {
-            tokio::process::Command::new("bash")
-                .arg("-c")
-                .arg(&code)
-                .output()
-                .await
+            let mut c = tokio::process::Command::new("bash");
+            c.arg("-c").arg(&code);
+            c
         }
         "powershell" | "pwsh" => {
-            tokio::process::Command::new("powershell")
-                .args(["-NoProfile", "-NonInteractive", "-Command", &code])
-                .output()
-                .await
+            let mut c = tokio::process::Command::new("powershell");
+            c.args(["-NoProfile", "-NonInteractive", "-Command", &code]);
+            c
         }
         _ => return Err(format!("Unsupported command type: {}", cmd_type)),
+    };
+
+    if let Some(dir) = cwd {
+        cmd.current_dir(dir);
     }
-    .map_err(|e| e.to_string())?;
+
+    let output = cmd.output().await.map_err(|e| e.to_string())?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
