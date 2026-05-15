@@ -52,3 +52,17 @@ pub fn load_history(
 
     Ok(history)
 }
+
+#[tauri::command]
+pub fn delete_history(
+    session_id: String,
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<(), String> {
+    let db = state.db.lock().unwrap();
+    db.execute(
+        "DELETE FROM history WHERE session_id = ?1",
+        rusqlite::params![session_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}

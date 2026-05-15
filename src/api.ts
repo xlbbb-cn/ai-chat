@@ -84,3 +84,7 @@ export interface HistoryRecord {
 export async function loadHistory(): Promise<HistoryRecord[]> {
   return invoke("load_history");
 }
+
+export async function deleteHistory(sessionId: string): Promise<void> {
+  return invoke("delete_history", { sessionId });
+}

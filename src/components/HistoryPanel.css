@@ -45,9 +45,41 @@
   cursor: pointer;
   border: none;
   display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  transition: background-color 0.33s;
+}
+
+.history-content {
+  display: flex;
   flex-direction: column;
   gap: 4px;
-  transition: background-color 0.33s;
+  overflow: hidden;
+  flex: 1;
+}
+
+.history-delete-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  opacity: 0;
+  transition: opacity 0.2s, transform 0.2s;
+  padding: 4px;
+}
+
+.history-delete-btn:hover {
+  transform: scale(1.1);
+}
+
+.history-item:hover .history-delete-btn {
+  opacity: 0.6;
+}
+
+.history-delete-btn:hover {
+  opacity: 1 !important;
 }
 
 .history-item:hover {

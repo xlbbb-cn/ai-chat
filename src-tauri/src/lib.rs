@@ -142,6 +142,7 @@ pub fn run() {
             search::search_by,
             db::save_history,
             db::load_history,
+            db::delete_history,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

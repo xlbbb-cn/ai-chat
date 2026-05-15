@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { loadHistory } from "../api";
+import { loadHistory, deleteHistory } from "../api";
 import type { HistoryRecord } from "../api";
 import type { Message } from "../types";
 import "./HistoryPanel.css";
@@ -37,6 +37,17 @@ export function HistoryPanel({ currentSessionId, onLoad, onClose }: Props) {
     onClose();
   }
 
+  async function handleDelete(e: React.MouseEvent, sessionId: string) {
+    e.stopPropagation();
+    if (!confirm("Are you sure you want to delete this session?")) return;
+    try {
+      await deleteHistory(sessionId);
+      setRecords(records.filter((r) => r.session_id !== sessionId));
+    } catch (err) {
+      console.error("Failed to delete history:", err);
+    }
+  }
+
   return (
     <div className="history-panel">
       <div className="history-header">
@@ -57,12 +68,21 @@ export function HistoryPanel({ currentSessionId, onLoad, onClose }: Props) {
                 className={`history-item ${isCurrent ? "active" : ""}`}
                 onClick={() => handleLoad(sid, recs)}
               >
-                <span className="history-preview">
-                  {preview.length > 60 ? preview.slice(0, 60) + "…" : preview}
-                </span>
-                <span className="history-meta">
-                  {recs.length} messages{isCurrent ? " · current" : ""}
-                </span>
+                <div className="history-content">
+                  <span className="history-preview">
+                    {preview.length > 60 ? preview.slice(0, 60) + "…" : preview}
+                  </span>
+                  <span className="history-meta">
+                    {recs.length} messages{isCurrent ? " · current" : ""}
+                  </span>
+                </div>
+                <button
+                  className="history-delete-btn"
+                  onClick={(e) => handleDelete(e, sid)}
+                  title="Delete session"
+                >
+                  🗑️
+                </button>
               </div>
             );
           })

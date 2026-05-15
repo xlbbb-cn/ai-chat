@@ -297,15 +297,66 @@ pub async fn run_command(cmd_type: String, code: String) -> Result<String, Strin
 }
 
 pub async fn fetch_web_content(url: &str) -> Result<String, String> {
-    // We use Jina Reader API as a proxy. 
-    // It automatically handles JS rendering, waits for page load, and bypasses common anti-bot/anti-crawler strategies (like Cloudflare).
-    // It returns clean markdown content.
-    let jina_url = format!("https://r.jina.ai/{}", url);
+    // Attempt local direct extraction first (falling back to Jina if needed or just attempting both)
+    // Wait, let's implement local content extraction and if blocked or invalid, maybe fallback.
+    // Or we can just use scraper to parse locally.
     let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         .build()
         .map_err(|e| e.to_string())?;
 
+    let res = client.get(url).send().await.map_err(|e| e.to_string())?;
+    
+    if res.status().is_success() {
+        let content_type = res
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_lowercase();
+
+        if content_type.contains("text/html") {
+            if let Ok(html) = res.text().await {
+                // Parse HTML locally using scraper
+                let document = scraper::Html::parse_document(&html);
+                let mut text_content = String::new();
+                
+                // Select body to extract readable text, avoiding scripts/styles
+                let body_selector = scraper::Selector::parse("body").unwrap();
+                if let Some(body) = document.select(&body_selector).next() {
+                    for node in body.descendants() {
+                        if let Some(element) = node.value().as_element() {
+                            let tag = element.name();
+                            if tag == "script" || tag == "style" || tag == "noscript" || tag == "svg" {
+                                continue; // Skip these tags
+                            }
+                        }
+                        if let Some(text) = node.value().as_text() {
+                            let t = text.trim();
+                            if !t.is_empty() {
+                                text_content.push_str(t);
+                                text_content.push(' ');
+                            }
+                        }
+                    }
+                }
+                
+                // If the extracted text seems too short (possibly CSRA / JS-rendered), fallback to Jina
+                if text_content.len() > 200 {
+                    return Ok(text_content);
+                }
+            }
+        } else {
+            // Non-HTML content (e.g., direct text)
+            let txt = res.text().await.unwrap_or_default();
+            if txt.len() > 0 {
+                return Ok(txt);
+            }
+        }
+    }
+
+    // Fallback to Jina for JS rendering and anti-bot bypass
+    let jina_url = format!("https://r.jina.ai/{}", url);
     let res = client.get(&jina_url)
         .header("X-Return-Format", "markdown")
         .send()
