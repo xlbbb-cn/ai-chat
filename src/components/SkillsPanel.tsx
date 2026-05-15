@@ -4,8 +4,8 @@ import type { Skill } from "../types";
 import "./SkillsPanel.css";
 
 interface Props {
-  activeSkillId: string | null;
-  onSelect: (name: string | null) => void;
+  activeSkillIds: string[];
+  onToggle: (name: string, active: boolean) => void;
   onClose: () => void;
 }
 
@@ -16,7 +16,7 @@ const emptySkill = (): Skill => ({
   allowed_tools: [],
 });
 
-export function SkillsPanel({ activeSkillId, onSelect, onClose }: Props) {
+export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [editing, setEditing] = useState<Skill | null>(null);
   const [originalName, setOriginalName] = useState<string | null>(null);
@@ -30,8 +30,11 @@ export function SkillsPanel({ activeSkillId, onSelect, onClose }: Props) {
     await saveSkill(editing);
     // If name changed, delete the old file
     if (originalName && originalName !== editing.name) {
-      await deleteSkill(originalName).catch(() => {});
-      if (activeSkillId === originalName) onSelect(editing.name);
+      await deleteSkill(originalName).catch(() => { });
+      if (activeSkillIds.includes(originalName)) {
+        onToggle(originalName, false);
+        onToggle(editing.name, true);
+      }
     }
     const updated = await listSkills();
     setSkills(updated);
@@ -47,7 +50,7 @@ export function SkillsPanel({ activeSkillId, onSelect, onClose }: Props) {
   async function handleDelete(name: string) {
     await deleteSkill(name);
     setSkills((s) => s.filter((x) => x.name !== name));
-    if (activeSkillId === name) onSelect(null);
+    if (activeSkillIds.includes(name)) onToggle(name, false);
   }
 
   function toggleTool(tool: string) {
@@ -123,32 +126,36 @@ export function SkillsPanel({ activeSkillId, onSelect, onClose }: Props) {
       ) : (
         <>
           <div className="skills-list">
-            <div
-              className={`skill-item ${activeSkillId === null ? "active" : ""}`}
-              onClick={() => onSelect(null)}
-            >
-              <span className="skill-name">No Skill</span>
-              <span className="skill-desc">Default assistant behavior</span>
-            </div>
-            {skills.map((skill) => (
-              <div
-                key={skill.name}
-                className={`skill-item ${activeSkillId === skill.name ? "active" : ""}`}
-                onClick={() => onSelect(skill.name)}
-              >
-                <span className="skill-name">
-                  {skill.name}
-                  {(skill.allowed_tools ?? []).includes("Bash") && (
-                    <span title="Command execution enabled" style={{ marginLeft: "6px", fontSize: "0.75rem", opacity: 0.7 }}>⚙️</span>
-                  )}
-                </span>
-                <span className="skill-desc">{skill.description}</span>
-                <div className="skill-actions" onClick={(e) => e.stopPropagation()}>
-                  <button onClick={() => startEdit(skill)}>Edit</button>
-                  <button className="danger" onClick={() => handleDelete(skill.name)}>Delete</button>
+            {skills.map((skill) => {
+              const isActive = activeSkillIds.includes(skill.name);
+              return (
+                <div
+                  key={skill.name}
+                  className={`skill-item ${isActive ? "active" : ""}`}
+                  onClick={() => onToggle(skill.name, !isActive)}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isActive}
+                    readOnly
+                    style={{ marginRight: "10px", pointerEvents: "none" }}
+                  />
+                  <div style={{ flex: 1 }}>
+                    <span className="skill-name">
+                      {skill.name}
+                      {(skill.allowed_tools ?? []).includes("Bash") && (
+                        <span title="Command execution enabled" style={{ marginLeft: "6px", fontSize: "0.75rem", opacity: 0.7 }}>⚙️</span>
+                      )}
+                    </span>
+                    <span className="skill-desc">{skill.description}</span>
+                  </div>
+                  <div className="skill-actions" onClick={(e) => e.stopPropagation()}>
+                    <button onClick={() => startEdit(skill)}>Edit</button>
+                    <button className="danger" onClick={() => handleDelete(skill.name)}>Delete</button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
           <div className="skills-footer">
             <button className="btn-primary" onClick={() => { setEditing(emptySkill()); setOriginalName(null); }}>

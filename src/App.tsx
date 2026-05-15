@@ -18,7 +18,7 @@ export default function App() {
   const [streaming, setStreaming] = useState(false);
   const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
   const [sidebar, setSidebar] = useState<Sidebar>(null);
-  const [activeSkillId, setActiveSkillId] = useState<string | null>(null);
+  const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [usage, setUsage] = useState<{ prompt_tokens: number, completion_tokens: number } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -67,7 +67,7 @@ export default function App() {
 
     let accumulatedContent = "";
 
-    const cleanup = await chatCompletion(history, activeSkillId ? [activeSkillId] : [], {
+    const cleanup = await chatCompletion(history, activeSkillIds, {
       onToken(token) {
         accumulatedContent += token;
         setMessages((prev) =>
@@ -99,7 +99,7 @@ export default function App() {
     });
 
     cleanupRef.current = cleanup;
-  }, [input, messages, streaming, activeSkillId]);
+  }, [input, messages, streaming, activeSkillIds, sessionId]);
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -132,8 +132,12 @@ export default function App() {
           )}
           {sidebar === "skills" && (
             <SkillsPanel
-              activeSkillId={activeSkillId}
-              onSelect={setActiveSkillId}
+              activeSkillIds={activeSkillIds}
+              onToggle={(name, active) => {
+                setActiveSkillIds((prev) =>
+                  active ? [...prev, name] : prev.filter((id) => id !== name)
+                );
+              }}
               onClose={() => setSidebar(null)}
             />
           )}
@@ -164,8 +168,8 @@ export default function App() {
         <header className="toolbar">
           <span className="app-title">AI Chat</span>
           <div className="toolbar-actions">
-            {activeSkillId && (
-              <span className="skill-badge">Skill active</span>
+            {activeSkillIds.length > 0 && (
+              <span className="skill-badge">{activeSkillIds.length} Skill{activeSkillIds.length > 1 ? "s" : ""} active</span>
             )}
             <button
               className={`toolbar-btn ${sidebar === "history" ? "active" : ""}`}
