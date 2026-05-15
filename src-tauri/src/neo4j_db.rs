@@ -30,19 +30,13 @@ impl Neo4jRepo {
 #[async_trait]
 impl KnowledgeGraph for Neo4jRepo {
     async fn execute_query(&self, query: &str) -> Result<String, String> {
-        let mut result = self.graph.execute(
-            neo4rs::query(query), // use neo4rs string or query
-        ).await.map_err(|e| e.to_string())?;
+        // Execute the query and surface driver errors; detailed row parsing can be added later.
+        let _ = self
+            .graph
+            .execute(neo4rs::query(query))
+            .await
+            .map_err(|e| e.to_string())?;
 
-        // Simple stringification of result rows
-        // Note: neo4rs returns rows as neo4rs::Row
-        let mut output = String::new();
-        /*
-        while let Ok(Some(row)) = result.next().await {
-            // we will need to format row roughly
-            output.push_str("Row\n");
-        }
-        */
-        Ok(format!("Executed query: {}", query)) // placeholder since neo4rs rows parsing is complex
+        Ok(format!("Executed query: {}", query))
     }
 }
