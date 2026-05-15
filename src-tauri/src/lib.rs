@@ -3,13 +3,16 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use rusqlite::Connection;
-use tauri::{Manager, State};
+use tauri::{menu::{Menu, MenuItem, Submenu}, Manager, State};
+use tauri_plugin_opener::OpenerExt;
 
 mod db;
 mod llm_complete;
 mod search;
 mod skills;
 mod tools;
+
+const OPEN_APP_DATA_DIR_MENU_ID: &str = "open-app-data-dir";
 
 // ─── App State ───────────────────────────────────────────────────────────────
 
@@ -80,12 +83,32 @@ fn save_config(state: State<'_, AppState>, config: AppConfig) -> Result<(), Stri
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .on_menu_event(|app, event| {
+            if event.id() == OPEN_APP_DATA_DIR_MENU_ID {
+                if let Ok(data_dir) = app.path().app_data_dir() {
+                    let _ = app.opener().open_path(data_dir.to_string_lossy().into_owned(), None::<&str>);
+                }
+            }
+        })
         .setup(|app| {
             let data_dir = app
                 .path()
                 .app_data_dir()
                 .expect("failed to get app data dir");
             fs::create_dir_all(&data_dir).ok();
+
+            let open_app_data_dir_item = MenuItem::with_id(
+                app,
+                OPEN_APP_DATA_DIR_MENU_ID,
+                "Open App Data Directory",
+                true,
+                None::<&str>,
+            )
+            .expect("failed to create menu item");
+            let file_menu = Submenu::with_items(app, "File", true, &[&open_app_data_dir_item])
+                .expect("failed to create app menu");
+            let menu = Menu::with_items(app, &[&file_menu]).expect("failed to create app menu");
+            app.set_menu(menu).expect("failed to set app menu");
 
             let skills_dir = data_dir.join("skills");
             fs::create_dir_all(&skills_dir).ok();
