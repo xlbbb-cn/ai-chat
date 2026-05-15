@@ -15,6 +15,7 @@ type Sidebar = "settings" | "skills" | "history" | "tools" | null;
 export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState<{ name: string; content: string }[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
   const [sidebar, setSidebar] = useState<Sidebar>(null);
@@ -23,6 +24,7 @@ export default function App() {
   const [usage, setUsage] = useState<{ prompt_tokens: number, completion_tokens: number } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -46,8 +48,14 @@ export default function App() {
   }, []);
 
   const sendMessage = useCallback(async () => {
-    const text = input.trim();
-    if (!text || streaming) return;
+    let text = input.trim();
+    if ((!text && attachments.length === 0) || streaming) return;
+
+    for (const file of attachments) {
+      const ext = file.name.split('.').pop() || '';
+      text += `\n\n[Attached File: ${file.name}]\n\`\`\`${ext}\n${file.content}\n\`\`\``;
+    }
+    text = text.trim();
     setUsage(null);
 
     const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: text };
@@ -56,6 +64,7 @@ export default function App() {
 
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
     setInput("");
+    setAttachments([]);
     setStreaming(true);
     setError(null);
 
@@ -88,10 +97,10 @@ export default function App() {
       onDone() {
         // Optionally save reasoning context as well, but for now we'll just save the final content
         // Or append reasoning to content if we want it in history
-        const finalContentToSave = accumulatedReasoning 
+        const finalContentToSave = accumulatedReasoning
           ? `<details><summary>Thought Process</summary>\n\n${accumulatedReasoning}\n</details>\n\n${accumulatedContent}`
           : accumulatedContent;
-        
+
         saveHistory(sessionId, "assistant", finalContentToSave);
         setMessages((prev) =>
           prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m))
@@ -114,7 +123,7 @@ export default function App() {
     });
 
     cleanupRef.current = cleanup;
-  }, [input, messages, streaming, activeSkillIds, sessionId]);
+  }, [input, messages, streaming, activeSkillIds, sessionId, attachments]);
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -262,29 +271,73 @@ export default function App() {
         </div>
 
         {/* Input */}
-        <div className="input-area" style={{ position: "relative" }}>
+        <div className="input-area" style={{ position: "relative", flexDirection: "column", alignItems: "stretch" }}>
           {usage && (
             <div style={{ position: "absolute", top: "-15px", left: "10px", fontSize: "10px", color: "gray" }}>
               Tokens: {usage.prompt_tokens} prompt / {usage.completion_tokens} completion
             </div>
           )}
-          <textarea
-            ref={textareaRef}
-            className="chat-input"
-            rows={1}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Type a message… (Enter to send, Shift+Enter for newline)"
-            disabled={streaming}
-          />
-          <button
-            className="send-btn"
-            onClick={streaming ? stopStreaming : sendMessage}
-            disabled={!streaming && !input.trim()}
-          >
-            {streaming ? "Stop" : "Send"}
-          </button>
+          {attachments.length > 0 && (
+            <div className="attachments-bar">
+              {attachments.map((file, i) => (
+                <div key={i} className="attachment-pill">
+                  <span className="attachment-name" title={file.name}>{file.name}</span>
+                  <button className="attachment-remove" onClick={() => {
+                    setAttachments(prev => prev.filter((_, idx) => idx !== i));
+                  }}>×</button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="input-row">
+            <button
+              className="attach-btn"
+              title="Attach files"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={streaming}
+            >
+              📎
+            </button>
+            <input
+              type="file"
+              multiple
+              ref={fileInputRef}
+              style={{ display: 'none' }}
+              onChange={async (e) => {
+                const files = e.target.files;
+                if (files && files.length > 0) {
+                  const newAttachments: { name: string; content: string }[] = [];
+                  for (const f of Array.from(files)) {
+                    try {
+                      const content = await f.text();
+                      newAttachments.push({ name: f.name, content });
+                    } catch (err) {
+                      console.error("Failed to read file", f.name, err);
+                    }
+                  }
+                  setAttachments(prev => [...prev, ...newAttachments]);
+                }
+                e.target.value = '';
+              }}
+            />
+            <textarea
+              ref={textareaRef}
+              className="chat-input"
+              rows={1}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Type a message… (Enter to send, Shift+Enter for newline)"
+              disabled={streaming}
+            />
+            <button
+              className="send-btn"
+              onClick={streaming ? stopStreaming : sendMessage}
+              disabled={!streaming && !input.trim() && attachments.length === 0}
+            >
+              {streaming ? "Stop" : "Send"}
+            </button>
+          </div>
         </div>
       </div >
     </div >
