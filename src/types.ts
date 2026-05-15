@@ -14,6 +14,7 @@ export interface AppConfig {
   reasoning_effort?: string;
   system_message?: string;
   selected_tools?: string[];
+  search_engine?: string;
 }
 
 export interface Skill {

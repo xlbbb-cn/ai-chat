@@ -15,7 +15,31 @@ pub fn get_all_tools(selected_tools: &[String], allow_commands: bool, skill_dir:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "query": { "type": "string", "description": "The search query" }
+                        "query": { "type": "string", "description": "The search query" },
+                        "engine": {
+                            "type": "string",
+                            "description": "Optional search engine override. If omitted, the configured engine from Tools settings is used.",
+                            "enum": [
+                                "baidu",
+                                "bing_cn",
+                                "bing_int",
+                                "bing",
+                                "360",
+                                "sogou",
+                                "wechat",
+                                "shenma",
+                                "google",
+                                "google_hk",
+                                "duckduckgo",
+                                "ddg",
+                                "yahoo",
+                                "startpage",
+                                "brave",
+                                "ecosia",
+                                "qwant",
+                                "wolframalpha"
+                            ]
+                        }
                     },
                     "required": ["query"]
                 }
@@ -132,13 +156,21 @@ pub async fn execute_tool(
     name: &str,
     args_str: &str,
     skill_dir: Option<PathBuf>,
+    configured_search_engine: &str,
 ) -> String {
     let args: Value = serde_json::from_str(args_str).unwrap_or_default();
     match name {
         "web_search" => {
             let query = args["query"].as_str().unwrap_or("").to_string();
-            let _ = app.emit("chat-token", format!("🔍 *Searching: {}...*\n\n", query));
-            crate::search::search_by("duckduckgo".to_string(), query).await
+            let engine = args["engine"]
+                .as_str()
+                .unwrap_or(configured_search_engine)
+                .to_string();
+            let _ = app.emit(
+                "chat-token",
+                format!("🔍 *Searching with {}: {}...*\n\n", engine, query),
+            );
+            crate::search::search_by(engine, query).await
                 .unwrap_or_else(|e| format!("Search failed: {}", e))
         }
         "execute_command" => {

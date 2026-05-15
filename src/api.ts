@@ -65,8 +65,8 @@ export async function chatCompletion(
   return cleanup;
 }
 
-export async function searchDuckduckgo(query: string): Promise<string> {
-  return invoke("search_duckduckgo", { query });
+export async function searchBy(engine: string, query: string): Promise<string> {
+  return invoke("search_by", { engine, query });
 }
 
 export async function saveHistory(sessionId: string, role: string, content: string): Promise<void> {

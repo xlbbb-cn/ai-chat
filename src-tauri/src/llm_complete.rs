@@ -298,7 +298,14 @@ pub async fn chat_completion(
                     format!("Error: Skill '{}' not found.", skill_name)
                 }
             } else {
-                tools::execute_tool(&app, name, args, skill_dir_path.clone()).await
+                tools::execute_tool(
+                    &app,
+                    name,
+                    args,
+                    skill_dir_path.clone(),
+                    &config.search_engine,
+                )
+                .await
             };
             
             all_messages.push(json!({

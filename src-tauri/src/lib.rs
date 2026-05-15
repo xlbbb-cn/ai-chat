@@ -28,6 +28,12 @@ pub struct AppConfig {
     pub system_message: String,
     #[serde(default)]
     pub selected_tools: Vec<String>,
+    #[serde(default = "default_search_engine")]
+    pub search_engine: String,
+}
+
+fn default_search_engine() -> String {
+    "duckduckgo".to_string()
 }
 
 impl Default for AppConfig {
@@ -41,6 +47,7 @@ impl Default for AppConfig {
             reasoning_effort: String::new(),
             system_message: String::new(),
             selected_tools: vec!["web_search".to_string()],
+            search_engine: default_search_engine(),
         }
     }
 }
