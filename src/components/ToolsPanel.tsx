@@ -52,6 +52,11 @@ const AVAILABLE_TOOLS = [
         id: "list_dir",
         name: "List Directory",
         description: "List directory contents in the workspace",
+    },
+    {
+        id: "fetch_web",
+        name: "Fetch Web",
+        description: "Fetch true webpage content (bypassing anti-bot & JS rendering)",
     }
 ];
 

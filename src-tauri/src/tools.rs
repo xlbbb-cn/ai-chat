@@ -48,6 +48,23 @@ pub fn get_all_tools(selected_tools: &[String], allow_commands: bool, skill_dir:
         }));
     }
 
+    if selected_tools.iter().any(|t| t == "fetch_web") {
+        tools.push(json!({
+            "type": "function",
+            "function": {
+                "name": "fetch_web",
+                "description": "Fetch the content of a given URL. This resolves JS rendering and bypasses anti-bot/scraping strategies to read the true webpage content in markdown.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": { "type": "string", "description": "The URL to fetch, e.g. https://example.com" }
+                    },
+                    "required": ["url"]
+                }
+            }
+        }));
+    }
+
     if skill_dir.is_some() || selected_tools.iter().any(|t| t == "read_file" || t == "write_file" || t == "list_dir") {
         if selected_tools.iter().any(|t| t == "read_file") || skill_dir.is_some() {
             tools.push(json!({
@@ -157,6 +174,11 @@ pub async fn execute_tool(
             .await
             .unwrap_or_else(|_| Ok("Command timed out after 30 seconds.".to_string()))
             .unwrap_or_else(|e| format!("Error: {}", e))
+        }
+        "fetch_web" => {
+            let url = args["url"].as_str().unwrap_or("").to_string();
+            let _ = app.emit("chat-token", format!("🌐 *Fetching {}*\n\n", url));
+            fetch_web_content(&url).await.unwrap_or_else(|e| format!("Failed to fetch web content: {}", e))
         }
         "read_file" => {
             if let Some(dir) = skill_dir {
@@ -272,4 +294,27 @@ pub async fn run_command(cmd_type: String, code: String) -> Result<String, Strin
         result = "(no output)".to_string();
     }
     Ok(result)
+}
+
+pub async fn fetch_web_content(url: &str) -> Result<String, String> {
+    // We use Jina Reader API as a proxy. 
+    // It automatically handles JS rendering, waits for page load, and bypasses common anti-bot/anti-crawler strategies (like Cloudflare).
+    // It returns clean markdown content.
+    let jina_url = format!("https://r.jina.ai/{}", url);
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let res = client.get(&jina_url)
+        .header("X-Return-Format", "markdown")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if res.status().is_success() {
+        res.text().await.map_err(|e| e.to_string())
+    } else {
+        Err(format!("Error: received status code {}", res.status()))
+    }
 }
