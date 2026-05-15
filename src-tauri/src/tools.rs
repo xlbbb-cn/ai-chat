@@ -138,7 +138,7 @@ pub async fn execute_tool(
         "web_search" => {
             let query = args["query"].as_str().unwrap_or("").to_string();
             let _ = app.emit("chat-token", format!("🔍 *Searching: {}...*\n\n", query));
-            crate::search_db::search_duckduckgo(query).await
+            crate::search::search_by("duckduckgo".to_string(), query).await
                 .unwrap_or_else(|e| format!("Search failed: {}", e))
         }
         "execute_command" => {

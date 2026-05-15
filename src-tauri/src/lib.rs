@@ -5,8 +5,9 @@ use std::sync::Mutex;
 use rusqlite::Connection;
 use tauri::{Manager, State};
 
+mod db;
 mod llm_complete;
-mod search_db;
+mod search;
 mod skills;
 mod tools;
 
@@ -111,9 +112,9 @@ pub fn run() {
             skills::list_skills,
             skills::save_skill,
             skills::delete_skill,
-            search_db::search_duckduckgo,
-            search_db::save_history,
-            search_db::load_history,
+            search::search_by,
+            db::save_history,
+            db::load_history,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
