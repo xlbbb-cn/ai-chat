@@ -12,6 +12,7 @@ mod llm_complete;
 mod search;
 mod skills;
 mod tools;
+pub mod neo4j_db;
 
 const OPEN_APP_DATA_DIR_MENU_ID: &str = "open-app-data-dir";
 
@@ -33,6 +34,9 @@ pub struct AppConfig {
     #[serde(default = "default_search_engine")]
     pub search_engine: String,
     pub kg_engine: Option<String>,
+    pub neo4j_uri: Option<String>,
+    pub neo4j_user: Option<String>,
+    pub neo4j_password: Option<String>,
 }
 
 fn default_search_engine() -> String {
@@ -51,6 +55,9 @@ impl Default for AppConfig {
             selected_tools: vec!["web_search".to_string()],
             search_engine: default_search_engine(),
             kg_engine: None,
+            neo4j_uri: Some("bolt://localhost:7687".to_string()),
+            neo4j_user: Some("neo4j".to_string()),
+            neo4j_password: Some(String::new()),
         }
     }
 }

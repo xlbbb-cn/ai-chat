@@ -155,14 +155,13 @@ pub async fn execute_tool(
     args_str: &str,
     skill_dir: Option<PathBuf>,
     workspace_dir: PathBuf,
-    configured_search_engine: &str,
-    configured_kg_engine: &str,
+    config: &crate::AppConfig,
 ) -> String {
     let args: Value = serde_json::from_str(args_str).unwrap_or_default();
     match name {
         "web_search" => {
             let query = args["query"].as_str().unwrap_or("").to_string();
-            let engine = configured_search_engine.to_string();
+            let engine = config.search_engine.clone();
             let _ = app.emit(
                 "chat-token",
                 format!("🔍 *Searching with {}: {}...*\n\n", engine, query),
@@ -246,13 +245,29 @@ pub async fn execute_tool(
         }
         "knowledge_graph" => {
             let query = args["query"].as_str().unwrap_or("").to_string();
-            let engine = configured_kg_engine.to_string();
+            let engine = config.kg_engine.as_deref().unwrap_or("neo4j").to_string();
             let _ = app.emit(
                 "chat-token",
                 format!("🧠 *Querying Knowledge Graph ({}) with: {}...*\n\n", engine, query),
             );
-            // Example stub: you'd implement actual Neo4j querying here
-            format!("Knowledge graph {} query executed: {}. (Not fully implemented yet)", engine, query)
+            
+            if engine == "neo4j" {
+                use crate::neo4j_db::{KnowledgeGraph, Neo4jRepo};
+                let uri = config.neo4j_uri.as_deref().unwrap_or("bolt://localhost:7687");
+                let user = config.neo4j_user.as_deref().unwrap_or("neo4j");
+                let pass = config.neo4j_password.as_deref().unwrap_or("");
+                match Neo4jRepo::new(uri, user, pass).await {
+                    Ok(repo) => {
+                        match repo.execute_query(&query).await {
+                            Ok(res) => format!("Knowledge graph neo4j query executed: {}\nResult: {}", query, res),
+                            Err(e) => format!("Error executing neo4j query: {}", e)
+                        }
+                    }
+                    Err(e) => format!("Failed to connect to neo4j: {}", e)
+                }
+            } else {
+                format!("Knowledge graph {} query executed: {}. (Not fully implemented yet)", engine, query)
+            }
         }
         _ => format!("Unknown tool: {}", name),
     }

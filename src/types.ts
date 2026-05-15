@@ -16,6 +16,9 @@ export interface AppConfig {
   selected_tools?: string[];
   search_engine?: string;
   kg_engine?: string;
+  neo4j_uri?: string;
+  neo4j_user?: string;
+  neo4j_password?: string;
 }
 
 export interface Skill {

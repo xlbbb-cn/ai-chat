@@ -24,4 +24,6 @@ dirs = "5"
 rusqlite = { version = "0.39.0", features = ["bundled"] }
 scraper = "0.27.0"
 serde_yaml = "0.9"
+neo4rs = "0.8.0"
+async-trait = "0.1.89"
 
