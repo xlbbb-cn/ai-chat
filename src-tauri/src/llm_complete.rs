@@ -240,9 +240,6 @@ pub async fn chat_completion(
         if let Some(temp) = config.temperature {
             req_body["temperature"] = json!(temp);
         }
-        if config.enable_thinking {
-            req_body["thinking"] = json!({ "type": "enabled" });
-        }
         if !config.reasoning_effort.is_empty() {
             req_body["reasoning_effort"] = json!(config.reasoning_effort);
         }

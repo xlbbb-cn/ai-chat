@@ -24,8 +24,6 @@ pub struct AppConfig {
     #[serde(default)]
     pub temperature: Option<f64>,
     #[serde(default)]
-    pub enable_thinking: bool,
-    #[serde(default)]
     pub reasoning_effort: String,
     #[serde(default)]
     pub system_message: String,
@@ -46,7 +44,6 @@ impl Default for AppConfig {
             api_key: String::new(),
             model: "gpt-4o-mini".into(),
             temperature: None,
-            enable_thinking: false,
             reasoning_effort: String::new(),
             system_message: String::new(),
             selected_tools: vec!["web_search".to_string()],

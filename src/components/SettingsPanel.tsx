@@ -12,7 +12,6 @@ const defaultConfig: AppConfig = {
   api_key: "",
   model: "gpt-4o-mini",
   temperature: undefined,
-  enable_thinking: false,
   reasoning_effort: "",
   system_message: "",
 };
@@ -108,16 +107,6 @@ export function SettingsPanel({ onClose }: Props) {
         </label>
 
         <div className="settings-section-title">Reasoning</div>
-
-        <label className="settings-row">
-          <input
-            type="checkbox"
-            checked={config.enable_thinking ?? false}
-            onChange={(e) => setConfig({ ...config, enable_thinking: e.target.checked })}
-          />
-          Enable thinking
-          <span className="settings-hint">adds <code>thinking: &#123;"type":"enabled"&#125;</code></span>
-        </label>
 
         <label>
           Reasoning effort

@@ -10,7 +10,6 @@ export interface AppConfig {
   api_key: string;
   model: string;
   temperature?: number;
-  enable_thinking?: boolean;
   reasoning_effort?: string;
   system_message?: string;
   selected_tools?: string[];
