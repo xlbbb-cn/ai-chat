@@ -39,7 +39,6 @@ export function HistoryPanel({ currentSessionId, onLoad, onClose }: Props) {
 
   async function handleDelete(e: React.MouseEvent, sessionId: string) {
     e.stopPropagation();
-    if (!confirm("Are you sure you want to delete this session?")) return;
     try {
       await deleteHistory(sessionId);
       setRecords(records.filter((r) => r.session_id !== sessionId));
