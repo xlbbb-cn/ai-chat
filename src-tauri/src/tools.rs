@@ -76,8 +76,8 @@ pub fn get_all_tools(selected_tools: &[String], allow_commands: bool, skill_dir:
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["read", "write", "list"],
-                            "description": "The file action to perform"
+                            "enum": ["read", "write", "list", "edit", "patch"],
+                            "description": "The file action to perform: read file content, write/overwrite a file, list directory entries, edit by replacing a string, or apply a unified diff patch."
                         },
                         "path": {
                             "type": "string",
@@ -85,7 +85,19 @@ pub fn get_all_tools(selected_tools: &[String], allow_commands: bool, skill_dir:
                         },
                         "content": {
                             "type": "string",
-                            "description": "Content to write (only required for 'write' action)"
+                            "description": "Content to write (only for 'write')."
+                        },
+                        "old_string": {
+                            "type": "string",
+                            "description": "Exact string to find and replace (only for 'edit')."
+                        },
+                        "new_string": {
+                            "type": "string",
+                            "description": "Replacement string (only for 'edit')."
+                        },
+                        "patch": {
+                            "type": "string",
+                            "description": "Unified diff patch to apply to the file (only for 'patch'). Must be a valid unified diff (--- / +++ header optional)."
                         }
                     },
                     "required": ["action", "path"]
@@ -238,6 +250,48 @@ pub async fn execute_tool(
                             }
                         }
                         Err(e) => format!("Error: {}", e)
+                    }
+                }
+                "edit" => {
+                    let old_string = args["old_string"].as_str().unwrap_or("");
+                    let new_string = args["new_string"].as_str().unwrap_or("");
+                    let _ = app.emit("chat-token", format!("✏️ *Editing {}*\n\n", path_str));
+                    match resolve_safe_path(&root_dir, path_str) {
+                        Ok(p) => match fs::read_to_string(&p) {
+                            Ok(original) => {
+                                if !original.contains(old_string) {
+                                    format!("Error: old_string not found in {}", path_str)
+                                } else {
+                                    let updated = original.replacen(old_string, new_string, 1);
+                                    match fs::write(&p, &updated) {
+                                        Ok(_) => format!("Successfully edited {}", path_str),
+                                        Err(e) => format!("Error writing file: {}", e),
+                                    }
+                                }
+                            }
+                            Err(e) => format!("Error reading file: {}", e),
+                        },
+                        Err(e) => format!("Error: {}", e),
+                    }
+                }
+                "patch" => {
+                    let patch_str = args["patch"].as_str().unwrap_or("");
+                    let _ = app.emit("chat-token", format!("🩹 *Patching {}*\n\n", path_str));
+                    match resolve_safe_path(&root_dir, path_str) {
+                        Ok(p) => match fs::read_to_string(&p) {
+                            Ok(original) => match diffy::Patch::from_str(patch_str) {
+                                Ok(patch) => match diffy::apply(&original, &patch) {
+                                    Ok(patched) => match fs::write(&p, &patched) {
+                                        Ok(_) => format!("Successfully patched {}", path_str),
+                                        Err(e) => format!("Error writing file: {}", e),
+                                    },
+                                    Err(e) => format!("Error applying patch: {}", e),
+                                },
+                                Err(e) => format!("Error parsing patch: {}", e),
+                            },
+                            Err(e) => format!("Error reading file: {}", e),
+                        },
+                        Err(e) => format!("Error: {}", e),
                     }
                 }
                 _ => format!("Unknown action '{}' for file_actions tool.", action),

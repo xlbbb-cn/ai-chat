@@ -41,7 +41,7 @@ const AVAILABLE_TOOLS = [
     {
         id: "file_actions",
         name: "File Actions",
-        description: "Read, write, and list items in the workspace",
+        description: "he file action to perform: read file content, write/overwrite a file, list directory entries, edit by replacing a string, or apply a unified diff patch.",
     },
     {
         id: "fetch_web",
