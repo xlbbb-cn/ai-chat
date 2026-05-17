@@ -9,6 +9,7 @@ use tauri_plugin_opener::OpenerExt;
 
 mod db;
 mod llm_complete;
+pub mod mcp;
 mod search;
 mod skills;
 mod tools;
@@ -67,6 +68,7 @@ pub struct AppState {
     pub config_path: PathBuf,
     pub workspace_dir: PathBuf,
     pub skills_dir: PathBuf,
+    pub mcp_servers_path: PathBuf,
     pub db: Mutex<Connection>,
     pub chat_cancelled: AtomicBool,
 }
@@ -131,6 +133,8 @@ pub fn run() {
             let skills_dir = data_dir.join("skills");
             fs::create_dir_all(&skills_dir).ok();
 
+            let mcp_servers_path = data_dir.join("mcp_servers.json");
+
             let db_path = data_dir.join("chat.db");
             let db = Connection::open(db_path).unwrap();
             db.execute("CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)", []).unwrap();
@@ -151,6 +155,7 @@ pub fn run() {
                 workspace_dir,
                 db: Mutex::new(db),
                 skills_dir,
+                mcp_servers_path,
                 chat_cancelled: AtomicBool::new(false),
             });
             Ok(())
@@ -167,6 +172,10 @@ pub fn run() {
             db::save_history,
             db::load_history,
             db::delete_history,
+            mcp::list_mcp_servers,
+            mcp::save_mcp_server,
+            mcp::delete_mcp_server,
+            mcp::test_mcp_server,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

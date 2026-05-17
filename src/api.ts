@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import type { AppConfig, Message, Skill } from "./types";
+import type { AppConfig, Message, Skill, McpServer } from "./types";
 
 export async function getConfig(): Promise<AppConfig> {
   return invoke("get_config");
@@ -97,4 +97,20 @@ export async function loadHistory(): Promise<HistoryRecord[]> {
 
 export async function deleteHistory(sessionId: string): Promise<void> {
   return invoke("delete_history", { sessionId });
+}
+
+export async function listMcpServers(): Promise<McpServer[]> {
+  return invoke("list_mcp_servers");
+}
+
+export async function saveMcpServer(server: McpServer): Promise<void> {
+  return invoke("save_mcp_server", { server });
+}
+
+export async function deleteMcpServer(id: string): Promise<void> {
+  return invoke("delete_mcp_server", { id });
+}
+
+export async function testMcpServer(server: McpServer): Promise<string> {
+  return invoke("test_mcp_server", { server });
 }

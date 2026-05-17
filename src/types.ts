@@ -29,3 +29,19 @@ export interface Skill {
   version?: string;
   author?: string;
 }
+
+export type McpTransport = "stdio" | "sse";
+
+export interface McpServer {
+  id: string;
+  name: string;
+  transport: McpTransport;
+  /** stdio only */
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  /** sse only */
+  url: string;
+  auth_token: string;
+  enabled: boolean;
+}

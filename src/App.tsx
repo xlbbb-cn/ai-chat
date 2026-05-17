@@ -7,10 +7,11 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { SkillsPanel } from "./components/SkillsPanel";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { ToolsPanel } from "./components/ToolsPanel";
+import { McpPanel } from "./components/McpPanel";
 import type { Message } from "./types";
 import "./App.css";
 
-type Sidebar = "settings" | "skills" | "history" | "tools" | null;
+type Sidebar = "settings" | "skills" | "history" | "tools" | "mcp" | null;
 
 export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -195,6 +196,9 @@ export default function App() {
               onToolsChange={() => { }}
             />
           )}
+          {sidebar === "mcp" && (
+            <McpPanel onClose={() => setSidebar(null)} />
+          )}
           {sidebar === "history" && (
             <HistoryPanel
               currentSessionId={sessionId}
@@ -232,6 +236,13 @@ export default function App() {
               title="Skills"
             >
               ✦ Skills
+            </button>
+            <button
+              className={`toolbar-btn ${sidebar === "mcp" ? "active" : ""}`}
+              onClick={() => toggleSidebar("mcp")}
+              title="MCP Servers"
+            >
+              ⬡ MCP
             </button>
             <button
               className={`toolbar-btn ${sidebar === "tools" ? "active" : ""}`}
