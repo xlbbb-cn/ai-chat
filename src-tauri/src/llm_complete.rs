@@ -320,7 +320,6 @@ pub async fn chat_completion(
                 };
 
                 if let Some(skill) = skill_opt {
-                    let mut already_loaded = false;
                     if let Some(sys_msg) = all_messages.get_mut(0) {
                         if sys_msg["role"] == "system" {
                             let old_content = sys_msg["content"].as_str().unwrap_or("");
@@ -330,14 +329,13 @@ pub async fn chat_completion(
                             if !old_content.contains(&dyn_marker) && !old_content.contains(&static_marker) {
                                 let new_content = format!("{}\n\n{}\n{}", old_content, dyn_marker, skill.system_prompt);
                                 sys_msg["content"] = json!(new_content);
-                            } else {
-                                already_loaded = true;
+                                 let _ = app.emit("chat-token", format!("🧠 *Loading skill: {}*\n\n", skill_name));
                             }
                         }
                     }
-                    if !already_loaded {
-                        let _ = app.emit("chat-token", format!("🧠 *Loading skill: {}*\n\n", skill_name));
-                    }
+
+                       
+                
                     format!("Skill '{}' detailed instructions have been successfully loaded and APPENDED TO YOUR SYSTEM PROMPT. You can now follow its instructions to fulfill the user's request. There is no need to call use_skill for this skill again.", skill_name)
                 } else {
                     format!("Error: Skill '{}' not found.", skill_name)
