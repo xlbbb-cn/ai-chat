@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, State};
 
-use crate::{AppState, tools, skills};
+use crate::{AppState, tools, skills, mcp};
 
 // ─── Chat ────────────────────────────────────────────────────────────────────
 
@@ -231,8 +231,51 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
     if config.selected_tools.iter().any(|t| t == "execute_command") {
         allow_commands = true;
     }
-    
+
     let mut tools_list = tools::get_all_tools(&config.selected_tools, allow_commands, skill_dir_path.as_deref());
+
+    // ── MCP tools ───────────────────────────────────────────────────────────
+    // Load enabled MCP servers and collect their tools into tools_list.
+    // mcp_tool_map: function_name -> (server, actual_mcp_tool_name)
+    let mut mcp_tool_map: std::collections::HashMap<String, (mcp::McpServer, String)> =
+        std::collections::HashMap::new();
+    {
+        let enabled_servers: Vec<mcp::McpServer> = mcp::load_servers(&state.mcp_servers_path)
+            .into_iter()
+            .filter(|s| s.enabled)
+            .collect();
+
+        for (idx, server) in enabled_servers.iter().enumerate() {
+            match mcp::get_server_tools(server).await {
+                Ok(server_tools) => {
+                    for tool in server_tools {
+                        let Some(actual_name) = tool["function"]["name"].as_str() else { continue };
+                        let safe_name = mcp::sanitize_fn_name(actual_name);
+                        // Prefix: mcp_{idx}_{safe_tool_name}, truncated to 64 chars
+                        let raw_fn = format!("mcp_{idx}_{safe_name}");
+                        let fn_name: String = raw_fn.chars().take(64).collect();
+
+                        let mut openai_tool = tool.clone();
+                        openai_tool["function"]["name"] = serde_json::json!(fn_name);
+                        // Prepend server name to description for clarity
+                        let desc = tool["function"]["description"]
+                            .as_str()
+                            .unwrap_or("")
+                            .to_string();
+                        openai_tool["function"]["description"] =
+                            serde_json::json!(format!("[MCP: {}] {}", server.name, desc));
+
+                        tools_list.push(openai_tool);
+                        mcp_tool_map.insert(fn_name, (server.clone(), actual_name.to_string()));
+                    }
+                }
+                Err(e) => {
+                    // Non-fatal: log via a system message the LLM won't see
+                    eprintln!("MCP server '{}' tools/list failed: {e}", server.name);
+                }
+            }
+        }
+    }
 
     if !skill_ids.is_empty() {
         tools_list.push(json!({
@@ -357,6 +400,13 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                     }
                 } else {
                     format!("Error: Skill '{}' not found.", skill_name)
+                }
+            } else if let Some((mcp_server, actual_tool_name)) = mcp_tool_map.get(name) {
+                let args_json: Value = serde_json::from_str(args).unwrap_or_default();
+                let _ = app.emit("chat-token", format!("🔌 *MCP [{}]: {}*\n\n", mcp_server.name, actual_tool_name));
+                match mcp::invoke_mcp_tool(mcp_server, actual_tool_name, args_json).await {
+                    Ok(result) => result,
+                    Err(e) => format!("MCP tool error: {e}"),
                 }
             } else {
                 tools::execute_tool(

@@ -53,7 +53,7 @@ struct McpServersFile {
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
-fn load_servers(path: &PathBuf) -> Vec<McpServer> {
+pub fn load_servers(path: &PathBuf) -> Vec<McpServer> {
     if !path.exists() {
         return vec![];
     }
@@ -177,6 +177,283 @@ async fn test_stdio_server(server: &McpServer) -> Result<String, String> {
         Ok(Err(e)) => Err(format!("Read error: {e}")),
         Err(_) => Err("Timeout: no response within 5 seconds".to_string()),
     }
+}
+
+// ─── LLM integration helpers ──────────────────────────────────────────────────
+
+/// Sanitize a string so it can be used as part of an OpenAI function name.
+/// Allowed chars: letters, digits, underscores.
+pub fn sanitize_fn_name(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .collect()
+}
+
+// ── stdio JSON-RPC helpers ──────────────────────────────────────────────────
+
+async fn stdio_write_json(
+    stdin: &mut tokio::process::ChildStdin,
+    value: &serde_json::Value,
+) -> Result<(), String> {
+    use tokio::io::AsyncWriteExt;
+    let line = format!("{}\n", value);
+    stdin.write_all(line.as_bytes()).await.map_err(|e| format!("stdin write: {e}"))
+}
+
+/// Read lines from stdout until we get a JSON object whose `id` matches `expected_id`.
+/// Notifications (messages without an `id` field, or with `method`) are skipped.
+async fn stdio_read_response(
+    reader: &mut tokio::io::BufReader<tokio::process::ChildStdout>,
+    expected_id: u64,
+) -> Result<serde_json::Value, String> {
+    use tokio::io::AsyncBufReadExt;
+    use tokio::time::{timeout, Duration};
+    timeout(Duration::from_secs(10), async {
+        let mut line = String::new();
+        loop {
+            line.clear();
+            reader.read_line(&mut line).await.map_err(|e| format!("stdout read: {e}"))?;
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) else { continue };
+            // Skip notifications (they have "method" but no matching id)
+            if parsed.get("method").is_some() {
+                continue;
+            }
+            if parsed["id"].as_u64() == Some(expected_id) {
+                return Ok(parsed);
+            }
+        }
+    })
+    .await
+    .map_err(|_| "MCP stdio timeout".to_string())?
+}
+
+/// Spawn an MCP stdio process and run `initialize` + `notifications/initialized`.
+/// Returns (child, stdin, stdout_reader) ready for further RPC calls.
+async fn stdio_init(
+    server: &McpServer,
+) -> Result<
+    (
+        tokio::process::Child,
+        tokio::process::ChildStdin,
+        tokio::io::BufReader<tokio::process::ChildStdout>,
+    ),
+    String,
+> {
+    use std::process::Stdio;
+    use tokio::process::Command;
+
+    let mut cmd = Command::new(&server.command);
+    cmd.args(&server.args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    for (k, v) in &server.env {
+        cmd.env(k, v);
+    }
+
+    let mut child = cmd.spawn().map_err(|e| format!("spawn: {e}"))?;
+    let mut stdin = child.stdin.take().ok_or("no stdin")?;
+    let stdout = child.stdout.take().ok_or("no stdout")?;
+    let mut reader = tokio::io::BufReader::new(stdout);
+
+    // initialize
+    let init_req = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-03-26",
+            "capabilities": {},
+            "clientInfo": { "name": "ai-chat", "version": "0.1.0" }
+        },
+        "id": 1
+    });
+    stdio_write_json(&mut stdin, &init_req).await?;
+    stdio_read_response(&mut reader, 1).await?;
+
+    // send initialized notification (no response expected)
+    let notif = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized",
+        "params": {}
+    });
+    stdio_write_json(&mut stdin, &notif).await?;
+
+    Ok((child, stdin, reader))
+}
+
+// ── Public functions used by llm_complete ───────────────────────────────────
+
+/// Get the list of tools from an MCP server, in OpenAI /chat/completions tool format.
+pub async fn get_server_tools(server: &McpServer) -> Result<Vec<serde_json::Value>, String> {
+    match server.transport {
+        McpTransport::Stdio => get_tools_stdio(server).await,
+        McpTransport::Sse => get_tools_sse(server).await,
+    }
+}
+
+async fn get_tools_stdio(server: &McpServer) -> Result<Vec<serde_json::Value>, String> {
+    let (mut child, mut stdin, mut reader) = stdio_init(server).await?;
+
+    let list_req = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "tools/list",
+        "params": {},
+        "id": 2
+    });
+    stdio_write_json(&mut stdin, &list_req).await?;
+    let resp = stdio_read_response(&mut reader, 2).await;
+    let _ = child.kill().await;
+
+    let resp = resp?;
+    if let Some(err) = resp.get("error") {
+        return Err(format!("MCP tools/list error: {err}"));
+    }
+    let tools = resp["result"]["tools"].as_array().cloned().unwrap_or_default();
+    Ok(convert_mcp_tools(tools))
+}
+
+async fn get_tools_sse(server: &McpServer) -> Result<Vec<serde_json::Value>, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let req_body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "tools/list",
+        "params": {},
+        "id": 1
+    });
+
+    let mut builder = client.post(&server.url).json(&req_body);
+    if !server.auth_token.is_empty() {
+        builder = builder.header("Authorization", format!("Bearer {}", server.auth_token));
+    }
+
+    let resp = builder.send().await.map_err(|e| format!("HTTP error: {e}"))?;
+    let body: serde_json::Value = resp.json().await.map_err(|e| format!("Response parse: {e}"))?;
+
+    if let Some(err) = body.get("error") {
+        return Err(format!("MCP tools/list error: {err}"));
+    }
+    let tools = body["result"]["tools"].as_array().cloned().unwrap_or_default();
+    Ok(convert_mcp_tools(tools))
+}
+
+/// Convert MCP tool definitions to OpenAI function-calling tool format.
+fn convert_mcp_tools(mcp_tools: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
+    mcp_tools
+        .into_iter()
+        .filter_map(|t| {
+            let name = t["name"].as_str()?;
+            let description = t["description"].as_str().unwrap_or("").to_string();
+            let input_schema = t.get("inputSchema").cloned().unwrap_or_else(|| {
+                serde_json::json!({ "type": "object", "properties": {} })
+            });
+            Some(serde_json::json!({
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": description,
+                    "parameters": input_schema
+                }
+            }))
+        })
+        .collect()
+}
+
+/// Call a tool on an MCP server and return its text result.
+pub async fn invoke_mcp_tool(
+    server: &McpServer,
+    tool_name: &str,
+    arguments: serde_json::Value,
+) -> Result<String, String> {
+    match server.transport {
+        McpTransport::Stdio => invoke_tool_stdio(server, tool_name, arguments).await,
+        McpTransport::Sse => invoke_tool_sse(server, tool_name, arguments).await,
+    }
+}
+
+async fn invoke_tool_stdio(
+    server: &McpServer,
+    tool_name: &str,
+    arguments: serde_json::Value,
+) -> Result<String, String> {
+    let (mut child, mut stdin, mut reader) = stdio_init(server).await?;
+
+    let call_req = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "params": {
+            "name": tool_name,
+            "arguments": arguments
+        },
+        "id": 2
+    });
+    stdio_write_json(&mut stdin, &call_req).await?;
+    let resp = stdio_read_response(&mut reader, 2).await;
+    let _ = child.kill().await;
+
+    let resp = resp?;
+    if let Some(err) = resp.get("error") {
+        return Err(format!("MCP tool error: {err}"));
+    }
+    Ok(extract_tool_result(&resp["result"]))
+}
+
+async fn invoke_tool_sse(
+    server: &McpServer,
+    tool_name: &str,
+    arguments: serde_json::Value,
+) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let req_body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "params": { "name": tool_name, "arguments": arguments },
+        "id": 1
+    });
+
+    let mut builder = client.post(&server.url).json(&req_body);
+    if !server.auth_token.is_empty() {
+        builder = builder.header("Authorization", format!("Bearer {}", server.auth_token));
+    }
+
+    let resp = builder.send().await.map_err(|e| format!("HTTP error: {e}"))?;
+    let body: serde_json::Value = resp.json().await.map_err(|e| format!("Response parse: {e}"))?;
+
+    if let Some(err) = body.get("error") {
+        return Err(format!("MCP tool error: {err}"));
+    }
+    Ok(extract_tool_result(&body["result"]))
+}
+
+/// Extract a string result from an MCP tools/call response result.
+fn extract_tool_result(result: &serde_json::Value) -> String {
+    // MCP result content is usually an array of content blocks
+    if let Some(content) = result["content"].as_array() {
+        let parts: Vec<String> = content
+            .iter()
+            .filter_map(|block| {
+                if block["type"].as_str() == Some("text") {
+                    block["text"].as_str().map(|s| s.to_string())
+                } else {
+                    Some(serde_json::to_string(block).unwrap_or_default())
+                }
+            })
+            .collect();
+        return parts.join("\n");
+    }
+    // Fallback: serialize the whole result
+    serde_json::to_string_pretty(result).unwrap_or_default()
 }
 
 async fn test_sse_server(server: &McpServer) -> Result<String, String> {
