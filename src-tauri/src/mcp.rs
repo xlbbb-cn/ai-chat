@@ -108,8 +108,6 @@ pub async fn test_mcp_server(server: McpServer) -> Result<String, String> {
 }
 
 async fn test_stdio_server(server: &McpServer) -> Result<String, String> {
-    use std::process::Stdio;
-    use tokio::process::Command;
     use tokio::io::AsyncWriteExt;
     use tokio::time::{timeout, Duration};
 
@@ -133,16 +131,7 @@ async fn test_stdio_server(server: &McpServer) -> Result<String, String> {
     });
     let request_line = format!("{}\n", init_request);
 
-    let mut cmd = Command::new(&server.command);
-    cmd.args(&server.args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-
-    for (k, v) in &server.env {
-        cmd.env(k, v);
-    }
-
+    let mut cmd = build_stdio_cmd(server);
     let mut child = cmd.spawn().map_err(|e| format!("Failed to start process: {e}"))?;
 
     let mut stdin = child.stdin.take().ok_or("No stdin")?;
@@ -187,6 +176,99 @@ pub fn sanitize_fn_name(s: &str) -> String {
     s.chars()
         .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
         .collect()
+}
+
+/// Build a `tokio::process::Command` for a stdio MCP server.
+///
+/// On Windows, Tauri apps may not inherit the full system PATH, making
+/// commands like `npx` or `uvx` fail with "program not found".
+/// The fix is to route through `cmd.exe /C` so the shell resolves PATH.
+/// On Unix, we use `sh -c` for the same reason.
+fn build_stdio_cmd(server: &McpServer) -> tokio::process::Command {
+    use std::process::Stdio;
+
+    #[cfg(windows)]
+    {
+        // Check if the command looks like an absolute path (contains \ or /)
+        let is_absolute = server.command.contains('\\')
+            || server.command.contains('/')
+            || std::path::Path::new(&server.command).is_absolute();
+
+        if !is_absolute {
+            // Wrap in cmd /C so that PATH is inherited from the Windows shell
+            let mut args_str = shell_escape_windows(&server.command);
+            for arg in &server.args {
+                args_str.push(' ');
+                args_str.push_str(&shell_escape_windows(arg));
+            }
+            let mut cmd = tokio::process::Command::new("cmd.exe");
+            cmd.args(["/C", &args_str])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null());
+            for (k, v) in &server.env {
+                cmd.env(k, v);
+            }
+            // Prevent a console window from flashing on Windows
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+            return cmd;
+        }
+    }
+
+    #[cfg(unix)]
+    {
+        let is_absolute = server.command.starts_with('/');
+        if !is_absolute {
+            let mut shell_cmd = server.command.clone();
+            for arg in &server.args {
+                shell_cmd.push(' ');
+                shell_cmd.push_str(&shell_quote_unix(arg));
+            }
+            let mut cmd = tokio::process::Command::new("sh");
+            cmd.args(["-c", &shell_cmd])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null());
+            for (k, v) in &server.env {
+                cmd.env(k, v);
+            }
+            return cmd;
+        }
+    }
+
+    // Absolute path — spawn directly
+    let mut cmd = tokio::process::Command::new(&server.command);
+    cmd.args(&server.args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    for (k, v) in &server.env {
+        cmd.env(k, v);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
+#[cfg(windows)]
+fn shell_escape_windows(s: &str) -> String {
+    // Wrap in double-quotes and escape inner double-quotes
+    if s.contains(' ') || s.contains('"') || s.contains('\t') {
+        format!("\"{}\"", s.replace('"', "\\\""))
+    } else {
+        s.to_string()
+    }
+}
+
+#[cfg(unix)]
+fn shell_quote_unix(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 // ── stdio JSON-RPC helpers ──────────────────────────────────────────────────
@@ -243,19 +325,8 @@ async fn stdio_init(
     ),
     String,
 > {
-    use std::process::Stdio;
-    use tokio::process::Command;
-
-    let mut cmd = Command::new(&server.command);
-    cmd.args(&server.args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    for (k, v) in &server.env {
-        cmd.env(k, v);
-    }
-
-    let mut child = cmd.spawn().map_err(|e| format!("spawn: {e}"))?;
+    let mut cmd = build_stdio_cmd(server);
+    let mut child = cmd.spawn().map_err(|e| format!("Failed to start process: {e}"))?;
     let mut stdin = child.stdin.take().ok_or("no stdin")?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
     let mut reader = tokio::io::BufReader::new(stdout);
