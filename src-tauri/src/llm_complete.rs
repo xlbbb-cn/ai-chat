@@ -183,7 +183,7 @@ pub async fn chat_completion(
             }
             
             if activated_skills.contains(&skill.name) {
-                // Already active, put its full details in the system prompt
+                // Already active, keep its full details in a non-system context message.
                 loaded_skills_content.push_str(&format!("\n\n--- Skill: {} ---\n{}", skill.name, skill.system_prompt));
             } else {
                 // Not active, just list description so it can be loaded with use_skill
@@ -192,19 +192,11 @@ pub async fn chat_completion(
         }
     }
 
-    if !loaded_skills_content.is_empty() {
-        if !system_content.is_empty() {
-            system_content.push_str("\n\n");
-        }
-        system_content.push_str("IMPORTANT SKILL PATH ISOLATION RULE: Except for explicitly requested paths, any operation executed by a skill MUST use the directory containing the skill's SKILL.md as its root path. Operating on or referencing paths outside this root is STRICTLY FORBIDDEN. All paths referenced within a skill (e.g. read_file, write_file, list_dir, execute_command) are automatically evaluated relative to this root path.\n\n");
-        system_content.push_str(&format!("The following skills are CURRENTLY ACTIVE and their detailed instructions are provided below:{}", loaded_skills_content));
-    }
-
     if !available_skills_info.is_empty() {
         let skills_sys_msg = format!(
             "You have access to the following skills. You currently only see their descriptions. \
             If you decide that a skill is relevant to the user's request, you MUST call the `use_skill` \
-            tool with the skill's name to load its detailed instructions. Once loaded, the instructions will be appended to your system prompt for the rest of the session.\n\n\
+            tool with the skill's name to load its detailed instructions. Once loaded, the instructions will be appended as a dedicated context message for the rest of the session.\n\n\
             Available skills:\n{}",
             available_skills_info
         );
@@ -217,6 +209,16 @@ pub async fn chat_completion(
     // Push the SINGLE combined system message.
     if !system_content.is_empty() {
         all_messages.push(json!({ "role": "system", "content": system_content }));
+    }
+
+    if !loaded_skills_content.is_empty() {
+        let active_skills_context = format!(
+            "INTERNAL CONTEXT - ACTIVE SKILLS (not a user request):\n\
+IMPORTANT SKILL PATH ISOLATION RULE: Except for explicitly requested paths, any operation executed by a skill MUST use the directory containing the skill's SKILL.md as its root path. Operating on or referencing paths outside this root is STRICTLY FORBIDDEN. All paths referenced within a skill (e.g. read_file, write_file, list_dir, execute_command) are automatically evaluated relative to this root path.\n\n\
+The following skills are CURRENTLY ACTIVE and their detailed instructions are provided below:{}",
+            loaded_skills_content
+        );
+        all_messages.push(json!({ "role": "user", "content": active_skills_context }));
     }
 
     for m in &messages {
@@ -237,7 +239,7 @@ pub async fn chat_completion(
             "type": "function",
             "function": {
                 "name": "use_skill",
-                "description": "Load the detailed instructions and system prompt for a specific skill. You MUST call this before using a skill's capabilities.",
+                "description": "Load detailed instructions for a specific skill. You MUST call this before using a skill's capabilities.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -302,6 +304,8 @@ pub async fn chat_completion(
             "tool_calls": assistant_tcs
         }));
 
+        let mut pending_skill_context_messages: Vec<Value> = vec![];
+
         for (id, name, args) in &tool_calls {
             if state.chat_cancelled.load(Ordering::SeqCst) {
                 break;
@@ -320,23 +324,37 @@ pub async fn chat_completion(
                 };
 
                 if let Some(skill) = skill_opt {
-                    if let Some(sys_msg) = all_messages.get_mut(0) {
-                        if sys_msg["role"] == "system" {
-                            let old_content = sys_msg["content"].as_str().unwrap_or("");
-                            let dyn_marker = format!("--- Skill (Dynamically Loaded): {} ---", skill.name);
-                            let static_marker = format!("--- Skill: {} ---", skill.name);
-                            
-                            if !old_content.contains(&dyn_marker) && !old_content.contains(&static_marker) {
-                                let new_content = format!("{}\n\n{}\n{}", old_content, dyn_marker, skill.system_prompt);
-                                sys_msg["content"] = json!(new_content);
-                                 let _ = app.emit("chat-token", format!("🧠 *Loading skill: {}*\n\n", skill_name));
-                            }
-                        }
-                    }
+                    let dyn_marker = format!("--- Skill (Dynamically Loaded): {} ---", skill.name);
+                    let static_marker = format!("--- Skill: {} ---", skill.name);
 
-                       
-                
-                    format!("Skill '{}' detailed instructions have been successfully loaded and APPENDED TO YOUR SYSTEM PROMPT. You can now follow its instructions to fulfill the user's request. There is no need to call use_skill for this skill again.", skill_name)
+                    let already_loaded = all_messages.iter().any(|msg| {
+                        msg["content"]
+                            .as_str()
+                            .map(|content| content.contains(&dyn_marker) || content.contains(&static_marker))
+                            .unwrap_or(false)
+                    }) || pending_skill_context_messages.iter().any(|msg| {
+                        msg["content"]
+                            .as_str()
+                            .map(|content| content.contains(&dyn_marker) || content.contains(&static_marker))
+                            .unwrap_or(false)
+                    });
+
+                    if !already_loaded {
+                        let skill_context = format!(
+                            "INTERNAL CONTEXT - DYNAMICALLY LOADED SKILL (not a user request):\n\
+{}\n{}",
+                            dyn_marker,
+                            skill.system_prompt
+                        );
+                        pending_skill_context_messages.push(json!({
+                            "role": "user",
+                            "content": skill_context
+                        }));
+                        let _ = app.emit("chat-token", format!("🧠 *Loading skill: {}*\n\n", skill_name));
+                        format!("Skill '{}' detailed instructions have been successfully loaded and appended to context messages. You can now follow its instructions to fulfill the user's request. There is no need to call use_skill for this skill again.", skill_name)
+                    } else {
+                        format!("Skill '{}' is already loaded in context messages. There is no need to call use_skill for this skill again.", skill_name)
+                    }
                 } else {
                     format!("Error: Skill '{}' not found.", skill_name)
                 }
@@ -358,6 +376,8 @@ pub async fn chat_completion(
                 "content": result
             }));
         }
+
+        all_messages.extend(pending_skill_context_messages);
     }
 
     state.chat_cancelled.store(false, Ordering::SeqCst);
