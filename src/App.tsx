@@ -7,11 +7,12 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { SkillsPanel } from "./components/SkillsPanel";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { ToolsPanel } from "./components/ToolsPanel";
+import { RequestMonitorPanel } from "./components/RequestMonitorPanel";
 import { McpPanel } from "./components/McpPanel";
 import type { Message } from "./types";
 import "./App.css";
 
-type Sidebar = "settings" | "skills" | "history" | "tools" | "mcp" | null;
+type Sidebar = "settings" | "skills" | "history" | "tools" | "mcp" | "monitor" | null;
 
 export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -78,7 +79,7 @@ export default function App() {
     let accumulatedContent = "";
     let accumulatedReasoning = "";
 
-    const cleanup = await chatCompletion(history, activeSkillIds, {
+    const cleanup = await chatCompletion(history, activeSkillIds, sessionId, {
       onToken(token) {
         accumulatedContent += token;
         setMessages((prev) =>
@@ -175,7 +176,7 @@ export default function App() {
     <div className="app-layout">
       {/* Sidebar */}
       {sidebar && (
-        <aside className="sidebar">
+        <aside className={`sidebar${sidebar === "monitor" ? " sidebar-wide" : ""}`}>
           {sidebar === "settings" && (
             <SettingsPanel onClose={() => setSidebar(null)} />
           )}
@@ -200,16 +201,19 @@ export default function App() {
             <McpPanel onClose={() => setSidebar(null)} />
           )}
           {sidebar === "history" && (
-            <HistoryPanel
-              currentSessionId={sessionId}
-              onLoad={(sid, msgs) => {
-                if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null; }
-                setStreaming(false);
-                setMessages(msgs);
-                setSessionId(sid);
-              }}
-              onClose={() => setSidebar(null)}
-            />
+              <HistoryPanel
+                currentSessionId={sessionId}
+                onLoad={(sid, msgs) => {
+                  if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null; }
+                  setStreaming(false);
+                  setMessages(msgs);
+                  setSessionId(sid);
+                }}
+                onClose={() => setSidebar(null)}
+              />
+            )}
+          {sidebar === "monitor" && (
+            <RequestMonitorPanel onClose={() => setSidebar(null)} />
           )}
         </aside>
       )}
@@ -229,6 +233,13 @@ export default function App() {
               title="History"
             >
               🕒 History
+            </button>
+            <button
+              className={`toolbar-btn ${sidebar === "monitor" ? "active" : ""}`}
+              onClick={() => toggleSidebar("monitor")}
+              title="Request Monitor"
+            >
+              📡 Monitor
             </button>
             <button
               className={`toolbar-btn ${sidebar === "skills" ? "active" : ""}`}

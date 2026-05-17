@@ -41,6 +41,10 @@ body {
   background: #FFFFFF;
 }
 
+.sidebar-wide {
+  width: 800px;
+}
+
 /* Chat area */
 .chat-area {
   flex: 1;

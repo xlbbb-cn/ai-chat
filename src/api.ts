@@ -36,6 +36,7 @@ export interface StreamCallbacks {
 export async function chatCompletion(
   messages: Pick<Message, "role" | "content">[],
   skillIds: string[],
+  sessionId: string,
   callbacks: StreamCallbacks
 ): Promise<UnlistenFn> {
   const unlisteners: UnlistenFn[] = [];
@@ -67,6 +68,7 @@ export async function chatCompletion(
   invoke("chat_completion", {
     messages: messages.map((m) => ({ role: m.role, content: m.content })),
     skillIds,
+    sessionId,
   }).catch((err: string) => {
     callbacks.onError(err);
     cleanup();
@@ -114,3 +116,50 @@ export async function deleteMcpServer(id: string): Promise<void> {
 export async function testMcpServer(server: McpServer): Promise<string> {
   return invoke("test_mcp_server", { server });
 }
+
+// ─── API Request Monitor ──────────────────────────────────────────────────────
+
+export interface ApiRequestRecord {
+  id: number;
+  session_id: string;
+  timestamp: string;
+  model: string;
+  finish_reason: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  duration_ms: number;
+  error: string;
+  response_preview: string;
+}
+
+export interface ApiRequestDetail {
+  id: number;
+  session_id: string;
+  timestamp: string;
+  model: string;
+  request_body: string;
+  response_content: string;
+  tool_calls: string;
+  finish_reason: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  duration_ms: number;
+  error: string;
+}
+
+export async function listApiRequests(): Promise<ApiRequestRecord[]> {
+  return invoke("list_api_requests");
+}
+
+export async function getApiRequest(id: number): Promise<ApiRequestDetail> {
+  return invoke("get_api_request", { id });
+}
+
+export async function deleteApiRequest(id: number): Promise<void> {
+  return invoke("delete_api_request", { id });
+}
+
+export async function clearApiRequests(): Promise<void> {
+  return invoke("clear_api_requests");
+}
+

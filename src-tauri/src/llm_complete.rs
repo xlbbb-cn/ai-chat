@@ -16,10 +16,18 @@ pub struct ChatMessage {
     pub content: String,
 }
 
+struct StreamResult {
+    finish_reason: String,
+    tool_calls: Vec<(String, String, String)>,
+    content: String,
+    prompt_tokens: u32,
+    completion_tokens: u32,
+}
+
 // ─── Tool helpers ─────────────────────────────────────────────────────────────
 
 /// Stream one completion request. Emits "chat-token" for content chunks.
-/// Returns (finish_reason, tool_calls: vec of (id, name, accumulated_args)).
+/// Returns StreamResult with finish_reason, tool_calls, accumulated content, and usage.
 async fn stream_request(
     app: &AppHandle,
     client: &Client,
@@ -27,7 +35,7 @@ async fn stream_request(
     api_key: &str,
     req_body: Value,
     cancelled: &AtomicBool,
-) -> Result<(String, Vec<(String, String, String)>), String> {
+) -> Result<StreamResult, String> {
     let res = client
         .post(url)
         .bearer_auth(api_key)
@@ -44,13 +52,16 @@ async fn stream_request(
 
     let mut finish_reason = String::new();
     let mut tool_calls: Vec<(String, String, String)> = Vec::new();
+    let mut content = String::new();
+    let mut prompt_tokens: u32 = 0;
+    let mut completion_tokens: u32 = 0;
 
     let mut stream = res.bytes_stream();
     let mut buffer = String::new();
 
     'stream_loop: while let Some(chunk) = stream.next().await {
         if cancelled.load(Ordering::SeqCst) {
-            return Ok(("cancelled".to_string(), vec![]));
+            return Ok(StreamResult { finish_reason: "cancelled".into(), tool_calls: vec![], content, prompt_tokens, completion_tokens });
         }
         let bytes = chunk.map_err(|e| e.to_string())?;
         buffer.push_str(&String::from_utf8_lossy(&bytes));
@@ -60,7 +71,7 @@ async fn stream_request(
             buffer.drain(..=idx);
 
             if cancelled.load(Ordering::SeqCst) {
-                return Ok(("cancelled".to_string(), vec![]));
+                return Ok(StreamResult { finish_reason: "cancelled".into(), tool_calls: vec![], content, prompt_tokens, completion_tokens });
             }
             let line = line.trim();
             if line.is_empty() {
@@ -74,8 +85,8 @@ async fn stream_request(
 
             if let Some(usage) = parsed.get("usage") {
                 if !usage.is_null() {
-                    let prompt_tokens = usage.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                    let completion_tokens = usage.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                    prompt_tokens = usage.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                    completion_tokens = usage.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                     let _ = app.emit("chat-usage", json!({
                         "prompt_tokens": prompt_tokens,
                         "completion_tokens": completion_tokens
@@ -117,13 +128,14 @@ async fn stream_request(
             }
 
             // Emit regular content tokens
-            if let Some(content) = delta["content"].as_str() {
-                let _ = app.emit("chat-token", content.to_string());
+            if let Some(token) = delta["content"].as_str() {
+                content.push_str(token);
+                let _ = app.emit("chat-token", token.to_string());
             }
         }
     }
 
-    Ok((finish_reason, tool_calls))
+    Ok(StreamResult { finish_reason, tool_calls, content, prompt_tokens, completion_tokens })
 }
 
 // ─── Chat command ─────────────────────────────────────────────────────────────
@@ -133,6 +145,7 @@ pub async fn chat_completion(
     app: AppHandle,
     messages: Vec<ChatMessage>,
     skill_ids: Vec<String>,
+    session_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     state.chat_cancelled.store(false, Ordering::SeqCst);
@@ -181,12 +194,10 @@ pub async fn chat_completion(
             if skill_dir_path.is_none() {
                 skill_dir_path = Some(spath);
             }
-            
+
             if activated_skills.contains(&skill.name) {
-                // Already active, keep its full details in a non-system context message.
                 loaded_skills_content.push_str(&format!("\n\n--- Skill: {} ---\n{}", skill.name, skill.system_prompt));
             } else {
-                // Not active, just list description so it can be loaded with use_skill
                 available_skills_info.push_str(&format!("- Name: {}\n  Description: {}\n", skill.name, skill.description));
             }
         }
@@ -206,7 +217,6 @@ pub async fn chat_completion(
         system_content.push_str(&skills_sys_msg);
     }
 
-    // Push the SINGLE combined system message.
     if !system_content.is_empty() {
         all_messages.push(json!({ "role": "system", "content": system_content }));
     }
@@ -235,8 +245,6 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
     let mut tools_list = tools::get_all_tools(&config.selected_tools, allow_commands, skill_dir_path.as_deref());
 
     // ── MCP tools ───────────────────────────────────────────────────────────
-    // Load enabled MCP servers and collect their tools into tools_list.
-    // mcp_tool_map: function_name -> (server, actual_mcp_tool_name)
     let mut mcp_tool_map: std::collections::HashMap<String, (mcp::McpServer, String)> =
         std::collections::HashMap::new();
     {
@@ -251,13 +259,11 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                     for tool in server_tools {
                         let Some(actual_name) = tool["function"]["name"].as_str() else { continue };
                         let safe_name = mcp::sanitize_fn_name(actual_name);
-                        // Prefix: mcp_{idx}_{safe_tool_name}, truncated to 64 chars
                         let raw_fn = format!("mcp_{idx}_{safe_name}");
                         let fn_name: String = raw_fn.chars().take(64).collect();
 
                         let mut openai_tool = tool.clone();
                         openai_tool["function"]["name"] = serde_json::json!(fn_name);
-                        // Prepend server name to description for clarity
                         let desc = tool["function"]["description"]
                             .as_str()
                             .unwrap_or("")
@@ -270,7 +276,6 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                     }
                 }
                 Err(e) => {
-                    // Non-fatal: log via a system message the LLM won't see
                     eprintln!("MCP server '{}' tools/list failed: {e}", server.name);
                 }
             }
@@ -312,26 +317,76 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
             req_body["reasoning_effort"] = json!(config.reasoning_effort);
         }
 
-        let (finish_reason, tool_calls) =
-            stream_request(
-                &app,
-                &client,
-                &url,
-                &config.api_key,
-                req_body,
-                &state.chat_cancelled,
-            )
-            .await?;
+        let started_at = std::time::Instant::now();
+        let request_snapshot = req_body.clone();
 
-        if finish_reason == "cancelled" {
+        let result = stream_request(
+            &app,
+            &client,
+            &url,
+            &config.api_key,
+            req_body,
+            &state.chat_cancelled,
+        )
+        .await;
+
+        let duration_ms = started_at.elapsed().as_millis() as i64;
+
+        match &result {
+            Ok(sr) => {
+                // Log successful request
+                let tool_calls_json = if sr.tool_calls.is_empty() {
+                    String::new()
+                } else {
+                    serde_json::to_string(&sr.tool_calls.iter().map(|(id, name, args)| json!({
+                        "id": id, "name": name, "arguments": args
+                    })).collect::<Vec<_>>()).unwrap_or_default()
+                };
+                let db = state.db.lock().unwrap();
+                let _ = db.execute(
+                    "INSERT INTO api_requests (session_id, model, request_body, response_content, tool_calls, finish_reason, prompt_tokens, completion_tokens, duration_ms) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    rusqlite::params![
+                        session_id,
+                        config.model,
+                        request_snapshot.to_string(),
+                        sr.content,
+                        tool_calls_json,
+                        sr.finish_reason,
+                        sr.prompt_tokens,
+                        sr.completion_tokens,
+                        duration_ms,
+                    ],
+                );
+            }
+            Err(err) => {
+                // Log failed request
+                let db = state.db.lock().unwrap();
+                let _ = db.execute(
+                    "INSERT INTO api_requests (session_id, model, request_body, finish_reason, duration_ms, error) \
+                     VALUES (?1, ?2, ?3, 'error', ?4, ?5)",
+                    rusqlite::params![
+                        session_id,
+                        config.model,
+                        request_snapshot.to_string(),
+                        duration_ms,
+                        err,
+                    ],
+                );
+            }
+        }
+
+        let sr = result?;
+
+        if sr.finish_reason == "cancelled" {
             break;
         }
 
-        if finish_reason != "tool_calls" || tool_calls.is_empty() {
+        if sr.finish_reason != "tool_calls" || sr.tool_calls.is_empty() {
             break;
         }
 
-        let assistant_tcs: Vec<Value> = tool_calls
+        let assistant_tcs: Vec<Value> = sr.tool_calls
             .iter()
             .map(|(id, name, args)| {
                 json!({
@@ -349,14 +404,14 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
 
         let mut pending_skill_context_messages: Vec<Value> = vec![];
 
-        for (id, name, args) in &tool_calls {
+        for (id, name, args) in &sr.tool_calls {
             if state.chat_cancelled.load(Ordering::SeqCst) {
                 break;
             }
             let result = if name == "use_skill" {
                 let args_json: Value = serde_json::from_str(args).unwrap_or_default();
                 let skill_name = args_json["skill_name"].as_str().unwrap_or("");
-                
+
                 let skill_opt = if let Ok(skill) = skills::load_skill_by_name(&state.skills_dir, skill_name) {
                     Some(skill)
                 } else if let Some(home_dir) = dirs::home_dir() {
@@ -419,7 +474,7 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                 )
                 .await
             };
-            
+
             all_messages.push(json!({
                 "role": "tool",
                 "tool_call_id": id,

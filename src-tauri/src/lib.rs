@@ -138,6 +138,23 @@ pub fn run() {
             let db_path = data_dir.join("chat.db");
             let db = Connection::open(db_path).unwrap();
             db.execute("CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)", []).unwrap();
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS api_requests (\
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, \
+                    session_id TEXT, \
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, \
+                    model TEXT, \
+                    request_body TEXT, \
+                    response_content TEXT, \
+                    tool_calls TEXT, \
+                    finish_reason TEXT, \
+                    prompt_tokens INTEGER DEFAULT 0, \
+                    completion_tokens INTEGER DEFAULT 0, \
+                    duration_ms INTEGER DEFAULT 0, \
+                    error TEXT\
+                )",
+                [],
+            ).unwrap();
 
             let config_path = data_dir.join("config.json");
             let config = if config_path.exists() {
@@ -172,6 +189,10 @@ pub fn run() {
             db::save_history,
             db::load_history,
             db::delete_history,
+            db::list_api_requests,
+            db::get_api_request,
+            db::delete_api_request,
+            db::clear_api_requests,
             mcp::list_mcp_servers,
             mcp::save_mcp_server,
             mcp::delete_mcp_server,

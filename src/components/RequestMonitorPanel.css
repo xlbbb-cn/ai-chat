@@ -1,0 +1,274 @@
+.monitor-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #FFFFFF;
+  color: #393C41;
+}
+
+.monitor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #EEEEEE;
+  flex-shrink: 0;
+}
+
+.monitor-header h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 500;
+  color: #171A20;
+}
+
+.monitor-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.monitor-btn {
+  background: none;
+  border: 1px solid #DDDDDD;
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #393C41;
+}
+
+.monitor-btn:hover {
+  background: #F4F4F4;
+}
+
+.monitor-btn.danger {
+  color: #CC3333;
+  border-color: #CC3333;
+}
+
+.monitor-btn.danger:hover {
+  background: #FFF0F0;
+}
+
+/* Body: list + detail side-by-side */
+.monitor-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* Left column: request list */
+.monitor-list {
+  width: 240px;
+  flex-shrink: 0;
+  border-right: 1px solid #EEEEEE;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.monitor-empty {
+  font-size: 13px;
+  color: #888;
+  text-align: center;
+  margin-top: 24px;
+}
+
+.monitor-item {
+  padding: 8px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.15s;
+}
+
+.monitor-item:hover {
+  background: #F4F4F4;
+}
+
+.monitor-item.active {
+  background: #EFF3FF;
+  border-color: #B3C4FF;
+}
+
+.monitor-item.error {
+  border-left: 3px solid #CC3333;
+}
+
+.monitor-item-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.monitor-model {
+  font-size: 12px;
+  font-weight: 600;
+  color: #171A20;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
+}
+
+.monitor-duration {
+  font-size: 11px;
+  color: #888;
+  flex-shrink: 0;
+}
+
+.monitor-item-mid {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 2px;
+}
+
+.monitor-tokens {
+  font-size: 11px;
+  color: #5C5E62;
+}
+
+.monitor-finish {
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: #E8F5E9;
+  color: #2E7D32;
+}
+
+.monitor-finish.error,
+.monitor-finish.stop {
+  background: #F4F4F4;
+  color: #5C5E62;
+}
+
+.monitor-finish.tool_calls {
+  background: #FFF8E1;
+  color: #F57F17;
+}
+
+.monitor-preview {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #5C5E62;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.monitor-preview.error-text {
+  color: #CC3333;
+}
+
+.monitor-item-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.monitor-ts {
+  font-size: 10px;
+  color: #AAAAAA;
+}
+
+.monitor-del-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 11px;
+  color: #AAAAAA;
+  padding: 0 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.monitor-item:hover .monitor-del-btn {
+  opacity: 1;
+}
+
+.monitor-del-btn:hover {
+  color: #CC3333;
+}
+
+/* Right column: detail */
+.monitor-detail {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.monitor-detail-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #AAAAAA;
+  font-size: 14px;
+}
+
+.monitor-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #EEEEEE;
+  font-size: 12px;
+  color: #5C5E62;
+  flex-shrink: 0;
+}
+
+.monitor-error-box {
+  margin: 8px 16px;
+  padding: 8px 12px;
+  background: #FFF0F0;
+  border: 1px solid #FFCCCC;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #CC3333;
+  flex-shrink: 0;
+}
+
+.monitor-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 8px 16px 0;
+  flex-shrink: 0;
+}
+
+.monitor-tabs button {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 4px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #5C5E62;
+}
+
+.monitor-tabs button.active {
+  border-bottom-color: #3B82F6;
+  color: #171A20;
+  font-weight: 500;
+}
+
+.monitor-code-wrap {
+  flex: 1;
+  overflow: auto;
+  padding: 12px 16px;
+}
+
+.monitor-code {
+  margin: 0;
+  font-family: 'Fira Mono', 'Consolas', monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: #2C2C2C;
+}
