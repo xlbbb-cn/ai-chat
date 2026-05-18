@@ -241,7 +241,7 @@ export default function App() {
       <div className="chat-area">
         {/* Toolbar */}
         <header className="toolbar">
-          {/* <span className="app-title">AI Chat</span> */}
+          <span className="app-title">Chat</span>
           <div className="toolbar-actions">
             {activeSkillIds.length > 0 && (
               <span className="skill-badge">{activeSkillIds.length} Skill{activeSkillIds.length > 1 ? "s" : ""} active</span>
