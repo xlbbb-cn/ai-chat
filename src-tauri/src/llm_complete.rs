@@ -146,6 +146,7 @@ pub async fn chat_completion(
     messages: Vec<ChatMessage>,
     skill_ids: Vec<String>,
     session_id: String,
+    model_override: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     state.chat_cancelled.store(false, Ordering::SeqCst);
@@ -243,6 +244,10 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
     }
 
     let mut tools_list = tools::get_all_tools(&config.selected_tools, allow_commands, skill_dir_path.as_deref());
+    let active_model = model_override
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty())
+        .unwrap_or_else(|| config.model.clone());
 
     // ── MCP tools ───────────────────────────────────────────────────────────
     let mut mcp_tool_map: std::collections::HashMap<String, (mcp::McpServer, String)> =
@@ -301,7 +306,7 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
 
     loop {
         let mut req_body = json!({
-            "model": config.model,
+            "model": active_model,
             "messages": all_messages,
             "stream": true,
             "stream_options": { "include_usage": true }
@@ -310,11 +315,17 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
             req_body["tools"] = json!(tools_list);
             req_body["tool_choice"] = json!("auto");
         }
-        if let Some(temp) = config.temperature {
+        if let Some(temp) = config.model_settings.temperature {
             req_body["temperature"] = json!(temp);
         }
-        if !config.reasoning_effort.is_empty() {
-            req_body["reasoning_effort"] = json!(config.reasoning_effort);
+        if let Some(top_p) = config.model_settings.top_p {
+            req_body["top_p"] = json!(top_p);
+        }
+        if !config.model_settings.reasoning_effort.is_empty() {
+            req_body["reasoning_effort"] = json!(config.model_settings.reasoning_effort);
+        }
+        if let Some(max_tokens) = config.model_settings.max_tokens {
+            req_body["max_tokens"] = json!(max_tokens);
         }
 
         let started_at = std::time::Instant::now();
@@ -348,7 +359,7 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                     rusqlite::params![
                         session_id,
-                        config.model,
+                        active_model.as_str(),
                         request_snapshot.to_string(),
                         sr.content,
                         tool_calls_json,
@@ -367,7 +378,7 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                      VALUES (?1, ?2, ?3, 'error', ?4, ?5)",
                     rusqlite::params![
                         session_id,
-                        config.model,
+                        active_model.as_str(),
                         request_snapshot.to_string(),
                         duration_ms,
                         err,

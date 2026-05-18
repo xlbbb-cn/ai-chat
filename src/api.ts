@@ -10,6 +10,10 @@ export async function saveConfig(config: AppConfig): Promise<void> {
   return invoke("save_config", { config });
 }
 
+export async function fetchModels(): Promise<string[]> {
+  return invoke("fetch_models");
+}
+
 export async function listSkills(): Promise<Skill[]> {
   return invoke("list_skills");
 }
@@ -37,6 +41,7 @@ export async function chatCompletion(
   messages: Pick<Message, "role" | "content">[],
   skillIds: string[],
   sessionId: string,
+  modelOverride: string | undefined,
   callbacks: StreamCallbacks
 ): Promise<UnlistenFn> {
   const unlisteners: UnlistenFn[] = [];
@@ -69,6 +74,7 @@ export async function chatCompletion(
     messages: messages.map((m) => ({ role: m.role, content: m.content })),
     skillIds,
     sessionId,
+    modelOverride,
   }).catch((err: string) => {
     callbacks.onError(err);
     cleanup();

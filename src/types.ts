@@ -10,8 +10,8 @@ export interface AppConfig {
   api_base_url: string;
   api_key: string;
   model: string;
-  temperature?: number;
-  reasoning_effort?: string;
+  model_catalog?: string[];
+  model_settings?: ModelSettings;
   system_message?: string;
   selected_tools?: string[];
   search_engine?: string;
@@ -19,6 +19,13 @@ export interface AppConfig {
   neo4j_uri?: string;
   neo4j_user?: string;
   neo4j_password?: string;
+}
+
+export interface ModelSettings {
+  temperature?: number;
+  top_p?: number;
+  reasoning_effort?: string;
+  max_tokens?: number;
 }
 
 export interface Skill {

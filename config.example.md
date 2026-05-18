@@ -14,8 +14,13 @@ Typical locations:
   "api_base_url": "https://api.openai.com/v1",
   "api_key": "sk-...",
   "model": "gpt-4o-mini",
-  "temperature": 0.7,
-  "reasoning_effort": "medium",
+  "model_catalog": ["gpt-4o-mini", "gpt-4.1-mini"],
+  "model_settings": {
+    "temperature": 0.7,
+    "top_p": 0.95,
+    "reasoning_effort": "medium",
+    "max_tokens": 4096
+  },
   "system_message": "You are a helpful assistant.",
   "selected_tools": ["web_search", "file_actions", "knowledge_graph"],
   "search_engine": "duckduckgo",
@@ -30,9 +35,9 @@ Typical locations:
 
 - api_base_url: OpenAI-compatible API base URL.
 - api_key: API key for the model provider.
-- model: Model name used for chat completion.
-- temperature: Sampling temperature. Higher means more diverse output.
-- reasoning_effort: Reasoning level hint used by some models.
+- model: Default model name used for chat completion.
+- model_catalog: Model options shown in the UI model selector.
+- model_settings: Advanced model parameters forwarded to chat completion.
 - system_message: Global system prompt appended to each conversation.
 - selected_tools: Enabled tools list. Supported values include web_search, execute_command, fetch_web, file_actions, knowledge_graph.
 - search_engine: Default engine used by web_search.

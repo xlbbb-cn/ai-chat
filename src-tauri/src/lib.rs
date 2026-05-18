@@ -20,14 +20,37 @@ const OPEN_APP_DATA_DIR_MENU_ID: &str = "open-app-data-dir";
 // ─── App State ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelSettings {
+    #[serde(default)]
+    pub temperature: Option<f64>,
+    #[serde(default)]
+    pub top_p: Option<f64>,
+    #[serde(default)]
+    pub reasoning_effort: String,
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
+}
+
+impl Default for ModelSettings {
+    fn default() -> Self {
+        Self {
+            temperature: None,
+            top_p: None,
+            reasoning_effort: String::new(),
+            max_tokens: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub api_base_url: String,
     pub api_key: String,
     pub model: String,
     #[serde(default)]
-    pub temperature: Option<f64>,
+    pub model_catalog: Vec<String>,
     #[serde(default)]
-    pub reasoning_effort: String,
+    pub model_settings: ModelSettings,
     #[serde(default)]
     pub system_message: String,
     #[serde(default)]
@@ -50,8 +73,8 @@ impl Default for AppConfig {
             api_base_url: "https://api.openai.com/v1".into(),
             api_key: String::new(),
             model: "gpt-4o-mini".into(),
-            temperature: None,
-            reasoning_effort: String::new(),
+            model_catalog: vec!["gpt-4o-mini".to_string()],
+            model_settings: ModelSettings::default(),
             system_message: String::new(),
             selected_tools: vec!["web_search".to_string()],
             search_engine: default_search_engine(),
@@ -86,6 +109,39 @@ fn save_config(state: State<'_, AppState>, config: AppConfig) -> Result<(), Stri
     fs::write(&state.config_path, json).map_err(|e| e.to_string())?;
     *state.config.lock().unwrap() = config;
     Ok(())
+}
+
+#[tauri::command]
+async fn fetch_models(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let config = state.config.lock().unwrap().clone();
+    let url = format!("{}/models", config.api_base_url.trim_end_matches('/'));
+
+    let client = reqwest::Client::new();
+    let res = client
+        .get(&url)
+        .bearer_auth(config.api_key)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !res.status().is_success() {
+        return Err(res.text().await.unwrap_or_else(|_| "failed to fetch models".to_string()));
+    }
+
+    let body: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+    let models = body
+        .get("data")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| "Invalid models response: missing data array".to_string())?;
+
+    let mut names: Vec<String> = models
+        .iter()
+        .filter_map(|m| m.get("id").and_then(|id| id.as_str()).map(|s| s.to_string()))
+        .collect();
+
+    names.sort();
+    names.dedup();
+    Ok(names)
 }
 
 #[tauri::command]
@@ -182,6 +238,7 @@ pub fn run() {
             stop_chat_completion,
             get_config,
             save_config,
+            fetch_models,
             skills::list_skills,
             skills::save_skill,
             skills::delete_skill,

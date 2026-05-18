@@ -268,6 +268,26 @@ body {
   opacity: 0.6;
 }
 
+.model-select {
+  min-height: 42px;
+  max-width: 220px;
+  padding: 0 10px;
+  border: 1px solid #EEEEEE;
+  border-radius: 4px;
+  background: #FFFFFF;
+  color: #171A20;
+  font-size: 13px;
+  outline: none;
+}
+
+.model-select:focus {
+  border-color: #171A20;
+}
+
+.model-select:disabled {
+  opacity: 0.6;
+}
+
 .send-btn {
   padding: 4px 16px;
   min-height: 40px;

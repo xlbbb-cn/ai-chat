@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { chatCompletion, saveHistory, stopChatCompletion } from "./api";
+import { chatCompletion, getConfig, saveHistory, stopChatCompletion } from "./api";
 
 import { ChatMessage } from "./components/ChatMessage";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -24,6 +24,8 @@ export default function App() {
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [usage, setUsage] = useState<{ prompt_tokens: number, completion_tokens: number } | null>(null);
+  const [availableModels, setAvailableModels] = useState<string[]>(["gpt-4o-mini"]);
+  const [selectedModel, setSelectedModel] = useState("gpt-4o-mini");
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -47,6 +49,16 @@ export default function App() {
     return () => {
       unlisten.then((fn) => fn());
     };
+  }, []);
+
+  useEffect(() => {
+    getConfig()
+      .then((cfg) => {
+        const catalog = Array.from(new Set([...(cfg.model_catalog ?? []), cfg.model].filter(Boolean)));
+        setAvailableModels(catalog.length > 0 ? catalog : ["gpt-4o-mini"]);
+        setSelectedModel(cfg.model || "gpt-4o-mini");
+      })
+      .catch(console.error);
   }, []);
 
   const sendMessage = useCallback(async () => {
@@ -79,7 +91,7 @@ export default function App() {
     let accumulatedContent = "";
     let accumulatedReasoning = "";
 
-    const cleanup = await chatCompletion(history, activeSkillIds, sessionId, {
+    const cleanup = await chatCompletion(history, activeSkillIds, sessionId, selectedModel, {
       onToken(token) {
         accumulatedContent += token;
         setMessages((prev) =>
@@ -125,7 +137,7 @@ export default function App() {
     });
 
     cleanupRef.current = cleanup;
-  }, [input, messages, streaming, activeSkillIds, sessionId, attachments]);
+  }, [input, messages, streaming, activeSkillIds, sessionId, attachments, selectedModel]);
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -178,7 +190,14 @@ export default function App() {
       {sidebar && (
         <aside className={`sidebar${sidebar === "monitor" ? " sidebar-wide" : ""}`}>
           {sidebar === "settings" && (
-            <SettingsPanel onClose={() => setSidebar(null)} />
+            <SettingsPanel
+              onClose={() => setSidebar(null)}
+              onConfigSaved={(cfg) => {
+                const catalog = Array.from(new Set([...(cfg.model_catalog ?? []), cfg.model].filter(Boolean)));
+                setAvailableModels(catalog.length > 0 ? catalog : ["gpt-4o-mini"]);
+                setSelectedModel(cfg.model || "gpt-4o-mini");
+              }}
+            />
           )}
           {sidebar === "skills" && (
             <SkillsPanel
@@ -201,17 +220,17 @@ export default function App() {
             <McpPanel onClose={() => setSidebar(null)} />
           )}
           {sidebar === "history" && (
-              <HistoryPanel
-                currentSessionId={sessionId}
-                onLoad={(sid, msgs) => {
-                  if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null; }
-                  setStreaming(false);
-                  setMessages(msgs);
-                  setSessionId(sid);
-                }}
-                onClose={() => setSidebar(null)}
-              />
-            )}
+            <HistoryPanel
+              currentSessionId={sessionId}
+              onLoad={(sid, msgs) => {
+                if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null; }
+                setStreaming(false);
+                setMessages(msgs);
+                setSessionId(sid);
+              }}
+              onClose={() => setSidebar(null)}
+            />
+          )}
           {sidebar === "monitor" && (
             <RequestMonitorPanel onClose={() => setSidebar(null)} />
           )}
@@ -352,6 +371,17 @@ export default function App() {
               placeholder="Type a message… (Enter to send, Shift+Enter for newline)"
               disabled={streaming}
             />
+            <select
+              className="model-select"
+              title="Select model"
+              value={selectedModel}
+              onChange={(e) => setSelectedModel(e.target.value)}
+              disabled={streaming}
+            >
+              {availableModels.map((model) => (
+                <option key={model} value={model}>{model}</option>
+              ))}
+            </select>
             <button
               className="send-btn"
               onClick={streaming ? stopStreaming : sendMessage}
