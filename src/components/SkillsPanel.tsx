@@ -13,7 +13,6 @@ const emptySkill = (): Skill => ({
   name: "",
   description: "",
   system_prompt: "",
-  allowed_tools: [],
   allowed_commands: [],
 });
 
@@ -52,15 +51,6 @@ export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
     await deleteSkill(name);
     setSkills((s) => s.filter((x) => x.name !== name));
     if (activeSkillIds.includes(name)) onToggle(name, false);
-  }
-
-  function toggleTool(tool: string) {
-    if (!editing) return;
-    const tools = editing.allowed_tools ?? [];
-    const next = tools.includes(tool)
-      ? tools.filter((t) => t !== tool)
-      : [...tools, tool];
-    setEditing({ ...editing, allowed_tools: next });
   }
 
   return (
@@ -107,33 +97,23 @@ export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
               placeholder="e.g. 1.0.0 (optional)"
             />
           </label>
-          <label style={{ flexDirection: "row", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+          <label>
+            Allowed Commands
             <input
-              type="checkbox"
-              checked={(editing.allowed_tools ?? []).includes("Bash")}
-              onChange={() => toggleTool("Bash")}
+              value={(editing.allowed_commands ?? []).join(", ")}
+              onChange={(e) => {
+                const cmds = e.target.value
+                  .split(",")
+                  .map((s) => s.trim())
+                  .filter(Boolean);
+                setEditing({ ...editing, allowed_commands: cmds });
+              }}
+              placeholder="e.g. curl, wget, git  (empty = unrestricted)"
             />
-            Allow command execution
+            <span style={{ fontSize: "0.78rem", opacity: 0.65 }}>
+              Comma-separated executable names. Leave empty to allow all.
+            </span>
           </label>
-          {(editing.allowed_tools ?? []).includes("Bash") && (
-            <label>
-              <input
-                value={(editing.allowed_commands ?? []).join(", ")}
-                onChange={(e) => {
-                  const raw = e.target.value;
-                  const cmds = raw
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter(Boolean);
-                  setEditing({ ...editing, allowed_commands: cmds });
-                }}
-                placeholder="e.g. curl, wget, git  (empty = unrestricted)"
-              />
-              <span style={{ fontSize: "0.78rem", opacity: 0.65 }}>
-                Comma-separated executable names allowed in <em>direct</em> mode. Leave empty to allow all.
-              </span>
-            </label>
-          )}
           <div className="editor-actions">
             <button className="btn-primary" onClick={handleSave} disabled={!editing.name.trim()}>
               Save
@@ -158,9 +138,6 @@ export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
                   <div style={{ flex: 1 }}>
                     <span className="skill-name">
                       {skill.name}
-                      {(skill.allowed_tools ?? []).includes("Bash") && (
-                        <span title="Command execution enabled" style={{ marginLeft: "6px", fontSize: "0.75rem", opacity: 0.7 }}>⚙️</span>
-                      )}
                     </span>
                     <span className="skill-desc">{skill.description}</span>
                   </div>

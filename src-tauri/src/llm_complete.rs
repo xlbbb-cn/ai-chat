@@ -190,17 +190,18 @@ pub async fn chat_completion(
         } else { None };
 
         if let Some((skill, spath)) = skill_opt {
-            if skill.allowed_tools.iter().any(|t| t.eq_ignore_ascii_case("bash")) {
-                allow_commands = true;
-            }
             if skill_dir_path.is_none() {
                 skill_dir_path = Some(spath);
-                // Collect allowed_commands from the first (primary) skill.
                 skill_allowed_commands = skill.allowed_commands.clone();
             }
 
             if activated_skills.contains(&skill.name) {
-                loaded_skills_content.push_str(&format!("\n\n--- Skill: {} ---\n{}", skill.name, skill.system_prompt));
+                let cmd_constraint = if skill.allowed_commands.is_empty() {
+                    String::new()
+                } else {
+                    format!("\n[Allowed commands for this skill: {}]\n", skill.allowed_commands.join(", "))
+                };
+                loaded_skills_content.push_str(&format!("\n\n--- Skill: {} ---\n{}{}", skill.name, cmd_constraint, skill.system_prompt));
             } else {
                 available_skills_info.push_str(&format!("- Name: {}\n  Description: {}\n", skill.name, skill.description));
             }
@@ -452,10 +453,16 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                     });
 
                     if !already_loaded {
+                        let cmd_constraint = if skill.allowed_commands.is_empty() {
+                            String::new()
+                        } else {
+                            format!("\n[Allowed commands for this skill: {}]\n", skill.allowed_commands.join(", "))
+                        };
                         let skill_context = format!(
                             "INTERNAL CONTEXT - DYNAMICALLY LOADED SKILL (not a user request):\n\
-{}\n{}",
+{}\n{}{}",
                             dyn_marker,
+                            cmd_constraint,
                             skill.system_prompt
                         );
                         pending_skill_context_messages.push(json!({
