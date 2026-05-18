@@ -52,6 +52,15 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const unlisten = listen("request-set-workspace-dir", () => {
+      setSidebar("settings");
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  useEffect(() => {
     getConfig()
       .then((cfg) => {
         const catalog = Array.from(new Set([...(cfg.model_catalog ?? []), cfg.model].filter(Boolean)));

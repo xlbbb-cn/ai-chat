@@ -6,6 +6,10 @@ export async function getConfig(): Promise<AppConfig> {
   return invoke("get_config");
 }
 
+export async function getWorkspaceDir(): Promise<string> {
+  return invoke("get_workspace_dir");
+}
+
 export async function saveConfig(config: AppConfig): Promise<void> {
   return invoke("save_config", { config });
 }

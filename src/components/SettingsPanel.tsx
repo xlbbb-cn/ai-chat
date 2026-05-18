@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { fetchModels, getConfig, saveConfig } from "../api";
+import { fetchModels, getConfig, getWorkspaceDir, saveConfig } from "../api";
 import type { AppConfig, ModelSettings } from "../types";
 import "./SettingsPanel.css";
 
@@ -39,6 +39,11 @@ export function SettingsPanel({ onClose, onConfigSaved }: Props) {
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [manualModel, setManualModel] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(true);
+  const [workspaceDirActual, setWorkspaceDirActual] = useState("");
+
+  useEffect(() => {
+    getWorkspaceDir().then(setWorkspaceDirActual).catch(console.error);
+  }, []);
 
   useEffect(() => {
     getConfig()
@@ -166,6 +171,20 @@ export function SettingsPanel({ onClose, onConfigSaved }: Props) {
             value={config.system_message ?? ""}
             onChange={(e) => setConfig({ ...config, system_message: e.target.value })}
             placeholder="You are a helpful assistant…"
+          />
+        </label>
+
+        <div className="settings-section-title">Workspace</div>
+
+        <label>
+          Workspace Directory
+          <input
+            type="text"
+            value={config.workspace_dir ?? ""}
+            onChange={(e) =>
+              setConfig({ ...config, workspace_dir: e.target.value || undefined })
+            }
+            placeholder={workspaceDirActual || "Default workspace directory"}
           />
         </label>
 

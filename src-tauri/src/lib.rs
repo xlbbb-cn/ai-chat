@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 use rusqlite::Connection;
-use tauri::{menu::{Menu, MenuItem, Submenu}, Manager, State};
+use tauri::{menu::{Menu, MenuItem, Submenu}, AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 mod db;
@@ -16,6 +16,7 @@ mod tools;
 pub mod neo4j_db;
 
 const OPEN_APP_DATA_DIR_MENU_ID: &str = "open-app-data-dir";
+const SET_WORKSPACE_DIR_MENU_ID: &str = "set-workspace-dir";
 
 // ─── App State ───────────────────────────────────────────────────────────────
 
@@ -61,6 +62,8 @@ pub struct AppConfig {
     pub neo4j_uri: Option<String>,
     pub neo4j_user: Option<String>,
     pub neo4j_password: Option<String>,
+    #[serde(default)]
+    pub workspace_dir: Option<String>,
 }
 
 fn default_search_engine() -> String {
@@ -82,6 +85,7 @@ impl Default for AppConfig {
             neo4j_uri: Some("bolt://localhost:7687".to_string()),
             neo4j_user: Some("neo4j".to_string()),
             neo4j_password: Some(String::new()),
+            workspace_dir: None,
         }
     }
 }
@@ -89,7 +93,7 @@ impl Default for AppConfig {
 pub struct AppState {
     pub config: Mutex<AppConfig>,
     pub config_path: PathBuf,
-    pub workspace_dir: PathBuf,
+    pub workspace_dir: Mutex<PathBuf>,
     pub skills_dir: PathBuf,
     pub mcp_servers_path: PathBuf,
     pub db: Mutex<Connection>,
@@ -104,9 +108,22 @@ fn get_config(state: State<'_, AppState>) -> AppConfig {
 }
 
 #[tauri::command]
-fn save_config(state: State<'_, AppState>, config: AppConfig) -> Result<(), String> {
+fn save_config(app: AppHandle, state: State<'_, AppState>, config: AppConfig) -> Result<(), String> {
     let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
     fs::write(&state.config_path, json).map_err(|e| e.to_string())?;
+
+    // Update workspace_dir in state and refresh window title
+    let new_workspace_path = match config.workspace_dir.as_deref().filter(|s| !s.is_empty()) {
+        Some(dir) => PathBuf::from(dir),
+        None => app.path().app_data_dir().map_err(|e| e.to_string())?.join("workspace"),
+    };
+    fs::create_dir_all(&new_workspace_path).ok();
+    *state.workspace_dir.lock().unwrap() = new_workspace_path.clone();
+    if let Some(win) = app.get_webview_window("main") {
+        let title = format!("AI Chat — {}", new_workspace_path.display());
+        let _ = win.set_title(&title);
+    }
+
     *state.config.lock().unwrap() = config;
     Ok(())
 }
@@ -151,6 +168,11 @@ fn stop_chat_completion(state: State<'_, AppState>) {
         .store(true, std::sync::atomic::Ordering::SeqCst);
 }
 
+#[tauri::command]
+fn get_workspace_dir(state: State<'_, AppState>) -> String {
+    state.workspace_dir.lock().unwrap().to_string_lossy().to_string()
+}
+
 // ─── Entry point ─────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -162,6 +184,8 @@ pub fn run() {
                 if let Ok(data_dir) = app.path().app_data_dir() {
                     let _ = app.opener().open_path(data_dir.to_string_lossy().into_owned(), None::<&str>);
                 }
+            } else if event.id() == SET_WORKSPACE_DIR_MENU_ID {
+                let _ = app.emit("request-set-workspace-dir", ());
             }
         })
         .setup(|app| {
@@ -179,12 +203,18 @@ pub fn run() {
                 None::<&str>,
             )
             .expect("failed to create menu item");
-            let file_menu = Submenu::with_items(app, "File", true, &[&open_app_data_dir_item])
+            let set_workspace_dir_item = MenuItem::with_id(
+                app,
+                SET_WORKSPACE_DIR_MENU_ID,
+                "Set Workspace Directory\u{2026}",
+                true,
+                None::<&str>,
+            )
+            .expect("failed to create menu item");
+            let file_menu = Submenu::with_items(app, "File", true, &[&open_app_data_dir_item, &set_workspace_dir_item])
                 .expect("failed to create app menu");
             let menu = Menu::with_items(app, &[&file_menu]).expect("failed to create app menu");
             app.set_menu(menu).expect("failed to set app menu");
-            let workspace_dir = data_dir.join("workspace");
-            fs::create_dir_all(&workspace_dir).ok();
             
             let skills_dir = data_dir.join("skills");
             fs::create_dir_all(&skills_dir).ok();
@@ -222,15 +252,29 @@ pub fn run() {
                 AppConfig::default()
             };
 
+            // Resolve workspace_dir from config, or fall back to default
+            let workspace_dir = match config.workspace_dir.as_deref().filter(|s| !s.is_empty()) {
+                Some(dir) => PathBuf::from(dir),
+                None => data_dir.join("workspace"),
+            };
+            fs::create_dir_all(&workspace_dir).ok();
+
             app.manage(AppState {
                 config: Mutex::new(config),
                 config_path,
-                workspace_dir,
+                workspace_dir: Mutex::new(workspace_dir.clone()),
                 db: Mutex::new(db),
                 skills_dir,
                 mcp_servers_path,
                 chat_cancelled: AtomicBool::new(false),
             });
+
+            // Set window title to show current workspace directory
+            if let Some(win) = app.get_webview_window("main") {
+                let title = format!("AI Chat — {}", workspace_dir.display());
+                let _ = win.set_title(&title);
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -239,6 +283,7 @@ pub fn run() {
             get_config,
             save_config,
             fetch_models,
+            get_workspace_dir,
             skills::list_skills,
             skills::save_skill,
             skills::delete_skill,

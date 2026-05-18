@@ -475,12 +475,13 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                     Err(e) => format!("MCP tool error: {e}"),
                 }
             } else {
+                let workspace_dir = state.workspace_dir.lock().unwrap().clone();
                 tools::execute_tool(
                     &app,
                     name,
                     args,
                     skill_dir_path.clone(),
-                    state.workspace_dir.clone(),
+                    workspace_dir,
                     &config,
                 )
                 .await

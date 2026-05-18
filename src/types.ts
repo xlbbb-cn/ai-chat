@@ -19,6 +19,7 @@ export interface AppConfig {
   neo4j_uri?: string;
   neo4j_user?: string;
   neo4j_password?: string;
+  workspace_dir?: string;
 }
 
 export interface ModelSettings {
