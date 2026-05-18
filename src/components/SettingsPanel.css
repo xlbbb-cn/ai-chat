@@ -95,6 +95,21 @@
   border-top: 1px solid #EEEEEE;
 }
 
+.settings-section-toggle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+}
+
+.settings-toggle-icon {
+  transition: transform 0.2s ease;
+}
+
+.settings-toggle-icon.open {
+  transform: rotate(180deg);
+}
+
 .settings-row {
   flex-direction: row !important;
   align-items: center;

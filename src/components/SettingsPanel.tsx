@@ -38,6 +38,7 @@ export function SettingsPanel({ onClose, onConfigSaved }: Props) {
   const [loadingModels, setLoadingModels] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [manualModel, setManualModel] = useState("");
+  const [advancedOpen, setAdvancedOpen] = useState(true);
 
   useEffect(() => {
     getConfig()
@@ -158,8 +159,6 @@ export function SettingsPanel({ onClose, onConfigSaved }: Props) {
           </div>
         </label>
 
-        <div className="settings-section-title">Model Advanced Settings</div>
-
         <label>
           System Message
           <textarea
@@ -170,87 +169,103 @@ export function SettingsPanel({ onClose, onConfigSaved }: Props) {
           />
         </label>
 
-        <label>
-          Temperature
-          <input
-            type="number"
-            min={0}
-            max={2}
-            step={0.05}
-            value={config.model_settings?.temperature ?? ""}
-            onChange={(e) => {
-              const v = e.target.value;
-              setConfig((prev) => ({
-                ...prev,
-                model_settings: updateModelSettings(prev.model_settings, {
-                  temperature: v === "" ? undefined : parseFloat(v),
-                }),
-              }));
-            }}
-            placeholder="default (leave empty)"
-          />
-        </label>
+        <div
+          className="settings-section-title settings-section-toggle"
+          onClick={() => setAdvancedOpen((prev) => !prev)}
+          role="button"
+          tabIndex={0}
+        >
+          <span>Model Advanced Settings</span>
+          <span className={`settings-toggle-icon ${advancedOpen ? "open" : ""}`}>
+            ▼
+          </span>
+        </div>
 
-        <label>
-          Top P
-          <input
-            type="number"
-            min={0}
-            max={1}
-            step={0.05}
-            value={config.model_settings?.top_p ?? ""}
-            onChange={(e) => {
-              const v = e.target.value;
-              setConfig((prev) => ({
-                ...prev,
-                model_settings: updateModelSettings(prev.model_settings, {
-                  top_p: v === "" ? undefined : parseFloat(v),
-                }),
-              }));
-            }}
-            placeholder="default (leave empty)"
-          />
-        </label>
+        {advancedOpen && (
+          <>
+            <label>
+              Temperature
+              <input
+                type="number"
+                min={0}
+                max={2}
+                step={0.05}
+                value={config.model_settings?.temperature ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setConfig((prev) => ({
+                    ...prev,
+                    model_settings: updateModelSettings(prev.model_settings, {
+                      temperature: v === "" ? undefined : parseFloat(v),
+                    }),
+                  }));
+                }}
+                placeholder="default (leave empty)"
+              />
+            </label>
 
-        <label>
-          Max Tokens
-          <input
-            type="number"
-            min={1}
-            step={1}
-            value={config.model_settings?.max_tokens ?? ""}
-            onChange={(e) => {
-              const v = e.target.value;
-              setConfig((prev) => ({
-                ...prev,
-                model_settings: updateModelSettings(prev.model_settings, {
-                  max_tokens: v === "" ? undefined : Math.max(1, Math.floor(Number(v))),
-                }),
-              }));
-            }}
-            placeholder="default (leave empty)"
-          />
-        </label>
+            <label>
+              Top P
+              <input
+                type="number"
+                min={0}
+                max={1}
+                step={0.05}
+                value={config.model_settings?.top_p ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setConfig((prev) => ({
+                    ...prev,
+                    model_settings: updateModelSettings(prev.model_settings, {
+                      top_p: v === "" ? undefined : parseFloat(v),
+                    }),
+                  }));
+                }}
+                placeholder="default (leave empty)"
+              />
+            </label>
 
-        <label>
-          Reasoning effort
-          <select
-            value={config.model_settings?.reasoning_effort ?? ""}
-            onChange={(e) =>
-              setConfig((prev) => ({
-                ...prev,
-                model_settings: updateModelSettings(prev.model_settings, {
-                  reasoning_effort: e.target.value,
-                }),
-              }))
-            }
-          >
-            <option value="">— not set —</option>
-            <option value="low">low</option>
-            <option value="medium">medium</option>
-            <option value="high">high</option>
-          </select>
-        </label>
+            <label>
+              Max Tokens
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={config.model_settings?.max_tokens ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setConfig((prev) => ({
+                    ...prev,
+                    model_settings: updateModelSettings(prev.model_settings, {
+                      max_tokens: v === "" ? undefined : Math.max(1, Math.floor(Number(v))),
+                    }),
+                  }));
+                }}
+                placeholder="default (leave empty)"
+              />
+            </label>
+
+            <label>
+              Reasoning effort
+              <select
+                value={config.model_settings?.reasoning_effort ?? ""}
+                onChange={(e) =>
+                  setConfig((prev) => ({
+                    ...prev,
+                    model_settings: updateModelSettings(prev.model_settings, {
+                      reasoning_effort: e.target.value,
+                    }),
+                  }))
+                }
+              >
+                <option value="">— not set —</option>
+                <option value="low">low</option>
+                <option value="medium">medium</option>
+                <option value="high">high</option>
+              </select>
+            </label>
+          </>
+        )}
       </div>
 
       <div className="settings-footer">
