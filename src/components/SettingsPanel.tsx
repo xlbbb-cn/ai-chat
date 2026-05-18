@@ -108,6 +108,21 @@ export function SettingsPanel({ onClose, onConfigSaved }: Props) {
       </div>
 
       <div className="settings-body">
+
+        <div className="settings-section-title">Workspace</div>
+
+        <label>
+          Workspace Directory
+          <input
+            type="text"
+            value={config.workspace_dir ?? ""}
+            onChange={(e) =>
+              setConfig({ ...config, workspace_dir: e.target.value || undefined })
+            }
+            placeholder={workspaceDirActual || "Default workspace directory"}
+          />
+        </label>
+
         <div className="settings-section-title">API</div>
 
         <label>
@@ -171,20 +186,6 @@ export function SettingsPanel({ onClose, onConfigSaved }: Props) {
             value={config.system_message ?? ""}
             onChange={(e) => setConfig({ ...config, system_message: e.target.value })}
             placeholder="You are a helpful assistant…"
-          />
-        </label>
-
-        <div className="settings-section-title">Workspace</div>
-
-        <label>
-          Workspace Directory
-          <input
-            type="text"
-            value={config.workspace_dir ?? ""}
-            onChange={(e) =>
-              setConfig({ ...config, workspace_dir: e.target.value || undefined })
-            }
-            placeholder={workspaceDirActual || "Default workspace directory"}
           />
         </label>
 
