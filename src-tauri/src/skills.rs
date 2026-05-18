@@ -17,6 +17,9 @@ pub struct SkillMeta {
     pub author: Option<String>,
     #[serde(rename = "allowed-tools", default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_tools: Vec<String>,
+    /// Allowlist of executable names the skill may run (empty = unrestricted).
+    #[serde(rename = "allowed-commands", default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_commands: Vec<String>,
 }
 
 /// Full skill representation passed to/from the frontend.
@@ -30,6 +33,9 @@ pub struct Skill {
     pub author: Option<String>,
     #[serde(default)]
     pub allowed_tools: Vec<String>,
+    /// Allowlist of executable names the skill may run (empty = unrestricted).
+    #[serde(default)]
+    pub allowed_commands: Vec<String>,
     pub system_prompt: String,
 }
 
@@ -49,6 +55,7 @@ pub fn parse_skill_md(content: &str) -> Result<Skill, String> {
         version: meta.version,
         author: meta.author,
         allowed_tools: meta.allowed_tools,
+        allowed_commands: meta.allowed_commands,
         system_prompt: body.to_string(),
     })
 }
@@ -60,6 +67,7 @@ pub fn skill_to_md(skill: &Skill) -> Result<String, String> {
         version: skill.version.clone(),
         author: skill.author.clone(),
         allowed_tools: skill.allowed_tools.clone(),
+        allowed_commands: skill.allowed_commands.clone(),
     };
     let frontmatter = serde_yaml::to_string(&meta).map_err(|e| e.to_string())?;
     Ok(format!("---\n{}---\n\n{}", frontmatter, skill.system_prompt))

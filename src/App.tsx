@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { chatCompletion, getConfig, saveHistory, stopChatCompletion } from "./api";
+import { chatCompletion, getConfig, saveHistory, stopChatCompletion, confirmCommand } from "./api";
 
 import { ChatMessage } from "./components/ChatMessage";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -55,6 +55,24 @@ export default function App() {
     const unlisten = listen("request-set-workspace-dir", () => {
       setSidebar("settings");
     });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  // Dangerous-command confirmation dialog
+  useEffect(() => {
+    const unlisten = listen<{ reason: string; cmd_type: string; code: string }>(
+      "confirm-required",
+      (e) => {
+        const { reason, cmd_type, code } = e.payload;
+        const preview = code.length > 200 ? code.slice(0, 200) + "…" : code;
+        const confirmed = window.confirm(
+          `⚠️ Dangerous command detected\n\nReason: ${reason}\nType: ${cmd_type}\n\n${preview}\n\nAllow execution?`
+        );
+        confirmCommand(confirmed).catch(console.error);
+      }
+    );
     return () => {
       unlisten.then((fn) => fn());
     };

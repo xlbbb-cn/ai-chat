@@ -14,6 +14,7 @@ const emptySkill = (): Skill => ({
   description: "",
   system_prompt: "",
   allowed_tools: [],
+  allowed_commands: [],
 });
 
 export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
@@ -114,6 +115,26 @@ export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
             />
             Allow command execution — <code>Bash</code>
           </label>
+          {(editing.allowed_tools ?? []).includes("Bash") && (
+            <label>
+              Allowed commands
+              <input
+                value={(editing.allowed_commands ?? []).join(", ")}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  const cmds = raw
+                    .split(",")
+                    .map((s) => s.trim())
+                    .filter(Boolean);
+                  setEditing({ ...editing, allowed_commands: cmds });
+                }}
+                placeholder="e.g. curl, wget, git  (empty = unrestricted)"
+              />
+              <span style={{ fontSize: "0.78rem", opacity: 0.65 }}>
+                Comma-separated executable names allowed in <em>direct</em> mode. Leave empty to allow all.
+              </span>
+            </label>
+          )}
           <div className="editor-actions">
             <button className="btn-primary" onClick={handleSave} disabled={!editing.name.trim()}>
               Save

@@ -155,6 +155,7 @@ pub async fn chat_completion(
     let mut allow_commands = false;
     let mut all_messages: Vec<Value> = vec![];
     let mut skill_dir_path: Option<PathBuf> = None;
+    let mut skill_allowed_commands: Vec<String> = Vec::new();
 
     // 1. Determine which skills have already been loaded in this session
     // We scan the assistant messages for "🧠 *Loading skill: xxx*"
@@ -194,6 +195,8 @@ pub async fn chat_completion(
             }
             if skill_dir_path.is_none() {
                 skill_dir_path = Some(spath);
+                // Collect allowed_commands from the first (primary) skill.
+                skill_allowed_commands = skill.allowed_commands.clone();
             }
 
             if activated_skills.contains(&skill.name) {
@@ -483,6 +486,7 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                     skill_dir_path.clone(),
                     workspace_dir,
                     &config,
+                    &skill_allowed_commands,
                 )
                 .await
             };

@@ -33,6 +33,8 @@ export interface Skill {
   description: string;
   system_prompt: string;
   allowed_tools?: string[];
+  /** Allowlist of executable names for direct execution (empty = unrestricted). */
+  allowed_commands?: string[];
   version?: string;
   author?: string;
 }

@@ -89,6 +89,9 @@ pub struct AppState {
     pub mcp_servers_path: PathBuf,
     pub db: Mutex<Connection>,
     pub chat_cancelled: AtomicBool,
+    /// One-shot channel sender used to relay the user's confirm/deny response
+    /// back to a waiting `execute_tool` call.
+    pub confirm_sender: Mutex<Option<tokio::sync::oneshot::Sender<bool>>>,
 }
 
 // ─── Config commands ──────────────────────────────────────────────────────────
@@ -157,6 +160,15 @@ fn stop_chat_completion(state: State<'_, AppState>) {
     state
         .chat_cancelled
         .store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Called by the frontend to confirm or deny a pending dangerous-command execution.
+#[tauri::command]
+fn confirm_command(state: State<'_, AppState>, confirmed: bool) {
+    let mut guard = state.confirm_sender.lock().unwrap();
+    if let Some(tx) = guard.take() {
+        let _ = tx.send(confirmed);
+    }
 }
 
 #[tauri::command]
@@ -248,6 +260,7 @@ pub fn run() {
                 skills_dir,
                 mcp_servers_path: mcp_servers_path.clone(),
                 chat_cancelled: AtomicBool::new(false),
+                confirm_sender: Mutex::new(None),
             });
 
             // Warm up enabled MCP servers as soon as the app starts.
@@ -266,6 +279,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             llm_complete::chat_completion,
             stop_chat_completion,
+            confirm_command,
             get_config,
             save_config,
             fetch_models,

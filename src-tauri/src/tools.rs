@@ -1,7 +1,87 @@
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
+
+// ─── Dangerous command detection ─────────────────────────────────────────────
+
+/// Patterns that indicate a script may have destructive/system-altering effects.
+static DANGEROUS_SCRIPT_PATTERNS: &[&str] = &[
+    "rm -rf", "rm -fr",
+    "del /f", "del /s", "rd /s", "rmdir /s",
+    "format ", "diskpart", "fdisk",
+    "reg add", "reg delete", "reg import",
+    "netsh ", "net user", "net localgroup",
+    "sc delete", "sc stop", "sc config",
+    "schtasks /create", "schtasks /delete",
+    "bcdedit", "bootcfg",
+    "takeown", "icacls",
+    "apt install", "apt remove", "apt purge",
+    "yum install", "yum remove", "dnf remove",
+    "winget install", "winget uninstall",
+    "choco install", "choco uninstall",
+    "pip install", "pip uninstall", "pip3 install",
+    "npm install -g", "npm uninstall -g",
+    "set-executionpolicy", "invoke-expression",
+    "shutdown", "reboot", "halt", "poweroff",
+];
+
+/// Executables considered dangerous when used in direct mode.
+static DANGEROUS_EXECUTABLES: &[&str] = &[
+    "rm", "del", "format", "fdisk", "diskpart",
+    "netsh", "sc", "reg", "regedit", "bcdedit",
+    "schtasks", "net", "takeown", "icacls",
+    "dd", "mkfs", "shutdown", "reboot", "halt", "poweroff", "attrib",
+];
+
+/// Returns a human-readable reason if the command is considered dangerous, or None.
+fn is_dangerous(cmd_type: &str, code: &str) -> Option<String> {
+    let lower = code.to_lowercase();
+    if cmd_type == "direct" {
+        let parts = split_command_line(code);
+        if let Some(first) = parts.first() {
+            let exe_name = Path::new(first.as_str())
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or(first.as_str())
+                .to_lowercase();
+            if DANGEROUS_EXECUTABLES.contains(&exe_name.as_str()) {
+                return Some(format!("executable '{}' is potentially destructive", exe_name));
+            }
+        }
+    }
+    for pattern in DANGEROUS_SCRIPT_PATTERNS {
+        if lower.contains(pattern) {
+            return Some(format!("dangerous pattern detected: '{}'", pattern));
+        }
+    }
+    None
+}
+
+/// Simple command-line splitter that handles single and double quotes.
+fn split_command_line(code: &str) -> Vec<String> {
+    let mut args: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut in_single = false;
+    let mut in_double = false;
+    for ch in code.chars() {
+        match ch {
+            '\'' if !in_double => { in_single = !in_single; }
+            '"' if !in_single => { in_double = !in_double; }
+            ' ' | '\t' if !in_single && !in_double => {
+                if !current.is_empty() {
+                    args.push(current.clone());
+                    current.clear();
+                }
+            }
+            _ => { current.push(ch); }
+        }
+    }
+    if !current.is_empty() {
+        args.push(current);
+    }
+    args
+}
 
 pub fn get_all_tools(selected_tools: &[String], allow_commands: bool, skill_dir: Option<&Path>) -> Vec<Value> {
     let mut tools = vec![];
@@ -11,18 +91,18 @@ pub fn get_all_tools(selected_tools: &[String], allow_commands: bool, skill_dir:
             "type": "function",
             "function": {
                 "name": "execute_command",
-                "description": "Execute a bash, python, or powershell command/script on the user's machine. If called by a skill, runs in the directory containing the skill's SKILL.md; otherwise runs in the app managed workspace directory. Use for calculations, file operations, data processing, system queries, or any task that benefits from running locally.",
+                "description": "Execute a command or script on the user's machine. Use type='direct' to run an executable (curl, wget, git, …) directly without a shell — preferred for simple commands. Use 'powershell'/'cmd'/'bash'/'python' only when you need shell features (pipes, loops, variables). If called by a skill, runs in the skill's directory; otherwise in the managed workspace directory. Dangerous operations (deleting files, modifying system settings, installing software, etc.) will require explicit user confirmation before execution.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "type": {
                             "type": "string",
-                            "enum": ["bash", "cmd", "powershell", "python"],
-                            "description": "The runtime to use. ON WINDOWS, ALWAYS prefer 'powershell' or 'cmd'"
+                            "enum": ["direct", "powershell", "cmd", "bash", "python"],
+                            "description": "Execution mode. 'direct' runs the program directly (first word = executable, rest = arguments, handles basic quoting). On Windows prefer 'direct', 'powershell', or 'cmd' over 'bash'."
                         },
                         "code": {
                             "type": "string",
-                            "description": "The command or code to execute"
+                            "description": "The command or code to execute. For 'direct': the full command line (e.g. 'curl -s https://example.com'). For shell types: the script body."
                         }
                     },
                     "required": ["type", "code"]
@@ -152,12 +232,61 @@ pub async fn execute_tool(
     skill_dir: Option<PathBuf>,
     workspace_dir: PathBuf,
     config: &crate::AppConfig,
+    // Allowlist of executable names from the active skill (empty = unrestricted).
+    allowed_commands: &[String],
 ) -> String {
     let args: Value = serde_json::from_str(args_str).unwrap_or_default();
     match name {
         "execute_command" => {
-            let cmd_type = args["type"].as_str().unwrap_or("bash").to_string();
+            let cmd_type = args["type"].as_str().unwrap_or("direct").to_string();
             let code = args["code"].as_str().unwrap_or("").to_string();
+
+            // ── Allowed-commands enforcement (direct mode, skill context) ──────
+            if cmd_type == "direct" && !allowed_commands.is_empty() {
+                let parts = split_command_line(&code);
+                let program = parts.first().map(|s| s.as_str()).unwrap_or("");
+                let exe_name = Path::new(program)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or(program)
+                    .to_lowercase();
+                let permitted = allowed_commands.iter().any(|a| a.eq_ignore_ascii_case(&exe_name));
+                if !permitted {
+                    return format!(
+                        "⛔ Command '{}' is not in this skill's allowed-commands list ({}).",
+                        exe_name,
+                        allowed_commands.join(", ")
+                    );
+                }
+            }
+
+            // ── Dangerous command check → ask for user confirmation ───────────
+            if let Some(reason) = is_dangerous(&cmd_type, &code) {
+                let _ = app.emit("confirm-required", serde_json::json!({
+                    "reason": reason,
+                    "cmd_type": cmd_type,
+                    "code": code
+                }));
+
+                let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
+                {
+                    let state = app.state::<crate::AppState>();
+                    *state.confirm_sender.lock().unwrap() = Some(tx);
+                }
+
+                let confirmed = tokio::time::timeout(
+                    std::time::Duration::from_secs(60),
+                    rx,
+                )
+                .await
+                .map(|r| r.unwrap_or(false))
+                .unwrap_or(false);
+
+                if !confirmed {
+                    return "⛔ Command execution denied by user.".to_string();
+                }
+            }
+
             let _ = app.emit("chat-token", format!("⚙️ *Running {}:*\n```{}\n{}\n```\n\n", cmd_type, cmd_type, code));
             let cwd = resolve_workspace_root(&workspace_dir, skill_dir.clone());
             tokio::time::timeout(
@@ -276,6 +405,18 @@ pub async fn execute_tool(
 
 pub async fn run_command(cmd_type: String, code: String, cwd: Option<PathBuf>) -> Result<String, String> {
     let mut cmd = match cmd_type.as_str() {
+        "direct" => {
+            // Run the executable directly — no shell wrapper needed.
+            let parts = split_command_line(&code);
+            if parts.is_empty() {
+                return Err("Empty command".to_string());
+            }
+            let mut c = tokio::process::Command::new(&parts[0]);
+            if parts.len() > 1 {
+                c.args(&parts[1..]);
+            }
+            c
+        }
         "python" | "python3" => {
             let mut c = tokio::process::Command::new(if cfg!(windows) { "python" } else { "python3" });
             c.arg("-c").arg(&code);
