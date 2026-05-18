@@ -6,23 +6,6 @@ use tauri::{AppHandle, Emitter};
 pub fn get_all_tools(selected_tools: &[String], allow_commands: bool, skill_dir: Option<&Path>) -> Vec<Value> {
     let mut tools = vec![];
 
-    if selected_tools.iter().any(|t| t == "web_search") {
-        tools.push(json!({
-            "type": "function",
-            "function": {
-                "name": "web_search",
-                "description": "Search the web for current information using the configured search engine. Use when the user asks about recent events, current data, or anything requiring up-to-date information.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": { "type": "string", "description": "The search query" }
-                    },
-                    "required": ["query"]
-                }
-            }
-        }));
-    }
-
     if allow_commands {
         tools.push(json!({
             "type": "function",
@@ -43,23 +26,6 @@ pub fn get_all_tools(selected_tools: &[String], allow_commands: bool, skill_dir:
                         }
                     },
                     "required": ["type", "code"]
-                }
-            }
-        }));
-    }
-
-    if selected_tools.iter().any(|t| t == "fetch_web") {
-        tools.push(json!({
-            "type": "function",
-            "function": {
-                "name": "fetch_web",
-                "description": "Fetch the content of a given URL. This resolves JS rendering and bypasses anti-bot/scraping strategies to read the true webpage content in markdown.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "url": { "type": "string", "description": "The URL to fetch, e.g. https://example.com" }
-                    },
-                    "required": ["url"]
                 }
             }
         }));
@@ -171,16 +137,6 @@ pub async fn execute_tool(
 ) -> String {
     let args: Value = serde_json::from_str(args_str).unwrap_or_default();
     match name {
-        "web_search" => {
-            let query = args["query"].as_str().unwrap_or("").to_string();
-            let engine = config.search_engine.clone();
-            let _ = app.emit(
-                "chat-token",
-                format!("🔍 *Searching with {}: {}...*\n\n", engine, query),
-            );
-            crate::search::search_by(engine, query).await
-                .unwrap_or_else(|e| format!("Search failed: {}", e))
-        }
         "execute_command" => {
             let cmd_type = args["type"].as_str().unwrap_or("bash").to_string();
             let code = args["code"].as_str().unwrap_or("").to_string();
@@ -193,11 +149,6 @@ pub async fn execute_tool(
             .await
             .unwrap_or_else(|_| Ok("Command timed out after 30 seconds.".to_string()))
             .unwrap_or_else(|e| format!("Error: {}", e))
-        }
-        "fetch_web" => {
-            let url = args["url"].as_str().unwrap_or("").to_string();
-            let _ = app.emit("chat-token", format!("🌐 *Fetching {}*\n\n", url));
-            fetch_web_content(&url).await.unwrap_or_else(|e| format!("Failed to fetch web content: {}", e))
         }
         "file_actions" => {
             let action = args["action"].as_str().unwrap_or("");
@@ -387,25 +338,3 @@ pub async fn run_command(cmd_type: String, code: String, cwd: Option<PathBuf>) -
     Ok(result)
 }
 
-pub async fn fetch_web_content(url: &str) -> Result<String, String> {
-    // Attempt local direct extraction first (falling back to Jina if needed or just attempting both)
-    // Wait, let's implement local content extraction and if blocked or invalid, maybe fallback.
-    // Or we can just use scraper to parse locally.
-    let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    let jina_url = format!("https://r.jina.ai/{}", url);
-    let res = client.get(&jina_url)
-        .header("X-Return-Format", "markdown")
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if res.status().is_success() {
-        res.text().await.map_err(|e| e.to_string())
-    } else {
-        Err(format!("Error: received status code {}", res.status()))
-    }
-}

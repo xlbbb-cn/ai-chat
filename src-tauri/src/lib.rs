@@ -10,7 +10,6 @@ use tauri_plugin_opener::OpenerExt;
 mod db;
 mod llm_complete;
 pub mod mcp;
-mod search;
 mod skills;
 mod tools;
 pub mod neo4j_db;
@@ -55,18 +54,12 @@ pub struct AppConfig {
     pub system_message: String,
     #[serde(default)]
     pub selected_tools: Vec<String>,
-    #[serde(default = "default_search_engine")]
-    pub search_engine: String,
     pub kg_engine: Option<String>,
     pub neo4j_uri: Option<String>,
     pub neo4j_user: Option<String>,
     pub neo4j_password: Option<String>,
     #[serde(default)]
     pub workspace_dir: Option<String>,
-}
-
-fn default_search_engine() -> String {
-    "duckduckgo".to_string()
 }
 
 impl Default for AppConfig {
@@ -78,8 +71,7 @@ impl Default for AppConfig {
             model_catalog: vec!["gpt-4o-mini".to_string()],
             model_settings: ModelSettings::default(),
             system_message: String::new(),
-            selected_tools: vec!["web_search".to_string()],
-            search_engine: default_search_engine(),
+            selected_tools: vec![],
             kg_engine: None,
             neo4j_uri: Some("bolt://localhost:7687".to_string()),
             neo4j_user: Some("neo4j".to_string()),
@@ -281,7 +273,6 @@ pub fn run() {
             skills::list_skills,
             skills::save_skill,
             skills::delete_skill,
-            search::search_by,
             db::save_history,
             db::load_history,
             db::delete_history,

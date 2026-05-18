@@ -8,25 +8,6 @@ interface Props {
     onToolsChange: (tools: string[]) => void;
 }
 
-const SEARCH_ENGINES = [
-    { value: "duckduckgo", label: "DuckDuckGo" },
-    { value: "google", label: "Google" },
-    { value: "google_hk", label: "Google HK" },
-    { value: "bing", label: "Bing INT" },
-    { value: "bing_cn", label: "Bing CN" },
-    { value: "baidu", label: "Baidu" },
-    { value: "360", label: "360" },
-    { value: "sogou", label: "Sogou" },
-    { value: "wechat", label: "WeChat Search" },
-    { value: "shenma", label: "Shenma" },
-    { value: "yahoo", label: "Yahoo" },
-    { value: "startpage", label: "Startpage" },
-    { value: "brave", label: "Brave" },
-    { value: "ecosia", label: "Ecosia" },
-    { value: "qwant", label: "Qwant" },
-    { value: "wolframalpha", label: "WolframAlpha" },
-];
-
 const AVAILABLE_TOOLS = [
 
 
@@ -39,16 +20,6 @@ const AVAILABLE_TOOLS = [
         id: "execute_command",
         name: "Command Execution",
         description: "Execute generic Bash/Python/Powershell scripts globally",
-    },
-    {
-        id: "web_search",
-        name: "Web Search",
-        description: "Search the web for current information",
-    },
-    {
-        id: "fetch_web",
-        name: "Fetch Web",
-        description: "Fetch true webpage content (bypassing anti-bot & JS rendering)",
     },
     {
         id: "knowledge_graph",
@@ -82,13 +53,6 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
         onToolsChange(updated);
     }
 
-    async function updateSearchEngine(search_engine: string) {
-        if (!config) return;
-        const newConfig = { ...config, search_engine };
-        setConfig(newConfig);
-        await saveConfig(newConfig);
-    }
-
     async function updateKgEngine(kg_engine: string) {
         if (!config) return;
         const newConfig = { ...config, kg_engine };
@@ -101,8 +65,6 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
     }
 
     const selectedTools = config.selected_tools ?? [];
-    const searchEngine = config.search_engine ?? "duckduckgo";
-    const webSearchEnabled = selectedTools.includes("web_search");
     const kgEngine = config.kg_engine ?? "neo4j";
     const kgEnabled = selectedTools.includes("knowledge_graph");
 
@@ -144,26 +106,6 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                         )}
                     </div>
                 ))}
-            </div>
-
-            <div className="search-engine-section">
-                <label className="search-engine-label" htmlFor="search-engine-select">
-                    Web Search Engine
-                </label>
-                <select
-                    id="search-engine-select"
-                    className="search-engine-select"
-                    value={searchEngine}
-                    onChange={(e) => void updateSearchEngine(e.target.value)}
-                    disabled={!webSearchEnabled}
-                    title={webSearchEnabled ? "Default engine for web_search" : "Enable Web Search tool first"}
-                >
-                    {SEARCH_ENGINES.map(engine => (
-                        <option key={engine.value} value={engine.value}>
-                            {engine.label}
-                        </option>
-                    ))}
-                </select>
             </div>
 
             <div className="search-engine-section">

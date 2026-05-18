@@ -14,7 +14,6 @@ export interface AppConfig {
   model_settings?: ModelSettings;
   system_message?: string;
   selected_tools?: string[];
-  search_engine?: string;
   kg_engine?: string;
   neo4j_uri?: string;
   neo4j_user?: string;
