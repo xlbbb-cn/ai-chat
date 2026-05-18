@@ -113,11 +113,10 @@ export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
               checked={(editing.allowed_tools ?? []).includes("Bash")}
               onChange={() => toggleTool("Bash")}
             />
-            Allow command execution — <code>Bash</code>
+            Allow command execution
           </label>
           {(editing.allowed_tools ?? []).includes("Bash") && (
             <label>
-              Allowed commands
               <input
                 value={(editing.allowed_commands ?? []).join(", ")}
                 onChange={(e) => {

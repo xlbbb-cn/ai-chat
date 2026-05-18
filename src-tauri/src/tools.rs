@@ -97,8 +97,8 @@ pub fn get_all_tools(selected_tools: &[String], allow_commands: bool, skill_dir:
                     "properties": {
                         "type": {
                             "type": "string",
-                            "enum": ["direct", "powershell", "cmd", "bash", "python"],
-                            "description": "Execution mode. 'direct' runs the program directly (first word = executable, rest = arguments, handles basic quoting). On Windows prefer 'direct', 'powershell', or 'cmd' over 'bash'."
+                            "enum": ["direct", "powershell", "bash", "python"],
+                            "description": "Execution mode. 'direct' runs the program directly (first word = executable, rest = arguments, handles basic quoting). On Windows prefer 'direct' or 'powershell' over 'bash'."
                         },
                         "code": {
                             "type": "string",
@@ -420,11 +420,6 @@ pub async fn run_command(cmd_type: String, code: String, cwd: Option<PathBuf>) -
         "python" | "python3" => {
             let mut c = tokio::process::Command::new(if cfg!(windows) { "python" } else { "python3" });
             c.arg("-c").arg(&code);
-            c
-        }
-        "cmd" => {
-            let mut c = tokio::process::Command::new("cmd");
-            c.args(["/C", &code]);
             c
         }
         "bash" | "sh" => {
