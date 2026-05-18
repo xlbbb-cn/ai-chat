@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 use rusqlite::Connection;
-use tauri::{menu::{Menu, MenuItem, Submenu}, AppHandle, Emitter, Manager, State};
+use tauri::{menu::{Menu, MenuItem, Submenu}, AppHandle, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 mod db;
@@ -16,7 +16,6 @@ mod tools;
 pub mod neo4j_db;
 
 const OPEN_APP_DATA_DIR_MENU_ID: &str = "open-app-data-dir";
-const SET_WORKSPACE_DIR_MENU_ID: &str = "set-workspace-dir";
 
 // ─── App State ───────────────────────────────────────────────────────────────
 
@@ -184,8 +183,6 @@ pub fn run() {
                 if let Ok(data_dir) = app.path().app_data_dir() {
                     let _ = app.opener().open_path(data_dir.to_string_lossy().into_owned(), None::<&str>);
                 }
-            } else if event.id() == SET_WORKSPACE_DIR_MENU_ID {
-                let _ = app.emit("request-set-workspace-dir", ());
             }
         })
         .setup(|app| {
@@ -203,15 +200,7 @@ pub fn run() {
                 None::<&str>,
             )
             .expect("failed to create menu item");
-            let set_workspace_dir_item = MenuItem::with_id(
-                app,
-                SET_WORKSPACE_DIR_MENU_ID,
-                "Set Workspace Directory\u{2026}",
-                true,
-                None::<&str>,
-            )
-            .expect("failed to create menu item");
-            let file_menu = Submenu::with_items(app, "File", true, &[&open_app_data_dir_item, &set_workspace_dir_item])
+            let file_menu = Submenu::with_items(app, "File", true, &[&open_app_data_dir_item])
                 .expect("failed to create app menu");
             let menu = Menu::with_items(app, &[&file_menu]).expect("failed to create app menu");
             app.set_menu(menu).expect("failed to set app menu");
@@ -265,9 +254,14 @@ pub fn run() {
                 workspace_dir: Mutex::new(workspace_dir.clone()),
                 db: Mutex::new(db),
                 skills_dir,
-                mcp_servers_path,
+                mcp_servers_path: mcp_servers_path.clone(),
                 chat_cancelled: AtomicBool::new(false),
             });
+
+            // Warm up enabled MCP servers as soon as the app starts.
+            for server in mcp::load_servers(&mcp_servers_path).into_iter().filter(|s| s.enabled) {
+                mcp::spawn_warmup(server);
+            }
 
             // Set window title to show current workspace directory
             if let Some(win) = app.get_webview_window("main") {

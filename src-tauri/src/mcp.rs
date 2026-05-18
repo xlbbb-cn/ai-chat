@@ -81,13 +81,19 @@ pub fn list_mcp_servers(state: State<'_, AppState>) -> Vec<McpServer> {
 
 #[tauri::command]
 pub fn save_mcp_server(state: State<'_, AppState>, server: McpServer) -> Result<(), String> {
+    let warmup_server = server.clone();
+    let should_warmup = warmup_server.enabled;
     let mut servers = load_servers(&state.mcp_servers_path);
     if let Some(existing) = servers.iter_mut().find(|s| s.id == server.id) {
         *existing = server;
     } else {
         servers.push(server);
     }
-    save_servers(&state.mcp_servers_path, &servers)
+    let save_result = save_servers(&state.mcp_servers_path, &servers);
+    if save_result.is_ok() && should_warmup {
+        spawn_warmup(warmup_server);
+    }
+    save_result
 }
 
 #[tauri::command]
@@ -104,6 +110,33 @@ pub async fn test_mcp_server(server: McpServer) -> Result<String, String> {
     match server.transport {
         McpTransport::Stdio => test_stdio_server(&server).await,
         McpTransport::Sse => test_sse_server(&server).await,
+    }
+}
+
+/// Start a non-blocking warmup for an enabled MCP server.
+/// This validates that the server can initialize at enable/startup time.
+pub fn spawn_warmup(server: McpServer) {
+    tauri::async_runtime::spawn(async move {
+        let server_name = server.name.clone();
+        let result = warmup_server(&server).await;
+        match result {
+            Ok(msg) => eprintln!("MCP warmup success [{}]: {}", server_name, msg),
+            Err(err) => eprintln!("MCP warmup failed [{}]: {}", server_name, err),
+        }
+    });
+}
+
+async fn warmup_server(server: &McpServer) -> Result<String, String> {
+    match server.transport {
+        McpTransport::Stdio => {
+            let (mut child, _stdin, _reader) = stdio_init(server).await?;
+            let _ = child.kill().await;
+            Ok("stdio initialize successful".to_string())
+        }
+        McpTransport::Sse => {
+            let tools = get_tools_sse(server).await?;
+            Ok(format!("sse reachable, discovered {} tools", tools.len()))
+        }
     }
 }
 
@@ -187,6 +220,9 @@ pub fn sanitize_fn_name(s: &str) -> String {
 fn build_stdio_cmd(server: &McpServer) -> tokio::process::Command {
     use std::process::Stdio;
 
+    let normalized = server.command.trim().to_lowercase();
+    let is_known_stdio_runtime = matches!(normalized.as_str(), "uvx" | "ux" | "python" | "python3" | "py" | "node");
+
     #[cfg(windows)]
     {
         // Check if the command looks like an absolute path (contains \ or /)
@@ -194,7 +230,7 @@ fn build_stdio_cmd(server: &McpServer) -> tokio::process::Command {
             || server.command.contains('/')
             || std::path::Path::new(&server.command).is_absolute();
 
-        if !is_absolute {
+        if !is_absolute || is_known_stdio_runtime {
             // Wrap in cmd /C so that PATH is inherited from the Windows shell
             let mut args_str = shell_escape_windows(&server.command);
             for arg in &server.args {
@@ -210,7 +246,6 @@ fn build_stdio_cmd(server: &McpServer) -> tokio::process::Command {
                 cmd.env(k, v);
             }
             // Prevent a console window from flashing on Windows
-            use std::os::windows::process::CommandExt;
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             cmd.creation_flags(CREATE_NO_WINDOW);
             return cmd;
@@ -220,7 +255,7 @@ fn build_stdio_cmd(server: &McpServer) -> tokio::process::Command {
     #[cfg(unix)]
     {
         let is_absolute = server.command.starts_with('/');
-        if !is_absolute {
+        if !is_absolute || is_known_stdio_runtime {
             let mut shell_cmd = server.command.clone();
             for arg in &server.args {
                 shell_cmd.push(' ');
@@ -249,7 +284,6 @@ fn build_stdio_cmd(server: &McpServer) -> tokio::process::Command {
     }
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }

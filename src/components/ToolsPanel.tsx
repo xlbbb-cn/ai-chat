@@ -28,10 +28,12 @@ const SEARCH_ENGINES = [
 ];
 
 const AVAILABLE_TOOLS = [
+
+
     {
-        id: "web_search",
-        name: "Web Search",
-        description: "Search the web for current information",
+        id: "file_actions",
+        name: "File Actions",
+        description: "he file action to perform: read file content, write/overwrite a file, list directory entries, edit by replacing a string, or apply a unified diff patch.",
     },
     {
         id: "execute_command",
@@ -39,9 +41,9 @@ const AVAILABLE_TOOLS = [
         description: "Execute generic Bash/Python/Powershell scripts globally",
     },
     {
-        id: "file_actions",
-        name: "File Actions",
-        description: "he file action to perform: read file content, write/overwrite a file, list directory entries, edit by replacing a string, or apply a unified diff patch.",
+        id: "web_search",
+        name: "Web Search",
+        description: "Search the web for current information",
     },
     {
         id: "fetch_web",
