@@ -42,8 +42,8 @@ pub fn get_all_tools(selected_tools: &[String], allow_commands: bool, skill_dir:
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["read", "write", "list", "edit", "patch"],
-                            "description": "The file action to perform: read file content, write/overwrite a file, list directory entries, edit by replacing a string, or apply a unified diff patch."
+                            "enum": ["read", "write", "list", "patch"],
+                            "description": "The file action to perform: read file content, write/overwrite a file, list directory entries, or apply a unified diff patch."
                         },
                         "path": {
                             "type": "string",
@@ -52,14 +52,6 @@ pub fn get_all_tools(selected_tools: &[String], allow_commands: bool, skill_dir:
                         "content": {
                             "type": "string",
                             "description": "Content to write (only for 'write')."
-                        },
-                        "old_string": {
-                            "type": "string",
-                            "description": "Exact string to find and replace (only for 'edit')."
-                        },
-                        "new_string": {
-                            "type": "string",
-                            "description": "Replacement string (only for 'edit')."
                         },
                         "patch": {
                             "type": "string",
@@ -92,15 +84,26 @@ pub fn get_all_tools(selected_tools: &[String], allow_commands: bool, skill_dir:
     tools
 }
 
-fn resolve_safe_path(skill_dir: &Path, rel_path: &str) -> Result<PathBuf, String> {
+fn resolve_safe_path(root_dir: &Path, rel_path: &str) -> Result<PathBuf, String> {
     let rel_path = Path::new(rel_path);
-    let mut resolved = skill_dir.to_path_buf();
-    
+
+    // Reject absolute paths and UNC/Windows drive prefixes outright
+    for comp in rel_path.components() {
+        match comp {
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                return Err("Absolute paths are not allowed; use a path relative to the workspace root".to_string());
+            }
+            _ => {}
+        }
+    }
+
+    let mut resolved = root_dir.to_path_buf();
     for comp in rel_path.components() {
         match comp {
             std::path::Component::ParentDir => {
-                if !resolved.pop() || !resolved.starts_with(skill_dir) {
-                    return Err("Path escapes skill directory".to_string());
+                resolved.pop();
+                if !resolved.starts_with(root_dir) {
+                    return Err("Path escapes workspace directory".to_string());
                 }
             }
             std::path::Component::Normal(c) => {
@@ -109,11 +112,26 @@ fn resolve_safe_path(skill_dir: &Path, rel_path: &str) -> Result<PathBuf, String
             _ => {}
         }
     }
-    
-    if !resolved.starts_with(skill_dir) {
-        return Err("Path escapes skill directory".to_string());
+
+    // Final guard: canonicalize the resolved path and verify it is still inside root_dir
+    match resolved.canonicalize() {
+        Ok(canonical) => {
+            let canonical_root = root_dir.canonicalize()
+                .unwrap_or_else(|_| root_dir.to_path_buf());
+            if !canonical.starts_with(&canonical_root) {
+                return Err("Path escapes workspace directory".to_string());
+            }
+            Ok(canonical)
+        }
+        // File does not exist yet (e.g. write to a new file) — fall back to the unresolved path
+        // after confirming it still starts with root_dir lexically
+        Err(_) => {
+            if !resolved.starts_with(root_dir) {
+                return Err("Path escapes workspace directory".to_string());
+            }
+            Ok(resolved)
+        }
     }
-    Ok(resolved)
 }
 
 /// Resolve workspace root:
@@ -153,7 +171,7 @@ pub async fn execute_tool(
         "file_actions" => {
             let action = args["action"].as_str().unwrap_or("");
             let path_str = args["path"].as_str().unwrap_or("");
-            let root_dir = resolve_workspace_root(&workspace_dir, skill_dir.clone());
+            let root_dir = workspace_dir.clone();
             match action {
                 "read" => {
                     let _ = app.emit("chat-token", format!("📄 *Reading {}*\n\n", path_str));
@@ -201,28 +219,6 @@ pub async fn execute_tool(
                             }
                         }
                         Err(e) => format!("Error: {}", e)
-                    }
-                }
-                "edit" => {
-                    let old_string = args["old_string"].as_str().unwrap_or("");
-                    let new_string = args["new_string"].as_str().unwrap_or("");
-                    let _ = app.emit("chat-token", format!("✏️ *Editing {}*\n\n", path_str));
-                    match resolve_safe_path(&root_dir, path_str) {
-                        Ok(p) => match fs::read_to_string(&p) {
-                            Ok(original) => {
-                                if !original.contains(old_string) {
-                                    format!("Error: old_string not found in {}", path_str)
-                                } else {
-                                    let updated = original.replacen(old_string, new_string, 1);
-                                    match fs::write(&p, &updated) {
-                                        Ok(_) => format!("Successfully edited {}", path_str),
-                                        Err(e) => format!("Error writing file: {}", e),
-                                    }
-                                }
-                            }
-                            Err(e) => format!("Error reading file: {}", e),
-                        },
-                        Err(e) => format!("Error: {}", e),
                     }
                 }
                 "patch" => {
