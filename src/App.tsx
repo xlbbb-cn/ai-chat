@@ -241,25 +241,12 @@ export default function App() {
       <div className="chat-area">
         {/* Toolbar */}
         <header className="toolbar">
-          <span className="app-title">AI Chat</span>
+          {/* <span className="app-title">AI Chat</span> */}
           <div className="toolbar-actions">
             {activeSkillIds.length > 0 && (
               <span className="skill-badge">{activeSkillIds.length} Skill{activeSkillIds.length > 1 ? "s" : ""} active</span>
             )}
-            <button
-              className={`toolbar-btn ${sidebar === "history" ? "active" : ""}`}
-              onClick={() => toggleSidebar("history")}
-              title="History"
-            >
-              🕒 History
-            </button>
-            <button
-              className={`toolbar-btn ${sidebar === "monitor" ? "active" : ""}`}
-              onClick={() => toggleSidebar("monitor")}
-              title="Request Monitor"
-            >
-              📡 Monitor
-            </button>
+
             <button
               className={`toolbar-btn ${sidebar === "skills" ? "active" : ""}`}
               onClick={() => toggleSidebar("skills")}
@@ -288,7 +275,25 @@ export default function App() {
             >
               ⚙ Settings
             </button>
-            <button className="toolbar-btn" onClick={clearChat} title="New chat">
+            <button
+              className={`toolbar-btn ${sidebar === "history" ? "active" : ""}`}
+              onClick={() => toggleSidebar("history")}
+              title="History"
+            >
+              🕒 History
+            </button>
+            <button
+              className={`toolbar-btn ${sidebar === "monitor" ? "active" : ""}`}
+              onClick={() => toggleSidebar("monitor")}
+              title="Request Monitor"
+            >
+              📡 Monitor
+            </button>
+            <button
+              className="toolbar-btn"
+              onClick={clearChat}
+              title="New chat"
+            >
               ↻ New Chat
             </button>
           </div>
