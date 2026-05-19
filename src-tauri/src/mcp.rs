@@ -206,11 +206,14 @@ async fn test_stdio_server(server: &McpServer) -> Result<String, String> {
 /// Recursively walk through a JSON value and resolve any relative file-path
 /// strings to absolute paths by joining them with `workspace`.
 ///
-/// A string is treated as a relative path when:
+/// A string is treated as a path that should be resolved when:
 /// - it is non-empty
 /// - it does not contain `://` (not a URL)
 /// - it is a relative `std::path::Path` (not absolute)
 /// - it starts with `.` OR contains a `/` or `\` separator
+///
+/// Additionally, relative file URLs that begin with `file://./` or `file://.\`
+/// are resolved relative to `workspace` and rewritten as absolute `file://` URLs.
 pub fn resolve_paths_in_args(value: &mut serde_json::Value, workspace: &std::path::Path) {
     match value {
         serde_json::Value::String(s) => {
@@ -241,7 +244,7 @@ fn try_resolve_relative_path(s: &str, workspace: &std::path::Path) -> Option<Str
         let p = std::path::Path::new(file_url_path);
         let absolute = workspace.join(p);
         let normalized = absolute.to_string_lossy().replace('\\', "/");
-        return Some(format!("file://{normalized}"));
+        return Some(format!("file:///{normalized}"));
     }
 
     if s.contains("://") {
