@@ -123,8 +123,8 @@ pub fn get_all_tools(selected_tools: &[String], allow_commands: bool, skill_dir:
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["read", "write", "list", "patch", "rename"],
-                            "description": "The file action to perform: read file content, write/overwrite a file, list directory entries, apply a unified diff patch, or rename a file/directory."
+                            "enum": ["read", "write", "list", "patch", "rename", "move"],
+                            "description": "The file action to perform: read file content, write/overwrite a file, list directory entries, apply a unified diff patch, rename a file/directory, or move a file/directory."
                         },
                         "path": {
                             "type": "string",
@@ -435,11 +435,11 @@ pub async fn execute_tool(
                         Err(e) => format!("Error: {}", e)
                     }
                 }
-                "rename" => {
+                "rename" | "move" => {
                     let new_path = args["new_path"].as_str().unwrap_or("");
-                    let _ = app.emit("chat-token", format!("🔁 *Renaming {} -> {}*\n\n", path_str, new_path));
+                    let _ = app.emit("chat-token", format!("🔁 *Moving {} -> {}*\n\n", path_str, new_path));
                     if new_path.is_empty() {
-                        return "Error: new_path is required for rename.".to_string();
+                        return "Error: new_path is required for move/rename.".to_string();
                     }
                     match resolve_safe_path(&root_dir, path_str) {
                         Ok(src) => match resolve_safe_path(&root_dir, new_path) {
@@ -450,8 +450,8 @@ pub async fn execute_tool(
                                     }
                                 }
                                 match fs::rename(&src, &dst) {
-                                    Ok(_) => format!("Successfully renamed {} to {}", path_str, new_path),
-                                    Err(e) => format!("Error renaming file: {}", e),
+                                    Ok(_) => format!("Successfully moved {} to {}", path_str, new_path),
+                                    Err(e) => format!("Error moving file: {}", e),
                                 }
                             }
                             Err(e) => format!("Error: {}", e),
