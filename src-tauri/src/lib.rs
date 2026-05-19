@@ -28,8 +28,6 @@ struct ProfileData {
     config: AppConfig,
     #[serde(default)]
     mcp_servers: Vec<mcp::McpServer>,
-    #[serde(default)]
-    skills: Vec<skills::Skill>,
 }
 
 fn resolve_workspace_path(app: &AppHandle, workspace_dir: Option<&str>) -> Result<PathBuf, String> {
@@ -62,29 +60,12 @@ fn apply_config(app: &AppHandle, state: &AppState, config: AppConfig) -> Result<
     Ok(())
 }
 
-fn collect_local_skills(skills_dir: &PathBuf) -> Vec<skills::Skill> {
-    fs::read_dir(skills_dir)
-        .map(|entries| {
-            entries
-                .filter_map(|e| e.ok())
-                .filter(|e| e.path().is_dir())
-                .filter_map(|e| {
-                    let skill_path = e.path().join("skill.md");
-                    let content = fs::read_to_string(skill_path).ok()?;
-                    skills::parse_skill_md(&content).ok()
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default()
-}
-
 fn export_profile(app: &AppHandle, profile_path: &PathBuf) -> Result<(), String> {
     let state = app.state::<AppState>();
     let profile = ProfileData {
         version: 1,
         config: state.config.lock().unwrap().clone(),
         mcp_servers: mcp::load_servers(&state.mcp_servers_path),
-        skills: collect_local_skills(&state.skills_dir),
     };
 
     if let Some(parent) = profile_path.parent() {
@@ -111,20 +92,6 @@ fn import_profile(app: &AppHandle, profile_path: &PathBuf) -> Result<(), String>
     let mcp_file = serde_json::json!({ "servers": profile.mcp_servers });
     let mcp_json = serde_json::to_string_pretty(&mcp_file).map_err(|e| e.to_string())?;
     fs::write(&state.mcp_servers_path, mcp_json).map_err(|e| e.to_string())?;
-
-    fs::create_dir_all(&state.skills_dir).map_err(|e| e.to_string())?;
-    for entry in fs::read_dir(&state.skills_dir).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        if entry.path().is_dir() {
-            let _ = fs::remove_dir_all(entry.path());
-        }
-    }
-    for skill in &profile.skills {
-        let md = skills::skill_to_md(skill)?;
-        let skill_dir = state.skills_dir.join(&skill.name);
-        fs::create_dir_all(&skill_dir).map_err(|e| e.to_string())?;
-        fs::write(skill_dir.join("skill.md"), md).map_err(|e| e.to_string())?;
-    }
 
     for server in mcp::load_servers(&state.mcp_servers_path).into_iter().filter(|s| s.enabled) {
         mcp::spawn_warmup(server);
