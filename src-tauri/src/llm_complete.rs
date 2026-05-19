@@ -478,7 +478,11 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                     format!("Error: Skill '{}' not found.", skill_name)
                 }
             } else if let Some((mcp_server, actual_tool_name)) = mcp_tool_map.get(name) {
-                let args_json: Value = serde_json::from_str(args).unwrap_or_default();
+                let mut args_json: Value = serde_json::from_str(args).unwrap_or_default();
+                // Resolve any relative file paths in arguments to absolute paths
+                let workspace_dir = state.workspace_dir.lock().unwrap().clone();
+                mcp::resolve_paths_in_args(&mut args_json, &workspace_dir);
+                println!("Args for MCP tool '{}': {}", actual_tool_name, args_json);
                 let _ = app.emit("chat-token", format!("🔌 *MCP [{}]: {}*\n\n", mcp_server.name, actual_tool_name));
                 match mcp::invoke_mcp_tool(mcp_server, actual_tool_name, args_json).await {
                     Ok(result) => result,
