@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { chatCompletion, getConfig, saveHistory, stopChatCompletion, confirmCommand } from "./api";
+import { chatCompletion, getConfig, listMcpServers, saveConfig, saveHistory, stopChatCompletion, confirmCommand } from "./api";
 
 import { ChatMessage } from "./components/ChatMessage";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -14,6 +14,8 @@ import "./App.css";
 
 type Sidebar = "settings" | "skills" | "history" | "tools" | "mcp" | "monitor" | null;
 
+const KNOWN_TOOL_IDS = new Set(["file_actions", "execute_command", "knowledge_graph"]);
+
 export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -26,6 +28,9 @@ export default function App() {
   const [usage, setUsage] = useState<{ prompt_tokens: number, completion_tokens: number } | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>(["gpt-4o-mini"]);
   const [selectedModel, setSelectedModel] = useState("gpt-4o-mini");
+  const [activeToolCount, setActiveToolCount] = useState(0);
+  const [activeMcpCount, setActiveMcpCount] = useState(0);
+  const [skillsLoadedFromConfig, setSkillsLoadedFromConfig] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -84,9 +89,26 @@ export default function App() {
         const catalog = Array.from(new Set([...(cfg.model_catalog ?? []), cfg.model].filter(Boolean)));
         setAvailableModels(catalog.length > 0 ? catalog : ["gpt-4o-mini"]);
         setSelectedModel(cfg.model || "gpt-4o-mini");
+        setActiveSkillIds(cfg.selected_skills ?? []);
+        setActiveToolCount((cfg.selected_tools ?? []).filter((id) => KNOWN_TOOL_IDS.has(id)).length);
+        setSkillsLoadedFromConfig(true);
       })
       .catch(console.error);
   }, []);
+
+  useEffect(() => {
+    listMcpServers()
+      .then((servers) => setActiveMcpCount(servers.filter((s) => s.enabled).length))
+      .catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    if (!skillsLoadedFromConfig) return;
+
+    getConfig()
+      .then((cfg) => saveConfig({ ...cfg, selected_skills: activeSkillIds }))
+      .catch(console.error);
+  }, [activeSkillIds, skillsLoadedFromConfig]);
 
   const sendMessage = useCallback(async () => {
     let text = input.trim();
@@ -240,11 +262,16 @@ export default function App() {
           {sidebar === "tools" && (
             <ToolsPanel
               onClose={() => setSidebar(null)}
-              onToolsChange={() => { }}
+              onToolsChange={(tools) =>
+                setActiveToolCount(tools.filter((id) => KNOWN_TOOL_IDS.has(id)).length)
+              }
             />
           )}
           {sidebar === "mcp" && (
-            <McpPanel onClose={() => setSidebar(null)} />
+            <McpPanel
+              onClose={() => setSidebar(null)}
+              onServersChange={(enabledCount) => setActiveMcpCount(enabledCount)}
+            />
           )}
           {sidebar === "history" && (
             <HistoryPanel
@@ -270,16 +297,15 @@ export default function App() {
         <header className="toolbar">
           <span className="app-title">Chat</span>
           <div className="toolbar-actions">
-            {activeSkillIds.length > 0 && (
-              <span className="skill-badge">{activeSkillIds.length} Skill{activeSkillIds.length > 1 ? "s" : ""} active</span>
-            )}
-
             <button
               className={`toolbar-btn ${sidebar === "skills" ? "active" : ""}`}
               onClick={() => toggleSidebar("skills")}
               title="Skills"
             >
               ✦ Skills
+              {activeSkillIds.length > 0 && (
+                <span className="toolbar-btn-count">{activeSkillIds.length}</span>
+              )}
             </button>
             <button
               className={`toolbar-btn ${sidebar === "mcp" ? "active" : ""}`}
@@ -287,6 +313,9 @@ export default function App() {
               title="MCP Servers"
             >
               ⬡ MCP
+              {activeMcpCount > 0 && (
+                <span className="toolbar-btn-count">{activeMcpCount}</span>
+              )}
             </button>
             <button
               className={`toolbar-btn ${sidebar === "tools" ? "active" : ""}`}
@@ -294,6 +323,9 @@ export default function App() {
               title="Tools"
             >
               🛠 Tools
+              {activeToolCount > 0 && (
+                <span className="toolbar-btn-count">{activeToolCount}</span>
+              )}
             </button>
             <button
               className={`toolbar-btn ${sidebar === "settings" ? "active" : ""}`}

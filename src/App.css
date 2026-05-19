@@ -82,6 +82,7 @@ body {
 }
 
 .toolbar-btn {
+  position: relative;
   padding: 4px 16px;
   background: transparent;
   border: none;
@@ -100,13 +101,20 @@ body {
   color: #171A20;
 }
 
-.skill-badge {
-  font-size: 14px;
-  padding: 4px 8px;
-  background: #F4F4F4;
-  color: #5C5E62;
-  border-radius: 4px;
-  font-weight: 400;
+.toolbar-btn-count {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #171A20;
+  color: #FFFFFF;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+  pointer-events: none;
 }
 
 /* Messages */

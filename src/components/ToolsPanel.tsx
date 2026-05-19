@@ -28,6 +28,8 @@ const AVAILABLE_TOOLS = [
     }
 ];
 
+const AVAILABLE_TOOL_IDS = new Set(AVAILABLE_TOOLS.map((t) => t.id));
+
 const KG_ENGINES = [
     { value: "neo4j", label: "Neo4j" }
 ];
@@ -37,7 +39,14 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
     const [expandedTool, setExpandedTool] = useState<string | null>(null);
 
     useEffect(() => {
-        getConfig().then(setConfig).catch(console.error);
+        getConfig()
+            .then((cfg) => {
+                const selected = (cfg.selected_tools ?? []).filter((id) => AVAILABLE_TOOL_IDS.has(id));
+                const sanitized = { ...cfg, selected_tools: selected };
+                setConfig(sanitized);
+                onToolsChange(selected);
+            })
+            .catch(console.error);
     }, []);
 
     async function toggleTool(toolId: string) {

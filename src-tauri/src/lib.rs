@@ -54,6 +54,8 @@ pub struct AppConfig {
     pub system_message: String,
     #[serde(default)]
     pub selected_tools: Vec<String>,
+    #[serde(default)]
+    pub selected_skills: Vec<String>,
     pub kg_engine: Option<String>,
     pub neo4j_uri: Option<String>,
     pub neo4j_user: Option<String>,
@@ -72,6 +74,7 @@ impl Default for AppConfig {
             model_settings: ModelSettings::default(),
             system_message: String::new(),
             selected_tools: vec![],
+            selected_skills: vec![],
             kg_engine: None,
             neo4j_uri: Some("bolt://localhost:7687".to_string()),
             neo4j_user: Some("neo4j".to_string()),

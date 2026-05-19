@@ -5,6 +5,7 @@ import "./McpPanel.css";
 
 interface Props {
     onClose: () => void;
+    onServersChange?: (enabledCount: number) => void;
 }
 
 function emptyServer(): McpServer {
@@ -21,7 +22,7 @@ function emptyServer(): McpServer {
     };
 }
 
-export function McpPanel({ onClose }: Props) {
+export function McpPanel({ onClose, onServersChange }: Props) {
     const [servers, setServers] = useState<McpServer[]>([]);
     const [editing, setEditing] = useState<McpServer | null>(null);
     const [testStatus, setTestStatus] = useState<Record<string, { ok: boolean; msg: string }>>({});
@@ -32,6 +33,10 @@ export function McpPanel({ onClose }: Props) {
     useEffect(() => {
         listMcpServers().then(setServers).catch(console.error);
     }, []);
+
+    useEffect(() => {
+        onServersChange?.(servers.filter((s) => s.enabled).length);
+    }, [servers, onServersChange]);
 
     function startAdd() {
         const s = emptyServer();
