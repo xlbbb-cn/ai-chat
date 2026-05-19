@@ -254,7 +254,7 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
     let url = format!("{}/chat/completions", config.api_base_url.trim_end_matches('/'));
     let client = Client::new();
 
-    if config.selected_tools.iter().any(|t| t == "execute_command") {
+    if config.selected_tools.iter().any(|t| t == "run_cmd" || t == "run_shell") {
         allow_commands = true;
     }
 

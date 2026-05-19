@@ -17,9 +17,14 @@ const AVAILABLE_TOOLS = [
         description: "he file action to perform: read file content, write/overwrite a file, list directory entries, edit by replacing a string, or apply a unified diff patch.",
     },
     {
-        id: "execute_command",
-        name: "Command Execution",
-        description: "Execute generic Bash/Python/Powershell scripts globally",
+        id: "run_cmd",
+        name: "Run Command",
+        description: "Run an executable program directly (without a shell). Preferred for simple commands like curl, git, wget, etc.",
+    },
+    {
+        id: "run_shell",
+        name: "Run Shell",
+        description: "Execute a script in a shell (PowerShell, cmd, or Bash). Supports pipes, loops, variables, and other shell features.",
     },
     {
         id: "knowledge_graph",

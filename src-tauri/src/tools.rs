@@ -87,23 +87,46 @@ fn split_command_line(code: &str) -> Vec<String> {
 pub fn get_all_tools(selected_tools: &[String], allow_commands: bool, skill_dir: Option<&Path>) -> Vec<Value> {
     let mut tools = vec![];
 
-    if allow_commands {
+    let want_run_cmd = allow_commands || selected_tools.iter().any(|t| t == "run_cmd");
+    let want_run_shell = allow_commands || selected_tools.iter().any(|t| t == "run_shell");
+
+    if want_run_cmd {
         tools.push(json!({
             "type": "function",
             "function": {
-                "name": "execute_command",
-                "description": "Execute a command or script on the user's machine. Use type='direct' to run an executable (curl, wget, git, …) directly without a shell — preferred for simple commands. Use 'powershell'/'cmd'/'bash'/'python' only when you need shell features (pipes, loops, variables). If called by a skill, runs in the skill's directory; otherwise in the managed workspace directory. Dangerous operations (deleting files, modifying system settings, installing software, etc.) will require explicit user confirmation before execution.",
+                "name": "run_cmd",
+                "description": "Run an executable program directly (without a shell) on the user's machine. The first token is the executable; the rest are arguments. Preferred for simple commands like curl, wget, git, etc. If called by a skill, runs in the skill's directory; otherwise in the managed workspace directory. Dangerous operations (deleting files, modifying system settings, installing software, etc.) will require explicit user confirmation before execution.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "The full command line (e.g. 'curl -s https://example.com'). The first word is the executable; the rest are arguments. Handles basic single- and double-quote grouping."
+                        }
+                    },
+                    "required": ["command"]
+                }
+            }
+        }));
+    }
+
+    if want_run_shell {
+        tools.push(json!({
+            "type": "function",
+            "function": {
+                "name": "run_shell",
+                "description": "Execute a script in a shell on the user's machine. Supports pipes, loops, variables, and other shell features. If called by a skill, runs in the skill's directory; otherwise in the managed workspace directory. Dangerous operations will require explicit user confirmation before execution.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "type": {
                             "type": "string",
-                            "enum": ["direct", "powershell", "bash", "python"],
-                            "description": "Execution mode. 'direct' runs the program directly (first word = executable, rest = arguments, handles basic quoting). On Windows prefer 'direct' or 'powershell' over 'bash'."
+                            "enum": ["powershell", "cmd", "bash"],
+                            "description": "Shell to use. On Windows prefer 'powershell' or 'cmd'; on Linux/macOS use 'bash'."
                         },
                         "code": {
                             "type": "string",
-                            "description": "The command or code to execute. For 'direct': the full command line (e.g. 'curl -s https://example.com'). For shell types: the script body."
+                            "description": "The shell script body to execute."
                         }
                     },
                     "required": ["type", "code"]
@@ -252,13 +275,12 @@ pub async fn execute_tool(
 ) -> String {
     let args: Value = serde_json::from_str(args_str).unwrap_or_default();
     match name {
-        "execute_command" => {
-            let cmd_type = args["type"].as_str().unwrap_or("direct").to_string();
-            let code = args["code"].as_str().unwrap_or("").to_string();
+        "run_cmd" => {
+            let command = args["command"].as_str().unwrap_or("").to_string();
 
-            // ── Allowed-commands enforcement (direct mode, skill context) ──────
-            if cmd_type == "direct" && !allowed_commands.is_empty() {
-                let parts = split_command_line(&code);
+            // ── Allowed-commands enforcement (skill context) ──────────────────
+            if !allowed_commands.is_empty() {
+                let parts = split_command_line(&command);
                 let program = parts.first().map(|s| s.as_str()).unwrap_or("");
                 let exe_name = Path::new(program)
                     .file_stem()
@@ -276,10 +298,51 @@ pub async fn execute_tool(
             }
 
             // ── Dangerous command check → ask for user confirmation ───────────
-            if let Some(reason) = is_dangerous(&cmd_type, &code) {
+            if let Some(reason) = is_dangerous("direct", &command) {
                 let _ = app.emit("confirm-required", serde_json::json!({
                     "reason": reason,
-                    "cmd_type": cmd_type,
+                    "cmd_type": "direct",
+                    "code": command
+                }));
+
+                let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
+                {
+                    let state = app.state::<crate::AppState>();
+                    *state.confirm_sender.lock().unwrap() = Some(tx);
+                }
+
+                let confirmed = tokio::time::timeout(
+                    std::time::Duration::from_secs(60),
+                    rx,
+                )
+                .await
+                .map(|r| r.unwrap_or(false))
+                .unwrap_or(false);
+
+                if !confirmed {
+                    return "⛔ Command execution denied by user.".to_string();
+                }
+            }
+
+            let _ = app.emit("chat-token", format!("⚙️ *Running:*\n```\n{}\n```\n\n", command));
+            let cwd = resolve_workspace_root(&workspace_dir, skill_dir.clone());
+            tokio::time::timeout(
+                std::time::Duration::from_secs(30),
+                run_command("direct".to_string(), command, Some(cwd)),
+            )
+            .await
+            .unwrap_or_else(|_| Ok("Command timed out after 30 seconds.".to_string()))
+            .unwrap_or_else(|e| format!("Error: {}", e))
+        }
+        "run_shell" => {
+            let shell_type = args["type"].as_str().unwrap_or("powershell").to_string();
+            let code = args["code"].as_str().unwrap_or("").to_string();
+
+            // ── Dangerous command check → ask for user confirmation ───────────
+            if let Some(reason) = is_dangerous(&shell_type, &code) {
+                let _ = app.emit("confirm-required", serde_json::json!({
+                    "reason": reason,
+                    "cmd_type": shell_type,
                     "code": code
                 }));
 
@@ -302,11 +365,11 @@ pub async fn execute_tool(
                 }
             }
 
-            let _ = app.emit("chat-token", format!("⚙️ *Running {}:*\n```{}\n{}\n```\n\n", cmd_type, cmd_type, code));
+            let _ = app.emit("chat-token", format!("⚙️ *Running {}:*\n```{}\n{}\n```\n\n", shell_type, shell_type, code));
             let cwd = resolve_workspace_root(&workspace_dir, skill_dir.clone());
             tokio::time::timeout(
                 std::time::Duration::from_secs(30),
-                run_command(cmd_type, code, Some(cwd)),
+                run_command(shell_type, code, Some(cwd)),
             )
             .await
             .unwrap_or_else(|_| Ok("Command timed out after 30 seconds.".to_string()))
