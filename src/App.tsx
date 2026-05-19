@@ -13,7 +13,7 @@ import "./App.css";
 
 type Sidebar = "settings" | "skills" | "history" | "tools" | "mcp" | null;
 
-const KNOWN_TOOL_IDS = new Set(["file_actions", "execute_command", "knowledge_graph"]);
+const KNOWN_TOOL_IDS = new Set(["file_actions", "run_cmd", "run_shell", "knowledge_graph"]);
 
 export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
