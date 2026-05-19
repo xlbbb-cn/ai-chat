@@ -8,11 +8,14 @@ use tauri::{menu::{Menu, MenuItem, Submenu}, AppHandle, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 mod db;
+mod logger;
 mod llm_complete;
 pub mod mcp;
 mod skills;
 mod tools;
 pub mod neo4j_db;
+
+use logger::{AppLogger, LoggerOutput};
 
 const OPEN_APP_DATA_DIR_MENU_ID: &str = "open-app-data-dir";
 
@@ -62,6 +65,8 @@ pub struct AppConfig {
     pub neo4j_password: Option<String>,
     #[serde(default)]
     pub workspace_dir: Option<String>,
+    #[serde(default)]
+    pub logger_output: LoggerOutput,
 }
 
 impl Default for AppConfig {
@@ -80,6 +85,7 @@ impl Default for AppConfig {
             neo4j_user: Some("neo4j".to_string()),
             neo4j_password: Some(String::new()),
             workspace_dir: None,
+            logger_output: LoggerOutput::default(),
         }
     }
 }
@@ -91,6 +97,7 @@ pub struct AppState {
     pub skills_dir: PathBuf,
     pub mcp_servers_path: PathBuf,
     pub db: Mutex<Connection>,
+    pub logger: Mutex<AppLogger>,
     pub chat_cancelled: AtomicBool,
     /// One-shot channel sender used to relay the user's confirm/deny response
     /// back to a waiting `execute_tool` call.
@@ -121,7 +128,13 @@ fn save_config(app: AppHandle, state: State<'_, AppState>, config: AppConfig) ->
         let _ = win.set_title(&title);
     }
 
+    let logger_output = config.logger_output.clone();
     *state.config.lock().unwrap() = config;
+
+    let mut logger = state.logger.lock().unwrap();
+    logger.set_output(logger_output);
+    logger.log("INFO", "Configuration updated");
+
     Ok(())
 }
 
@@ -248,6 +261,13 @@ pub fn run() {
                 AppConfig::default()
             };
 
+            let app_logger = AppLogger::new(
+                cfg!(debug_assertions),
+                config.logger_output.clone(),
+                data_dir.join("app.log"),
+            );
+            app_logger.log("INFO", "Logger initialized");
+
             // Resolve workspace_dir from config, or fall back to default
             let workspace_dir = match config.workspace_dir.as_deref().filter(|s| !s.is_empty()) {
                 Some(dir) => PathBuf::from(dir),
@@ -260,6 +280,7 @@ pub fn run() {
                 config_path,
                 workspace_dir: Mutex::new(workspace_dir.clone()),
                 db: Mutex::new(db),
+                logger: Mutex::new(app_logger),
                 skills_dir,
                 mcp_servers_path: mcp_servers_path.clone(),
                 chat_cancelled: AtomicBool::new(false),

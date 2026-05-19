@@ -20,6 +20,7 @@ export interface AppConfig {
   neo4j_user?: string;
   neo4j_password?: string;
   workspace_dir?: string;
+  logger_output?: "file" | "println";
 }
 
 export interface ModelSettings {

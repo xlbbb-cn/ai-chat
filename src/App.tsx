@@ -7,12 +7,11 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { SkillsPanel } from "./components/SkillsPanel";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { ToolsPanel } from "./components/ToolsPanel";
-import { RequestMonitorPanel } from "./components/RequestMonitorPanel";
 import { McpPanel } from "./components/McpPanel";
 import type { Message } from "./types";
 import "./App.css";
 
-type Sidebar = "settings" | "skills" | "history" | "tools" | "mcp" | "monitor" | null;
+type Sidebar = "settings" | "skills" | "history" | "tools" | "mcp" | null;
 
 const KNOWN_TOOL_IDS = new Set(["file_actions", "execute_command", "knowledge_graph"]);
 
@@ -237,7 +236,7 @@ export default function App() {
     <div className="app-layout">
       {/* Sidebar */}
       {sidebar && (
-        <aside className={`sidebar${sidebar === "monitor" ? " sidebar-wide" : ""}`}>
+        <aside className="sidebar">
           {sidebar === "settings" && (
             <SettingsPanel
               onClose={() => setSidebar(null)}
@@ -284,9 +283,6 @@ export default function App() {
               }}
               onClose={() => setSidebar(null)}
             />
-          )}
-          {sidebar === "monitor" && (
-            <RequestMonitorPanel onClose={() => setSidebar(null)} />
           )}
         </aside>
       )}
@@ -340,13 +336,6 @@ export default function App() {
               title="History"
             >
               🕒 History
-            </button>
-            <button
-              className={`toolbar-btn ${sidebar === "monitor" ? "active" : ""}`}
-              onClick={() => toggleSidebar("monitor")}
-              title="Request Monitor"
-            >
-              📡 Monitor
             </button>
             <button
               className="toolbar-btn"

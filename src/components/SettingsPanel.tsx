@@ -15,6 +15,7 @@ const defaultConfig: AppConfig = {
   model_catalog: ["gpt-4o-mini"],
   model_settings: {},
   system_message: "",
+  logger_output: "file",
 };
 
 function mergeModels(current: string[] | undefined, incoming: string[]): string[] {
@@ -187,6 +188,22 @@ export function SettingsPanel({ onClose, onConfigSaved }: Props) {
             onChange={(e) => setConfig({ ...config, system_message: e.target.value })}
             placeholder="You are a helpful assistant…"
           />
+        </label>
+
+        <label>
+          Logger Output (debug build only)
+          <select
+            value={config.logger_output ?? "file"}
+            onChange={(e) =>
+              setConfig((prev) => ({
+                ...prev,
+                logger_output: e.target.value as "file" | "println",
+              }))
+            }
+          >
+            <option value="file">Write to app.log</option>
+            <option value="println">Print to terminal (println)</option>
+          </select>
         </label>
 
         <div

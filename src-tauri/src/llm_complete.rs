@@ -8,6 +8,12 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::{AppState, tools, skills, mcp};
 
+fn log_event(state: &State<'_, AppState>, level: &str, message: String) {
+    if let Ok(logger) = state.logger.lock() {
+        logger.log(level, &message);
+    }
+}
+
 // ─── Chat ────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,6 +157,11 @@ pub async fn chat_completion(
 ) -> Result<(), String> {
     state.chat_cancelled.store(false, Ordering::SeqCst);
     let config = state.config.lock().unwrap().clone();
+    log_event(
+        &state,
+        "INFO",
+        format!("chat_completion started: session_id={}, model={}", session_id, config.model),
+    );
 
     let mut allow_commands = false;
     let mut all_messages: Vec<Value> = vec![];
@@ -285,7 +296,7 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                     }
                 }
                 Err(e) => {
-                    eprintln!("MCP server '{}' tools/list failed: {e}", server.name);
+                    log_event(&state, "ERROR", format!("MCP server '{}' tools/list failed: {e}", server.name));
                 }
             }
         }
@@ -373,6 +384,14 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                         duration_ms,
                     ],
                 );
+                log_event(
+                    &state,
+                    "INFO",
+                    format!(
+                        "chat_completion request succeeded: session_id={}, finish_reason={}, duration_ms={}",
+                        session_id, sr.finish_reason, duration_ms
+                    ),
+                );
             }
             Err(err) => {
                 // Log failed request
@@ -387,6 +406,14 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                         duration_ms,
                         err,
                     ],
+                );
+                log_event(
+                    &state,
+                    "ERROR",
+                    format!(
+                        "chat_completion request failed: session_id={}, duration_ms={}, error={}",
+                        session_id, duration_ms, err
+                    ),
                 );
             }
         }
@@ -482,7 +509,11 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                 // Resolve any relative file paths in arguments to absolute paths
                 let workspace_dir = state.workspace_dir.lock().unwrap().clone();
                 mcp::resolve_paths_in_args(&mut args_json, &workspace_dir);
-                println!("Args for MCP tool '{}': {}", actual_tool_name, args_json);
+                log_event(
+                    &state,
+                    "INFO",
+                    format!("Args for MCP tool '{}': {}", actual_tool_name, args_json),
+                );
                 let _ = app.emit("chat-token", format!("🔌 *MCP [{}]: {}*\n\n", mcp_server.name, actual_tool_name));
                 match mcp::invoke_mcp_tool(mcp_server, actual_tool_name, args_json).await {
                     Ok(result) => result,
@@ -513,6 +544,11 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
     }
 
     state.chat_cancelled.store(false, Ordering::SeqCst);
+    log_event(
+        &state,
+        "INFO",
+        format!("chat_completion finished: session_id={}", session_id),
+    );
     let _ = app.emit("chat-done", ());
     Ok(())
 }
