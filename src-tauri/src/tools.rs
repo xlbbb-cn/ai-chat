@@ -123,12 +123,16 @@ pub fn get_all_tools(selected_tools: &[String], allow_commands: bool, skill_dir:
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["read", "write", "list", "patch"],
-                            "description": "The file action to perform: read file content, write/overwrite a file, list directory entries, or apply a unified diff patch."
+                            "enum": ["read", "write", "list", "patch", "rename"],
+                            "description": "The file action to perform: read file content, write/overwrite a file, list directory entries, apply a unified diff patch, or rename a file/directory."
                         },
                         "path": {
                             "type": "string",
                             "description": "Relative path to the file or directory. Use '.' for root when listing."
+                        },
+                        "new_path": {
+                            "type": "string",
+                            "description": "Destination relative path for rename operations. Required when action is 'rename'."
                         },
                         "start_line": {
                             "type": "integer",
@@ -429,6 +433,30 @@ pub async fn execute_tool(
                             }
                         }
                         Err(e) => format!("Error: {}", e)
+                    }
+                }
+                "rename" => {
+                    let new_path = args["new_path"].as_str().unwrap_or("");
+                    let _ = app.emit("chat-token", format!("🔁 *Renaming {} -> {}*\n\n", path_str, new_path));
+                    if new_path.is_empty() {
+                        return "Error: new_path is required for rename.".to_string();
+                    }
+                    match resolve_safe_path(&root_dir, path_str) {
+                        Ok(src) => match resolve_safe_path(&root_dir, new_path) {
+                            Ok(dst) => {
+                                if let Some(parent) = dst.parent() {
+                                    if let Err(e) = fs::create_dir_all(parent) {
+                                        return format!("Error creating destination directory: {}", e);
+                                    }
+                                }
+                                match fs::rename(&src, &dst) {
+                                    Ok(_) => format!("Successfully renamed {} to {}", path_str, new_path),
+                                    Err(e) => format!("Error renaming file: {}", e),
+                                }
+                            }
+                            Err(e) => format!("Error: {}", e),
+                        },
+                        Err(e) => format!("Error: {}", e),
                     }
                 }
                 "patch" => {
