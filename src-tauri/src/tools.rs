@@ -1,5 +1,6 @@
 use serde_json::{json, Value};
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -128,6 +129,16 @@ pub fn get_all_tools(selected_tools: &[String], allow_commands: bool, skill_dir:
                         "path": {
                             "type": "string",
                             "description": "Relative path to the file or directory. Use '.' for root when listing."
+                        },
+                        "start_line": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "Optional 1-based starting line number to read from (inclusive). Only used for 'read'."
+                        },
+                        "end_line": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "Optional 1-based ending line number to read to (inclusive). Only used for 'read'."
                         },
                         "content": {
                             "type": "string",
@@ -304,8 +315,63 @@ pub async fn execute_tool(
             match action {
                 "read" => {
                     let _ = app.emit("chat-token", format!("📄 *Reading {}*\n\n", path_str));
+                    let start_line = args["start_line"].as_i64();
+                    let end_line = args["end_line"].as_i64();
                     match resolve_safe_path(&root_dir, path_str) {
-                        Ok(p) => fs::read_to_string(&p).unwrap_or_else(|e| format!("Error reading file: {}", e)),
+                        Ok(p) => {
+                            match fs::metadata(&p) {
+                                Ok(metadata) if metadata.is_dir() => {
+                                    return format!("Error: {} is a directory", path_str);
+                                }
+                                Err(e) => {
+                                    return format!("Error reading file metadata: {}", e);
+                                }
+                                _ => {}
+                            }
+
+                            if start_line.is_none() && end_line.is_none() {
+                                return fs::read_to_string(&p).unwrap_or_else(|e| format!("Error reading file: {}", e));
+                            }
+
+                            let start = start_line.unwrap_or(1);
+                            let end = end_line.unwrap_or(i64::MAX);
+                            if start <= 0 || end < start {
+                                return "Error: invalid line range. start_line must be >= 1 and end_line must be >= start_line.".to_string();
+                            }
+
+                            match fs::File::open(&p) {
+                                Ok(file) => {
+                                    let reader = BufReader::new(file);
+                                    let mut result = String::new();
+                                    for (index, line) in reader.lines().enumerate() {
+                                        let line_num = (index + 1) as i64;
+                                        if line_num < start {
+                                            continue;
+                                        }
+                                        if line_num > end {
+                                            break;
+                                        }
+                                        match line {
+                                            Ok(text) => {
+                                                if !result.is_empty() {
+                                                    result.push('\n');
+                                                }
+                                                result.push_str(&text);
+                                            }
+                                            Err(e) => {
+                                                return format!("Error reading file: {}", e);
+                                            }
+                                        }
+                                    }
+                                    if result.is_empty() {
+                                        "(no matching lines)".to_string()
+                                    } else {
+                                        result
+                                    }
+                                }
+                                Err(e) => format!("Error opening file: {}", e),
+                            }
+                        }
                         Err(e) => format!("Error: {}", e)
                     }
                 }
@@ -329,13 +395,28 @@ pub async fn execute_tool(
                     let _ = app.emit("chat-token", format!("📂 *Listing {}*\n\n", path_str));
                     match resolve_safe_path(&root_dir, path_str) {
                         Ok(p) => {
+                            match fs::metadata(&p) {
+                                Ok(metadata) => {
+                                    if metadata.is_file() {
+                                        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or(path_str).to_string();
+                                        return format!("{} ({} bytes)", name, metadata.len());
+                                    }
+                                }
+                                Err(_) => {}
+                            }
+
                             match fs::read_dir(&p) {
                                 Ok(entries) => {
                                     let mut res = Vec::new();
                                     for entry in entries.flatten() {
                                         if let Ok(name) = entry.file_name().into_string() {
                                             let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-                                            res.push(format!("{}{}", name, if is_dir { "/" } else { "" }));
+                                            if is_dir {
+                                                res.push(format!("{}/", name));
+                                            } else {
+                                                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                                                res.push(format!("{} ({} bytes)", name, size));
+                                            }
                                         }
                                     }
                                     if res.is_empty() {

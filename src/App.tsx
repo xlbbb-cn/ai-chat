@@ -102,6 +102,25 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const unlisten = listen("profile-restored", async () => {
+      try {
+        const [cfg, servers] = await Promise.all([getConfig(), listMcpServers()]);
+        const catalog = Array.from(new Set([...(cfg.model_catalog ?? []), cfg.model].filter(Boolean)));
+        setAvailableModels(catalog.length > 0 ? catalog : ["gpt-4o-mini"]);
+        setSelectedModel(cfg.model || "gpt-4o-mini");
+        setActiveSkillIds(cfg.selected_skills ?? []);
+        setActiveToolCount((cfg.selected_tools ?? []).filter((id) => KNOWN_TOOL_IDS.has(id)).length);
+        setActiveMcpCount(servers.filter((s) => s.enabled).length);
+      } catch (err) {
+        console.error(err);
+      }
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  useEffect(() => {
     if (!skillsLoadedFromConfig) return;
 
     getConfig()

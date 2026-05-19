@@ -4,8 +4,9 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 use rusqlite::Connection;
-use tauri::{menu::{Menu, MenuItem, Submenu}, AppHandle, Manager, State};
+use tauri::{menu::{Menu, MenuItem, Submenu}, AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
+use tauri_plugin_dialog::DialogExt;
 
 mod db;
 mod logger;
@@ -18,6 +19,125 @@ pub mod neo4j_db;
 use logger::{AppLogger, LoggerOutput};
 
 const OPEN_APP_DATA_DIR_MENU_ID: &str = "open-app-data-dir";
+const SAVE_PROFILE_MENU_ID: &str = "save-profile";
+const RESTORE_PROFILE_MENU_ID: &str = "restore-profile";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ProfileData {
+    version: u32,
+    config: AppConfig,
+    #[serde(default)]
+    mcp_servers: Vec<mcp::McpServer>,
+    #[serde(default)]
+    skills: Vec<skills::Skill>,
+}
+
+fn resolve_workspace_path(app: &AppHandle, workspace_dir: Option<&str>) -> Result<PathBuf, String> {
+    Ok(match workspace_dir.filter(|s| !s.is_empty()) {
+        Some(dir) => PathBuf::from(dir),
+        None => app.path().app_data_dir().map_err(|e| e.to_string())?.join("workspace"),
+    })
+}
+
+fn apply_config(app: &AppHandle, state: &AppState, config: AppConfig) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    fs::write(&state.config_path, json).map_err(|e| e.to_string())?;
+
+    let new_workspace_path = resolve_workspace_path(app, config.workspace_dir.as_deref())?;
+    fs::create_dir_all(&new_workspace_path).ok();
+    *state.workspace_dir.lock().unwrap() = new_workspace_path.clone();
+
+    if let Some(win) = app.get_webview_window("main") {
+        let title = format!("AI Chat — {}", new_workspace_path.display());
+        let _ = win.set_title(&title);
+    }
+
+    let logger_output = config.logger_output.clone();
+    *state.config.lock().unwrap() = config;
+
+    let mut logger = state.logger.lock().unwrap();
+    logger.set_output(logger_output);
+    logger.log("INFO", "Configuration updated");
+
+    Ok(())
+}
+
+fn collect_local_skills(skills_dir: &PathBuf) -> Vec<skills::Skill> {
+    fs::read_dir(skills_dir)
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .filter(|e| e.path().is_dir())
+                .filter_map(|e| {
+                    let skill_path = e.path().join("skill.md");
+                    let content = fs::read_to_string(skill_path).ok()?;
+                    skills::parse_skill_md(&content).ok()
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn export_profile(app: &AppHandle, profile_path: &PathBuf) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let profile = ProfileData {
+        version: 1,
+        config: state.config.lock().unwrap().clone(),
+        mcp_servers: mcp::load_servers(&state.mcp_servers_path),
+        skills: collect_local_skills(&state.skills_dir),
+    };
+
+    if let Some(parent) = profile_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    let json = serde_json::to_string_pretty(&profile).map_err(|e| e.to_string())?;
+    fs::write(profile_path, json).map_err(|e| e.to_string())?;
+    state
+        .logger
+        .lock()
+        .unwrap()
+        .log("INFO", &format!("Profile saved to {}", profile_path.display()));
+    Ok(())
+}
+
+fn import_profile(app: &AppHandle, profile_path: &PathBuf) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let content = fs::read_to_string(profile_path).map_err(|e| e.to_string())?;
+    let profile: ProfileData = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+
+    apply_config(app, &state, profile.config)?;
+
+    let mcp_file = serde_json::json!({ "servers": profile.mcp_servers });
+    let mcp_json = serde_json::to_string_pretty(&mcp_file).map_err(|e| e.to_string())?;
+    fs::write(&state.mcp_servers_path, mcp_json).map_err(|e| e.to_string())?;
+
+    fs::create_dir_all(&state.skills_dir).map_err(|e| e.to_string())?;
+    for entry in fs::read_dir(&state.skills_dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if entry.path().is_dir() {
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
+    for skill in &profile.skills {
+        let md = skills::skill_to_md(skill)?;
+        let skill_dir = state.skills_dir.join(&skill.name);
+        fs::create_dir_all(&skill_dir).map_err(|e| e.to_string())?;
+        fs::write(skill_dir.join("skill.md"), md).map_err(|e| e.to_string())?;
+    }
+
+    for server in mcp::load_servers(&state.mcp_servers_path).into_iter().filter(|s| s.enabled) {
+        mcp::spawn_warmup(server);
+    }
+
+    let _ = app.emit("profile-restored", ());
+    state
+        .logger
+        .lock()
+        .unwrap()
+        .log("INFO", &format!("Profile restored from {}", profile_path.display()));
+    Ok(())
+}
 
 // ─── App State ───────────────────────────────────────────────────────────────
 
@@ -113,29 +233,7 @@ fn get_config(state: State<'_, AppState>) -> AppConfig {
 
 #[tauri::command]
 fn save_config(app: AppHandle, state: State<'_, AppState>, config: AppConfig) -> Result<(), String> {
-    let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
-    fs::write(&state.config_path, json).map_err(|e| e.to_string())?;
-
-    // Update workspace_dir in state and refresh window title
-    let new_workspace_path = match config.workspace_dir.as_deref().filter(|s| !s.is_empty()) {
-        Some(dir) => PathBuf::from(dir),
-        None => app.path().app_data_dir().map_err(|e| e.to_string())?.join("workspace"),
-    };
-    fs::create_dir_all(&new_workspace_path).ok();
-    *state.workspace_dir.lock().unwrap() = new_workspace_path.clone();
-    if let Some(win) = app.get_webview_window("main") {
-        let title = format!("AI Chat — {}", new_workspace_path.display());
-        let _ = win.set_title(&title);
-    }
-
-    let logger_output = config.logger_output.clone();
-    *state.config.lock().unwrap() = config;
-
-    let mut logger = state.logger.lock().unwrap();
-    logger.set_output(logger_output);
-    logger.log("INFO", "Configuration updated");
-
-    Ok(())
+    apply_config(&app, &state, config)
 }
 
 #[tauri::command]
@@ -198,10 +296,48 @@ fn get_workspace_dir(state: State<'_, AppState>) -> String {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .on_menu_event(|app, event| {
             if event.id() == OPEN_APP_DATA_DIR_MENU_ID {
                 if let Ok(data_dir) = app.path().app_data_dir() {
                     let _ = app.opener().open_path(data_dir.to_string_lossy().into_owned(), None::<&str>);
+                }
+            } else if event.id() == SAVE_PROFILE_MENU_ID {
+                if let Some(path) = app
+                    .dialog()
+                    .file()
+                    .add_filter("Profile", &["json"])
+                    .set_file_name("ai-chat.profile.json")
+                    .blocking_save_file()
+                {
+                    let profile_path = path.into_path().map_err(|_| "unsupported save path").ok();
+                    if let Some(profile_path) = profile_path {
+                        if let Err(err) = export_profile(app, &profile_path) {
+                            app.state::<AppState>()
+                                .logger
+                                .lock()
+                                .unwrap()
+                                .log("ERROR", &format!("Save profile failed: {err}"));
+                        }
+                    }
+                }
+            } else if event.id() == RESTORE_PROFILE_MENU_ID {
+                if let Some(path) = app
+                    .dialog()
+                    .file()
+                    .add_filter("Profile", &["json"])
+                    .blocking_pick_file()
+                {
+                    let profile_path = path.into_path().map_err(|_| "unsupported profile path").ok();
+                    if let Some(profile_path) = profile_path {
+                        if let Err(err) = import_profile(app, &profile_path) {
+                            app.state::<AppState>()
+                                .logger
+                                .lock()
+                                .unwrap()
+                                .log("ERROR", &format!("Restore profile failed: {err}"));
+                        }
+                    }
                 }
             }
         })
@@ -220,7 +356,28 @@ pub fn run() {
                 None::<&str>,
             )
             .expect("failed to create menu item");
-            let file_menu = Submenu::with_items(app, "File", true, &[&open_app_data_dir_item])
+            let save_profile_item = MenuItem::with_id(
+                app,
+                SAVE_PROFILE_MENU_ID,
+                "Save Profile...",
+                true,
+                None::<&str>,
+            )
+            .expect("failed to create menu item");
+            let restore_profile_item = MenuItem::with_id(
+                app,
+                RESTORE_PROFILE_MENU_ID,
+                "Restore Profile...",
+                true,
+                None::<&str>,
+            )
+            .expect("failed to create menu item");
+            let file_menu = Submenu::with_items(
+                app,
+                "File",
+                true,
+                &[&save_profile_item, &restore_profile_item, &open_app_data_dir_item],
+            )
                 .expect("failed to create app menu");
             let menu = Menu::with_items(app, &[&file_menu]).expect("failed to create app menu");
             app.set_menu(menu).expect("failed to set app menu");
