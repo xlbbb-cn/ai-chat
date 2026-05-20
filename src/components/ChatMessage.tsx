@@ -13,8 +13,9 @@ const escapeHtml = (value: string): string =>
     .replace(/'/g, "&#39;");
 
 const md = new MarkdownIt({
-  html: true,
-  linkify: true,
+  // Disable raw HTML and auto-linking to prevent navigation vectors.
+  html: false,
+  linkify: false,
   typographer: true,
   breaks: true,
   highlight: (str: string, lang: string): string => {
@@ -26,6 +27,11 @@ const md = new MarkdownIt({
     return `<pre class="hljs"><code>${escapeHtml(str)}</code></pre>`;
   },
 });
+
+// Remove markdown link parsing entirely ([text](url), autolink) and strip any fallback anchor tokens.
+md.disable(["link", "autolink"]);
+md.renderer.rules.link_open = () => "<span>";
+md.renderer.rules.link_close = () => "</span>";
 
 interface Props {
   message: Message;
