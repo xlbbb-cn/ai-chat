@@ -203,17 +203,28 @@ pub fn get_all_tools(selected_tools: &[String], skill_dir: Option<&Path>) -> Vec
 }
 
 fn resolve_safe_path(root_dir: &Path, rel_path: &str) -> Result<PathBuf, String> {
-    let rel_path = Path::new(rel_path);
-
-    // Reject absolute paths and UNC/Windows drive prefixes outright
-    for comp in rel_path.components() {
-        match comp {
-            std::path::Component::RootDir | std::path::Component::Prefix(_) => {
-                return Err("Absolute paths are not allowed; use a path relative to the workspace root".to_string());
-            }
-            _ => {}
+    // If an absolute path is given and it starts with root_dir, strip the prefix
+    // so the AI can pass either relative or absolute paths within the workspace.
+    let stripped;
+    let rel_path_str = if Path::new(rel_path).is_absolute() {
+        let canonical_root = root_dir.canonicalize().unwrap_or_else(|_| root_dir.to_path_buf());
+        let abs = Path::new(rel_path);
+        let abs_canonical = abs.canonicalize().unwrap_or_else(|_| abs.to_path_buf());
+        if let Ok(suffix) = abs_canonical.strip_prefix(&canonical_root) {
+            stripped = suffix.to_string_lossy().into_owned();
+            &stripped as &str
+        } else {
+            return Err(format!(
+                "Absolute path '{}' is outside the workspace root '{}'",
+                rel_path,
+                root_dir.display()
+            ));
         }
-    }
+    } else {
+        rel_path
+    };
+
+    let rel_path = Path::new(rel_path_str);
 
     let mut resolved = root_dir.to_path_buf();
     for comp in rel_path.components() {
@@ -378,7 +389,8 @@ pub async fn execute_tool(
         "file_actions" => {
             let action = args["action"].as_str().unwrap_or("");
             let path_str = args["path"].as_str().unwrap_or("");
-            let root_dir = workspace_dir.clone();
+            // Use skill directory as root when running in a skill context (same as run_cmd/run_shell).
+            let root_dir = resolve_workspace_root(&workspace_dir, skill_dir.clone());
             match action {
                 "read" => {
                     let _ = app.emit("chat-token", format!("📄 *Reading {}*\n\n", path_str));

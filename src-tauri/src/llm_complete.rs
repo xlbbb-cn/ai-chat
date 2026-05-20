@@ -237,9 +237,21 @@ pub async fn chat_completion(
     }
 
     if !loaded_skills_content.is_empty() {
+        let skill_root_display = skill_dir_path
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| {
+                let workspace_dir = state.workspace_dir.lock().unwrap().clone();
+                workspace_dir.display().to_string()
+            });
         let active_skills_context = format!(
             "INTERNAL CONTEXT - ACTIVE SKILLS (not a user request):\n\
-IMPORTANT SKILL PATH ISOLATION RULE: Except for explicitly requested paths, any operation executed by a skill MUST use the directory containing the skill's SKILL.md as its root path. Operating on or referencing paths outside this root is STRICTLY FORBIDDEN. All paths referenced within a skill (e.g. read_file, write_file, list_dir, execute_command) are automatically evaluated relative to this root path.\n\n\
+IMPORTANT SKILL PATH ISOLATION RULE:\n\
+- The skill root directory (absolute path on this machine) is: {skill_root_display}\n\
+- All file_actions paths MUST be relative to this root (e.g. \"src/foo.txt\" not an absolute path).\n\
+- Alternatively, you may supply the absolute path prefixed by the root above; the backend will strip the prefix automatically.\n\
+- Except for explicitly requested paths, you MUST NOT access any file or directory outside this root.\n\
+- Operating on paths outside this root is STRICTLY FORBIDDEN.\n\n\
 The following skills are CURRENTLY ACTIVE and their detailed instructions are provided below:{}",
             loaded_skills_content
         );
