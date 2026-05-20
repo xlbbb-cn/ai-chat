@@ -599,19 +599,7 @@ pub async fn execute_tool(
                         Err(e) => format!("Error: {}", e),
                     }
                 }
-                _ => format!("Unknown action '{}' for file_actions tool.", action),
-            }
-        }
-        "knowledge_graph" => {
-            let query = args["query"].as_str().unwrap_or("").to_string();
-            let engine = config.kg_engine.as_deref().unwrap_or("neo4j").to_string();
-            let _ = app.emit(
-                "chat-token",
-                format!("🧠 *Querying Knowledge Graph ({}) with: {}...*\n\n", engine, query),
-            );
-            
-            if engine == "neo4j" {
-                "mkdir" => {
+                                "mkdir" => {
                     let _ = app.emit("chat-token", format!("📁 *Creating directory {}*\n\n", path_str));
                     match resolve_safe_path_with_roots(&root_dir, active_skill_roots, path_str, false) {
                         Ok((p, _)) => {
@@ -626,6 +614,19 @@ pub async fn execute_tool(
                         Err(e) => format!("Error: {}", e),
                     }
                 }
+                _ => format!("Unknown action '{}' for file_actions tool.", action),
+            }
+        }
+        "knowledge_graph" => {
+            let query = args["query"].as_str().unwrap_or("").to_string();
+            let engine = config.kg_engine.as_deref().unwrap_or("neo4j").to_string();
+            let _ = app.emit(
+                "chat-token",
+                format!("🧠 *Querying Knowledge Graph ({}) with: {}...*\n\n", engine, query),
+            );
+            
+            if engine == "neo4j" {
+
                 use crate::neo4j_db::{KnowledgeGraph, Neo4jRepo};
                 let uri = config.neo4j_uri.as_deref().unwrap_or("bolt://localhost:7687");
                 let user = config.neo4j_user.as_deref().unwrap_or("neo4j");
