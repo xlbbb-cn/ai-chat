@@ -84,7 +84,7 @@ fn split_command_line(code: &str) -> Vec<String> {
     args
 }
 
-pub fn get_all_tools(selected_tools: &[String], skill_dir: Option<&Path>) -> Vec<Value> {
+pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
     let mut tools = vec![];
 
     let want_run_cmd = selected_tools.iter().any(|t| t == "run_cmd");
@@ -135,7 +135,7 @@ pub fn get_all_tools(selected_tools: &[String], skill_dir: Option<&Path>) -> Vec
         }));
     }
 
-    if skill_dir.is_some() || selected_tools.iter().any(|t| t == "file_actions") {
+    if selected_tools.iter().any(|t| t == "file_actions") {
         tools.push(json!({
             "type": "function",
             "function": {
@@ -263,22 +263,10 @@ fn resolve_safe_path(root_dir: &Path, rel_path: &str) -> Result<PathBuf, String>
     }
 }
 
-/// Resolve workspace root:
-/// - if launched from a skill, use the skill directory
-/// - otherwise use managed workspace_dir
-fn resolve_workspace_root(workspace_dir: &Path, skill_dir: Option<PathBuf>) -> PathBuf {
-    if let Some(dir) = skill_dir {
-        dir
-    } else {
-        workspace_dir.to_path_buf()
-    }
-}
-
 pub async fn execute_tool(
     app: &AppHandle,
     name: &str,
     args_str: &str,
-    skill_dir: Option<PathBuf>,
     workspace_dir: PathBuf,
     config: &crate::AppConfig,
     // Allowlist of executable names from the active skill (empty = unrestricted).
@@ -336,10 +324,9 @@ pub async fn execute_tool(
             }
 
             let _ = app.emit("chat-token", format!("⚙️ *Running:*\n```\n{}\n```\n\n", command));
-            let cwd = resolve_workspace_root(&workspace_dir, skill_dir.clone());
             tokio::time::timeout(
                 std::time::Duration::from_secs(30),
-                run_command("direct".to_string(), command, Some(cwd)),
+                run_command("direct".to_string(), command, Some(workspace_dir.clone())),
             )
             .await
             .unwrap_or_else(|_| Ok("Command timed out after 30 seconds.".to_string()))
@@ -377,10 +364,9 @@ pub async fn execute_tool(
             }
 
             let _ = app.emit("chat-token", format!("⚙️ *Running {}:*\n```{}\n{}\n```\n\n", shell_type, shell_type, code));
-            let cwd = resolve_workspace_root(&workspace_dir, skill_dir.clone());
             tokio::time::timeout(
                 std::time::Duration::from_secs(30),
-                run_command(shell_type, code, Some(cwd)),
+                run_command(shell_type, code, Some(workspace_dir.clone())),
             )
             .await
             .unwrap_or_else(|_| Ok("Command timed out after 30 seconds.".to_string()))
@@ -389,8 +375,7 @@ pub async fn execute_tool(
         "file_actions" => {
             let action = args["action"].as_str().unwrap_or("");
             let path_str = args["path"].as_str().unwrap_or("");
-            // Use skill directory as root when running in a skill context (same as run_cmd/run_shell).
-            let root_dir = resolve_workspace_root(&workspace_dir, skill_dir.clone());
+            let root_dir = workspace_dir.clone();
             match action {
                 "read" => {
                     let _ = app.emit("chat-token", format!("📄 *Reading {}*\n\n", path_str));

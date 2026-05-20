@@ -2,7 +2,6 @@ use futures_util::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, State};
 
@@ -164,7 +163,6 @@ pub async fn chat_completion(
     );
 
     let mut all_messages: Vec<Value> = vec![];
-    let mut skill_dir_path: Option<PathBuf> = None;
     let mut skill_allowed_commands: Vec<String> = Vec::new();
 
     // 1. Determine which skills have already been loaded in this session
@@ -199,9 +197,8 @@ pub async fn chat_completion(
             } else { None }
         } else { None };
 
-        if let Some((skill, spath)) = skill_opt {
-            if skill_dir_path.is_none() {
-                skill_dir_path = Some(spath);
+        if let Some((skill, _spath)) = skill_opt {
+            if skill_allowed_commands.is_empty() {
                 skill_allowed_commands = skill.allowed_commands.clone();
             }
 
@@ -237,17 +234,12 @@ pub async fn chat_completion(
     }
 
     if !loaded_skills_content.is_empty() {
-        let skill_root_display = skill_dir_path
-            .as_ref()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| {
-                let workspace_dir = state.workspace_dir.lock().unwrap().clone();
-                workspace_dir.display().to_string()
-            });
+        let workspace_dir = state.workspace_dir.lock().unwrap().clone();
+        let workspace_root_display = workspace_dir.display().to_string();
         let active_skills_context = format!(
             "INTERNAL CONTEXT - ACTIVE SKILLS (not a user request):\n\
 IMPORTANT SKILL PATH ISOLATION RULE:\n\
-- The skill root directory (absolute path on this machine) is: {skill_root_display}\n\
+- The workspace root directory (absolute path on this machine) is: {workspace_root_display}\n\
 - All file_actions paths MUST be relative to this root (e.g. \"src/foo.txt\" not an absolute path).\n\
 - Alternatively, you may supply the absolute path prefixed by the root above; the backend will strip the prefix automatically.\n\
 - Except for explicitly requested paths, you MUST NOT access any file or directory outside this root.\n\
@@ -265,7 +257,7 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
     let url = format!("{}/chat/completions", config.api_base_url.trim_end_matches('/'));
     let client = Client::new();
 
-    let mut tools_list = tools::get_all_tools(&config.selected_tools, skill_dir_path.as_deref());
+    let mut tools_list = tools::get_all_tools(&config.selected_tools);
     let active_model = model_override
         .map(|m| m.trim().to_string())
         .filter(|m| !m.is_empty())
@@ -532,7 +524,6 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                     &app,
                     name,
                     args,
-                    skill_dir_path.clone(),
                     workspace_dir,
                     &config,
                     &skill_allowed_commands,
