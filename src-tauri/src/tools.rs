@@ -146,8 +146,8 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["read", "write", "list", "patch", "rename", "move"],
-                            "description": "The file action to perform: read file content, write/overwrite a file, list directory entries, apply a unified diff patch, rename a file/directory, or move a file/directory."
+                            "enum": ["read", "write", "list", "mkdir", "patch", "rename", "move"],
+                            "description": "The file action to perform: read file content, write/overwrite a file, list directory entries, recursively create directories, apply a unified diff patch, rename a file/directory, or move a file/directory."
                         },
                         "path": {
                             "type": "string",
@@ -611,6 +611,21 @@ pub async fn execute_tool(
             );
             
             if engine == "neo4j" {
+                "mkdir" => {
+                    let _ = app.emit("chat-token", format!("📁 *Creating directory {}*\n\n", path_str));
+                    match resolve_safe_path_with_roots(&root_dir, active_skill_roots, path_str, false) {
+                        Ok((p, _)) => {
+                            if p.exists() && p.is_file() {
+                                return format!("Error: {} is an existing file", path_str);
+                            }
+                            match fs::create_dir_all(&p) {
+                                Ok(_) => format!("Successfully created directory {}", path_str),
+                                Err(e) => format!("Error creating directory: {}", e),
+                            }
+                        }
+                        Err(e) => format!("Error: {}", e),
+                    }
+                }
                 use crate::neo4j_db::{KnowledgeGraph, Neo4jRepo};
                 let uri = config.neo4j_uri.as_deref().unwrap_or("bolt://localhost:7687");
                 let user = config.neo4j_user.as_deref().unwrap_or("neo4j");
