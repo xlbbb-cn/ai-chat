@@ -121,8 +121,8 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
                     "properties": {
                         "type": {
                             "type": "string",
-                            "enum": ["powershell", "cmd", "bash"],
-                            "description": "Shell to use. On Windows prefer 'powershell' or 'cmd'; on Linux/macOS use 'bash'."
+                            "enum": ["powershell",  "bash"],
+                            "description": "Shell to use. On Windows prefer 'powershell'; on Linux/macOS use 'bash'."
                         },
                         "code": {
                             "type": "string",
@@ -280,37 +280,55 @@ fn resolve_safe_path_with_roots(
     require_exists: bool,
 ) -> Result<(PathBuf, PathBuf), String> {
     let roots = build_candidate_roots(primary_root, extra_roots);
-    let is_absolute = Path::new(input_path).is_absolute();
 
-    // Relative paths prefer the primary root for backward compatibility.
-    if !is_absolute {
-        let preferred = resolve_safe_path(primary_root, input_path)?;
-        if preferred.exists() {
-            return Ok((preferred, primary_root.to_path_buf()));
-        }
-    }
-
-    for root in roots {
-        if !is_absolute && root == primary_root {
-            continue;
-        }
-        if let Ok(resolved) = resolve_safe_path(&root, input_path) {
-            if !require_exists || resolved.exists() {
-                return Ok((resolved, root));
+    // 1. Try to find the exact existing file in ANY root
+    for root in &roots {
+        if let Ok(resolved) = resolve_safe_path(root, input_path) {
+            if resolved.exists() {
+                return Ok((resolved, root.clone()));
             }
         }
     }
 
     if require_exists {
-        Err(format!(
+        return Err(format!(
             "Path '{}' was not found under workspace root '{}' or any active skill root",
             input_path,
             primary_root.display()
-        ))
-    } else {
-        resolve_safe_path(primary_root, input_path)
-            .map(|p| (p, primary_root.to_path_buf()))
+        ));
     }
+
+    // 2. File doesn't exist, and require_exists is false.
+    let is_absolute = Path::new(input_path).is_absolute();
+    if is_absolute {
+        for root in &roots {
+            if let Ok(resolved) = resolve_safe_path(root, input_path) {
+                return Ok((resolved, root.clone()));
+            }
+        }
+        return Err(format!("Absolute path '{}' does not belong to workspace or any active skill root", input_path));
+    }
+
+    // 3. For relative paths, see if the target's parent directory already exists in a skill root.
+    // This allows creating new files in existing skill subdirectories.
+    if let Some(parent) = Path::new(input_path).parent() {
+        if !parent.as_os_str().is_empty() {
+            // Check skill roots (skip the primary root at index 0 initially)
+            for root in roots.iter().skip(1) {
+                if let Ok(resolved) = resolve_safe_path(root, input_path) {
+                    if let Some(resolved_parent) = resolved.parent() {
+                        if resolved_parent.exists() {
+                            return Ok((resolved, root.clone()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. Default to primary workspace root for new relative paths
+    resolve_safe_path(primary_root, input_path)
+        .map(|p| (p, primary_root.to_path_buf()))
 }
 
 pub async fn execute_tool(
