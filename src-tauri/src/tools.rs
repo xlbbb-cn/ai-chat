@@ -84,11 +84,11 @@ fn split_command_line(code: &str) -> Vec<String> {
     args
 }
 
-pub fn get_all_tools(selected_tools: &[String], allow_commands: bool, skill_dir: Option<&Path>) -> Vec<Value> {
+pub fn get_all_tools(selected_tools: &[String], skill_dir: Option<&Path>) -> Vec<Value> {
     let mut tools = vec![];
 
-    let want_run_cmd = allow_commands || selected_tools.iter().any(|t| t == "run_cmd");
-    let want_run_shell = allow_commands || selected_tools.iter().any(|t| t == "run_shell");
+    let want_run_cmd = selected_tools.iter().any(|t| t == "run_cmd");
+    let want_run_shell = selected_tools.iter().any(|t| t == "run_shell");
 
     if want_run_cmd {
         tools.push(json!({

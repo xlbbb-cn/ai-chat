@@ -163,7 +163,6 @@ pub async fn chat_completion(
         format!("chat_completion started: session_id={}, model={}", session_id, config.model),
     );
 
-    let mut allow_commands = false;
     let mut all_messages: Vec<Value> = vec![];
     let mut skill_dir_path: Option<PathBuf> = None;
     let mut skill_allowed_commands: Vec<String> = Vec::new();
@@ -254,7 +253,7 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
     let url = format!("{}/chat/completions", config.api_base_url.trim_end_matches('/'));
     let client = Client::new();
 
-    let mut tools_list = tools::get_all_tools(&config.selected_tools, allow_commands, skill_dir_path.as_deref());
+    let mut tools_list = tools::get_all_tools(&config.selected_tools, skill_dir_path.as_deref());
     let active_model = model_override
         .map(|m| m.trim().to_string())
         .filter(|m| !m.is_empty())
