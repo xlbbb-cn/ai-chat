@@ -61,6 +61,16 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const preventContextMenu = (event: MouseEvent) => {
+      event.preventDefault();
+    };
+    document.addEventListener("contextmenu", preventContextMenu);
+    return () => {
+      document.removeEventListener("contextmenu", preventContextMenu);
+    };
+  }, []);
+
+  useEffect(() => {
     const unlisten = listen("request-set-workspace-dir", () => {
       setSidebar("settings");
     });

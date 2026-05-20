@@ -136,21 +136,27 @@ export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
                 >
                   <div className="skill-content">
                     <div className="skill-title-row">
-                      <input
-                        className="skill-checkbox"
-                        type="checkbox"
-                        checked={isActive}
-                        readOnly
-                      />
+                      <label className="toggle-switch">
+                        <input
+                          type="checkbox"
+                          checked={isActive}
+                          readOnly
+                        />
+                        <span className="toggle-switch-slider" />
+                      </label>
                       <span className="skill-name" title={skill.name}>
                         {skill.name}
                       </span>
                     </div>
                     <span className="skill-desc" title={skill.description}>{skill.description}</span>
-                  </div>
-                  <div className="skill-actions" onClick={(e) => e.stopPropagation()}>
-                    <button onClick={() => startEdit(skill)}>Edit</button>
-                    <button className="danger" onClick={() => handleDelete(skill.name)}>Delete</button>
+                    <div className="skill-actions-bottom" onClick={(e) => e.stopPropagation()}>
+                      <button className="mcp-action-btn" onClick={() => startEdit(skill)} title="Edit">
+                        ✎
+                      </button>
+                      <button className="mcp-action-btn danger" onClick={() => handleDelete(skill.name)} title="Delete">
+                        ✕
+                      </button>
+                    </div>
                   </div>
                 </div>
               );

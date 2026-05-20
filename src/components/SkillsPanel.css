@@ -77,13 +77,52 @@
 .skill-title-row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
   min-width: 0;
 }
 
-.skill-checkbox {
-  flex: 0 0 auto;
-  pointer-events: none;
+.skill-title-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.skill-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.skill-actions-bottom {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.skill-actions-bottom button,
+.skill-actions button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: #5f6368;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+
+.skill-actions-bottom button:hover,
+.skill-actions button:hover {
+  background: #f1f3f4;
+  color: #171a20;
+}
+
+.skill-actions-bottom button.danger:hover,
+.skill-actions button.danger:hover {
+  background: #fef2f2;
+  color: #dc2626;
 }
 
 .skill-name {

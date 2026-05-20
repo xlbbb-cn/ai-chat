@@ -218,6 +218,57 @@ body {
   border: 1px solid #EEEEEE;
 }
 
+.toggle-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.toggle-switch-slider {
+  width: 32px;
+  height: 18px;
+  background: #d1d5db;
+  border-radius: 9px;
+  transition: background 0.2s;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.toggle-switch-slider::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.2s;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.toggle-switch input:checked+.toggle-switch-slider {
+  background: #2563eb;
+}
+
+.toggle-switch input:checked+.toggle-switch-slider::after {
+  transform: translateX(14px);
+}
+
+.toggle-switch input:disabled+.toggle-switch-slider {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .attachment-name {
   max-width: 150px;
   white-space: nowrap;

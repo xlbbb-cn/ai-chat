@@ -95,11 +95,14 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                             className={`tool-item ${selectedTools.includes(tool.id) ? "active" : ""}`}
                             onClick={() => toggleTool(tool.id)}
                         >
-                            <input
-                                type="checkbox"
-                                checked={selectedTools.includes(tool.id)}
-                                onChange={() => { }}
-                            />
+                            <label className="toggle-switch">
+                                <input
+                                    type="checkbox"
+                                    checked={selectedTools.includes(tool.id)}
+                                    onChange={() => { }}
+                                />
+                                <span className="toggle-switch-slider" />
+                            </label>
                             <div className="tool-info">
                                 <span className="tool-name">{tool.name}</span>
                             </div>
