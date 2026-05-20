@@ -164,6 +164,7 @@ pub async fn chat_completion(
 
     let mut all_messages: Vec<Value> = vec![];
     let mut skill_allowed_commands: Vec<String> = Vec::new();
+    let mut active_skill_roots: Vec<std::path::PathBuf> = Vec::new();
 
     // 1. Determine which skills have already been loaded in this session
     // We scan the assistant messages for "🧠 *Loading skill: xxx*"
@@ -197,12 +198,15 @@ pub async fn chat_completion(
             } else { None }
         } else { None };
 
-        if let Some((skill, _spath)) = skill_opt {
+        if let Some((skill, spath)) = skill_opt {
             if skill_allowed_commands.is_empty() {
                 skill_allowed_commands = skill.allowed_commands.clone();
             }
 
             if activated_skills.contains(&skill.name) {
+                if !active_skill_roots.iter().any(|p| p == &spath) {
+                    active_skill_roots.push(spath.clone());
+                }
                 let cmd_constraint = if skill.allowed_commands.is_empty() {
                     String::new()
                 } else {
@@ -236,14 +240,26 @@ pub async fn chat_completion(
     if !loaded_skills_content.is_empty() {
         let workspace_dir = state.workspace_dir.lock().unwrap().clone();
         let workspace_root_display = workspace_dir.display().to_string();
+        let active_skill_roots_display = if active_skill_roots.is_empty() {
+            "(none)".to_string()
+        } else {
+            active_skill_roots
+                .iter()
+                .map(|p| format!("- {}", p.display()))
+                .collect::<Vec<String>>()
+                .join("\n")
+        };
         let active_skills_context = format!(
             "INTERNAL CONTEXT - ACTIVE SKILLS (not a user request):\n\
 IMPORTANT SKILL PATH ISOLATION RULE:\n\
 - The workspace root directory (absolute path on this machine) is: {workspace_root_display}\n\
-- All file_actions paths MUST be relative to this root (e.g. \"src/foo.txt\" not an absolute path).\n\
-- Alternatively, you may supply the absolute path prefixed by the root above; the backend will strip the prefix automatically.\n\
-- Except for explicitly requested paths, you MUST NOT access any file or directory outside this root.\n\
-- Operating on paths outside this root is STRICTLY FORBIDDEN.\n\n\
+- Active skill root directories are:\n\
+{active_skill_roots_display}\n\
+- For workspace files, use paths relative to the workspace root (e.g. \"src/foo.txt\").\n\
+- For skill reference files (e.g. \"ref/index.md\"), you may use a relative path; backend resolves existing files under workspace root first, then active skill roots.\n\
+- You may also provide an absolute path under the workspace root or any active skill root; backend will strip the matched root prefix automatically.\n\
+- Except for explicitly requested paths, you MUST NOT access any file or directory outside workspace root or active skill roots.\n\
+- Operating on paths outside these roots is STRICTLY FORBIDDEN.\n\n\
 The following skills are CURRENTLY ACTIVE and their detailed instructions are provided below:{}",
             loaded_skills_content
         );
@@ -454,15 +470,17 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                 let skill_name = args_json["skill_name"].as_str().unwrap_or("");
 
                 let skill_opt = if let Ok(skill) = skills::load_skill_by_name(&state.skills_dir, skill_name) {
-                    Some(skill)
+                    Some((skill, state.skills_dir.join(skill_name)))
                 } else if let Some(home_dir) = dirs::home_dir() {
                     let user_skills_dir = home_dir.join(".skills");
-                    skills::load_skill_by_name(&user_skills_dir, skill_name).ok()
+                    skills::load_skill_by_name(&user_skills_dir, skill_name)
+                        .ok()
+                        .map(|skill| (skill, user_skills_dir.join(skill_name)))
                 } else {
                     None
                 };
 
-                if let Some(skill) = skill_opt {
+                if let Some((skill, skill_root)) = skill_opt {
                     let dyn_marker = format!("--- Skill (Dynamically Loaded): {} ---", skill.name);
                     let static_marker = format!("--- Skill: {} ---", skill.name);
 
@@ -479,6 +497,9 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                     });
 
                     if !already_loaded {
+                        if !active_skill_roots.iter().any(|p| p == &skill_root) {
+                            active_skill_roots.push(skill_root);
+                        }
                         let cmd_constraint = if skill.allowed_commands.is_empty() {
                             String::new()
                         } else {
@@ -527,6 +548,7 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                     workspace_dir,
                     &config,
                     &skill_allowed_commands,
+                    &active_skill_roots,
                 )
                 .await
             };

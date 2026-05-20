@@ -140,7 +140,7 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "file_actions",
-                "description": "Perform file operations (read, write, list) inside the current workspace root.",
+                "description": "Perform file operations (read, write, list) inside the current workspace root. In skill context, existing paths can also resolve relative to active skill roots.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -263,6 +263,56 @@ fn resolve_safe_path(root_dir: &Path, rel_path: &str) -> Result<PathBuf, String>
     }
 }
 
+fn build_candidate_roots(primary_root: &Path, extra_roots: &[PathBuf]) -> Vec<PathBuf> {
+    let mut roots = vec![primary_root.to_path_buf()];
+    for root in extra_roots {
+        if !roots.iter().any(|r| r == root) {
+            roots.push(root.clone());
+        }
+    }
+    roots
+}
+
+fn resolve_safe_path_with_roots(
+    primary_root: &Path,
+    extra_roots: &[PathBuf],
+    input_path: &str,
+    require_exists: bool,
+) -> Result<(PathBuf, PathBuf), String> {
+    let roots = build_candidate_roots(primary_root, extra_roots);
+    let is_absolute = Path::new(input_path).is_absolute();
+
+    // Relative paths prefer the primary root for backward compatibility.
+    if !is_absolute {
+        let preferred = resolve_safe_path(primary_root, input_path)?;
+        if !require_exists || preferred.exists() {
+            return Ok((preferred, primary_root.to_path_buf()));
+        }
+    }
+
+    for root in roots {
+        if !is_absolute && root == primary_root {
+            continue;
+        }
+        if let Ok(resolved) = resolve_safe_path(&root, input_path) {
+            if !require_exists || resolved.exists() {
+                return Ok((resolved, root));
+            }
+        }
+    }
+
+    if require_exists {
+        Err(format!(
+            "Path '{}' was not found under workspace root '{}' or any active skill root",
+            input_path,
+            primary_root.display()
+        ))
+    } else {
+        resolve_safe_path(primary_root, input_path)
+            .map(|p| (p, primary_root.to_path_buf()))
+    }
+}
+
 pub async fn execute_tool(
     app: &AppHandle,
     name: &str,
@@ -271,11 +321,17 @@ pub async fn execute_tool(
     config: &crate::AppConfig,
     // Allowlist of executable names from the active skill (empty = unrestricted).
     allowed_commands: &[String],
+    // Root directories of active skills for resolving skill-local references.
+    active_skill_roots: &[PathBuf],
 ) -> String {
     let args: Value = serde_json::from_str(args_str).unwrap_or_default();
     match name {
         "run_cmd" => {
             let command = args["command"].as_str().unwrap_or("").to_string();
+            let command_cwd = active_skill_roots
+                .first()
+                .cloned()
+                .unwrap_or_else(|| workspace_dir.clone());
 
             // ── Allowed-commands enforcement (skill context) ──────────────────
             if !allowed_commands.is_empty() {
@@ -326,7 +382,7 @@ pub async fn execute_tool(
             let _ = app.emit("chat-token", format!("⚙️ *Running:*\n```\n{}\n```\n\n", command));
             tokio::time::timeout(
                 std::time::Duration::from_secs(30),
-                run_command("direct".to_string(), command, Some(workspace_dir.clone())),
+                run_command("direct".to_string(), command, Some(command_cwd)),
             )
             .await
             .unwrap_or_else(|_| Ok("Command timed out after 30 seconds.".to_string()))
@@ -335,6 +391,10 @@ pub async fn execute_tool(
         "run_shell" => {
             let shell_type = args["type"].as_str().unwrap_or("powershell").to_string();
             let code = args["code"].as_str().unwrap_or("").to_string();
+            let command_cwd = active_skill_roots
+                .first()
+                .cloned()
+                .unwrap_or_else(|| workspace_dir.clone());
 
             // ── Dangerous command check → ask for user confirmation ───────────
             if let Some(reason) = is_dangerous(&shell_type, &code) {
@@ -366,7 +426,7 @@ pub async fn execute_tool(
             let _ = app.emit("chat-token", format!("⚙️ *Running {}:*\n```{}\n{}\n```\n\n", shell_type, shell_type, code));
             tokio::time::timeout(
                 std::time::Duration::from_secs(30),
-                run_command(shell_type, code, Some(workspace_dir.clone())),
+                run_command(shell_type, code, Some(command_cwd)),
             )
             .await
             .unwrap_or_else(|_| Ok("Command timed out after 30 seconds.".to_string()))
@@ -381,8 +441,8 @@ pub async fn execute_tool(
                     let _ = app.emit("chat-token", format!("📄 *Reading {}*\n\n", path_str));
                     let start_line = args["start_line"].as_i64();
                     let end_line = args["end_line"].as_i64();
-                    match resolve_safe_path(&root_dir, path_str) {
-                        Ok(p) => {
+                    match resolve_safe_path_with_roots(&root_dir, active_skill_roots, path_str, true) {
+                        Ok((p, _)) => {
                             match fs::metadata(&p) {
                                 Ok(metadata) if metadata.is_dir() => {
                                     return format!("Error: {} is a directory", path_str);
@@ -442,8 +502,8 @@ pub async fn execute_tool(
                 "write" => {
                     let content_str = args["content"].as_str().unwrap_or("");
                     let _ = app.emit("chat-token", format!("💾 *Writing {}*\n\n", path_str));
-                    match resolve_safe_path(&root_dir, path_str) {
-                        Ok(p) => {
+                    match resolve_safe_path_with_roots(&root_dir, active_skill_roots, path_str, false) {
+                        Ok((p, _)) => {
                             if let Some(parent) = p.parent() {
                                 let _ = fs::create_dir_all(parent);
                             }
@@ -457,8 +517,8 @@ pub async fn execute_tool(
                 }
                 "list" => {
                     let _ = app.emit("chat-token", format!("📂 *Listing {}*\n\n", path_str));
-                    match resolve_safe_path(&root_dir, path_str) {
-                        Ok(p) => {
+                    match resolve_safe_path_with_roots(&root_dir, active_skill_roots, path_str, true) {
+                        Ok((p, _)) => {
                             match fs::metadata(&p) {
                                 Ok(metadata) => {
                                     if metadata.is_file() {
@@ -501,9 +561,9 @@ pub async fn execute_tool(
                     if new_path.is_empty() {
                         return "Error: new_path is required for move/rename.".to_string();
                     }
-                    match resolve_safe_path(&root_dir, path_str) {
-                        Ok(src) => match resolve_safe_path(&root_dir, new_path) {
-                            Ok(dst) => {
+                    match resolve_safe_path_with_roots(&root_dir, active_skill_roots, path_str, true) {
+                        Ok((src, src_root)) => match resolve_safe_path_with_roots(&src_root, active_skill_roots, new_path, false) {
+                            Ok((dst, _)) => {
                                 if let Some(parent) = dst.parent() {
                                     if let Err(e) = fs::create_dir_all(parent) {
                                         return format!("Error creating destination directory: {}", e);
@@ -522,8 +582,8 @@ pub async fn execute_tool(
                 "patch" => {
                     let patch_str = args["patch"].as_str().unwrap_or("");
                     let _ = app.emit("chat-token", format!("🩹 *Patching {}*\n\n", path_str));
-                    match resolve_safe_path(&root_dir, path_str) {
-                        Ok(p) => match fs::read_to_string(&p) {
+                    match resolve_safe_path_with_roots(&root_dir, active_skill_roots, path_str, true) {
+                        Ok((p, _)) => match fs::read_to_string(&p) {
                             Ok(original) => match diffy::Patch::from_str(patch_str) {
                                 Ok(patch) => match diffy::apply(&original, &patch) {
                                     Ok(patched) => match fs::write(&p, &patched) {
