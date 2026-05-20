@@ -285,7 +285,7 @@ fn resolve_safe_path_with_roots(
     // Relative paths prefer the primary root for backward compatibility.
     if !is_absolute {
         let preferred = resolve_safe_path(primary_root, input_path)?;
-        if !require_exists || preferred.exists() {
+        if preferred.exists() {
             return Ok((preferred, primary_root.to_path_buf()));
         }
     }
@@ -599,7 +599,7 @@ pub async fn execute_tool(
                         Err(e) => format!("Error: {}", e),
                     }
                 }
-                                "mkdir" => {
+                "mkdir" => {
                     let _ = app.emit("chat-token", format!("📁 *Creating directory {}*\n\n", path_str));
                     match resolve_safe_path_with_roots(&root_dir, active_skill_roots, path_str, false) {
                         Ok((p, _)) => {
@@ -660,11 +660,6 @@ pub async fn run_command(cmd_type: String, code: String, cwd: Option<PathBuf>) -
             if parts.len() > 1 {
                 c.args(&parts[1..]);
             }
-            c
-        }
-        "python" | "python3" => {
-            let mut c = tokio::process::Command::new(if cfg!(windows) { "python" } else { "python3" });
-            c.arg("-c").arg(&code);
             c
         }
         "bash" | "sh" => {
