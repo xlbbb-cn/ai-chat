@@ -140,14 +140,14 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "file_actions",
-                "description": "Perform file operations (read, write, list) inside the current workspace root. In skill context, existing paths can also resolve relative to active skill roots.",
+                "description": "Perform file operations (read, write, list, mkdir, rename/move, patch, delete) inside the current workspace root. In skill context, existing paths can also resolve relative to active skill roots.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["read", "write", "list", "mkdir", "patch", "rename", "move"],
-                            "description": "The file action to perform: read file content, write/overwrite a file, list directory entries, recursively create directories, apply a unified diff patch, rename a file/directory, or move a file/directory."
+                            "enum": ["read", "write", "list", "mkdir", "patch", "rename", "move", "delete"],
+                            "description": "The file action to perform: read file content, write/overwrite a file, list directory entries, recursively create directories, apply a unified diff patch, rename a file/directory, move a file/directory, or delete a file/directory."
                         },
                         "path": {
                             "type": "string",
@@ -627,6 +627,25 @@ pub async fn execute_tool(
                             match fs::create_dir_all(&p) {
                                 Ok(_) => format!("Successfully created directory {}", path_str),
                                 Err(e) => format!("Error creating directory: {}", e),
+                            }
+                        }
+                        Err(e) => format!("Error: {}", e),
+                    }
+                }
+                "delete" => {
+                    let _ = app.emit("chat-token", format!("🗑️ *Deleting {}*\n\n", path_str));
+                    match resolve_safe_path_with_roots(&root_dir, active_skill_roots, path_str, true) {
+                        Ok((p, _)) => {
+                            if p.is_dir() {
+                                match fs::remove_dir_all(&p) {
+                                    Ok(_) => format!("Successfully deleted directory {}", path_str),
+                                    Err(e) => format!("Error deleting directory: {}", e),
+                                }
+                            } else {
+                                match fs::remove_file(&p) {
+                                    Ok(_) => format!("Successfully deleted file {}", path_str),
+                                    Err(e) => format!("Error deleting file: {}", e),
+                                }
                             }
                         }
                         Err(e) => format!("Error: {}", e),
