@@ -13,6 +13,17 @@ fn log_event(state: &State<'_, AppState>, level: &str, message: String) {
     }
 }
 
+fn merge_allowed_commands(allowed_commands: &mut Vec<String>, incoming: &[String]) {
+    for command in incoming {
+        if !allowed_commands
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(command))
+        {
+            allowed_commands.push(command.clone());
+        }
+    }
+}
+
 // ─── Chat ────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -199,9 +210,7 @@ pub async fn chat_completion(
         } else { None };
 
         if let Some((skill, spath)) = skill_opt {
-            if skill_allowed_commands.is_empty() {
-                skill_allowed_commands = skill.allowed_commands.clone();
-            }
+            merge_allowed_commands(&mut skill_allowed_commands, &skill.allowed_commands);
 
             if activated_skills.contains(&skill.name) {
                 if !active_skill_roots.iter().any(|p| p == &spath) {
@@ -497,6 +506,7 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                     });
 
                     if !already_loaded {
+                        merge_allowed_commands(&mut skill_allowed_commands, &skill.allowed_commands);
                         if !active_skill_roots.iter().any(|p| p == &skill_root) {
                             active_skill_roots.push(skill_root);
                         }
