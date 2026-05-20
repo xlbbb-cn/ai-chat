@@ -30,6 +30,11 @@ export default function App() {
   const [activeToolCount, setActiveToolCount] = useState(0);
   const [activeMcpCount, setActiveMcpCount] = useState(0);
   const [skillsLoadedFromConfig, setSkillsLoadedFromConfig] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    reason: string;
+    cmd_type: string;
+    code: string;
+  } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -70,16 +75,19 @@ export default function App() {
       "confirm-required",
       (e) => {
         const { reason, cmd_type, code } = e.payload;
-        const preview = code.length > 200 ? code.slice(0, 200) + "…" : code;
-        const confirmed = window.confirm(
-          `⚠️ Dangerous command detected\n\nReason: ${reason}\nType: ${cmd_type}\n\n${preview}\n\nAllow execution?`
+        setConfirmDialog((current) =>
+          current ?? { reason, cmd_type, code }
         );
-        confirmCommand(confirmed).catch(console.error);
       }
     );
     return () => {
       unlisten.then((fn) => fn());
     };
+  }, []);
+
+  const respondToConfirm = useCallback((confirmed: boolean) => {
+    confirmCommand(confirmed).catch(console.error);
+    setConfirmDialog(null);
   }, []);
 
   useEffect(() => {
@@ -226,6 +234,47 @@ export default function App() {
     setSessionId(crypto.randomUUID());
   }
 
+  const renderConfirmDialog = () => {
+    if (!confirmDialog) {
+      return null;
+    }
+    const preview =
+      confirmDialog.code.length > 400
+        ? confirmDialog.code.slice(0, 400) + "…"
+        : confirmDialog.code;
+
+    return (
+      <div className="confirm-overlay">
+        <div className="confirm-dialog">
+          <h2>⚠️ Dangerous command detected</h2>
+          <p>
+            <strong>Reason:</strong> {confirmDialog.reason}
+          </p>
+          <p>
+            <strong>Type:</strong> {confirmDialog.cmd_type}
+          </p>
+          <div className="confirm-dialog-preview">
+            <pre>{preview}</pre>
+          </div>
+          <div className="confirm-dialog-buttons">
+            <button
+              className="confirm-dialog-button cancel"
+              onClick={() => respondToConfirm(false)}
+            >
+              Deny
+            </button>
+            <button
+              className="confirm-dialog-button confirm"
+              onClick={() => respondToConfirm(true)}
+            >
+              Allow
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   async function stopStreaming() {
     try {
       await stopChatCompletion();
@@ -253,6 +302,7 @@ export default function App() {
 
   return (
     <div className="app-layout">
+      {renderConfirmDialog()}
       {/* Sidebar */}
       {sidebar && (
         <aside className="sidebar">
