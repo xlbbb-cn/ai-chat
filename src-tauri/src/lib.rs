@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use rusqlite::Connection;
 use tauri::{menu::{Menu, MenuItem, Submenu}, AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 mod db;
 mod logger;
@@ -21,6 +21,7 @@ use logger::{AppLogger, LoggerOutput};
 const OPEN_APP_DATA_DIR_MENU_ID: &str = "open-app-data-dir";
 const SAVE_PROFILE_MENU_ID: &str = "save-profile";
 const RESTORE_PROFILE_MENU_ID: &str = "restore-profile";
+const ABOUT_MENU_ID: &str = "about";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ProfileData {
@@ -306,6 +307,14 @@ pub fn run() {
                         }
                     }
                 }
+            } else if event.id() == ABOUT_MENU_ID {
+                app.dialog()
+                    .message(format!(
+                        "About AI Chat\n\nAI Chat\nOpenAI-compatible desktop assistant\nVersion {}",
+                        env!("CARGO_PKG_VERSION")
+                    ))
+                    .buttons(MessageDialogButtons::Ok)
+                    .show(|_| {});
             }
         })
         .setup(|app| {
@@ -346,7 +355,17 @@ pub fn run() {
                 &[&save_profile_item, &restore_profile_item, &open_app_data_dir_item],
             )
                 .expect("failed to create app menu");
-            let menu = Menu::with_items(app, &[&file_menu]).expect("failed to create app menu");
+            let about_item = MenuItem::with_id(
+                app,
+                ABOUT_MENU_ID,
+                "About",
+                true,
+                None::<&str>,
+            )
+            .expect("failed to create about menu item");
+            let help_menu = Submenu::with_items(app, "Help", true, &[&about_item])
+                .expect("failed to create help menu");
+            let menu = Menu::with_items(app, &[&file_menu, &help_menu]).expect("failed to create app menu");
             app.set_menu(menu).expect("failed to set app menu");
             
             let skills_dir = data_dir.join("skills");
