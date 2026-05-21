@@ -78,6 +78,7 @@ export function MonitorPanel({ sessionId, onClose }: Props) {
     };
 
     const tryParseJson = (str: string): string => {
+        if (!str) return "";
         try {
             const obj = JSON.parse(str);
             return JSON.stringify(obj, null, 2);

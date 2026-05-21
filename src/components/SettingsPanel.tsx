@@ -237,24 +237,7 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
           </label>
         </section>
 
-        <section className="settings-group">
-          <div className="settings-group-title">Runtime</div>
-          <label className="settings-field">
-            Logger Output (debug build only)
-            <select
-              value={config.logger_output ?? "file"}
-              onChange={(e) =>
-                setConfig((prev) => ({
-                  ...prev,
-                  logger_output: e.target.value as "file" | "println",
-                }))
-              }
-            >
-              <option value="file">Write to app.log</option>
-              <option value="println">Print to terminal (println)</option>
-            </select>
-          </label>
-        </section>
+
 
         <section className="settings-group">
           <div
@@ -355,6 +338,29 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
             </div>
           )}
         </section>
+        <section className="settings-group">
+          <div className="settings-group-title">Runtime & DEBUG</div>
+          <label className="settings-field">
+            Logger Output (debug build only)
+            <select
+              value={config.logger_output ?? "file"}
+              onChange={(e) =>
+                setConfig((prev) => ({
+                  ...prev,
+                  logger_output: e.target.value as "file" | "println",
+                }))
+              }
+            >
+              <option value="file">Write to app.log</option>
+              <option value="println">Print to terminal (println)</option>
+            </select>
+            {sessionId && (
+              <button className="btn-secondary" onClick={() => setShowMonitor(true)}>
+                🔍 Launch Monitor
+              </button>
+            )}
+          </label>
+        </section>
       </div>
 
       {isMessageEditorOpen && (
@@ -402,11 +408,7 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
         <button className="btn-primary" onClick={handleSave} disabled={saving}>
           {saving ? "Saving…" : saved ? "Saved ✓" : "Save"}
         </button>
-        {sessionId && (
-          <button className="btn-secondary" onClick={() => setShowMonitor(true)}>
-            🔍 Launch Monitor
-          </button>
-        )}
+
       </div>
 
       {showMonitor && (

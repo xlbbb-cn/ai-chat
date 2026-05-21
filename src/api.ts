@@ -247,7 +247,7 @@ export interface InteractionLogDetail {
 }
 
 export async function listInteractions(sessionId: string): Promise<InteractionLogRecord[]> {
-  return invoke("list_interactions", { session_id: sessionId });
+  return invoke("list_interactions", { sessionId });
 }
 
 export async function getInteraction(id: number): Promise<InteractionLogDetail> {
@@ -255,5 +255,5 @@ export async function getInteraction(id: number): Promise<InteractionLogDetail> 
 }
 
 export async function clearInteractions(sessionId: string): Promise<void> {
-  return invoke("clear_interactions", { session_id: sessionId });
+  return invoke("clear_interactions", { sessionId });
 }
