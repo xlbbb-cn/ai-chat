@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { listSkills, saveSkill, deleteSkill } from "../api";
 import type { Skill } from "../types";
+import ReactMarkdown from "react-markdown";
 import "./SkillsPanel.css";
 
 interface Props {
@@ -20,6 +21,8 @@ export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [editing, setEditing] = useState<Skill | null>(null);
   const [originalName, setOriginalName] = useState<string | null>(null);
+  const [isPromptEditorOpen, setIsPromptEditorOpen] = useState(false);
+  const [promptDraft, setPromptDraft] = useState("");
 
   useEffect(() => {
     listSkills().then(setSkills).catch(console.error);
@@ -40,11 +43,38 @@ export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
     setSkills(updated);
     setEditing(null);
     setOriginalName(null);
+    setIsPromptEditorOpen(false);
   }
 
   function startEdit(skill: Skill) {
     setEditing({ ...skill });
     setOriginalName(skill.name);
+    setIsPromptEditorOpen(false);
+  }
+
+  function openPromptEditor() {
+    if (!editing) return;
+    setPromptDraft(editing.system_prompt ?? "");
+    setIsPromptEditorOpen(true);
+  }
+
+  function closePromptEditor() {
+    setIsPromptEditorOpen(false);
+  }
+
+  async function applyPromptEditor() {
+    if (!editing) return;
+    const updatedSkill: Skill = { ...editing, system_prompt: promptDraft };
+    setEditing(updatedSkill);
+
+    // Persist immediately for prompt-only editing when no rename operation is pending.
+    if (!originalName || originalName === updatedSkill.name) {
+      await saveSkill(updatedSkill);
+      const updated = await listSkills();
+      setSkills(updated);
+    }
+
+    setIsPromptEditorOpen(false);
   }
 
   async function handleDelete(name: string) {
@@ -79,7 +109,12 @@ export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
             />
           </label>
           <label>
-            System Prompt
+            <div className="field-title-row">
+              <span>System Prompt</span>
+              <button type="button" className="inline-edit-btn" onClick={openPromptEditor}>
+                Edit
+              </button>
+            </div>
             <textarea
               rows={8}
               value={editing.system_prompt}
@@ -118,10 +153,51 @@ export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
             <button className="btn-primary" onClick={handleSave} disabled={!editing.name.trim()}>
               Save
             </button>
-            <button className="btn-secondary" onClick={() => { setEditing(null); setOriginalName(null); }}>
+            <button className="btn-secondary" onClick={() => { setEditing(null); setOriginalName(null); setIsPromptEditorOpen(false); }}>
               Cancel
             </button>
           </div>
+
+          {isPromptEditorOpen && (
+            <div className="prompt-editor-overlay" role="dialog" aria-modal="true" aria-label="Edit system prompt">
+              <div className="prompt-editor-shell">
+                <div className="prompt-editor-header">
+                  <h3>System Prompt Editor</h3>
+                  <div className="prompt-editor-actions">
+                    <button type="button" className="btn-secondary" onClick={closePromptEditor}>
+                      Cancel
+                    </button>
+                    <button type="button" className="btn-primary" onClick={applyPromptEditor}>
+                      Done
+                    </button>
+                  </div>
+                </div>
+
+                <div className="prompt-editor-body">
+                  <div className="prompt-column">
+                    <span>Markdown</span>
+                    <textarea
+                      className="prompt-editor-textarea"
+                      value={promptDraft}
+                      onChange={(e) => setPromptDraft(e.target.value)}
+                      placeholder="Write your system prompt in Markdown..."
+                    />
+                  </div>
+
+                  <div className="prompt-column">
+                    <span>Preview</span>
+                    <div className="prompt-preview">
+                      {promptDraft.trim() ? (
+                        <ReactMarkdown>{promptDraft}</ReactMarkdown>
+                      ) : (
+                        <p className="prompt-preview-empty">Markdown preview will appear here.</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <>

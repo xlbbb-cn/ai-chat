@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { fetchModels, getConfig, getWorkspaceDir, saveConfig } from "../api";
 import type { AppConfig, ModelSettings } from "../types";
+import ReactMarkdown from "react-markdown";
 import "./SettingsPanel.css";
 
 interface Props {
@@ -41,6 +42,9 @@ export function SettingsPanel({ onClose, onConfigSaved }: Props) {
   const [manualModel, setManualModel] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(true);
   const [workspaceDirActual, setWorkspaceDirActual] = useState("");
+  const [isMessageEditorOpen, setIsMessageEditorOpen] = useState(false);
+  const [messageDraft, setMessageDraft] = useState("");
+  const [messageSaving, setMessageSaving] = useState(false);
 
   useEffect(() => {
     getWorkspaceDir().then(setWorkspaceDirActual).catch(console.error);
@@ -101,6 +105,37 @@ export function SettingsPanel({ onClose, onConfigSaved }: Props) {
     }
   }
 
+  function openMessageEditor() {
+    setMessageDraft(config.system_message ?? "");
+    setIsMessageEditorOpen(true);
+  }
+
+  function closeMessageEditor() {
+    setIsMessageEditorOpen(false);
+  }
+
+  async function applyMessageEditor() {
+    const normalized: AppConfig = {
+      ...config,
+      system_message: messageDraft,
+      model_catalog: modelCatalog,
+    };
+
+    setMessageSaving(true);
+    try {
+      await saveConfig(normalized);
+      setConfig(normalized);
+      setSaved(true);
+      onConfigSaved?.(normalized);
+      setTimeout(() => setSaved(false), 2000);
+      setIsMessageEditorOpen(false);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setMessageSaving(false);
+    }
+  }
+
   return (
     <div className="settings-panel">
       <div className="settings-header">
@@ -109,201 +144,256 @@ export function SettingsPanel({ onClose, onConfigSaved }: Props) {
       </div>
 
       <div className="settings-body">
-
-        <div className="settings-section-title">Workspace</div>
-
-        <label>
-          Workspace Directory
-          <input
-            type="text"
-            value={config.workspace_dir ?? ""}
-            onChange={(e) =>
-              setConfig({ ...config, workspace_dir: e.target.value || undefined })
-            }
-            placeholder={workspaceDirActual || "Default workspace directory"}
-          />
-        </label>
-
-        <div className="settings-section-title">API</div>
-
-        <label>
-          Base URL
-          <input
-            type="text"
-            value={config.api_base_url}
-            onChange={(e) => setConfig({ ...config, api_base_url: e.target.value })}
-            placeholder="https://api.openai.com/v1"
-          />
-        </label>
-
-        <label>
-          API Key
-          <input
-            type="password"
-            value={config.api_key}
-            onChange={(e) => setConfig({ ...config, api_key: e.target.value })}
-            placeholder="sk-..."
-          />
-        </label>
-
-        <label>
-          Model
-          <select
-            value={config.model}
-            onChange={(e) => setConfig({ ...config, model: e.target.value })}
-          >
-            {modelCatalog.map((name) => (
-              <option key={name} value={name}>{name}</option>
-            ))}
-          </select>
-        </label>
-
-        <div className="settings-inline-row">
-          <button className="btn-secondary" onClick={handleFetchModels} disabled={loadingModels}>
-            {loadingModels ? "Loading models…" : "Fetch Models From API"}
-          </button>
-        </div>
-        {modelsError && <div className="settings-error">{modelsError}</div>}
-
-        <label>
-          Add model manually
-          <div className="settings-inline-row">
+        <section className="settings-group">
+          <div className="settings-group-title">Workspace</div>
+          <label className="settings-field">
+            Workspace Directory
             <input
               type="text"
-              value={manualModel}
-              onChange={(e) => setManualModel(e.target.value)}
-              placeholder="gpt-4.1-mini"
+              value={config.workspace_dir ?? ""}
+              onChange={(e) =>
+                setConfig({ ...config, workspace_dir: e.target.value || undefined })
+              }
+              placeholder={workspaceDirActual || "Default workspace directory"}
             />
-            <button className="btn-secondary" onClick={handleAddManualModel} type="button">
-              Add
+          </label>
+        </section>
+
+        <section className="settings-group">
+          <div className="settings-group-title">API</div>
+          <label className="settings-field">
+            Base URL
+            <input
+              type="text"
+              value={config.api_base_url}
+              onChange={(e) => setConfig({ ...config, api_base_url: e.target.value })}
+              placeholder="https://api.openai.com/v1"
+            />
+          </label>
+
+          <label className="settings-field">
+            API Key
+            <input
+              type="password"
+              value={config.api_key}
+              onChange={(e) => setConfig({ ...config, api_key: e.target.value })}
+              placeholder="sk-..."
+            />
+          </label>
+
+          <label className="settings-field">
+            Model
+            <select
+              value={config.model}
+              onChange={(e) => setConfig({ ...config, model: e.target.value })}
+            >
+              {modelCatalog.map((name) => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
+          </label>
+
+          <div className="settings-toolbar">
+            <button className="btn-secondary" onClick={handleFetchModels} disabled={loadingModels}>
+              {loadingModels ? "Loading models…" : "Fetch Models From API"}
             </button>
+            {modelsError && <div className="settings-error">{modelsError}</div>}
           </div>
-        </label>
 
-        <label>
-          System Message
-          <textarea
-            rows={4}
-            value={config.system_message ?? ""}
-            onChange={(e) => setConfig({ ...config, system_message: e.target.value })}
-            placeholder="You are a helpful assistant…"
-          />
-        </label>
+          <label className="settings-field">
+            Add model manually
+            <div className="settings-inline-row">
+              <input
+                type="text"
+                value={manualModel}
+                onChange={(e) => setManualModel(e.target.value)}
+                placeholder="gpt-4.1-mini"
+              />
+              <button className="btn-secondary" onClick={handleAddManualModel} type="button">
+                Add
+              </button>
+            </div>
+          </label>
+        </section>
 
-        <label>
-          Logger Output (debug build only)
-          <select
-            value={config.logger_output ?? "file"}
-            onChange={(e) =>
-              setConfig((prev) => ({
-                ...prev,
-                logger_output: e.target.value as "file" | "println",
-              }))
-            }
+        <section className="settings-group">
+          <div className="settings-group-title">System Message</div>
+          <label className="settings-field">
+            <div className="field-title-row">
+              <span>Content</span>
+              <button type="button" className="inline-edit-btn" onClick={openMessageEditor}>
+                Edit
+              </button>
+            </div>
+            <textarea
+              rows={4}
+              value={config.system_message ?? ""}
+              onChange={(e) => setConfig({ ...config, system_message: e.target.value })}
+              placeholder="You are a helpful assistant…"
+            />
+          </label>
+        </section>
+
+        <section className="settings-group">
+          <div className="settings-group-title">Runtime</div>
+          <label className="settings-field">
+            Logger Output (debug build only)
+            <select
+              value={config.logger_output ?? "file"}
+              onChange={(e) =>
+                setConfig((prev) => ({
+                  ...prev,
+                  logger_output: e.target.value as "file" | "println",
+                }))
+              }
+            >
+              <option value="file">Write to app.log</option>
+              <option value="println">Print to terminal (println)</option>
+            </select>
+          </label>
+        </section>
+
+        <section className="settings-group">
+          <div
+            className="settings-group-title settings-section-toggle"
+            onClick={() => setAdvancedOpen((prev) => !prev)}
+            role="button"
+            tabIndex={0}
           >
-            <option value="file">Write to app.log</option>
-            <option value="println">Print to terminal (println)</option>
-          </select>
-        </label>
+            <span>Model Advanced Settings</span>
+            <span className={`settings-toggle-icon ${advancedOpen ? "open" : ""}`}>
+              ▼
+            </span>
+          </div>
 
-        <div
-          className="settings-section-title settings-section-toggle"
-          onClick={() => setAdvancedOpen((prev) => !prev)}
-          role="button"
-          tabIndex={0}
-        >
-          <span>Model Advanced Settings</span>
-          <span className={`settings-toggle-icon ${advancedOpen ? "open" : ""}`}>
-            ▼
-          </span>
-        </div>
+          {advancedOpen && (
+            <div className="settings-advanced-grid">
+              <label className="settings-field">
+                Temperature
+                <input
+                  type="number"
+                  min={0}
+                  max={2}
+                  step={0.05}
+                  value={config.model_settings?.temperature ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setConfig((prev) => ({
+                      ...prev,
+                      model_settings: updateModelSettings(prev.model_settings, {
+                        temperature: v === "" ? undefined : parseFloat(v),
+                      }),
+                    }));
+                  }}
+                  placeholder="default (leave empty)"
+                />
+              </label>
 
-        {advancedOpen && (
-          <>
-            <label>
-              Temperature
-              <input
-                type="number"
-                min={0}
-                max={2}
-                step={0.05}
-                value={config.model_settings?.temperature ?? ""}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setConfig((prev) => ({
-                    ...prev,
-                    model_settings: updateModelSettings(prev.model_settings, {
-                      temperature: v === "" ? undefined : parseFloat(v),
-                    }),
-                  }));
-                }}
-                placeholder="default (leave empty)"
-              />
-            </label>
+              <label className="settings-field">
+                Top P
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={config.model_settings?.top_p ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setConfig((prev) => ({
+                      ...prev,
+                      model_settings: updateModelSettings(prev.model_settings, {
+                        top_p: v === "" ? undefined : parseFloat(v),
+                      }),
+                    }));
+                  }}
+                  placeholder="default (leave empty)"
+                />
+              </label>
 
-            <label>
-              Top P
-              <input
-                type="number"
-                min={0}
-                max={1}
-                step={0.05}
-                value={config.model_settings?.top_p ?? ""}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setConfig((prev) => ({
-                    ...prev,
-                    model_settings: updateModelSettings(prev.model_settings, {
-                      top_p: v === "" ? undefined : parseFloat(v),
-                    }),
-                  }));
-                }}
-                placeholder="default (leave empty)"
-              />
-            </label>
+              <label className="settings-field">
+                Max Tokens
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={config.model_settings?.max_tokens ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setConfig((prev) => ({
+                      ...prev,
+                      model_settings: updateModelSettings(prev.model_settings, {
+                        max_tokens: v === "" ? undefined : Math.max(1, Math.floor(Number(v))),
+                      }),
+                    }));
+                  }}
+                  placeholder="default (leave empty)"
+                />
+              </label>
 
-            <label>
-              Max Tokens
-              <input
-                type="number"
-                min={1}
-                step={1}
-                value={config.model_settings?.max_tokens ?? ""}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setConfig((prev) => ({
-                    ...prev,
-                    model_settings: updateModelSettings(prev.model_settings, {
-                      max_tokens: v === "" ? undefined : Math.max(1, Math.floor(Number(v))),
-                    }),
-                  }));
-                }}
-                placeholder="default (leave empty)"
-              />
-            </label>
-
-            <label>
-              Reasoning effort
-              <select
-                value={config.model_settings?.reasoning_effort ?? ""}
-                onChange={(e) =>
-                  setConfig((prev) => ({
-                    ...prev,
-                    model_settings: updateModelSettings(prev.model_settings, {
-                      reasoning_effort: e.target.value,
-                    }),
-                  }))
-                }
-              >
-                <option value="">— not set —</option>
-                <option value="low">low</option>
-                <option value="medium">medium</option>
-                <option value="high">high</option>
-              </select>
-            </label>
-          </>
-        )}
+              <label className="settings-field">
+                Reasoning effort
+                <select
+                  value={config.model_settings?.reasoning_effort ?? ""}
+                  onChange={(e) =>
+                    setConfig((prev) => ({
+                      ...prev,
+                      model_settings: updateModelSettings(prev.model_settings, {
+                        reasoning_effort: e.target.value,
+                      }),
+                    }))
+                  }
+                >
+                  <option value="">— not set —</option>
+                  <option value="low">low</option>
+                  <option value="medium">medium</option>
+                  <option value="high">high</option>
+                </select>
+              </label>
+            </div>
+          )}
+        </section>
       </div>
+
+      {isMessageEditorOpen && (
+        <div className="prompt-editor-overlay" role="dialog" aria-modal="true" aria-label="Edit system message">
+          <div className="prompt-editor-shell">
+            <div className="prompt-editor-header">
+              <h3>System Message Editor</h3>
+              <div className="prompt-editor-actions">
+                <button type="button" className="btn-secondary" onClick={closeMessageEditor} disabled={messageSaving}>
+                  Cancel
+                </button>
+                <button type="button" className="btn-primary" onClick={applyMessageEditor} disabled={messageSaving}>
+                  {messageSaving ? "Saving…" : "Done"}
+                </button>
+              </div>
+            </div>
+
+            <div className="prompt-editor-body">
+              <div className="prompt-column">
+                <span>Markdown</span>
+                <textarea
+                  className="prompt-editor-textarea"
+                  value={messageDraft}
+                  onChange={(e) => setMessageDraft(e.target.value)}
+                  placeholder="Write your system message in Markdown..."
+                />
+              </div>
+
+              <div className="prompt-column">
+                <span>Preview</span>
+                <div className="prompt-preview">
+                  {messageDraft.trim() ? (
+                    <ReactMarkdown>{messageDraft}</ReactMarkdown>
+                  ) : (
+                    <p className="prompt-preview-empty">Markdown preview will appear here.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="settings-footer">
         <button className="btn-primary" onClick={handleSave} disabled={saving}>
