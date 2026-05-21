@@ -426,6 +426,7 @@ export default function App() {
     }
     setMessages([]);
     setError(null);
+    setUsage(null);
     setPendingRetryUserContent(null);
     setSessionId(crypto.randomUUID());
   }
