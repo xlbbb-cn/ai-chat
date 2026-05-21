@@ -37,23 +37,56 @@ interface Props {
   message: Message;
 }
 
+function extractEmbeddedThoughtProcess(content: string): {
+  reasoningContent: string;
+  mainContent: string;
+} {
+  const detailsPrefix = "<details><summary>Thought Process</summary>";
+  const detailsSuffix = "</details>";
+
+  const trimmed = content.trimStart();
+  if (!trimmed.startsWith(detailsPrefix)) {
+    return { reasoningContent: "", mainContent: content };
+  }
+
+  const endIdx = trimmed.indexOf(detailsSuffix);
+  if (endIdx < 0) {
+    return { reasoningContent: "", mainContent: content };
+  }
+
+  const reasoningContent = trimmed
+    .slice(detailsPrefix.length, endIdx)
+    .trim();
+  const mainContent = trimmed
+    .slice(endIdx + detailsSuffix.length)
+    .trimStart();
+
+  return { reasoningContent, mainContent };
+}
+
 export function ChatMessage({ message }: Props) {
   const isUser = message.role === "user";
+  const embeddedThought = extractEmbeddedThoughtProcess(message.content);
+  const reasoningContent = message.reasoning_content ?? embeddedThought.reasoningContent;
+  const mainContent = message.reasoning_content
+    ? message.content
+    : embeddedThought.mainContent;
+
   return (
     <div className={`chat-message ${isUser ? "user" : "assistant"}`}>
       <div className="message-role">{isUser ? "You" : "Assistant"}</div>
-      {message.reasoning_content && (
+      {reasoningContent && (
         <details className="message-reasoning">
           <summary>Thought Process</summary>
           <div
             className="message-reasoning-content"
-            dangerouslySetInnerHTML={{ __html: md.render(message.reasoning_content) }}
+            dangerouslySetInnerHTML={{ __html: md.render(reasoningContent) }}
           />
         </details>
       )}
       <div
         className="message-content"
-        dangerouslySetInnerHTML={{ __html: md.render(message.content) }}
+        dangerouslySetInnerHTML={{ __html: md.render(mainContent) }}
         onClick={(e) => {
           const target = e.target as HTMLElement;
           const link = target.closest("a");

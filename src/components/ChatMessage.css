@@ -82,7 +82,7 @@
   margin-bottom: 0.25em;
 }
 
-.message-content li > p {
+.message-content li>p {
   margin-bottom: 0;
 }
 
@@ -97,10 +97,45 @@
   border: 1px solid #EEEEEE;
 }
 
+.message-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.75em 0;
+  border: 1px solid #D7DADF;
+  border-radius: 6px;
+  overflow: hidden;
+  font-size: 13px;
+  background: #FFFFFF;
+}
+
+.message-content th,
+.message-content td {
+  border: 1px solid #D7DADF;
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.message-content thead th {
+  background: #F6F8FA;
+  color: #2F333A;
+  font-weight: 600;
+}
+
+.message-content tbody tr:nth-child(even) {
+  background: #FBFCFD;
+}
+
+.message-content tbody tr:hover {
+  background: #F2F6FF;
+}
+
 .cursor {
   animation: blink 0.7s step-end infinite;
 }
 
 @keyframes blink {
-  50% { opacity: 0; }
+  50% {
+    opacity: 0;
+  }
 }
