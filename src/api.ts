@@ -216,3 +216,44 @@ export async function getAgentOrchestration(): Promise<AgentOrchestration> {
 export async function saveAgentOrchestration(orchestration: AgentOrchestration): Promise<void> {
   return invoke("save_agent_orchestration", { orchestration });
 }
+
+// ─── Interaction Log Monitor ──────────────────────────────────────────────────
+
+export interface InteractionLogRecord {
+  id: number;
+  session_id: string;
+  interaction_type: string;
+  timestamp: string;
+  actor: string;
+  action_name: string;
+  error_message: string;
+  duration_ms: number;
+  input_preview: string;
+  output_preview: string;
+}
+
+export interface InteractionLogDetail {
+  id: number;
+  session_id: string;
+  interaction_type: string;
+  timestamp: string;
+  actor: string;
+  action_name: string;
+  input_data: string;
+  output_data: string;
+  error_message: string;
+  duration_ms: number;
+  metadata: string;
+}
+
+export async function listInteractions(sessionId: string): Promise<InteractionLogRecord[]> {
+  return invoke("list_interactions", { session_id: sessionId });
+}
+
+export async function getInteraction(id: number): Promise<InteractionLogDetail> {
+  return invoke("get_interaction", { id });
+}
+
+export async function clearInteractions(sessionId: string): Promise<void> {
+  return invoke("clear_interactions", { session_id: sessionId });
+}

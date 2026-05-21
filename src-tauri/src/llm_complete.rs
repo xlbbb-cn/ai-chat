@@ -390,6 +390,32 @@ async fn stream_request(
     }).await
 }
 
+/// Log interaction to database
+fn log_interaction(
+    db: &rusqlite::Connection,
+    session_id: &str,
+    interaction_type: &str,
+    actor: &str,
+    action_name: &str,
+    input_data: String,
+    output_data: String,
+    error_message: Option<String>,
+    duration_ms: i64,
+) {
+    let _ = db::save_interaction_log(
+        db,
+        session_id,
+        interaction_type,
+        actor,
+        action_name,
+        &input_data,
+        &output_data,
+        error_message.as_deref(),
+        duration_ms,
+        None,
+    );
+}
+
 // ─── Chat command ─────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -719,6 +745,21 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                         duration_ms,
                     ],
                 );
+                // Log to interaction_log table
+                let request_body_display = request_snapshot.to_string().chars().take(1000).collect::<String>();
+                let response_display = sr.content.chars().take(500).collect::<String>();
+                log_interaction(
+                    &db,
+                    &session_id,
+                    "llm_api",
+                    &active_model,
+                    "chat_completion",
+                    request_body_display,
+                    response_display,
+                    None,
+                    duration_ms,
+                );
+                drop(db);
                 log_event(
                     &state,
                     "INFO",
@@ -742,6 +783,20 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                         err,
                     ],
                 );
+                // Log to interaction_log table
+                let request_body_display = request_snapshot.to_string().chars().take(1000).collect::<String>();
+                log_interaction(
+                    &db,
+                    &session_id,
+                    "llm_error",
+                    &active_model,
+                    "chat_completion",
+                    request_body_display,
+                    String::new(),
+                    Some(err.clone()),
+                    duration_ms,
+                );
+                drop(db);
                 log_event(
                     &state,
                     "ERROR",
@@ -907,13 +962,48 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                     format!("Args for MCP tool '{}': {}", actual_tool_name, args_json),
                 );
                 let _ = app.emit("chat-token", format!("🔌 *MCP [{}]: {}*\n\n", mcp_server.name, actual_tool_name));
-                match mcp::invoke_mcp_tool(mcp_server, actual_tool_name, args_json).await {
-                    Ok(result) => result,
-                    Err(e) => format!("MCP tool error: {e}"),
-                }
+                let start_time = std::time::Instant::now();
+                let mcp_result = mcp::invoke_mcp_tool(mcp_server, actual_tool_name, args_json.clone()).await;
+                let duration_ms = start_time.elapsed().as_millis() as i64;
+                let result = match &mcp_result {
+                    Ok(result) => {
+                        // Log successful MCP call
+                        let db = state.db.lock().unwrap();
+                        log_interaction(
+                            &db,
+                            &session_id,
+                            "mcp_response",
+                            &mcp_server.name,
+                            actual_tool_name,
+                            serde_json::to_string(&args_json).unwrap_or_default(),
+                            result.chars().take(500).collect(),
+                            None,
+                            duration_ms,
+                        );
+                        result.clone()
+                    }
+                    Err(e) => {
+                        // Log MCP error
+                        let db = state.db.lock().unwrap();
+                        log_interaction(
+                            &db,
+                            &session_id,
+                            "mcp_call",
+                            &mcp_server.name,
+                            actual_tool_name,
+                            serde_json::to_string(&args_json).unwrap_or_default(),
+                            String::new(),
+                            Some(e.clone()),
+                            duration_ms,
+                        );
+                        format!("MCP tool error: {e}")
+                    }
+                };
+                result
             } else {
                 let workspace_dir = state.workspace_dir.lock().unwrap().clone();
-                tools::execute_tool(
+                let start_time = std::time::Instant::now();
+                let tool_result = tools::execute_tool(
                     &app,
                     name,
                     args,
@@ -922,7 +1012,25 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                     &skill_allowed_commands,
                     &active_skill_roots,
                 )
-                .await
+                .await;
+                let duration_ms = start_time.elapsed().as_millis() as i64;
+                
+                // Log tool execution
+                let db = state.db.lock().unwrap();
+                let is_error = tool_result.starts_with("⛔") || tool_result.starts_with("Error");
+                log_interaction(
+                    &db,
+                    &session_id,
+                    if is_error { "tool_error" } else { "tool_output" },
+                    "tool_executor",
+                    name,
+                    serde_json::to_string(&serde_json::from_str::<Value>(args).unwrap_or_default()).unwrap_or_default(),
+                    tool_result.chars().take(500).collect(),
+                    if is_error { Some(tool_result.clone()) } else { None },
+                    duration_ms,
+                );
+                drop(db);
+                tool_result
             };
 
             all_messages.push(json!({

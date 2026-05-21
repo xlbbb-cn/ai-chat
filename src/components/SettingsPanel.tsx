@@ -2,11 +2,13 @@ import { useState, useEffect } from "react";
 import { fetchModels, getConfig, getWorkspaceDir, saveConfig } from "../api";
 import type { AppConfig, ModelSettings } from "../types";
 import ReactMarkdown from "react-markdown";
+import { MonitorPanel } from "./MonitorPanel";
 import "./SettingsPanel.css";
 
 interface Props {
   onClose: () => void;
   onConfigSaved?: (config: AppConfig) => void;
+  sessionId?: string;
 }
 
 const defaultConfig: AppConfig = {
@@ -33,7 +35,7 @@ function updateModelSettings(
   return { ...(settings ?? {}), ...patch };
 }
 
-export function SettingsPanel({ onClose, onConfigSaved }: Props) {
+export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
   const [config, setConfig] = useState<AppConfig>(defaultConfig);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -45,6 +47,7 @@ export function SettingsPanel({ onClose, onConfigSaved }: Props) {
   const [isMessageEditorOpen, setIsMessageEditorOpen] = useState(false);
   const [messageDraft, setMessageDraft] = useState("");
   const [messageSaving, setMessageSaving] = useState(false);
+  const [showMonitor, setShowMonitor] = useState(false);
 
   useEffect(() => {
     getWorkspaceDir().then(setWorkspaceDirActual).catch(console.error);
@@ -399,7 +402,16 @@ export function SettingsPanel({ onClose, onConfigSaved }: Props) {
         <button className="btn-primary" onClick={handleSave} disabled={saving}>
           {saving ? "Saving…" : saved ? "Saved ✓" : "Save"}
         </button>
+        {sessionId && (
+          <button className="btn-secondary" onClick={() => setShowMonitor(true)}>
+            🔍 Launch Monitor
+          </button>
+        )}
       </div>
+
+      {showMonitor && (
+        <MonitorPanel sessionId={sessionId!} onClose={() => setShowMonitor(false)} />
+      )}
     </div>
   );
 }

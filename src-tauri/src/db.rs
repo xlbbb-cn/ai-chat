@@ -230,3 +230,159 @@ pub fn clear_api_requests(
         .map_err(|e| e.to_string())?;
     Ok(())
 }
+
+// ─── Interaction Log Monitor ──────────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct InteractionLogRecord {
+    pub id: i64,
+    pub session_id: String,
+    pub interaction_type: String,
+    pub timestamp: String,
+    pub actor: String,
+    pub action_name: String,
+    pub error_message: String,
+    pub duration_ms: i64,
+    // Truncated preview (first 150 chars)
+    pub input_preview: String,
+    pub output_preview: String,
+}
+
+#[derive(Serialize)]
+pub struct InteractionLogDetail {
+    pub id: i64,
+    pub session_id: String,
+    pub interaction_type: String,
+    pub timestamp: String,
+    pub actor: String,
+    pub action_name: String,
+    pub input_data: String,
+    pub output_data: String,
+    pub error_message: String,
+    pub duration_ms: i64,
+    pub metadata: String,
+}
+
+pub fn save_interaction_log(
+    db: &rusqlite::Connection,
+    session_id: &str,
+    interaction_type: &str,
+    actor: &str,
+    action_name: &str,
+    input_data: &str,
+    output_data: &str,
+    error_message: Option<&str>,
+    duration_ms: i64,
+    metadata: Option<&str>,
+) -> Result<(), String> {
+    db.execute(
+        "INSERT INTO interaction_log (session_id, interaction_type, actor, action_name, \
+         input_data, output_data, error_message, duration_ms, metadata) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        rusqlite::params![
+            session_id,
+            interaction_type,
+            actor,
+            action_name,
+            input_data,
+            output_data,
+            error_message.unwrap_or(""),
+            duration_ms,
+            metadata.unwrap_or("{}")
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn list_interactions(
+    session_id: String,
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<Vec<InteractionLogRecord>, String> {
+    let db = state.db.lock().unwrap();
+    let mut stmt = db
+        .prepare(
+            "SELECT id, COALESCE(session_id,''), COALESCE(interaction_type,''), \
+             COALESCE(timestamp,''), COALESCE(actor,''), COALESCE(action_name,''), \
+             COALESCE(error_message,''), COALESCE(duration_ms,0), \
+             COALESCE(input_data,''), COALESCE(output_data,'') \
+             FROM interaction_log \
+             WHERE session_id = ?1 \
+             ORDER BY id DESC LIMIT 500",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let records = stmt
+        .query_map(rusqlite::params![session_id], |row| {
+            let input: String = row.get(8)?;
+            let output: String = row.get(9)?;
+            let input_preview: String = input.chars().take(150).collect();
+            let output_preview: String = output.chars().take(150).collect();
+            Ok(InteractionLogRecord {
+                id: row.get(0)?,
+                session_id: row.get(1)?,
+                interaction_type: row.get(2)?,
+                timestamp: row.get(3)?,
+                actor: row.get(4)?,
+                action_name: row.get(5)?,
+                error_message: row.get(6)?,
+                duration_ms: row.get(7)?,
+                input_preview,
+                output_preview,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(Result::ok)
+        .collect();
+
+    Ok(records)
+}
+
+#[tauri::command]
+pub fn get_interaction(
+    id: i64,
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<InteractionLogDetail, String> {
+    let db = state.db.lock().unwrap();
+    let mut stmt = db
+        .prepare(
+            "SELECT id, COALESCE(session_id,''), COALESCE(interaction_type,''), \
+             COALESCE(timestamp,''), COALESCE(actor,''), COALESCE(action_name,''), \
+             COALESCE(input_data,''), COALESCE(output_data,''), \
+             COALESCE(error_message,''), COALESCE(duration_ms,0), COALESCE(metadata,'{}') \
+             FROM interaction_log WHERE id = ?1",
+        )
+        .map_err(|e| e.to_string())?;
+
+    stmt.query_row(rusqlite::params![id], |row| {
+        Ok(InteractionLogDetail {
+            id: row.get(0)?,
+            session_id: row.get(1)?,
+            interaction_type: row.get(2)?,
+            timestamp: row.get(3)?,
+            actor: row.get(4)?,
+            action_name: row.get(5)?,
+            input_data: row.get(6)?,
+            output_data: row.get(7)?,
+            error_message: row.get(8)?,
+            duration_ms: row.get(9)?,
+            metadata: row.get(10)?,
+        })
+    })
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn clear_interactions(
+    session_id: String,
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<(), String> {
+    let db = state.db.lock().unwrap();
+    db.execute(
+        "DELETE FROM interaction_log WHERE session_id = ?1",
+        rusqlite::params![session_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}

@@ -404,6 +404,22 @@ pub fn run() {
                 )",
                 [],
             ).unwrap();
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS interaction_log (\
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, \
+                    session_id TEXT NOT NULL, \
+                    interaction_type TEXT NOT NULL, \
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, \
+                    actor TEXT, \
+                    action_name TEXT, \
+                    input_data TEXT, \
+                    output_data TEXT, \
+                    error_message TEXT, \
+                    duration_ms INTEGER DEFAULT 0, \
+                    metadata TEXT\
+                )",
+                [],
+            ).unwrap();
 
             let config_path = data_dir.join("config.json");
             let config = if config_path.exists() {
@@ -473,6 +489,9 @@ pub fn run() {
             db::get_api_request,
             db::delete_api_request,
             db::clear_api_requests,
+            db::list_interactions,
+            db::get_interaction,
+            db::clear_interactions,
             mcp::list_mcp_servers,
             mcp::save_mcp_server,
             mcp::delete_mcp_server,

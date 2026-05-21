@@ -168,6 +168,9 @@
 .settings-footer {
   padding: 16px 20px;
   border-top: 1px solid #EEEEEE;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .settings-inline-row {

@@ -516,6 +516,7 @@ export default function App() {
         <aside className="sidebar">
           {sidebar === "settings" && (
             <SettingsPanel
+              sessionId={sessionId}
               onClose={() => setSidebar(null)}
               onConfigSaved={(cfg) => {
                 const catalog = Array.from(new Set([...(cfg.model_catalog ?? []), cfg.model].filter(Boolean)));

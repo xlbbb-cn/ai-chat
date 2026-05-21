@@ -1,0 +1,311 @@
+.monitor-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 16px;
+}
+
+.monitor-shell {
+    background-color: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    max-width: 1400px;
+    max-height: 90vh;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+}
+
+.monitor-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px;
+    border-bottom: 1px solid #333;
+    background-color: #252526;
+    border-radius: 8px 8px 0 0;
+}
+
+.monitor-header h2 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: #fff;
+}
+
+.monitor-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.monitor-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    color: #b0b0b0;
+}
+
+.monitor-checkbox input {
+    cursor: pointer;
+}
+
+.close-btn {
+    background: transparent;
+    border: none;
+    color: #999;
+    font-size: 20px;
+    cursor: pointer;
+    padding: 4px 8px;
+    transition: color 0.2s;
+}
+
+.close-btn:hover {
+    color: #fff;
+}
+
+.monitor-body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+    gap: 0;
+}
+
+/* Left Panel: Interaction List */
+.monitor-list-panel {
+    display: flex;
+    flex-direction: column;
+    width: 35%;
+    border-right: 1px solid #333;
+    background-color: #1e1e1e;
+}
+
+.monitor-list-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background-color: #2d2d2d;
+    border-bottom: 1px solid #333;
+}
+
+.monitor-list-header h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #ddd;
+}
+
+.loading-spinner {
+    display: inline-block;
+    animation: spin 1s linear infinite;
+    color: #888;
+}
+
+@keyframes spin {
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+.monitor-list {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.monitor-item {
+    padding: 12px 16px;
+    border-bottom: 1px solid #333;
+    cursor: pointer;
+    transition: background-color 0.15s;
+}
+
+.monitor-item:hover {
+    background-color: #2d2d2d;
+}
+
+.monitor-item.selected {
+    background-color: #264f78;
+    border-left: 3px solid #007acc;
+}
+
+.monitor-item-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.monitor-type-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #fff;
+}
+
+.monitor-actor {
+    font-size: 12px;
+    color: #888;
+}
+
+.monitor-item-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #e0e0e0;
+    margin-bottom: 4px;
+}
+
+.monitor-item-time {
+    font-size: 11px;
+    color: #888;
+    margin-bottom: 4px;
+}
+
+.monitor-item-error {
+    font-size: 11px;
+    color: #f48771;
+    margin-bottom: 4px;
+}
+
+.monitor-item-preview {
+    font-size: 11px;
+    color: #999;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-height: 20px;
+}
+
+.monitor-empty {
+    padding: 40px 20px;
+    text-align: center;
+    color: #888;
+    font-size: 13px;
+}
+
+/* Right Panel: Details */
+.monitor-detail-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background-color: #1e1e1e;
+    overflow: hidden;
+}
+
+.monitor-detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background-color: #2d2d2d;
+    border-bottom: 1px solid #333;
+}
+
+.monitor-detail-header h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #ddd;
+}
+
+.monitor-detail-id {
+    font-size: 12px;
+    color: #888;
+}
+
+.monitor-detail-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+}
+
+.detail-section {
+    margin-bottom: 16px;
+}
+
+.detail-label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: #ddd;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.detail-value {
+    font-size: 13px;
+    color: #e0e0e0;
+    word-break: break-all;
+    padding: 8px;
+    background-color: #2d2d2d;
+    border-radius: 4px;
+    border-left: 2px solid #007acc;
+}
+
+.error-section .detail-value {
+    border-left-color: #f48771;
+}
+
+.error-text {
+    color: #f48771;
+}
+
+.detail-code {
+    font-size: 12px;
+    color: #ce9178;
+    background-color: #2d2d2d;
+    border-radius: 4px;
+    padding: 12px;
+    border-left: 2px solid #007acc;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 0;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+/* Scrollbar styling */
+.monitor-list::-webkit-scrollbar,
+.monitor-detail-content::-webkit-scrollbar,
+.detail-code::-webkit-scrollbar {
+    width: 8px;
+}
+
+.monitor-list::-webkit-scrollbar-track,
+.monitor-detail-content::-webkit-scrollbar-track,
+.detail-code::-webkit-scrollbar-track {
+    background: #1e1e1e;
+}
+
+.monitor-list::-webkit-scrollbar-thumb,
+.monitor-detail-content::-webkit-scrollbar-thumb,
+.detail-code::-webkit-scrollbar-thumb {
+    background: #464647;
+    border-radius: 4px;
+}
+
+.monitor-list::-webkit-scrollbar-thumb:hover,
+.monitor-detail-content::-webkit-scrollbar-thumb:hover,
+.detail-code::-webkit-scrollbar-thumb:hover {
+    background: #5e5e5f;
+}
