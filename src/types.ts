@@ -71,6 +71,7 @@ export interface SubAgent {
 }
 
 export interface AgentOrchestration {
+  use_agents: boolean;
   auto_configure: boolean;
   max_concurrent: number;
   mode: "parallel" | "sequential";

@@ -41,6 +41,7 @@ const emptyAgent = (): SubAgent => ({
 export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggleUseAgents, agentStatuses }: Props) {
   const [agents, setAgents] = useState<SubAgent[]>([]);
   const [orchestration, setOrchestration] = useState<AgentOrchestration>({
+    use_agents: false,
     auto_configure: false,
     max_concurrent: 3,
     mode: "parallel",
@@ -233,7 +234,11 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
                 <input
                   type="checkbox"
                   checked={useAgentsEnabled}
-                  onChange={(e) => onToggleUseAgents(e.target.checked)}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    onToggleUseAgents(checked);
+                    handleSaveOrchestration({ ...orchestration, use_agents: checked });
+                  }}
                 />
                 <span className="toggle-switch-slider" />
               </label>

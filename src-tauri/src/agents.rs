@@ -40,6 +40,8 @@ fn default_true() -> bool { true }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentOrchestration {
     #[serde(default)]
+    pub use_agents: bool,
+    #[serde(default)]
     pub auto_configure: bool,
     #[serde(default = "default_max_concurrent")]
     pub max_concurrent: usize,
@@ -52,7 +54,7 @@ fn default_mode() -> String { "parallel".to_string() }
 
 impl Default for AgentOrchestration {
     fn default() -> Self {
-        Self { auto_configure: false, max_concurrent: 3, mode: "parallel".to_string() }
+        Self { use_agents: false, auto_configure: false, max_concurrent: 3, mode: "parallel".to_string() }
     }
 }
 

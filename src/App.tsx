@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { chatCompletion, getConfig, listMcpServers, listSubAgents, saveConfig, saveHistory, stopChatCompletion, confirmCommand } from "./api";
+import { chatCompletion, getConfig, getAgentOrchestration, listMcpServers, listSubAgents, saveConfig, saveHistory, stopChatCompletion, confirmCommand } from "./api";
 
 import { ChatMessage } from "./components/ChatMessage";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -134,6 +134,9 @@ export default function App() {
   useEffect(() => {
     listSubAgents()
       .then((agents) => setActiveAgentCount(agents.filter((a) => a.enabled).length))
+      .catch(console.error);
+    getAgentOrchestration()
+      .then((orch) => setUseAgentsEnabled(orch.use_agents))
       .catch(console.error);
   }, []);
 
