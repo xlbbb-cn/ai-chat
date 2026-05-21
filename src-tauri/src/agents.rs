@@ -67,14 +67,14 @@ pub struct AgentsConfig {
 // ─── Internal planning types ──────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Deserialize)]
-struct Task {
-    id: String,
-    agent_id: String,
-    description: String,
+pub struct Task {
+    pub id: String,
+    pub agent_id: String,
+    pub description: String,
     #[serde(default)]
-    context: String,
+    pub context: String,
     #[serde(default)]
-    dependencies: Vec<String>,
+    pub dependencies: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -85,14 +85,14 @@ struct TaskPlan {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct TaskResult {
-    task_id: String,
-    agent_id: String,
-    agent_name: String,
-    status: String,
-    content: String,
-    tool_calls_count: u32,
-    tokens_used: u32,
+pub struct TaskResult {
+    pub task_id: String,
+    pub agent_id: String,
+    pub agent_name: String,
+    pub status: String,
+    pub content: String,
+    pub tool_calls_count: u32,
+    pub tokens_used: u32,
 }
 
 // ─── Config I/O ───────────────────────────────────────────────────────────────
@@ -462,7 +462,12 @@ async fn plan_tasks(
         .take(3)
         .rev()
         .map(|m| {
-            let preview = &m.content[..m.content.len().min(600)];
+            let limit = m.content.len().min(600);
+            let mut end = limit;
+            while end > 0 && !m.content.is_char_boundary(end) {
+                end -= 1;
+            }
+            let preview = &m.content[..end];
             format!("[{}]: {}", m.role, preview)
         })
         .collect::<Vec<_>>()
@@ -635,7 +640,7 @@ async fn execute_sequential(
 
 // ─── Sub-agent loop ───────────────────────────────────────────────────────────
 
-async fn run_sub_agent(
+pub async fn run_sub_agent(
     app: &AppHandle,
     client: &Client,
     url: &str,

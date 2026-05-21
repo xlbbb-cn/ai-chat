@@ -181,7 +181,7 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
               />
             </label>
             <label style={{ flex: 1 }}>
-              Max iterations
+              Max iter
               <input
                 type="number"
                 min={1}
@@ -307,6 +307,22 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
                       </label>
                       <span className="agent-name">{agent.name}</span>
                       {statusIcon(agent.id)}
+                      <div className="skill-actions" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          className="mcp-action-btn"
+                          title="Edit"
+                          onClick={() => setEditing({ ...agent })}
+                        >
+                          ✎
+                        </button>
+                        <button
+                          className="mcp-action-btn danger"
+                          title="Delete"
+                          onClick={() => handleDeleteAgent(agent.id)}
+                        >
+                          ✕
+                        </button>
+                      </div>
                     </div>
                     <span className="agent-desc">{agent.description}</span>
                     {st && st.status === "done" && st.summary && (
@@ -325,22 +341,6 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
                       {agent.model && (
                         <span className="agent-tool-tag model">{agent.model}</span>
                       )}
-                    </div>
-                    <div className="skill-actions-bottom" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        className="mcp-action-btn"
-                        title="Edit"
-                        onClick={() => setEditing({ ...agent })}
-                      >
-                        ✎
-                      </button>
-                      <button
-                        className="mcp-action-btn danger"
-                        title="Delete"
-                        onClick={() => handleDeleteAgent(agent.id)}
-                      >
-                        ✕
-                      </button>
                     </div>
                   </div>
                 </div>

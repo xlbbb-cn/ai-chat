@@ -250,15 +250,34 @@ pub async fn chat_completion(
             Available skills:\n{}",
             available_skills_info
         );
-        if !system_content.is_empty() {
-            system_content.push_str("\n\n");
-        }
-        system_content.push_str(&skills_sys_msg);
-    }
-
     if !system_content.is_empty() {
-        all_messages.push(json!({ "role": "system", "content": system_content }));
+        system_content.push_str("\n\n");
     }
+    system_content.push_str(&skills_sys_msg);
+}
+
+let agents_cfg = agents::load_agents_config(&state.agents_config_path);
+let enabled_agents: Vec<agents::SubAgent> = agents_cfg.agents.into_iter().filter(|a| a.enabled).collect();
+
+if !enabled_agents.is_empty() {
+    let mut available_agents_info = String::new();
+    for agent in &enabled_agents {
+        available_agents_info.push_str(&format!("- ID: {}\n  Name: {}\n  Description: {}\n", agent.id, agent.name, agent.description));
+    }
+    let agents_sys_msg = format!(
+        "You have access to the following specialized sub-agents. To delegate a task to one of them, use the `call_subagent` tool with the corresponding `agent_id`.\n\n\
+        Available sub-agents:\n{}",
+        available_agents_info
+    );
+    if !system_content.is_empty() {
+        system_content.push_str("\n\n");
+    }
+    system_content.push_str(&agents_sys_msg);
+}
+
+if !system_content.is_empty() {
+    all_messages.push(json!({ "role": "system", "content": system_content }));
+}
 
     if !loaded_skills_content.is_empty() {
         let workspace_dir = state.workspace_dir.lock().unwrap().clone();
@@ -352,6 +371,30 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                         "skill_name": { "type": "string", "description": "The name of the skill to load details for" }
                     },
                     "required": ["skill_name"]
+                }
+            }
+        }));
+    }
+
+    if !enabled_agents.is_empty() {
+        tools_list.push(json!({
+            "type": "function",
+            "function": {
+                "name": "call_subagent",
+                "description": "Delegate a complex or specialized task to an autonomous sub-agent. You must specify the exact agent_id. Wait for its execution fully; it returns the final task result.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "agent_id": {
+                            "type": "string",
+                            "description": "The exact ID of the sub-agent to invoke"
+                        },
+                        "task_description": {
+                            "type": "string",
+                            "description": "Detailed prompt/description of the task for the sub-agent to perform"
+                        }
+                    },
+                    "required": ["agent_id", "task_description"]
                 }
             }
         }));
@@ -547,6 +590,38 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                     }
                 } else {
                     format!("Error: Skill '{}' not found.", skill_name)
+                }
+            } else if name == "call_subagent" {
+                let args_json: Value = serde_json::from_str(args).unwrap_or_default();
+                let agent_id = args_json["agent_id"].as_str().unwrap_or("");
+                let task_desc = args_json["task_description"].as_str().unwrap_or("");
+
+                if let Some(agent) = enabled_agents.iter().find(|a| a.id == agent_id) {
+                    let task = agents::Task {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        agent_id: agent_id.to_string(),
+                        description: task_desc.to_string(),
+                        context: String::new(),
+                        dependencies: vec![],
+                    };
+                    let workspace_dir = state.workspace_dir.lock().unwrap().clone();
+                    let url = format!("{}/chat/completions", config.api_base_url.trim_end_matches('/'));
+                    let client = reqwest::Client::new();
+                    
+                    let res = agents::run_sub_agent(
+                        &app,
+                        &client,
+                        &url,
+                        &config,
+                        agent,
+                        &task,
+                        workspace_dir,
+                    ).await;
+
+                    format!("Task execution finished with status: {}\nTokens used: {}\nTool calls made: {}\n\nResult:\n{}", 
+                        res.status, res.tokens_used, res.tool_calls_count, res.content)
+                } else {
+                    format!("Error: Agent with ID '{}' not found or not enabled.", agent_id)
                 }
             } else if let Some((mcp_server, actual_tool_name)) = mcp_tool_map.get(name) {
                 let mut args_json: Value = serde_json::from_str(args).unwrap_or_default();
