@@ -32,25 +32,40 @@ pub struct ChatMessage {
     pub content: String,
 }
 
-struct StreamResult {
-    finish_reason: String,
-    tool_calls: Vec<(String, String, String)>,
-    content: String,
-    prompt_tokens: u32,
-    completion_tokens: u32,
+pub struct StreamResult {
+    pub finish_reason: String,
+    pub tool_calls: Vec<(String, String, String)>,
+    pub content: String,
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
 }
 
-// ─── Tool helpers ─────────────────────────────────────────────────────────────
+/// Options controlling how a streaming LLM request behaves.
+/// Main agent: emit reasoning + usage, token_event="chat-token", no task_id.
+/// Sub-agent:  no reasoning/usage, token_event="agent-task-token", task_id=Some(...).
+pub struct StreamOptions<'a> {
+    /// Event name for content delta tokens.
+    pub token_event: &'a str,
+    /// If set, include `{"task_id": ..., "token": ...}` payload instead of a plain string.
+    pub task_id: Option<&'a str>,
+    /// Emit `chat-reasoning-token` for DeepSeek/Qwen reasoning_content.
+    pub emit_reasoning: bool,
+    /// Emit `chat-usage` and populate prompt/completion token counts.
+    pub emit_usage: bool,
+}
 
-/// Stream one completion request. Emits "chat-token" for content chunks.
-/// Returns StreamResult with finish_reason, tool_calls, accumulated content, and usage.
-async fn stream_request(
+// ─── Unified streaming helper ─────────────────────────────────────────────────
+
+/// Stream one completion request according to `opts`.
+/// Returns StreamResult with finish_reason, accumulated tool_calls, content, and token counts.
+pub async fn stream_llm_request(
     app: &AppHandle,
     client: &Client,
     url: &str,
     api_key: &str,
     req_body: Value,
     cancelled: &AtomicBool,
+    opts: StreamOptions<'_>,
 ) -> Result<StreamResult, String> {
     let res = client
         .post(url)
@@ -71,6 +86,7 @@ async fn stream_request(
     let mut content = String::new();
     let mut prompt_tokens: u32 = 0;
     let mut completion_tokens: u32 = 0;
+    let mut got_tool_calls = false;
 
     let mut stream = res.bytes_stream();
     let mut buffer = String::new();
@@ -90,17 +106,13 @@ async fn stream_request(
                 return Ok(StreamResult { finish_reason: "cancelled".into(), tool_calls: vec![], content, prompt_tokens, completion_tokens });
             }
             let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            if line == "data: [DONE]" {
-                break 'stream_loop;
-            }
+            if line.is_empty() { continue; }
+            if line == "data: [DONE]" { break 'stream_loop; }
             let Some(json_str) = line.strip_prefix("data: ") else { continue };
             let Ok(parsed) = serde_json::from_str::<Value>(json_str) else { continue };
 
-            if let Some(usage) = parsed.get("usage") {
-                if !usage.is_null() {
+            if opts.emit_usage {
+                if let Some(usage) = parsed.get("usage").filter(|v| !v.is_null()) {
                     prompt_tokens = usage.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                     completion_tokens = usage.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                     let _ = app.emit("chat-usage", json!({
@@ -116,12 +128,15 @@ async fn stream_request(
             if let Some(fr) = choice["finish_reason"].as_str() {
                 if !fr.is_empty() {
                     finish_reason = fr.to_string();
+                    if fr == "tool_calls" { got_tool_calls = true; }
                 }
             }
 
-            // Consume reasoning content (DeepSeek/Qwen style)
-            if let Some(reasoning) = delta.get("reasoning_content").and_then(|v| v.as_str()) {
-                let _ = app.emit("chat-reasoning-token", reasoning.to_string());
+            // DeepSeek/Qwen reasoning tokens — main agent only
+            if opts.emit_reasoning {
+                if let Some(reasoning) = delta.get("reasoning_content").and_then(|v| v.as_str()) {
+                    let _ = app.emit("chat-reasoning-token", reasoning.to_string());
+                }
             }
 
             // Accumulate streamed tool call chunks by index
@@ -131,27 +146,47 @@ async fn stream_request(
                     while tool_calls.len() <= idx {
                         tool_calls.push((String::new(), String::new(), String::new()));
                     }
-                    if let Some(id) = tc["id"].as_str() {
-                        tool_calls[idx].0 = id.to_string();
-                    }
-                    if let Some(name) = tc["function"]["name"].as_str() {
-                        tool_calls[idx].1 = name.to_string();
-                    }
-                    if let Some(args) = tc["function"]["arguments"].as_str() {
-                        tool_calls[idx].2.push_str(args);
-                    }
+                    if let Some(id) = tc["id"].as_str() { tool_calls[idx].0 = id.to_string(); }
+                    if let Some(name) = tc["function"]["name"].as_str() { tool_calls[idx].1 = name.to_string(); }
+                    if let Some(args) = tc["function"]["arguments"].as_str() { tool_calls[idx].2.push_str(args); }
                 }
             }
 
-            // Emit regular content tokens
+            // Emit content token
             if let Some(token) = delta["content"].as_str() {
                 content.push_str(token);
-                let _ = app.emit("chat-token", token.to_string());
+                if let Some(task_id) = opts.task_id {
+                    let _ = app.emit(opts.token_event, json!({ "task_id": task_id, "token": token }));
+                } else {
+                    let _ = app.emit(opts.token_event, token.to_string());
+                }
             }
         }
     }
 
+    // Sub-agent mode: clear tool_calls if the LLM never signalled tool use
+    if !got_tool_calls && opts.task_id.is_some() {
+        tool_calls.clear();
+    }
+
     Ok(StreamResult { finish_reason, tool_calls, content, prompt_tokens, completion_tokens })
+}
+
+/// Thin wrapper used by the main agent (preserves existing call sites).
+async fn stream_request(
+    app: &AppHandle,
+    client: &Client,
+    url: &str,
+    api_key: &str,
+    req_body: Value,
+    cancelled: &AtomicBool,
+) -> Result<StreamResult, String> {
+    stream_llm_request(app, client, url, api_key, req_body, cancelled, StreamOptions {
+        token_event: "chat-token",
+        task_id: None,
+        emit_reasoning: true,
+        emit_usage: true,
+    }).await
 }
 
 // ─── Chat command ─────────────────────────────────────────────────────────────

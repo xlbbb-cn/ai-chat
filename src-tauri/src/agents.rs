@@ -1,4 +1,3 @@
-use futures_util::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -7,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
-use crate::{AppConfig, AppState, tools};
+use crate::{AppConfig, AppState, tools, llm_complete::{StreamOptions, stream_llm_request}};
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -190,116 +189,6 @@ async fn call_llm_once(
         .as_str()
         .unwrap_or("")
         .to_string())
-}
-
-/// Streaming LLM call for a sub-agent task.
-/// Emits `agent-task-token` events and returns (content, tool_calls, tokens_used).
-async fn stream_agent_request(
-    app: &AppHandle,
-    client: &Client,
-    url: &str,
-    api_key: &str,
-    req_body: Value,
-    cancelled: &AtomicBool,
-    task_id: &str,
-) -> Result<(String, Vec<(String, String, String)>, u32), String> {
-    let res = client
-        .post(url)
-        .bearer_auth(api_key)
-        .json(&req_body)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if !res.status().is_success() {
-        return Err(res.text().await.unwrap_or_default());
-    }
-
-    let mut content = String::new();
-    let mut tool_calls: Vec<(String, String, String)> = Vec::new();
-    let mut tokens_used: u32 = 0;
-    let mut got_tool_calls = false;
-
-    let mut stream = res.bytes_stream();
-    let mut buffer = String::new();
-
-    'outer: while let Some(chunk) = stream.next().await {
-        if cancelled.load(Ordering::SeqCst) {
-            break;
-        }
-        let bytes = chunk.map_err(|e| e.to_string())?;
-        buffer.push_str(&String::from_utf8_lossy(&bytes));
-
-        while let Some(newline_idx) = buffer.find('\n') {
-            let line = buffer[..newline_idx].to_string();
-            buffer.drain(..=newline_idx);
-
-            if cancelled.load(Ordering::SeqCst) {
-                break 'outer;
-            }
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            if line == "data: [DONE]" {
-                break 'outer;
-            }
-            let Some(json_str) = line.strip_prefix("data: ") else { continue };
-            let Ok(parsed) = serde_json::from_str::<Value>(json_str) else { continue };
-
-            if let Some(usage) = parsed.get("usage").filter(|v| !v.is_null()) {
-                tokens_used = (usage
-                    .get("prompt_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0)
-                    + usage
-                        .get("completion_tokens")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0)) as u32;
-            }
-
-            let Some(choice) = parsed["choices"].get(0) else { continue };
-            let delta = &choice["delta"];
-
-            if let Some(fr) = choice["finish_reason"].as_str() {
-                if fr == "tool_calls" {
-                    got_tool_calls = true;
-                }
-            }
-
-            if let Some(tcs) = delta["tool_calls"].as_array() {
-                for tc in tcs {
-                    let idx = tc["index"].as_u64().unwrap_or(0) as usize;
-                    while tool_calls.len() <= idx {
-                        tool_calls.push((String::new(), String::new(), String::new()));
-                    }
-                    if let Some(id) = tc["id"].as_str() {
-                        tool_calls[idx].0 = id.to_string();
-                    }
-                    if let Some(n) = tc["function"]["name"].as_str() {
-                        tool_calls[idx].1 = n.to_string();
-                    }
-                    if let Some(a) = tc["function"]["arguments"].as_str() {
-                        tool_calls[idx].2.push_str(a);
-                    }
-                }
-            }
-
-            if let Some(token) = delta["content"].as_str() {
-                content.push_str(token);
-                let _ = app.emit(
-                    "agent-task-token",
-                    json!({ "task_id": task_id, "token": token }),
-                );
-            }
-        }
-    }
-
-    // Return tool_calls only if LLM signalled tool use
-    if !got_tool_calls {
-        tool_calls.clear();
-    }
-    Ok((content, tool_calls, tokens_used))
 }
 
 // ─── Orchestration entry point ────────────────────────────────────────────────
@@ -698,10 +587,17 @@ pub async fn run_sub_agent(
             req_body["tool_choice"] = json!("auto");
         }
 
-        let stream_result = stream_agent_request(
-            app, client, url, &config.api_key, req_body, &cancelled, &task.id,
+        let stream_result = stream_llm_request(
+            app, client, url, &config.api_key, req_body, &cancelled,
+            StreamOptions {
+                token_event: "agent-task-token",
+                task_id: Some(&task.id),
+                emit_reasoning: false,
+                emit_usage: false,
+            },
         )
-        .await;
+        .await
+        .map(|sr| (sr.content, sr.tool_calls, sr.prompt_tokens + sr.completion_tokens));
 
         match stream_result {
             Err(e) => {
@@ -855,41 +751,13 @@ async fn aggregate_results(
         "stream_options": { "include_usage": true },
     });
 
-    let res = client
-        .post(url)
-        .bearer_auth(api_key)
-        .json(&req_body)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let cancelled = AtomicBool::new(false);
+    let sr = stream_llm_request(app, client, url, api_key, req_body, &cancelled, StreamOptions {
+        token_event: "chat-token",
+        task_id: None,
+        emit_reasoning: false,
+        emit_usage: false,
+    }).await?;
 
-    if !res.status().is_success() {
-        return Err(res.text().await.unwrap_or_default());
-    }
-
-    let mut final_content = String::new();
-    let mut stream = res.bytes_stream();
-    let mut buffer = String::new();
-
-    'outer: while let Some(chunk) = stream.next().await {
-        let bytes = chunk.map_err(|e| e.to_string())?;
-        buffer.push_str(&String::from_utf8_lossy(&bytes));
-
-        while let Some(idx) = buffer.find('\n') {
-            let line = buffer[..idx].to_string();
-            buffer.drain(..=idx);
-            let line = line.trim();
-            if line.is_empty() { continue; }
-            if line == "data: [DONE]" { break 'outer; }
-            let Some(json_str) = line.strip_prefix("data: ") else { continue };
-            let Ok(parsed) = serde_json::from_str::<Value>(json_str) else { continue };
-            let Some(choice) = parsed["choices"].get(0) else { continue };
-            if let Some(token) = choice["delta"]["content"].as_str() {
-                final_content.push_str(token);
-                let _ = app.emit("chat-token", token.to_string());
-            }
-        }
-    }
-
-    Ok(final_content)
+    Ok(sr.content)
 }
