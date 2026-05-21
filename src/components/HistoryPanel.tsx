@@ -27,7 +27,6 @@ export function HistoryPanel({ currentSessionId, onLoad, onClose }: Props) {
   }, [records]);
 
   function handleLoad(sessionId: string, sessionRecords: HistoryRecord[]) {
-    if (sessionId === currentSessionId) return;
     const messages: Message[] = sessionRecords.map((r) => ({
       id: crypto.randomUUID(),
       role: r.role as "user" | "assistant",
