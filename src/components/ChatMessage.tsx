@@ -37,6 +37,16 @@ interface Props {
   message: Message;
 }
 
+function extractAttachmentNames(content: string): string[] {
+  const names: string[] = [];
+  const re = /<details><summary>Attached File: ([^<]+)<\/summary>/g;
+  let m;
+  while ((m = re.exec(content)) !== null) {
+    names.push(m[1].trim());
+  }
+  return names;
+}
+
 function extractEmbeddedThoughtProcess(content: string): {
   reasoningContent: string;
   mainContent: string;
@@ -66,15 +76,20 @@ function extractEmbeddedThoughtProcess(content: string): {
 
 export function ChatMessage({ message }: Props) {
   const isUser = message.role === "user";
-  const embeddedThought = extractEmbeddedThoughtProcess(message.content);
+  const attachmentNames = isUser ? extractAttachmentNames(message.content) : [];
+  const displayContent = isUser
+    ? message.content.replace(/<details><summary>Attached File:[^<]*<\/summary>[\s\S]*?<\/details>/g, "").trim()
+    : message.content;
+  const embeddedThought = extractEmbeddedThoughtProcess(displayContent);
   const reasoningContent = message.reasoning_content ?? embeddedThought.reasoningContent;
   const mainContent = message.reasoning_content
-    ? message.content
+    ? displayContent
     : embeddedThought.mainContent;
 
   return (
     <div className={`chat-message ${isUser ? "user" : "assistant"}`}>
       <div className="message-role">{isUser ? "You" : "Assistant"}</div>
+
       {reasoningContent && (
         <details className="message-reasoning">
           <summary>Thought Process</summary>
@@ -96,6 +111,14 @@ export function ChatMessage({ message }: Props) {
         }}
       />
       {message.streaming && <span className="cursor">|</span>}
+      {attachmentNames.length > 0 && (
+        <div className="message-attachments">
+          <span>Attached Files:</span>
+          {attachmentNames.map((name, i) => (
+            <span key={i} className="message-attachment-pill">📎 {name}</span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
