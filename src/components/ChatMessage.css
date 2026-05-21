@@ -162,6 +162,26 @@
   animation: blink 0.7s step-end infinite;
 }
 
+.message-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+
+.message-retry-btn {
+  border: 1px solid #D1D5DB;
+  background: #FFFFFF;
+  color: #171A20;
+  border-radius: 4px;
+  padding: 2px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.message-retry-btn:hover {
+  background: #F9FAFB;
+}
+
 @keyframes blink {
   50% {
     opacity: 0;

@@ -52,7 +52,7 @@ export default function App() {
     cmd_type: string;
     code: string;
   } | null>(null);
-  const [pendingRetryUserContent, setPendingRetryUserContent] = useState<string | null>(null);
+  const [pendingRetryMessageId, setPendingRetryMessageId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -265,7 +265,7 @@ export default function App() {
       text += `\n\n<details><summary>Attached File: ${file.name}</summary>\n\n\`\`\`${ext}\n${file.content}\n\`\`\`\n</details>`;
     }
     text = text.trim();
-    setPendingRetryUserContent(null);
+    setPendingRetryMessageId(null);
 
     const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: text };
     const assistantId = crypto.randomUUID();
@@ -340,7 +340,7 @@ export default function App() {
   }, [input, messages, streaming, activeSkillIds, sessionId, attachments, selectedModel, useAgentsEnabled]);
 
   const retryPendingUserMessage = useCallback(async () => {
-    if (streaming || !pendingRetryUserContent) return;
+    if (streaming || !pendingRetryMessageId) return;
 
     const assistantId = crypto.randomUUID();
     const assistantMsg: Message = { id: assistantId, role: "assistant", content: "", streaming: true };
@@ -384,7 +384,7 @@ export default function App() {
             .filter((m) => !m.id.startsWith("agent-progress-"))
             .map((m) => (m.id === assistantId ? { ...m, streaming: false } : m))
         );
-        setPendingRetryUserContent(null);
+        setPendingRetryMessageId(null);
         setAgentStatuses({});
         setStreaming(false);
         cleanupRef.current = null;
@@ -407,7 +407,7 @@ export default function App() {
     }, useAgentsEnabled);
 
     cleanupRef.current = cleanup;
-  }, [messages, streaming, pendingRetryUserContent, activeSkillIds, sessionId, selectedModel, useAgentsEnabled]);
+  }, [messages, streaming, pendingRetryMessageId, activeSkillIds, sessionId, selectedModel, useAgentsEnabled]);
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -427,7 +427,7 @@ export default function App() {
     setMessages([]);
     setError(null);
     setUsage(null);
-    setPendingRetryUserContent(null);
+    setPendingRetryMessageId(null);
     setSessionId(crypto.randomUUID());
   }
 
@@ -561,9 +561,9 @@ export default function App() {
 
                 const lastMsg = msgs.length > 0 ? msgs[msgs.length - 1] : null;
                 if (lastMsg?.role === "user") {
-                  setPendingRetryUserContent(lastMsg.content);
+                  setPendingRetryMessageId(lastMsg.id);
                 } else {
-                  setPendingRetryUserContent(null);
+                  setPendingRetryMessageId(null);
                 }
               }}
               onClose={() => setSidebar(null)}
@@ -662,7 +662,12 @@ export default function App() {
             </div>
           )}
           {messages.map((m) => (
-            <ChatMessage key={m.id} message={m} />
+            <ChatMessage
+              key={m.id}
+              message={m}
+              showRetry={m.role === "user" && m.id === pendingRetryMessageId && !streaming}
+              onRetry={retryPendingUserMessage}
+            />
           ))}
           {error && <div className="error-banner">{error}</div>}
           <div ref={bottomRef} />
@@ -742,14 +747,6 @@ export default function App() {
                 <option key={model} value={model}>{model}</option>
               ))}
             </select>
-            <button
-              className="send-btn"
-              onClick={retryPendingUserMessage}
-              disabled={streaming || !pendingRetryUserContent}
-              title="Retry last unfinished user message"
-            >
-              Retry
-            </button>
             <button
               className="send-btn"
               onClick={streaming ? stopStreaming : sendMessage}

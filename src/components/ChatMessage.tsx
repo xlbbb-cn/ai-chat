@@ -35,6 +35,8 @@ md.renderer.rules.link_close = () => "</span>";
 
 interface Props {
   message: Message;
+  showRetry?: boolean;
+  onRetry?: () => void;
 }
 
 function extractAttachmentNames(content: string): string[] {
@@ -74,7 +76,7 @@ function extractEmbeddedThoughtProcess(content: string): {
   return { reasoningContent, mainContent };
 }
 
-export function ChatMessage({ message }: Props) {
+export function ChatMessage({ message, showRetry = false, onRetry }: Props) {
   const isUser = message.role === "user";
   const attachmentNames = isUser ? extractAttachmentNames(message.content) : [];
   const displayContent = isUser
@@ -117,6 +119,13 @@ export function ChatMessage({ message }: Props) {
           {attachmentNames.map((name, i) => (
             <span key={i} className="message-attachment-pill">📎 {name}</span>
           ))}
+        </div>
+      )}
+      {isUser && showRetry && (
+        <div className="message-actions">
+          <button className="message-retry-btn" onClick={onRetry} title="Retry this unfinished user message">
+            Retry
+          </button>
         </div>
       )}
     </div>
