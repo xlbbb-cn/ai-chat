@@ -22,8 +22,6 @@ interface AgentStatus {
   tokens?: number;
 }
 
-const KNOWN_TOOL_IDS = new Set(["file_actions", "run_cmd", "run_shell", "knowledge_graph"]);
-
 export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -119,7 +117,7 @@ export default function App() {
         setAvailableModels(catalog.length > 0 ? catalog : ["gpt-4o-mini"]);
         setSelectedModel(cfg.model || "gpt-4o-mini");
         setActiveSkillIds(cfg.selected_skills ?? []);
-        setActiveToolCount((cfg.selected_tools ?? []).filter((id) => KNOWN_TOOL_IDS.has(id)).length);
+        setActiveToolCount((cfg.selected_tools ?? []).length);
         setSkillsLoadedFromConfig(true);
       })
       .catch(console.error);
@@ -148,7 +146,7 @@ export default function App() {
         setAvailableModels(catalog.length > 0 ? catalog : ["gpt-4o-mini"]);
         setSelectedModel(cfg.model || "gpt-4o-mini");
         setActiveSkillIds(cfg.selected_skills ?? []);
-        setActiveToolCount((cfg.selected_tools ?? []).filter((id) => KNOWN_TOOL_IDS.has(id)).length);
+        setActiveToolCount((cfg.selected_tools ?? []).length);
         setActiveMcpCount(servers.filter((s) => s.enabled).length);
       } catch (err) {
         console.error(err);
@@ -442,7 +440,7 @@ export default function App() {
             <ToolsPanel
               onClose={() => setSidebar(null)}
               onToolsChange={(tools) =>
-                setActiveToolCount(tools.filter((id) => KNOWN_TOOL_IDS.has(id)).length)
+                setActiveToolCount(tools.length)
               }
             />
           )}
@@ -488,7 +486,7 @@ export default function App() {
               title={`Sub Agents${useAgentsEnabled ? " (启用中)" : ""}`}
             >
               🤖 Agents
-              {activeAgentCount > 0 && (
+              {activeAgentCount > 0 && useAgentsEnabled && (
                 <span className="toolbar-btn-count">{activeAgentCount}</span>
               )}
             </button>
