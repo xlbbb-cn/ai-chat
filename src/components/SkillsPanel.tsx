@@ -132,7 +132,6 @@ export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
                 <div
                   key={skill.name}
                   className={`skill-item ${isActive ? "active" : ""}`}
-                  onClick={() => onToggle(skill.name, !isActive)}
                 >
                   <div className="skill-content">
                     <div className="skill-title-row">
@@ -140,7 +139,7 @@ export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
                         <input
                           type="checkbox"
                           checked={isActive}
-                          readOnly
+                          onChange={(e) => onToggle(skill.name, e.target.checked)}
                         />
                         <span className="toggle-switch-slider" />
                       </label>

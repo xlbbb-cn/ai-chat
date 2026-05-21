@@ -40,31 +40,28 @@
 .skills-list {
   flex: 1;
   overflow-y: auto;
-  padding: 12px;
+  padding: 12px 20px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .skill-item {
-  padding: 12px;
+  border: 1px solid #D0D1D2;
   border-radius: 4px;
-  background: transparent;
-  cursor: pointer;
-  border: none;
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  gap: 8px;
-  transition: background-color 0.25s;
+  gap: 6px;
+  transition: opacity 0.25s;
 }
 
 .skill-item:hover {
-  background: #F4F4F4;
+  opacity: 0.95;
 }
 
 .skill-item.active {
-  background: #F4F4F4;
+  /* highlighted when active */
 }
 
 .skill-content {
@@ -79,14 +76,14 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
 }
 
 .skill-title-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
 }
 
@@ -100,7 +97,7 @@
   display: flex;
   justify-content: flex-end;
   gap: 4px;
-  margin-top: 12px;
+  margin-top: 6px;
 }
 
 .skill-actions-bottom button,
@@ -135,10 +132,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: default;
 }
 
 .skill-desc {
-  font-size: 14px;
+  font-size: 13px;
   color: #5C5E62;
   display: -webkit-box;
   -webkit-line-clamp: 2;
