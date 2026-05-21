@@ -44,37 +44,45 @@ Use cases:
 ### 1) Chat Capabilities
 
 - Supports OpenAI-compatible Chat Completions
-- Streaming responses (token-level incremental display)
+- Streaming responses with usage events
 - Displays reasoning content streams (reasoning tokens)
 - Interruptible generation
+- File attachment support in messages
 - Model switching and parameter configuration (temperature, top_p, max_tokens, etc.)
 
-### 2) Skill System
+### 2) Sub-Agent Orchestration
+
+- Create, edit, enable, and delete sub-agents
+- Configure agent orchestration and toggle sub-agent mode
+- Task-level orchestration events in the chat flow
+
+### 3) Skill System
 
 - Define skills via skill.md (YAML frontmatter + system prompt)
 - Add, delete, enable/disable skills
 - Load skills from both app and user directories
-- Skills can restrict accessible tools for controlled execution boundaries
+- Skill path isolation for safer file and command scope
+- Skill command allowlist merging across multiple selected skills
 
-### 3) Tool System
+### 4) Tool System
 
-- web_search: Internet search
-- fetch_web: Web scraping
-- execute_command: Local command execution (bash/cmd/powershell/python)
-- file_actions: File read/write/edit/patch
+- run_cmd / run_shell: Local command execution with dangerous-command confirmation
+- file_actions: File read/write/edit/patch plus mkdir/rename/move/delete
 - knowledge_graph: Knowledge graph queries (supports Neo4j)
 
-### 4) MCP Management
+### 5) MCP Management
 
 - Add, edit, delete MCP servers
-- Supports stdio / SSE transport modes
+- Supports stdio / SSE transport modes with relative path handling improvements
 - Connectivity testing
 
-### 5) Local Persistence
+### 6) Local Persistence & Operations
 
 - config.json for model and tool configurations
 - SQLite for chat history and API request monitoring data
-- Request monitoring panel for viewing API call summaries, errors, and durations
+- Request monitoring panel for listing, details, and deletion
+- Profile save/restore support for local configuration snapshots
+- Workspace directory setting in the UI
 
 ---
 

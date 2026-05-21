@@ -43,37 +43,45 @@ AI Chat 是一个桌面端 AI 助手应用，支持接入任意 OpenAI 兼容模
 ### 1) 对话能力
 
 - 支持 OpenAI 兼容 Chat Completions
-- 支持流式返回（token 级别增量显示）
+- 支持流式返回与 usage 事件
 - 支持推理内容流（reasoning token）展示
 - 支持中断生成
+- 支持消息文件附件展示
 - 支持模型切换与模型参数配置（temperature、top_p、max_tokens 等）
 
-### 2) 技能系统（Skills）
+### 2) 子代理编排（Sub-Agents）
+
+- 支持子代理新增、编辑、启用与删除
+- 支持编排配置与子代理模式开关
+- 对话中支持任务级编排事件
+
+### 3) 技能系统（Skills）
 
 - 基于 skill.md（YAML frontmatter + system prompt）定义技能
 - 支持技能的新增、删除、启用/停用
 - 支持从应用目录和用户目录加载技能
-- 技能可限制可用工具集合，形成更可控的执行边界
+- 技能目录隔离，约束文件与命令作用范围
+- 多技能下命令白名单可合并
 
-### 3) 工具系统（Tools）
+### 4) 工具系统（Tools）
 
-- web_search：联网搜索
-- fetch_web：网页抓取
-- execute_command：本地命令执行（bash/cmd/powershell/python）
-- file_actions：文件读写、编辑、补丁
+- run_cmd / run_shell：本地命令执行，内置危险命令确认
+- file_actions：文件读写、编辑、补丁，支持 mkdir / rename / move / delete
 - knowledge_graph：知识图谱查询（支持 Neo4j）
 
-### 4) MCP 管理
+### 5) MCP 管理
 
 - 支持 MCP Server 的增删改查
-- 支持 stdio / sse 两种传输模式
+- 支持 stdio / sse 两种传输模式，并改进相对路径处理
 - 支持连通性测试
 
-### 5) 本地持久化
+### 6) 本地持久化与运维
 
 - config.json 保存模型与工具配置
 - SQLite 保存聊天历史与 API 请求监控数据
-- 请求监控面板可查看模型调用摘要、错误与耗时
+- 请求监控面板支持列表、详情与删除
+- 支持配置快照的保存与恢复（Profile）
+- 支持在设置中管理工作目录
 
 ---
 
