@@ -746,8 +746,8 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                     ],
                 );
                 // Log to interaction_log table
-                let request_body_display = request_snapshot.to_string().chars().take(1000).collect::<String>();
-                let response_display = sr.content.chars().take(500).collect::<String>();
+                let request_body_display = request_snapshot.to_string();
+                let response_display = sr.content.clone();
                 log_interaction(
                     &db,
                     &session_id,
@@ -784,7 +784,7 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                     ],
                 );
                 // Log to interaction_log table
-                let request_body_display = request_snapshot.to_string().chars().take(1000).collect::<String>();
+                let request_body_display = request_snapshot.to_string();
                 log_interaction(
                     &db,
                     &session_id,
@@ -976,7 +976,7 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                             &mcp_server.name,
                             actual_tool_name,
                             serde_json::to_string(&args_json).unwrap_or_default(),
-                            result.chars().take(500).collect(),
+                            result.clone(),
                             None,
                             duration_ms,
                         );
@@ -1025,7 +1025,7 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
                     "tool_executor",
                     name,
                     serde_json::to_string(&serde_json::from_str::<Value>(args).unwrap_or_default()).unwrap_or_default(),
-                    tool_result.chars().take(500).collect(),
+                    tool_result.clone(),
                     if is_error { Some(tool_result.clone()) } else { None },
                     duration_ms,
                 );
