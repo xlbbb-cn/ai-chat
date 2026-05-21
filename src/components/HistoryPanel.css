@@ -22,6 +22,21 @@
   color: #171A20;
 }
 
+.close-btn {
+  background: transparent;
+  border: none;
+  color: #171A20;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background-color 0.25s;
+}
+
+.close-btn:hover {
+  background: #F4F4F4;
+}
+
 .history-list {
   flex: 1;
   overflow-y: auto;

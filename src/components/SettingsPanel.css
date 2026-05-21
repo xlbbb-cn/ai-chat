@@ -12,6 +12,7 @@
   justify-content: space-between;
   padding: 16px 20px;
   border-bottom: 1px solid #EEEEEE;
+  flex-shrink: 0;
 }
 
 .settings-header h2 {
@@ -29,7 +30,7 @@
   cursor: pointer;
   padding: 4px 8px;
   border-radius: 4px;
-  transition: background-color 0.33s;
+  transition: background-color 0.25s;
 }
 
 .close-btn:hover {
