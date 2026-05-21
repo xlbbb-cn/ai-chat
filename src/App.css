@@ -167,6 +167,50 @@ body {
   flex-shrink: 0;
 }
 
+.usage-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.usage-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: #6B7280;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.usage-line {
+  color: #6B7280;
+  font-size: 11px;
+  line-height: 1.2;
+  font-family: Consolas, "Courier New", monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.usage-bar-track {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: #E5E7EB;
+  overflow: hidden;
+}
+
+.usage-bar-fill {
+  height: 100%;
+  background: #16A34A;
+  transition: width 0.25s ease;
+}
+
+.usage-bar-fill.warning {
+  background: #DC2626;
+}
+
 .input-row {
   display: flex;
   gap: 8px;

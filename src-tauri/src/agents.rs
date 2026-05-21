@@ -594,6 +594,7 @@ pub async fn run_sub_agent(
                 task_id: Some(&task.id),
                 emit_reasoning: false,
                 emit_usage: false,
+                usage_max_tokens: None,
             },
         )
         .await
@@ -757,6 +758,7 @@ async fn aggregate_results(
         task_id: None,
         emit_reasoning: false,
         emit_usage: false,
+        usage_max_tokens: None,
     }).await?;
 
     Ok(sr.content)

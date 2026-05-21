@@ -380,6 +380,14 @@ pub fn run() {
             let db = Connection::open(db_path).unwrap();
             db.execute("CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)", []).unwrap();
             db.execute(
+                "CREATE TABLE IF NOT EXISTS session_summaries (\
+                    session_id TEXT PRIMARY KEY, \
+                    summary TEXT NOT NULL, \
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP\
+                )",
+                [],
+            ).unwrap();
+            db.execute(
                 "CREATE TABLE IF NOT EXISTS api_requests (\
                     id INTEGER PRIMARY KEY AUTOINCREMENT, \
                     session_id TEXT, \

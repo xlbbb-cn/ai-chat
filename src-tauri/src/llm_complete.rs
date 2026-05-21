@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, State};
 
-use crate::{AppState, tools, skills, mcp, agents};
+use crate::{AppState, agents, db, mcp, skills, tools};
 
 fn log_event(state: &State<'_, AppState>, level: &str, message: String) {
     if let Ok(logger) = state.logger.lock() {
@@ -52,6 +52,196 @@ pub struct StreamOptions<'a> {
     pub emit_reasoning: bool,
     /// Emit `chat-usage` and populate prompt/completion token counts.
     pub emit_usage: bool,
+    /// Optional max token ceiling used for usage ratio reporting.
+    pub usage_max_tokens: Option<u32>,
+}
+
+const CONTEXT_COMPRESSION_THRESHOLD: f32 = 0.9;
+const CONTEXT_KEEP_RECENT_MESSAGES: usize = 12;
+const CONTEXT_SUMMARY_MARKER: &str = "INTERNAL CONTEXT - SESSION SUMMARY";
+const CONTEXT_SUMMARY_MAX_LINES: usize = 120;
+const DEFAULT_MODEL_MAX_TOKENS: u32 = 131_072;
+
+fn truncate_text(value: &str, max_chars: usize) -> String {
+    value.chars().take(max_chars).collect::<String>()
+}
+
+fn summarize_message_for_context(msg: &Value) -> Option<String> {
+    let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("unknown");
+    if role == "tool" {
+        return None;
+    }
+
+    if msg
+        .get("tool_calls")
+        .and_then(|v| v.as_array())
+        .map(|calls| !calls.is_empty())
+        .unwrap_or(false)
+    {
+        return None;
+    }
+
+    let content = msg
+        .get("content")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .replace('\n', " ");
+
+    if content.is_empty() {
+        return None;
+    }
+
+    Some(format!("- {role}: {}", truncate_text(&content, 260)))
+}
+
+fn is_pinned_context_message(msg: &Value) -> bool {
+    if msg.get("role").and_then(|v| v.as_str()) == Some("system") {
+        return true;
+    }
+    msg.get("content")
+        .and_then(|v| v.as_str())
+        .map(|content| {
+            content.starts_with("INTERNAL CONTEXT - ACTIVE SKILLS")
+                || content.starts_with("INTERNAL CONTEXT - DYNAMICALLY LOADED SKILL")
+        })
+        .unwrap_or(false)
+}
+
+fn extract_summary_body(content: &str) -> Option<String> {
+    if !content.starts_with(CONTEXT_SUMMARY_MARKER) {
+        return None;
+    }
+    let body = content
+        .split_once('\n')
+        .map(|(_, rest)| rest.trim().to_string())
+        .unwrap_or_default();
+    if body.is_empty() {
+        None
+    } else {
+        Some(body)
+    }
+}
+
+fn merge_summary_lines(existing_summary: Option<&str>, new_lines: &[String]) -> String {
+    let mut merged: Vec<String> = Vec::new();
+
+    if let Some(existing) = existing_summary {
+        merged.extend(
+            existing
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(|line| line.to_string()),
+        );
+    }
+
+    merged.extend(new_lines.iter().cloned());
+
+    if merged.len() > CONTEXT_SUMMARY_MAX_LINES {
+        merged = merged.split_off(merged.len() - CONTEXT_SUMMARY_MAX_LINES);
+    }
+
+    merged.join("\n")
+}
+
+fn compress_session_context(all_messages: &mut Vec<Value>) -> Option<String> {
+    if all_messages.len() <= CONTEXT_KEEP_RECENT_MESSAGES + 2 {
+        return None;
+    }
+
+    let mut pinned: Vec<Value> = Vec::new();
+    let mut compressible: Vec<Value> = Vec::new();
+    let mut existing_summary_body: Option<String> = None;
+
+    for msg in all_messages.drain(..) {
+        let existing_summary = msg
+            .get("content")
+            .and_then(|v| v.as_str())
+            .and_then(extract_summary_body);
+        if let Some(summary_body) = existing_summary {
+            existing_summary_body = Some(summary_body);
+            continue;
+        }
+
+        let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or_default();
+        let has_tool_calls = msg
+            .get("tool_calls")
+            .and_then(|v| v.as_array())
+            .map(|calls| !calls.is_empty())
+            .unwrap_or(false);
+
+        if role == "tool" || has_tool_calls {
+            // Explicitly drop tool invocation context from compression strategy.
+            continue;
+        }
+
+        if is_pinned_context_message(&msg) {
+            pinned.push(msg);
+        } else {
+            compressible.push(msg);
+        }
+    }
+
+    if compressible.len() <= CONTEXT_KEEP_RECENT_MESSAGES + 2 {
+        let mut rebuilt = Vec::with_capacity(pinned.len() + compressible.len());
+        rebuilt.extend(pinned);
+        rebuilt.extend(compressible);
+
+        if let Some(existing_summary_body) = existing_summary_body {
+            rebuilt.insert(
+                rebuilt.len().min(1),
+                json!({
+                    "role": "system",
+                    "content": format!("{CONTEXT_SUMMARY_MARKER}\n{existing_summary_body}")
+                }),
+            );
+        }
+
+        *all_messages = rebuilt;
+        return None;
+    }
+
+    let split_idx = compressible.len().saturating_sub(CONTEXT_KEEP_RECENT_MESSAGES);
+    let (older, recent) = compressible.split_at(split_idx);
+
+    let summary_lines: Vec<String> = older
+        .iter()
+        .filter_map(summarize_message_for_context)
+        .collect();
+
+    if summary_lines.is_empty() {
+        let mut rebuilt = Vec::with_capacity(pinned.len() + compressible.len());
+        rebuilt.extend(pinned);
+        rebuilt.extend(compressible);
+
+        if let Some(existing_summary_body) = existing_summary_body {
+            rebuilt.insert(
+                rebuilt.len().min(1),
+                json!({
+                    "role": "system",
+                    "content": format!("{CONTEXT_SUMMARY_MARKER}\n{existing_summary_body}")
+                }),
+            );
+        }
+
+        *all_messages = rebuilt;
+        return None;
+    }
+
+    let merged_summary = merge_summary_lines(existing_summary_body.as_deref(), &summary_lines);
+
+    let summary_message = json!({
+        "role": "system",
+        "content": format!("{CONTEXT_SUMMARY_MARKER}\n{merged_summary}")
+    });
+
+    let mut rebuilt = Vec::with_capacity(pinned.len() + 1 + recent.len());
+    rebuilt.extend(pinned);
+    rebuilt.push(summary_message);
+    rebuilt.extend(recent.iter().cloned());
+    *all_messages = rebuilt;
+    Some(merged_summary)
 }
 
 // ─── Unified streaming helper ─────────────────────────────────────────────────
@@ -115,9 +305,18 @@ pub async fn stream_llm_request(
                 if let Some(usage) = parsed.get("usage").filter(|v| !v.is_null()) {
                     prompt_tokens = usage.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                     completion_tokens = usage.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                    let total_tokens = prompt_tokens.saturating_add(completion_tokens);
+                    let usage_ratio = opts
+                        .usage_max_tokens
+                        .filter(|max| *max > 0)
+                        .map(|max| total_tokens as f64 / max as f64)
+                        .unwrap_or(0.0);
                     let _ = app.emit("chat-usage", json!({
                         "prompt_tokens": prompt_tokens,
-                        "completion_tokens": completion_tokens
+                        "completion_tokens": completion_tokens,
+                        "total_tokens": total_tokens,
+                        "max_tokens": opts.usage_max_tokens,
+                        "usage_ratio": usage_ratio
                     }));
                 }
             }
@@ -180,12 +379,14 @@ async fn stream_request(
     api_key: &str,
     req_body: Value,
     cancelled: &AtomicBool,
+    usage_max_tokens: Option<u32>,
 ) -> Result<StreamResult, String> {
     stream_llm_request(app, client, url, api_key, req_body, cancelled, StreamOptions {
         token_event: "chat-token",
         task_id: None,
         emit_reasoning: true,
         emit_usage: true,
+        usage_max_tokens,
     }).await
 }
 
@@ -314,6 +515,17 @@ if !system_content.is_empty() {
     all_messages.push(json!({ "role": "system", "content": system_content }));
 }
 
+    if let Ok(db_guard) = state.db.lock() {
+        if let Ok(Some(saved_summary)) = db::get_session_summary(&db_guard, &session_id) {
+            if !saved_summary.trim().is_empty() {
+                all_messages.push(json!({
+                    "role": "system",
+                    "content": format!("{CONTEXT_SUMMARY_MARKER}\n{}", saved_summary)
+                }));
+            }
+        }
+    }
+
     if !loaded_skills_content.is_empty() {
         let workspace_dir = state.workspace_dir.lock().unwrap().clone();
         let workspace_root_display = workspace_dir.display().to_string();
@@ -436,6 +648,12 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
     }
 
     loop {
+        let effective_max_tokens = config
+            .model_settings
+            .max_tokens
+            .filter(|max| *max > 0)
+            .unwrap_or(DEFAULT_MODEL_MAX_TOKENS);
+
         let mut req_body = json!({
             "model": active_model,
             "messages": all_messages,
@@ -469,6 +687,7 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
             &config.api_key,
             req_body,
             &state.chat_cancelled,
+            Some(effective_max_tokens),
         )
         .await;
 
@@ -535,6 +754,25 @@ The following skills are CURRENTLY ACTIVE and their detailed instructions are pr
         }
 
         let sr = result?;
+
+        let total_tokens = sr.prompt_tokens.saturating_add(sr.completion_tokens);
+        let ratio = total_tokens as f32 / effective_max_tokens as f32;
+        if ratio >= CONTEXT_COMPRESSION_THRESHOLD {
+            if let Some(merged_summary) = compress_session_context(&mut all_messages) {
+                if let Ok(db_guard) = state.db.lock() {
+                    let _ = db::save_session_summary(&db_guard, &session_id, &merged_summary);
+                }
+                log_event(
+                    &state,
+                    "INFO",
+                    format!(
+                        "session context compressed: session_id={}, total_tokens={}, max_tokens={}, ratio={:.3}",
+                        session_id, total_tokens, effective_max_tokens, ratio
+                    ),
+                );
+                let _ = app.emit("chat-token", "\n\n[System] Context compressed (tool-call traces discarded) and persisted for next turns.\n\n");
+            }
+        }
 
         if sr.finish_reason == "cancelled" {
             break;

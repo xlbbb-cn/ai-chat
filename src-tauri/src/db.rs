@@ -1,3 +1,4 @@
+use rusqlite::Connection;
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -61,6 +62,42 @@ pub fn delete_history(
     let db = state.db.lock().unwrap();
     db.execute(
         "DELETE FROM history WHERE session_id = ?1",
+        rusqlite::params![session_id],
+    )
+    .map_err(|e| e.to_string())?;
+    delete_session_summary(&db, &session_id)?;
+    Ok(())
+}
+
+pub fn get_session_summary(db: &Connection, session_id: &str) -> Result<Option<String>, String> {
+    let mut stmt = db
+        .prepare(
+            "SELECT summary FROM session_summaries WHERE session_id = ?1 LIMIT 1",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let result = stmt.query_row(rusqlite::params![session_id], |row| row.get::<_, String>(0));
+    match result {
+        Ok(summary) => Ok(Some(summary)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+pub fn save_session_summary(db: &Connection, session_id: &str, summary: &str) -> Result<(), String> {
+    db.execute(
+        "INSERT INTO session_summaries (session_id, summary, updated_at) \
+         VALUES (?1, ?2, CURRENT_TIMESTAMP) \
+         ON CONFLICT(session_id) DO UPDATE SET summary = excluded.summary, updated_at = CURRENT_TIMESTAMP",
+        rusqlite::params![session_id, summary],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn delete_session_summary(db: &Connection, session_id: &str) -> Result<(), String> {
+    db.execute(
+        "DELETE FROM session_summaries WHERE session_id = ?1",
         rusqlite::params![session_id],
     )
     .map_err(|e| e.to_string())?;

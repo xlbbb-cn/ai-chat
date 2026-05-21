@@ -31,7 +31,14 @@ export default function App() {
   const [sidebar, setSidebar] = useState<Sidebar>(null);
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [usage, setUsage] = useState<{ prompt_tokens: number, completion_tokens: number } | null>(null);
+  const [usage, setUsage] = useState<{
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens?: number;
+    max_tokens?: number;
+    usage_ratio?: number;
+  } | null>(null);
+  const [maxTokens, setMaxTokens] = useState<number | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>(["gpt-4o-mini"]);
   const [selectedModel, setSelectedModel] = useState("gpt-4o-mini");
   const [activeToolCount, setActiveToolCount] = useState(0);
@@ -62,7 +69,13 @@ export default function App() {
   }, [input]);
 
   useEffect(() => {
-    const unlisten = listen<{ prompt_tokens: number; completion_tokens: number }>("chat-usage", (e) => {
+    const unlisten = listen<{
+      prompt_tokens: number;
+      completion_tokens: number;
+      total_tokens?: number;
+      max_tokens?: number;
+      usage_ratio?: number;
+    }>("chat-usage", (e) => {
       setUsage(e.payload);
     });
     return () => {
@@ -116,6 +129,7 @@ export default function App() {
         const catalog = Array.from(new Set([...(cfg.model_catalog ?? []), cfg.model].filter(Boolean)));
         setAvailableModels(catalog.length > 0 ? catalog : ["gpt-4o-mini"]);
         setSelectedModel(cfg.model || "gpt-4o-mini");
+        setMaxTokens(cfg.model_settings?.max_tokens ?? null);
         setActiveSkillIds(cfg.selected_skills ?? []);
         setActiveToolCount((cfg.selected_tools ?? []).length);
         setSkillsLoadedFromConfig(true);
@@ -145,6 +159,7 @@ export default function App() {
         const catalog = Array.from(new Set([...(cfg.model_catalog ?? []), cfg.model].filter(Boolean)));
         setAvailableModels(catalog.length > 0 ? catalog : ["gpt-4o-mini"]);
         setSelectedModel(cfg.model || "gpt-4o-mini");
+        setMaxTokens(cfg.model_settings?.max_tokens ?? null);
         setActiveSkillIds(cfg.selected_skills ?? []);
         setActiveToolCount((cfg.selected_tools ?? []).length);
         setActiveMcpCount(servers.filter((s) => s.enabled).length);
@@ -249,7 +264,6 @@ export default function App() {
       text += `\n\n<details><summary>Attached File: ${file.name}</summary>\n\n\`\`\`${ext}\n${file.content}\n\`\`\`\n</details>`;
     }
     text = text.trim();
-    setUsage(null);
 
     const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: text };
     const assistantId = crypto.randomUUID();
@@ -409,6 +423,17 @@ export default function App() {
     setStreaming(false);
   }
 
+  const usageTotal = usage ? (usage.total_tokens ?? usage.prompt_tokens + usage.completion_tokens) : 0;
+  const fallbackMaxTokens = 131072; // 128k tokens as a hard upper bound for usage ratio calculations when no explicit max is provided
+  const usageMax = usage?.max_tokens ?? maxTokens ?? fallbackMaxTokens;
+  const usageRatio = usage
+    ? (usage.usage_ratio ?? (usageMax > 0 ? usageTotal / usageMax : 0))
+    : 0;
+  const usagePercent = Math.max(0, Math.min(100, Math.round(usageRatio * 100)));
+  const usageBarWidth = 16;
+  const usageBarFilled = Math.max(0, Math.min(usageBarWidth, Math.round((usagePercent / 100) * usageBarWidth)));
+  const usageBarText = `[${"x".repeat(usageBarFilled)}${"-".repeat(usageBarWidth - usageBarFilled)} ]`;
+
   return (
     <div className="app-layout">
       {renderConfirmDialog()}
@@ -422,6 +447,7 @@ export default function App() {
                 const catalog = Array.from(new Set([...(cfg.model_catalog ?? []), cfg.model].filter(Boolean)));
                 setAvailableModels(catalog.length > 0 ? catalog : ["gpt-4o-mini"]);
                 setSelectedModel(cfg.model || "gpt-4o-mini");
+                setMaxTokens(cfg.model_settings?.max_tokens ?? null);
               }}
             />
           )}
@@ -564,8 +590,10 @@ export default function App() {
         {/* Input */}
         <div className="input-area" style={{ position: "relative", flexDirection: "column", alignItems: "stretch" }}>
           {usage && (
-            <div style={{ position: "absolute", top: "-15px", left: "10px", fontSize: "10px", color: "gray" }}>
-              Tokens: {usage.prompt_tokens} prompt / {usage.completion_tokens} completion
+            <div className="usage-panel">
+              <div className="usage-line" role="status" aria-live="polite">
+                Tokens: {usage.prompt_tokens} prompt / {usage.completion_tokens} completion   {usageBarText} {usageTotal} / {usageMax} ({usagePercent}%)
+              </div>
             </div>
           )}
           {attachments.length > 0 && (
