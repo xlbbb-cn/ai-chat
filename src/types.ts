@@ -55,3 +55,32 @@ export interface McpServer {
   auth_token: string;
   enabled: boolean;
 }
+
+export interface SubAgent {
+  id: string;
+  name: string;
+  description: string;
+  system_prompt: string;
+  model?: string;
+  max_tokens?: number;
+  temperature?: number;
+  allowed_tools: string[];
+  allowed_skills: string[];
+  max_iterations: number;
+  enabled: boolean;
+}
+
+export interface AgentOrchestration {
+  auto_configure: boolean;
+  max_concurrent: number;
+  mode: "parallel" | "sequential";
+}
+
+export interface AgentTaskEvent {
+  task_id: string;
+  agent_id: string;
+  agent_name: string;
+  description?: string;
+  summary?: string;
+  error?: string;
+}

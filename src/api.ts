@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import type { AppConfig, Message, Skill, McpServer } from "./types";
+import type { AppConfig, Message, Skill, McpServer, SubAgent, AgentOrchestration, AgentTaskEvent } from "./types";
 
 export async function getConfig(): Promise<AppConfig> {
   return invoke("get_config");
@@ -43,6 +43,11 @@ export interface StreamCallbacks {
   onReasoningToken?: (token: string) => void;
   onDone: () => void;
   onError: (err: string) => void;
+  onAgentTaskStart?: (e: AgentTaskEvent) => void;
+  onAgentTaskDone?: (e: AgentTaskEvent) => void;
+  onAgentTaskError?: (e: AgentTaskEvent) => void;
+  onAgentPlanStart?: (taskCount: number) => void;
+  onAgentAggregateStart?: () => void;
 }
 
 export async function chatCompletion(
@@ -50,7 +55,8 @@ export async function chatCompletion(
   skillIds: string[],
   sessionId: string,
   modelOverride: string | undefined,
-  callbacks: StreamCallbacks
+  callbacks: StreamCallbacks,
+  useAgents?: boolean,
 ): Promise<UnlistenFn> {
   const unlisteners: UnlistenFn[] = [];
 
@@ -75,14 +81,30 @@ export async function chatCompletion(
     callbacks.onError(e.payload);
     cleanup();
   });
+  const unTaskStart = await listen<AgentTaskEvent>("agent-task-start", (e) => {
+    callbacks.onAgentTaskStart?.(e.payload);
+  });
+  const unTaskDone = await listen<AgentTaskEvent>("agent-task-done", (e) => {
+    callbacks.onAgentTaskDone?.(e.payload);
+  });
+  const unTaskError = await listen<AgentTaskEvent>("agent-task-error", (e) => {
+    callbacks.onAgentTaskError?.(e.payload);
+  });
+  const unPlanStart = await listen<{ task_count: number }>("agent-plan-start", (e) => {
+    callbacks.onAgentPlanStart?.(e.payload.task_count);
+  });
+  const unAggStart = await listen<void>("agent-aggregate-start", () => {
+    callbacks.onAgentAggregateStart?.();
+  });
 
-  unlisteners.push(unToken, unReasoning, unDone, unError);
+  unlisteners.push(unToken, unReasoning, unDone, unError, unTaskStart, unTaskDone, unTaskError, unPlanStart, unAggStart);
 
   invoke("chat_completion", {
     messages: messages.map((m) => ({ role: m.role, content: m.content })),
     skillIds,
     sessionId,
     modelOverride,
+    useAgents: useAgents ?? false,
   }).catch((err: string) => {
     callbacks.onError(err);
     cleanup();
@@ -173,3 +195,24 @@ export async function clearApiRequests(): Promise<void> {
   return invoke("clear_api_requests");
 }
 
+// ─── Sub-Agent Management ─────────────────────────────────────────────────────
+
+export async function listSubAgents(): Promise<SubAgent[]> {
+  return invoke("list_sub_agents");
+}
+
+export async function saveSubAgent(agent: SubAgent): Promise<void> {
+  return invoke("save_sub_agent", { agent });
+}
+
+export async function deleteSubAgent(id: string): Promise<void> {
+  return invoke("delete_sub_agent", { id });
+}
+
+export async function getAgentOrchestration(): Promise<AgentOrchestration> {
+  return invoke("get_agent_orchestration");
+}
+
+export async function saveAgentOrchestration(orchestration: AgentOrchestration): Promise<void> {
+  return invoke("save_agent_orchestration", { orchestration });
+}

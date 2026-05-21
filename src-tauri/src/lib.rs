@@ -15,6 +15,7 @@ pub mod mcp;
 mod skills;
 mod tools;
 pub mod neo4j_db;
+pub mod agents;
 
 use logger::{AppLogger, LoggerOutput};
 
@@ -184,6 +185,7 @@ pub struct AppState {
     pub workspace_dir: Mutex<PathBuf>,
     pub skills_dir: PathBuf,
     pub mcp_servers_path: PathBuf,
+    pub agents_config_path: PathBuf,
     pub db: Mutex<Connection>,
     pub logger: Mutex<AppLogger>,
     pub chat_cancelled: AtomicBool,
@@ -372,6 +374,7 @@ pub fn run() {
             fs::create_dir_all(&skills_dir).ok();
 
             let mcp_servers_path = data_dir.join("mcp_servers.json");
+            let agents_config_path = data_dir.join("sub_agents.json");
 
             let db_path = data_dir.join("chat.db");
             let db = Connection::open(db_path).unwrap();
@@ -426,6 +429,7 @@ pub fn run() {
                 logger: Mutex::new(app_logger),
                 skills_dir,
                 mcp_servers_path: mcp_servers_path.clone(),
+                agents_config_path,
                 chat_cancelled: AtomicBool::new(false),
                 confirm_sender: Mutex::new(None),
             });
@@ -465,6 +469,11 @@ pub fn run() {
             mcp::save_mcp_server,
             mcp::delete_mcp_server,
             mcp::test_mcp_server,
+            agents::list_sub_agents,
+            agents::save_sub_agent,
+            agents::delete_sub_agent,
+            agents::get_agent_orchestration,
+            agents::save_agent_orchestration,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

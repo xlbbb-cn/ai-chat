@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { chatCompletion, getConfig, listMcpServers, saveConfig, saveHistory, stopChatCompletion, confirmCommand } from "./api";
+import { chatCompletion, getConfig, listMcpServers, listSubAgents, saveConfig, saveHistory, stopChatCompletion, confirmCommand } from "./api";
 
 import { ChatMessage } from "./components/ChatMessage";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -8,10 +8,19 @@ import { SkillsPanel } from "./components/SkillsPanel";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { ToolsPanel } from "./components/ToolsPanel";
 import { McpPanel } from "./components/McpPanel";
-import type { Message } from "./types";
+import { AgentsPanel } from "./components/AgentsPanel";
+import type { Message, AgentTaskEvent } from "./types";
 import "./App.css";
 
-type Sidebar = "settings" | "skills" | "history" | "tools" | "mcp" | null;
+type Sidebar = "settings" | "skills" | "history" | "tools" | "mcp" | "agents" | null;
+
+interface AgentStatus {
+  status: "idle" | "running" | "done" | "error";
+  description?: string;
+  summary?: string;
+  error?: string;
+  tokens?: number;
+}
 
 const KNOWN_TOOL_IDS = new Set(["file_actions", "run_cmd", "run_shell", "knowledge_graph"]);
 
@@ -29,6 +38,9 @@ export default function App() {
   const [selectedModel, setSelectedModel] = useState("gpt-4o-mini");
   const [activeToolCount, setActiveToolCount] = useState(0);
   const [activeMcpCount, setActiveMcpCount] = useState(0);
+  const [activeAgentCount, setActiveAgentCount] = useState(0);
+  const [useAgentsEnabled, setUseAgentsEnabled] = useState(false);
+  const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
   const [skillsLoadedFromConfig, setSkillsLoadedFromConfig] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<{
     reason: string;
@@ -120,6 +132,12 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    listSubAgents()
+      .then((agents) => setActiveAgentCount(agents.filter((a) => a.enabled).length))
+      .catch(console.error);
+  }, []);
+
+  useEffect(() => {
     const unlisten = listen("profile-restored", async () => {
       try {
         const [cfg, servers] = await Promise.all([getConfig(), listMcpServers()]);
@@ -146,6 +164,81 @@ export default function App() {
       .catch(console.error);
   }, [activeSkillIds, skillsLoadedFromConfig]);
 
+  // Agent task progress tracking
+  useEffect(() => {
+    const unlisteners: Promise<() => void>[] = [];
+    unlisteners.push(
+      listen<AgentTaskEvent>("agent-task-start", (e) => {
+        const { agent_id, agent_name, description, task_id } = e.payload;
+        setAgentStatuses((prev) => ({
+          ...prev,
+          [agent_id]: { status: "running", description },
+        }));
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `agent-progress-${task_id}`,
+            role: "system" as const,
+            content: `🤖 **[${agent_name}]** 正在执行: ${description ?? ""}`,
+          },
+        ]);
+      }),
+      listen<AgentTaskEvent>("agent-task-done", (e) => {
+        const { agent_id, agent_name, summary, task_id } = e.payload;
+        setAgentStatuses((prev) => ({
+          ...prev,
+          [agent_id]: { status: "done", summary: summary ?? "" },
+        }));
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === `agent-progress-${task_id}`
+              ? { ...m, content: `✅ **[${agent_name}]** 完成` }
+              : m
+          )
+        );
+      }),
+      listen<AgentTaskEvent>("agent-task-error", (e) => {
+        const { agent_id, agent_name, error, task_id } = e.payload;
+        setAgentStatuses((prev) => ({
+          ...prev,
+          [agent_id]: { status: "error", error: error ?? "" },
+        }));
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === `agent-progress-${task_id}`
+              ? { ...m, content: `❌ **[${agent_name}]** 失败: ${error}` }
+              : m
+          )
+        );
+      }),
+      listen("agent-plan-start", (e: { payload: { task_count: number } }) => {
+        if (e.payload.task_count > 0) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: "agent-progress-plan",
+              role: "system" as const,
+              content: `🗂 **规划完成** — 共 ${e.payload.task_count} 个任务`,
+            },
+          ]);
+        }
+      }),
+      listen("agent-aggregate-start", () => {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: "agent-progress-aggregate",
+            role: "system" as const,
+            content: `📝 **正在汇总所有子任务结果...**`,
+          },
+        ]);
+      }),
+    );
+    return () => {
+      unlisteners.forEach((p) => p.then((fn) => fn()));
+    };
+  }, []);
+
   const sendMessage = useCallback(async () => {
     let text = input.trim();
     if ((!text && attachments.length === 0) || streaming) return;
@@ -168,7 +261,7 @@ export default function App() {
     setError(null);
 
     const history = [...messages, userMsg]
-      .filter((m) => !m.streaming)
+      .filter((m) => !m.streaming && !m.id.startsWith("agent-progress-"))
       .map((m) => ({ role: m.role, content: m.content }));
 
     saveHistory(sessionId, "user", text);
@@ -194,35 +287,40 @@ export default function App() {
         );
       },
       onDone() {
-        // Optionally save reasoning context as well, but for now we'll just save the final content
-        // Or append reasoning to content if we want it in history
         const finalContentToSave = accumulatedReasoning
           ? `<details><summary>Thought Process</summary>\n\n${accumulatedReasoning}\n</details>\n\n${accumulatedContent}`
           : accumulatedContent;
 
         saveHistory(sessionId, "assistant", finalContentToSave);
+        // Remove all agent progress system messages and finalize assistant message
         setMessages((prev) =>
-          prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m))
+          prev
+            .filter((m) => !m.id.startsWith("agent-progress-"))
+            .map((m) => (m.id === assistantId ? { ...m, streaming: false } : m))
         );
+        setAgentStatuses({});
         setStreaming(false);
         cleanupRef.current = null;
       },
       onError(err) {
         setError(err);
         setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId
-              ? { ...m, content: m.content || "Error: " + err, streaming: false }
-              : m
-          )
+          prev
+            .filter((m) => !m.id.startsWith("agent-progress-"))
+            .map((m) =>
+              m.id === assistantId
+                ? { ...m, content: m.content || "Error: " + err, streaming: false }
+                : m
+            )
         );
+        setAgentStatuses({});
         setStreaming(false);
         cleanupRef.current = null;
       },
-    });
+    }, useAgentsEnabled);
 
     cleanupRef.current = cleanup;
-  }, [input, messages, streaming, activeSkillIds, sessionId, attachments, selectedModel]);
+  }, [input, messages, streaming, activeSkillIds, sessionId, attachments, selectedModel, useAgentsEnabled]);
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -363,6 +461,15 @@ export default function App() {
               onClose={() => setSidebar(null)}
             />
           )}
+          {sidebar === "agents" && (
+            <AgentsPanel
+              onClose={() => setSidebar(null)}
+              onAgentsChange={(count) => setActiveAgentCount(count)}
+              useAgentsEnabled={useAgentsEnabled}
+              onToggleUseAgents={setUseAgentsEnabled}
+              agentStatuses={agentStatuses}
+            />
+          )}
         </aside>
       )}
 
@@ -372,6 +479,16 @@ export default function App() {
         <header className="toolbar">
           <span className="app-title">Chat</span>
           <div className="toolbar-actions">
+            <button
+              className={`toolbar-btn ${sidebar === "agents" ? "active" : ""}`}
+              onClick={() => toggleSidebar("agents")}
+              title={`Sub Agents${useAgentsEnabled ? " (启用中)" : ""}`}
+            >
+              🤖 Agents
+              {activeAgentCount > 0 && (
+                <span className="toolbar-btn-count">{activeAgentCount}</span>
+              )}
+            </button>
             <button
               className={`toolbar-btn ${sidebar === "skills" ? "active" : ""}`}
               onClick={() => toggleSidebar("skills")}

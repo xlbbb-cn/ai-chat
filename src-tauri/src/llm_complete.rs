@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, State};
 
-use crate::{AppState, tools, skills, mcp};
+use crate::{AppState, tools, skills, mcp, agents};
 
 fn log_event(state: &State<'_, AppState>, level: &str, message: String) {
     if let Ok(logger) = state.logger.lock() {
@@ -163,6 +163,7 @@ pub async fn chat_completion(
     skill_ids: Vec<String>,
     session_id: String,
     model_override: Option<String>,
+    use_agents: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     state.chat_cancelled.store(false, Ordering::SeqCst);
@@ -172,6 +173,19 @@ pub async fn chat_completion(
         "INFO",
         format!("chat_completion started: session_id={}, model={}", session_id, config.model),
     );
+
+    // ── Agent orchestration path ──────────────────────────────────────────────
+    if use_agents == Some(true) {
+        let agents_cfg = agents::load_agents_config(&state.agents_config_path);
+        let has_enabled = agents_cfg.agents.iter().any(|a| a.enabled);
+        if has_enabled {
+            let result = agents::orchestrate(&app, &state, &config, &messages, &session_id).await;
+            state.chat_cancelled.store(false, Ordering::SeqCst);
+            log_event(&state, "INFO", format!("agent orchestration finished: session_id={}", session_id));
+            let _ = app.emit("chat-done", ());
+            return result.map(|_| ());
+        }
+    }
 
     let mut all_messages: Vec<Value> = vec![];
     let mut skill_allowed_commands: Vec<String> = Vec::new();
