@@ -126,6 +126,15 @@ fn export_profile(app: &AppHandle, profile_path: &PathBuf) -> Result<(), String>
     zip.start_file("mcp_servers.json", options).map_err(|e| e.to_string())?;
     zip.write_all(mcp_json.as_bytes()).map_err(|e| e.to_string())?;
 
+    emit_profile_export_status(app, "Writing sub_agents.json");
+    let sub_agents_json = if state.agents_config_path.exists() {
+        fs::read_to_string(&state.agents_config_path).map_err(|e| e.to_string())?
+    } else {
+        serde_json::to_string_pretty(&agents::AgentsConfig::default()).map_err(|e| e.to_string())?
+    };
+    zip.start_file("sub_agents.json", options).map_err(|e| e.to_string())?;
+    zip.write_all(sub_agents_json.as_bytes()).map_err(|e| e.to_string())?;
+
     emit_profile_export_status(app, "Packing skills directory");
     zip.add_directory("skills/", options).map_err(|e| e.to_string())?;
     add_path_to_zip(&mut zip, &state.skills_dir, &state.skills_dir)?;
@@ -179,6 +188,14 @@ fn import_profile(app: &AppHandle, profile_path: &PathBuf) -> Result<(), String>
     let config: AppConfig = serde_json::from_str(&config_json).map_err(|e| e.to_string())?;
 
     apply_config(app, &state, config)?;
+
+    if let Ok(mut agents_file) = archive.by_name("sub_agents.json") {
+        let mut sub_agents_json = String::new();
+        agents_file
+            .read_to_string(&mut sub_agents_json)
+            .map_err(|e| e.to_string())?;
+        fs::write(&state.agents_config_path, sub_agents_json).map_err(|e| e.to_string())?;
+    }
 
     let _ = app.emit("profile-restored", ());
     state
