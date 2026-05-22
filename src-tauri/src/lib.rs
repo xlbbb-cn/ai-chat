@@ -114,23 +114,23 @@ fn export_profile(app: &AppHandle, profile_path: &PathBuf) -> Result<(), String>
     let mut zip = ZipWriter::new(file);
     let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
-    emit_profile_export_status(app, "正在写入 config.json");
+    emit_profile_export_status(app, "Writing config.json");
     let config_json = serde_json::to_string_pretty(&state.config.lock().unwrap().clone())
         .map_err(|e| e.to_string())?;
     zip.start_file("config.json", options).map_err(|e| e.to_string())?;
     zip.write_all(config_json.as_bytes()).map_err(|e| e.to_string())?;
 
-    emit_profile_export_status(app, "正在写入 mcp_servers.json");
+    emit_profile_export_status(app, "Writing mcp_servers.json");
     let mcp_json = serde_json::json!({ "servers": mcp::load_servers(&state.mcp_servers_path) });
     let mcp_json = serde_json::to_string_pretty(&mcp_json).map_err(|e| e.to_string())?;
     zip.start_file("mcp_servers.json", options).map_err(|e| e.to_string())?;
     zip.write_all(mcp_json.as_bytes()).map_err(|e| e.to_string())?;
 
-    emit_profile_export_status(app, "正在打包 skills 目录");
+    emit_profile_export_status(app, "Packing skills directory");
     zip.add_directory("skills/", options).map_err(|e| e.to_string())?;
     add_path_to_zip(&mut zip, &state.skills_dir, &state.skills_dir)?;
 
-    emit_profile_export_status(app, "正在导出 chat.db（导出期间已禁止发送）");
+    emit_profile_export_status(app, "Exporting chat.db (sending disabled during export)");
     let chat_db_backup = backup_chat_db(&state)?;
     let db_result = (|| -> Result<(), String> {
         zip.start_file("chat.db", options).map_err(|e| e.to_string())?;
@@ -153,7 +153,7 @@ fn export_profile(app: &AppHandle, profile_path: &PathBuf) -> Result<(), String>
 fn spawn_profile_export(app: AppHandle, profile_path: PathBuf) {
     std::thread::spawn(move || {
         let _ = app.emit(PROFILE_EXPORT_START_EVENT, ());
-        emit_profile_export_status(&app, "正在准备导出 Profile...");
+        emit_profile_export_status(&app, "Preparing to export profile...");
 
         match export_profile(&app, &profile_path) {
             Ok(()) => {
