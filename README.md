@@ -1,5 +1,12 @@
 # AI Chat
 
+
+[![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/LeonardSSH/ai-chat?style=social)](https://github.com/LeonardSSH/ai-chat/stargazers)
+[![GitHub issues](https://img.shields.io/github/issues/LeonardSSH/ai-chat)](https://github.com/LeonardSSH/ai-chat/issues)
+[![GitHub pull requests](https://img.shields.io/github/issues-pr/LeonardSSH/ai-chat)](https://github.com/LeonardSSH/ai-chat/pulls)
+[![Last Commit](https://img.shields.io/github/last-commit/LeonardSSH/ai-chat)](https://github.com/LeonardSSH/ai-chat/commits)
+
 [中文](./README.zh.md)
 
 A desktop AI chat client built with Tauri 2 + React + TypeScript + Rust, compatible with OpenAI APIs. It supports streaming responses, skill systems, tool invocation, MCP server integration, and session persistence.
@@ -260,4 +267,10 @@ ai-chat/
 - Add skill signing and publishing mechanisms
 - Add multi-workspace session isolation and synchronization
 - Add end-to-end testing and security baseline scans
+
+---
+
+## License
+
+This project is licensed under the MIT License. See the `LICENSE` file for details.
 

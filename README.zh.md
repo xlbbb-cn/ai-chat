@@ -1,5 +1,12 @@
 # AI Chat
 
+
+[![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/LeonardSSH/ai-chat?style=social)](https://github.com/LeonardSSH/ai-chat/stargazers)
+[![GitHub issues](https://img.shields.io/github/issues/LeonardSSH/ai-chat)](https://github.com/LeonardSSH/ai-chat/issues)
+[![GitHub pull requests](https://img.shields.io/github/issues-pr/LeonardSSH/ai-chat)](https://github.com/LeonardSSH/ai-chat/pulls)
+[![Last Commit](https://img.shields.io/github/last-commit/LeonardSSH/ai-chat)](https://github.com/LeonardSSH/ai-chat/commits)
+
 [English](./README.md)
 
 一个基于 Tauri 2 + React + TypeScript + Rust 的桌面 AI 对话客户端，面向 OpenAI 兼容接口，支持流式回复、技能系统、工具调用、MCP 服务接入和会话持久化。
