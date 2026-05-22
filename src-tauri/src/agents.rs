@@ -301,10 +301,11 @@ async fn auto_configure_agents(
     // Strip markdown fences if present
     let json_str = raw.trim();
     let json_str = json_str
-        .strip_prefix("```json").unwrap_or(json_str)
-        .strip_prefix("```").unwrap_or(json_str)
-        .strip_suffix("```").unwrap_or(json_str)
+        .strip_prefix("```json")
+        .or_else(|| json_str.strip_prefix("```"))
+        .unwrap_or(json_str)
         .trim();
+    let json_str = json_str.strip_suffix("```").unwrap_or(json_str).trim();
 
     let parsed: Value = serde_json::from_str(json_str).map_err(|e| e.to_string())?;
     match parsed["strategy"].as_str() {
@@ -389,10 +390,11 @@ async fn plan_tasks(
 
     let json_str = raw.trim();
     let json_str = json_str
-        .strip_prefix("```json").unwrap_or(json_str)
-        .strip_prefix("```").unwrap_or(json_str)
-        .strip_suffix("```").unwrap_or(json_str)
+        .strip_prefix("```json")
+        .or_else(|| json_str.strip_prefix("```"))
+        .unwrap_or(json_str)
         .trim();
+    let json_str = json_str.strip_suffix("```").unwrap_or(json_str).trim();
 
     serde_json::from_str::<TaskPlan>(json_str)
         .map_err(|e| format!("Plan parse error: {e}\nRaw: {raw}"))
