@@ -83,16 +83,21 @@ export default function App() {
         // If this is the first usage data, return it as-is
         if (!prevUsage) return e.payload;
 
-        // Otherwise, accumulate token counts within the same session
+        // Accumulate token counts within the same session
+        // (for session history), but preserve current request's max_tokens and usage_ratio
         const prevTotal = prevUsage.total_tokens ?? prevUsage.prompt_tokens + prevUsage.completion_tokens;
         const currentTotal = e.payload.total_tokens ?? e.payload.prompt_tokens + e.payload.completion_tokens;
 
         return {
+          // Accumulated token counts for session history display
           prompt_tokens: prevUsage.prompt_tokens + e.payload.prompt_tokens,
           completion_tokens: prevUsage.completion_tokens + e.payload.completion_tokens,
           total_tokens: prevTotal + currentTotal,
+          // Keep the current request's max_tokens for ratio calculation (not accumulated)
           max_tokens: e.payload.max_tokens ?? prevUsage.max_tokens,
-          usage_ratio: undefined, // Reset to let the UI recalculate
+          // Keep the current request's usage_ratio (not accumulated)
+          // This correctly reflects the current request's token usage within its max_tokens limit
+          usage_ratio: e.payload.usage_ratio,
         };
       });
     });
