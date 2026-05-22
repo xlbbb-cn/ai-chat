@@ -53,7 +53,7 @@ export default function App() {
     code: string;
   } | null>(null);
   const [profileExporting, setProfileExporting] = useState(false);
-  const [profileExportMessage, setProfileExportMessage] = useState("正在导出并压缩 Profile...");
+  const [profileExportMessage, setProfileExportMessage] = useState("Exporting and compressing profile...");
   const [pendingRetryMessageId, setPendingRetryMessageId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -180,18 +180,18 @@ export default function App() {
     unlisteners.push(
       listen("profile-export-start", () => {
         setProfileExporting(true);
-        setProfileExportMessage("正在准备导出 Profile...");
+        setProfileExportMessage("Preparing profile export...");
       }),
       listen<string>("profile-export-status", (e) => {
         setProfileExportMessage(e.payload);
       }),
       listen("profile-export-done", () => {
         setProfileExporting(false);
-        setProfileExportMessage("正在导出并压缩 Profile...");
+        setProfileExportMessage("Exporting and compressing profile...");
       }),
       listen<string>("profile-export-error", (e) => {
         setProfileExporting(false);
-        setProfileExportMessage("正在导出并压缩 Profile...");
+        setProfileExportMessage("Exporting and compressing profile...");
         setError(`Profile export failed: ${e.payload}`);
       })
     );
@@ -690,7 +690,7 @@ export default function App() {
         {profileExporting && (
           <div className="profile-export-progress" role="progressbar" aria-busy="true" aria-live="polite">
             <div className="profile-export-progress-label">{profileExportMessage}</div>
-            <div className="profile-export-progress-hint">导出期间聊天窗口已锁定，发送会被禁止。</div>
+            <div className="profile-export-progress-hint">Chat is locked during export and sending is disabled.</div>
             <div className="profile-export-progress-track">
               <div className="profile-export-progress-fill" />
             </div>
