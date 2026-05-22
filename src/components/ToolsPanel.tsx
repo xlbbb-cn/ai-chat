@@ -19,12 +19,12 @@ const AVAILABLE_TOOLS = [
     {
         id: "run_cmd",
         name: "Run Command",
-        description: "Run an executable program directly (without a shell). Preferred for simple commands like curl, git, wget, etc.",
+        description: "Run an executable program directly (without a shell). Preferred for simple commands like curl, git, wget, etc. Privileged operations (sudo) and dangerous commands require explicit confirmation.",
     },
     {
         id: "run_shell",
         name: "Run Shell",
-        description: "Execute a script in a shell (PowerShell, cmd, or Bash). Supports pipes, loops, variables, and other shell features.",
+        description: "Execute a script in a shell (PowerShell or Bash). Supports pipes, loops, variables, and other shell features. Privileged operations (sudo / admin elevation) and dangerous commands require explicit confirmation.",
     },
     {
         id: "knowledge_graph",
