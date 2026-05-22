@@ -379,3 +379,152 @@
 .btn-secondary:hover {
   background: #F4F4F4;
 }
+.field-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.inline-edit-btn {
+  border: 1px solid #D0D1D2;
+  background: #FFFFFF;
+  color: #171A20;
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.inline-edit-btn:hover {
+  background: #F4F4F4;
+}
+
+.prompt-editor-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: #FFFFFF;
+}
+
+.prompt-editor-shell {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.prompt-editor-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #E5E7EB;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.prompt-editor-header h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.prompt-editor-actions {
+  display: flex;
+  gap: 10px;
+  min-width: 260px;
+}
+
+.prompt-editor-actions .btn-primary,
+.prompt-editor-actions .btn-secondary {
+  min-height: 36px;
+}
+
+.prompt-editor-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  padding: 16px 20px 20px;
+}
+
+.prompt-column {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 8px;
+  font-size: 13px;
+  color: #4B5563;
+  font-weight: 500;
+}
+
+.prompt-editor-textarea {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  resize: none;
+  border: 1px solid #D1D5DB;
+  border-radius: 6px;
+  padding: 14px;
+  font-size: 14px;
+  line-height: 1.6;
+  font-family: Consolas, "Courier New", monospace;
+  color: #171A20;
+  outline: none;
+}
+
+.prompt-editor-textarea:focus {
+  border-color: #171A20;
+}
+
+.prompt-preview {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid #D1D5DB;
+  border-radius: 6px;
+  padding: 14px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #1F2937;
+}
+
+.prompt-preview-empty {
+  margin: 0;
+  color: #9CA3AF;
+}
+
+.prompt-preview h1,
+.prompt-preview h2,
+.prompt-preview h3 {
+  margin-top: 0;
+}
+
+.prompt-preview code {
+  background: #F3F4F6;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.prompt-preview pre {
+  background: #F3F4F6;
+  border-radius: 6px;
+  padding: 10px;
+  overflow: auto;
+}
+
+@media (max-width: 900px) {
+  .prompt-editor-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .prompt-editor-actions {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .settings-inline-row {
+    grid-template-columns: 1fr;
+  }
+}

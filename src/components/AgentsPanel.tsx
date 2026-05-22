@@ -4,6 +4,7 @@ import {
   getAgentOrchestration, saveAgentOrchestration,
 } from "../api";
 import type { SubAgent, AgentOrchestration } from "../types";
+import ReactMarkdown from "react-markdown";
 import "./AgentsPanel.css";
 
 const KNOWN_TOOLS = ["file_actions", "run_cmd", "run_shell", "knowledge_graph"];
@@ -48,6 +49,8 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
   });
   const [editing, setEditing] = useState<SubAgent | null>(null);
   const [saving, setSaving] = useState(false);
+  const [isPromptEditorOpen, setIsPromptEditorOpen] = useState(false);
+  const [promptDraft, setPromptDraft] = useState("");
 
   useEffect(() => {
     listSubAgents().then(setAgents).catch(console.error);
@@ -101,6 +104,22 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
     });
   }
 
+  function openPromptEditor() {
+    if (!editing) return;
+    setPromptDraft(editing.system_prompt ?? "");
+    setIsPromptEditorOpen(true);
+  }
+
+  function closePromptEditor() {
+    setIsPromptEditorOpen(false);
+  }
+
+  function applyPromptEditor() {
+    if (!editing) return;
+    setEditing({ ...editing, system_prompt: promptDraft });
+    setIsPromptEditorOpen(false);
+  }
+
   const statusIcon = (agentId: string) => {
     const s = agentStatuses[agentId];
     if (!s || s.status === "idle") return null;
@@ -137,7 +156,12 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
             />
           </label>
           <label>
-            System prompt
+            <div className="field-title-row">
+              <span>System prompt</span>
+              <button type="button" className="inline-edit-btn" onClick={openPromptEditor}>
+                Edit
+              </button>
+            </div>
             <textarea
               rows={6}
               value={editing.system_prompt}
@@ -221,6 +245,47 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
               Cancel
             </button>
           </div>
+
+          {isPromptEditorOpen && (
+            <div className="prompt-editor-overlay" role="dialog" aria-modal="true" aria-label="Edit system prompt">
+              <div className="prompt-editor-shell">
+                <div className="prompt-editor-header">
+                  <h3>System Prompt Editor</h3>
+                  <div className="prompt-editor-actions">
+                    <button type="button" className="btn-secondary" onClick={closePromptEditor}>
+                      Cancel
+                    </button>
+                    <button type="button" className="btn-primary" onClick={applyPromptEditor}>
+                      Done
+                    </button>
+                  </div>
+                </div>
+
+                <div className="prompt-editor-body">
+                  <div className="prompt-column">
+                    <span>Markdown</span>
+                    <textarea
+                      className="prompt-editor-textarea"
+                      value={promptDraft}
+                      onChange={(e) => setPromptDraft(e.target.value)}
+                      placeholder="Write your system prompt in Markdown..."
+                    />
+                  </div>
+
+                  <div className="prompt-column">
+                    <span>Preview</span>
+                    <div className="prompt-preview">
+                      {promptDraft.trim() ? (
+                        <ReactMarkdown>{promptDraft}</ReactMarkdown>
+                      ) : (
+                        <p className="prompt-preview-empty">Markdown preview will appear here.</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <>
