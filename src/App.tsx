@@ -79,7 +79,22 @@ export default function App() {
       max_tokens?: number;
       usage_ratio?: number;
     }>("chat-usage", (e) => {
-      setUsage(e.payload);
+      setUsage((prevUsage) => {
+        // If this is the first usage data, return it as-is
+        if (!prevUsage) return e.payload;
+
+        // Otherwise, accumulate token counts within the same session
+        const prevTotal = prevUsage.total_tokens ?? prevUsage.prompt_tokens + prevUsage.completion_tokens;
+        const currentTotal = e.payload.total_tokens ?? e.payload.prompt_tokens + e.payload.completion_tokens;
+
+        return {
+          prompt_tokens: prevUsage.prompt_tokens + e.payload.prompt_tokens,
+          completion_tokens: prevUsage.completion_tokens + e.payload.completion_tokens,
+          total_tokens: prevTotal + currentTotal,
+          max_tokens: e.payload.max_tokens ?? prevUsage.max_tokens,
+          usage_ratio: undefined, // Reset to let the UI recalculate
+        };
+      });
     });
     return () => {
       unlisten.then((fn) => fn());
