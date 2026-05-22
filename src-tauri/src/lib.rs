@@ -1,12 +1,14 @@
 ﻿use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 use rusqlite::Connection;
 use tauri::{menu::{Menu, MenuItem, Submenu}, AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+use zip::{write::FileOptions, ZipArchive, ZipWriter};
 
 mod db;
 mod logger;
@@ -24,19 +26,33 @@ const SAVE_PROFILE_MENU_ID: &str = "save-profile";
 const RESTORE_PROFILE_MENU_ID: &str = "restore-profile";
 const ABOUT_MENU_ID: &str = "about";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ProfileData {
-    version: u32,
-    config: AppConfig,
-    #[serde(default)]
-    mcp_servers: Vec<mcp::McpServer>,
-}
-
 fn resolve_workspace_path(app: &AppHandle, workspace_dir: Option<&str>) -> Result<PathBuf, String> {
     Ok(match workspace_dir.filter(|s| !s.is_empty()) {
         Some(dir) => PathBuf::from(dir),
         None => app.path().app_data_dir().map_err(|e| e.to_string())?.join("workspace"),
     })
+}
+
+fn add_path_to_zip(zip: &mut ZipWriter<fs::File>, base_dir: &Path, path: &Path) -> Result<(), String> {
+    if path.is_dir() {
+        for entry in fs::read_dir(path).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            add_path_to_zip(zip, base_dir, &entry.path())?;
+        }
+        return Ok(());
+    }
+
+    if path.is_file() {
+        let relative_path = path.strip_prefix(base_dir).map_err(|e| e.to_string())?;
+        let entry_name = format!("skills/{}", relative_path.to_string_lossy().replace('\\', "/"));
+        let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        zip.start_file(entry_name, options).map_err(|e| e.to_string())?;
+
+        let mut file = fs::File::open(path).map_err(|e| e.to_string())?;
+        std::io::copy(&mut file, zip).map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
 }
 
 fn apply_config(app: &AppHandle, state: &AppState, config: AppConfig) -> Result<(), String> {
@@ -64,18 +80,28 @@ fn apply_config(app: &AppHandle, state: &AppState, config: AppConfig) -> Result<
 
 fn export_profile(app: &AppHandle, profile_path: &PathBuf) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let profile = ProfileData {
-        version: 1,
-        config: state.config.lock().unwrap().clone(),
-        mcp_servers: mcp::load_servers(&state.mcp_servers_path),
-    };
-
     if let Some(parent) = profile_path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
 
-    let json = serde_json::to_string_pretty(&profile).map_err(|e| e.to_string())?;
-    fs::write(profile_path, json).map_err(|e| e.to_string())?;
+    let file = fs::File::create(profile_path).map_err(|e| e.to_string())?;
+    let mut zip = ZipWriter::new(file);
+    let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+    let config_json = serde_json::to_string_pretty(&state.config.lock().unwrap().clone())
+        .map_err(|e| e.to_string())?;
+    zip.start_file("config.json", options).map_err(|e| e.to_string())?;
+    zip.write_all(config_json.as_bytes()).map_err(|e| e.to_string())?;
+
+    let mcp_json = serde_json::json!({ "servers": mcp::load_servers(&state.mcp_servers_path) });
+    let mcp_json = serde_json::to_string_pretty(&mcp_json).map_err(|e| e.to_string())?;
+    zip.start_file("mcp_servers.json", options).map_err(|e| e.to_string())?;
+    zip.write_all(mcp_json.as_bytes()).map_err(|e| e.to_string())?;
+
+    zip.add_directory("skills/", options).map_err(|e| e.to_string())?;
+    add_path_to_zip(&mut zip, &state.skills_dir, &state.skills_dir)?;
+
+    zip.finish().map_err(|e| e.to_string())?;
     state
         .logger
         .lock()
@@ -86,18 +112,17 @@ fn export_profile(app: &AppHandle, profile_path: &PathBuf) -> Result<(), String>
 
 fn import_profile(app: &AppHandle, profile_path: &PathBuf) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let content = fs::read_to_string(profile_path).map_err(|e| e.to_string())?;
-    let profile: ProfileData = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    let file = fs::File::open(profile_path).map_err(|e| e.to_string())?;
+    let mut archive = ZipArchive::new(file).map_err(|e| e.to_string())?;
 
-    apply_config(app, &state, profile.config)?;
+    let mut config_file = archive
+        .by_name("config.json")
+        .map_err(|_| "missing config.json in profile archive".to_string())?;
+    let mut config_json = String::new();
+    config_file.read_to_string(&mut config_json).map_err(|e| e.to_string())?;
+    let config: AppConfig = serde_json::from_str(&config_json).map_err(|e| e.to_string())?;
 
-    let mcp_file = serde_json::json!({ "servers": profile.mcp_servers });
-    let mcp_json = serde_json::to_string_pretty(&mcp_file).map_err(|e| e.to_string())?;
-    fs::write(&state.mcp_servers_path, mcp_json).map_err(|e| e.to_string())?;
-
-    for server in mcp::load_servers(&state.mcp_servers_path).into_iter().filter(|s| s.enabled) {
-        mcp::spawn_warmup(server);
-    }
+    apply_config(app, &state, config)?;
 
     let _ = app.emit("profile-restored", ());
     state
@@ -276,8 +301,8 @@ pub fn run() {
                 if let Some(path) = app
                     .dialog()
                     .file()
-                    .add_filter("Profile", &["json"])
-                    .set_file_name("ai-chat.profile.json")
+                    .add_filter("Profile", &["zip"])
+                    .set_file_name("ai-chat.profile.zip")
                     .blocking_save_file()
                 {
                     let profile_path = path.into_path().map_err(|_| "unsupported save path").ok();
@@ -295,7 +320,7 @@ pub fn run() {
                 if let Some(path) = app
                     .dialog()
                     .file()
-                    .add_filter("Profile", &["json"])
+                    .add_filter("Profile", &["zip"])
                     .blocking_pick_file()
                 {
                     let profile_path = path.into_path().map_err(|_| "unsupported profile path").ok();

@@ -30,4 +30,5 @@ neo4rs = "0.8.0"
 async-trait = "0.1.89"
 diffy = "0.4"
 uuid = { version = "1", features = ["v4"] }
+zip = "0.6"
 

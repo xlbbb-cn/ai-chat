@@ -81,7 +81,7 @@ Use cases:
 - config.json for model and tool configurations
 - SQLite for chat history and API request monitoring data
 - Request monitoring panel for listing, details, and deletion
-- Profile save/restore support for local configuration snapshots
+- Profile export/import via zip archives, with skills packaged for manual restore
 - Workspace directory setting in the UI
 
 ---
