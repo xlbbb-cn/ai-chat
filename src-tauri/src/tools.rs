@@ -115,7 +115,11 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "run_shell",
-                "description": "Execute a script in a shell on the user's machine. Supports pipes, loops, variables, and other shell features. If called by a skill, runs in the skill's directory; otherwise in the managed workspace directory. Dangerous operations will require explicit user confirmation before execution.",
+                "description": "Execute a script in a shell on the user's machine. 
+                                Supports pipes, loops, variables, and other shell features. 
+                                If called by a skill, runs in the skill's directory; 
+                                otherwise in the managed workspace directory. 
+                                Dangerous operations will require explicit user confirmation before execution.",
                 "parameters": {
                     "type": "object",
                     "properties": {

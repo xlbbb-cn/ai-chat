@@ -238,7 +238,6 @@ ai-chat/
 │  ├─ src/tools.rs
 │  ├─ src/mcp.rs
 │  └─ src/db.rs
-├─ skills-example/      # 技能示例
 └─ README.md
 ```
 
@@ -261,10 +260,3 @@ ai-chat/
 - 增加多工作区会话隔离与同步
 - 增加端到端测试与安全基线扫描
 
----
-
-如果你希望，我可以继续为这个 README 增加：
-
-1. 中英文双语版本
-2. 一键安装脚本（Windows/macOS/Linux）
-3. GitHub Actions 自动构建发布配置

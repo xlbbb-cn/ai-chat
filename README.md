@@ -239,7 +239,6 @@ ai-chat/
 │  ├─ src/tools.rs
 │  ├─ src/mcp.rs
 │  └─ src/db.rs
-├─ skills-example/      # Skill examples
 └─ README.md
 ```
 
@@ -262,10 +261,3 @@ ai-chat/
 - Add multi-workspace session isolation and synchronization
 - Add end-to-end testing and security baseline scans
 
----
-
-If desired, I can further enhance this README with:
-
-1. Bilingual (Chinese-English) versions
-2. One-click installation scripts (Windows/macOS/Linux)
-3. GitHub Actions for automated build and release

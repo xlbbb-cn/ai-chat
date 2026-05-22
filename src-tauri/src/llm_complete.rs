@@ -471,9 +471,18 @@ pub async fn chat_completion(
         }
     }
 
-    let mut system_content = config.system_message.clone();
+    let mut system_content = config.system_message.clone(); //top-level system instructions from config
     let mut loaded_skills_content = String::new();
     let mut available_skills_info = String::new();
+
+    let os_info = os_info::get();
+    let os_sys_msg = format!("System information about the machine you are running on:\n- OS: {} {}\n- CPU: {}\n",
+        os_info.os_type(), os_info.version(), os_info.cpu_arch());
+
+    if !system_content.is_empty() {
+        system_content.push_str("\n\n");
+    }
+    system_content.push_str(&os_sys_msg); //Add system info to system prompt
 
     for skill_name in &skill_ids {
         let skill_opt = if let Ok(skill) = skills::load_skill_by_name(&state.skills_dir, skill_name) {
@@ -565,17 +574,17 @@ if !system_content.is_empty() {
                 .join("\n")
         };
         let active_skills_context = format!(
-            "INTERNAL CONTEXT - ACTIVE SKILLS (not a user request):\n\
-IMPORTANT SKILL PATH ISOLATION RULE:\n\
-- The workspace root directory (absolute path on this machine) is: {workspace_root_display}\n\
-- Active skill root directories are:\n\
-{active_skill_roots_display}\n\
-- For workspace files, use paths relative to the workspace root (e.g. \"src/foo.txt\").\n\
-- For skill reference files (e.g. \"ref/index.md\"), you may use a relative path; backend resolves existing files under workspace root first, then active skill roots.\n\
-- You may also provide an absolute path under the workspace root or any active skill root; backend will strip the matched root prefix automatically.\n\
-- Except for explicitly requested paths, you MUST NOT access any file or directory outside workspace root or active skill roots.\n\
-- Operating on paths outside these roots is STRICTLY FORBIDDEN.\n\n\
-The following skills are CURRENTLY ACTIVE and their detailed instructions are provided below:{}",
+               "INTERNAL CONTEXT - ACTIVE SKILLS (not a user request):\n\
+                IMPORTANT SKILL PATH ISOLATION RULE:\n\
+                - The workspace root directory (absolute path on this machine) is: {workspace_root_display}\n\
+                - Active skill root directories are:\n\
+                {active_skill_roots_display}\n\
+                - For workspace files, use paths relative to the workspace root (e.g. \"src/foo.txt\").\n\
+                - For skill reference files (e.g. \"ref/index.md\"), you may use a relative path; backend resolves existing files under workspace root first, then active skill roots.\n\
+                - You may also provide an absolute path under the workspace root or any active skill root; backend will strip the matched root prefix automatically.\n\
+                - Except for explicitly requested paths, you MUST NOT access any file or directory outside workspace root or active skill roots.\n\
+                - Operating on paths outside these roots is STRICTLY FORBIDDEN.\n\n\
+                The following skills are CURRENTLY ACTIVE and their detailed instructions are provided below:{}",
             loaded_skills_content
         );
         all_messages.push(json!({ "role": "user", "content": active_skills_context }));
