@@ -9,6 +9,7 @@ use tauri::{menu::{Menu, MenuItem, Submenu}, AppHandle, Emitter, Manager, State}
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 use zip::{write::FileOptions, ZipArchive, ZipWriter};
+use uuid::Uuid;
 
 mod db;
 mod logger;
@@ -25,6 +26,10 @@ const OPEN_APP_DATA_DIR_MENU_ID: &str = "open-app-data-dir";
 const SAVE_PROFILE_MENU_ID: &str = "save-profile";
 const RESTORE_PROFILE_MENU_ID: &str = "restore-profile";
 const ABOUT_MENU_ID: &str = "about";
+const PROFILE_EXPORT_START_EVENT: &str = "profile-export-start";
+const PROFILE_EXPORT_STATUS_EVENT: &str = "profile-export-status";
+const PROFILE_EXPORT_DONE_EVENT: &str = "profile-export-done";
+const PROFILE_EXPORT_ERROR_EVENT: &str = "profile-export-error";
 
 fn resolve_workspace_path(app: &AppHandle, workspace_dir: Option<&str>) -> Result<PathBuf, String> {
     Ok(match workspace_dir.filter(|s| !s.is_empty()) {
@@ -53,6 +58,27 @@ fn add_path_to_zip(zip: &mut ZipWriter<fs::File>, base_dir: &Path, path: &Path) 
     }
 
     Ok(())
+}
+
+fn emit_profile_export_status(app: &AppHandle, status: &str) {
+    let _ = app.emit(PROFILE_EXPORT_STATUS_EVENT, status.to_string());
+}
+
+fn escape_sql_string(value: &str) -> String {
+    value.replace('\'', "''")
+}
+
+fn backup_chat_db(state: &AppState) -> Result<PathBuf, String> {
+    let backup_path = state
+        .db_path
+        .with_file_name(format!("chat-export-{}.db", Uuid::new_v4()));
+    let escaped_path = escape_sql_string(&backup_path.to_string_lossy());
+
+    let db = state.db.lock().unwrap();
+    db.execute_batch(&format!("VACUUM INTO '{}';", escaped_path))
+        .map_err(|e| e.to_string())?;
+
+    Ok(backup_path)
 }
 
 fn apply_config(app: &AppHandle, state: &AppState, config: AppConfig) -> Result<(), String> {
@@ -88,18 +114,32 @@ fn export_profile(app: &AppHandle, profile_path: &PathBuf) -> Result<(), String>
     let mut zip = ZipWriter::new(file);
     let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
+    emit_profile_export_status(app, "正在写入 config.json");
     let config_json = serde_json::to_string_pretty(&state.config.lock().unwrap().clone())
         .map_err(|e| e.to_string())?;
     zip.start_file("config.json", options).map_err(|e| e.to_string())?;
     zip.write_all(config_json.as_bytes()).map_err(|e| e.to_string())?;
 
+    emit_profile_export_status(app, "正在写入 mcp_servers.json");
     let mcp_json = serde_json::json!({ "servers": mcp::load_servers(&state.mcp_servers_path) });
     let mcp_json = serde_json::to_string_pretty(&mcp_json).map_err(|e| e.to_string())?;
     zip.start_file("mcp_servers.json", options).map_err(|e| e.to_string())?;
     zip.write_all(mcp_json.as_bytes()).map_err(|e| e.to_string())?;
 
+    emit_profile_export_status(app, "正在打包 skills 目录");
     zip.add_directory("skills/", options).map_err(|e| e.to_string())?;
     add_path_to_zip(&mut zip, &state.skills_dir, &state.skills_dir)?;
+
+    emit_profile_export_status(app, "正在导出 chat.db（导出期间已禁止发送）");
+    let chat_db_backup = backup_chat_db(&state)?;
+    let db_result = (|| -> Result<(), String> {
+        zip.start_file("chat.db", options).map_err(|e| e.to_string())?;
+        let mut db_file = fs::File::open(&chat_db_backup).map_err(|e| e.to_string())?;
+        std::io::copy(&mut db_file, &mut zip).map_err(|e| e.to_string())?;
+        Ok(())
+    })();
+    let _ = fs::remove_file(&chat_db_backup);
+    db_result?;
 
     zip.finish().map_err(|e| e.to_string())?;
     state
@@ -108,6 +148,22 @@ fn export_profile(app: &AppHandle, profile_path: &PathBuf) -> Result<(), String>
         .unwrap()
         .log("INFO", &format!("Profile saved to {}", profile_path.display()));
     Ok(())
+}
+
+fn spawn_profile_export(app: AppHandle, profile_path: PathBuf) {
+    std::thread::spawn(move || {
+        let _ = app.emit(PROFILE_EXPORT_START_EVENT, ());
+        emit_profile_export_status(&app, "正在准备导出 Profile...");
+
+        match export_profile(&app, &profile_path) {
+            Ok(()) => {
+                let _ = app.emit(PROFILE_EXPORT_DONE_EVENT, ());
+            }
+            Err(err) => {
+                let _ = app.emit(PROFILE_EXPORT_ERROR_EVENT, err);
+            }
+        }
+    });
 }
 
 fn import_profile(app: &AppHandle, profile_path: &PathBuf) -> Result<(), String> {
@@ -208,6 +264,7 @@ pub struct AppState {
     pub config: Mutex<AppConfig>,
     pub config_path: PathBuf,
     pub workspace_dir: Mutex<PathBuf>,
+    pub db_path: PathBuf,
     pub skills_dir: PathBuf,
     pub mcp_servers_path: PathBuf,
     pub agents_config_path: PathBuf,
@@ -307,13 +364,7 @@ pub fn run() {
                 {
                     let profile_path = path.into_path().map_err(|_| "unsupported save path").ok();
                     if let Some(profile_path) = profile_path {
-                        if let Err(err) = export_profile(app, &profile_path) {
-                            app.state::<AppState>()
-                                .logger
-                                .lock()
-                                .unwrap()
-                                .log("ERROR", &format!("Save profile failed: {err}"));
-                        }
+                        spawn_profile_export(app.clone(), profile_path);
                     }
                 }
             } else if event.id() == RESTORE_PROFILE_MENU_ID {
@@ -402,7 +453,7 @@ pub fn run() {
             let agents_config_path = data_dir.join("sub_agents.json");
 
             let db_path = data_dir.join("chat.db");
-            let db = Connection::open(db_path).unwrap();
+            let db = Connection::open(&db_path).unwrap();
             db.execute("CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)", []).unwrap();
             db.execute(
                 "CREATE TABLE IF NOT EXISTS session_summaries (\
@@ -475,6 +526,7 @@ pub fn run() {
                 config_path,
                 workspace_dir: Mutex::new(workspace_dir.clone()),
                 db: Mutex::new(db),
+                db_path,
                 logger: Mutex::new(app_logger),
                 skills_dir,
                 mcp_servers_path: mcp_servers_path.clone(),

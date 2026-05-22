@@ -52,6 +52,8 @@ export default function App() {
     cmd_type: string;
     code: string;
   } | null>(null);
+  const [profileExporting, setProfileExporting] = useState(false);
+  const [profileExportMessage, setProfileExportMessage] = useState("正在导出并压缩 Profile...");
   const [pendingRetryMessageId, setPendingRetryMessageId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -174,6 +176,32 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const unlisteners: Promise<() => void>[] = [];
+    unlisteners.push(
+      listen("profile-export-start", () => {
+        setProfileExporting(true);
+        setProfileExportMessage("正在准备导出 Profile...");
+      }),
+      listen<string>("profile-export-status", (e) => {
+        setProfileExportMessage(e.payload);
+      }),
+      listen("profile-export-done", () => {
+        setProfileExporting(false);
+        setProfileExportMessage("正在导出并压缩 Profile...");
+      }),
+      listen<string>("profile-export-error", (e) => {
+        setProfileExporting(false);
+        setProfileExportMessage("正在导出并压缩 Profile...");
+        setError(`Profile export failed: ${e.payload}`);
+      })
+    );
+
+    return () => {
+      unlisteners.forEach((p) => p.then((fn) => fn()));
+    };
+  }, []);
+
+  useEffect(() => {
     if (!skillsLoadedFromConfig) return;
 
     getConfig()
@@ -257,6 +285,8 @@ export default function App() {
   }, []);
 
   const sendMessage = useCallback(async () => {
+    if (profileExporting) return;
+
     let text = input.trim();
     if ((!text && attachments.length === 0) || streaming) return;
 
@@ -337,7 +367,7 @@ export default function App() {
     }, useAgentsEnabled);
 
     cleanupRef.current = cleanup;
-  }, [input, messages, streaming, activeSkillIds, sessionId, attachments, selectedModel, useAgentsEnabled]);
+  }, [input, messages, streaming, profileExporting, activeSkillIds, sessionId, attachments, selectedModel, useAgentsEnabled]);
 
   const retryPendingUserMessage = useCallback(async () => {
     if (streaming || !pendingRetryMessageId) return;
@@ -410,6 +440,11 @@ export default function App() {
   }, [messages, streaming, pendingRetryMessageId, activeSkillIds, sessionId, selectedModel, useAgentsEnabled]);
 
   function handleKeyDown(e: React.KeyboardEvent) {
+    if (profileExporting) {
+      e.preventDefault();
+      return;
+    }
+
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
@@ -652,6 +687,16 @@ export default function App() {
           </div>
         </header>
 
+        {profileExporting && (
+          <div className="profile-export-progress" role="progressbar" aria-busy="true" aria-live="polite">
+            <div className="profile-export-progress-label">{profileExportMessage}</div>
+            <div className="profile-export-progress-hint">导出期间聊天窗口已锁定，发送会被禁止。</div>
+            <div className="profile-export-progress-track">
+              <div className="profile-export-progress-fill" />
+            </div>
+          </div>
+        )}
+
         {/* Messages */}
         <div className="messages">
           {messages.length === 0 && (
@@ -700,7 +745,7 @@ export default function App() {
               className="attach-btn"
               title="Attach files"
               onClick={() => fileInputRef.current?.click()}
-              disabled={streaming}
+              disabled={streaming || profileExporting}
             >
               📎
             </button>
@@ -735,14 +780,14 @@ export default function App() {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Type a message… (Enter to send, Shift+Enter for newline)"
-              disabled={streaming}
+              disabled={streaming || profileExporting}
             />
             <select
               className="model-select"
               title="Select model"
               value={selectedModel}
               onChange={(e) => setSelectedModel(e.target.value)}
-              disabled={streaming}
+              disabled={streaming || profileExporting}
             >
               {availableModels.map((model) => (
                 <option key={model} value={model}>{model}</option>
@@ -751,7 +796,7 @@ export default function App() {
             <button
               className="send-btn"
               onClick={streaming ? stopStreaming : sendMessage}
-              disabled={!streaming && !input.trim() && attachments.length === 0}
+              disabled={profileExporting || (!streaming && !input.trim() && attachments.length === 0)}
             >
               {streaming ? "Stop" : "Send"}
             </button>
