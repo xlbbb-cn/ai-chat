@@ -12,6 +12,7 @@ interface Props {
 
 export function HistoryPanel({ currentSessionId, onLoad, onClose }: Props) {
   const [records, setRecords] = useState<HistoryRecord[]>([]);
+  const [searchKeyword, setSearchKeyword] = useState("");
 
   useEffect(() => {
     loadHistory().then(setRecords).catch(console.error);
@@ -26,21 +27,31 @@ export function HistoryPanel({ currentSessionId, onLoad, onClose }: Props) {
     return Array.from(map.entries()).reverse();
   }, [records]);
 
+  const filteredSessions = useMemo(() => {
+    const keyword = searchKeyword.trim().toLowerCase();
+    if (!keyword) return sessions;
+
+    return sessions.filter(([sid, recs]) => {
+      if (sid.toLowerCase().includes(keyword)) return true;
+      return recs.some((rec) => rec.content.toLowerCase().includes(keyword));
+    });
+  }, [searchKeyword, sessions]);
+
   function handleLoad(sessionId: string, sessionRecords: HistoryRecord[]) {
     const messages: Message[] = sessionRecords.map((r) => ({
       id: crypto.randomUUID(),
       role: r.role as "user" | "assistant",
       content: r.content,
     }));
+
     onLoad(sessionId, messages);
-    onClose();
   }
 
   async function handleDelete(e: React.MouseEvent, sessionId: string) {
     e.stopPropagation();
     try {
       await deleteHistory(sessionId);
-      setRecords(records.filter((r) => r.session_id !== sessionId));
+      setRecords((prev) => prev.filter((r) => r.session_id !== sessionId));
     } catch (err) {
       console.error("Failed to delete history:", err);
     }
@@ -53,11 +64,24 @@ export function HistoryPanel({ currentSessionId, onLoad, onClose }: Props) {
         <button className="close-btn" onClick={onClose}>✕</button>
       </div>
 
+      <div className="history-search-wrap">
+        <input
+          className="history-search-input"
+          type="text"
+          value={searchKeyword}
+          onChange={(e) => setSearchKeyword(e.target.value)}
+          placeholder="Search sessions by keyword"
+          aria-label="Search history sessions"
+        />
+      </div>
+
       <div className="history-list">
         {sessions.length === 0 ? (
           <p className="history-empty">No history yet.</p>
+        ) : filteredSessions.length === 0 ? (
+          <p className="history-empty">No sessions matched "{searchKeyword}".</p>
         ) : (
-          sessions.map(([sid, recs]) => {
+          filteredSessions.map(([sid, recs]) => {
             const preview = recs.find((r) => r.role === "user")?.content ?? "(empty)";
             const isCurrent = sid === currentSessionId;
             return (
