@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, State};
+use os_info;
 
 use crate::{AppState, agents, db, mcp, skills, tools};
 
@@ -476,8 +477,8 @@ pub async fn chat_completion(
     let mut available_skills_info = String::new();
 
     let os_info = os_info::get();
-    let os_sys_msg = format!("System information about the machine you are running on:\n- OS: {} {}\n- CPU: {}\n",
-        os_info.os_type(), os_info.version(), os_info.cpu_arch());
+    let os_sys_msg = format!("System information:\n- OS: {} {}\n- CPU: {:?}\n",
+        os_info.os_type(), os_info.version(), os_info.architecture());
 
     if !system_content.is_empty() {
         system_content.push_str("\n\n");
