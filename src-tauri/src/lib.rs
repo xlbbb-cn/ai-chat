@@ -180,12 +180,14 @@ fn import_profile(app: &AppHandle, profile_path: &PathBuf) -> Result<(), String>
     let file = fs::File::open(profile_path).map_err(|e| e.to_string())?;
     let mut archive = ZipArchive::new(file).map_err(|e| e.to_string())?;
 
-    let mut config_file = archive
-        .by_name("config.json")
-        .map_err(|_| "missing config.json in profile archive".to_string())?;
-    let mut config_json = String::new();
-    config_file.read_to_string(&mut config_json).map_err(|e| e.to_string())?;
-    let config: AppConfig = serde_json::from_str(&config_json).map_err(|e| e.to_string())?;
+    let config: AppConfig = {
+        let mut config_file = archive
+            .by_name("config.json")
+            .map_err(|_| "missing config.json in profile archive".to_string())?;
+        let mut config_json = String::new();
+        config_file.read_to_string(&mut config_json).map_err(|e| e.to_string())?;
+        serde_json::from_str(&config_json).map_err(|e| e.to_string())?
+    };
 
     apply_config(app, &state, config)?;
 
