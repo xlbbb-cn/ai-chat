@@ -2,7 +2,9 @@ use serde_json::{json, Value};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use tauri::{AppHandle, Emitter, Manager};
+use tokio::io::AsyncWriteExt;
 
 // ─── Dangerous command detection ─────────────────────────────────────────────
 
@@ -84,6 +86,109 @@ fn split_command_line(code: &str) -> Vec<String> {
     args
 }
 
+fn is_sudo_executable(token: &str) -> bool {
+    Path::new(token)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(token)
+        .eq_ignore_ascii_case("sudo")
+}
+
+fn code_requests_sudo(code: &str) -> bool {
+    for line in code.lines() {
+        let trimmed = line.trim_start();
+        if trimmed == "sudo" || trimmed.starts_with("sudo ") || trimmed.starts_with("sudo\t") {
+            return true;
+        }
+    }
+    false
+}
+
+fn format_process_output(output: std::process::Output) -> String {
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    let mut result = String::new();
+    if !stdout.is_empty() {
+        result.push_str(&stdout);
+    }
+    if !stderr.is_empty() {
+        if !result.is_empty() {
+            result.push('\n');
+        }
+        result.push_str("STDERR:\n");
+        result.push_str(&stderr);
+    }
+    if !output.status.success() {
+        result.push_str(&format!(
+            "\nExit code: {}",
+            output.status.code().unwrap_or(-1)
+        ));
+    }
+    if result.is_empty() {
+        result = "(no output)".to_string();
+    }
+    result
+}
+
+async fn run_command_with_stdin(
+    mut cmd: tokio::process::Command,
+    stdin_data: String,
+) -> Result<String, String> {
+    let mut child = cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(stdin_data.as_bytes())
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+
+    let output = child.wait_with_output().await.map_err(|e| e.to_string())?;
+    Ok(format_process_output(output))
+}
+
+async fn request_tool_confirmation(
+    app: &AppHandle,
+    reason: String,
+    cmd_type: String,
+    code: String,
+    confirm_kind: &'static str,
+    requires_auth: &'static str,
+) -> crate::ToolConfirmation {
+    let _ = app.emit(
+        "confirm-required",
+        serde_json::json!({
+            "reason": reason,
+            "cmd_type": cmd_type,
+            "code": code,
+            "confirm_kind": confirm_kind,
+            "requires_auth": requires_auth,
+        }),
+    );
+
+    let (tx, rx) = tokio::sync::oneshot::channel::<crate::ToolConfirmation>();
+    {
+        let state = app.state::<crate::AppState>();
+        *state.confirm_sender.lock().unwrap() = Some(tx);
+    }
+
+    tokio::time::timeout(std::time::Duration::from_secs(120), rx)
+        .await
+        .ok()
+        .and_then(|r| r.ok())
+        .unwrap_or(crate::ToolConfirmation {
+            confirmed: false,
+            username: None,
+            password: None,
+        })
+}
+
 pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
     let mut tools = vec![];
 
@@ -95,7 +200,7 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "run_cmd",
-                "description": "Run an executable program directly (without a shell) on the user's machine. The first token is the executable; the rest are arguments. Preferred for simple commands like curl, wget, git, etc. If called by a skill, runs in the skill's directory; otherwise in the managed workspace directory. Dangerous operations (deleting files, modifying system settings, installing software, etc.) will require explicit user confirmation before execution.",
+                "description": "Run an executable program directly (without a shell) on the user's machine. The first token is the executable; the rest are arguments. Preferred for simple commands like curl, wget, git, etc. If called by a skill, runs in the skill's directory; otherwise in the managed workspace directory. Dangerous or privileged operations (sudo) will require explicit user confirmation before execution.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -119,7 +224,7 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
                                 Supports pipes, loops, variables, and other shell features. 
                                 If called by a skill, runs in the skill's directory; 
                                 otherwise in the managed workspace directory. 
-                                Dangerous operations will require explicit user confirmation before execution.",
+                                Dangerous or privileged operations (sudo / admin elevation) will require explicit user confirmation before execution.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -131,6 +236,14 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
                         "code": {
                             "type": "string",
                             "description": "The shell script body to execute."
+                        },
+                        "sudo": {
+                            "type": "boolean",
+                            "description": "If true (bash only), run the entire script via sudo. Requires explicit user confirmation and sudo credentials."
+                        },
+                        "elevated": {
+                            "type": "boolean",
+                            "description": "If true (PowerShell only), request administrator elevation (UAC). Requires explicit user confirmation."
                         }
                     },
                     "required": ["type", "code"]
@@ -374,31 +487,76 @@ pub async fn execute_tool(
                 }
             }
 
-            // ── Dangerous command check → ask for user confirmation ───────────
+            let parts = split_command_line(&command);
+            let sudo_requested = parts.first().is_some_and(|p| is_sudo_executable(p));
+            let mut reasons: Vec<String> = vec![];
+            if sudo_requested {
+                reasons.push("privileged execution requested via sudo".to_string());
+            }
             if let Some(reason) = is_dangerous("direct", &command) {
-                let _ = app.emit("confirm-required", serde_json::json!({
-                    "reason": reason,
-                    "cmd_type": "direct",
-                    "code": command
-                }));
+                reasons.push(reason);
+            }
 
-                let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
-                {
-                    let state = app.state::<crate::AppState>();
-                    *state.confirm_sender.lock().unwrap() = Some(tx);
-                }
-
-                let confirmed = tokio::time::timeout(
-                    std::time::Duration::from_secs(60),
-                    rx,
+            // ── Confirmation / privilege prompts ─────────────────────────────
+            let mut sudo_username: Option<String> = None;
+            let mut sudo_password: Option<String> = None;
+            if !reasons.is_empty() {
+                let requires_auth = if sudo_requested { "sudo" } else { "none" };
+                let kind = if sudo_requested { "sudo" } else { "dangerous" };
+                let confirm = request_tool_confirmation(
+                    app,
+                    reasons.join("; "),
+                    "direct".to_string(),
+                    command.clone(),
+                    kind,
+                    requires_auth,
                 )
-                .await
-                .map(|r| r.unwrap_or(false))
-                .unwrap_or(false);
+                .await;
 
-                if !confirmed {
+                if !confirm.confirmed {
                     return "⛔ Command execution denied by user.".to_string();
                 }
+                sudo_username = confirm.username;
+                sudo_password = confirm.password;
+            }
+
+            if sudo_requested {
+                let password = sudo_password.unwrap_or_default();
+                if password.is_empty() {
+                    return "⛔ sudo password is required.".to_string();
+                }
+
+                let mut sudo_args: Vec<String> = parts.into_iter().skip(1).collect();
+                let username = sudo_username
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string());
+
+                if let Some(ref u) = username {
+                    let has_user_flag = sudo_args.iter().any(|t| t == "-u");
+                    if !has_user_flag {
+                        sudo_args.splice(0..0, vec!["-u".to_string(), u.clone()]);
+                    }
+                }
+
+                let _ = app.emit(
+                    "chat-token",
+                    format!("⚙️ *Running (sudo):*\n```\n{}\n```\n\n", command),
+                );
+
+                let mut cmd = tokio::process::Command::new("sudo");
+                cmd.arg("-S").arg("-p").arg("");
+                cmd.args(sudo_args);
+                cmd.current_dir(command_cwd);
+
+                return tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    run_command_with_stdin(cmd, format!("{}\n", password)),
+                )
+                .await
+                .unwrap_or_else(|_| Ok("Command timed out after 30 seconds.".to_string()))
+                .unwrap_or_else(|e| format!("Error: {}", e));
             }
 
             let _ = app.emit("chat-token", format!("⚙️ *Running:*\n```\n{}\n```\n\n", command));
@@ -413,36 +571,107 @@ pub async fn execute_tool(
         "run_shell" => {
             let shell_type = args["type"].as_str().unwrap_or("powershell").to_string();
             let code = args["code"].as_str().unwrap_or("").to_string();
+            let sudo_flag = args["sudo"].as_bool().unwrap_or(false);
+            let elevated_flag = args["elevated"].as_bool().unwrap_or(false);
             let command_cwd = active_skill_roots
                 .first()
                 .cloned()
                 .unwrap_or_else(|| workspace_dir.clone());
 
-            // ── Dangerous command check → ask for user confirmation ───────────
+            let sudo_requested = shell_type == "bash" && (sudo_flag || code_requests_sudo(&code));
+            let elevated_requested = shell_type == "powershell" && elevated_flag;
+
+            let mut reasons: Vec<String> = vec![];
+            if sudo_requested {
+                reasons.push("privileged execution requested via sudo".to_string());
+            }
+            if elevated_requested {
+                reasons.push("administrator elevation requested (UAC)".to_string());
+            }
             if let Some(reason) = is_dangerous(&shell_type, &code) {
-                let _ = app.emit("confirm-required", serde_json::json!({
-                    "reason": reason,
-                    "cmd_type": shell_type,
-                    "code": code
-                }));
+                reasons.push(reason);
+            }
 
-                let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
-                {
-                    let state = app.state::<crate::AppState>();
-                    *state.confirm_sender.lock().unwrap() = Some(tx);
-                }
+            let mut sudo_username: Option<String> = None;
+            let mut sudo_password: Option<String> = None;
+            if !reasons.is_empty() {
+                let (kind, requires_auth) = if sudo_requested {
+                    ("sudo", "sudo")
+                } else if elevated_requested {
+                    ("elevation", "elevation")
+                } else {
+                    ("dangerous", "none")
+                };
 
-                let confirmed = tokio::time::timeout(
-                    std::time::Duration::from_secs(60),
-                    rx,
+                let confirm = request_tool_confirmation(
+                    app,
+                    reasons.join("; "),
+                    shell_type.clone(),
+                    code.clone(),
+                    kind,
+                    requires_auth,
                 )
-                .await
-                .map(|r| r.unwrap_or(false))
-                .unwrap_or(false);
+                .await;
 
-                if !confirmed {
+                if !confirm.confirmed {
                     return "⛔ Command execution denied by user.".to_string();
                 }
+                sudo_username = confirm.username;
+                sudo_password = confirm.password;
+            }
+
+            if sudo_requested {
+                let password = sudo_password.unwrap_or_default();
+                if password.is_empty() {
+                    return "⛔ sudo password is required.".to_string();
+                }
+                let username = sudo_username
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string());
+
+                let _ = app.emit(
+                    "chat-token",
+                    format!(
+                        "⚙️ *Running {} (sudo):*\n```{}\n{}\n```\n\n",
+                        shell_type, shell_type, code
+                    ),
+                );
+
+                let mut cmd = tokio::process::Command::new("sudo");
+                cmd.arg("-S").arg("-p").arg("");
+                if let Some(u) = username {
+                    cmd.arg("-u").arg(u);
+                }
+                cmd.arg("bash").arg("-lc").arg(code);
+                cmd.current_dir(command_cwd);
+
+                return tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    run_command_with_stdin(cmd, format!("{}\n", password)),
+                )
+                .await
+                .unwrap_or_else(|_| Ok("Command timed out after 30 seconds.".to_string()))
+                .unwrap_or_else(|e| format!("Error: {}", e));
+            }
+
+            if elevated_requested {
+                let _ = app.emit(
+                    "chat-token",
+                    format!(
+                        "⚙️ *Running {} (elevated):*\n```{}\n{}\n```\n\n",
+                        shell_type, shell_type, code
+                    ),
+                );
+
+                return tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    run_powershell_elevated(code, Some(command_cwd)),
+                )
+                .await
+                .unwrap_or_else(|_| Ok("Command timed out after 30 seconds.".to_string()))
+                .unwrap_or_else(|e| format!("Error: {}", e));
             }
 
             let _ = app.emit("chat-token", format!("⚙️ *Running {}:*\n```{}\n{}\n```\n\n", shell_type, shell_type, code));
@@ -727,27 +956,91 @@ pub async fn run_command(cmd_type: String, code: String, cwd: Option<PathBuf>) -
     }
 
     let output = cmd.output().await.map_err(|e| e.to_string())?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-    let mut result = String::new();
-    if !stdout.is_empty() {
-        result.push_str(&stdout);
-    }
-    if !stderr.is_empty() {
-        if !result.is_empty() {
-            result.push('\n');
-        }
-        result.push_str("STDERR:\n");
-        result.push_str(&stderr);
-    }
-    if !output.status.success() {
-        result.push_str(&format!("\nExit code: {}", output.status.code().unwrap_or(-1)));
-    }
-    if result.is_empty() {
-        result = "(no output)".to_string();
-    }
-    Ok(result)
+    Ok(format_process_output(output))
 }
 
+async fn run_powershell_elevated(code: String, cwd: Option<PathBuf>) -> Result<String, String> {
+    #[cfg(not(windows))]
+    {
+        let _ = cwd;
+        return Err("Elevated PowerShell execution is only supported on Windows.".to_string());
+    }
+
+    #[cfg(windows)]
+    {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        fn ps_quote(s: &str) -> String {
+            format!("'{}'", s.replace('\'', "''"))
+        }
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| e.to_string())?
+            .as_millis();
+
+        let mut temp_dir = std::env::temp_dir();
+        temp_dir.push("ai-chat");
+        fs::create_dir_all(&temp_dir).map_err(|e| e.to_string())?;
+
+        let script_path = temp_dir.join(format!("elevated-{}.ps1", now));
+        let out_path = temp_dir.join(format!("elevated-{}.out.txt", now));
+        let err_path = temp_dir.join(format!("elevated-{}.err.txt", now));
+
+        fs::write(&script_path, code).map_err(|e| e.to_string())?;
+
+        let script_path_s = script_path.to_string_lossy().to_string();
+        let out_path_s = out_path.to_string_lossy().to_string();
+        let err_path_s = err_path.to_string_lossy().to_string();
+
+        let launcher = format!(
+            "$ErrorActionPreference='Stop';\n\
+            $script={script};\n\
+            $out={out};\n\
+            $err={err};\n\
+            $args=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$script);\n\
+            $p=Start-Process -FilePath 'powershell' -ArgumentList $args -Verb RunAs -Wait -PassThru -RedirectStandardOutput $out -RedirectStandardError $err;\n\
+            exit $p.ExitCode\n",
+            script = ps_quote(&script_path_s),
+            out = ps_quote(&out_path_s),
+            err = ps_quote(&err_path_s)
+        );
+
+        let mut cmd = tokio::process::Command::new("powershell");
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", &launcher]);
+        if let Some(dir) = cwd {
+            cmd.current_dir(dir);
+        }
+
+        let output = cmd.output().await.map_err(|e| e.to_string())?;
+        let mut res = format_process_output(output);
+
+        let out_txt = fs::read_to_string(&out_path).unwrap_or_default();
+        let err_txt = fs::read_to_string(&err_path).unwrap_or_default();
+
+        let have_redirected_output = !out_txt.trim().is_empty() || !err_txt.trim().is_empty();
+        if have_redirected_output && res == "(no output)" {
+            res.clear();
+        }
+
+        if !out_txt.trim().is_empty() {
+            if !res.is_empty() {
+                res.push('\n');
+            }
+            res.push_str(&out_txt);
+        }
+        if !err_txt.trim().is_empty() {
+            if !res.is_empty() {
+                res.push('\n');
+            }
+            res.push_str("STDERR (elevated):\n");
+            res.push_str(&err_txt);
+        }
+
+        let _ = fs::remove_file(&script_path);
+        let _ = fs::remove_file(&out_path);
+        let _ = fs::remove_file(&err_path);
+
+        Ok(res)
+    }
+}

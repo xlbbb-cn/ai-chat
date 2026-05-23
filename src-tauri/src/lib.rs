@@ -273,7 +273,14 @@ pub struct AppState {
     pub chat_cancelled: AtomicBool,
     /// One-shot channel sender used to relay the user's confirm/deny response
     /// back to a waiting `execute_tool` call.
-    pub confirm_sender: Mutex<Option<tokio::sync::oneshot::Sender<bool>>>,
+    pub confirm_sender: Mutex<Option<tokio::sync::oneshot::Sender<ToolConfirmation>>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ToolConfirmation {
+    pub confirmed: bool,
+    pub username: Option<String>,
+    pub password: Option<String>,
 }
 
 // ─── Config commands ──────────────────────────────────────────────────────────
@@ -330,10 +337,19 @@ fn stop_chat_completion(state: State<'_, AppState>) {
 
 /// Called by the frontend to confirm or deny a pending dangerous-command execution.
 #[tauri::command]
-fn confirm_command(state: State<'_, AppState>, confirmed: bool) {
+fn confirm_command(
+    state: State<'_, AppState>,
+    confirmed: bool,
+    username: Option<String>,
+    password: Option<String>,
+) {
     let mut guard = state.confirm_sender.lock().unwrap();
     if let Some(tx) = guard.take() {
-        let _ = tx.send(confirmed);
+        let _ = tx.send(ToolConfirmation {
+            confirmed,
+            username,
+            password,
+        });
     }
 }
 

@@ -51,7 +51,11 @@ export default function App() {
     reason: string;
     cmd_type: string;
     code: string;
+    confirm_kind?: "dangerous" | "sudo" | "elevation";
+    requires_auth?: "none" | "sudo" | "elevation";
   } | null>(null);
+  const [confirmUsername, setConfirmUsername] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [profileExporting, setProfileExporting] = useState(false);
   const [profileExportMessage, setProfileExportMessage] = useState("Exporting and compressing profile...");
   const [pendingRetryMessageId, setPendingRetryMessageId] = useState<string | null>(null);
@@ -127,13 +131,21 @@ export default function App() {
 
   // Dangerous-command confirmation dialog
   useEffect(() => {
-    const unlisten = listen<{ reason: string; cmd_type: string; code: string }>(
+    const unlisten = listen<{
+      reason: string;
+      cmd_type: string;
+      code: string;
+      confirm_kind?: "dangerous" | "sudo" | "elevation";
+      requires_auth?: "none" | "sudo" | "elevation";
+    }>(
       "confirm-required",
       (e) => {
-        const { reason, cmd_type, code } = e.payload;
+        const { reason, cmd_type, code, confirm_kind, requires_auth } = e.payload;
         setConfirmDialog((current) =>
-          current ?? { reason, cmd_type, code }
+          current ?? { reason, cmd_type, code, confirm_kind, requires_auth }
         );
+        setConfirmUsername("");
+        setConfirmPassword("");
       }
     );
     return () => {
@@ -142,9 +154,12 @@ export default function App() {
   }, []);
 
   const respondToConfirm = useCallback((confirmed: boolean) => {
-    confirmCommand(confirmed).catch(console.error);
+    const requiresSudo = confirmDialog?.requires_auth === "sudo";
+    confirmCommand(confirmed, requiresSudo ? { username: confirmUsername, password: confirmPassword } : undefined).catch(console.error);
     setConfirmDialog(null);
-  }, []);
+    setConfirmUsername("");
+    setConfirmPassword("");
+  }, [confirmDialog, confirmUsername, confirmPassword]);
 
   useEffect(() => {
     getConfig()
@@ -490,6 +505,18 @@ export default function App() {
     if (!confirmDialog) {
       return null;
     }
+    const requiresSudo = confirmDialog.requires_auth === "sudo";
+    const requiresElevation = confirmDialog.requires_auth === "elevation";
+    const title = requiresSudo
+      ? "⚠️ Privileged operation (sudo)"
+      : requiresElevation
+        ? "⚠️ Privileged operation (administrator)"
+        : "⚠️ Dangerous command detected";
+    const badge = requiresSudo
+      ? "SUDO"
+      : requiresElevation
+        ? "ADMIN"
+        : "DANGEROUS";
     const preview =
       confirmDialog.code.length > 400
         ? confirmDialog.code.slice(0, 400) + "…"
@@ -498,13 +525,45 @@ export default function App() {
     return (
       <div className="confirm-overlay">
         <div className="confirm-dialog">
-          <h2>⚠️ Dangerous command detected</h2>
+          <h2>
+            {title} <span className="confirm-dialog-badge">{badge}</span>
+          </h2>
           <p>
             <strong>Reason:</strong> {confirmDialog.reason}
           </p>
           <p>
             <strong>Type:</strong> {confirmDialog.cmd_type}
           </p>
+          {requiresSudo && (
+            <div className="confirm-dialog-credentials">
+              <label>
+                Username (optional)
+                <input
+                  value={confirmUsername}
+                  onChange={(e) => setConfirmUsername(e.target.value)}
+                  placeholder="leave blank for current user"
+                />
+              </label>
+              <label>
+                Password
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="required"
+                  autoFocus
+                />
+              </label>
+              <p className="confirm-dialog-hint">
+                This will run with elevated privileges and may modify your system.
+              </p>
+            </div>
+          )}
+          {requiresElevation && (
+            <p className="confirm-dialog-hint">
+              This will request administrator elevation (UAC) and may modify system settings.
+            </p>
+          )}
           <div className="confirm-dialog-preview">
             <pre>{preview}</pre>
           </div>
@@ -518,6 +577,7 @@ export default function App() {
             <button
               className="confirm-dialog-button confirm"
               onClick={() => respondToConfirm(true)}
+              disabled={requiresSudo && confirmPassword.trim().length === 0}
             >
               Allow
             </button>
