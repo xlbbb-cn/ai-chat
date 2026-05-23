@@ -1,12 +1,12 @@
 use futures_util::StreamExt;
+use os_info;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, State};
-use os_info;
 
-use crate::{AppState, agents, db, mcp, skills, tools};
+use crate::{agents, db, mcp, skills, tools, AppState};
 
 fn log_event(state: &State<'_, AppState>, level: &str, message: String) {
     if let Ok(logger) = state.logger.lock() {
@@ -68,7 +68,10 @@ fn truncate_text(value: &str, max_chars: usize) -> String {
 }
 
 fn summarize_message_for_context(msg: &Value) -> Option<String> {
-    let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("unknown");
+    let role = msg
+        .get("role")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
     if role == "tool" {
         return None;
     }
@@ -203,7 +206,9 @@ fn compress_session_context(all_messages: &mut Vec<Value>) -> Option<String> {
         return None;
     }
 
-    let split_idx = compressible.len().saturating_sub(CONTEXT_KEEP_RECENT_MESSAGES);
+    let split_idx = compressible
+        .len()
+        .saturating_sub(CONTEXT_KEEP_RECENT_MESSAGES);
     let (older, recent) = compressible.split_at(split_idx);
 
     let summary_lines: Vec<String> = older
@@ -284,7 +289,13 @@ pub async fn stream_llm_request(
 
     'stream_loop: while let Some(chunk) = stream.next().await {
         if cancelled.load(Ordering::SeqCst) {
-            return Ok(StreamResult { finish_reason: "cancelled".into(), tool_calls: vec![], content, prompt_tokens, completion_tokens });
+            return Ok(StreamResult {
+                finish_reason: "cancelled".into(),
+                tool_calls: vec![],
+                content,
+                prompt_tokens,
+                completion_tokens,
+            });
         }
         let bytes = chunk.map_err(|e| e.to_string())?;
         buffer.push_str(&String::from_utf8_lossy(&bytes));
@@ -294,41 +305,68 @@ pub async fn stream_llm_request(
             buffer.drain(..=idx);
 
             if cancelled.load(Ordering::SeqCst) {
-                return Ok(StreamResult { finish_reason: "cancelled".into(), tool_calls: vec![], content, prompt_tokens, completion_tokens });
+                return Ok(StreamResult {
+                    finish_reason: "cancelled".into(),
+                    tool_calls: vec![],
+                    content,
+                    prompt_tokens,
+                    completion_tokens,
+                });
             }
             let line = line.trim();
-            if line.is_empty() { continue; }
-            if line == "data: [DONE]" { break 'stream_loop; }
-            let Some(json_str) = line.strip_prefix("data: ") else { continue };
-            let Ok(parsed) = serde_json::from_str::<Value>(json_str) else { continue };
+            if line.is_empty() {
+                continue;
+            }
+            if line == "data: [DONE]" {
+                break 'stream_loop;
+            }
+            let Some(json_str) = line.strip_prefix("data: ") else {
+                continue;
+            };
+            let Ok(parsed) = serde_json::from_str::<Value>(json_str) else {
+                continue;
+            };
 
             if opts.emit_usage {
                 if let Some(usage) = parsed.get("usage").filter(|v| !v.is_null()) {
-                    prompt_tokens = usage.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                    completion_tokens = usage.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                    prompt_tokens = usage
+                        .get("prompt_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0) as u32;
+                    completion_tokens = usage
+                        .get("completion_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0) as u32;
                     let total_tokens = prompt_tokens.saturating_add(completion_tokens);
                     let usage_ratio = opts
                         .usage_max_tokens
                         .filter(|max| *max > 0)
                         .map(|max| total_tokens as f64 / max as f64)
                         .unwrap_or(0.0);
-                    let _ = app.emit("chat-usage", json!({
-                        "prompt_tokens": prompt_tokens,
-                        "completion_tokens": completion_tokens,
-                        "total_tokens": total_tokens,
-                        "max_tokens": opts.usage_max_tokens,
-                        "usage_ratio": usage_ratio
-                    }));
+                    let _ = app.emit(
+                        "chat-usage",
+                        json!({
+                            "prompt_tokens": prompt_tokens,
+                            "completion_tokens": completion_tokens,
+                            "total_tokens": total_tokens,
+                            "max_tokens": opts.usage_max_tokens,
+                            "usage_ratio": usage_ratio
+                        }),
+                    );
                 }
             }
 
-            let Some(choice) = parsed["choices"].get(0) else { continue };
+            let Some(choice) = parsed["choices"].get(0) else {
+                continue;
+            };
             let delta = &choice["delta"];
 
             if let Some(fr) = choice["finish_reason"].as_str() {
                 if !fr.is_empty() {
                     finish_reason = fr.to_string();
-                    if fr == "tool_calls" { got_tool_calls = true; }
+                    if fr == "tool_calls" {
+                        got_tool_calls = true;
+                    }
                 }
             }
 
@@ -346,9 +384,15 @@ pub async fn stream_llm_request(
                     while tool_calls.len() <= idx {
                         tool_calls.push((String::new(), String::new(), String::new()));
                     }
-                    if let Some(id) = tc["id"].as_str() { tool_calls[idx].0 = id.to_string(); }
-                    if let Some(name) = tc["function"]["name"].as_str() { tool_calls[idx].1 = name.to_string(); }
-                    if let Some(args) = tc["function"]["arguments"].as_str() { tool_calls[idx].2.push_str(args); }
+                    if let Some(id) = tc["id"].as_str() {
+                        tool_calls[idx].0 = id.to_string();
+                    }
+                    if let Some(name) = tc["function"]["name"].as_str() {
+                        tool_calls[idx].1 = name.to_string();
+                    }
+                    if let Some(args) = tc["function"]["arguments"].as_str() {
+                        tool_calls[idx].2.push_str(args);
+                    }
                 }
             }
 
@@ -356,7 +400,10 @@ pub async fn stream_llm_request(
             if let Some(token) = delta["content"].as_str() {
                 content.push_str(token);
                 if let Some(task_id) = opts.task_id {
-                    let _ = app.emit(opts.token_event, json!({ "task_id": task_id, "token": token }));
+                    let _ = app.emit(
+                        opts.token_event,
+                        json!({ "task_id": task_id, "token": token }),
+                    );
                 } else {
                     let _ = app.emit(opts.token_event, token.to_string());
                 }
@@ -369,7 +416,13 @@ pub async fn stream_llm_request(
         tool_calls.clear();
     }
 
-    Ok(StreamResult { finish_reason, tool_calls, content, prompt_tokens, completion_tokens })
+    Ok(StreamResult {
+        finish_reason,
+        tool_calls,
+        content,
+        prompt_tokens,
+        completion_tokens,
+    })
 }
 
 /// Thin wrapper used by the main agent (preserves existing call sites).
@@ -382,13 +435,22 @@ async fn stream_request(
     cancelled: &AtomicBool,
     usage_max_tokens: Option<u32>,
 ) -> Result<StreamResult, String> {
-    stream_llm_request(app, client, url, api_key, req_body, cancelled, StreamOptions {
-        token_event: "chat-token",
-        task_id: None,
-        emit_reasoning: true,
-        emit_usage: true,
-        usage_max_tokens,
-    }).await
+    stream_llm_request(
+        app,
+        client,
+        url,
+        api_key,
+        req_body,
+        cancelled,
+        StreamOptions {
+            token_event: "chat-token",
+            task_id: None,
+            emit_reasoning: true,
+            emit_usage: true,
+            usage_max_tokens,
+        },
+    )
+    .await
 }
 
 /// Log interaction to database
@@ -434,7 +496,10 @@ pub async fn chat_completion(
     log_event(
         &state,
         "INFO",
-        format!("chat_completion started: session_id={}, model={}", session_id, config.model),
+        format!(
+            "chat_completion started: session_id={}, model={}",
+            session_id, config.model
+        ),
     );
 
     // ── Agent orchestration path ──────────────────────────────────────────────
@@ -444,7 +509,11 @@ pub async fn chat_completion(
         if has_enabled {
             let result = agents::orchestrate(&app, &state, &config, &messages, &session_id).await;
             state.chat_cancelled.store(false, Ordering::SeqCst);
-            log_event(&state, "INFO", format!("agent orchestration finished: session_id={}", session_id));
+            log_event(
+                &state,
+                "INFO",
+                format!("agent orchestration finished: session_id={}", session_id),
+            );
             let _ = app.emit("chat-done", ());
             return result.map(|_| ());
         }
@@ -453,6 +522,13 @@ pub async fn chat_completion(
     let mut all_messages: Vec<Value> = vec![];
     let mut skill_allowed_commands: Vec<String> = Vec::new();
     let mut active_skill_roots: Vec<std::path::PathBuf> = Vec::new();
+    let self_evolution_roots =
+        skills::collect_self_evolution_roots(&state.skills_dir, config.self_evolution_mode);
+    let self_evolution_files = if config.self_evolution_mode {
+        vec![state.agents_config_path.clone()]
+    } else {
+        Vec::new()
+    };
 
     // 1. Determine which skills have already been loaded in this session
     // We scan the assistant messages for "🧠 *Loading skill: xxx*"
@@ -464,7 +540,9 @@ pub async fn chat_completion(
             while let Some(idx) = m.content[start_idx..].find(marker) {
                 let actual_start = start_idx + idx + marker.len();
                 if let Some(end) = m.content[actual_start..].find('*') {
-                    let skill_name = m.content[actual_start..actual_start+end].trim().to_string();
+                    let skill_name = m.content[actual_start..actual_start + end]
+                        .trim()
+                        .to_string();
                     activated_skills.insert(skill_name);
                 }
                 start_idx = actual_start;
@@ -477,8 +555,12 @@ pub async fn chat_completion(
     let mut available_skills_info = String::new();
 
     let os_info = os_info::get();
-    let os_sys_msg = format!("System information:\n- OS: {} {}\n- CPU: {:?}\n",
-        os_info.os_type(), os_info.version(), os_info.architecture());
+    let os_sys_msg = format!(
+        "System information:\n- OS: {} {}\n- CPU: {:?}\n",
+        os_info.os_type(),
+        os_info.version(),
+        os_info.architecture()
+    );
 
     if !system_content.is_empty() {
         system_content.push_str("\n\n");
@@ -486,14 +568,18 @@ pub async fn chat_completion(
     system_content.push_str(&os_sys_msg); //Add system info to system prompt
 
     for skill_name in &skill_ids {
-        let skill_opt = if let Ok(skill) = skills::load_skill_by_name(&state.skills_dir, skill_name) {
+        let skill_opt = if let Ok(skill) = skills::load_skill_by_name(&state.skills_dir, skill_name)
+        {
             Some((skill, state.skills_dir.join(skill_name)))
-        } else if let Some(home_dir) = dirs::home_dir() {
-            let user_skills_dir = home_dir.join(".skills");
+        } else if let Some(user_skills_dir) = skills::user_skills_dir() {
             if let Ok(skill) = skills::load_skill_by_name(&user_skills_dir, skill_name) {
                 Some((skill, user_skills_dir.join(skill_name)))
-            } else { None }
-        } else { None };
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         if let Some((skill, spath)) = skill_opt {
             merge_allowed_commands(&mut skill_allowed_commands, &skill.allowed_commands);
@@ -505,11 +591,20 @@ pub async fn chat_completion(
                 let cmd_constraint = if skill.allowed_commands.is_empty() {
                     String::new()
                 } else {
-                    format!("\n[Allowed commands for this skill: {}]\n", skill.allowed_commands.join(", "))
+                    format!(
+                        "\n[Allowed commands for this skill: {}]\n",
+                        skill.allowed_commands.join(", ")
+                    )
                 };
-                loaded_skills_content.push_str(&format!("\n\n--- Skill: {} ---\n{}{}", skill.name, cmd_constraint, skill.system_prompt));
+                loaded_skills_content.push_str(&format!(
+                    "\n\n--- Skill: {} ---\n{}{}",
+                    skill.name, cmd_constraint, skill.system_prompt
+                ));
             } else {
-                available_skills_info.push_str(&format!("- Name: {}\n  Description: {}\n", skill.name, skill.description));
+                available_skills_info.push_str(&format!(
+                    "- Name: {}\n  Description: {}\n",
+                    skill.name, skill.description
+                ));
             }
         }
     }
@@ -522,34 +617,66 @@ pub async fn chat_completion(
             Available skills:\n{}",
             available_skills_info
         );
-    if !system_content.is_empty() {
-        system_content.push_str("\n\n");
+        if !system_content.is_empty() {
+            system_content.push_str("\n\n");
+        }
+        system_content.push_str(&skills_sys_msg);
     }
-    system_content.push_str(&skills_sys_msg);
-}
 
-let agents_cfg = agents::load_agents_config(&state.agents_config_path);
-let enabled_agents: Vec<agents::SubAgent> = agents_cfg.agents.into_iter().filter(|a| a.enabled).collect();
+    let agents_cfg = agents::load_agents_config(&state.agents_config_path);
+    let enabled_agents: Vec<agents::SubAgent> = agents_cfg
+        .agents
+        .into_iter()
+        .filter(|a| a.enabled)
+        .collect();
 
-if !enabled_agents.is_empty() {
-    let mut available_agents_info = String::new();
-    for agent in &enabled_agents {
-        available_agents_info.push_str(&format!("- ID: {}\n  Name: {}\n  Description: {}\n", agent.id, agent.name, agent.description));
-    }
-    let agents_sys_msg = format!(
+    if !enabled_agents.is_empty() {
+        let mut available_agents_info = String::new();
+        for agent in &enabled_agents {
+            available_agents_info.push_str(&format!(
+                "- ID: {}\n  Name: {}\n  Description: {}\n",
+                agent.id, agent.name, agent.description
+            ));
+        }
+        let agents_sys_msg = format!(
         "You have access to the following specialized sub-agents. To delegate a task to one of them, use the `call_subagent` tool with the corresponding `agent_id`.\n\n\
         Available sub-agents:\n{}",
         available_agents_info
     );
-    if !system_content.is_empty() {
-        system_content.push_str("\n\n");
+        if !system_content.is_empty() {
+            system_content.push_str("\n\n");
+        }
+        system_content.push_str(&agents_sys_msg);
     }
-    system_content.push_str(&agents_sys_msg);
-}
 
-if !system_content.is_empty() {
-    all_messages.push(json!({ "role": "system", "content": system_content }));
-}
+    if !system_content.is_empty() {
+        all_messages.push(json!({ "role": "system", "content": system_content }));
+    }
+
+    if config.self_evolution_mode && !self_evolution_roots.is_empty() {
+        let skill_roots_display = self_evolution_roots
+            .iter()
+            .map(|p| format!("- {}", p.display()))
+            .collect::<Vec<String>>()
+            .join("\n");
+        let agents_config_display = state.agents_config_path.display().to_string();
+        all_messages.push(json!({
+            "role": "system",
+            "content": format!(
+                "INTERNAL CONTEXT - SELF EVOLUTION MODE (not a user request):\n\
+                 Self-evolution mode is ENABLED.\n\
+                 - You may inspect, create, and update reusable skills under these skill roots:\n\
+                 {skill_roots_display}\n\
+                 - You may also inspect and update the sub-agent config file at:\n\
+                 {agents_config_display}\n\
+                 - When it directly helps the user's request, you may improve existing skills or create new ones for future reuse.\n\
+                 - Before modifying any skill file or the sub-agent config file, create a sibling backup with suffix `.bak.<number>`.\n\
+                 - Use `file_actions` for these edits so backup creation is enforced automatically.\n\
+                 - Prefer absolute paths when working in skill roots to avoid ambiguity with workspace files.\n\
+                 - Unless the user explicitly asks otherwise, do not access paths outside the workspace root, these skill roots, or the sub-agent config file."
+            )
+        }));
+    }
 
     if let Ok(db_guard) = state.db.lock() {
         if let Ok(Some(saved_summary)) = db::get_session_summary(&db_guard, &session_id) {
@@ -595,7 +722,10 @@ if !system_content.is_empty() {
         all_messages.push(json!({ "role": m.role, "content": m.content }));
     }
 
-    let url = format!("{}/chat/completions", config.api_base_url.trim_end_matches('/'));
+    let url = format!(
+        "{}/chat/completions",
+        config.api_base_url.trim_end_matches('/')
+    );
     let client = Client::new();
 
     let mut tools_list = tools::get_all_tools(&config.selected_tools);
@@ -617,7 +747,9 @@ if !system_content.is_empty() {
             match mcp::get_server_tools(server).await {
                 Ok(server_tools) => {
                     for tool in server_tools {
-                        let Some(actual_name) = tool["function"]["name"].as_str() else { continue };
+                        let Some(actual_name) = tool["function"]["name"].as_str() else {
+                            continue;
+                        };
                         let safe_name = mcp::sanitize_fn_name(actual_name);
                         let raw_fn = format!("mcp_{idx}_{safe_name}");
                         let fn_name: String = raw_fn.chars().take(64).collect();
@@ -636,7 +768,11 @@ if !system_content.is_empty() {
                     }
                 }
                 Err(e) => {
-                    log_event(&state, "ERROR", format!("MCP server '{}' tools/list failed: {e}", server.name));
+                    log_event(
+                        &state,
+                        "ERROR",
+                        format!("MCP server '{}' tools/list failed: {e}", server.name),
+                    );
                 }
             }
         }
@@ -735,9 +871,17 @@ if !system_content.is_empty() {
                 let tool_calls_json = if sr.tool_calls.is_empty() {
                     String::new()
                 } else {
-                    serde_json::to_string(&sr.tool_calls.iter().map(|(id, name, args)| json!({
-                        "id": id, "name": name, "arguments": args
-                    })).collect::<Vec<_>>()).unwrap_or_default()
+                    serde_json::to_string(
+                        &sr.tool_calls
+                            .iter()
+                            .map(|(id, name, args)| {
+                                json!({
+                                    "id": id, "name": name, "arguments": args
+                                })
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                    .unwrap_or_default()
                 };
                 let db = state.db.lock().unwrap();
                 let _ = db.execute(
@@ -847,7 +991,8 @@ if !system_content.is_empty() {
             break;
         }
 
-        let assistant_tcs: Vec<Value> = sr.tool_calls
+        let assistant_tcs: Vec<Value> = sr
+            .tool_calls
             .iter()
             .map(|(id, name, args)| {
                 json!({
@@ -873,16 +1018,16 @@ if !system_content.is_empty() {
                 let args_json: Value = serde_json::from_str(args).unwrap_or_default();
                 let skill_name = args_json["skill_name"].as_str().unwrap_or("");
 
-                let skill_opt = if let Ok(skill) = skills::load_skill_by_name(&state.skills_dir, skill_name) {
-                    Some((skill, state.skills_dir.join(skill_name)))
-                } else if let Some(home_dir) = dirs::home_dir() {
-                    let user_skills_dir = home_dir.join(".skills");
-                    skills::load_skill_by_name(&user_skills_dir, skill_name)
-                        .ok()
-                        .map(|skill| (skill, user_skills_dir.join(skill_name)))
-                } else {
-                    None
-                };
+                let skill_opt =
+                    if let Ok(skill) = skills::load_skill_by_name(&state.skills_dir, skill_name) {
+                        Some((skill, state.skills_dir.join(skill_name)))
+                    } else if let Some(user_skills_dir) = skills::user_skills_dir() {
+                        skills::load_skill_by_name(&user_skills_dir, skill_name)
+                            .ok()
+                            .map(|skill| (skill, user_skills_dir.join(skill_name)))
+                    } else {
+                        None
+                    };
 
                 if let Some((skill, skill_root)) = skill_opt {
                     let dyn_marker = format!("--- Skill (Dynamically Loaded): {} ---", skill.name);
@@ -891,37 +1036,48 @@ if !system_content.is_empty() {
                     let already_loaded = all_messages.iter().any(|msg| {
                         msg["content"]
                             .as_str()
-                            .map(|content| content.contains(&dyn_marker) || content.contains(&static_marker))
+                            .map(|content| {
+                                content.contains(&dyn_marker) || content.contains(&static_marker)
+                            })
                             .unwrap_or(false)
                     }) || pending_skill_context_messages.iter().any(|msg| {
                         msg["content"]
                             .as_str()
-                            .map(|content| content.contains(&dyn_marker) || content.contains(&static_marker))
+                            .map(|content| {
+                                content.contains(&dyn_marker) || content.contains(&static_marker)
+                            })
                             .unwrap_or(false)
                     });
 
                     if !already_loaded {
-                        merge_allowed_commands(&mut skill_allowed_commands, &skill.allowed_commands);
+                        merge_allowed_commands(
+                            &mut skill_allowed_commands,
+                            &skill.allowed_commands,
+                        );
                         if !active_skill_roots.iter().any(|p| p == &skill_root) {
                             active_skill_roots.push(skill_root);
                         }
                         let cmd_constraint = if skill.allowed_commands.is_empty() {
                             String::new()
                         } else {
-                            format!("\n[Allowed commands for this skill: {}]\n", skill.allowed_commands.join(", "))
+                            format!(
+                                "\n[Allowed commands for this skill: {}]\n",
+                                skill.allowed_commands.join(", ")
+                            )
                         };
                         let skill_context = format!(
                             "INTERNAL CONTEXT - DYNAMICALLY LOADED SKILL (not a user request):\n\
 {}\n{}{}",
-                            dyn_marker,
-                            cmd_constraint,
-                            skill.system_prompt
+                            dyn_marker, cmd_constraint, skill.system_prompt
                         );
                         pending_skill_context_messages.push(json!({
                             "role": "user",
                             "content": skill_context
                         }));
-                        let _ = app.emit("chat-token", format!("🧠 *Loading skill: {}*\n\n", skill_name));
+                        let _ = app.emit(
+                            "chat-token",
+                            format!("🧠 *Loading skill: {}*\n\n", skill_name),
+                        );
                         format!("Skill '{}' detailed instructions have been successfully loaded and appended to context messages. You can now follow its instructions to fulfill the user's request. There is no need to call use_skill for this skill again.", skill_name)
                     } else {
                         format!("Skill '{}' is already loaded in context messages. There is no need to call use_skill for this skill again.", skill_name)
@@ -943,9 +1099,12 @@ if !system_content.is_empty() {
                         dependencies: vec![],
                     };
                     let workspace_dir = state.workspace_dir.lock().unwrap().clone();
-                    let url = format!("{}/chat/completions", config.api_base_url.trim_end_matches('/'));
+                    let url = format!(
+                        "{}/chat/completions",
+                        config.api_base_url.trim_end_matches('/')
+                    );
                     let client = reqwest::Client::new();
-                    
+
                     let res = agents::run_sub_agent(
                         &app,
                         &client,
@@ -954,12 +1113,18 @@ if !system_content.is_empty() {
                         agent,
                         &task,
                         workspace_dir,
-                    ).await;
+                        self_evolution_roots.clone(),
+                        self_evolution_files.clone(),
+                    )
+                    .await;
 
                     format!("Task execution finished with status: {}\nTokens used: {}\nTool calls made: {}\n\nResult:\n{}", 
                         res.status, res.tokens_used, res.tool_calls_count, res.content)
                 } else {
-                    format!("Error: Agent with ID '{}' not found or not enabled.", agent_id)
+                    format!(
+                        "Error: Agent with ID '{}' not found or not enabled.",
+                        agent_id
+                    )
                 }
             } else if let Some((mcp_server, actual_tool_name)) = mcp_tool_map.get(name) {
                 let mut args_json: Value = serde_json::from_str(args).unwrap_or_default();
@@ -971,9 +1136,13 @@ if !system_content.is_empty() {
                     "INFO",
                     format!("Args for MCP tool '{}': {}", actual_tool_name, args_json),
                 );
-                let _ = app.emit("chat-token", format!("🔌 *MCP [{}]: {}*\n\n", mcp_server.name, actual_tool_name));
+                let _ = app.emit(
+                    "chat-token",
+                    format!("🔌 *MCP [{}]: {}*\n\n", mcp_server.name, actual_tool_name),
+                );
                 let start_time = std::time::Instant::now();
-                let mcp_result = mcp::invoke_mcp_tool(mcp_server, actual_tool_name, args_json.clone()).await;
+                let mcp_result =
+                    mcp::invoke_mcp_tool(mcp_server, actual_tool_name, args_json.clone()).await;
                 let duration_ms = start_time.elapsed().as_millis() as i64;
                 let result = match &mcp_result {
                     Ok(result) => {
@@ -1012,6 +1181,15 @@ if !system_content.is_empty() {
                 result
             } else {
                 let workspace_dir = state.workspace_dir.lock().unwrap().clone();
+                let mut accessible_skill_roots = active_skill_roots.clone();
+                for root in &self_evolution_roots {
+                    if !accessible_skill_roots
+                        .iter()
+                        .any(|existing| existing == root)
+                    {
+                        accessible_skill_roots.push(root.clone());
+                    }
+                }
                 let start_time = std::time::Instant::now();
                 let tool_result = tools::execute_tool(
                     &app,
@@ -1021,22 +1199,34 @@ if !system_content.is_empty() {
                     &config,
                     &skill_allowed_commands,
                     &active_skill_roots,
+                    &accessible_skill_roots,
+                    &self_evolution_roots,
+                    &self_evolution_files,
                 )
                 .await;
                 let duration_ms = start_time.elapsed().as_millis() as i64;
-                
+
                 // Log tool execution
                 let db = state.db.lock().unwrap();
                 let is_error = tool_result.starts_with("⛔") || tool_result.starts_with("Error");
                 log_interaction(
                     &db,
                     &session_id,
-                    if is_error { "tool_error" } else { "tool_output" },
+                    if is_error {
+                        "tool_error"
+                    } else {
+                        "tool_output"
+                    },
                     "tool_executor",
                     name,
-                    serde_json::to_string(&serde_json::from_str::<Value>(args).unwrap_or_default()).unwrap_or_default(),
+                    serde_json::to_string(&serde_json::from_str::<Value>(args).unwrap_or_default())
+                        .unwrap_or_default(),
                     tool_result.clone(),
-                    if is_error { Some(tool_result.clone()) } else { None },
+                    if is_error {
+                        Some(tool_result.clone())
+                    } else {
+                        None
+                    },
                     duration_ms,
                 );
                 drop(db);

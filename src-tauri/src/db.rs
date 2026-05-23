@@ -71,9 +71,7 @@ pub fn delete_history(
 
 pub fn get_session_summary(db: &Connection, session_id: &str) -> Result<Option<String>, String> {
     let mut stmt = db
-        .prepare(
-            "SELECT summary FROM session_summaries WHERE session_id = ?1 LIMIT 1",
-        )
+        .prepare("SELECT summary FROM session_summaries WHERE session_id = ?1 LIMIT 1")
         .map_err(|e| e.to_string())?;
 
     let result = stmt.query_row(rusqlite::params![session_id], |row| row.get::<_, String>(0));
@@ -84,7 +82,11 @@ pub fn get_session_summary(db: &Connection, session_id: &str) -> Result<Option<S
     }
 }
 
-pub fn save_session_summary(db: &Connection, session_id: &str, summary: &str) -> Result<(), String> {
+pub fn save_session_summary(
+    db: &Connection,
+    session_id: &str,
+    summary: &str,
+) -> Result<(), String> {
     db.execute(
         "INSERT INTO session_summaries (session_id, summary, updated_at) \
          VALUES (?1, ?2, CURRENT_TIMESTAMP) \
@@ -211,20 +213,18 @@ pub fn get_api_request(
 }
 
 #[tauri::command]
-pub fn delete_api_request(
-    id: i64,
-    state: tauri::State<'_, crate::AppState>,
-) -> Result<(), String> {
+pub fn delete_api_request(id: i64, state: tauri::State<'_, crate::AppState>) -> Result<(), String> {
     let db = state.db.lock().unwrap();
-    db.execute("DELETE FROM api_requests WHERE id = ?1", rusqlite::params![id])
-        .map_err(|e| e.to_string())?;
+    db.execute(
+        "DELETE FROM api_requests WHERE id = ?1",
+        rusqlite::params![id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn clear_api_requests(
-    state: tauri::State<'_, crate::AppState>,
-) -> Result<(), String> {
+pub fn clear_api_requests(state: tauri::State<'_, crate::AppState>) -> Result<(), String> {
     let db = state.db.lock().unwrap();
     db.execute("DELETE FROM api_requests", [])
         .map_err(|e| e.to_string())?;

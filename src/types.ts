@@ -15,6 +15,7 @@ export interface AppConfig {
   system_message?: string;
   selected_tools?: string[];
   selected_skills?: string[];
+  self_evolution_mode?: boolean;
   kg_engine?: string;
   neo4j_uri?: string;
   neo4j_user?: string;

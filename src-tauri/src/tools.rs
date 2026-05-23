@@ -10,31 +10,58 @@ use tokio::io::AsyncWriteExt;
 
 /// Patterns that indicate a script may have destructive/system-altering effects.
 static DANGEROUS_SCRIPT_PATTERNS: &[&str] = &[
-    "rm -rf", "rm -fr",
-    "del /f", "del /s", "rd /s", "rmdir /s",
-    "format ", "diskpart", "fdisk",
-    "reg add", "reg delete", "reg import",
-    "netsh ", "net user", "net localgroup",
-    "sc delete", "sc stop", "sc config",
-    "schtasks /create", "schtasks /delete",
-    "bcdedit", "bootcfg",
-    "takeown", "icacls",
-    "apt install", "apt remove", "apt purge",
-    "yum install", "yum remove", "dnf remove",
-    "winget install", "winget uninstall",
-    "choco install", "choco uninstall",
-    "pip install", "pip uninstall", "pip3 install",
-    "npm install -g", "npm uninstall -g",
-    "set-executionpolicy", "invoke-expression",
-    "shutdown", "reboot", "halt", "poweroff",
+    "rm -rf",
+    "rm -fr",
+    "del /f",
+    "del /s",
+    "rd /s",
+    "rmdir /s",
+    "format ",
+    "diskpart",
+    "fdisk",
+    "reg add",
+    "reg delete",
+    "reg import",
+    "netsh ",
+    "net user",
+    "net localgroup",
+    "sc delete",
+    "sc stop",
+    "sc config",
+    "schtasks /create",
+    "schtasks /delete",
+    "bcdedit",
+    "bootcfg",
+    "takeown",
+    "icacls",
+    "apt install",
+    "apt remove",
+    "apt purge",
+    "yum install",
+    "yum remove",
+    "dnf remove",
+    "winget install",
+    "winget uninstall",
+    "choco install",
+    "choco uninstall",
+    "pip install",
+    "pip uninstall",
+    "pip3 install",
+    "npm install -g",
+    "npm uninstall -g",
+    "set-executionpolicy",
+    "invoke-expression",
+    "shutdown",
+    "reboot",
+    "halt",
+    "poweroff",
 ];
 
 /// Executables considered dangerous when used in direct mode.
 static DANGEROUS_EXECUTABLES: &[&str] = &[
-    "rm", "del", "format", "fdisk", "diskpart",
-    "netsh", "sc", "reg", "regedit", "bcdedit",
-    "schtasks", "net", "takeown", "icacls",
-    "dd", "mkfs", "shutdown", "reboot", "halt", "poweroff", "attrib",
+    "rm", "del", "format", "fdisk", "diskpart", "netsh", "sc", "reg", "regedit", "bcdedit",
+    "schtasks", "net", "takeown", "icacls", "dd", "mkfs", "shutdown", "reboot", "halt", "poweroff",
+    "attrib",
 ];
 
 /// Returns a human-readable reason if the command is considered dangerous, or None.
@@ -49,7 +76,10 @@ fn is_dangerous(cmd_type: &str, code: &str) -> Option<String> {
                 .unwrap_or(first.as_str())
                 .to_lowercase();
             if DANGEROUS_EXECUTABLES.contains(&exe_name.as_str()) {
-                return Some(format!("executable '{}' is potentially destructive", exe_name));
+                return Some(format!(
+                    "executable '{}' is potentially destructive",
+                    exe_name
+                ));
             }
         }
     }
@@ -69,15 +99,21 @@ fn split_command_line(code: &str) -> Vec<String> {
     let mut in_double = false;
     for ch in code.chars() {
         match ch {
-            '\'' if !in_double => { in_single = !in_single; }
-            '"' if !in_single => { in_double = !in_double; }
+            '\'' if !in_double => {
+                in_single = !in_single;
+            }
+            '"' if !in_single => {
+                in_double = !in_double;
+            }
             ' ' | '\t' if !in_single && !in_double => {
                 if !current.is_empty() {
                     args.push(current.clone());
                     current.clear();
                 }
             }
-            _ => { current.push(ch); }
+            _ => {
+                current.push(ch);
+            }
         }
     }
     if !current.is_empty() {
@@ -257,7 +293,7 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "file_actions",
-                "description": "Perform file operations (read, write, list, mkdir, rename/move, patch, delete) inside the current workspace root. In skill context, existing paths can also resolve relative to active skill roots.",
+                "description": "Perform file operations (read, write, list, mkdir, rename/move, patch, delete) inside the current workspace root. Existing paths can also resolve relative to active skill roots, self-evolution skill roots, and protected self-evolution files when enabled. When protected skill/sub-agent files are modified through this tool, a sibling `.bak.<number>` backup is created automatically first.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -324,7 +360,9 @@ fn resolve_safe_path(root_dir: &Path, rel_path: &str) -> Result<PathBuf, String>
     // so the AI can pass either relative or absolute paths within the workspace.
     let stripped;
     let rel_path_str = if Path::new(rel_path).is_absolute() {
-        let canonical_root = root_dir.canonicalize().unwrap_or_else(|_| root_dir.to_path_buf());
+        let canonical_root = root_dir
+            .canonicalize()
+            .unwrap_or_else(|_| root_dir.to_path_buf());
         let abs = Path::new(rel_path);
         let abs_canonical = abs.canonicalize().unwrap_or_else(|_| abs.to_path_buf());
         if let Ok(suffix) = abs_canonical.strip_prefix(&canonical_root) {
@@ -362,7 +400,8 @@ fn resolve_safe_path(root_dir: &Path, rel_path: &str) -> Result<PathBuf, String>
     // Final guard: canonicalize the resolved path and verify it is still inside root_dir
     match resolved.canonicalize() {
         Ok(canonical) => {
-            let canonical_root = root_dir.canonicalize()
+            let canonical_root = root_dir
+                .canonicalize()
                 .unwrap_or_else(|_| root_dir.to_path_buf());
             if !canonical.starts_with(&canonical_root) {
                 return Err("Path escapes workspace directory".to_string());
@@ -388,6 +427,66 @@ fn build_candidate_roots(primary_root: &Path, extra_roots: &[PathBuf]) -> Vec<Pa
         }
     }
     roots
+}
+
+fn is_backup_variant(base_file: &Path, candidate: &Path) -> bool {
+    let Some(base_name) = base_file.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    let Some(candidate_name) = candidate.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+
+    candidate_name
+        .strip_prefix(&format!("{base_name}.bak."))
+        .is_some_and(|suffix| !suffix.is_empty() && suffix.chars().all(|ch| ch.is_ascii_digit()))
+        && candidate.parent() == base_file.parent()
+}
+
+fn resolve_safe_explicit_file(
+    input_path: &str,
+    allowed_files: &[PathBuf],
+) -> Option<(PathBuf, PathBuf)> {
+    let input = Path::new(input_path);
+    let is_bare_name = input
+        .parent()
+        .map(|parent| parent.as_os_str().is_empty())
+        .unwrap_or(true);
+    let input_abs = input
+        .is_absolute()
+        .then(|| input.canonicalize().unwrap_or_else(|_| input.to_path_buf()));
+
+    for file in allowed_files {
+        let file_abs = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+        let parent = file_abs
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("/"));
+
+        let matched = if let Some(input_abs) = &input_abs {
+            input_abs == &file_abs || is_backup_variant(&file_abs, input_abs)
+        } else if !is_bare_name {
+            false
+        } else {
+            input
+                .file_name()
+                .map(|name| parent.join(name))
+                .is_some_and(|candidate| {
+                    candidate == file_abs || is_backup_variant(&file_abs, &candidate)
+                })
+        };
+
+        if matched {
+            let resolved = if let Some(input_abs) = &input_abs {
+                input_abs.clone()
+            } else {
+                parent.join(input.file_name()?)
+            };
+            return Some((resolved, parent));
+        }
+    }
+
+    None
 }
 
 fn resolve_safe_path_with_roots(
@@ -423,7 +522,10 @@ fn resolve_safe_path_with_roots(
                 return Ok((resolved, root.clone()));
             }
         }
-        return Err(format!("Absolute path '{}' does not belong to workspace or any active skill root", input_path));
+        return Err(format!(
+            "Absolute path '{}' does not belong to workspace or any active skill root",
+            input_path
+        ));
     }
 
     // 3. For relative paths, see if the target's parent directory already exists in a skill root.
@@ -444,8 +546,71 @@ fn resolve_safe_path_with_roots(
     }
 
     // 4. Default to primary workspace root for new relative paths
-    resolve_safe_path(primary_root, input_path)
-        .map(|p| (p, primary_root.to_path_buf()))
+    resolve_safe_path(primary_root, input_path).map(|p| (p, primary_root.to_path_buf()))
+}
+
+fn is_path_protected(
+    path: &Path,
+    protected_roots: &[PathBuf],
+    protected_files: &[PathBuf],
+) -> bool {
+    let normalized = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+
+    protected_files.iter().any(|file| {
+        let normalized_file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+        normalized == normalized_file || is_backup_variant(&normalized_file, &normalized)
+    }) || protected_roots.iter().any(|root| {
+        let normalized_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        normalized.starts_with(&normalized_root)
+    })
+}
+
+fn next_backup_path(path: &Path) -> Result<PathBuf, String> {
+    let Some(parent) = path.parent() else {
+        return Err(format!(
+            "Cannot create backup for '{}': missing parent directory",
+            path.display()
+        ));
+    };
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return Err(format!(
+            "Cannot create backup for '{}': invalid file name",
+            path.display()
+        ));
+    };
+
+    for index in 1.. {
+        let candidate = parent.join(format!("{file_name}.bak.{index}"));
+        if !candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+
+    Err(format!("Cannot create backup for '{}'", path.display()))
+}
+
+fn backup_protected_file(
+    path: &Path,
+    protected_roots: &[PathBuf],
+    protected_files: &[PathBuf],
+) -> Result<Option<PathBuf>, String> {
+    if !path.exists()
+        || !path.is_file()
+        || !is_path_protected(path, protected_roots, protected_files)
+    {
+        return Ok(None);
+    }
+
+    let backup_path = next_backup_path(path)?;
+    fs::copy(path, &backup_path).map_err(|e| {
+        format!(
+            "Failed to back up '{}' to '{}': {}",
+            path.display(),
+            backup_path.display(),
+            e
+        )
+    })?;
+    Ok(Some(backup_path))
 }
 
 pub async fn execute_tool(
@@ -456,14 +621,20 @@ pub async fn execute_tool(
     config: &crate::AppConfig,
     // Allowlist of executable names from the active skill (empty = unrestricted).
     allowed_commands: &[String],
-    // Root directories of active skills for resolving skill-local references.
-    active_skill_roots: &[PathBuf],
+    // Root directories of active skills used as the default command cwd.
+    command_skill_roots: &[PathBuf],
+    // Extra roots allowed for file access, such as skill directories available in self-evolution mode.
+    accessible_skill_roots: &[PathBuf],
+    // Skill roots that require automatic `.bak.N` backups before mutation.
+    protected_skill_roots: &[PathBuf],
+    // Exact files that require automatic `.bak.N` backups before mutation.
+    protected_exact_files: &[PathBuf],
 ) -> String {
     let args: Value = serde_json::from_str(args_str).unwrap_or_default();
     match name {
         "run_cmd" => {
             let command = args["command"].as_str().unwrap_or("").to_string();
-            let command_cwd = active_skill_roots
+            let command_cwd = command_skill_roots
                 .first()
                 .cloned()
                 .unwrap_or_else(|| workspace_dir.clone());
@@ -477,7 +648,9 @@ pub async fn execute_tool(
                     .and_then(|s| s.to_str())
                     .unwrap_or(program)
                     .to_lowercase();
-                let permitted = allowed_commands.iter().any(|a| a.eq_ignore_ascii_case(&exe_name));
+                let permitted = allowed_commands
+                    .iter()
+                    .any(|a| a.eq_ignore_ascii_case(&exe_name));
                 if !permitted {
                     return format!(
                         "⛔ Command '{}' is not in this skill's allowed-commands list ({}).",
@@ -559,7 +732,10 @@ pub async fn execute_tool(
                 .unwrap_or_else(|e| format!("Error: {}", e));
             }
 
-            let _ = app.emit("chat-token", format!("⚙️ *Running:*\n```\n{}\n```\n\n", command));
+            let _ = app.emit(
+                "chat-token",
+                format!("⚙️ *Running:*\n```\n{}\n```\n\n", command),
+            );
             tokio::time::timeout(
                 std::time::Duration::from_secs(30),
                 run_command("direct".to_string(), command, Some(command_cwd)),
@@ -573,7 +749,7 @@ pub async fn execute_tool(
             let code = args["code"].as_str().unwrap_or("").to_string();
             let sudo_flag = args["sudo"].as_bool().unwrap_or(false);
             let elevated_flag = args["elevated"].as_bool().unwrap_or(false);
-            let command_cwd = active_skill_roots
+            let command_cwd = command_skill_roots
                 .first()
                 .cloned()
                 .unwrap_or_else(|| workspace_dir.clone());
@@ -674,7 +850,13 @@ pub async fn execute_tool(
                 .unwrap_or_else(|e| format!("Error: {}", e));
             }
 
-            let _ = app.emit("chat-token", format!("⚙️ *Running {}:*\n```{}\n{}\n```\n\n", shell_type, shell_type, code));
+            let _ = app.emit(
+                "chat-token",
+                format!(
+                    "⚙️ *Running {}:*\n```{}\n{}\n```\n\n",
+                    shell_type, shell_type, code
+                ),
+            );
             tokio::time::timeout(
                 std::time::Duration::from_secs(30),
                 run_command(shell_type, code, Some(command_cwd)),
@@ -687,12 +869,31 @@ pub async fn execute_tool(
             let action = args["action"].as_str().unwrap_or("");
             let path_str = args["path"].as_str().unwrap_or("");
             let root_dir = workspace_dir.clone();
+            let resolve_file_path = |input: &str, require_exists: bool| {
+                resolve_safe_explicit_file(input, protected_exact_files)
+                    .or_else(|| {
+                        resolve_safe_path_with_roots(
+                            &root_dir,
+                            accessible_skill_roots,
+                            input,
+                            require_exists,
+                        )
+                        .ok()
+                    })
+                    .ok_or_else(|| {
+                        format!(
+                            "Path '{}' was not found under workspace root '{}' or any allowed self-evolution target",
+                            input,
+                            root_dir.display()
+                        )
+                    })
+            };
             match action {
                 "read" => {
                     let _ = app.emit("chat-token", format!("📄 *Reading {}*\n\n", path_str));
                     let start_line = args["start_line"].as_i64();
                     let end_line = args["end_line"].as_i64();
-                    match resolve_safe_path_with_roots(&root_dir, active_skill_roots, path_str, true) {
+                    match resolve_file_path(path_str, true) {
                         Ok((p, _)) => {
                             match fs::metadata(&p) {
                                 Ok(metadata) if metadata.is_dir() => {
@@ -705,7 +906,8 @@ pub async fn execute_tool(
                             }
 
                             if start_line.is_none() && end_line.is_none() {
-                                return fs::read_to_string(&p).unwrap_or_else(|e| format!("Error reading file: {}", e));
+                                return fs::read_to_string(&p)
+                                    .unwrap_or_else(|e| format!("Error reading file: {}", e));
                             }
 
                             let start = start_line.unwrap_or(1);
@@ -747,33 +949,55 @@ pub async fn execute_tool(
                                 Err(e) => format!("Error opening file: {}", e),
                             }
                         }
-                        Err(e) => format!("Error: {}", e)
+                        Err(e) => format!("Error: {}", e),
                     }
                 }
                 "write" => {
                     let content_str = args["content"].as_str().unwrap_or("");
                     let _ = app.emit("chat-token", format!("💾 *Writing {}*\n\n", path_str));
-                    match resolve_safe_path_with_roots(&root_dir, active_skill_roots, path_str, false) {
+                    match resolve_file_path(path_str, false) {
                         Ok((p, _)) => {
+                            let backup = match backup_protected_file(
+                                &p,
+                                protected_skill_roots,
+                                protected_exact_files,
+                            ) {
+                                Ok(backup) => backup,
+                                Err(e) => return format!("Error: {}", e),
+                            };
                             if let Some(parent) = p.parent() {
                                 let _ = fs::create_dir_all(parent);
                             }
                             match fs::write(&p, content_str) {
-                                Ok(_) => format!("Successfully wrote to {}", path_str),
-                                Err(e) => format!("Error writing file: {}", e)
+                                Ok(_) => {
+                                    if let Some(backup) = backup {
+                                        format!(
+                                            "Successfully backed up to {} and wrote to {}",
+                                            backup.display(),
+                                            path_str
+                                        )
+                                    } else {
+                                        format!("Successfully wrote to {}", path_str)
+                                    }
+                                }
+                                Err(e) => format!("Error writing file: {}", e),
                             }
                         }
-                        Err(e) => format!("Error: {}", e)
+                        Err(e) => format!("Error: {}", e),
                     }
                 }
                 "list" => {
                     let _ = app.emit("chat-token", format!("📂 *Listing {}*\n\n", path_str));
-                    match resolve_safe_path_with_roots(&root_dir, active_skill_roots, path_str, true) {
+                    match resolve_file_path(path_str, true) {
                         Ok((p, _)) => {
                             match fs::metadata(&p) {
                                 Ok(metadata) => {
                                     if metadata.is_file() {
-                                        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or(path_str).to_string();
+                                        let name = p
+                                            .file_name()
+                                            .and_then(|n| n.to_str())
+                                            .unwrap_or(path_str)
+                                            .to_string();
                                         return format!("{} ({} bytes)", name, metadata.len());
                                     }
                                 }
@@ -785,11 +1009,15 @@ pub async fn execute_tool(
                                     let mut res = Vec::new();
                                     for entry in entries.flatten() {
                                         if let Ok(name) = entry.file_name().into_string() {
-                                            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                                            let is_dir = entry
+                                                .file_type()
+                                                .map(|t| t.is_dir())
+                                                .unwrap_or(false);
                                             if is_dir {
                                                 res.push(format!("{}/", name));
                                             } else {
-                                                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                                                let size =
+                                                    entry.metadata().map(|m| m.len()).unwrap_or(0);
                                                 res.push(format!("{} ({} bytes)", name, size));
                                             }
                                         }
@@ -800,28 +1028,61 @@ pub async fn execute_tool(
                                         res.join("\n")
                                     }
                                 }
-                                Err(e) => format!("Error listing directory: {}", e)
+                                Err(e) => format!("Error listing directory: {}", e),
                             }
                         }
-                        Err(e) => format!("Error: {}", e)
+                        Err(e) => format!("Error: {}", e),
                     }
                 }
                 "rename" | "move" => {
                     let new_path = args["new_path"].as_str().unwrap_or("");
-                    let _ = app.emit("chat-token", format!("🔁 *Moving {} -> {}*\n\n", path_str, new_path));
+                    let _ = app.emit(
+                        "chat-token",
+                        format!("🔁 *Moving {} -> {}*\n\n", path_str, new_path),
+                    );
                     if new_path.is_empty() {
                         return "Error: new_path is required for move/rename.".to_string();
                     }
-                    match resolve_safe_path_with_roots(&root_dir, active_skill_roots, path_str, true) {
-                        Ok((src, src_root)) => match resolve_safe_path_with_roots(&src_root, active_skill_roots, new_path, false) {
+                    match resolve_file_path(path_str, true) {
+                        Ok((src, src_root)) => match resolve_safe_path_with_roots(
+                            &src_root,
+                            accessible_skill_roots,
+                            new_path,
+                            false,
+                        ) {
                             Ok((dst, _)) => {
+                                let backup = match backup_protected_file(
+                                    &src,
+                                    protected_skill_roots,
+                                    protected_exact_files,
+                                ) {
+                                    Ok(backup) => backup,
+                                    Err(e) => return format!("Error: {}", e),
+                                };
                                 if let Some(parent) = dst.parent() {
                                     if let Err(e) = fs::create_dir_all(parent) {
-                                        return format!("Error creating destination directory: {}", e);
+                                        return format!(
+                                            "Error creating destination directory: {}",
+                                            e
+                                        );
                                     }
                                 }
                                 match fs::rename(&src, &dst) {
-                                    Ok(_) => format!("Successfully moved {} to {}", path_str, new_path),
+                                    Ok(_) => {
+                                        if let Some(backup) = backup {
+                                            format!(
+                                                "Successfully backed up to {} and moved {} to {}",
+                                                backup.display(),
+                                                path_str,
+                                                new_path
+                                            )
+                                        } else {
+                                            format!(
+                                                "Successfully moved {} to {}",
+                                                path_str, new_path
+                                            )
+                                        }
+                                    }
                                     Err(e) => format!("Error moving file: {}", e),
                                 }
                             }
@@ -833,26 +1094,54 @@ pub async fn execute_tool(
                 "patch" => {
                     let patch_str = args["patch"].as_str().unwrap_or("");
                     let _ = app.emit("chat-token", format!("🩹 *Patching {}*\n\n", path_str));
-                    match resolve_safe_path_with_roots(&root_dir, active_skill_roots, path_str, true) {
-                        Ok((p, _)) => match fs::read_to_string(&p) {
-                            Ok(original) => match diffy::Patch::from_str(patch_str) {
-                                Ok(patch) => match diffy::apply(&original, &patch) {
-                                    Ok(patched) => match fs::write(&p, &patched) {
-                                        Ok(_) => format!("Successfully patched {}", path_str),
-                                        Err(e) => format!("Error writing file: {}", e),
+                    match resolve_file_path(path_str, true) {
+                        Ok((p, _)) => {
+                            let backup = match backup_protected_file(
+                                &p,
+                                protected_skill_roots,
+                                protected_exact_files,
+                            ) {
+                                Ok(backup) => backup,
+                                Err(e) => return format!("Error: {}", e),
+                            };
+                            match fs::read_to_string(&p) {
+                                Ok(original) => match diffy::Patch::from_str(patch_str) {
+                                    Ok(patch) => match diffy::apply(&original, &patch) {
+                                        Ok(patched) => match fs::write(&p, &patched) {
+                                            Ok(_) => {
+                                                if let Some(backup) = backup {
+                                                    format!(
+                                                        "Successfully backed up to {} and patched {}",
+                                                        backup.display(),
+                                                        path_str
+                                                    )
+                                                } else {
+                                                    format!("Successfully patched {}", path_str)
+                                                }
+                                            }
+                                            Err(e) => format!("Error writing file: {}", e),
+                                        },
+                                        Err(e) => format!("Error applying patch: {}", e),
                                     },
-                                    Err(e) => format!("Error applying patch: {}", e),
+                                    Err(e) => format!("Error parsing patch: {}", e),
                                 },
-                                Err(e) => format!("Error parsing patch: {}", e),
-                            },
-                            Err(e) => format!("Error reading file: {}", e),
-                        },
+                                Err(e) => format!("Error reading file: {}", e),
+                            }
+                        }
                         Err(e) => format!("Error: {}", e),
                     }
                 }
                 "mkdir" => {
-                    let _ = app.emit("chat-token", format!("📁 *Creating directory {}*\n\n", path_str));
-                    match resolve_safe_path_with_roots(&root_dir, active_skill_roots, path_str, false) {
+                    let _ = app.emit(
+                        "chat-token",
+                        format!("📁 *Creating directory {}*\n\n", path_str),
+                    );
+                    match resolve_safe_path_with_roots(
+                        &root_dir,
+                        accessible_skill_roots,
+                        path_str,
+                        false,
+                    ) {
                         Ok((p, _)) => {
                             if p.exists() && p.is_file() {
                                 return format!("Error: {} is an existing file", path_str);
@@ -867,8 +1156,16 @@ pub async fn execute_tool(
                 }
                 "delete" => {
                     let _ = app.emit("chat-token", format!("🗑️ *Deleting {}*\n\n", path_str));
-                    match resolve_safe_path_with_roots(&root_dir, active_skill_roots, path_str, true) {
+                    match resolve_file_path(path_str, true) {
                         Ok((p, _)) => {
+                            let backup = match backup_protected_file(
+                                &p,
+                                protected_skill_roots,
+                                protected_exact_files,
+                            ) {
+                                Ok(backup) => backup,
+                                Err(e) => return format!("Error: {}", e),
+                            };
                             if p.is_dir() {
                                 match fs::remove_dir_all(&p) {
                                     Ok(_) => format!("Successfully deleted directory {}", path_str),
@@ -876,7 +1173,17 @@ pub async fn execute_tool(
                                 }
                             } else {
                                 match fs::remove_file(&p) {
-                                    Ok(_) => format!("Successfully deleted file {}", path_str),
+                                    Ok(_) => {
+                                        if let Some(backup) = backup {
+                                            format!(
+                                                "Successfully backed up to {} and deleted file {}",
+                                                backup.display(),
+                                                path_str
+                                            )
+                                        } else {
+                                            format!("Successfully deleted file {}", path_str)
+                                        }
+                                    }
                                     Err(e) => format!("Error deleting file: {}", e),
                                 }
                             }
@@ -892,33 +1199,46 @@ pub async fn execute_tool(
             let engine = config.kg_engine.as_deref().unwrap_or("neo4j").to_string();
             let _ = app.emit(
                 "chat-token",
-                format!("🧠 *Querying Knowledge Graph ({}) with: {}...*\n\n", engine, query),
+                format!(
+                    "🧠 *Querying Knowledge Graph ({}) with: {}...*\n\n",
+                    engine, query
+                ),
             );
-            
-            if engine == "neo4j" {
 
+            if engine == "neo4j" {
                 use crate::neo4j_db::{KnowledgeGraph, Neo4jRepo};
-                let uri = config.neo4j_uri.as_deref().unwrap_or("bolt://localhost:7687");
+                let uri = config
+                    .neo4j_uri
+                    .as_deref()
+                    .unwrap_or("bolt://localhost:7687");
                 let user = config.neo4j_user.as_deref().unwrap_or("neo4j");
                 let pass = config.neo4j_password.as_deref().unwrap_or("");
                 match Neo4jRepo::new(uri, user, pass).await {
-                    Ok(repo) => {
-                        match repo.execute_query(&query).await {
-                            Ok(res) => format!("Knowledge graph neo4j query executed: {}\nResult: {}", query, res),
-                            Err(e) => format!("Error executing neo4j query: {}", e)
-                        }
-                    }
-                    Err(e) => format!("Failed to connect to neo4j: {}", e)
+                    Ok(repo) => match repo.execute_query(&query).await {
+                        Ok(res) => format!(
+                            "Knowledge graph neo4j query executed: {}\nResult: {}",
+                            query, res
+                        ),
+                        Err(e) => format!("Error executing neo4j query: {}", e),
+                    },
+                    Err(e) => format!("Failed to connect to neo4j: {}", e),
                 }
             } else {
-                format!("Knowledge graph {} query executed: {}. (Not fully implemented yet)", engine, query)
+                format!(
+                    "Knowledge graph {} query executed: {}. (Not fully implemented yet)",
+                    engine, query
+                )
             }
         }
         _ => format!("Unknown tool: {}", name),
     }
 }
 
-pub async fn run_command(cmd_type: String, code: String, cwd: Option<PathBuf>) -> Result<String, String> {
+pub async fn run_command(
+    cmd_type: String,
+    code: String,
+    cwd: Option<PathBuf>,
+) -> Result<String, String> {
     let mut cmd = match cmd_type.as_str() {
         "direct" => {
             // Run the executable directly — no shell wrapper needed.
@@ -959,7 +1279,7 @@ pub async fn run_command(cmd_type: String, code: String, cwd: Option<PathBuf>) -
     Ok(format_process_output(output))
 }
 
-async fn run_powershell_elevated(code: String, cwd: Option<PathBuf>) -> Result<String, String> {
+async fn run_powershell_elevated(_code: String, cwd: Option<PathBuf>) -> Result<String, String> {
     #[cfg(not(windows))]
     {
         let _ = cwd;
@@ -987,7 +1307,7 @@ async fn run_powershell_elevated(code: String, cwd: Option<PathBuf>) -> Result<S
         let out_path = temp_dir.join(format!("elevated-{}.out.txt", now));
         let err_path = temp_dir.join(format!("elevated-{}.err.txt", now));
 
-        fs::write(&script_path, code).map_err(|e| e.to_string())?;
+        fs::write(&script_path, _code).map_err(|e| e.to_string())?;
 
         let script_path_s = script_path.to_string_lossy().to_string();
         let out_path_s = out_path.to_string_lossy().to_string();

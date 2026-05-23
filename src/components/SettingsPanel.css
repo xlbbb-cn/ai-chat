@@ -110,6 +110,43 @@
   border-color: #171A20;
 }
 
+.settings-checkbox {
+  display: grid !important;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 10px !important;
+}
+
+.settings-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+}
+
+.settings-checkbox-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.settings-checkbox-copy small {
+  font-size: 12px;
+  line-height: 1.45;
+  color: #5C5E62;
+  font-weight: 400;
+}
+
+.settings-checkbox-copy code {
+  white-space: normal;
+  word-break: break-all;
+  font-size: 12px;
+  line-height: 1.45;
+  background: #F4F4F4;
+  padding: 6px 8px;
+  border-radius: 4px;
+}
+
 .settings-section-title {
   font-size: 14px;
   font-weight: 500;

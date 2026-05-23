@@ -1,24 +1,27 @@
-﻿use serde::{Deserialize, Serialize};
+use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
-use rusqlite::Connection;
-use tauri::{menu::{Menu, MenuItem, Submenu}, AppHandle, Emitter, Manager, State};
-use tauri_plugin_opener::OpenerExt;
+use tauri::{
+    menu::{Menu, MenuItem, Submenu},
+    AppHandle, Emitter, Manager, State,
+};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
-use zip::{write::FileOptions, ZipArchive, ZipWriter};
+use tauri_plugin_opener::OpenerExt;
 use uuid::Uuid;
+use zip::{write::FileOptions, ZipArchive, ZipWriter};
 
+pub mod agents;
 mod db;
-mod logger;
 mod llm_complete;
+mod logger;
 pub mod mcp;
+pub mod neo4j_db;
 mod skills;
 mod tools;
-pub mod neo4j_db;
-pub mod agents;
 
 use logger::{AppLogger, LoggerOutput};
 
@@ -34,11 +37,19 @@ const PROFILE_EXPORT_ERROR_EVENT: &str = "profile-export-error";
 fn resolve_workspace_path(app: &AppHandle, workspace_dir: Option<&str>) -> Result<PathBuf, String> {
     Ok(match workspace_dir.filter(|s| !s.is_empty()) {
         Some(dir) => PathBuf::from(dir),
-        None => app.path().app_data_dir().map_err(|e| e.to_string())?.join("workspace"),
+        None => app
+            .path()
+            .app_data_dir()
+            .map_err(|e| e.to_string())?
+            .join("workspace"),
     })
 }
 
-fn add_path_to_zip(zip: &mut ZipWriter<fs::File>, base_dir: &Path, path: &Path) -> Result<(), String> {
+fn add_path_to_zip(
+    zip: &mut ZipWriter<fs::File>,
+    base_dir: &Path,
+    path: &Path,
+) -> Result<(), String> {
     if path.is_dir() {
         for entry in fs::read_dir(path).map_err(|e| e.to_string())? {
             let entry = entry.map_err(|e| e.to_string())?;
@@ -49,9 +60,13 @@ fn add_path_to_zip(zip: &mut ZipWriter<fs::File>, base_dir: &Path, path: &Path) 
 
     if path.is_file() {
         let relative_path = path.strip_prefix(base_dir).map_err(|e| e.to_string())?;
-        let entry_name = format!("skills/{}", relative_path.to_string_lossy().replace('\\', "/"));
+        let entry_name = format!(
+            "skills/{}",
+            relative_path.to_string_lossy().replace('\\', "/")
+        );
         let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-        zip.start_file(entry_name, options).map_err(|e| e.to_string())?;
+        zip.start_file(entry_name, options)
+            .map_err(|e| e.to_string())?;
 
         let mut file = fs::File::open(path).map_err(|e| e.to_string())?;
         std::io::copy(&mut file, zip).map_err(|e| e.to_string())?;
@@ -117,14 +132,18 @@ fn export_profile(app: &AppHandle, profile_path: &PathBuf) -> Result<(), String>
     emit_profile_export_status(app, "Writing config.json");
     let config_json = serde_json::to_string_pretty(&state.config.lock().unwrap().clone())
         .map_err(|e| e.to_string())?;
-    zip.start_file("config.json", options).map_err(|e| e.to_string())?;
-    zip.write_all(config_json.as_bytes()).map_err(|e| e.to_string())?;
+    zip.start_file("config.json", options)
+        .map_err(|e| e.to_string())?;
+    zip.write_all(config_json.as_bytes())
+        .map_err(|e| e.to_string())?;
 
     emit_profile_export_status(app, "Writing mcp_servers.json");
     let mcp_json = serde_json::json!({ "servers": mcp::load_servers(&state.mcp_servers_path) });
     let mcp_json = serde_json::to_string_pretty(&mcp_json).map_err(|e| e.to_string())?;
-    zip.start_file("mcp_servers.json", options).map_err(|e| e.to_string())?;
-    zip.write_all(mcp_json.as_bytes()).map_err(|e| e.to_string())?;
+    zip.start_file("mcp_servers.json", options)
+        .map_err(|e| e.to_string())?;
+    zip.write_all(mcp_json.as_bytes())
+        .map_err(|e| e.to_string())?;
 
     emit_profile_export_status(app, "Writing sub_agents.json");
     let sub_agents_json = if state.agents_config_path.exists() {
@@ -132,17 +151,21 @@ fn export_profile(app: &AppHandle, profile_path: &PathBuf) -> Result<(), String>
     } else {
         serde_json::to_string_pretty(&agents::AgentsConfig::default()).map_err(|e| e.to_string())?
     };
-    zip.start_file("sub_agents.json", options).map_err(|e| e.to_string())?;
-    zip.write_all(sub_agents_json.as_bytes()).map_err(|e| e.to_string())?;
+    zip.start_file("sub_agents.json", options)
+        .map_err(|e| e.to_string())?;
+    zip.write_all(sub_agents_json.as_bytes())
+        .map_err(|e| e.to_string())?;
 
     emit_profile_export_status(app, "Packing skills directory");
-    zip.add_directory("skills/", options).map_err(|e| e.to_string())?;
+    zip.add_directory("skills/", options)
+        .map_err(|e| e.to_string())?;
     add_path_to_zip(&mut zip, &state.skills_dir, &state.skills_dir)?;
 
     emit_profile_export_status(app, "Exporting chat.db (sending disabled during export)");
     let chat_db_backup = backup_chat_db(&state)?;
     let db_result = (|| -> Result<(), String> {
-        zip.start_file("chat.db", options).map_err(|e| e.to_string())?;
+        zip.start_file("chat.db", options)
+            .map_err(|e| e.to_string())?;
         let mut db_file = fs::File::open(&chat_db_backup).map_err(|e| e.to_string())?;
         std::io::copy(&mut db_file, &mut zip).map_err(|e| e.to_string())?;
         Ok(())
@@ -151,11 +174,10 @@ fn export_profile(app: &AppHandle, profile_path: &PathBuf) -> Result<(), String>
     db_result?;
 
     zip.finish().map_err(|e| e.to_string())?;
-    state
-        .logger
-        .lock()
-        .unwrap()
-        .log("INFO", &format!("Profile saved to {}", profile_path.display()));
+    state.logger.lock().unwrap().log(
+        "INFO",
+        &format!("Profile saved to {}", profile_path.display()),
+    );
     Ok(())
 }
 
@@ -185,7 +207,9 @@ fn import_profile(app: &AppHandle, profile_path: &PathBuf) -> Result<(), String>
             .by_name("config.json")
             .map_err(|_| "missing config.json in profile archive".to_string())?;
         let mut config_json = String::new();
-        config_file.read_to_string(&mut config_json).map_err(|e| e.to_string())?;
+        config_file
+            .read_to_string(&mut config_json)
+            .map_err(|e| e.to_string())?;
         serde_json::from_str(&config_json).map_err(|e| e.to_string())?
     };
 
@@ -200,11 +224,10 @@ fn import_profile(app: &AppHandle, profile_path: &PathBuf) -> Result<(), String>
     }
 
     let _ = app.emit("profile-restored", ());
-    state
-        .logger
-        .lock()
-        .unwrap()
-        .log("INFO", &format!("Profile restored from {}", profile_path.display()));
+    state.logger.lock().unwrap().log(
+        "INFO",
+        &format!("Profile restored from {}", profile_path.display()),
+    );
     Ok(())
 }
 
@@ -248,6 +271,8 @@ pub struct AppConfig {
     pub selected_tools: Vec<String>,
     #[serde(default)]
     pub selected_skills: Vec<String>,
+    #[serde(default)]
+    pub self_evolution_mode: bool,
     pub kg_engine: Option<String>,
     pub neo4j_uri: Option<String>,
     pub neo4j_user: Option<String>,
@@ -269,6 +294,7 @@ impl Default for AppConfig {
             system_message: String::new(),
             selected_tools: vec![],
             selected_skills: vec![],
+            self_evolution_mode: false,
             kg_engine: None,
             neo4j_uri: Some("bolt://localhost:7687".to_string()),
             neo4j_user: Some("neo4j".to_string()),
@@ -310,7 +336,11 @@ fn get_config(state: State<'_, AppState>) -> AppConfig {
 }
 
 #[tauri::command]
-fn save_config(app: AppHandle, state: State<'_, AppState>, config: AppConfig) -> Result<(), String> {
+fn save_config(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    config: AppConfig,
+) -> Result<(), String> {
     apply_config(&app, &state, config)
 }
 
@@ -328,7 +358,10 @@ async fn fetch_models(state: State<'_, AppState>) -> Result<Vec<String>, String>
         .map_err(|e| e.to_string())?;
 
     if !res.status().is_success() {
-        return Err(res.text().await.unwrap_or_else(|_| "failed to fetch models".to_string()));
+        return Err(res
+            .text()
+            .await
+            .unwrap_or_else(|_| "failed to fetch models".to_string()));
     }
 
     let body: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
@@ -339,7 +372,11 @@ async fn fetch_models(state: State<'_, AppState>) -> Result<Vec<String>, String>
 
     let mut names: Vec<String> = models
         .iter()
-        .filter_map(|m| m.get("id").and_then(|id| id.as_str()).map(|s| s.to_string()))
+        .filter_map(|m| {
+            m.get("id")
+                .and_then(|id| id.as_str())
+                .map(|s| s.to_string())
+        })
         .collect();
 
     names.sort();
@@ -374,7 +411,22 @@ fn confirm_command(
 
 #[tauri::command]
 fn get_workspace_dir(state: State<'_, AppState>) -> String {
-    state.workspace_dir.lock().unwrap().to_string_lossy().to_string()
+    state
+        .workspace_dir
+        .lock()
+        .unwrap()
+        .to_string_lossy()
+        .to_string()
+}
+
+#[tauri::command]
+fn get_skill_roots(state: State<'_, AppState>) -> Vec<String> {
+    let mut paths: Vec<String> = skills::collect_self_evolution_roots(&state.skills_dir, true)
+        .into_iter()
+        .map(|path| path.to_string_lossy().to_string())
+        .collect();
+    paths.push(state.agents_config_path.to_string_lossy().to_string());
+    paths
 }
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
@@ -480,7 +532,7 @@ pub fn run() {
                 .expect("failed to create help menu");
             let menu = Menu::with_items(app, &[&file_menu, &help_menu]).expect("failed to create app menu");
             app.set_menu(menu).expect("failed to set app menu");
-            
+
             let skills_dir = data_dir.join("skills");
             fs::create_dir_all(&skills_dir).ok();
 
@@ -591,6 +643,7 @@ pub fn run() {
             save_config,
             fetch_models,
             get_workspace_dir,
+            get_skill_roots,
             skills::list_skills,
             skills::save_skill,
             skills::delete_skill,

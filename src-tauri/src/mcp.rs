@@ -165,7 +165,9 @@ async fn test_stdio_server(server: &McpServer) -> Result<String, String> {
     let request_line = format!("{}\n", init_request);
 
     let mut cmd = build_stdio_cmd(server);
-    let mut child = cmd.spawn().map_err(|e| format!("Failed to start process: {e}"))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to start process: {e}"))?;
 
     let mut stdin = child.stdin.take().ok_or("No stdin")?;
     let mut stdout = child.stdout.take().ok_or("No stdout")?;
@@ -190,9 +192,15 @@ async fn test_stdio_server(server: &McpServer) -> Result<String, String> {
         Ok(Ok(line)) if !line.trim().is_empty() => {
             // Validate it looks like a JSON-RPC response
             if line.contains("\"result\"") || line.contains("jsonrpc") {
-                Ok(format!("Connected successfully (received {} bytes)", line.len()))
+                Ok(format!(
+                    "Connected successfully (received {} bytes)",
+                    line.len()
+                ))
             } else {
-                Err(format!("Unexpected response: {}", line.chars().take(200).collect::<String>()))
+                Err(format!(
+                    "Unexpected response: {}",
+                    line.chars().take(200).collect::<String>()
+                ))
             }
         }
         Ok(Ok(_)) => Err("Server closed connection without response".to_string()),
@@ -240,7 +248,10 @@ fn try_resolve_relative_path(s: &str, workspace: &std::path::Path) -> Option<Str
         return None;
     }
 
-    if let Some(file_url_path) = s.strip_prefix("file://./").or_else(|| s.strip_prefix("file://.\\")) {
+    if let Some(file_url_path) = s
+        .strip_prefix("file://./")
+        .or_else(|| s.strip_prefix("file://.\\"))
+    {
         let p = std::path::Path::new(file_url_path);
         let absolute = workspace.join(p);
         let normalized = absolute.to_string_lossy().replace('\\', "/");
@@ -268,7 +279,13 @@ fn try_resolve_relative_path(s: &str, workspace: &std::path::Path) -> Option<Str
 /// Allowed chars: letters, digits, underscores.
 pub fn sanitize_fn_name(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -282,7 +299,10 @@ fn build_stdio_cmd(server: &McpServer) -> tokio::process::Command {
     use std::process::Stdio;
 
     let normalized = server.command.trim().to_lowercase();
-    let is_known_stdio_runtime = matches!(normalized.as_str(), "uvx" | "ux" | "python" | "python3" | "py" | "node");
+    let is_known_stdio_runtime = matches!(
+        normalized.as_str(),
+        "uvx" | "ux" | "python" | "python3" | "py" | "node"
+    );
 
     #[cfg(windows)]
     {
@@ -374,7 +394,10 @@ async fn stdio_write_json(
 ) -> Result<(), String> {
     use tokio::io::AsyncWriteExt;
     let line = format!("{}\n", value);
-    stdin.write_all(line.as_bytes()).await.map_err(|e| format!("stdin write: {e}"))
+    stdin
+        .write_all(line.as_bytes())
+        .await
+        .map_err(|e| format!("stdin write: {e}"))
 }
 
 /// Read lines from stdout until we get a JSON object whose `id` matches `expected_id`.
@@ -389,12 +412,17 @@ async fn stdio_read_response(
         let mut line = String::new();
         loop {
             line.clear();
-            reader.read_line(&mut line).await.map_err(|e| format!("stdout read: {e}"))?;
+            reader
+                .read_line(&mut line)
+                .await
+                .map_err(|e| format!("stdout read: {e}"))?;
             let trimmed = line.trim();
             if trimmed.is_empty() {
                 continue;
             }
-            let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) else { continue };
+            let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+                continue;
+            };
             // Skip notifications (they have "method" but no matching id)
             if parsed.get("method").is_some() {
                 continue;
@@ -421,7 +449,9 @@ async fn stdio_init(
     String,
 > {
     let mut cmd = build_stdio_cmd(server);
-    let mut child = cmd.spawn().map_err(|e| format!("Failed to start process: {e}"))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to start process: {e}"))?;
     let mut stdin = child.stdin.take().ok_or("no stdin")?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
     let mut reader = tokio::io::BufReader::new(stdout);
@@ -478,7 +508,10 @@ async fn get_tools_stdio(server: &McpServer) -> Result<Vec<serde_json::Value>, S
     if let Some(err) = resp.get("error") {
         return Err(format!("MCP tools/list error: {err}"));
     }
-    let tools = resp["result"]["tools"].as_array().cloned().unwrap_or_default();
+    let tools = resp["result"]["tools"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     Ok(convert_mcp_tools(tools))
 }
 
@@ -500,13 +533,22 @@ async fn get_tools_sse(server: &McpServer) -> Result<Vec<serde_json::Value>, Str
         builder = builder.header("Authorization", format!("Bearer {}", server.auth_token));
     }
 
-    let resp = builder.send().await.map_err(|e| format!("HTTP error: {e}"))?;
-    let body: serde_json::Value = resp.json().await.map_err(|e| format!("Response parse: {e}"))?;
+    let resp = builder
+        .send()
+        .await
+        .map_err(|e| format!("HTTP error: {e}"))?;
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Response parse: {e}"))?;
 
     if let Some(err) = body.get("error") {
         return Err(format!("MCP tools/list error: {err}"));
     }
-    let tools = body["result"]["tools"].as_array().cloned().unwrap_or_default();
+    let tools = body["result"]["tools"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     Ok(convert_mcp_tools(tools))
 }
 
@@ -517,9 +559,10 @@ fn convert_mcp_tools(mcp_tools: Vec<serde_json::Value>) -> Vec<serde_json::Value
         .filter_map(|t| {
             let name = t["name"].as_str()?;
             let description = t["description"].as_str().unwrap_or("").to_string();
-            let input_schema = t.get("inputSchema").cloned().unwrap_or_else(|| {
-                serde_json::json!({ "type": "object", "properties": {} })
-            });
+            let input_schema = t
+                .get("inputSchema")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({ "type": "object", "properties": {} }));
             Some(serde_json::json!({
                 "type": "function",
                 "function": {
@@ -593,8 +636,14 @@ async fn invoke_tool_sse(
         builder = builder.header("Authorization", format!("Bearer {}", server.auth_token));
     }
 
-    let resp = builder.send().await.map_err(|e| format!("HTTP error: {e}"))?;
-    let body: serde_json::Value = resp.json().await.map_err(|e| format!("Response parse: {e}"))?;
+    let resp = builder
+        .send()
+        .await
+        .map_err(|e| format!("HTTP error: {e}"))?;
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Response parse: {e}"))?;
 
     if let Some(err) = body.get("error") {
         return Err(format!("MCP tool error: {err}"));
@@ -639,7 +688,10 @@ async fn test_sse_server(server: &McpServer) -> Result<String, String> {
     // For SSE endpoints, request the event stream content type
     req = req.header("Accept", "text/event-stream,application/json");
 
-    let resp = req.send().await.map_err(|e| format!("Request failed: {e}"))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {e}"))?;
     let status = resp.status();
 
     if status.is_success() {

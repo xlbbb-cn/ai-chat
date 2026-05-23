@@ -6,7 +6,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
-use crate::{AppConfig, AppState, tools, llm_complete::{StreamOptions, stream_llm_request}};
+use crate::{
+    llm_complete::{stream_llm_request, StreamOptions},
+    tools, AppConfig, AppState,
+};
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -33,8 +36,12 @@ pub struct SubAgent {
     pub enabled: bool,
 }
 
-fn default_max_iterations() -> u32 { 10 }
-fn default_true() -> bool { true }
+fn default_max_iterations() -> u32 {
+    10
+}
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentOrchestration {
@@ -48,12 +55,21 @@ pub struct AgentOrchestration {
     pub mode: String,
 }
 
-fn default_max_concurrent() -> usize { 3 }
-fn default_mode() -> String { "parallel".to_string() }
+fn default_max_concurrent() -> usize {
+    3
+}
+fn default_mode() -> String {
+    "parallel".to_string()
+}
 
 impl Default for AgentOrchestration {
     fn default() -> Self {
-        Self { use_agents: false, auto_configure: false, max_concurrent: 3, mode: "parallel".to_string() }
+        Self {
+            use_agents: false,
+            auto_configure: false,
+            max_concurrent: 3,
+            mode: "parallel".to_string(),
+        }
     }
 }
 
@@ -214,7 +230,10 @@ pub async fn orchestrate(
     }
 
     let client = Client::new();
-    let url = format!("{}/chat/completions", config.api_base_url.trim_end_matches('/'));
+    let url = format!(
+        "{}/chat/completions",
+        config.api_base_url.trim_end_matches('/')
+    );
     let model = config.model.clone();
     let orchestration = agents_config.orchestration.clone();
 
@@ -229,18 +248,34 @@ pub async fn orchestrate(
 
     // Step 2: Plan
     let _ = app.emit("agent-plan-start", json!({ "task_count": 0 }));
-    let plan =
-        plan_tasks(&client, &url, &config.api_key, &model, messages, &working_agents).await?;
+    let plan = plan_tasks(
+        &client,
+        &url,
+        &config.api_key,
+        &model,
+        messages,
+        &working_agents,
+    )
+    .await?;
 
     if plan.tasks.is_empty() {
         return Err("Planner produced no tasks".to_string());
     }
-    let _ = app.emit("agent-plan-start", json!({ "task_count": plan.tasks.len() }));
+    let _ = app.emit(
+        "agent-plan-start",
+        json!({ "task_count": plan.tasks.len() }),
+    );
 
     // Step 3: Execute
-    let use_parallel = orchestration.mode != "sequential"
-        && plan.execution_mode != "sequential";
+    let use_parallel = orchestration.mode != "sequential" && plan.execution_mode != "sequential";
     let workspace_dir = state.workspace_dir.lock().unwrap().clone();
+    let skill_access_roots =
+        crate::skills::collect_self_evolution_roots(&state.skills_dir, config.self_evolution_mode);
+    let protected_evolution_files = if config.self_evolution_mode {
+        vec![state.agents_config_path.clone()]
+    } else {
+        Vec::new()
+    };
     let results = execute_tasks(
         app,
         &client,
@@ -249,6 +284,8 @@ pub async fn orchestrate(
         &working_agents,
         plan.tasks,
         workspace_dir,
+        skill_access_roots,
+        protected_evolution_files,
         use_parallel,
         orchestration.max_concurrent,
         &state.chat_cancelled,
@@ -257,7 +294,16 @@ pub async fn orchestrate(
 
     // Step 4: Aggregate
     let _ = app.emit("agent-aggregate-start", ());
-    aggregate_results(app, &client, &url, &config.api_key, &model, messages, results).await
+    aggregate_results(
+        app,
+        &client,
+        &url,
+        &config.api_key,
+        &model,
+        messages,
+        results,
+    )
+    .await
 }
 
 // ─── Auto-configure ───────────────────────────────────────────────────────────
@@ -272,7 +318,12 @@ async fn auto_configure_agents(
 ) -> Result<Vec<SubAgent>, String> {
     let existing_desc = existing
         .iter()
-        .map(|a| format!("  - id={:?} name={:?} description={:?}", a.id, a.name, a.description))
+        .map(|a| {
+            format!(
+                "  - id={:?} name={:?} description={:?}",
+                a.id, a.name, a.description
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -290,13 +341,17 @@ async fn auto_configure_agents(
     );
 
     let raw = call_llm_once(
-        client, url, api_key,
+        client,
+        url,
+        api_key,
         vec![
             json!({"role":"system","content": system}),
             json!({"role":"user","content": user_query}),
         ],
-        model, 2048,
-    ).await?;
+        model,
+        2048,
+    )
+    .await?;
 
     // Strip markdown fences if present
     let json_str = raw.trim();
@@ -314,7 +369,11 @@ async fn auto_configure_agents(
                 .as_array()
                 .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
                 .unwrap_or_default();
-            Ok(existing.iter().filter(|a| ids.contains(&a.id.as_str())).cloned().collect())
+            Ok(existing
+                .iter()
+                .filter(|a| ids.contains(&a.id.as_str()))
+                .cloned()
+                .collect())
         }
         Some("new") => {
             let agents: Vec<SubAgent> = parsed["agents"]
@@ -325,7 +384,11 @@ async fn auto_configure_agents(
                         .collect()
                 })
                 .unwrap_or_default();
-            if agents.is_empty() { Ok(existing.to_vec()) } else { Ok(agents) }
+            if agents.is_empty() {
+                Ok(existing.to_vec())
+            } else {
+                Ok(agents)
+            }
         }
         _ => Ok(existing.to_vec()),
     }
@@ -343,7 +406,12 @@ async fn plan_tasks(
 ) -> Result<TaskPlan, String> {
     let agents_desc = agents
         .iter()
-        .map(|a| format!("  - id={:?} name={:?} description={:?}", a.id, a.name, a.description))
+        .map(|a| {
+            format!(
+                "  - id={:?} name={:?} description={:?}",
+                a.id, a.name, a.description
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -410,14 +478,41 @@ async fn execute_tasks(
     agents: &[SubAgent],
     tasks: Vec<Task>,
     workspace_dir: PathBuf,
+    skill_access_roots: Vec<PathBuf>,
+    protected_evolution_files: Vec<PathBuf>,
     use_parallel: bool,
     max_concurrent: usize,
     cancelled: &AtomicBool,
 ) -> Vec<TaskResult> {
     if use_parallel {
-        execute_parallel(app, client, url, config, agents, tasks, workspace_dir, max_concurrent, cancelled).await
+        execute_parallel(
+            app,
+            client,
+            url,
+            config,
+            agents,
+            tasks,
+            workspace_dir,
+            skill_access_roots,
+            protected_evolution_files,
+            max_concurrent,
+            cancelled,
+        )
+        .await
     } else {
-        execute_sequential(app, client, url, config, agents, tasks, workspace_dir, cancelled).await
+        execute_sequential(
+            app,
+            client,
+            url,
+            config,
+            agents,
+            tasks,
+            workspace_dir,
+            skill_access_roots,
+            protected_evolution_files,
+            cancelled,
+        )
+        .await
     }
 }
 
@@ -429,6 +524,8 @@ async fn execute_parallel(
     agents: &[SubAgent],
     tasks: Vec<Task>,
     workspace_dir: PathBuf,
+    skill_access_roots: Vec<PathBuf>,
+    protected_evolution_files: Vec<PathBuf>,
     max_concurrent: usize,
     cancelled: &AtomicBool,
 ) -> Vec<TaskResult> {
@@ -478,6 +575,8 @@ async fn execute_parallel(
                 let config_c = config.clone();
                 let task_c = task.clone();
                 let wd_c = workspace_dir.clone();
+                let skill_roots_c = skill_access_roots.clone();
+                let protected_files_c = protected_evolution_files.clone();
                 let is_cancelled = cancelled.load(Ordering::SeqCst);
 
                 join_set.spawn(async move {
@@ -492,7 +591,18 @@ async fn execute_parallel(
                             tokens_used: 0,
                         };
                     }
-                    run_sub_agent(&app_c, &client_c, &url_c, &config_c, &agent, &task_c, wd_c).await
+                    run_sub_agent(
+                        &app_c,
+                        &client_c,
+                        &url_c,
+                        &config_c,
+                        &agent,
+                        &task_c,
+                        wd_c,
+                        skill_roots_c,
+                        protected_files_c,
+                    )
+                    .await
                 });
             }
 
@@ -514,6 +624,8 @@ async fn execute_sequential(
     agents: &[SubAgent],
     tasks: Vec<Task>,
     workspace_dir: PathBuf,
+    skill_access_roots: Vec<PathBuf>,
+    protected_evolution_files: Vec<PathBuf>,
     cancelled: &AtomicBool,
 ) -> Vec<TaskResult> {
     let mut results = Vec::new();
@@ -525,7 +637,18 @@ async fn execute_sequential(
             Some(a) => a,
             None => continue,
         };
-        let res = run_sub_agent(app, client, url, config, agent, &task, workspace_dir.clone()).await;
+        let res = run_sub_agent(
+            app,
+            client,
+            url,
+            config,
+            agent,
+            &task,
+            workspace_dir.clone(),
+            skill_access_roots.clone(),
+            protected_evolution_files.clone(),
+        )
+        .await;
         results.push(res);
     }
     results
@@ -541,6 +664,8 @@ pub async fn run_sub_agent(
     agent: &SubAgent,
     task: &Task,
     workspace_dir: PathBuf,
+    skill_access_roots: Vec<PathBuf>,
+    protected_evolution_files: Vec<PathBuf>,
 ) -> TaskResult {
     let _ = app.emit(
         "agent-task-start",
@@ -559,9 +684,33 @@ pub async fn run_sub_agent(
     let mut total_tokens: u32 = 0;
     let mut tool_calls_count: u32 = 0;
 
+    let self_evolution_context = if skill_access_roots.is_empty() {
+        String::new()
+    } else {
+        let roots = skill_access_roots
+            .iter()
+            .map(|root| format!("- {}", root.display()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!(
+            "\n\nSelf-evolution mode is enabled for this task.\n\
+             You may inspect and update reusable skills under these roots when it helps the task:\n\
+             {roots}\n\
+             You may also optimize the sub-agent config file at:\n\
+             {}\n\
+             Before modifying any skill file or the sub-agent config file, create a sibling backup with suffix `.bak.<number>`.\n\
+             Use `file_actions` for these edits so backup creation is enforced automatically.\n\
+             Prefer absolute paths for protected files.",
+            protected_evolution_files
+                .first()
+                .map(|path| path.display().to_string())
+                .unwrap_or_default()
+        )
+    };
+
     let task_system = format!(
-        "{}\n\nYou are executing a specific task. Be concise and thorough.\nTask: {}\nContext: {}",
-        agent.system_prompt, task.description, task.context
+        "{}\n\nYou are executing a specific task. Be concise and thorough.\nTask: {}\nContext: {}{}",
+        agent.system_prompt, task.description, task.context, self_evolution_context
     );
 
     let mut messages: Vec<Value> = vec![
@@ -590,7 +739,12 @@ pub async fn run_sub_agent(
         }
 
         let stream_result = stream_llm_request(
-            app, client, url, &config.api_key, req_body, &cancelled,
+            app,
+            client,
+            url,
+            &config.api_key,
+            req_body,
+            &cancelled,
             StreamOptions {
                 token_event: "agent-task-token",
                 task_id: Some(&task.id),
@@ -600,7 +754,13 @@ pub async fn run_sub_agent(
             },
         )
         .await
-        .map(|sr| (sr.content, sr.tool_calls, sr.prompt_tokens + sr.completion_tokens));
+        .map(|sr| {
+            (
+                sr.content,
+                sr.tool_calls,
+                sr.prompt_tokens + sr.completion_tokens,
+            )
+        });
 
         match stream_result {
             Err(e) => {
@@ -647,23 +807,32 @@ pub async fn run_sub_agent(
                 // Append assistant turn with tool calls
                 let assistant_tcs: Vec<Value> = agent_tool_calls
                     .iter()
-                    .map(|(id, name, args)| json!({
-                        "id": id,
-                        "type": "function",
-                        "function": { "name": name, "arguments": args },
-                    }))
+                    .map(|(id, name, args)| {
+                        json!({
+                            "id": id,
+                            "type": "function",
+                            "function": { "name": name, "arguments": args },
+                        })
+                    })
                     .collect();
-                messages.push(json!({ "role": "assistant", "content": null, "tool_calls": assistant_tcs }));
+                messages.push(
+                    json!({ "role": "assistant", "content": null, "tool_calls": assistant_tcs }),
+                );
 
                 // Execute each tool call
                 for (id, name, args) in &agent_tool_calls {
                     tool_calls_count += 1;
                     let result = tools::execute_tool(
-                        app, name, args,
+                        app,
+                        name,
+                        args,
                         workspace_dir.clone(),
                         config,
                         &[],
                         &[],
+                        &skill_access_roots,
+                        &skill_access_roots,
+                        &protected_evolution_files,
                     )
                     .await;
                     messages.push(json!({ "role": "tool", "tool_call_id": id, "content": result }));
@@ -676,7 +845,12 @@ pub async fn run_sub_agent(
     let last_content = messages
         .iter()
         .rev()
-        .find_map(|m| m["content"].as_str().filter(|s| !s.is_empty()).map(|s| s.to_string()))
+        .find_map(|m| {
+            m["content"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+        })
         .unwrap_or_else(|| "Max iterations reached without final answer.".to_string());
 
     let _ = app.emit(
@@ -755,13 +929,22 @@ async fn aggregate_results(
     });
 
     let cancelled = AtomicBool::new(false);
-    let sr = stream_llm_request(app, client, url, api_key, req_body, &cancelled, StreamOptions {
-        token_event: "chat-token",
-        task_id: None,
-        emit_reasoning: false,
-        emit_usage: false,
-        usage_max_tokens: None,
-    }).await?;
+    let sr = stream_llm_request(
+        app,
+        client,
+        url,
+        api_key,
+        req_body,
+        &cancelled,
+        StreamOptions {
+            token_event: "chat-token",
+            task_id: None,
+            emit_reasoning: false,
+            emit_usage: false,
+            usage_max_tokens: None,
+        },
+    )
+    .await?;
 
     Ok(sr.content)
 }

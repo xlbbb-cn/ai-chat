@@ -1,5 +1,5 @@
-use neo4rs::{Graph, ConfigBuilder};
 use async_trait::async_trait;
+use neo4rs::{ConfigBuilder, Graph};
 
 #[async_trait]
 pub trait KnowledgeGraph {
@@ -19,9 +19,7 @@ impl Neo4jRepo {
             .build()
             .map_err(|e| e.to_string())?;
 
-        let graph = Graph::connect(config)
-            .await
-            .map_err(|e| e.to_string())?;
+        let graph = Graph::connect(config).await.map_err(|e| e.to_string())?;
 
         Ok(Self { graph })
     }

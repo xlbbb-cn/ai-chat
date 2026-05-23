@@ -1,8 +1,8 @@
+use dirs::home_dir;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::State;
-use dirs::home_dir;
 
 use crate::AppState;
 
@@ -16,7 +16,11 @@ pub struct SkillMeta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
     /// Allowlist of executable names the skill may run (empty = unrestricted).
-    #[serde(rename = "allowed-commands", default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        rename = "allowed-commands",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub allowed_commands: Vec<String>,
 }
 
@@ -43,7 +47,10 @@ pub fn parse_skill_md(content: &str) -> Result<Skill, String> {
         .ok_or("missing YAML frontmatter")?;
     let end = rest.find("\n---").ok_or("unclosed frontmatter")?;
     let frontmatter = &rest[..end];
-    let body = rest[end + 4..].trim_start_matches('\n').trim_start_matches('\r').trim();
+    let body = rest[end + 4..]
+        .trim_start_matches('\n')
+        .trim_start_matches('\r')
+        .trim();
     let meta: SkillMeta = serde_yaml::from_str(frontmatter).map_err(|e| e.to_string())?;
     Ok(Skill {
         name: meta.name,
@@ -64,13 +71,34 @@ pub fn skill_to_md(skill: &Skill) -> Result<String, String> {
         allowed_commands: skill.allowed_commands.clone(),
     };
     let frontmatter = serde_yaml::to_string(&meta).map_err(|e| e.to_string())?;
-    Ok(format!("---\n{}---\n\n{}", frontmatter, skill.system_prompt))
+    Ok(format!(
+        "---\n{}---\n\n{}",
+        frontmatter, skill.system_prompt
+    ))
 }
 
 pub fn load_skill_by_name(skills_dir: &PathBuf, name: &str) -> Result<Skill, String> {
     let path = skills_dir.join(name).join("skill.md");
     let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
     parse_skill_md(&content)
+}
+
+pub fn user_skills_dir() -> Option<PathBuf> {
+    home_dir().map(|dir| dir.join(".skills"))
+}
+
+pub fn collect_self_evolution_roots(managed_skills_dir: &Path, enabled: bool) -> Vec<PathBuf> {
+    if !enabled {
+        return Vec::new();
+    }
+
+    let mut roots = vec![managed_skills_dir.to_path_buf()];
+    if let Some(user_root) = user_skills_dir() {
+        if !roots.iter().any(|root| root == &user_root) {
+            roots.push(user_root);
+        }
+    }
+    roots
 }
 
 #[tauri::command]
@@ -95,8 +123,7 @@ pub fn list_skills(state: State<'_, AppState>) -> Vec<Skill> {
 
     skills.extend(read_dir_skills(&state.skills_dir));
 
-    if let Some(home_dir) = home_dir() {
-        let user_skills_dir = home_dir.join(".skills");
+    if let Some(user_skills_dir) = user_skills_dir() {
         skills.extend(read_dir_skills(&user_skills_dir));
     }
 

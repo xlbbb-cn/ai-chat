@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { fetchModels, getConfig, getWorkspaceDir, saveConfig } from "../api";
+import { fetchModels, getConfig, getSkillRoots, getWorkspaceDir, saveConfig } from "../api";
 import type { AppConfig, ModelSettings } from "../types";
 import ReactMarkdown from "react-markdown";
 import { MonitorPanel } from "./MonitorPanel";
@@ -19,6 +19,7 @@ const defaultConfig: AppConfig = {
   model_settings: {},
   system_message: "",
   logger_output: "file",
+  self_evolution_mode: false,
 };
 
 function mergeModels(current: string[] | undefined, incoming: string[]): string[] {
@@ -44,6 +45,7 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
   const [manualModel, setManualModel] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(true);
   const [workspaceDirActual, setWorkspaceDirActual] = useState("");
+  const [skillRoots, setSkillRoots] = useState<string[]>([]);
   const [isMessageEditorOpen, setIsMessageEditorOpen] = useState(false);
   const [messageDraft, setMessageDraft] = useState("");
   const [messageSaving, setMessageSaving] = useState(false);
@@ -51,6 +53,7 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
 
   useEffect(() => {
     getWorkspaceDir().then(setWorkspaceDirActual).catch(console.error);
+    getSkillRoots().then(setSkillRoots).catch(console.error);
   }, []);
 
   useEffect(() => {
@@ -159,6 +162,29 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
               }
               placeholder={workspaceDirActual || "Default workspace directory"}
             />
+          </label>
+
+          <label className="settings-checkbox">
+            <input
+              type="checkbox"
+              checked={config.self_evolution_mode ?? false}
+              onChange={(e) =>
+                setConfig((prev) => ({
+                  ...prev,
+                  self_evolution_mode: e.target.checked,
+                }))
+              }
+            />
+            <div className="settings-checkbox-copy">
+              <span>Enable Self-Evolution Mode</span>
+              <small>
+                Allow the main agent and sub-agents to inspect and update skill directories and
+                sub-agent config so they can iteratively optimize reusable skills and sub-agents.
+              </small>
+              {skillRoots.length > 0 && (
+                <code>{skillRoots.join("  |  ")}</code>
+              )}
+            </div>
           </label>
         </section>
 
