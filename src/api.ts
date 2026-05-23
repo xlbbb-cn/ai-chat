@@ -6,8 +6,15 @@ export async function getConfig(): Promise<AppConfig> {
   return invoke("get_config");
 }
 
-export async function confirmCommand(confirmed: boolean): Promise<void> {
-  return invoke("confirm_command", { confirmed });
+export async function confirmCommand(
+  confirmed: boolean,
+  opts?: { username?: string; password?: string },
+): Promise<void> {
+  return invoke("confirm_command", {
+    confirmed,
+    username: opts?.username,
+    password: opts?.password,
+  });
 }
 
 export async function getWorkspaceDir(): Promise<string> {
