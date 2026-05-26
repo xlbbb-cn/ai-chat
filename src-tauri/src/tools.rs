@@ -429,6 +429,44 @@ fn build_candidate_roots(primary_root: &Path, extra_roots: &[PathBuf]) -> Vec<Pa
     roots
 }
 
+fn build_root_relative_candidates(root: &Path, input_path: &str) -> Vec<PathBuf> {
+    let input = Path::new(input_path);
+    let mut candidates = vec![input.to_path_buf()];
+
+    if input.is_absolute() {
+        return candidates;
+    }
+
+    let Some(root_name) = root.file_name() else {
+        return candidates;
+    };
+
+    let mut components = input.components();
+    let Some(std::path::Component::Normal(first)) = components.next() else {
+        return candidates;
+    };
+
+    if first != root_name {
+        return candidates;
+    }
+
+    let mut stripped = PathBuf::new();
+    for component in components {
+        match component {
+            std::path::Component::Normal(segment) => stripped.push(segment),
+            std::path::Component::ParentDir => stripped.push(".."),
+            std::path::Component::CurDir => {}
+            _ => {}
+        }
+    }
+
+    if !stripped.as_os_str().is_empty() && !candidates.iter().any(|p| p == &stripped) {
+        candidates.push(stripped);
+    }
+
+    candidates
+}
+
 fn is_backup_variant(base_file: &Path, candidate: &Path) -> bool {
     let Some(base_name) = base_file.file_name().and_then(|name| name.to_str()) else {
         return false;
@@ -499,9 +537,11 @@ fn resolve_safe_path_with_roots(
 
     // 1. Try to find the exact existing file in ANY root
     for root in &roots {
-        if let Ok(resolved) = resolve_safe_path(root, input_path) {
-            if resolved.exists() {
-                return Ok((resolved, root.clone()));
+        for candidate in build_root_relative_candidates(root, input_path) {
+            if let Ok(resolved) = resolve_safe_path(root, &candidate.to_string_lossy()) {
+                if resolved.exists() {
+                    return Ok((resolved, root.clone()));
+                }
             }
         }
     }
@@ -518,8 +558,10 @@ fn resolve_safe_path_with_roots(
     let is_absolute = Path::new(input_path).is_absolute();
     if is_absolute {
         for root in &roots {
-            if let Ok(resolved) = resolve_safe_path(root, input_path) {
-                return Ok((resolved, root.clone()));
+            for candidate in build_root_relative_candidates(root, input_path) {
+                if let Ok(resolved) = resolve_safe_path(root, &candidate.to_string_lossy()) {
+                    return Ok((resolved, root.clone()));
+                }
             }
         }
         return Err(format!(
@@ -534,10 +576,12 @@ fn resolve_safe_path_with_roots(
         if !parent.as_os_str().is_empty() {
             // Check skill roots (skip the primary root at index 0 initially)
             for root in roots.iter().skip(1) {
-                if let Ok(resolved) = resolve_safe_path(root, input_path) {
-                    if let Some(resolved_parent) = resolved.parent() {
-                        if resolved_parent.exists() {
-                            return Ok((resolved, root.clone()));
+                for candidate in build_root_relative_candidates(root, input_path) {
+                    if let Ok(resolved) = resolve_safe_path(root, &candidate.to_string_lossy()) {
+                        if let Some(resolved_parent) = resolved.parent() {
+                            if resolved_parent.exists() {
+                                return Ok((resolved, root.clone()));
+                            }
                         }
                     }
                 }
@@ -547,6 +591,69 @@ fn resolve_safe_path_with_roots(
 
     // 4. Default to primary workspace root for new relative paths
     resolve_safe_path(primary_root, input_path).map(|p| (p, primary_root.to_path_buf()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_safe_path_with_roots;
+    use std::fs;
+    use std::path::PathBuf;
+    use uuid::Uuid;
+
+    fn make_temp_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ai-chat-tools-{label}-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn normalize(path: &PathBuf) -> PathBuf {
+        path.canonicalize().unwrap_or_else(|_| path.clone())
+    }
+
+    #[test]
+    fn resolves_existing_skill_file_with_root_name_prefix() {
+        let workspace_root = make_temp_dir("workspace");
+        let skill_root = make_temp_dir("skills").join("skills");
+        let skill_file = skill_root.join("demo").join("skill.md");
+        fs::create_dir_all(skill_file.parent().unwrap()).unwrap();
+        fs::write(&skill_file, "content").unwrap();
+
+        let resolved = resolve_safe_path_with_roots(
+            &workspace_root,
+            std::slice::from_ref(&skill_root),
+            "skills/demo/skill.md",
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(normalize(&resolved.0), normalize(&skill_file));
+        assert_eq!(normalize(&resolved.1), normalize(&skill_root));
+
+        let _ = fs::remove_dir_all(&workspace_root);
+        let _ = fs::remove_dir_all(skill_root.parent().unwrap());
+    }
+
+    #[test]
+    fn resolves_new_skill_file_with_root_name_prefix_to_skill_root() {
+        let workspace_root = make_temp_dir("workspace");
+        let skill_root = make_temp_dir("skills").join("skills");
+        let existing_dir = skill_root.join("demo");
+        fs::create_dir_all(&existing_dir).unwrap();
+
+        let resolved = resolve_safe_path_with_roots(
+            &workspace_root,
+            std::slice::from_ref(&skill_root),
+            "skills/demo/improved.md",
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(resolved.0, existing_dir.join("improved.md"));
+        assert_eq!(normalize(&resolved.1), normalize(&skill_root));
+
+        let _ = fs::remove_dir_all(&workspace_root);
+        let _ = fs::remove_dir_all(skill_root.parent().unwrap());
+    }
 }
 
 fn is_path_protected(

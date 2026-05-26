@@ -181,9 +181,6 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
                 Allow the main agent and sub-agents to inspect and update skill directories and
                 sub-agent config so they can iteratively optimize reusable skills and sub-agents.
               </small>
-              {skillRoots.length > 0 && (
-                <code>{skillRoots.join("  |  ")}</code>
-              )}
             </div>
           </label>
         </section>
