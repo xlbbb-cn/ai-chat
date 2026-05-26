@@ -87,17 +87,28 @@ pub fn user_skills_dir() -> Option<PathBuf> {
     home_dir().map(|dir| dir.join(".skills"))
 }
 
-pub fn collect_self_evolution_roots(managed_skills_dir: &Path, enabled: bool) -> Vec<PathBuf> {
+/// Collect skill roots eligible for self-evolution edits.
+/// Includes the app-managed skills directory and optionally the
+/// `skills/` subdirectory inside the active workspace. The `~/.skills`
+/// user directory is intentionally excluded.
+pub fn collect_self_evolution_roots(
+    managed_skills_dir: &Path,
+    workspace_dir: Option<&Path>,
+    enabled: bool,
+) -> Vec<PathBuf> {
     if !enabled {
         return Vec::new();
     }
 
     let mut roots = vec![managed_skills_dir.to_path_buf()];
-    if let Some(user_root) = user_skills_dir() {
-        if !roots.iter().any(|root| root == &user_root) {
-            roots.push(user_root);
+
+    if let Some(ws_dir) = workspace_dir {
+        let ws_skills = ws_dir.join("skills");
+        if !roots.iter().any(|root| root == &ws_skills) {
+            roots.push(ws_skills);
         }
     }
+
     roots
 }
 

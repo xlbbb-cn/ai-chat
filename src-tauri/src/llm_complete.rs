@@ -624,8 +624,13 @@ pub async fn chat_completion(
     let mut all_messages: Vec<Value> = vec![];
     let mut skill_allowed_commands: Vec<String> = Vec::new();
     let mut active_skill_roots: Vec<std::path::PathBuf> = Vec::new();
+    let workspace_dir_for_roots = state.workspace_dir.lock().unwrap().clone();
     let self_evolution_roots = if self_evolution_enabled {
-        skills::collect_self_evolution_roots(&state.skills_dir, true)
+        skills::collect_self_evolution_roots(
+            &state.skills_dir,
+            Some(&workspace_dir_for_roots),
+            true,
+        )
     } else {
         Vec::new()
     };

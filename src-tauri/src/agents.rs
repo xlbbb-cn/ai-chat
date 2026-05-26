@@ -270,7 +270,7 @@ pub async fn orchestrate(
     let use_parallel = orchestration.mode != "sequential" && plan.execution_mode != "sequential";
     let workspace_dir = state.workspace_dir.lock().unwrap().clone();
     let skill_access_roots =
-        crate::skills::collect_self_evolution_roots(&state.skills_dir, config.self_evolution_mode);
+        crate::skills::collect_self_evolution_roots(&state.skills_dir, Some(&workspace_dir), config.self_evolution_mode);
     let protected_evolution_files = if config.self_evolution_mode {
         vec![state.agents_config_path.clone()]
     } else {
