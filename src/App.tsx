@@ -530,6 +530,12 @@ export default function App() {
     }, 180);
   }
 
+  function handleChatAreaClick(event: React.MouseEvent<HTMLDivElement>) {
+    if (!sidebar) return;
+    if ((event.target as HTMLElement).closest('.toolbar')) return;
+    closeSidebar();
+  }
+
   async function clearChat() {
     if (streaming) {
       await stopStreaming();
@@ -745,7 +751,7 @@ export default function App() {
       )}
 
       {/* Main chat area */}
-      <div className="chat-area">
+      <div className="chat-area" onClick={handleChatAreaClick}>
         {/* Toolbar */}
         <header className="toolbar">
           <span className="app-title">Chat</span>
