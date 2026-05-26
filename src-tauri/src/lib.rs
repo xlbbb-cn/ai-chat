@@ -1,10 +1,11 @@
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{
     menu::{Menu, MenuItem, Submenu},
     AppHandle, Emitter, Manager, State,
@@ -316,9 +317,38 @@ pub struct AppState {
     pub db: Mutex<Connection>,
     pub logger: Mutex<AppLogger>,
     pub chat_cancelled: AtomicBool,
+    pub session_controls: Mutex<HashMap<String, Arc<SessionControl>>>,
     /// One-shot channel sender used to relay the user's confirm/deny response
     /// back to a waiting `execute_tool` call.
     pub confirm_sender: Mutex<Option<tokio::sync::oneshot::Sender<ToolConfirmation>>>,
+}
+
+pub struct SessionControl {
+    pub cancelled: AtomicBool,
+    pub running: AtomicBool,
+}
+
+impl SessionControl {
+    fn new() -> Self {
+        Self {
+            cancelled: AtomicBool::new(false),
+            running: AtomicBool::new(false),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionRuntimeRecord {
+    pub session_id: String,
+    pub status: String,
+}
+
+pub fn get_or_create_session_control(state: &AppState, session_id: &str) -> Arc<SessionControl> {
+    let mut controls = state.session_controls.lock().unwrap();
+    controls
+        .entry(session_id.to_string())
+        .or_insert_with(|| Arc::new(SessionControl::new()))
+        .clone()
 }
 
 #[derive(Clone, Debug)]
@@ -385,10 +415,30 @@ async fn fetch_models(state: State<'_, AppState>) -> Result<Vec<String>, String>
 }
 
 #[tauri::command]
-fn stop_chat_completion(state: State<'_, AppState>) {
-    state
-        .chat_cancelled
-        .store(true, std::sync::atomic::Ordering::SeqCst);
+fn stop_chat_completion(session_id: String, state: State<'_, AppState>) {
+    if let Some(control) = state.session_controls.lock().unwrap().get(&session_id).cloned() {
+        control
+            .cancelled
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+#[tauri::command]
+fn list_session_runtime_states(state: State<'_, AppState>) -> Vec<SessionRuntimeRecord> {
+    let controls = state.session_controls.lock().unwrap();
+    let mut records = controls
+        .iter()
+        .map(|(session_id, control)| SessionRuntimeRecord {
+            session_id: session_id.clone(),
+            status: if control.running.load(std::sync::atomic::Ordering::SeqCst) {
+                "working".to_string()
+            } else {
+                "idle".to_string()
+            },
+        })
+        .collect::<Vec<_>>();
+    records.sort_by(|left, right| left.session_id.cmp(&right.session_id));
+    records
 }
 
 /// Called by the frontend to confirm or deny a pending dangerous-command execution.
@@ -619,6 +669,7 @@ pub fn run() {
                 mcp_servers_path: mcp_servers_path.clone(),
                 agents_config_path,
                 chat_cancelled: AtomicBool::new(false),
+                session_controls: Mutex::new(HashMap::new()),
                 confirm_sender: Mutex::new(None),
             });
 
@@ -638,6 +689,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             llm_complete::chat_completion,
             stop_chat_completion,
+            list_session_runtime_states,
             confirm_command,
             get_config,
             save_config,

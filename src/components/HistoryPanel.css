@@ -143,4 +143,33 @@
 .history-meta {
   font-size: 14px;
   color: #5C5E62;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.history-runtime-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.history-runtime-badge.idle {
+  background: #ECEDEE;
+  color: #4F5358;
+}
+
+.history-runtime-badge.working {
+  background: #E6F4EA;
+  color: #146C2E;
+}
+
+.history-runtime-badge.error {
+  background: #FCE8E6;
+  color: #B3261E;
 }

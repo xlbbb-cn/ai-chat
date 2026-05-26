@@ -2,7 +2,8 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
@@ -215,7 +216,8 @@ pub async fn orchestrate(
     state: &AppState,
     config: &AppConfig,
     messages: &[crate::llm_complete::ChatMessage],
-    _session_id: &str,
+    session_id: &str,
+    session_control: Arc<crate::SessionControl>,
 ) -> Result<String, String> {
     let agents_config = load_agents_config(&state.agents_config_path);
     let enabled: Vec<SubAgent> = agents_config
@@ -247,7 +249,10 @@ pub async fn orchestrate(
     };
 
     // Step 2: Plan
-    let _ = app.emit("agent-plan-start", json!({ "task_count": 0 }));
+    let _ = app.emit(
+        "agent-plan-start",
+        json!({ "session_id": session_id, "task_count": 0 }),
+    );
     let plan = plan_tasks(
         &client,
         &url,
@@ -263,7 +268,7 @@ pub async fn orchestrate(
     }
     let _ = app.emit(
         "agent-plan-start",
-        json!({ "task_count": plan.tasks.len() }),
+        json!({ "session_id": session_id, "task_count": plan.tasks.len() }),
     );
 
     // Step 3: Execute
@@ -286,14 +291,15 @@ pub async fn orchestrate(
         workspace_dir,
         skill_access_roots,
         protected_evolution_files,
+        session_id,
         use_parallel,
         orchestration.max_concurrent,
-        &state.chat_cancelled,
+        session_control.clone(),
     )
     .await;
 
     // Step 4: Aggregate
-    let _ = app.emit("agent-aggregate-start", ());
+    let _ = app.emit("agent-aggregate-start", json!({ "session_id": session_id }));
     aggregate_results(
         app,
         &client,
@@ -302,6 +308,8 @@ pub async fn orchestrate(
         &model,
         messages,
         results,
+        session_id,
+        session_control,
     )
     .await
 }
@@ -480,9 +488,10 @@ async fn execute_tasks(
     workspace_dir: PathBuf,
     skill_access_roots: Vec<PathBuf>,
     protected_evolution_files: Vec<PathBuf>,
+    session_id: &str,
     use_parallel: bool,
     max_concurrent: usize,
-    cancelled: &AtomicBool,
+    session_control: Arc<crate::SessionControl>,
 ) -> Vec<TaskResult> {
     if use_parallel {
         execute_parallel(
@@ -495,8 +504,9 @@ async fn execute_tasks(
             workspace_dir,
             skill_access_roots,
             protected_evolution_files,
+            session_id,
             max_concurrent,
-            cancelled,
+            session_control,
         )
         .await
     } else {
@@ -510,7 +520,8 @@ async fn execute_tasks(
             workspace_dir,
             skill_access_roots,
             protected_evolution_files,
-            cancelled,
+            session_id,
+            session_control,
         )
         .await
     }
@@ -526,8 +537,9 @@ async fn execute_parallel(
     workspace_dir: PathBuf,
     skill_access_roots: Vec<PathBuf>,
     protected_evolution_files: Vec<PathBuf>,
+    session_id: &str,
     max_concurrent: usize,
-    cancelled: &AtomicBool,
+    session_control: Arc<crate::SessionControl>,
 ) -> Vec<TaskResult> {
     use std::collections::HashMap;
     use tokio::task::JoinSet;
@@ -537,7 +549,7 @@ async fn execute_parallel(
     let mut results: Vec<TaskResult> = Vec::new();
 
     while !pending.is_empty() {
-        if cancelled.load(Ordering::SeqCst) {
+        if session_control.cancelled.load(Ordering::SeqCst) {
             break;
         }
 
@@ -557,7 +569,7 @@ async fn execute_parallel(
 
         // Process ready tasks in batches of max_concurrent
         for batch in ready.chunks(max_concurrent.max(1)) {
-            if cancelled.load(Ordering::SeqCst) {
+            if session_control.cancelled.load(Ordering::SeqCst) {
                 break;
             }
 
@@ -577,10 +589,11 @@ async fn execute_parallel(
                 let wd_c = workspace_dir.clone();
                 let skill_roots_c = skill_access_roots.clone();
                 let protected_files_c = protected_evolution_files.clone();
-                let is_cancelled = cancelled.load(Ordering::SeqCst);
+                let session_id_c = session_id.to_string();
+                let session_control_c = session_control.clone();
 
                 join_set.spawn(async move {
-                    if is_cancelled {
+                    if session_control_c.cancelled.load(Ordering::SeqCst) {
                         return TaskResult {
                             task_id: task_c.id,
                             agent_id: task_c.agent_id,
@@ -601,6 +614,8 @@ async fn execute_parallel(
                         wd_c,
                         skill_roots_c,
                         protected_files_c,
+                        &session_id_c,
+                        session_control_c,
                     )
                     .await
                 });
@@ -626,11 +641,12 @@ async fn execute_sequential(
     workspace_dir: PathBuf,
     skill_access_roots: Vec<PathBuf>,
     protected_evolution_files: Vec<PathBuf>,
-    cancelled: &AtomicBool,
+    session_id: &str,
+    session_control: Arc<crate::SessionControl>,
 ) -> Vec<TaskResult> {
     let mut results = Vec::new();
     for task in tasks {
-        if cancelled.load(Ordering::SeqCst) {
+        if session_control.cancelled.load(Ordering::SeqCst) {
             break;
         }
         let agent = match agents.iter().find(|a| a.id == task.agent_id) {
@@ -647,6 +663,8 @@ async fn execute_sequential(
             workspace_dir.clone(),
             skill_access_roots.clone(),
             protected_evolution_files.clone(),
+            session_id,
+            session_control.clone(),
         )
         .await;
         results.push(res);
@@ -666,10 +684,13 @@ pub async fn run_sub_agent(
     workspace_dir: PathBuf,
     skill_access_roots: Vec<PathBuf>,
     protected_evolution_files: Vec<PathBuf>,
+    session_id: &str,
+    session_control: Arc<crate::SessionControl>,
 ) -> TaskResult {
     let _ = app.emit(
         "agent-task-start",
         json!({
+            "session_id": session_id,
             "task_id": task.id,
             "agent_id": agent.id,
             "agent_name": agent.name,
@@ -680,7 +701,6 @@ pub async fn run_sub_agent(
     let model = agent.model.as_deref().unwrap_or(&config.model);
     let max_tokens = agent.max_tokens.unwrap_or(8192);
     let tools_list = tools::get_all_tools(&agent.allowed_tools);
-    let cancelled = AtomicBool::new(false);
     let mut total_tokens: u32 = 0;
     let mut tool_calls_count: u32 = 0;
 
@@ -719,7 +739,7 @@ pub async fn run_sub_agent(
     ];
 
     for _iteration in 0..agent.max_iterations {
-        if cancelled.load(Ordering::SeqCst) {
+        if session_control.cancelled.load(Ordering::SeqCst) {
             break;
         }
 
@@ -744,8 +764,9 @@ pub async fn run_sub_agent(
             url,
             &config.api_key,
             req_body,
-            &cancelled,
+            &session_control.cancelled,
             StreamOptions {
+                session_id,
                 token_event: "agent-task-token",
                 task_id: Some(&task.id),
                 emit_reasoning: false,
@@ -766,7 +787,7 @@ pub async fn run_sub_agent(
             Err(e) => {
                 let _ = app.emit(
                     "agent-task-error",
-                    json!({ "task_id": task.id, "agent_id": agent.id, "error": e }),
+                    json!({ "session_id": session_id, "task_id": task.id, "agent_id": agent.id, "error": e }),
                 );
                 return TaskResult {
                     task_id: task.id.clone(),
@@ -787,6 +808,7 @@ pub async fn run_sub_agent(
                     let _ = app.emit(
                         "agent-task-done",
                         json!({
+                            "session_id": session_id,
                             "task_id": task.id,
                             "agent_id": agent.id,
                             "agent_name": agent.name,
@@ -826,6 +848,7 @@ pub async fn run_sub_agent(
                         app,
                         name,
                         args,
+                        session_id,
                         workspace_dir.clone(),
                         config,
                         &[],
@@ -856,6 +879,7 @@ pub async fn run_sub_agent(
     let _ = app.emit(
         "agent-task-done",
         json!({
+            "session_id": session_id,
             "task_id": task.id,
             "agent_id": agent.id,
             "agent_name": agent.name,
@@ -883,6 +907,8 @@ async fn aggregate_results(
     model: &str,
     original_messages: &[crate::llm_complete::ChatMessage],
     results: Vec<TaskResult>,
+    session_id: &str,
+    session_control: Arc<crate::SessionControl>,
 ) -> Result<String, String> {
     if results.is_empty() {
         return Ok("No results returned from sub-agents.".to_string());
@@ -928,15 +954,15 @@ async fn aggregate_results(
         "stream_options": { "include_usage": true },
     });
 
-    let cancelled = AtomicBool::new(false);
     let sr = stream_llm_request(
         app,
         client,
         url,
         api_key,
         req_body,
-        &cancelled,
+        &session_control.cancelled,
         StreamOptions {
+            session_id,
             token_event: "chat-token",
             task_id: None,
             emit_reasoning: false,

@@ -3,6 +3,7 @@ use os_info;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, State};
 
@@ -41,10 +42,31 @@ pub struct StreamResult {
     pub completion_tokens: u32,
 }
 
+struct SessionRunGuard {
+    control: Arc<crate::SessionControl>,
+}
+
+impl SessionRunGuard {
+    fn new(control: Arc<crate::SessionControl>) -> Self {
+        control.cancelled.store(false, Ordering::SeqCst);
+        control.running.store(true, Ordering::SeqCst);
+        Self { control }
+    }
+}
+
+impl Drop for SessionRunGuard {
+    fn drop(&mut self) {
+        self.control.running.store(false, Ordering::SeqCst);
+        self.control.cancelled.store(false, Ordering::SeqCst);
+    }
+}
+
 /// Options controlling how a streaming LLM request behaves.
 /// Main agent: emit reasoning + usage, token_event="chat-token", no task_id.
 /// Sub-agent:  no reasoning/usage, token_event="agent-task-token", task_id=Some(...).
 pub struct StreamOptions<'a> {
+    /// Session id associated with this streaming request.
+    pub session_id: &'a str,
     /// Event name for content delta tokens.
     pub token_event: &'a str,
     /// If set, include `{"task_id": ..., "token": ...}` payload instead of a plain string.
@@ -273,7 +295,13 @@ pub async fn stream_llm_request(
 
     if !res.status().is_success() {
         let err = res.text().await.unwrap_or_default();
-        let _ = app.emit("chat-error", err.clone());
+        let _ = app.emit(
+            "chat-error",
+            json!({
+                "session_id": opts.session_id,
+                "error": err.clone(),
+            }),
+        );
         return Err(err);
     }
 
@@ -346,6 +374,7 @@ pub async fn stream_llm_request(
                     let _ = app.emit(
                         "chat-usage",
                         json!({
+                            "session_id": opts.session_id,
                             "prompt_tokens": prompt_tokens,
                             "completion_tokens": completion_tokens,
                             "total_tokens": total_tokens,
@@ -373,7 +402,13 @@ pub async fn stream_llm_request(
             // DeepSeek/Qwen reasoning tokens — main agent only
             if opts.emit_reasoning {
                 if let Some(reasoning) = delta.get("reasoning_content").and_then(|v| v.as_str()) {
-                    let _ = app.emit("chat-reasoning-token", reasoning.to_string());
+                    let _ = app.emit(
+                        "chat-reasoning-token",
+                        json!({
+                            "session_id": opts.session_id,
+                            "token": reasoning,
+                        }),
+                    );
                 }
             }
 
@@ -402,10 +437,20 @@ pub async fn stream_llm_request(
                 if let Some(task_id) = opts.task_id {
                     let _ = app.emit(
                         opts.token_event,
-                        json!({ "task_id": task_id, "token": token }),
+                        json!({
+                            "session_id": opts.session_id,
+                            "task_id": task_id,
+                            "token": token,
+                        }),
                     );
                 } else {
-                    let _ = app.emit(opts.token_event, token.to_string());
+                    let _ = app.emit(
+                        opts.token_event,
+                        json!({
+                            "session_id": opts.session_id,
+                            "token": token,
+                        }),
+                    );
                 }
             }
         }
@@ -431,6 +476,7 @@ async fn stream_request(
     client: &Client,
     url: &str,
     api_key: &str,
+    session_id: &str,
     req_body: Value,
     cancelled: &AtomicBool,
     usage_max_tokens: Option<u32>,
@@ -443,6 +489,7 @@ async fn stream_request(
         req_body,
         cancelled,
         StreamOptions {
+            session_id: session_id,
             token_event: "chat-token",
             task_id: None,
             emit_reasoning: true,
@@ -491,7 +538,8 @@ pub async fn chat_completion(
     use_agents: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    state.chat_cancelled.store(false, Ordering::SeqCst);
+    let session_control = crate::get_or_create_session_control(&state, &session_id);
+    let _session_run_guard = SessionRunGuard::new(session_control.clone());
     let config = state.config.lock().unwrap().clone();
     let multi_agent_enabled = use_agents.unwrap_or(false);
     let self_evolution_enabled = config.self_evolution_mode;
@@ -510,14 +558,21 @@ pub async fn chat_completion(
         let agents_cfg = agents::load_agents_config(&state.agents_config_path);
         let has_enabled = agents_cfg.agents.iter().any(|a| a.enabled);
         if has_enabled {
-            let result = agents::orchestrate(&app, &state, &config, &messages, &session_id).await;
-            state.chat_cancelled.store(false, Ordering::SeqCst);
+            let result = agents::orchestrate(
+                &app,
+                &state,
+                &config,
+                &messages,
+                &session_id,
+                session_control.clone(),
+            )
+            .await;
             log_event(
                 &state,
                 "INFO",
                 format!("agent orchestration finished: session_id={}", session_id),
             );
-            let _ = app.emit("chat-done", ());
+            let _ = app.emit("chat-done", json!({ "session_id": session_id }));
             return result.map(|_| ());
         }
     }
@@ -883,8 +938,9 @@ pub async fn chat_completion(
             &client,
             &url,
             &config.api_key,
+            &session_id,
             req_body,
-            &state.chat_cancelled,
+            &session_control.cancelled,
             Some(effective_max_tokens),
         )
         .await;
@@ -1005,7 +1061,13 @@ pub async fn chat_completion(
                         session_id, total_tokens, effective_max_tokens, ratio
                     ),
                 );
-                let _ = app.emit("chat-token", "\n\n[System] Context compressed (tool-call traces discarded) and persisted for next turns.\n\n");
+                let _ = app.emit(
+                    "chat-token",
+                    json!({
+                        "session_id": session_id,
+                        "token": "\n\n[System] Context compressed (tool-call traces discarded) and persisted for next turns.\n\n",
+                    }),
+                );
             }
         }
 
@@ -1037,7 +1099,7 @@ pub async fn chat_completion(
         let mut pending_skill_context_messages: Vec<Value> = vec![];
 
         for (id, name, args) in &sr.tool_calls {
-            if state.chat_cancelled.load(Ordering::SeqCst) {
+            if session_control.cancelled.load(Ordering::SeqCst) {
                 break;
             }
             let result = if name == "use_skill" {
@@ -1102,7 +1164,10 @@ pub async fn chat_completion(
                         }));
                         let _ = app.emit(
                             "chat-token",
-                            format!("🧠 *Loading skill: {}*\n\n", skill_name),
+                            json!({
+                                "session_id": session_id,
+                                "token": format!("🧠 *Loading skill: {}*\n\n", skill_name),
+                            }),
                         );
                         format!("Skill '{}' detailed instructions have been successfully loaded and appended to context messages. You can now follow its instructions to fulfill the user's request. There is no need to call use_skill for this skill again.", skill_name)
                     } else {
@@ -1141,6 +1206,8 @@ pub async fn chat_completion(
                         workspace_dir,
                         self_evolution_roots.clone(),
                         self_evolution_files.clone(),
+                        &session_id,
+                        session_control.clone(),
                     )
                     .await;
 
@@ -1221,6 +1288,7 @@ pub async fn chat_completion(
                     &app,
                     name,
                     args,
+                    &session_id,
                     workspace_dir,
                     &config,
                     &skill_allowed_commands,
@@ -1275,6 +1343,6 @@ pub async fn chat_completion(
         "INFO",
         format!("chat_completion finished: session_id={}", session_id),
     );
-    let _ = app.emit("chat-done", ());
+    let _ = app.emit("chat-done", json!({ "session_id": session_id }));
     Ok(())
 }

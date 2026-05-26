@@ -720,10 +720,21 @@ fn backup_protected_file(
     Ok(Some(backup_path))
 }
 
+fn emit_chat_token(app: &AppHandle, session_id: &str, token: impl Into<String>) {
+    let _ = app.emit(
+        "chat-token",
+        json!({
+            "session_id": session_id,
+            "token": token.into(),
+        }),
+    );
+}
+
 pub async fn execute_tool(
     app: &AppHandle,
     name: &str,
     args_str: &str,
+    session_id: &str,
     workspace_dir: PathBuf,
     config: &crate::AppConfig,
     // Allowlist of executable names from the active skill (empty = unrestricted).
@@ -820,10 +831,7 @@ pub async fn execute_tool(
                     }
                 }
 
-                let _ = app.emit(
-                    "chat-token",
-                    format!("⚙️ *Running (sudo):*\n```\n{}\n```\n\n", command),
-                );
+                emit_chat_token(app, session_id, format!("⚙️ *Running (sudo):*\n```\n{}\n```\n\n", command));
 
                 let mut cmd = tokio::process::Command::new("sudo");
                 cmd.arg("-S").arg("-p").arg("");
@@ -839,10 +847,7 @@ pub async fn execute_tool(
                 .unwrap_or_else(|e| format!("Error: {}", e));
             }
 
-            let _ = app.emit(
-                "chat-token",
-                format!("⚙️ *Running:*\n```\n{}\n```\n\n", command),
-            );
+            emit_chat_token(app, session_id, format!("⚙️ *Running:*\n```\n{}\n```\n\n", command));
             tokio::time::timeout(
                 std::time::Duration::from_secs(30),
                 run_command("direct".to_string(), command, Some(command_cwd)),
@@ -914,8 +919,9 @@ pub async fn execute_tool(
                     .filter(|s| !s.is_empty())
                     .map(|s| s.to_string());
 
-                let _ = app.emit(
-                    "chat-token",
+                emit_chat_token(
+                    app,
+                    session_id,
                     format!(
                         "⚙️ *Running {} (sudo):*\n```{}\n{}\n```\n\n",
                         shell_type, shell_type, code
@@ -940,8 +946,9 @@ pub async fn execute_tool(
             }
 
             if elevated_requested {
-                let _ = app.emit(
-                    "chat-token",
+                emit_chat_token(
+                    app,
+                    session_id,
                     format!(
                         "⚙️ *Running {} (elevated):*\n```{}\n{}\n```\n\n",
                         shell_type, shell_type, code
@@ -957,8 +964,9 @@ pub async fn execute_tool(
                 .unwrap_or_else(|e| format!("Error: {}", e));
             }
 
-            let _ = app.emit(
-                "chat-token",
+            emit_chat_token(
+                app,
+                session_id,
                 format!(
                     "⚙️ *Running {}:*\n```{}\n{}\n```\n\n",
                     shell_type, shell_type, code
@@ -997,7 +1005,7 @@ pub async fn execute_tool(
             };
             match action {
                 "read" => {
-                    let _ = app.emit("chat-token", format!("📄 *Reading {}*\n\n", path_str));
+                    emit_chat_token(app, session_id, format!("📄 *Reading {}*\n\n", path_str));
                     let start_line = args["start_line"].as_i64();
                     let end_line = args["end_line"].as_i64();
                     match resolve_file_path(path_str, true) {
@@ -1061,7 +1069,7 @@ pub async fn execute_tool(
                 }
                 "write" => {
                     let content_str = args["content"].as_str().unwrap_or("");
-                    let _ = app.emit("chat-token", format!("💾 *Writing {}*\n\n", path_str));
+                    emit_chat_token(app, session_id, format!("💾 *Writing {}*\n\n", path_str));
                     match resolve_file_path(path_str, false) {
                         Ok((p, _)) => {
                             let backup = match backup_protected_file(
@@ -1094,7 +1102,7 @@ pub async fn execute_tool(
                     }
                 }
                 "list" => {
-                    let _ = app.emit("chat-token", format!("📂 *Listing {}*\n\n", path_str));
+                    emit_chat_token(app, session_id, format!("📂 *Listing {}*\n\n", path_str));
                     match resolve_file_path(path_str, true) {
                         Ok((p, _)) => {
                             match fs::metadata(&p) {
@@ -1143,10 +1151,7 @@ pub async fn execute_tool(
                 }
                 "rename" | "move" => {
                     let new_path = args["new_path"].as_str().unwrap_or("");
-                    let _ = app.emit(
-                        "chat-token",
-                        format!("🔁 *Moving {} -> {}*\n\n", path_str, new_path),
-                    );
+                    emit_chat_token(app, session_id, format!("🔁 *Moving {} -> {}*\n\n", path_str, new_path));
                     if new_path.is_empty() {
                         return "Error: new_path is required for move/rename.".to_string();
                     }
@@ -1200,7 +1205,7 @@ pub async fn execute_tool(
                 }
                 "patch" => {
                     let patch_str = args["patch"].as_str().unwrap_or("");
-                    let _ = app.emit("chat-token", format!("🩹 *Patching {}*\n\n", path_str));
+                    emit_chat_token(app, session_id, format!("🩹 *Patching {}*\n\n", path_str));
                     match resolve_file_path(path_str, true) {
                         Ok((p, _)) => {
                             let backup = match backup_protected_file(
@@ -1239,10 +1244,7 @@ pub async fn execute_tool(
                     }
                 }
                 "mkdir" => {
-                    let _ = app.emit(
-                        "chat-token",
-                        format!("📁 *Creating directory {}*\n\n", path_str),
-                    );
+                    emit_chat_token(app, session_id, format!("📁 *Creating directory {}*\n\n", path_str));
                     match resolve_safe_path_with_roots(
                         &root_dir,
                         accessible_skill_roots,
@@ -1262,7 +1264,7 @@ pub async fn execute_tool(
                     }
                 }
                 "delete" => {
-                    let _ = app.emit("chat-token", format!("🗑️ *Deleting {}*\n\n", path_str));
+                    emit_chat_token(app, session_id, format!("🗑️ *Deleting {}*\n\n", path_str));
                     match resolve_file_path(path_str, true) {
                         Ok((p, _)) => {
                             let backup = match backup_protected_file(
@@ -1304,8 +1306,9 @@ pub async fn execute_tool(
         "knowledge_graph" => {
             let query = args["query"].as_str().unwrap_or("").to_string();
             let engine = config.kg_engine.as_deref().unwrap_or("neo4j").to_string();
-            let _ = app.emit(
-                "chat-token",
+            emit_chat_token(
+                app,
+                session_id,
                 format!(
                     "🧠 *Querying Knowledge Graph ({}) with: {}...*\n\n",
                     engine, query

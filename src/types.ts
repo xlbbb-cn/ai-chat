@@ -79,10 +79,16 @@ export interface AgentOrchestration {
 }
 
 export interface AgentTaskEvent {
+  session_id: string;
   task_id: string;
   agent_id: string;
   agent_name: string;
   description?: string;
   summary?: string;
   error?: string;
+}
+
+export interface SessionRuntimeState {
+  status: "idle" | "working" | "error";
+  detail?: string;
 }

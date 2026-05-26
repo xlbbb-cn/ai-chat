@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { chatCompletion, getConfig, getAgentOrchestration, listMcpServers, listSubAgents, saveConfig, saveHistory, stopChatCompletion, confirmCommand } from "./api";
+import { chatCompletion, getConfig, getAgentOrchestration, listMcpServers, listSessionRuntimeStates, listSubAgents, saveConfig, saveHistory, stopChatCompletion, confirmCommand } from "./api";
 
 import { ChatMessage } from "./components/ChatMessage";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -9,7 +9,7 @@ import { HistoryPanel } from "./components/HistoryPanel";
 import { ToolsPanel } from "./components/ToolsPanel";
 import { McpPanel } from "./components/McpPanel";
 import { AgentsPanel } from "./components/AgentsPanel";
-import type { Message, AgentTaskEvent } from "./types";
+import type { Message, SessionRuntimeState } from "./types";
 import "./App.css";
 
 type Sidebar = "settings" | "skills" | "history" | "tools" | "mcp" | "agents" | null;
@@ -22,6 +22,19 @@ interface AgentStatus {
   tokens?: number;
 }
 
+interface UsageState {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens?: number;
+  max_tokens?: number;
+  usage_ratio?: number;
+}
+
+function derivePendingRetryMessageId(sessionMessages: Message[]): string | null {
+  const lastMsg = sessionMessages.length > 0 ? sessionMessages[sessionMessages.length - 1] : null;
+  return lastMsg?.role === "user" ? lastMsg.id : null;
+}
+
 export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -31,13 +44,7 @@ export default function App() {
   const [sidebar, setSidebar] = useState<Sidebar>(null);
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [usage, setUsage] = useState<{
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens?: number;
-    max_tokens?: number;
-    usage_ratio?: number;
-  } | null>(null);
+  const [usage, setUsage] = useState<UsageState | null>(null);
   const [maxTokens, setMaxTokens] = useState<number | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>(["gpt-4o-mini"]);
   const [selectedModel, setSelectedModel] = useState("gpt-4o-mini");
@@ -59,14 +66,44 @@ export default function App() {
   const [profileExporting, setProfileExporting] = useState(false);
   const [profileExportMessage, setProfileExportMessage] = useState("Exporting and compressing profile...");
   const [pendingRetryMessageId, setPendingRetryMessageId] = useState<string | null>(null);
+  const [sessionRuntimes, setSessionRuntimes] = useState<Record<string, SessionRuntimeState>>({});
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
+  const currentSessionRef = useRef(sessionId);
+  const activeStreamingSessionRef = useRef<string | null>(null);
+  const messagesRef = useRef<Message[]>([]);
+  const sessionMessagesRef = useRef<Record<string, Message[]>>({});
+  const sessionRetryRef = useRef<Record<string, string | null>>({});
+  const sessionAgentStatusesRef = useRef<Record<string, Record<string, AgentStatus>>>({});
+  const sessionUsageRef = useRef<Record<string, UsageState | null>>({});
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    currentSessionRef.current = sessionId;
+  }, [sessionId]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+    sessionMessagesRef.current[sessionId] = messages;
+  }, [messages, sessionId]);
+
+  useEffect(() => {
+    sessionRetryRef.current[sessionId] = pendingRetryMessageId;
+  }, [pendingRetryMessageId, sessionId]);
+
+  useEffect(() => {
+    sessionAgentStatusesRef.current[sessionId] = agentStatuses;
+  }, [agentStatuses, sessionId]);
+
+  useEffect(() => {
+    sessionUsageRef.current[sessionId] = usage;
+  }, [usage, sessionId]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -77,33 +114,42 @@ export default function App() {
 
   useEffect(() => {
     const unlisten = listen<{
+      session_id: string;
       prompt_tokens: number;
       completion_tokens: number;
       total_tokens?: number;
       max_tokens?: number;
       usage_ratio?: number;
     }>("chat-usage", (e) => {
-      setUsage((prevUsage) => {
+      const { session_id, ...payload } = e.payload;
+      const prevUsage = sessionUsageRef.current[session_id];
+
+      const nextUsage = (() => {
         // If this is the first usage data, return it as-is
-        if (!prevUsage) return e.payload;
+        if (!prevUsage) return payload;
 
         // Accumulate token counts within the same session
         // (for session history), but preserve current request's max_tokens and usage_ratio
         const prevTotal = prevUsage.total_tokens ?? prevUsage.prompt_tokens + prevUsage.completion_tokens;
-        const currentTotal = e.payload.total_tokens ?? e.payload.prompt_tokens + e.payload.completion_tokens;
+        const currentTotal = payload.total_tokens ?? payload.prompt_tokens + payload.completion_tokens;
 
         return {
           // Accumulated token counts for session history display
-          prompt_tokens: prevUsage.prompt_tokens + e.payload.prompt_tokens,
-          completion_tokens: prevUsage.completion_tokens + e.payload.completion_tokens,
+          prompt_tokens: prevUsage.prompt_tokens + payload.prompt_tokens,
+          completion_tokens: prevUsage.completion_tokens + payload.completion_tokens,
           total_tokens: prevTotal + currentTotal,
           // Keep the current request's max_tokens for ratio calculation (not accumulated)
-          max_tokens: e.payload.max_tokens ?? prevUsage.max_tokens,
+          max_tokens: payload.max_tokens ?? prevUsage.max_tokens,
           // Keep the current request's usage_ratio (not accumulated)
           // This correctly reflects the current request's token usage within its max_tokens limit
-          usage_ratio: e.payload.usage_ratio,
+          usage_ratio: payload.usage_ratio,
         };
-      });
+      })();
+
+      sessionUsageRef.current[session_id] = nextUsage;
+      if (currentSessionRef.current === session_id) {
+        setUsage(nextUsage);
+      }
     });
     return () => {
       unlisten.then((fn) => fn());
@@ -161,6 +207,70 @@ export default function App() {
     setConfirmPassword("");
   }, [confirmDialog, confirmUsername, confirmPassword]);
 
+  const persistHistoryRecord = useCallback((targetSessionId: string, role: string, content: string) => {
+    saveHistory(targetSessionId, role, content)
+      .then(() => setHistoryRefreshKey((prev) => prev + 1))
+      .catch(console.error);
+  }, []);
+
+  const setSessionRuntime = useCallback((targetSessionId: string, runtime: SessionRuntimeState) => {
+    setSessionRuntimes((prev) => ({ ...prev, [targetSessionId]: runtime }));
+  }, []);
+
+  const updateSessionMessages = useCallback((
+    targetSessionId: string,
+    updater: (prev: Message[]) => Message[],
+  ) => {
+    const previous = sessionMessagesRef.current[targetSessionId]
+      ?? (currentSessionRef.current === targetSessionId ? messagesRef.current : []);
+    const next = updater(previous);
+    sessionMessagesRef.current[targetSessionId] = next;
+    if (currentSessionRef.current === targetSessionId) {
+      messagesRef.current = next;
+      setMessages(next);
+    }
+  }, []);
+
+  const setSessionPendingRetry = useCallback((targetSessionId: string, nextRetryId: string | null) => {
+    sessionRetryRef.current[targetSessionId] = nextRetryId;
+    if (currentSessionRef.current === targetSessionId) {
+      setPendingRetryMessageId(nextRetryId);
+    }
+  }, []);
+
+  const updateSessionAgentStatuses = useCallback((
+    targetSessionId: string,
+    updater: (prev: Record<string, AgentStatus>) => Record<string, AgentStatus>,
+  ) => {
+    const previous = sessionAgentStatusesRef.current[targetSessionId] ?? {};
+    const next = updater(previous);
+    sessionAgentStatusesRef.current[targetSessionId] = next;
+    if (currentSessionRef.current === targetSessionId) {
+      setAgentStatuses(next);
+    }
+  }, []);
+
+  const activateSessionView = useCallback((targetSessionId: string, fallbackMessages: Message[]) => {
+    const nextMessages = sessionMessagesRef.current[targetSessionId] ?? fallbackMessages;
+    const nextRetryId = sessionRetryRef.current[targetSessionId] ?? derivePendingRetryMessageId(nextMessages);
+    const nextAgentStatuses = sessionAgentStatusesRef.current[targetSessionId] ?? {};
+    const nextUsage = sessionUsageRef.current[targetSessionId] ?? null;
+
+    currentSessionRef.current = targetSessionId;
+    sessionMessagesRef.current[targetSessionId] = nextMessages;
+    sessionRetryRef.current[targetSessionId] = nextRetryId;
+    sessionAgentStatusesRef.current[targetSessionId] = nextAgentStatuses;
+    sessionUsageRef.current[targetSessionId] = nextUsage;
+    messagesRef.current = nextMessages;
+
+    setSessionId(targetSessionId);
+    setMessages(nextMessages);
+    setPendingRetryMessageId(nextRetryId);
+    setAgentStatuses(nextAgentStatuses);
+    setUsage(nextUsage);
+    setError(null);
+  }, []);
+
   useEffect(() => {
     getConfig()
       .then((cfg) => {
@@ -179,6 +289,43 @@ export default function App() {
     listMcpServers()
       .then((servers) => setActiveMcpCount(servers.filter((s) => s.enabled).length))
       .catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+
+    const refreshRuntimeStates = async () => {
+      try {
+        const runtimeRecords = await listSessionRuntimeStates();
+        if (disposed) return;
+        setSessionRuntimes((prev) => {
+          const next = { ...prev };
+          for (const record of runtimeRecords) {
+            const previous = next[record.session_id];
+            next[record.session_id] = {
+              status: record.status,
+              detail:
+                record.status === "working"
+                  ? previous?.detail ?? "Worker"
+                  : previous?.status === "error"
+                    ? previous.detail
+                    : "Idle",
+            };
+          }
+          return next;
+        });
+      } catch (err) {
+        console.error(err);
+      }
+    };
+
+    refreshRuntimeStates();
+    const timer = window.setInterval(refreshRuntimeStates, 1000);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
   }, []);
 
   useEffect(() => {
@@ -244,81 +391,6 @@ export default function App() {
       .catch(console.error);
   }, [activeSkillIds, skillsLoadedFromConfig]);
 
-  // Agent task progress tracking
-  useEffect(() => {
-    const unlisteners: Promise<() => void>[] = [];
-    unlisteners.push(
-      listen<AgentTaskEvent>("agent-task-start", (e) => {
-        const { agent_id, agent_name, description, task_id } = e.payload;
-        setAgentStatuses((prev) => ({
-          ...prev,
-          [agent_id]: { status: "running", description },
-        }));
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `agent-progress-${task_id}`,
-            role: "system" as const,
-            content: `🤖 **[${agent_name}]** 正在执行: ${description ?? ""}`,
-          },
-        ]);
-      }),
-      listen<AgentTaskEvent>("agent-task-done", (e) => {
-        const { agent_id, agent_name, summary, task_id } = e.payload;
-        setAgentStatuses((prev) => ({
-          ...prev,
-          [agent_id]: { status: "done", summary: summary ?? "" },
-        }));
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === `agent-progress-${task_id}`
-              ? { ...m, content: `✅ **[${agent_name}]** 完成` }
-              : m
-          )
-        );
-      }),
-      listen<AgentTaskEvent>("agent-task-error", (e) => {
-        const { agent_id, agent_name, error, task_id } = e.payload;
-        setAgentStatuses((prev) => ({
-          ...prev,
-          [agent_id]: { status: "error", error: error ?? "" },
-        }));
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === `agent-progress-${task_id}`
-              ? { ...m, content: `❌ **[${agent_name}]** 失败: ${error}` }
-              : m
-          )
-        );
-      }),
-      listen("agent-plan-start", (e: { payload: { task_count: number } }) => {
-        if (e.payload.task_count > 0) {
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: "agent-progress-plan",
-              role: "system" as const,
-              content: `🗂 **规划完成** — 共 ${e.payload.task_count} 个任务`,
-            },
-          ]);
-        }
-      }),
-      listen("agent-aggregate-start", () => {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: "agent-progress-aggregate",
-            role: "system" as const,
-            content: `📝 **正在汇总所有子任务结果...**`,
-          },
-        ]);
-      }),
-    );
-    return () => {
-      unlisteners.forEach((p) => p.then((fn) => fn()));
-    };
-  }, []);
-
   const sendMessage = useCallback(async () => {
     if (profileExporting) return;
 
@@ -330,31 +402,35 @@ export default function App() {
       text += `\n\n<details><summary>Attached File: ${file.name}</summary>\n\n\`\`\`${ext}\n${file.content}\n\`\`\`\n</details>`;
     }
     text = text.trim();
-    setPendingRetryMessageId(null);
+    const targetSessionId = sessionId;
+    const baseMessages = sessionMessagesRef.current[targetSessionId] ?? messagesRef.current;
 
     const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: text };
     const assistantId = crypto.randomUUID();
     const assistantMsg: Message = { id: assistantId, role: "assistant", content: "", streaming: true };
 
-    setMessages((prev) => [...prev, userMsg, assistantMsg]);
+    setSessionPendingRetry(targetSessionId, null);
+    updateSessionMessages(targetSessionId, (prev) => [...prev, userMsg, assistantMsg]);
     setInput("");
     setAttachments([]);
     setStreaming(true);
+    activeStreamingSessionRef.current = targetSessionId;
     setError(null);
+    setSessionRuntime(targetSessionId, { status: "working", detail: useAgentsEnabled ? "Agents" : "LLM" });
 
-    const history = [...messages, userMsg]
+    const history = [...baseMessages, userMsg]
       .filter((m) => !m.streaming && !m.id.startsWith("agent-progress-"))
       .map((m) => ({ role: m.role, content: m.content }));
 
-    saveHistory(sessionId, "user", text);
+    persistHistoryRecord(targetSessionId, "user", text);
 
     let accumulatedContent = "";
     let accumulatedReasoning = "";
 
-    const cleanup = await chatCompletion(history, activeSkillIds, sessionId, selectedModel, {
+    const cleanup = await chatCompletion(history, activeSkillIds, targetSessionId, selectedModel, {
       onToken(token) {
         accumulatedContent += token;
-        setMessages((prev) =>
+        updateSessionMessages(targetSessionId, (prev) =>
           prev.map((m) =>
             m.id === assistantId ? { ...m, content: accumulatedContent } : m
           )
@@ -362,31 +438,104 @@ export default function App() {
       },
       onReasoningToken(token) {
         accumulatedReasoning += token;
-        setMessages((prev) =>
+        updateSessionMessages(targetSessionId, (prev) =>
           prev.map((m) =>
             m.id === assistantId ? { ...m, reasoning_content: accumulatedReasoning } : m
           )
         );
+      },
+      onAgentTaskStart(e) {
+        updateSessionAgentStatuses(targetSessionId, (prev) => ({
+          ...prev,
+          [e.agent_id]: { status: "running", description: e.description },
+        }));
+        updateSessionMessages(targetSessionId, (prev) => [
+          ...prev,
+          {
+            id: `agent-progress-${e.task_id}`,
+            role: "system",
+            content: `🤖 **[${e.agent_name}]** 正在执行: ${e.description ?? ""}`,
+          },
+        ]);
+        setSessionRuntime(targetSessionId, { status: "working", detail: e.agent_name });
+      },
+      onAgentTaskDone(e) {
+        updateSessionAgentStatuses(targetSessionId, (prev) => ({
+          ...prev,
+          [e.agent_id]: { status: "done", summary: e.summary ?? "" },
+        }));
+        updateSessionMessages(targetSessionId, (prev) =>
+          prev.map((m) =>
+            m.id === `agent-progress-${e.task_id}`
+              ? { ...m, content: `✅ **[${e.agent_name}]** 完成` }
+              : m
+          )
+        );
+      },
+      onAgentTaskError(e) {
+        updateSessionAgentStatuses(targetSessionId, (prev) => ({
+          ...prev,
+          [e.agent_id]: { status: "error", error: e.error ?? "" },
+        }));
+        updateSessionMessages(targetSessionId, (prev) =>
+          prev.map((m) =>
+            m.id === `agent-progress-${e.task_id}`
+              ? { ...m, content: `❌ **[${e.agent_name}]** 失败: ${e.error}` }
+              : m
+          )
+        );
+        setSessionRuntime(targetSessionId, { status: "error", detail: e.agent_name });
+      },
+      onAgentPlanStart(taskCount) {
+        if (taskCount > 0) {
+          updateSessionMessages(targetSessionId, (prev) => [
+            ...prev,
+            {
+              id: "agent-progress-plan",
+              role: "system",
+              content: `🗂 **规划完成** — 共 ${taskCount} 个任务`,
+            },
+          ]);
+          setSessionRuntime(targetSessionId, { status: "working", detail: "Planning" });
+        }
+      },
+      onAgentAggregateStart() {
+        updateSessionMessages(targetSessionId, (prev) => [
+          ...prev,
+          {
+            id: "agent-progress-aggregate",
+            role: "system",
+            content: "📝 **正在汇总所有子任务结果...**",
+          },
+        ]);
+        setSessionRuntime(targetSessionId, { status: "working", detail: "Aggregating" });
       },
       onDone() {
         const finalContentToSave = accumulatedReasoning
           ? `<details><summary>Thought Process</summary>\n\n${accumulatedReasoning}\n</details>\n\n${accumulatedContent}`
           : accumulatedContent;
 
-        saveHistory(sessionId, "assistant", finalContentToSave);
+        persistHistoryRecord(targetSessionId, "assistant", finalContentToSave);
         // Remove all agent progress system messages and finalize assistant message
-        setMessages((prev) =>
+        updateSessionMessages(targetSessionId, (prev) =>
           prev
             .filter((m) => !m.id.startsWith("agent-progress-"))
             .map((m) => (m.id === assistantId ? { ...m, streaming: false } : m))
         );
-        setAgentStatuses({});
-        setStreaming(false);
-        cleanupRef.current = null;
+        updateSessionAgentStatuses(targetSessionId, () => ({}));
+        setSessionPendingRetry(targetSessionId, null);
+        setSessionRuntime(targetSessionId, { status: "idle", detail: "Idle" });
+        if (activeStreamingSessionRef.current === targetSessionId) {
+          setStreaming(false);
+          activeStreamingSessionRef.current = null;
+          cleanupRef.current = null;
+        }
       },
       onError(err) {
-        setError(err);
-        setMessages((prev) =>
+        if (currentSessionRef.current === targetSessionId) {
+          setError(err);
+        }
+        updateSessionMessages(targetSessionId, (prev) =>
           prev
             .filter((m) => !m.id.startsWith("agent-progress-"))
             .map((m) =>
@@ -395,36 +544,45 @@ export default function App() {
                 : m
             )
         );
-        setAgentStatuses({});
-        setStreaming(false);
-        cleanupRef.current = null;
+        updateSessionAgentStatuses(targetSessionId, () => ({}));
+        setSessionPendingRetry(targetSessionId, userMsg.id);
+        setSessionRuntime(targetSessionId, { status: "error", detail: "Failed" });
+        if (activeStreamingSessionRef.current === targetSessionId) {
+          setStreaming(false);
+          activeStreamingSessionRef.current = null;
+          cleanupRef.current = null;
+        }
       },
     }, useAgentsEnabled);
 
     cleanupRef.current = cleanup;
-  }, [input, messages, streaming, profileExporting, activeSkillIds, sessionId, attachments, selectedModel, useAgentsEnabled]);
+  }, [input, streaming, profileExporting, activeSkillIds, sessionId, attachments, selectedModel, useAgentsEnabled, persistHistoryRecord, setSessionPendingRetry, updateSessionMessages, setSessionRuntime, updateSessionAgentStatuses]);
 
   const retryPendingUserMessage = useCallback(async () => {
     if (streaming || !pendingRetryMessageId) return;
 
+    const targetSessionId = sessionId;
+
     const assistantId = crypto.randomUUID();
     const assistantMsg: Message = { id: assistantId, role: "assistant", content: "", streaming: true };
 
-    setMessages((prev) => [...prev, assistantMsg]);
+    updateSessionMessages(targetSessionId, (prev) => [...prev, assistantMsg]);
     setStreaming(true);
+    activeStreamingSessionRef.current = targetSessionId;
     setError(null);
+    setSessionRuntime(targetSessionId, { status: "working", detail: useAgentsEnabled ? "Agents" : "LLM" });
 
-    const history = [...messages]
+    const history = [...(sessionMessagesRef.current[targetSessionId] ?? messagesRef.current)]
       .filter((m) => !m.streaming && !m.id.startsWith("agent-progress-"))
       .map((m) => ({ role: m.role, content: m.content }));
 
     let accumulatedContent = "";
     let accumulatedReasoning = "";
 
-    const cleanup = await chatCompletion(history, activeSkillIds, sessionId, selectedModel, {
+    const cleanup = await chatCompletion(history, activeSkillIds, targetSessionId, selectedModel, {
       onToken(token) {
         accumulatedContent += token;
-        setMessages((prev) =>
+        updateSessionMessages(targetSessionId, (prev) =>
           prev.map((m) =>
             m.id === assistantId ? { ...m, content: accumulatedContent } : m
           )
@@ -432,31 +590,103 @@ export default function App() {
       },
       onReasoningToken(token) {
         accumulatedReasoning += token;
-        setMessages((prev) =>
+        updateSessionMessages(targetSessionId, (prev) =>
           prev.map((m) =>
             m.id === assistantId ? { ...m, reasoning_content: accumulatedReasoning } : m
           )
         );
+      },
+      onAgentTaskStart(e) {
+        updateSessionAgentStatuses(targetSessionId, (prev) => ({
+          ...prev,
+          [e.agent_id]: { status: "running", description: e.description },
+        }));
+        updateSessionMessages(targetSessionId, (prev) => [
+          ...prev,
+          {
+            id: `agent-progress-${e.task_id}`,
+            role: "system",
+            content: `🤖 **[${e.agent_name}]** 正在执行: ${e.description ?? ""}`,
+          },
+        ]);
+        setSessionRuntime(targetSessionId, { status: "working", detail: e.agent_name });
+      },
+      onAgentTaskDone(e) {
+        updateSessionAgentStatuses(targetSessionId, (prev) => ({
+          ...prev,
+          [e.agent_id]: { status: "done", summary: e.summary ?? "" },
+        }));
+        updateSessionMessages(targetSessionId, (prev) =>
+          prev.map((m) =>
+            m.id === `agent-progress-${e.task_id}`
+              ? { ...m, content: `✅ **[${e.agent_name}]** 完成` }
+              : m
+          )
+        );
+      },
+      onAgentTaskError(e) {
+        updateSessionAgentStatuses(targetSessionId, (prev) => ({
+          ...prev,
+          [e.agent_id]: { status: "error", error: e.error ?? "" },
+        }));
+        updateSessionMessages(targetSessionId, (prev) =>
+          prev.map((m) =>
+            m.id === `agent-progress-${e.task_id}`
+              ? { ...m, content: `❌ **[${e.agent_name}]** 失败: ${e.error}` }
+              : m
+          )
+        );
+        setSessionRuntime(targetSessionId, { status: "error", detail: e.agent_name });
+      },
+      onAgentPlanStart(taskCount) {
+        if (taskCount > 0) {
+          updateSessionMessages(targetSessionId, (prev) => [
+            ...prev,
+            {
+              id: "agent-progress-plan",
+              role: "system",
+              content: `🗂 **规划完成** — 共 ${taskCount} 个任务`,
+            },
+          ]);
+          setSessionRuntime(targetSessionId, { status: "working", detail: "Planning" });
+        }
+      },
+      onAgentAggregateStart() {
+        updateSessionMessages(targetSessionId, (prev) => [
+          ...prev,
+          {
+            id: "agent-progress-aggregate",
+            role: "system",
+            content: "📝 **正在汇总所有子任务结果...**",
+          },
+        ]);
+        setSessionRuntime(targetSessionId, { status: "working", detail: "Aggregating" });
       },
       onDone() {
         const finalContentToSave = accumulatedReasoning
           ? `<details><summary>Thought Process</summary>\n\n${accumulatedReasoning}\n</details>\n\n${accumulatedContent}`
           : accumulatedContent;
 
-        saveHistory(sessionId, "assistant", finalContentToSave);
-        setMessages((prev) =>
+        persistHistoryRecord(targetSessionId, "assistant", finalContentToSave);
+        updateSessionMessages(targetSessionId, (prev) =>
           prev
             .filter((m) => !m.id.startsWith("agent-progress-"))
             .map((m) => (m.id === assistantId ? { ...m, streaming: false } : m))
         );
-        setPendingRetryMessageId(null);
-        setAgentStatuses({});
-        setStreaming(false);
-        cleanupRef.current = null;
+        setSessionPendingRetry(targetSessionId, null);
+        updateSessionAgentStatuses(targetSessionId, () => ({}));
+        setSessionRuntime(targetSessionId, { status: "idle", detail: "Idle" });
+        if (activeStreamingSessionRef.current === targetSessionId) {
+          setStreaming(false);
+          activeStreamingSessionRef.current = null;
+          cleanupRef.current = null;
+        }
       },
       onError(err) {
-        setError(err);
-        setMessages((prev) =>
+        if (currentSessionRef.current === targetSessionId) {
+          setError(err);
+        }
+        updateSessionMessages(targetSessionId, (prev) =>
           prev
             .filter((m) => !m.id.startsWith("agent-progress-"))
             .map((m) =>
@@ -465,14 +695,18 @@ export default function App() {
                 : m
             )
         );
-        setAgentStatuses({});
-        setStreaming(false);
-        cleanupRef.current = null;
+        updateSessionAgentStatuses(targetSessionId, () => ({}));
+        setSessionRuntime(targetSessionId, { status: "error", detail: "Failed" });
+        if (activeStreamingSessionRef.current === targetSessionId) {
+          setStreaming(false);
+          activeStreamingSessionRef.current = null;
+          cleanupRef.current = null;
+        }
       },
     }, useAgentsEnabled);
 
     cleanupRef.current = cleanup;
-  }, [messages, streaming, pendingRetryMessageId, activeSkillIds, sessionId, selectedModel, useAgentsEnabled]);
+  }, [streaming, pendingRetryMessageId, activeSkillIds, sessionId, selectedModel, useAgentsEnabled, updateSessionMessages, setSessionRuntime, updateSessionAgentStatuses, setSessionPendingRetry, persistHistoryRecord]);
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (profileExporting) {
@@ -494,11 +728,18 @@ export default function App() {
     if (streaming) {
       await stopStreaming();
     }
+    const nextSessionId = crypto.randomUUID();
+    currentSessionRef.current = nextSessionId;
+    sessionMessagesRef.current[nextSessionId] = [];
+    sessionRetryRef.current[nextSessionId] = null;
+    sessionAgentStatusesRef.current[nextSessionId] = {};
+    sessionUsageRef.current[nextSessionId] = null;
     setMessages([]);
     setError(null);
     setUsage(null);
+    setAgentStatuses({});
     setPendingRetryMessageId(null);
-    setSessionId(crypto.randomUUID());
+    setSessionId(nextSessionId);
   }
 
   const renderConfirmDialog = () => {
@@ -588,8 +829,13 @@ export default function App() {
   };
 
   async function stopStreaming() {
+    const targetSessionId = activeStreamingSessionRef.current;
+    if (!targetSessionId) {
+      setStreaming(false);
+      return;
+    }
     try {
-      await stopChatCompletion();
+      await stopChatCompletion(targetSessionId);
     } catch (err) {
       setError(String(err));
     }
@@ -599,16 +845,21 @@ export default function App() {
       cleanupRef.current = null;
     }
 
-    setMessages((prev) =>
-      prev.map((m) => {
-        if (!m.streaming) return m;
-        const stopSuffix = "\n\n[已停止生成]";
-        const content = m.content.includes("[已停止生成]")
-          ? m.content
-          : (m.content || "") + stopSuffix;
-        return { ...m, content, streaming: false };
-      })
-    );
+    if (targetSessionId) {
+      updateSessionMessages(targetSessionId, (prev) =>
+        prev.map((m) => {
+          if (!m.streaming) return m;
+          const stopSuffix = "\n\n[已停止生成]";
+          const content = m.content.includes("[已停止生成]")
+            ? m.content
+            : (m.content || "") + stopSuffix;
+          return { ...m, content, streaming: false };
+        })
+      );
+      updateSessionAgentStatuses(targetSessionId, () => ({}));
+      setSessionRuntime(targetSessionId, { status: "idle", detail: "Stopped" });
+    }
+    activeStreamingSessionRef.current = null;
     setStreaming(false);
   }
 
@@ -669,18 +920,10 @@ export default function App() {
           {sidebar === "history" && (
             <HistoryPanel
               currentSessionId={sessionId}
+              runtimeStates={sessionRuntimes}
+              refreshKey={historyRefreshKey}
               onLoad={(sid, msgs) => {
-                if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null; }
-                setStreaming(false);
-                setMessages(msgs);
-                setSessionId(sid);
-
-                const lastMsg = msgs.length > 0 ? msgs[msgs.length - 1] : null;
-                if (lastMsg?.role === "user") {
-                  setPendingRetryMessageId(lastMsg.id);
-                } else {
-                  setPendingRetryMessageId(null);
-                }
+                activateSessionView(sid, msgs);
               }}
               onClose={() => setSidebar(null)}
             />

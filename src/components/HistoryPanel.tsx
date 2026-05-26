@@ -1,22 +1,24 @@
 import { useState, useEffect, useMemo } from "react";
 import { loadHistory, deleteHistory } from "../api";
 import type { HistoryRecord } from "../api";
-import type { Message } from "../types";
+import type { Message, SessionRuntimeState } from "../types";
 import "./HistoryPanel.css";
 
 interface Props {
   currentSessionId: string;
+  runtimeStates: Record<string, SessionRuntimeState>;
+  refreshKey: number;
   onLoad: (sessionId: string, messages: Message[]) => void;
   onClose: () => void;
 }
 
-export function HistoryPanel({ currentSessionId, onLoad, onClose }: Props) {
+export function HistoryPanel({ currentSessionId, runtimeStates, refreshKey, onLoad, onClose }: Props) {
   const [records, setRecords] = useState<HistoryRecord[]>([]);
   const [searchKeyword, setSearchKeyword] = useState("");
 
   useEffect(() => {
     loadHistory().then(setRecords).catch(console.error);
-  }, []);
+  }, [refreshKey]);
 
   const sessions = useMemo(() => {
     const map = new Map<string, HistoryRecord[]>();
@@ -84,6 +86,13 @@ export function HistoryPanel({ currentSessionId, onLoad, onClose }: Props) {
           filteredSessions.map(([sid, recs]) => {
             const preview = recs.find((r) => r.role === "user")?.content ?? "(empty)";
             const isCurrent = sid === currentSessionId;
+            const runtime = runtimeStates[sid];
+            const runtimeLabel = runtime?.status === "working"
+              ? "Working"
+              : runtime?.status === "error"
+                ? "Error"
+                : "Idle";
+            const runtimeClass = runtime?.status ?? "idle";
             return (
               <div
                 key={sid}
@@ -96,6 +105,9 @@ export function HistoryPanel({ currentSessionId, onLoad, onClose }: Props) {
                   </span>
                   <span className="history-meta">
                     {recs.length} messages{isCurrent ? " · current" : ""}
+                    <span className={`history-runtime-badge ${runtimeClass}`}>
+                      {runtimeLabel}{runtime?.detail ? ` / ${runtime.detail}` : ""}
+                    </span>
                   </span>
                 </div>
                 <button

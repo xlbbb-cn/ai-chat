@@ -2,6 +2,34 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import type { AppConfig, Message, Skill, McpServer, SubAgent, AgentOrchestration, AgentTaskEvent } from "./types";
 
+interface SessionTokenEvent {
+  session_id: string;
+  token: string;
+}
+
+interface SessionDoneEvent {
+  session_id: string;
+}
+
+interface SessionErrorEvent {
+  session_id: string;
+  error: string;
+}
+
+interface AgentPlanEvent {
+  session_id: string;
+  task_count: number;
+}
+
+interface AgentAggregateEvent {
+  session_id: string;
+}
+
+export interface SessionRuntimeRecord {
+  session_id: string;
+  status: "working" | "idle";
+}
+
 export async function getConfig(): Promise<AppConfig> {
   return invoke("get_config");
 }
@@ -45,8 +73,12 @@ export async function deleteSkill(name: string): Promise<void> {
   return invoke("delete_skill", { name });
 }
 
-export async function stopChatCompletion(): Promise<void> {
-  return invoke("stop_chat_completion");
+export async function stopChatCompletion(sessionId: string): Promise<void> {
+  return invoke("stop_chat_completion", { sessionId });
+}
+
+export async function listSessionRuntimeStates(): Promise<SessionRuntimeRecord[]> {
+  return invoke("list_session_runtime_states");
 }
 
 export interface StreamCallbacks {
@@ -76,35 +108,44 @@ export async function chatCompletion(
     unlisteners.length = 0;
   };
 
-  const unToken = await listen<string>("chat-token", (e) =>
-    callbacks.onToken(e.payload)
-  );
-  const unReasoning = await listen<string>("chat-reasoning-token", (e) => {
+  const unToken = await listen<SessionTokenEvent>("chat-token", (e) => {
+    if (e.payload.session_id !== sessionId) return;
+    callbacks.onToken(e.payload.token);
+  });
+  const unReasoning = await listen<SessionTokenEvent>("chat-reasoning-token", (e) => {
+    if (e.payload.session_id !== sessionId) return;
     if (callbacks.onReasoningToken) {
-      callbacks.onReasoningToken(e.payload);
+      callbacks.onReasoningToken(e.payload.token);
     }
   });
-  const unDone = await listen<void>("chat-done", () => {
+  const unDone = await listen<SessionDoneEvent>("chat-done", (e) => {
+    if (e.payload.session_id !== sessionId) return;
     callbacks.onDone();
     cleanup();
   });
-  const unError = await listen<string>("chat-error", (e) => {
-    callbacks.onError(e.payload);
+  const unError = await listen<SessionErrorEvent>("chat-error", (e) => {
+    if (e.payload.session_id !== sessionId) return;
+    callbacks.onError(e.payload.error);
     cleanup();
   });
   const unTaskStart = await listen<AgentTaskEvent>("agent-task-start", (e) => {
+    if (e.payload.session_id !== sessionId) return;
     callbacks.onAgentTaskStart?.(e.payload);
   });
   const unTaskDone = await listen<AgentTaskEvent>("agent-task-done", (e) => {
+    if (e.payload.session_id !== sessionId) return;
     callbacks.onAgentTaskDone?.(e.payload);
   });
   const unTaskError = await listen<AgentTaskEvent>("agent-task-error", (e) => {
+    if (e.payload.session_id !== sessionId) return;
     callbacks.onAgentTaskError?.(e.payload);
   });
-  const unPlanStart = await listen<{ task_count: number }>("agent-plan-start", (e) => {
+  const unPlanStart = await listen<AgentPlanEvent>("agent-plan-start", (e) => {
+    if (e.payload.session_id !== sessionId) return;
     callbacks.onAgentPlanStart?.(e.payload.task_count);
   });
-  const unAggStart = await listen<void>("agent-aggregate-start", () => {
+  const unAggStart = await listen<AgentAggregateEvent>("agent-aggregate-start", (e) => {
+    if (e.payload.session_id !== sessionId) return;
     callbacks.onAgentAggregateStart?.();
   });
 
