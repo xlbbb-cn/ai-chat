@@ -405,6 +405,7 @@ export default function App() {
                 : m
             )
         );
+        setPendingRetryMessageId(userMsg.id);
         setAgentStatuses({});
         setStreaming(false);
         cleanupRef.current = null;
