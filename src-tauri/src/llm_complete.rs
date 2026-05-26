@@ -4,6 +4,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::{agents, db, mcp, skills, tools, AppState};
@@ -62,6 +63,58 @@ const CONTEXT_KEEP_RECENT_MESSAGES: usize = 12;
 const CONTEXT_SUMMARY_MARKER: &str = "INTERNAL CONTEXT - SESSION SUMMARY";
 const CONTEXT_SUMMARY_MAX_LINES: usize = 120;
 const DEFAULT_MODEL_MAX_TOKENS: u32 = 131_072;
+const STREAM_MAX_RETRIES: usize = 3;
+const STREAM_RETRY_BACKOFF_MS: [u64; 2] = [300, 900];
+
+fn retry_backoff_ms(attempt: usize) -> u64 {
+    let idx = attempt.saturating_sub(1).min(STREAM_RETRY_BACKOFF_MS.len());
+    STREAM_RETRY_BACKOFF_MS
+        .get(idx)
+        .copied()
+        .unwrap_or(1500)
+}
+
+fn is_retryable_network_error(err: &str) -> bool {
+    let lower = err.to_ascii_lowercase();
+    let patterns = [
+        "socket connection was closed unexpectedly",
+        "connection reset",
+        "broken pipe",
+        "connection aborted",
+        "timed out",
+        "timeout",
+        "unexpected eof",
+        "incomplete message",
+        "stream error",
+    ];
+    patterns.iter().any(|p| lower.contains(p))
+}
+
+fn extract_upstream_error_message(body: &str) -> String {
+    serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|v| {
+            v.get("error")
+                .and_then(|e| e.get("message"))
+                .and_then(|m| m.as_str())
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_else(|| body.to_string())
+}
+
+fn is_retryable_http_error_body(body: &str) -> bool {
+    is_retryable_network_error(&extract_upstream_error_message(body))
+}
+
+fn build_http_client() -> Result<Client, String> {
+    Client::builder()
+        .connect_timeout(Duration::from_secs(12))
+        .timeout(Duration::from_secs(300))
+        .pool_idle_timeout(Duration::from_secs(90))
+        .tcp_keepalive(Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {e}"))
+}
 
 fn truncate_text(value: &str, max_chars: usize) -> String {
     value.chars().take(max_chars).collect::<String>()
@@ -263,47 +316,54 @@ pub async fn stream_llm_request(
     cancelled: &AtomicBool,
     opts: StreamOptions<'_>,
 ) -> Result<StreamResult, String> {
-    let res = client
-        .post(url)
-        .bearer_auth(api_key)
-        .json(&req_body)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let mut last_err: Option<String> = None;
 
-    if !res.status().is_success() {
-        let err = res.text().await.unwrap_or_default();
-        let _ = app.emit("chat-error", err.clone());
-        return Err(err);
-    }
+    for attempt in 1..=STREAM_MAX_RETRIES {
+        let res = match client
+            .post(url)
+            .bearer_auth(api_key)
+            .json(&req_body)
+            .send()
+            .await
+        {
+            Ok(res) => res,
+            Err(err) => {
+                let err = err.to_string();
+                let retryable = is_retryable_network_error(&err) && attempt < STREAM_MAX_RETRIES;
+                last_err = Some(err.clone());
+                if retryable {
+                    tokio::time::sleep(Duration::from_millis(retry_backoff_ms(attempt))).await;
+                    continue;
+                }
+                return Err(err);
+            }
+        };
 
-    let mut finish_reason = String::new();
-    let mut tool_calls: Vec<(String, String, String)> = Vec::new();
-    let mut content = String::new();
-    let mut prompt_tokens: u32 = 0;
-    let mut completion_tokens: u32 = 0;
-    let mut got_tool_calls = false;
-
-    let mut stream = res.bytes_stream();
-    let mut buffer = String::new();
-
-    'stream_loop: while let Some(chunk) = stream.next().await {
-        if cancelled.load(Ordering::SeqCst) {
-            return Ok(StreamResult {
-                finish_reason: "cancelled".into(),
-                tool_calls: vec![],
-                content,
-                prompt_tokens,
-                completion_tokens,
-            });
+        if !res.status().is_success() {
+            let err = res.text().await.unwrap_or_default();
+            let retryable =
+                is_retryable_http_error_body(&err) && attempt < STREAM_MAX_RETRIES;
+            last_err = Some(err.clone());
+            if retryable {
+                tokio::time::sleep(Duration::from_millis(retry_backoff_ms(attempt))).await;
+                continue;
+            }
+            let _ = app.emit("chat-error", err.clone());
+            return Err(err);
         }
-        let bytes = chunk.map_err(|e| e.to_string())?;
-        buffer.push_str(&String::from_utf8_lossy(&bytes));
 
-        while let Some(idx) = buffer.find('\n') {
-            let line = buffer[..idx].to_string();
-            buffer.drain(..=idx);
+        let mut finish_reason = String::new();
+        let mut tool_calls: Vec<(String, String, String)> = Vec::new();
+        let mut content = String::new();
+        let mut prompt_tokens: u32 = 0;
+        let mut completion_tokens: u32 = 0;
+        let mut got_tool_calls = false;
+        let mut stream_error: Option<String> = None;
 
+        let mut stream = res.bytes_stream();
+        let mut buffer = String::new();
+
+        'stream_loop: while let Some(chunk) = stream.next().await {
             if cancelled.load(Ordering::SeqCst) {
                 return Ok(StreamResult {
                     finish_reason: "cancelled".into(),
@@ -313,116 +373,155 @@ pub async fn stream_llm_request(
                     completion_tokens,
                 });
             }
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            if line == "data: [DONE]" {
-                break 'stream_loop;
-            }
-            let Some(json_str) = line.strip_prefix("data: ") else {
-                continue;
+            let bytes = match chunk {
+                Ok(bytes) => bytes,
+                Err(err) => {
+                    let err = err.to_string();
+                    let can_retry = is_retryable_network_error(&err)
+                        && content.is_empty()
+                        && tool_calls.is_empty()
+                        && attempt < STREAM_MAX_RETRIES;
+                    if can_retry {
+                        stream_error = Some(err);
+                        break 'stream_loop;
+                    }
+                    return Err(err);
+                }
             };
-            let Ok(parsed) = serde_json::from_str::<Value>(json_str) else {
-                continue;
-            };
+            buffer.push_str(&String::from_utf8_lossy(&bytes));
 
-            if opts.emit_usage {
-                if let Some(usage) = parsed.get("usage").filter(|v| !v.is_null()) {
-                    prompt_tokens = usage
-                        .get("prompt_tokens")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0) as u32;
-                    completion_tokens = usage
-                        .get("completion_tokens")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0) as u32;
-                    let total_tokens = prompt_tokens.saturating_add(completion_tokens);
-                    let usage_ratio = opts
-                        .usage_max_tokens
-                        .filter(|max| *max > 0)
-                        .map(|max| total_tokens as f64 / max as f64)
-                        .unwrap_or(0.0);
-                    let _ = app.emit(
-                        "chat-usage",
-                        json!({
-                            "prompt_tokens": prompt_tokens,
-                            "completion_tokens": completion_tokens,
-                            "total_tokens": total_tokens,
-                            "max_tokens": opts.usage_max_tokens,
-                            "usage_ratio": usage_ratio
-                        }),
-                    );
+            while let Some(idx) = buffer.find('\n') {
+                let line = buffer[..idx].to_string();
+                buffer.drain(..=idx);
+
+                if cancelled.load(Ordering::SeqCst) {
+                    return Ok(StreamResult {
+                        finish_reason: "cancelled".into(),
+                        tool_calls: vec![],
+                        content,
+                        prompt_tokens,
+                        completion_tokens,
+                    });
                 }
-            }
-
-            let Some(choice) = parsed["choices"].get(0) else {
-                continue;
-            };
-            let delta = &choice["delta"];
-
-            if let Some(fr) = choice["finish_reason"].as_str() {
-                if !fr.is_empty() {
-                    finish_reason = fr.to_string();
-                    if fr == "tool_calls" {
-                        got_tool_calls = true;
-                    }
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
                 }
-            }
-
-            // DeepSeek/Qwen reasoning tokens — main agent only
-            if opts.emit_reasoning {
-                if let Some(reasoning) = delta.get("reasoning_content").and_then(|v| v.as_str()) {
-                    let _ = app.emit("chat-reasoning-token", reasoning.to_string());
+                if line == "data: [DONE]" {
+                    break 'stream_loop;
                 }
-            }
+                let Some(json_str) = line.strip_prefix("data: ") else {
+                    continue;
+                };
+                let Ok(parsed) = serde_json::from_str::<Value>(json_str) else {
+                    continue;
+                };
 
-            // Accumulate streamed tool call chunks by index
-            if let Some(tcs) = delta["tool_calls"].as_array() {
-                for tc in tcs {
-                    let idx = tc["index"].as_u64().unwrap_or(0) as usize;
-                    while tool_calls.len() <= idx {
-                        tool_calls.push((String::new(), String::new(), String::new()));
-                    }
-                    if let Some(id) = tc["id"].as_str() {
-                        tool_calls[idx].0 = id.to_string();
-                    }
-                    if let Some(name) = tc["function"]["name"].as_str() {
-                        tool_calls[idx].1 = name.to_string();
-                    }
-                    if let Some(args) = tc["function"]["arguments"].as_str() {
-                        tool_calls[idx].2.push_str(args);
+                if opts.emit_usage {
+                    if let Some(usage) = parsed.get("usage").filter(|v| !v.is_null()) {
+                        prompt_tokens = usage
+                            .get("prompt_tokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0) as u32;
+                        completion_tokens = usage
+                            .get("completion_tokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0) as u32;
+                        let total_tokens = prompt_tokens.saturating_add(completion_tokens);
+                        let usage_ratio = opts
+                            .usage_max_tokens
+                            .filter(|max| *max > 0)
+                            .map(|max| total_tokens as f64 / max as f64)
+                            .unwrap_or(0.0);
+                        let _ = app.emit(
+                            "chat-usage",
+                            json!({
+                                "prompt_tokens": prompt_tokens,
+                                "completion_tokens": completion_tokens,
+                                "total_tokens": total_tokens,
+                                "max_tokens": opts.usage_max_tokens,
+                                "usage_ratio": usage_ratio
+                            }),
+                        );
                     }
                 }
-            }
 
-            // Emit content token
-            if let Some(token) = delta["content"].as_str() {
-                content.push_str(token);
-                if let Some(task_id) = opts.task_id {
-                    let _ = app.emit(
-                        opts.token_event,
-                        json!({ "task_id": task_id, "token": token }),
-                    );
-                } else {
-                    let _ = app.emit(opts.token_event, token.to_string());
+                let Some(choice) = parsed["choices"].get(0) else {
+                    continue;
+                };
+                let delta = &choice["delta"];
+
+                if let Some(fr) = choice["finish_reason"].as_str() {
+                    if !fr.is_empty() {
+                        finish_reason = fr.to_string();
+                        if fr == "tool_calls" {
+                            got_tool_calls = true;
+                        }
+                    }
+                }
+
+                // DeepSeek/Qwen reasoning tokens — main agent only
+                if opts.emit_reasoning {
+                    if let Some(reasoning) = delta.get("reasoning_content").and_then(|v| v.as_str()) {
+                        let _ = app.emit("chat-reasoning-token", reasoning.to_string());
+                    }
+                }
+
+                // Accumulate streamed tool call chunks by index
+                if let Some(tcs) = delta["tool_calls"].as_array() {
+                    for tc in tcs {
+                        let idx = tc["index"].as_u64().unwrap_or(0) as usize;
+                        while tool_calls.len() <= idx {
+                            tool_calls.push((String::new(), String::new(), String::new()));
+                        }
+                        if let Some(id) = tc["id"].as_str() {
+                            tool_calls[idx].0 = id.to_string();
+                        }
+                        if let Some(name) = tc["function"]["name"].as_str() {
+                            tool_calls[idx].1 = name.to_string();
+                        }
+                        if let Some(args) = tc["function"]["arguments"].as_str() {
+                            tool_calls[idx].2.push_str(args);
+                        }
+                    }
+                }
+
+                // Emit content token
+                if let Some(token) = delta["content"].as_str() {
+                    content.push_str(token);
+                    if let Some(task_id) = opts.task_id {
+                        let _ = app.emit(
+                            opts.token_event,
+                            json!({ "task_id": task_id, "token": token }),
+                        );
+                    } else {
+                        let _ = app.emit(opts.token_event, token.to_string());
+                    }
                 }
             }
         }
+
+        if let Some(err) = stream_error {
+            last_err = Some(err);
+            tokio::time::sleep(Duration::from_millis(retry_backoff_ms(attempt))).await;
+            continue;
+        }
+
+        // Sub-agent mode: clear tool_calls if the LLM never signalled tool use
+        if !got_tool_calls && opts.task_id.is_some() {
+            tool_calls.clear();
+        }
+
+        return Ok(StreamResult {
+            finish_reason,
+            tool_calls,
+            content,
+            prompt_tokens,
+            completion_tokens,
+        });
     }
 
-    // Sub-agent mode: clear tool_calls if the LLM never signalled tool use
-    if !got_tool_calls && opts.task_id.is_some() {
-        tool_calls.clear();
-    }
-
-    Ok(StreamResult {
-        finish_reason,
-        tool_calls,
-        content,
-        prompt_tokens,
-        completion_tokens,
-    })
+    Err(last_err.unwrap_or_else(|| "stream request failed after retries".to_string()))
 }
 
 /// Thin wrapper used by the main agent (preserves existing call sites).
@@ -752,7 +851,7 @@ pub async fn chat_completion(
         "{}/chat/completions",
         config.api_base_url.trim_end_matches('/')
     );
-    let client = Client::new();
+    let client = build_http_client()?;
 
     let mut tools_list = tools::get_all_tools(&config.selected_tools);
     let active_model = model_override
@@ -1129,7 +1228,10 @@ pub async fn chat_completion(
                         "{}/chat/completions",
                         config.api_base_url.trim_end_matches('/')
                     );
-                    let client = reqwest::Client::new();
+                    let client = match build_http_client() {
+                        Ok(client) => client,
+                        Err(err) => return format!("Error: {err}"),
+                    };
 
                     let res = agents::run_sub_agent(
                         &app,
