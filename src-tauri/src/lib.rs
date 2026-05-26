@@ -102,6 +102,7 @@ fn apply_config(app: &AppHandle, state: &AppState, config: AppConfig) -> Result<
 
     let new_workspace_path = resolve_workspace_path(app, config.workspace_dir.as_deref())?;
     fs::create_dir_all(&new_workspace_path).ok();
+    fs::create_dir_all(new_workspace_path.join("skills")).ok();
     *state.workspace_dir.lock().unwrap() = new_workspace_path.clone();
 
     if let Some(win) = app.get_webview_window("main") {
@@ -609,6 +610,7 @@ pub fn run() {
                 None => data_dir.join("workspace"),
             };
             fs::create_dir_all(&workspace_dir).ok();
+            fs::create_dir_all(workspace_dir.join("skills")).ok();
 
             app.manage(AppState {
                 config: Mutex::new(config),

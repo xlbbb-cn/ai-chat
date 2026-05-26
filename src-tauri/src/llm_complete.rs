@@ -678,15 +678,12 @@ pub async fn chat_completion(
     system_content.push_str(&os_sys_msg); //Add system info to system prompt
 
     for skill_name in &skill_ids {
-        let skill_opt = if let Ok(skill) = skills::load_skill_by_name(&state.skills_dir, skill_name)
-        {
+        let ws_skills_dir = workspace_dir_for_roots.join("skills");
+        
+        let skill_opt = if let Ok(skill) = skills::load_skill_by_name(&ws_skills_dir, skill_name) {
+            Some((skill, ws_skills_dir.join(skill_name)))
+        } else if let Ok(skill) = skills::load_skill_by_name(&state.skills_dir, skill_name) {
             Some((skill, state.skills_dir.join(skill_name)))
-        } else if let Some(user_skills_dir) = skills::user_skills_dir() {
-            if let Ok(skill) = skills::load_skill_by_name(&user_skills_dir, skill_name) {
-                Some((skill, user_skills_dir.join(skill_name)))
-            } else {
-                None
-            }
         } else {
             None
         };
@@ -1147,14 +1144,13 @@ pub async fn chat_completion(
             let result = if name == "use_skill" {
                 let args_json: Value = serde_json::from_str(args).unwrap_or_default();
                 let skill_name = args_json["skill_name"].as_str().unwrap_or("");
+                let ws_skills_dir = workspace_dir_for_roots.join("skills");
 
                 let skill_opt =
-                    if let Ok(skill) = skills::load_skill_by_name(&state.skills_dir, skill_name) {
+                    if let Ok(skill) = skills::load_skill_by_name(&ws_skills_dir, skill_name) {
+                        Some((skill, ws_skills_dir.join(skill_name)))
+                    } else if let Ok(skill) = skills::load_skill_by_name(&state.skills_dir, skill_name) {
                         Some((skill, state.skills_dir.join(skill_name)))
-                    } else if let Some(user_skills_dir) = skills::user_skills_dir() {
-                        skills::load_skill_by_name(&user_skills_dir, skill_name)
-                            .ok()
-                            .map(|skill| (skill, user_skills_dir.join(skill_name)))
                     } else {
                         None
                     };

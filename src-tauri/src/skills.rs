@@ -1,4 +1,3 @@
-use dirs::home_dir;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -83,10 +82,6 @@ pub fn load_skill_by_name(skills_dir: &PathBuf, name: &str) -> Result<Skill, Str
     parse_skill_md(&content)
 }
 
-pub fn user_skills_dir() -> Option<PathBuf> {
-    home_dir().map(|dir| dir.join(".skills"))
-}
-
 /// Collect skill roots eligible for self-evolution edits.
 /// Includes the app-managed skills directory and optionally the
 /// `skills/` subdirectory inside the active workspace. The `~/.skills`
@@ -134,11 +129,17 @@ pub fn list_skills(state: State<'_, AppState>) -> Vec<Skill> {
 
     skills.extend(read_dir_skills(&state.skills_dir));
 
-    if let Some(user_skills_dir) = user_skills_dir() {
-        skills.extend(read_dir_skills(&user_skills_dir));
-    }
+    let workspace_dir = state.workspace_dir.lock().unwrap().clone();
+    let ws_skills_dir = workspace_dir.join("skills");
+    skills.extend(read_dir_skills(&ws_skills_dir));
 
-    skills
+    // Deduplicate by name, preferring workspace implementations over app-data implementations
+    let mut unique_skills = std::collections::HashMap::new();
+    for skill in skills {
+        unique_skills.insert(skill.name.clone(), skill);
+    }
+    
+    unique_skills.into_values().collect()
 }
 
 #[tauri::command]
