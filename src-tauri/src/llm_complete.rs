@@ -1228,26 +1228,26 @@ pub async fn chat_completion(
                         "{}/chat/completions",
                         config.api_base_url.trim_end_matches('/')
                     );
-                    let client = match build_http_client() {
-                        Ok(client) => client,
-                        Err(err) => return format!("Error: {err}"),
-                    };
+                    match build_http_client() {
+                        Ok(client) => {
+                            let res = agents::run_sub_agent(
+                                &app,
+                                &client,
+                                &url,
+                                &config,
+                                agent,
+                                &task,
+                                workspace_dir,
+                                self_evolution_roots.clone(),
+                                self_evolution_files.clone(),
+                            )
+                            .await;
 
-                    let res = agents::run_sub_agent(
-                        &app,
-                        &client,
-                        &url,
-                        &config,
-                        agent,
-                        &task,
-                        workspace_dir,
-                        self_evolution_roots.clone(),
-                        self_evolution_files.clone(),
-                    )
-                    .await;
-
-                    format!("Task execution finished with status: {}\nTokens used: {}\nTool calls made: {}\n\nResult:\n{}", 
-                        res.status, res.tokens_used, res.tool_calls_count, res.content)
+                            format!("Task execution finished with status: {}\nTokens used: {}\nTool calls made: {}\n\nResult:\n{}", 
+                                res.status, res.tokens_used, res.tool_calls_count, res.content)
+                        }
+                        Err(err) => format!("Error: {err}"),
+                    }
                 } else {
                     format!(
                         "Error: Agent with ID '{}' not found or not enabled.",
