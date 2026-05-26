@@ -6,6 +6,14 @@ use std::process::Stdio;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::AsyncWriteExt;
 
+#[derive(Clone, Copy)]
+enum OutputDecodeHint {
+    Default,
+    Direct,
+    CmdShell,
+    PowerShell,
+}
+
 // ─── Dangerous command detection ─────────────────────────────────────────────
 
 /// Patterns that indicate a script may have destructive/system-altering effects.
@@ -140,9 +148,168 @@ fn code_requests_sudo(code: &str) -> bool {
     false
 }
 
-fn format_process_output(output: std::process::Output) -> String {
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+fn decode_process_bytes(bytes: &[u8], hint: OutputDecodeHint) -> String {
+    if bytes.is_empty() {
+        return String::new();
+    }
+
+    if let Some(decoded) = decode_with_bom(bytes) {
+        return decoded;
+    }
+
+    if let Ok(decoded) = std::str::from_utf8(bytes) {
+        return decoded.to_string();
+    }
+
+    #[cfg(windows)]
+    if let Some(decoded) = decode_windows_process_bytes(bytes, hint) {
+        return decoded;
+    }
+
+    String::from_utf8_lossy(bytes).to_string()
+}
+
+fn decode_with_bom(bytes: &[u8]) -> Option<String> {
+    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        return std::str::from_utf8(&bytes[3..]).ok().map(|text| text.to_string());
+    }
+
+    if bytes.starts_with(&[0xFF, 0xFE]) {
+        return Some(String::from_utf16_lossy(&utf16_units_le(&bytes[2..])));
+    }
+
+    if bytes.starts_with(&[0xFE, 0xFF]) {
+        return Some(String::from_utf16_lossy(&utf16_units_be(&bytes[2..])));
+    }
+
+    None
+}
+
+fn utf16_units_le(bytes: &[u8]) -> Vec<u16> {
+    bytes
+        .chunks_exact(2)
+        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+        .collect()
+}
+
+fn utf16_units_be(bytes: &[u8]) -> Vec<u16> {
+    bytes
+        .chunks_exact(2)
+        .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+        .collect()
+}
+
+#[cfg(windows)]
+fn decode_windows_process_bytes(bytes: &[u8], hint: OutputDecodeHint) -> Option<String> {
+    use windows_sys::Win32::Globalization::{GetACP, GetOEMCP};
+
+    let mut code_pages = vec![65001];
+    match hint {
+        OutputDecodeHint::CmdShell => {
+            code_pages.push(unsafe { GetOEMCP() });
+            code_pages.push(unsafe { GetACP() });
+        }
+        _ => {
+            code_pages.push(unsafe { GetACP() });
+            code_pages.push(unsafe { GetOEMCP() });
+        }
+    }
+
+    decode_windows_process_bytes_with_code_pages(bytes, &code_pages)
+}
+
+#[cfg(windows)]
+fn decode_windows_process_bytes_with_code_pages(
+    bytes: &[u8],
+    code_pages: &[u32],
+) -> Option<String> {
+    let mut attempted = Vec::new();
+    for &code_page in code_pages {
+        if code_page == 0 || attempted.contains(&code_page) {
+            continue;
+        }
+        attempted.push(code_page);
+        if let Some(decoded) = decode_windows_code_page(bytes, code_page) {
+            return Some(decoded);
+        }
+    }
+    None
+}
+
+#[cfg(windows)]
+fn decode_windows_code_page(bytes: &[u8], code_page: u32) -> Option<String> {
+    use windows_sys::Win32::Globalization::{MultiByteToWideChar, MB_ERR_INVALID_CHARS};
+
+    let flags = if code_page == 65001 {
+        MB_ERR_INVALID_CHARS
+    } else {
+        0
+    };
+
+    let wide_len = unsafe {
+        MultiByteToWideChar(
+            code_page,
+            flags,
+            bytes.as_ptr(),
+            bytes.len() as i32,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if wide_len <= 0 {
+        return None;
+    }
+
+    let mut wide = vec![0u16; wide_len as usize];
+    let written = unsafe {
+        MultiByteToWideChar(
+            code_page,
+            flags,
+            bytes.as_ptr(),
+            bytes.len() as i32,
+            wide.as_mut_ptr(),
+            wide_len,
+        )
+    };
+    if written <= 0 {
+        return None;
+    }
+
+    Some(String::from_utf16_lossy(&wide[..written as usize]))
+}
+
+#[cfg(windows)]
+fn wrap_cmd_script_for_utf8(code: &str) -> String {
+    format!("chcp 65001>nul & {code}")
+}
+
+#[cfg(not(windows))]
+fn wrap_cmd_script_for_utf8(code: &str) -> String {
+    code.to_string()
+}
+
+fn wrap_powershell_script_for_utf8(code: &str) -> String {
+    #[cfg(windows)]
+    {
+        return format!(
+            "$utf8NoBom = New-Object System.Text.UTF8Encoding($false); \
+[Console]::InputEncoding = $utf8NoBom; \
+[Console]::OutputEncoding = $utf8NoBom; \
+$OutputEncoding = $utf8NoBom; \
+chcp 65001 > $null; \
+{code}"
+        );
+    }
+
+    #[cfg(not(windows))]
+    {
+        code.to_string()
+    }
+}
+
+fn format_process_output(output: std::process::Output, hint: OutputDecodeHint) -> String {
+    let stdout = decode_process_bytes(&output.stdout, hint);
+    let stderr = decode_process_bytes(&output.stderr, hint);
 
     let mut result = String::new();
     if !stdout.is_empty() {
@@ -186,7 +353,7 @@ async fn run_command_with_stdin(
     }
 
     let output = child.wait_with_output().await.map_err(|e| e.to_string())?;
-    Ok(format_process_output(output))
+    Ok(format_process_output(output, OutputDecodeHint::Default))
 }
 
 async fn request_tool_confirmation(
@@ -595,6 +762,10 @@ fn resolve_safe_path_with_roots(
 
 #[cfg(test)]
 mod tests {
+    use super::decode_process_bytes;
+    #[cfg(windows)]
+    use super::decode_windows_process_bytes_with_code_pages;
+    use super::OutputDecodeHint;
     use super::resolve_safe_path_with_roots;
     use std::fs;
     use std::path::PathBuf;
@@ -653,6 +824,28 @@ mod tests {
 
         let _ = fs::remove_dir_all(&workspace_root);
         let _ = fs::remove_dir_all(skill_root.parent().unwrap());
+    }
+
+    #[test]
+    fn decodes_utf8_bom_output() {
+        let decoded = decode_process_bytes(
+            &[0xEF, 0xBB, 0xBF, 0xE4, 0xB8, 0xAD, 0xE6, 0x96, 0x87],
+            OutputDecodeHint::Direct,
+        );
+
+        assert_eq!(decoded, "中文");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn decodes_gbk_output_with_explicit_code_page() {
+        let decoded = decode_windows_process_bytes_with_code_pages(
+            &[0xD6, 0xD0, 0xCE, 0xC4],
+            &[936],
+        )
+        .unwrap();
+
+        assert_eq!(decoded, "中文");
     }
 }
 
@@ -1346,6 +1539,13 @@ pub async fn run_command(
     code: String,
     cwd: Option<PathBuf>,
 ) -> Result<String, String> {
+    let decode_hint = match cmd_type.as_str() {
+        "direct" => OutputDecodeHint::Direct,
+        "bash" | "sh" if cfg!(windows) => OutputDecodeHint::CmdShell,
+        "powershell" | "pwsh" => OutputDecodeHint::PowerShell,
+        _ => OutputDecodeHint::Default,
+    };
+
     let mut cmd = match cmd_type.as_str() {
         "direct" => {
             // Run the executable directly — no shell wrapper needed.
@@ -1360,13 +1560,27 @@ pub async fn run_command(
             c
         }
         "bash" | "sh" => {
-            let mut c = tokio::process::Command::new(if cfg!(windows) { "cmd" } else { "bash" });
-            c.arg(if cfg!(windows) { "/C" } else { "-c" }).arg(&code);
+            #[cfg(windows)]
+            let c = {
+                let mut cmd = tokio::process::Command::new("cmd.exe");
+                let wrapped = wrap_cmd_script_for_utf8(&code);
+                cmd.args(["/D", "/S", "/C", &wrapped]);
+                cmd
+            };
+
+            #[cfg(not(windows))]
+            let c = {
+                let mut cmd = tokio::process::Command::new("bash");
+                cmd.args(["-c", &code]);
+                cmd
+            };
+
             c
         }
         "powershell" | "pwsh" => {
             let mut c = tokio::process::Command::new("powershell");
-            c.args(["-NoProfile", "-NonInteractive", "-Command", &code]);
+            let wrapped = wrap_powershell_script_for_utf8(&code);
+            c.args(["-NoProfile", "-NonInteractive", "-Command", &wrapped]);
             c
         }
         _ => return Err(format!("Unsupported command type: {}", cmd_type)),
@@ -1383,7 +1597,7 @@ pub async fn run_command(
     }
 
     let output = cmd.output().await.map_err(|e| e.to_string())?;
-    Ok(format_process_output(output))
+    Ok(format_process_output(output, decode_hint))
 }
 
 async fn run_powershell_elevated(_code: String, cwd: Option<PathBuf>) -> Result<String, String> {
@@ -1414,7 +1628,8 @@ async fn run_powershell_elevated(_code: String, cwd: Option<PathBuf>) -> Result<
         let out_path = temp_dir.join(format!("elevated-{}.out.txt", now));
         let err_path = temp_dir.join(format!("elevated-{}.err.txt", now));
 
-        fs::write(&script_path, _code).map_err(|e| e.to_string())?;
+        let wrapped_code = wrap_powershell_script_for_utf8(&_code);
+        fs::write(&script_path, wrapped_code).map_err(|e| e.to_string())?;
 
         let script_path_s = script_path.to_string_lossy().to_string();
         let out_path_s = out_path.to_string_lossy().to_string();
@@ -1440,10 +1655,14 @@ async fn run_powershell_elevated(_code: String, cwd: Option<PathBuf>) -> Result<
         }
 
         let output = cmd.output().await.map_err(|e| e.to_string())?;
-        let mut res = format_process_output(output);
+        let mut res = format_process_output(output, OutputDecodeHint::PowerShell);
 
-        let out_txt = fs::read_to_string(&out_path).unwrap_or_default();
-        let err_txt = fs::read_to_string(&err_path).unwrap_or_default();
+        let out_txt = fs::read(&out_path)
+            .map(|bytes| decode_process_bytes(&bytes, OutputDecodeHint::PowerShell))
+            .unwrap_or_default();
+        let err_txt = fs::read(&err_path)
+            .map(|bytes| decode_process_bytes(&bytes, OutputDecodeHint::PowerShell))
+            .unwrap_or_default();
 
         let have_redirected_output = !out_txt.trim().is_empty() || !err_txt.trim().is_empty();
         if have_redirected_output && res == "(no output)" {

@@ -318,8 +318,9 @@ fn build_stdio_cmd(server: &McpServer) -> tokio::process::Command {
                 args_str.push(' ');
                 args_str.push_str(&shell_escape_windows(arg));
             }
+            let wrapped = format!("chcp 65001>nul & {args_str}");
             let mut cmd = tokio::process::Command::new("cmd.exe");
-            cmd.args(["/C", &args_str])
+            cmd.args(["/D", "/S", "/C", &wrapped])
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null());
