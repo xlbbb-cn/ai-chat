@@ -39,7 +39,6 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<{ name: string; content: string }[]>([]);
-  const [streaming, setStreaming] = useState(false);
   const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
   const [sidebar, setSidebar] = useState<Sidebar>(null);
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
@@ -250,6 +249,14 @@ export default function App() {
     }
   }, []);
 
+  const isSessionWorking = useCallback((targetSessionId: string, sessionMessages?: Message[]) => {
+    const runtimeWorking = sessionRuntimes[targetSessionId]?.status === "working";
+    const candidateMessages = sessionMessages
+      ?? sessionMessagesRef.current[targetSessionId]
+      ?? (currentSessionRef.current === targetSessionId ? messagesRef.current : []);
+    return runtimeWorking || candidateMessages.some((message) => message.streaming);
+  }, [sessionRuntimes]);
+
   const activateSessionView = useCallback((targetSessionId: string, fallbackMessages: Message[]) => {
     const nextMessages = sessionMessagesRef.current[targetSessionId] ?? fallbackMessages;
     const nextRetryId = sessionRetryRef.current[targetSessionId] ?? derivePendingRetryMessageId(nextMessages);
@@ -269,7 +276,7 @@ export default function App() {
     setAgentStatuses(nextAgentStatuses);
     setUsage(nextUsage);
     setError(null);
-  }, []);
+  }, [isSessionWorking]);
 
   useEffect(() => {
     getConfig()
@@ -395,15 +402,16 @@ export default function App() {
     if (profileExporting) return;
 
     let text = input.trim();
-    if ((!text && attachments.length === 0) || streaming) return;
+    const targetSessionId = sessionId;
+    const baseMessages = sessionMessagesRef.current[targetSessionId] ?? messagesRef.current;
+    const targetSessionWorking = isSessionWorking(targetSessionId, baseMessages);
+    if ((!text && attachments.length === 0) || targetSessionWorking) return;
 
     for (const file of attachments) {
       const ext = file.name.split('.').pop() || '';
       text += `\n\n<details><summary>Attached File: ${file.name}</summary>\n\n\`\`\`${ext}\n${file.content}\n\`\`\`\n</details>`;
     }
     text = text.trim();
-    const targetSessionId = sessionId;
-    const baseMessages = sessionMessagesRef.current[targetSessionId] ?? messagesRef.current;
 
     const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: text };
     const assistantId = crypto.randomUUID();
@@ -413,7 +421,6 @@ export default function App() {
     updateSessionMessages(targetSessionId, (prev) => [...prev, userMsg, assistantMsg]);
     setInput("");
     setAttachments([]);
-    setStreaming(true);
     activeStreamingSessionRef.current = targetSessionId;
     setError(null);
     setSessionRuntime(targetSessionId, { status: "working", detail: useAgentsEnabled ? "Agents" : "LLM" });
@@ -526,7 +533,6 @@ export default function App() {
         setSessionPendingRetry(targetSessionId, null);
         setSessionRuntime(targetSessionId, { status: "idle", detail: "Idle" });
         if (activeStreamingSessionRef.current === targetSessionId) {
-          setStreaming(false);
           activeStreamingSessionRef.current = null;
           cleanupRef.current = null;
         }
@@ -548,7 +554,6 @@ export default function App() {
         setSessionPendingRetry(targetSessionId, userMsg.id);
         setSessionRuntime(targetSessionId, { status: "error", detail: "Failed" });
         if (activeStreamingSessionRef.current === targetSessionId) {
-          setStreaming(false);
           activeStreamingSessionRef.current = null;
           cleanupRef.current = null;
         }
@@ -556,23 +561,22 @@ export default function App() {
     }, useAgentsEnabled);
 
     cleanupRef.current = cleanup;
-  }, [input, streaming, profileExporting, activeSkillIds, sessionId, attachments, selectedModel, useAgentsEnabled, persistHistoryRecord, setSessionPendingRetry, updateSessionMessages, setSessionRuntime, updateSessionAgentStatuses]);
+  }, [input, profileExporting, activeSkillIds, sessionId, attachments, selectedModel, useAgentsEnabled, persistHistoryRecord, setSessionPendingRetry, updateSessionMessages, setSessionRuntime, updateSessionAgentStatuses, isSessionWorking]);
 
   const retryPendingUserMessage = useCallback(async () => {
-    if (streaming || !pendingRetryMessageId) return;
-
     const targetSessionId = sessionId;
+    const targetMessages = sessionMessagesRef.current[targetSessionId] ?? messagesRef.current;
+    if (isSessionWorking(targetSessionId, targetMessages) || !pendingRetryMessageId) return;
 
     const assistantId = crypto.randomUUID();
     const assistantMsg: Message = { id: assistantId, role: "assistant", content: "", streaming: true };
 
     updateSessionMessages(targetSessionId, (prev) => [...prev, assistantMsg]);
-    setStreaming(true);
     activeStreamingSessionRef.current = targetSessionId;
     setError(null);
     setSessionRuntime(targetSessionId, { status: "working", detail: useAgentsEnabled ? "Agents" : "LLM" });
 
-    const history = [...(sessionMessagesRef.current[targetSessionId] ?? messagesRef.current)]
+    const history = [...targetMessages]
       .filter((m) => !m.streaming && !m.id.startsWith("agent-progress-"))
       .map((m) => ({ role: m.role, content: m.content }));
 
@@ -677,7 +681,6 @@ export default function App() {
         updateSessionAgentStatuses(targetSessionId, () => ({}));
         setSessionRuntime(targetSessionId, { status: "idle", detail: "Idle" });
         if (activeStreamingSessionRef.current === targetSessionId) {
-          setStreaming(false);
           activeStreamingSessionRef.current = null;
           cleanupRef.current = null;
         }
@@ -698,7 +701,6 @@ export default function App() {
         updateSessionAgentStatuses(targetSessionId, () => ({}));
         setSessionRuntime(targetSessionId, { status: "error", detail: "Failed" });
         if (activeStreamingSessionRef.current === targetSessionId) {
-          setStreaming(false);
           activeStreamingSessionRef.current = null;
           cleanupRef.current = null;
         }
@@ -706,7 +708,7 @@ export default function App() {
     }, useAgentsEnabled);
 
     cleanupRef.current = cleanup;
-  }, [streaming, pendingRetryMessageId, activeSkillIds, sessionId, selectedModel, useAgentsEnabled, updateSessionMessages, setSessionRuntime, updateSessionAgentStatuses, setSessionPendingRetry, persistHistoryRecord]);
+  }, [pendingRetryMessageId, activeSkillIds, sessionId, selectedModel, useAgentsEnabled, updateSessionMessages, setSessionRuntime, updateSessionAgentStatuses, setSessionPendingRetry, persistHistoryRecord, isSessionWorking]);
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (profileExporting) {
@@ -725,7 +727,7 @@ export default function App() {
   }
 
   async function clearChat() {
-    if (streaming) {
+    if (isSessionWorking(sessionId, messagesRef.current)) {
       await stopStreaming();
     }
     const nextSessionId = crypto.randomUUID();
@@ -831,7 +833,6 @@ export default function App() {
   async function stopStreaming() {
     const targetSessionId = activeStreamingSessionRef.current;
     if (!targetSessionId) {
-      setStreaming(false);
       return;
     }
     try {
@@ -860,7 +861,6 @@ export default function App() {
       setSessionRuntime(targetSessionId, { status: "idle", detail: "Stopped" });
     }
     activeStreamingSessionRef.current = null;
-    setStreaming(false);
   }
 
   const usageTotal = usage ? (usage.total_tokens ?? usage.prompt_tokens + usage.completion_tokens) : 0;
@@ -873,6 +873,7 @@ export default function App() {
   const usageBarWidth = 16;
   const usageBarFilled = Math.max(0, Math.min(usageBarWidth, Math.round((usagePercent / 100) * usageBarWidth)));
   const usageBarText = `[${"x".repeat(usageBarFilled)}${"-".repeat(usageBarWidth - usageBarFilled)} ]`;
+  const currentSessionWorking = isSessionWorking(sessionId, messages);
 
   return (
     <div className="app-layout">
@@ -1034,7 +1035,7 @@ export default function App() {
             <ChatMessage
               key={m.id}
               message={m}
-              showRetry={m.role === "user" && m.id === pendingRetryMessageId && !streaming}
+              showRetry={m.role === "user" && m.id === pendingRetryMessageId && !currentSessionWorking}
               onRetry={retryPendingUserMessage}
             />
           ))}
@@ -1068,7 +1069,7 @@ export default function App() {
               className="attach-btn"
               title="Attach files"
               onClick={() => fileInputRef.current?.click()}
-              disabled={streaming || profileExporting}
+              disabled={currentSessionWorking || profileExporting}
             >
               📎
             </button>
@@ -1103,14 +1104,14 @@ export default function App() {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Type a message… (Enter to send, Shift+Enter for newline)"
-              disabled={streaming || profileExporting}
+              disabled={currentSessionWorking || profileExporting}
             />
             <select
               className="model-select"
               title="Select model"
               value={selectedModel}
               onChange={(e) => setSelectedModel(e.target.value)}
-              disabled={streaming || profileExporting}
+              disabled={currentSessionWorking || profileExporting}
             >
               {availableModels.map((model) => (
                 <option key={model} value={model}>{model}</option>
@@ -1118,10 +1119,10 @@ export default function App() {
             </select>
             <button
               className="send-btn"
-              onClick={streaming ? stopStreaming : sendMessage}
-              disabled={profileExporting || (!streaming && !input.trim() && attachments.length === 0)}
+              onClick={currentSessionWorking ? stopStreaming : sendMessage}
+              disabled={profileExporting || (!currentSessionWorking && !input.trim() && attachments.length === 0)}
             >
-              {streaming ? "Stop" : "Send"}
+              {currentSessionWorking ? "Stop" : "Send"}
             </button>
           </div>
         </div>

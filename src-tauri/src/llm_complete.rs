@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::{agents, db, mcp, skills, tools, AppState};
 
@@ -528,16 +528,15 @@ fn log_interaction(
 
 // ─── Chat command ─────────────────────────────────────────────────────────────
 
-#[tauri::command]
-pub async fn chat_completion(
+async fn run_chat_completion_worker(
     app: AppHandle,
     messages: Vec<ChatMessage>,
     skill_ids: Vec<String>,
     session_id: String,
     model_override: Option<String>,
     use_agents: Option<bool>,
-    state: State<'_, AppState>,
 ) -> Result<(), String> {
+    let state = app.state::<AppState>();
     let session_control = crate::get_or_create_session_control(&state, &session_id);
     let _session_run_guard = SessionRunGuard::new(session_control.clone());
     let config = state.config.lock().unwrap().clone();
@@ -1337,12 +1336,70 @@ pub async fn chat_completion(
         all_messages.extend(pending_skill_context_messages);
     }
 
-    state.chat_cancelled.store(false, Ordering::SeqCst);
     log_event(
         &state,
         "INFO",
         format!("chat_completion finished: session_id={}", session_id),
     );
     let _ = app.emit("chat-done", json!({ "session_id": session_id }));
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn chat_completion(
+    app: AppHandle,
+    messages: Vec<ChatMessage>,
+    skill_ids: Vec<String>,
+    session_id: String,
+    model_override: Option<String>,
+    use_agents: Option<bool>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let session_control = crate::get_or_create_session_control(&state, &session_id);
+    if session_control.running.load(Ordering::SeqCst) {
+        return Err(format!("Session '{}' is already running.", session_id));
+    }
+
+    let thread_app = app.clone();
+    let thread_session_id = session_id.clone();
+    std::thread::Builder::new()
+        .name(format!("chat-session-{}", session_id))
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build();
+
+            match runtime {
+                Ok(runtime) => {
+                    if let Err(err) = runtime.block_on(run_chat_completion_worker(
+                        thread_app.clone(),
+                        messages,
+                        skill_ids,
+                        thread_session_id.clone(),
+                        model_override,
+                        use_agents,
+                    )) {
+                        let _ = thread_app.emit(
+                            "chat-error",
+                            json!({
+                                "session_id": thread_session_id,
+                                "error": err,
+                            }),
+                        );
+                    }
+                }
+                Err(err) => {
+                    let _ = thread_app.emit(
+                        "chat-error",
+                        json!({
+                            "session_id": thread_session_id,
+                            "error": format!("Failed to create chat worker runtime: {}", err),
+                        }),
+                    );
+                }
+            }
+        })
+        .map_err(|e| format!("Failed to spawn chat worker thread: {}", e))?;
+
     Ok(())
 }

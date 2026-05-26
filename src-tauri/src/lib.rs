@@ -316,7 +316,6 @@ pub struct AppState {
     pub agents_config_path: PathBuf,
     pub db: Mutex<Connection>,
     pub logger: Mutex<AppLogger>,
-    pub chat_cancelled: AtomicBool,
     pub session_controls: Mutex<HashMap<String, Arc<SessionControl>>>,
     /// One-shot channel sender used to relay the user's confirm/deny response
     /// back to a waiting `execute_tool` call.
@@ -668,7 +667,6 @@ pub fn run() {
                 skills_dir,
                 mcp_servers_path: mcp_servers_path.clone(),
                 agents_config_path,
-                chat_cancelled: AtomicBool::new(false),
                 session_controls: Mutex::new(HashMap::new()),
                 confirm_sender: Mutex::new(None),
             });
