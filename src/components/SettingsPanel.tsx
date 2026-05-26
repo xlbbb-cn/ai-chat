@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { fetchModels, getConfig, getSkillRoots, getWorkspaceDir, saveConfig } from "../api";
+import { fetchModels, getConfig, getWorkspaceDir, saveConfig } from "../api";
 import type { AppConfig, ModelSettings } from "../types";
 import ReactMarkdown from "react-markdown";
 import { MonitorPanel } from "./MonitorPanel";
@@ -45,7 +45,6 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
   const [manualModel, setManualModel] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(true);
   const [workspaceDirActual, setWorkspaceDirActual] = useState("");
-  const [skillRoots, setSkillRoots] = useState<string[]>([]);
   const [isMessageEditorOpen, setIsMessageEditorOpen] = useState(false);
   const [messageDraft, setMessageDraft] = useState("");
   const [messageSaving, setMessageSaving] = useState(false);
@@ -53,7 +52,6 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
 
   useEffect(() => {
     getWorkspaceDir().then(setWorkspaceDirActual).catch(console.error);
-    getSkillRoots().then(setSkillRoots).catch(console.error);
   }, []);
 
   useEffect(() => {
