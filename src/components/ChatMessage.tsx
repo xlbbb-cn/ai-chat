@@ -18,15 +18,27 @@ const md = new MarkdownIt({
   linkify: false,
   typographer: true,
   breaks: true,
-  highlight: (str: string, lang: string): string => {
-    if (lang && hljs.getLanguage(lang)) {
-      try {
-        return `<pre class="hljs"><code>${hljs.highlight(str, { language: lang }).value}</code></pre>`;
-      } catch (__) { }
-    }
-    return `<pre class="hljs"><code>${escapeHtml(str)}</code></pre>`;
-  },
 });
+
+md.renderer.rules.fence = (tokens, idx) => {
+  const token = tokens[idx];
+  const info = token.info ? token.info.trim().split(/\s+/g)[0] : "";
+  const language = info && hljs.getLanguage(info) ? info : "";
+  const code = escapeHtml(token.content);
+  const highlighted = language
+    ? hljs.highlight(token.content, { language }).value
+    : code;
+  const className = language ? `language-${md.utils.escapeHtml(language)}` : "";
+
+  return `
+    <div class="code-block-wrapper">
+      <div class="code-block-toolbar">
+        <button type="button" class="code-copy-btn">Copy</button>
+      </div>
+      <pre class="hljs"><code class="${className}">${highlighted}</code></pre>
+    </div>
+  `;
+};
 
 // Remove markdown link parsing entirely ([text](url), autolink) and strip any fallback anchor tokens.
 md.disable(["link", "autolink"]);
@@ -106,6 +118,37 @@ export function ChatMessage({ message, showRetry = false, onRetry }: Props) {
         dangerouslySetInnerHTML={{ __html: md.render(mainContent) }}
         onClick={(e) => {
           const target = e.target as HTMLElement;
+          const copyButton = target.closest(".code-copy-btn") as HTMLButtonElement | null;
+          if (copyButton) {
+            const wrapper = copyButton.closest(".code-block-wrapper");
+            const code = wrapper?.querySelector("pre code");
+            const text = code?.textContent ?? "";
+            if (text) {
+              if (navigator.clipboard?.writeText) {
+                navigator.clipboard.writeText(text).catch(() => {
+                  const textarea = document.createElement("textarea");
+                  textarea.value = text;
+                  document.body.appendChild(textarea);
+                  textarea.select();
+                  document.execCommand("copy");
+                  document.body.removeChild(textarea);
+                });
+              } else {
+                const textarea = document.createElement("textarea");
+                textarea.value = text;
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand("copy");
+                document.body.removeChild(textarea);
+              }
+              const originalText = copyButton.textContent;
+              copyButton.textContent = "Copied!";
+              window.setTimeout(() => {
+                copyButton.textContent = originalText;
+              }, 1200);
+            }
+            return;
+          }
           const link = target.closest("a");
           if (link) {
             e.preventDefault();
