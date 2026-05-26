@@ -818,10 +818,13 @@ async fn run_chat_completion_worker(
     let mut mcp_tool_map: std::collections::HashMap<String, (mcp::McpServer, String)> =
         std::collections::HashMap::new();
     {
-        let enabled_servers: Vec<mcp::McpServer> = mcp::load_servers(&state.mcp_servers_path)
-            .into_iter()
-            .filter(|s| s.enabled)
-            .collect();
+        let enabled_servers: Vec<mcp::McpServer> = {
+            let _guard = state.mcp_servers_lock.lock().unwrap();
+            mcp::load_servers(&state.mcp_servers_path)
+                .into_iter()
+                .filter(|s| s.enabled)
+                .collect()
+        };
 
         for (idx, server) in enabled_servers.iter().enumerate() {
             match mcp::get_server_tools(server).await {
@@ -1230,7 +1233,10 @@ async fn run_chat_completion_worker(
                 );
                 let _ = app.emit(
                     "chat-token",
-                    format!("🔌 *MCP [{}]: {}*\n\n", mcp_server.name, actual_tool_name),
+                    json!({
+                        "session_id": session_id,
+                        "token": format!("🔌 *MCP [{}]: {}*\n\n", mcp_server.name, actual_tool_name),
+                    }),
                 );
                 let start_time = std::time::Instant::now();
                 let mcp_result =

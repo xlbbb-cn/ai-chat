@@ -139,7 +139,11 @@ fn export_profile(app: &AppHandle, profile_path: &PathBuf) -> Result<(), String>
         .map_err(|e| e.to_string())?;
 
     emit_profile_export_status(app, "Writing mcp_servers.json");
-    let mcp_json = serde_json::json!({ "servers": mcp::load_servers(&state.mcp_servers_path) });
+    let mcp_servers = {
+        let _guard = state.mcp_servers_lock.lock().unwrap();
+        mcp::load_servers(&state.mcp_servers_path)
+    };
+    let mcp_json = serde_json::json!({ "servers": mcp_servers });
     let mcp_json = serde_json::to_string_pretty(&mcp_json).map_err(|e| e.to_string())?;
     zip.start_file("mcp_servers.json", options)
         .map_err(|e| e.to_string())?;
@@ -313,6 +317,7 @@ pub struct AppState {
     pub db_path: PathBuf,
     pub skills_dir: PathBuf,
     pub mcp_servers_path: PathBuf,
+    pub mcp_servers_lock: Mutex<()>,
     pub agents_config_path: PathBuf,
     pub db: Mutex<Connection>,
     pub logger: Mutex<AppLogger>,
@@ -407,7 +412,6 @@ async fn fetch_models(state: State<'_, AppState>) -> Result<Vec<String>, String>
                 .map(|s| s.to_string())
         })
         .collect();
-
     names.sort();
     names.dedup();
     Ok(names)
@@ -666,6 +670,7 @@ pub fn run() {
                 logger: Mutex::new(app_logger),
                 skills_dir,
                 mcp_servers_path: mcp_servers_path.clone(),
+                mcp_servers_lock: Mutex::new(()),
                 agents_config_path,
                 session_controls: Mutex::new(HashMap::new()),
                 confirm_sender: Mutex::new(None),

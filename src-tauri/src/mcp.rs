@@ -76,6 +76,7 @@ fn save_servers(path: &PathBuf, servers: &[McpServer]) -> Result<(), String> {
 
 #[tauri::command]
 pub fn list_mcp_servers(state: State<'_, AppState>) -> Vec<McpServer> {
+    let _guard = state.mcp_servers_lock.lock().unwrap();
     load_servers(&state.mcp_servers_path)
 }
 
@@ -83,6 +84,7 @@ pub fn list_mcp_servers(state: State<'_, AppState>) -> Vec<McpServer> {
 pub fn save_mcp_server(state: State<'_, AppState>, server: McpServer) -> Result<(), String> {
     let warmup_server = server.clone();
     let should_warmup = warmup_server.enabled;
+    let _guard = state.mcp_servers_lock.lock().unwrap();
     let mut servers = load_servers(&state.mcp_servers_path);
     if let Some(existing) = servers.iter_mut().find(|s| s.id == server.id) {
         *existing = server;
@@ -98,6 +100,7 @@ pub fn save_mcp_server(state: State<'_, AppState>, server: McpServer) -> Result<
 
 #[tauri::command]
 pub fn delete_mcp_server(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    let _guard = state.mcp_servers_lock.lock().unwrap();
     let mut servers = load_servers(&state.mcp_servers_path);
     servers.retain(|s| s.id != id);
     save_servers(&state.mcp_servers_path, &servers)
