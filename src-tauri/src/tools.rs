@@ -410,6 +410,12 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
                         "command": {
                             "type": "string",
                             "description": "The full command line (e.g. 'curl -s https://example.com'). The first word is the executable; the rest are arguments. Handles basic single- and double-quote grouping."
+                        },
+                        "timeout_seconds": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 3600,
+                            "description": "Optional timeout for the command, in seconds. Defaults to 30 if omitted. Use a larger value for long-running compile or build steps."
                         }
                     },
                     "required": ["command"]
@@ -447,6 +453,12 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
                         "elevated": {
                             "type": "boolean",
                             "description": "If true (PowerShell only), request administrator elevation (UAC). Requires explicit user confirmation."
+                        },
+                        "timeout_seconds": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 3600,
+                            "description": "Optional timeout for the command, in seconds. Defaults to 30 if omitted. Use a larger value for long-running compile or build steps."
                         }
                     },
                     "required": ["type", "code"]
@@ -993,6 +1005,11 @@ pub async fn execute_tool(
                 sudo_password = confirm.password;
             }
 
+            let timeout_secs = args["timeout_seconds"]
+                .as_i64()
+                .unwrap_or(30)
+                .clamp(1, 3600) as u64;
+
             if sudo_requested {
                 let password = sudo_password.unwrap_or_default();
                 if password.is_empty() {
@@ -1024,11 +1041,11 @@ pub async fn execute_tool(
                 cmd.current_dir(command_cwd);
 
                 return tokio::time::timeout(
-                    std::time::Duration::from_secs(30),
+                    std::time::Duration::from_secs(timeout_secs),
                     run_command_with_stdin(cmd, format!("{}\n", password)),
                 )
                 .await
-                .unwrap_or_else(|_| Ok("Command timed out after 30 seconds.".to_string()))
+                .unwrap_or_else(|_| Ok(format!("Command timed out after {} seconds.", timeout_secs)))
                 .unwrap_or_else(|e| format!("Error: {}", e));
             }
 
@@ -1037,11 +1054,11 @@ pub async fn execute_tool(
                 format!("⚙️ *Running:*\n```\n{}\n```\n\n", command),
             );
             tokio::time::timeout(
-                std::time::Duration::from_secs(30),
+                std::time::Duration::from_secs(timeout_secs),
                 run_command("direct".to_string(), command, Some(command_cwd)),
             )
             .await
-            .unwrap_or_else(|_| Ok("Command timed out after 30 seconds.".to_string()))
+            .unwrap_or_else(|_| Ok(format!("Command timed out after {} seconds.", timeout_secs)))
             .unwrap_or_else(|e| format!("Error: {}", e))
         }
         "run_shell" => {
@@ -1053,6 +1070,10 @@ pub async fn execute_tool(
                 .first()
                 .cloned()
                 .unwrap_or_else(|| workspace_dir.clone());
+            let timeout_secs = args["timeout_seconds"]
+                .as_i64()
+                .unwrap_or(30)
+                .clamp(1, 3600) as u64;
 
             let sudo_requested = shell_type == "bash" && (sudo_flag || code_requests_sudo(&code));
             let elevated_requested = shell_type == "powershell" && elevated_flag;
@@ -1124,11 +1145,11 @@ pub async fn execute_tool(
                 cmd.current_dir(command_cwd);
 
                 return tokio::time::timeout(
-                    std::time::Duration::from_secs(30),
+                    std::time::Duration::from_secs(timeout_secs),
                     run_command_with_stdin(cmd, format!("{}\n", password)),
                 )
                 .await
-                .unwrap_or_else(|_| Ok("Command timed out after 30 seconds.".to_string()))
+                .unwrap_or_else(|_| Ok(format!("Command timed out after {} seconds.", timeout_secs)))
                 .unwrap_or_else(|e| format!("Error: {}", e));
             }
 
@@ -1142,11 +1163,11 @@ pub async fn execute_tool(
                 );
 
                 return tokio::time::timeout(
-                    std::time::Duration::from_secs(30),
+                    std::time::Duration::from_secs(timeout_secs),
                     run_powershell_elevated(code, Some(command_cwd)),
                 )
                 .await
-                .unwrap_or_else(|_| Ok("Command timed out after 30 seconds.".to_string()))
+                .unwrap_or_else(|_| Ok(format!("Command timed out after {} seconds.", timeout_secs)))
                 .unwrap_or_else(|e| format!("Error: {}", e));
             }
 
@@ -1158,11 +1179,11 @@ pub async fn execute_tool(
                 ),
             );
             tokio::time::timeout(
-                std::time::Duration::from_secs(30),
+                std::time::Duration::from_secs(timeout_secs),
                 run_command(shell_type, code, Some(command_cwd)),
             )
             .await
-            .unwrap_or_else(|_| Ok("Command timed out after 30 seconds.".to_string()))
+            .unwrap_or_else(|_| Ok(format!("Command timed out after {} seconds.", timeout_secs)))
             .unwrap_or_else(|e| format!("Error: {}", e))
         }
         "file_actions" => {
