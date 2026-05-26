@@ -29,6 +29,7 @@ export default function App() {
   const [streaming, setStreaming] = useState(false);
   const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
   const [sidebar, setSidebar] = useState<Sidebar>(null);
+  const [sidebarMotion, setSidebarMotion] = useState<"opening" | "closing" | null>(null);
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [usage, setUsage] = useState<{
@@ -63,10 +64,19 @@ export default function App() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
+  const sidebarMotionTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    return () => {
+      if (sidebarMotionTimerRef.current !== null) {
+        window.clearTimeout(sidebarMotionTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -487,7 +497,37 @@ export default function App() {
   }
 
   function toggleSidebar(panel: Sidebar) {
-    setSidebar((s) => (s === panel ? null : panel));
+    if (sidebar === panel) {
+      closeSidebar();
+      return;
+    }
+
+    if (sidebarMotionTimerRef.current !== null) {
+      window.clearTimeout(sidebarMotionTimerRef.current);
+      sidebarMotionTimerRef.current = null;
+    }
+
+    setSidebar(panel);
+    setSidebarMotion("opening");
+    sidebarMotionTimerRef.current = window.setTimeout(() => {
+      setSidebarMotion(null);
+      sidebarMotionTimerRef.current = null;
+    }, 180);
+  }
+
+  function closeSidebar() {
+    if (!sidebar) return;
+
+    if (sidebarMotionTimerRef.current !== null) {
+      window.clearTimeout(sidebarMotionTimerRef.current);
+    }
+
+    setSidebarMotion("closing");
+    sidebarMotionTimerRef.current = window.setTimeout(() => {
+      setSidebar(null);
+      setSidebarMotion(null);
+      sidebarMotionTimerRef.current = null;
+    }, 180);
   }
 
   async function clearChat() {
@@ -628,77 +668,79 @@ export default function App() {
       {renderConfirmDialog()}
       {/* Sidebar */}
       {sidebar && (
-        <aside className="sidebar">
-          {sidebar === "settings" && (
-            <SettingsPanel
-              sessionId={sessionId}
-              onClose={() => setSidebar(null)}
-              onConfigSaved={(cfg) => {
-                const catalog = Array.from(new Set([...(cfg.model_catalog ?? []), cfg.model].filter(Boolean)));
-                setAvailableModels(catalog.length > 0 ? catalog : ["gpt-4o-mini"]);
-                setSelectedModel(cfg.model || "gpt-4o-mini");
-                setMaxTokens(cfg.model_settings?.max_tokens ?? null);
-              }}
-            />
-          )}
-          {sidebar === "skills" && (
-            <SkillsPanel
-              activeSkillIds={activeSkillIds}
-              onToggle={(name, active) => {
-                setActiveSkillIds((prev) =>
-                  active ? [...prev, name] : prev.filter((id) => id !== name)
-                );
-              }}
-              onClose={() => setSidebar(null)}
-            />
-          )}
-          {sidebar === "tools" && (
-            <ToolsPanel
-              onClose={() => setSidebar(null)}
-              onToolsChange={(tools) =>
-                setActiveToolCount(tools.length)
-              }
-            />
-          )}
-          {sidebar === "mcp" && (
-            <McpPanel
-              onClose={() => setSidebar(null)}
-              onServersChange={(enabledCount) => setActiveMcpCount(enabledCount)}
-            />
-          )}
-          {sidebar === "history" && (
-            <HistoryPanel
-              currentSessionId={sessionId}
-              disableSessionSwitch={streaming}
-              onLoad={(sid, msgs) => {
-                if (streaming) {
-                  setError("当前正在生成回复，请先停止后再切换历史会话。");
-                  return;
+        <aside className={`sidebar ${sidebarMotion === "opening" ? "sidebar-opening" : ""} ${sidebarMotion === "closing" ? "sidebar-closing" : ""}`}>
+          <div className={`sidebar-shell ${sidebar === "settings" ? "panel-settings" : ""} ${sidebar === "skills" ? "panel-skills" : ""} ${sidebar === "history" ? "panel-history" : ""} ${sidebar === "tools" ? "panel-tools" : ""} ${sidebar === "mcp" ? "panel-mcp" : ""} ${sidebar === "agents" ? "panel-agents" : ""}`} key={sidebar}>
+            {sidebar === "settings" && (
+              <SettingsPanel
+                sessionId={sessionId}
+                onClose={closeSidebar}
+                onConfigSaved={(cfg) => {
+                  const catalog = Array.from(new Set([...(cfg.model_catalog ?? []), cfg.model].filter(Boolean)));
+                  setAvailableModels(catalog.length > 0 ? catalog : ["gpt-4o-mini"]);
+                  setSelectedModel(cfg.model || "gpt-4o-mini");
+                  setMaxTokens(cfg.model_settings?.max_tokens ?? null);
+                }}
+              />
+            )}
+            {sidebar === "skills" && (
+              <SkillsPanel
+                activeSkillIds={activeSkillIds}
+                onToggle={(name, active) => {
+                  setActiveSkillIds((prev) =>
+                    active ? [...prev, name] : prev.filter((id) => id !== name)
+                  );
+                }}
+                onClose={closeSidebar}
+              />
+            )}
+            {sidebar === "tools" && (
+              <ToolsPanel
+                onClose={closeSidebar}
+                onToolsChange={(tools) =>
+                  setActiveToolCount(tools.length)
                 }
-                if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null; }
-                setStreaming(false);
-                setMessages(msgs);
-                setSessionId(sid);
+              />
+            )}
+            {sidebar === "mcp" && (
+              <McpPanel
+                onClose={closeSidebar}
+                onServersChange={(enabledCount) => setActiveMcpCount(enabledCount)}
+              />
+            )}
+            {sidebar === "history" && (
+              <HistoryPanel
+                currentSessionId={sessionId}
+                disableSessionSwitch={streaming}
+                onLoad={(sid, msgs) => {
+                  if (streaming) {
+                    setError("当前正在生成回复，请先停止后再切换历史会话。");
+                    return;
+                  }
+                  if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null; }
+                  setStreaming(false);
+                  setMessages(msgs);
+                  setSessionId(sid);
 
-                const lastMsg = msgs.length > 0 ? msgs[msgs.length - 1] : null;
-                if (lastMsg?.role === "user") {
-                  setPendingRetryMessageId(lastMsg.id);
-                } else {
-                  setPendingRetryMessageId(null);
-                }
-              }}
-              onClose={() => setSidebar(null)}
-            />
-          )}
-          {sidebar === "agents" && (
-            <AgentsPanel
-              onClose={() => setSidebar(null)}
-              onAgentsChange={(count) => setActiveAgentCount(count)}
-              useAgentsEnabled={useAgentsEnabled}
-              onToggleUseAgents={setUseAgentsEnabled}
-              agentStatuses={agentStatuses}
-            />
-          )}
+                  const lastMsg = msgs.length > 0 ? msgs[msgs.length - 1] : null;
+                  if (lastMsg?.role === "user") {
+                    setPendingRetryMessageId(lastMsg.id);
+                  } else {
+                    setPendingRetryMessageId(null);
+                  }
+                }}
+                onClose={closeSidebar}
+              />
+            )}
+            {sidebar === "agents" && (
+              <AgentsPanel
+                onClose={closeSidebar}
+                onAgentsChange={(count) => setActiveAgentCount(count)}
+                useAgentsEnabled={useAgentsEnabled}
+                onToggleUseAgents={setUseAgentsEnabled}
+                agentStatuses={agentStatuses}
+              />
+            )}
+          </div>
         </aside>
       )}
 

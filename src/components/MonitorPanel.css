@@ -68,11 +68,17 @@
     font-size: 20px;
     cursor: pointer;
     padding: 4px 8px;
-    transition: color 0.2s;
+    transition: transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1), color 0.2s;
+    will-change: transform;
 }
 
 .close-btn:hover {
     color: #fff;
+    transform: translateX(-1px);
+}
+
+.close-btn:active {
+    transform: translateX(-3px) scale(0.92) rotate(-6deg);
 }
 
 .monitor-body {
