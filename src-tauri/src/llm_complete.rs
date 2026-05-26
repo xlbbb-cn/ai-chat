@@ -493,6 +493,9 @@ pub async fn chat_completion(
 ) -> Result<(), String> {
     state.chat_cancelled.store(false, Ordering::SeqCst);
     let config = state.config.lock().unwrap().clone();
+    let multi_agent_enabled = use_agents.unwrap_or(false);
+    let self_evolution_enabled = config.self_evolution_mode;
+    let subagent_evolution_enabled = multi_agent_enabled && config.self_evolution_mode;
     log_event(
         &state,
         "INFO",
@@ -503,7 +506,7 @@ pub async fn chat_completion(
     );
 
     // ── Agent orchestration path ──────────────────────────────────────────────
-    if use_agents == Some(true) {
+    if multi_agent_enabled {
         let agents_cfg = agents::load_agents_config(&state.agents_config_path);
         let has_enabled = agents_cfg.agents.iter().any(|a| a.enabled);
         if has_enabled {
@@ -522,9 +525,12 @@ pub async fn chat_completion(
     let mut all_messages: Vec<Value> = vec![];
     let mut skill_allowed_commands: Vec<String> = Vec::new();
     let mut active_skill_roots: Vec<std::path::PathBuf> = Vec::new();
-    let self_evolution_roots =
-        skills::collect_self_evolution_roots(&state.skills_dir, config.self_evolution_mode);
-    let self_evolution_files = if config.self_evolution_mode {
+    let self_evolution_roots = if self_evolution_enabled {
+        skills::collect_self_evolution_roots(&state.skills_dir, true)
+    } else {
+        Vec::new()
+    };
+    let self_evolution_files = if subagent_evolution_enabled {
         vec![state.agents_config_path.clone()]
     } else {
         Vec::new()
@@ -623,12 +629,15 @@ pub async fn chat_completion(
         system_content.push_str(&skills_sys_msg);
     }
 
-    let agents_cfg = agents::load_agents_config(&state.agents_config_path);
-    let enabled_agents: Vec<agents::SubAgent> = agents_cfg
-        .agents
-        .into_iter()
-        .filter(|a| a.enabled)
-        .collect();
+    let enabled_agents: Vec<agents::SubAgent> = if multi_agent_enabled {
+        agents::load_agents_config(&state.agents_config_path)
+            .agents
+            .into_iter()
+            .filter(|a| a.enabled)
+            .collect()
+    } else {
+        Vec::new()
+    };
 
     if !enabled_agents.is_empty() {
         let mut available_agents_info = String::new();
@@ -653,13 +662,27 @@ pub async fn chat_completion(
         all_messages.push(json!({ "role": "system", "content": system_content }));
     }
 
-    if config.self_evolution_mode && !self_evolution_roots.is_empty() {
+    if self_evolution_enabled && !self_evolution_roots.is_empty() {
         let skill_roots_display = self_evolution_roots
             .iter()
             .map(|p| format!("- {}", p.display()))
             .collect::<Vec<String>>()
             .join("\n");
-        let agents_config_display = state.agents_config_path.display().to_string();
+        let subagent_config_section = if subagent_evolution_enabled {
+            format!(
+                "- You may also inspect and update the sub-agent config file at:\n\\
+                 {}\n\\
+",
+                state.agents_config_path.display()
+            )
+        } else {
+            String::new()
+        };
+        let backup_scope_line = if subagent_evolution_enabled {
+            "- Before modifying any skill file or the sub-agent config file, create a sibling backup with suffix `.bak.<number>`."
+        } else {
+            "- Before modifying any skill file, create a sibling backup with suffix `.bak.<number>`."
+        };
         all_messages.push(json!({
             "role": "system",
             "content": format!(
@@ -667,10 +690,9 @@ pub async fn chat_completion(
                  Self-evolution mode is ENABLED.\n\
                  - You may inspect, create, and update reusable skills under these skill roots:\n\
                  {skill_roots_display}\n\
-                 - You may also inspect and update the sub-agent config file at:\n\
-                 {agents_config_display}\n\
+                 {subagent_config_section}
                  - When it directly helps the user's request, you may improve existing skills or create new ones for future reuse.\n\
-                 - Before modifying any skill file or the sub-agent config file, create a sibling backup with suffix `.bak.<number>`.\n\
+                 {backup_scope_line}\n\
                  - Use `file_actions` for these edits so backup creation is enforced automatically.\n\
                  - Prefer absolute paths when working in skill roots to avoid ambiguity with workspace files.\n\
                  - If you read or list a file inside a skill root, reuse that exact returned path when patching or writing it.\n\
