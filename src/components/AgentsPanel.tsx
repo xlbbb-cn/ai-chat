@@ -359,10 +359,11 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
             )}
             {agents.map((agent) => {
               const st = agentStatuses[agent.id];
+              const statusClass = st?.status === "running" ? "running" : st?.status === "error" ? "error" : "";
               return (
                 <div
                   key={agent.id}
-                  className={`agent-item ${agent.enabled ? "active" : ""}`}
+                  className={`agent-item ${agent.enabled ? "active" : ""} ${statusClass}`}
                   onClick={() => handleToggleAgent(agent)}
                 >
                   <div className="agent-content">

@@ -96,7 +96,7 @@ export function HistoryPanel({ currentSessionId, runtimeStates, refreshKey, onLo
             return (
               <div
                 key={sid}
-                className={`history-item ${isCurrent ? "active" : ""}`}
+                className={`history-item ${isCurrent ? "active" : ""} ${runtime?.status === "working" || runtime?.status === "error" ? runtime.status : ""}`}
                 onClick={() => handleLoad(sid, recs)}
               >
                 <div className="history-content">

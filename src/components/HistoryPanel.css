@@ -127,6 +127,16 @@
   background: #F4F4F4;
 }
 
+.history-item.working {
+  box-shadow: 0 0 0 1px rgba(56, 142, 60, 0.16), 0 0 18px 4px rgba(102, 187, 106, 0.18);
+  background: rgba(232, 245, 233, 0.9);
+}
+
+.history-item.error {
+  box-shadow: 0 0 0 1px rgba(181, 128, 0, 0.18), 0 0 18px 4px rgba(255, 202, 40, 0.16);
+  background: rgba(255, 249, 196, 0.9);
+}
+
 .history-item.active {
   background: #F4F4F4;
   cursor: default;
