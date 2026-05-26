@@ -669,7 +669,12 @@ export default function App() {
           {sidebar === "history" && (
             <HistoryPanel
               currentSessionId={sessionId}
+              disableSessionSwitch={streaming}
               onLoad={(sid, msgs) => {
+                if (streaming) {
+                  setError("当前正在生成回复，请先停止后再切换历史会话。");
+                  return;
+                }
                 if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null; }
                 setStreaming(false);
                 setMessages(msgs);

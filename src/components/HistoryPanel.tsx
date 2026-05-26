@@ -7,10 +7,11 @@ import "./HistoryPanel.css";
 interface Props {
   currentSessionId: string;
   onLoad: (sessionId: string, messages: Message[]) => void;
+  disableSessionSwitch?: boolean;
   onClose: () => void;
 }
 
-export function HistoryPanel({ currentSessionId, onLoad, onClose }: Props) {
+export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = false, onClose }: Props) {
   const [records, setRecords] = useState<HistoryRecord[]>([]);
   const [searchKeyword, setSearchKeyword] = useState("");
 
@@ -38,6 +39,8 @@ export function HistoryPanel({ currentSessionId, onLoad, onClose }: Props) {
   }, [searchKeyword, sessions]);
 
   function handleLoad(sessionId: string, sessionRecords: HistoryRecord[]) {
+    if (disableSessionSwitch) return;
+
     const messages: Message[] = sessionRecords.map((r) => ({
       id: crypto.randomUUID(),
       role: r.role as "user" | "assistant",
@@ -49,9 +52,22 @@ export function HistoryPanel({ currentSessionId, onLoad, onClose }: Props) {
 
   async function handleDelete(e: React.MouseEvent, sessionId: string) {
     e.stopPropagation();
+    if (disableSessionSwitch) return;
+
+    const currentSessions = sessions;
+    const deletedIndex = currentSessions.findIndex(([sid]) => sid === sessionId);
+    const remainingSessions = currentSessions.filter(([sid]) => sid !== sessionId);
+
     try {
       await deleteHistory(sessionId);
       setRecords((prev) => prev.filter((r) => r.session_id !== sessionId));
+
+      if (remainingSessions.length > 0) {
+        const targetIndex = deletedIndex > 0 ? deletedIndex - 1 : 0;
+        const safeIndex = Math.min(targetIndex, remainingSessions.length - 1);
+        const [nextSessionId, nextSessionRecords] = remainingSessions[safeIndex];
+        handleLoad(nextSessionId, nextSessionRecords);
+      }
     } catch (err) {
       console.error("Failed to delete history:", err);
     }
@@ -73,6 +89,9 @@ export function HistoryPanel({ currentSessionId, onLoad, onClose }: Props) {
           placeholder="Search sessions by keyword"
           aria-label="Search history sessions"
         />
+        {disableSessionSwitch && (
+          <p className="history-switch-hint">正在生成回复，暂不可切换会话</p>
+        )}
       </div>
 
       <div className="history-list">
@@ -87,7 +106,7 @@ export function HistoryPanel({ currentSessionId, onLoad, onClose }: Props) {
             return (
               <div
                 key={sid}
-                className={`history-item ${isCurrent ? "active" : ""}`}
+                className={`history-item ${isCurrent ? "active" : ""} ${disableSessionSwitch ? "disabled" : ""}`}
                 onClick={() => handleLoad(sid, recs)}
               >
                 <div className="history-content">
