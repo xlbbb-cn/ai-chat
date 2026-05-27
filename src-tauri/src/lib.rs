@@ -22,6 +22,7 @@ pub mod mcp;
 pub mod neo4j_db;
 mod skills;
 mod tools;
+mod working;
 
 use logger::{AppLogger, LoggerOutput};
 
@@ -308,6 +309,7 @@ impl Default for AppConfig {
 
 pub struct AppState {
     pub config: Mutex<AppConfig>,
+    pub app_data_dir: PathBuf,
     pub config_path: PathBuf,
     pub workspace_dir: Mutex<PathBuf>,
     pub db_path: PathBuf,
@@ -320,6 +322,11 @@ pub struct AppState {
     /// One-shot channel sender used to relay the user's confirm/deny response
     /// back to a waiting `execute_tool` call.
     pub confirm_sender: Mutex<Option<tokio::sync::oneshot::Sender<ToolConfirmation>>>,
+    pub working_uid: String,
+    pub working_enabled: Mutex<bool>,
+    pub working_status: Mutex<String>,
+    pub working_status_detail: Mutex<Option<String>>,
+    pub working_task_path: Mutex<Option<PathBuf>>,
 }
 
 #[derive(Clone, Debug)]
@@ -439,6 +446,13 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed => {
+                let state = window.app_handle().state::<AppState>();
+                let _ = working::cleanup_working_lock(&state);
+            }
+            _ => {}
+        })
         .on_menu_event(|app, event| {
             if event.id() == OPEN_APP_DATA_DIR_MENU_ID {
                 if let Ok(data_dir) = app.path().app_data_dir() {
@@ -614,6 +628,7 @@ pub fn run() {
 
             app.manage(AppState {
                 config: Mutex::new(config),
+                app_data_dir: data_dir.clone(),
                 config_path,
                 workspace_dir: Mutex::new(workspace_dir.clone()),
                 db: Mutex::new(db),
@@ -624,6 +639,11 @@ pub fn run() {
                 agents_config_path,
                 chat_cancelled: AtomicBool::new(false),
                 confirm_sender: Mutex::new(None),
+                working_uid: Uuid::new_v4().to_string(),
+                working_enabled: Mutex::new(false),
+                working_status: Mutex::new("idle".to_string()),
+                working_status_detail: Mutex::new(None),
+                working_task_path: Mutex::new(None),
             });
 
             // Warm up enabled MCP servers as soon as the app starts.
@@ -670,6 +690,13 @@ pub fn run() {
             agents::delete_sub_agent,
             agents::get_agent_orchestration,
             agents::save_agent_orchestration,
+            working::get_working_runtime,
+            working::set_working_mode,
+            working::set_working_status,
+            working::list_working_clients,
+            working::acquire_working_task,
+            working::dispatch_working_task,
+            working::complete_working_task,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

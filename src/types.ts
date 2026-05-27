@@ -90,3 +90,27 @@ export interface AgentTaskEvent {
   summary?: string;
   error?: string;
 }
+
+export interface WorkingRuntime {
+  uid: string;
+  enabled: boolean;
+  status: "idle" | "busy" | string;
+  status_detail?: string | null;
+  active_task_file?: string | null;
+}
+
+export interface WorkingClientRecord {
+  uid: string;
+  status: "idle" | "busy" | string;
+  status_detail?: string | null;
+  updated_at_ms: number;
+  active_task_file?: string | null;
+  is_current: boolean;
+}
+
+export interface WorkingTask {
+  uid: string;
+  file_name: string;
+  path: string;
+  content: string;
+}

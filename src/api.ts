@@ -1,6 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import type { AppConfig, Message, Skill, McpServer, SubAgent, AgentOrchestration, AgentTaskEvent } from "./types";
+import type {
+  AppConfig,
+  Message,
+  Skill,
+  McpServer,
+  SubAgent,
+  AgentOrchestration,
+  AgentTaskEvent,
+  WorkingRuntime,
+  WorkingClientRecord,
+  WorkingTask,
+} from "./types";
 
 export async function getConfig(): Promise<AppConfig> {
   return invoke("get_config");
@@ -226,6 +237,39 @@ export async function getAgentOrchestration(): Promise<AgentOrchestration> {
 
 export async function saveAgentOrchestration(orchestration: AgentOrchestration): Promise<void> {
   return invoke("save_agent_orchestration", { orchestration });
+}
+
+// ─── Working Mode ────────────────────────────────────────────────────────────
+
+export async function getWorkingRuntime(): Promise<WorkingRuntime> {
+  return invoke("get_working_runtime");
+}
+
+export async function setWorkingMode(enabled: boolean): Promise<WorkingRuntime> {
+  return invoke("set_working_mode", { enabled });
+}
+
+export async function setWorkingStatus(
+  status: string,
+  statusDetail?: string,
+): Promise<WorkingRuntime> {
+  return invoke("set_working_status", { status, statusDetail });
+}
+
+export async function listWorkingClients(): Promise<WorkingClientRecord[]> {
+  return invoke("list_working_clients");
+}
+
+export async function acquireWorkingTask(): Promise<WorkingTask | null> {
+  return invoke("acquire_working_task");
+}
+
+export async function dispatchWorkingTask(targetUid: string, content: string): Promise<void> {
+  return invoke("dispatch_working_task", { targetUid, content });
+}
+
+export async function completeWorkingTask(success: boolean, details: string): Promise<void> {
+  return invoke("complete_working_task", { success, details });
 }
 
 // ─── Interaction Log Monitor ──────────────────────────────────────────────────

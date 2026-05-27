@@ -1,6 +1,20 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { chatCompletion, getConfig, getAgentOrchestration, listMcpServers, listSubAgents, saveConfig, saveHistory, stopChatCompletion, confirmCommand } from "./api";
+import {
+  acquireWorkingTask,
+  chatCompletion,
+  completeWorkingTask,
+  confirmCommand,
+  getAgentOrchestration,
+  getConfig,
+  getWorkingRuntime,
+  listMcpServers,
+  listSubAgents,
+  saveConfig,
+  saveHistory,
+  setWorkingStatus,
+  stopChatCompletion,
+} from "./api";
 
 import { ChatMessage } from "./components/ChatMessage";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -9,10 +23,11 @@ import { HistoryPanel } from "./components/HistoryPanel";
 import { ToolsPanel } from "./components/ToolsPanel";
 import { McpPanel } from "./components/McpPanel";
 import { AgentsPanel } from "./components/AgentsPanel";
-import type { Message, AgentTaskEvent } from "./types";
+import { WorkingPanel } from "./components/WorkingPanel";
+import type { Message, AgentTaskEvent, WorkingRuntime, WorkingTask } from "./types";
 import "./App.css";
 
-type Sidebar = "settings" | "skills" | "history" | "tools" | "mcp" | "agents" | null;
+type Sidebar = "settings" | "skills" | "history" | "tools" | "mcp" | "agents" | "working" | null;
 
 interface AgentStatus {
   status: "idle" | "running" | "done" | "error";
@@ -60,11 +75,15 @@ export default function App() {
   const [profileExporting, setProfileExporting] = useState(false);
   const [profileExportMessage, setProfileExportMessage] = useState("Exporting and compressing profile...");
   const [pendingRetryMessageId, setPendingRetryMessageId] = useState<string | null>(null);
+  const [workingRuntime, setWorkingRuntime] = useState<WorkingRuntime | null>(null);
+  const [activeWorkingTask, setActiveWorkingTask] = useState<WorkingTask | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
   const sidebarMotionTimerRef = useRef<number | null>(null);
+  const workingTaskPollInFlightRef = useRef(false);
+  const activeWorkingTaskRef = useRef<WorkingTask | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -84,6 +103,10 @@ export default function App() {
       textareaRef.current.style.height = textareaRef.current.scrollHeight + "px";
     }
   }, [input]);
+
+  useEffect(() => {
+    activeWorkingTaskRef.current = activeWorkingTask;
+  }, [activeWorkingTask]);
 
   useEffect(() => {
     const unlisten = listen<{
@@ -198,6 +221,10 @@ export default function App() {
     getAgentOrchestration()
       .then((orch) => setUseAgentsEnabled(orch.use_agents))
       .catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    getWorkingRuntime().then(setWorkingRuntime).catch(console.error);
   }, []);
 
   useEffect(() => {
@@ -329,6 +356,117 @@ export default function App() {
     };
   }, []);
 
+  const refreshWorkingRuntime = useCallback(() => {
+    getWorkingRuntime().then(setWorkingRuntime).catch(console.error);
+  }, []);
+
+  const finalizeWorkingTask = useCallback(async (task: WorkingTask, success: boolean, details: string) => {
+    let shouldFinalize = false;
+    setActiveWorkingTask((current) => {
+      if (current?.path === task.path) {
+        shouldFinalize = true;
+        return null;
+      }
+      return current;
+    });
+
+    if (!shouldFinalize) {
+      return;
+    }
+
+    try {
+      await completeWorkingTask(success, details);
+    } catch (err) {
+      console.error("Failed to finalize working task", err);
+    } finally {
+      refreshWorkingRuntime();
+    }
+  }, [refreshWorkingRuntime]);
+
+  const beginCompletion = useCallback(async (
+    history: Pick<Message, "role" | "content">[],
+    assistantId: string,
+    options?: {
+      userMessageId?: string;
+      clearPendingRetryOnSuccess?: boolean;
+      workingTask?: WorkingTask | null;
+    },
+  ) => {
+    let accumulatedContent = "";
+    let accumulatedReasoning = "";
+
+    const cleanup = await chatCompletion(history, activeSkillIds, sessionId, selectedModel, {
+      onToken(token) {
+        accumulatedContent += token;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId ? { ...m, content: accumulatedContent } : m
+          )
+        );
+      },
+      onReasoningToken(token) {
+        accumulatedReasoning += token;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId ? { ...m, reasoning_content: accumulatedReasoning } : m
+          )
+        );
+      },
+      onDone() {
+        const finalContentToSave = accumulatedReasoning
+          ? `<details><summary>Thought Process</summary>\n\n${accumulatedReasoning}\n</details>\n\n${accumulatedContent}`
+          : accumulatedContent;
+
+        saveHistory(sessionId, "assistant", finalContentToSave);
+        setMessages((prev) =>
+          prev
+            .filter((m) => !m.id.startsWith("agent-progress-"))
+            .map((m) => (m.id === assistantId ? { ...m, streaming: false } : m))
+        );
+        if (options?.clearPendingRetryOnSuccess) {
+          setPendingRetryMessageId(null);
+        }
+        if (options?.workingTask) {
+          void finalizeWorkingTask(
+            options.workingTask,
+            true,
+            finalContentToSave.trim() || "Task completed with no textual response."
+          );
+        }
+        setAgentStatuses({});
+        setStreaming(false);
+        cleanupRef.current = null;
+        refreshWorkingRuntime();
+      },
+      onError(err) {
+        setError(err);
+        setMessages((prev) =>
+          prev
+            .filter((m) => !m.id.startsWith("agent-progress-"))
+            .map((m) =>
+              m.id === assistantId
+                ? { ...m, content: m.content || "Error: " + err, streaming: false }
+                : m
+            )
+        );
+        if (options?.userMessageId) {
+          setPendingRetryMessageId(options.userMessageId);
+        }
+        if (options?.workingTask) {
+          const partial = accumulatedContent.trim() || accumulatedReasoning.trim();
+          const detail = partial ? `Error: ${err}\n\nPartial response:\n${partial}` : err;
+          void finalizeWorkingTask(options.workingTask, false, detail);
+        }
+        setAgentStatuses({});
+        setStreaming(false);
+        cleanupRef.current = null;
+        refreshWorkingRuntime();
+      },
+    }, useAgentsEnabled);
+
+    cleanupRef.current = cleanup;
+  }, [activeSkillIds, sessionId, selectedModel, useAgentsEnabled, finalizeWorkingTask, refreshWorkingRuntime]);
+
   const sendMessage = useCallback(async () => {
     if (profileExporting) return;
 
@@ -357,63 +495,8 @@ export default function App() {
       .map((m) => ({ role: m.role, content: m.content }));
 
     saveHistory(sessionId, "user", text);
-
-    let accumulatedContent = "";
-    let accumulatedReasoning = "";
-
-    const cleanup = await chatCompletion(history, activeSkillIds, sessionId, selectedModel, {
-      onToken(token) {
-        accumulatedContent += token;
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId ? { ...m, content: accumulatedContent } : m
-          )
-        );
-      },
-      onReasoningToken(token) {
-        accumulatedReasoning += token;
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId ? { ...m, reasoning_content: accumulatedReasoning } : m
-          )
-        );
-      },
-      onDone() {
-        const finalContentToSave = accumulatedReasoning
-          ? `<details><summary>Thought Process</summary>\n\n${accumulatedReasoning}\n</details>\n\n${accumulatedContent}`
-          : accumulatedContent;
-
-        saveHistory(sessionId, "assistant", finalContentToSave);
-        // Remove all agent progress system messages and finalize assistant message
-        setMessages((prev) =>
-          prev
-            .filter((m) => !m.id.startsWith("agent-progress-"))
-            .map((m) => (m.id === assistantId ? { ...m, streaming: false } : m))
-        );
-        setAgentStatuses({});
-        setStreaming(false);
-        cleanupRef.current = null;
-      },
-      onError(err) {
-        setError(err);
-        setMessages((prev) =>
-          prev
-            .filter((m) => !m.id.startsWith("agent-progress-"))
-            .map((m) =>
-              m.id === assistantId
-                ? { ...m, content: m.content || "Error: " + err, streaming: false }
-                : m
-            )
-        );
-        setPendingRetryMessageId(userMsg.id);
-        setAgentStatuses({});
-        setStreaming(false);
-        cleanupRef.current = null;
-      },
-    }, useAgentsEnabled);
-
-    cleanupRef.current = cleanup;
-  }, [input, messages, streaming, profileExporting, activeSkillIds, sessionId, attachments, selectedModel, useAgentsEnabled]);
+    await beginCompletion(history, assistantId, { userMessageId: userMsg.id });
+  }, [input, messages, streaming, profileExporting, sessionId, attachments, beginCompletion]);
 
   const retryPendingUserMessage = useCallback(async () => {
     if (streaming || !pendingRetryMessageId) return;
@@ -428,62 +511,94 @@ export default function App() {
     const history = [...messages]
       .filter((m) => !m.streaming && !m.id.startsWith("agent-progress-"))
       .map((m) => ({ role: m.role, content: m.content }));
+    await beginCompletion(history, assistantId, { clearPendingRetryOnSuccess: true });
+  }, [messages, streaming, pendingRetryMessageId, beginCompletion]);
 
-    let accumulatedContent = "";
-    let accumulatedReasoning = "";
+  const runWorkingTask = useCallback(async (task: WorkingTask) => {
+    if (profileExporting || streaming) return;
 
-    const cleanup = await chatCompletion(history, activeSkillIds, sessionId, selectedModel, {
-      onToken(token) {
-        accumulatedContent += token;
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId ? { ...m, content: accumulatedContent } : m
-          )
-        );
-      },
-      onReasoningToken(token) {
-        accumulatedReasoning += token;
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId ? { ...m, reasoning_content: accumulatedReasoning } : m
-          )
-        );
-      },
-      onDone() {
-        const finalContentToSave = accumulatedReasoning
-          ? `<details><summary>Thought Process</summary>\n\n${accumulatedReasoning}\n</details>\n\n${accumulatedContent}`
-          : accumulatedContent;
+    const taskText = task.content.trim();
+    const displayText = `Working task (${task.file_name})\n\n${taskText}`;
+    const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: displayText };
+    const assistantId = crypto.randomUUID();
+    const assistantMsg: Message = { id: assistantId, role: "assistant", content: "", streaming: true };
 
-        saveHistory(sessionId, "assistant", finalContentToSave);
-        setMessages((prev) =>
-          prev
-            .filter((m) => !m.id.startsWith("agent-progress-"))
-            .map((m) => (m.id === assistantId ? { ...m, streaming: false } : m))
-        );
-        setPendingRetryMessageId(null);
-        setAgentStatuses({});
-        setStreaming(false);
-        cleanupRef.current = null;
-      },
-      onError(err) {
-        setError(err);
-        setMessages((prev) =>
-          prev
-            .filter((m) => !m.id.startsWith("agent-progress-"))
-            .map((m) =>
-              m.id === assistantId
-                ? { ...m, content: m.content || "Error: " + err, streaming: false }
-                : m
-            )
-        );
-        setAgentStatuses({});
-        setStreaming(false);
-        cleanupRef.current = null;
-      },
-    }, useAgentsEnabled);
+    setActiveWorkingTask(task);
+    setMessages((prev) => [...prev, userMsg, assistantMsg]);
+    setPendingRetryMessageId(null);
+    setStreaming(true);
+    setError(null);
 
-    cleanupRef.current = cleanup;
-  }, [messages, streaming, pendingRetryMessageId, activeSkillIds, sessionId, selectedModel, useAgentsEnabled]);
+    const history = [...messages, userMsg]
+      .filter((m) => !m.streaming && !m.id.startsWith("agent-progress-"))
+      .map((m) => ({ role: m.role, content: m.content }));
+
+    saveHistory(sessionId, "user", displayText);
+    await beginCompletion(history, assistantId, { workingTask: task });
+  }, [messages, streaming, profileExporting, sessionId, beginCompletion]);
+
+  useEffect(() => {
+    if (!workingRuntime?.enabled || profileExporting || streaming || confirmDialog || activeWorkingTask) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const pollForTask = async () => {
+      if (workingTaskPollInFlightRef.current) {
+        return;
+      }
+
+      workingTaskPollInFlightRef.current = true;
+      try {
+        const task = await acquireWorkingTask();
+        if (!task || cancelled) {
+          return;
+        }
+
+        refreshWorkingRuntime();
+
+        if (!task.content.trim()) {
+          setActiveWorkingTask(task);
+          await finalizeWorkingTask(task, false, "Task file is empty.");
+          return;
+        }
+
+        await runWorkingTask(task);
+      } catch (err) {
+        console.error("Failed to poll working task", err);
+      } finally {
+        workingTaskPollInFlightRef.current = false;
+      }
+    };
+
+    void pollForTask();
+    const interval = window.setInterval(() => {
+      void pollForTask();
+    }, 4000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [workingRuntime?.enabled, profileExporting, streaming, confirmDialog, activeWorkingTask, runWorkingTask, finalizeWorkingTask, refreshWorkingRuntime]);
+
+  useEffect(() => {
+    if (!workingRuntime?.enabled) {
+      return;
+    }
+
+    const desiredStatus = streaming || !!activeWorkingTask ? "busy" : "idle";
+    const desiredDetail = activeWorkingTask?.file_name ?? (streaming ? "chat" : undefined);
+    const currentDetail = workingRuntime.status_detail ?? undefined;
+    if (workingRuntime.status === desiredStatus && currentDetail === desiredDetail) {
+      return;
+    }
+
+    setWorkingStatus(desiredStatus, desiredDetail)
+      .then(setWorkingRuntime)
+      .catch(console.error);
+  }, [workingRuntime, streaming, activeWorkingTask]);
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (profileExporting) {
@@ -657,6 +772,11 @@ export default function App() {
       })
     );
     setStreaming(false);
+
+    const currentTask = activeWorkingTaskRef.current;
+    if (currentTask) {
+      void finalizeWorkingTask(currentTask, false, "Task execution was stopped by the user.");
+    }
   }
 
   const usageTotal = usage ? (usage.total_tokens ?? usage.prompt_tokens + usage.completion_tokens) : 0;
@@ -676,7 +796,7 @@ export default function App() {
       {/* Sidebar */}
       {sidebar && (
         <aside className={`sidebar ${sidebarMotion === "opening" ? "sidebar-opening" : ""} ${sidebarMotion === "closing" ? "sidebar-closing" : ""}`}>
-          <div className={`sidebar-shell ${sidebar === "settings" ? "panel-settings" : ""} ${sidebar === "skills" ? "panel-skills" : ""} ${sidebar === "history" ? "panel-history" : ""} ${sidebar === "tools" ? "panel-tools" : ""} ${sidebar === "mcp" ? "panel-mcp" : ""} ${sidebar === "agents" ? "panel-agents" : ""}`} key={sidebar}>
+          <div className={`sidebar-shell ${sidebar === "settings" ? "panel-settings" : ""} ${sidebar === "skills" ? "panel-skills" : ""} ${sidebar === "history" ? "panel-history" : ""} ${sidebar === "tools" ? "panel-tools" : ""} ${sidebar === "mcp" ? "panel-mcp" : ""} ${sidebar === "agents" ? "panel-agents" : ""} ${sidebar === "working" ? "panel-working" : ""}`} key={sidebar}>
             {sidebar === "settings" && (
               <SettingsPanel
                 sessionId={sessionId}
@@ -747,6 +867,13 @@ export default function App() {
                 agentStatuses={agentStatuses}
               />
             )}
+            {sidebar === "working" && (
+              <WorkingPanel
+                runtime={workingRuntime}
+                onClose={closeSidebar}
+                onRuntimeChange={setWorkingRuntime}
+              />
+            )}
           </div>
         </aside>
       )}
@@ -757,6 +884,18 @@ export default function App() {
         <header className="toolbar">
           <span className="app-title">Chat</span>
           <div className="toolbar-actions">
+            <button
+              className={`toolbar-btn ${sidebar === "working" ? "active" : ""}`}
+              onClick={() => toggleSidebar("working")}
+              title={workingRuntime?.uid ? `Working Mode (${workingRuntime.uid})` : "Working Mode"}
+            >
+              ⚡ Working
+              {workingRuntime?.enabled && (
+                <span className={`toolbar-btn-pill ${workingRuntime.status === "busy" ? "busy" : ""}`}>
+                  {workingRuntime.status === "busy" ? "BUSY" : "ON"}
+                </span>
+              )}
+            </button>
             <button
               className={`toolbar-btn ${sidebar === "agents" ? "active" : ""}`}
               onClick={() => toggleSidebar("agents")}
@@ -821,121 +960,123 @@ export default function App() {
           </div>
         </header>
 
-        {profileExporting && (
-          <div className="profile-export-progress" role="progressbar" aria-busy="true" aria-live="polite">
-            <div className="profile-export-progress-label">{profileExportMessage}</div>
-            <div className="profile-export-progress-hint">Chat is locked during export and sending is disabled.</div>
-            <div className="profile-export-progress-track">
-              <div className="profile-export-progress-fill" />
-            </div>
-          </div>
-        )}
-
-        {/* Messages */}
-        <div className="messages">
-          {messages.length === 0 && (
-            <div className="empty-state">
-              <p>Start a conversation</p>
-              <p className="empty-hint">
-                Use <strong>Skills</strong> to set a system prompt, or configure the API in <strong>Settings</strong>.
-              </p>
-            </div>
-          )}
-          {messages.map((m) => (
-            <ChatMessage
-              key={m.id}
-              message={m}
-              showRetry={m.role === "user" && m.id === pendingRetryMessageId && !streaming}
-              onRetry={retryPendingUserMessage}
-            />
-          ))}
-          {error && <div className="error-banner">{error}</div>}
-          <div ref={bottomRef} />
+        {
+    profileExporting && (
+      <div className="profile-export-progress" role="progressbar" aria-busy="true" aria-live="polite">
+        <div className="profile-export-progress-label">{profileExportMessage}</div>
+        <div className="profile-export-progress-hint">Chat is locked during export and sending is disabled.</div>
+        <div className="profile-export-progress-track">
+          <div className="profile-export-progress-fill" />
         </div>
+      </div>
+    )
+  }
 
-        {/* Input */}
-        <div className="input-area" style={{ position: "relative", flexDirection: "column", alignItems: "stretch" }}>
-          {usage && (
-            <div className="usage-panel">
-              <div className="usage-line" role="status" aria-live="polite">
-                Tokens: {usage.prompt_tokens} prompt / {usage.completion_tokens} completion   {usageBarText} {usageTotal} / {usageMax} ({usagePercent}%)
-              </div>
-            </div>
-          )}
-          {attachments.length > 0 && (
-            <div className="attachments-bar">
-              {attachments.map((file, i) => (
-                <div key={i} className="attachment-pill">
-                  <span className="attachment-name" title={file.name}>{file.name}</span>
-                  <button className="attachment-remove" onClick={() => {
-                    setAttachments(prev => prev.filter((_, idx) => idx !== i));
-                  }}>×</button>
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="input-row">
-            <button
-              className="attach-btn"
-              title="Attach files"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={streaming || profileExporting}
-            >
-              📎
-            </button>
-            <input
-              type="file"
-              multiple
-              accept=".txt,.md,.markdown,.csv,.tsv,.json,.jsonl,.yaml,.yml,.xml,.html,.htm,.css,.js,.ts,.jsx,.tsx,.py,.rs,.go,.java,.c,.cpp,.h,.hpp,.cs,.rb,.php,.sh,.bat,.ps1,.sql,.log,.ini,.cfg,.toml,.env,.diff,.patch,.tex,.rst,.adoc,.org,.r,.m,.scala,.swift,.kt,.dart,.lua,.pl,.ex,.exs,.clj,.hs,.ml,.fs,.erl,.vim,.conf,.cfg,.v"
-              ref={fileInputRef}
-              style={{ display: 'none' }}
-              onChange={async (e) => {
-                const files = e.target.files;
-                if (files && files.length > 0) {
-                  const newAttachments: { name: string; content: string }[] = [];
-                  for (const f of Array.from(files)) {
-                    try {
-                      const content = await f.text();
-                      newAttachments.push({ name: f.name, content });
-                    } catch (err) {
-                      console.error("Failed to read file", f.name, err);
-                    }
-                  }
-                  setAttachments(prev => [...prev, ...newAttachments]);
-                }
-                e.target.value = '';
-              }}
-            />
-            <textarea
-              ref={textareaRef}
-              className="chat-input"
-              rows={1}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Type a message… (Enter to send, Shift+Enter for newline)"
-              disabled={streaming || profileExporting}
-            />
-            <select
-              className="model-select"
-              title="Select model"
-              value={selectedModel}
-              onChange={(e) => setSelectedModel(e.target.value)}
-              disabled={streaming || profileExporting}
-            >
-              {availableModels.map((model) => (
-                <option key={model} value={model}>{model}</option>
-              ))}
-            </select>
-            <button
-              className="send-btn"
-              onClick={streaming ? stopStreaming : sendMessage}
-              disabled={profileExporting || (!streaming && !input.trim() && attachments.length === 0)}
-            >
-              {streaming ? "Stop" : "Send"}
-            </button>
-          </div>
+  {/* Messages */ }
+  <div className="messages">
+    {messages.length === 0 && (
+      <div className="empty-state">
+        <p>Start a conversation</p>
+        <p className="empty-hint">
+          Use <strong>Skills</strong> to set a system prompt, or configure the API in <strong>Settings</strong>.
+        </p>
+      </div>
+    )}
+    {messages.map((m) => (
+      <ChatMessage
+        key={m.id}
+        message={m}
+        showRetry={m.role === "user" && m.id === pendingRetryMessageId && !streaming}
+        onRetry={retryPendingUserMessage}
+      />
+    ))}
+    {error && <div className="error-banner">{error}</div>}
+    <div ref={bottomRef} />
+  </div>
+
+  {/* Input */ }
+  <div className="input-area" style={{ position: "relative", flexDirection: "column", alignItems: "stretch" }}>
+    {usage && (
+      <div className="usage-panel">
+        <div className="usage-line" role="status" aria-live="polite">
+          Tokens: {usage.prompt_tokens} prompt / {usage.completion_tokens} completion   {usageBarText} {usageTotal} / {usageMax} ({usagePercent}%)
         </div>
+      </div>
+    )}
+    {attachments.length > 0 && (
+      <div className="attachments-bar">
+        {attachments.map((file, i) => (
+          <div key={i} className="attachment-pill">
+            <span className="attachment-name" title={file.name}>{file.name}</span>
+            <button className="attachment-remove" onClick={() => {
+              setAttachments(prev => prev.filter((_, idx) => idx !== i));
+            }}>×</button>
+          </div>
+        ))}
+      </div>
+    )}
+    <div className="input-row">
+      <button
+        className="attach-btn"
+        title="Attach files"
+        onClick={() => fileInputRef.current?.click()}
+        disabled={streaming || profileExporting}
+      >
+        📎
+      </button>
+      <input
+        type="file"
+        multiple
+        accept=".txt,.md,.markdown,.csv,.tsv,.json,.jsonl,.yaml,.yml,.xml,.html,.htm,.css,.js,.ts,.jsx,.tsx,.py,.rs,.go,.java,.c,.cpp,.h,.hpp,.cs,.rb,.php,.sh,.bat,.ps1,.sql,.log,.ini,.cfg,.toml,.env,.diff,.patch,.tex,.rst,.adoc,.org,.r,.m,.scala,.swift,.kt,.dart,.lua,.pl,.ex,.exs,.clj,.hs,.ml,.fs,.erl,.vim,.conf,.cfg,.v"
+        ref={fileInputRef}
+        style={{ display: 'none' }}
+        onChange={async (e) => {
+          const files = e.target.files;
+          if (files && files.length > 0) {
+            const newAttachments: { name: string; content: string }[] = [];
+            for (const f of Array.from(files)) {
+              try {
+                const content = await f.text();
+                newAttachments.push({ name: f.name, content });
+              } catch (err) {
+                console.error("Failed to read file", f.name, err);
+              }
+            }
+            setAttachments(prev => [...prev, ...newAttachments]);
+          }
+          e.target.value = '';
+        }}
+      />
+      <textarea
+        ref={textareaRef}
+        className="chat-input"
+        rows={1}
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={handleKeyDown}
+        placeholder="Type a message… (Enter to send, Shift+Enter for newline)"
+        disabled={streaming || profileExporting}
+      />
+      <select
+        className="model-select"
+        title="Select model"
+        value={selectedModel}
+        onChange={(e) => setSelectedModel(e.target.value)}
+        disabled={streaming || profileExporting}
+      >
+        {availableModels.map((model) => (
+          <option key={model} value={model}>{model}</option>
+        ))}
+      </select>
+      <button
+        className="send-btn"
+        onClick={streaming ? stopStreaming : sendMessage}
+        disabled={profileExporting || (!streaming && !input.trim() && attachments.length === 0)}
+      >
+        {streaming ? "Stop" : "Send"}
+      </button>
+    </div>
+  </div>
       </div >
     </div >
   );

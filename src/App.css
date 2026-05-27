@@ -171,6 +171,26 @@ body {
   pointer-events: none;
 }
 
+.toolbar-btn-pill {
+  margin-left: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #e9f7ee;
+  color: #167a45;
+  font-size: 10px;
+  font-weight: 700;
+  vertical-align: middle;
+}
+
+.toolbar-btn-pill.busy {
+  background: #fff1df;
+  color: #b45309;
+}
+
 .profile-export-progress {
   flex-shrink: 0;
   padding: 10px 16px 12px;
