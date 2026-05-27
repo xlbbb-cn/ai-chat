@@ -2,7 +2,6 @@ use crate::AppState;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::State;
@@ -11,6 +10,7 @@ const WORKING_STATUS_IDLE: &str = "idle";
 const WORKING_STATUS_BUSY: &str = "busy";
 const WORKING_TASK_KIND_TODO: &str = "todo";
 const WORKING_TASK_KIND_CRON: &str = "cron";
+const TODO_COMPLETED_MARKER: &str = "<!-- WORKING_TASK_COMPLETED -->";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkingRuntime {
@@ -88,6 +88,51 @@ fn done_path(state: &AppState) -> PathBuf {
     state
         .app_data_dir
         .join(format!("todo-{}-done.md", state.working_uid))
+}
+
+fn todo_is_completed(content: &str) -> bool {
+    content.contains(TODO_COMPLETED_MARKER)
+}
+
+fn normalize_todo_for_completion(content: &str) -> String {
+    let mut normalized_lines = Vec::new();
+    for line in content.lines() {
+        if let Some(rest) = line.trim_start().strip_prefix("- [ ] ") {
+            let leading_len = line.len() - line.trim_start().len();
+            let indent = " ".repeat(leading_len);
+            normalized_lines.push(format!("{indent}- [x] {rest}"));
+        } else {
+            normalized_lines.push(line.to_string());
+        }
+    }
+    normalized_lines.join("\n")
+}
+
+fn complete_todo_task(path: &Path, uid: &str, success: bool, details: &str) -> Result<(), String> {
+    let original = if path.exists() {
+        fs::read_to_string(path).map_err(|e| e.to_string())?
+    } else {
+        String::new()
+    };
+
+    let normalized = normalize_todo_for_completion(original.trim_end());
+    let status = if success { "success" } else { "failure" };
+    let result_block = format!(
+        "\n\n{}\n---\n## Working Result\n- uid: {}\n- status: {}\n- completed_at_ms: {}\n\n### Details\n\n{}\n",
+        TODO_COMPLETED_MARKER,
+        uid,
+        status,
+        now_ms(),
+        details.trim()
+    );
+
+    let updated = if normalized.is_empty() {
+        result_block.trim_start().to_string()
+    } else {
+        format!("{}{}", normalized, result_block)
+    };
+
+    fs::write(path, updated).map_err(|e| e.to_string())
 }
 
 fn task_file_name(path: &Path) -> Option<String> {
@@ -394,6 +439,9 @@ pub fn acquire_working_task(state: State<'_, AppState>) -> Result<Option<Working
     let task_path = todo_path(&state);
     if task_path.exists() {
         let content = fs::read_to_string(&task_path).map_err(|e| e.to_string())?;
+        if todo_is_completed(&content) {
+            return Ok(None);
+        }
         let file_name = task_file_name(&task_path).unwrap_or_else(|| format!("todo-{}.md", state.working_uid));
 
         set_active_task_state(&state, task_path.clone(), WORKING_TASK_KIND_TODO, None);
@@ -465,7 +513,12 @@ pub fn dispatch_working_task(
 
     let target_todo_path = todo_path_for_uid(&state.app_data_dir, target_uid);
     if target_todo_path.exists() {
-        return Err(format!("working client {target_uid} already has a pending task"));
+        let existing = fs::read_to_string(&target_todo_path).map_err(|e| e.to_string())?;
+        if todo_is_completed(&existing) {
+            fs::remove_file(&target_todo_path).map_err(|e| e.to_string())?;
+        } else {
+            return Err(format!("working client {target_uid} already has a pending task"));
+        }
     }
 
     fs::write(target_todo_path, content).map_err(|e| e.to_string())
@@ -495,32 +548,12 @@ pub fn complete_working_task(
         let cron_task_index = cron_task_index.ok_or_else(|| "missing active cron task index".to_string())?;
         complete_cron_task(&task_path, cron_task_index, success, &details)?;
     } else {
+        complete_todo_task(&task_path, &state.working_uid, success, &details)?;
+
         let done_path = done_path(&state);
         if done_path.exists() {
-            fs::remove_file(&done_path).map_err(|e| e.to_string())?;
+            let _ = fs::remove_file(&done_path);
         }
-
-        if task_path.exists() {
-            fs::rename(&task_path, &done_path).map_err(|e| e.to_string())?;
-        } else {
-            fs::write(&done_path, "").map_err(|e| e.to_string())?;
-        }
-
-        let mut file = fs::OpenOptions::new()
-            .append(true)
-            .open(&done_path)
-            .map_err(|e| e.to_string())?;
-
-        let status = if success { "success" } else { "failure" };
-        let result_block = format!(
-            "\n\n---\n## Working Result\n- uid: {}\n- status: {}\n- completed_at_ms: {}\n\n### Details\n\n{}\n",
-            state.working_uid,
-            status,
-            now_ms(),
-            details.trim()
-        );
-        file.write_all(result_block.as_bytes())
-            .map_err(|e| e.to_string())?;
     }
 
     *state.working_status.lock().unwrap() = WORKING_STATUS_IDLE.to_string();
