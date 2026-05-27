@@ -539,7 +539,7 @@ export default function App() {
   }, [messages, streaming, profileExporting, sessionId, beginCompletion]);
 
   useEffect(() => {
-    if (!workingRuntime?.enabled || profileExporting || streaming || confirmDialog || activeWorkingTask) {
+    if (!workingRuntime?.enabled || workingRuntime.status === "busy" || profileExporting || streaming || confirmDialog || activeWorkingTask) {
       return;
     }
 
@@ -582,7 +582,7 @@ export default function App() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [workingRuntime?.enabled, profileExporting, streaming, confirmDialog, activeWorkingTask, runWorkingTask, finalizeWorkingTask, refreshWorkingRuntime]);
+  }, [workingRuntime?.enabled, workingRuntime?.status, profileExporting, streaming, confirmDialog, activeWorkingTask, runWorkingTask, finalizeWorkingTask, refreshWorkingRuntime]);
 
   useEffect(() => {
     if (!workingRuntime?.enabled) {

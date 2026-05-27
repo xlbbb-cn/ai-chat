@@ -1,4 +1,5 @@
 use crate::AppState;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
@@ -8,6 +9,8 @@ use tauri::State;
 
 const WORKING_STATUS_IDLE: &str = "idle";
 const WORKING_STATUS_BUSY: &str = "busy";
+const WORKING_TASK_KIND_TODO: &str = "todo";
+const WORKING_TASK_KIND_CRON: &str = "cron";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkingRuntime {
@@ -45,6 +48,13 @@ struct WorkingLockFile {
     active_task_file: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct CronTaskEntry {
+    line_index: usize,
+    due_at: DateTime<Utc>,
+    content: String,
+}
+
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -66,6 +76,12 @@ fn todo_path(state: &AppState) -> PathBuf {
 
 fn todo_path_for_uid(app_data_dir: &Path, uid: &str) -> PathBuf {
     app_data_dir.join(format!("todo-{}.md", uid))
+}
+
+fn cron_path(state: &AppState) -> PathBuf {
+    state
+        .app_data_dir
+        .join(format!("cron-{}.md", state.working_uid))
 }
 
 fn done_path(state: &AppState) -> PathBuf {
@@ -97,6 +113,140 @@ fn current_runtime(state: &AppState) -> WorkingRuntime {
         status_detail,
         active_task_file,
     }
+}
+
+fn clear_active_task_state(state: &AppState) {
+    *state.working_task_path.lock().unwrap() = None;
+    *state.working_task_kind.lock().unwrap() = None;
+    *state.working_cron_task_index.lock().unwrap() = None;
+}
+
+fn set_active_task_state(state: &AppState, path: PathBuf, kind: &str, cron_task_index: Option<usize>) {
+    *state.working_task_path.lock().unwrap() = Some(path);
+    *state.working_task_kind.lock().unwrap() = Some(kind.to_string());
+    *state.working_cron_task_index.lock().unwrap() = cron_task_index;
+}
+
+fn parse_due_at(raw: &str) -> Option<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(raw)
+        .ok()
+        .map(|dt| dt.with_timezone(&Utc))
+}
+
+fn find_due_cron_task(path: &Path) -> Result<Option<CronTaskEntry>, String> {
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let lines: Vec<&str> = content.lines().collect();
+    let now = Utc::now();
+    let mut index = 0;
+
+    while index < lines.len() {
+        let line = lines[index].trim_start();
+        let Some(rest) = line.strip_prefix("- [ ] ") else {
+            index += 1;
+            continue;
+        };
+
+        let mut next_index = index + 1;
+        let Some((due_at_raw, first_line_content)) = rest.split_once('|') else {
+            while next_index < lines.len() {
+                let next_line = lines[next_index].trim_start();
+                if next_line.starts_with("- [ ] ") || next_line.starts_with("- [x] ") {
+                    break;
+                }
+                next_index += 1;
+            }
+            index = next_index;
+            continue;
+        };
+
+        let mut content_lines = Vec::new();
+        if !first_line_content.trim().is_empty() {
+            content_lines.push(first_line_content.trim().to_string());
+        }
+
+        while next_index < lines.len() {
+            let next_line = lines[next_index];
+            let next_trimmed = next_line.trim_start();
+            if next_trimmed.starts_with("- [ ] ") || next_trimmed.starts_with("- [x] ") {
+                break;
+            }
+
+            if next_line.starts_with("  ") {
+                let continuation = next_line.trim();
+                if !continuation.is_empty() {
+                    content_lines.push(continuation.to_string());
+                }
+            }
+
+            next_index += 1;
+        }
+
+        if let Some(due_at) = parse_due_at(due_at_raw.trim()) {
+            if due_at <= now {
+                return Ok(Some(CronTaskEntry {
+                    line_index: index,
+                    due_at,
+                    content: content_lines.join("\n"),
+                }));
+            }
+        }
+
+        index = next_index;
+    }
+
+    Ok(None)
+}
+
+fn complete_cron_task(path: &Path, line_index: usize, success: bool, details: &str) -> Result<(), String> {
+    let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let mut lines: Vec<String> = content.lines().map(|line| line.to_string()).collect();
+
+    if line_index >= lines.len() {
+        return Err("cron task index out of range".to_string());
+    }
+
+    if let Some(rest) = lines[line_index].trim_start().strip_prefix("- [ ] ") {
+        let leading_len = lines[line_index].len() - lines[line_index].trim_start().len();
+        let indent = " ".repeat(leading_len);
+        lines[line_index] = format!("{indent}- [x] {rest}");
+    }
+
+    let mut insert_at = line_index + 1;
+    while insert_at < lines.len() {
+        let trimmed = lines[insert_at].trim_start();
+        if trimmed.starts_with("- [ ] ") || trimmed.starts_with("- [x] ") {
+            break;
+        }
+        insert_at += 1;
+    }
+
+    let mut result_lines = vec![
+        String::new(),
+        format!(
+            "  Result: {} at {}",
+            if success { "success" } else { "failure" },
+            Utc::now().to_rfc3339()
+        ),
+    ];
+
+    if !details.trim().is_empty() {
+        result_lines.push("  Details:".to_string());
+        for line in details.trim().lines() {
+            result_lines.push(format!("  > {}", line));
+        }
+    }
+
+    lines.splice(insert_at..insert_at, result_lines);
+
+    let mut updated = lines.join("\n");
+    if !updated.is_empty() {
+        updated.push('\n');
+    }
+    fs::write(path, updated).map_err(|e| e.to_string())
 }
 
 fn validate_status(status: &str) -> Result<(), String> {
@@ -154,6 +304,9 @@ pub fn set_working_mode(
         }
         persist_lock_file(&state)?;
     } else {
+        clear_active_task_state(&state);
+        *state.working_status.lock().unwrap() = WORKING_STATUS_IDLE.to_string();
+        *state.working_status_detail.lock().unwrap() = None;
         cleanup_working_lock(&state)?;
     }
 
@@ -230,28 +383,56 @@ pub fn acquire_working_task(state: State<'_, AppState>) -> Result<Option<Working
         return Ok(None);
     }
 
+    if state.working_status.lock().unwrap().as_str() == WORKING_STATUS_BUSY {
+        return Ok(None);
+    }
+
     if state.working_task_path.lock().unwrap().is_some() {
         return Ok(None);
     }
 
     let task_path = todo_path(&state);
-    if !task_path.exists() {
-        return Ok(None);
+    if task_path.exists() {
+        let content = fs::read_to_string(&task_path).map_err(|e| e.to_string())?;
+        let file_name = task_file_name(&task_path).unwrap_or_else(|| format!("todo-{}.md", state.working_uid));
+
+        set_active_task_state(&state, task_path.clone(), WORKING_TASK_KIND_TODO, None);
+        *state.working_status.lock().unwrap() = WORKING_STATUS_BUSY.to_string();
+        *state.working_status_detail.lock().unwrap() = Some(file_name.clone());
+        persist_lock_file(&state)?;
+
+        return Ok(Some(WorkingTask {
+            uid: state.working_uid.clone(),
+            file_name,
+            path: task_path.to_string_lossy().to_string(),
+            content,
+        }));
     }
 
-    let content = fs::read_to_string(&task_path).map_err(|e| e.to_string())?;
-    let file_name = task_file_name(&task_path).unwrap_or_else(|| format!("todo-{}.md", state.working_uid));
+    let cron_file_path = cron_path(&state);
+    let Some(cron_task) = find_due_cron_task(&cron_file_path)? else {
+        return Ok(None);
+    };
 
-    *state.working_task_path.lock().unwrap() = Some(task_path.clone());
+    let cron_file_name = task_file_name(&cron_file_path)
+        .unwrap_or_else(|| format!("cron-{}.md", state.working_uid));
+    let status_detail = format!("{} @ {}", cron_file_name, cron_task.due_at.to_rfc3339());
+
+    set_active_task_state(
+        &state,
+        cron_file_path.clone(),
+        WORKING_TASK_KIND_CRON,
+        Some(cron_task.line_index),
+    );
     *state.working_status.lock().unwrap() = WORKING_STATUS_BUSY.to_string();
-    *state.working_status_detail.lock().unwrap() = Some(file_name.clone());
+    *state.working_status_detail.lock().unwrap() = Some(status_detail);
     persist_lock_file(&state)?;
 
     Ok(Some(WorkingTask {
         uid: state.working_uid.clone(),
-        file_name,
-        path: task_path.to_string_lossy().to_string(),
-        content,
+        file_name: cron_file_name,
+        path: cron_file_path.to_string_lossy().to_string(),
+        content: cron_task.content,
     }))
 }
 
@@ -302,33 +483,45 @@ pub fn complete_working_task(
         .unwrap()
         .take()
         .ok_or_else(|| "no active working task".to_string())?;
+    let task_kind = state
+        .working_task_kind
+        .lock()
+        .unwrap()
+        .take()
+        .unwrap_or_else(|| WORKING_TASK_KIND_TODO.to_string());
+    let cron_task_index = state.working_cron_task_index.lock().unwrap().take();
 
-    let done_path = done_path(&state);
-    if done_path.exists() {
-        fs::remove_file(&done_path).map_err(|e| e.to_string())?;
-    }
-
-    if task_path.exists() {
-        fs::rename(&task_path, &done_path).map_err(|e| e.to_string())?;
+    if task_kind == WORKING_TASK_KIND_CRON {
+        let cron_task_index = cron_task_index.ok_or_else(|| "missing active cron task index".to_string())?;
+        complete_cron_task(&task_path, cron_task_index, success, &details)?;
     } else {
-        fs::write(&done_path, "").map_err(|e| e.to_string())?;
+        let done_path = done_path(&state);
+        if done_path.exists() {
+            fs::remove_file(&done_path).map_err(|e| e.to_string())?;
+        }
+
+        if task_path.exists() {
+            fs::rename(&task_path, &done_path).map_err(|e| e.to_string())?;
+        } else {
+            fs::write(&done_path, "").map_err(|e| e.to_string())?;
+        }
+
+        let mut file = fs::OpenOptions::new()
+            .append(true)
+            .open(&done_path)
+            .map_err(|e| e.to_string())?;
+
+        let status = if success { "success" } else { "failure" };
+        let result_block = format!(
+            "\n\n---\n## Working Result\n- uid: {}\n- status: {}\n- completed_at_ms: {}\n\n### Details\n\n{}\n",
+            state.working_uid,
+            status,
+            now_ms(),
+            details.trim()
+        );
+        file.write_all(result_block.as_bytes())
+            .map_err(|e| e.to_string())?;
     }
-
-    let mut file = fs::OpenOptions::new()
-        .append(true)
-        .open(&done_path)
-        .map_err(|e| e.to_string())?;
-
-    let status = if success { "success" } else { "failure" };
-    let result_block = format!(
-        "\n\n---\n## Working Result\n- uid: {}\n- status: {}\n- completed_at_ms: {}\n\n### Details\n\n{}\n",
-        state.working_uid,
-        status,
-        now_ms(),
-        details.trim()
-    );
-    file.write_all(result_block.as_bytes())
-        .map_err(|e| e.to_string())?;
 
     *state.working_status.lock().unwrap() = WORKING_STATUS_IDLE.to_string();
     *state.working_status_detail.lock().unwrap() = None;

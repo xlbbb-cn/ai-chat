@@ -327,6 +327,8 @@ pub struct AppState {
     pub working_status: Mutex<String>,
     pub working_status_detail: Mutex<Option<String>>,
     pub working_task_path: Mutex<Option<PathBuf>>,
+    pub working_task_kind: Mutex<Option<String>>,
+    pub working_cron_task_index: Mutex<Option<usize>>,
 }
 
 #[derive(Clone, Debug)]
@@ -644,6 +646,8 @@ pub fn run() {
                 working_status: Mutex::new("idle".to_string()),
                 working_status_detail: Mutex::new(None),
                 working_task_path: Mutex::new(None),
+                working_task_kind: Mutex::new(None),
+                working_cron_task_index: Mutex::new(None),
             });
 
             // Warm up enabled MCP servers as soon as the app starts.
