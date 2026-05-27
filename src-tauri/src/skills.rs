@@ -21,6 +21,18 @@ pub struct SkillMeta {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub allowed_commands: Vec<String>,
+    #[serde(
+        rename = "allowed-tools",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub allowed_tools: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license: Option<String>,
 }
 
 /// Full skill representation passed to/from the frontend.
@@ -35,6 +47,14 @@ pub struct Skill {
     /// Allowlist of executable names the skill may run (empty = unrestricted).
     #[serde(default)]
     pub allowed_commands: Vec<String>,
+    #[serde(default)]
+    pub allowed_tools: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license: Option<String>,
     pub system_prompt: String,
 }
 
@@ -57,6 +77,10 @@ pub fn parse_skill_md(content: &str) -> Result<Skill, String> {
         version: meta.version,
         author: meta.author,
         allowed_commands: meta.allowed_commands,
+        allowed_tools: meta.allowed_tools,
+        context: meta.context,
+        agent: meta.agent,
+        license: meta.license,
         system_prompt: body.to_string(),
     })
 }
@@ -68,6 +92,10 @@ pub fn skill_to_md(skill: &Skill) -> Result<String, String> {
         version: skill.version.clone(),
         author: skill.author.clone(),
         allowed_commands: skill.allowed_commands.clone(),
+        allowed_tools: skill.allowed_tools.clone(),
+        context: skill.context.clone(),
+        agent: skill.agent.clone(),
+        license: skill.license.clone(),
     };
     let frontmatter = serde_yaml::to_string(&meta).map_err(|e| e.to_string())?;
     Ok(format!(
