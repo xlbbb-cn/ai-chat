@@ -84,6 +84,7 @@ export default function App() {
   const sidebarMotionTimerRef = useRef<number | null>(null);
   const workingTaskPollInFlightRef = useRef(false);
   const activeWorkingTaskRef = useRef<WorkingTask | null>(null);
+  const workingModeEnabled = !!workingRuntime?.enabled;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -468,7 +469,7 @@ export default function App() {
   }, [activeSkillIds, sessionId, selectedModel, useAgentsEnabled, finalizeWorkingTask, refreshWorkingRuntime]);
 
   const sendMessage = useCallback(async () => {
-    if (profileExporting) return;
+    if (profileExporting || workingModeEnabled) return;
 
     let text = input.trim();
     if ((!text && attachments.length === 0) || streaming) return;
@@ -496,10 +497,10 @@ export default function App() {
 
     saveHistory(sessionId, "user", text);
     await beginCompletion(history, assistantId, { userMessageId: userMsg.id });
-  }, [input, messages, streaming, profileExporting, sessionId, attachments, beginCompletion]);
+  }, [input, messages, streaming, profileExporting, workingModeEnabled, sessionId, attachments, beginCompletion]);
 
   const retryPendingUserMessage = useCallback(async () => {
-    if (streaming || !pendingRetryMessageId) return;
+    if (streaming || !pendingRetryMessageId || workingModeEnabled) return;
 
     const assistantId = crypto.randomUUID();
     const assistantMsg: Message = { id: assistantId, role: "assistant", content: "", streaming: true };
@@ -512,7 +513,7 @@ export default function App() {
       .filter((m) => !m.streaming && !m.id.startsWith("agent-progress-"))
       .map((m) => ({ role: m.role, content: m.content }));
     await beginCompletion(history, assistantId, { clearPendingRetryOnSuccess: true });
-  }, [messages, streaming, pendingRetryMessageId, beginCompletion]);
+  }, [messages, streaming, pendingRetryMessageId, workingModeEnabled, beginCompletion]);
 
   const runWorkingTask = useCallback(async (task: WorkingTask) => {
     if (profileExporting || streaming) return;
@@ -601,7 +602,7 @@ export default function App() {
   }, [workingRuntime, streaming, activeWorkingTask]);
 
   function handleKeyDown(e: React.KeyboardEvent) {
-    if (profileExporting) {
+    if (profileExporting || workingModeEnabled) {
       e.preventDefault();
       return;
     }
@@ -882,20 +883,14 @@ export default function App() {
       <div className="chat-area" onClick={handleChatAreaClick}>
         {/* Toolbar */}
         <header className="toolbar">
-          <span className="app-title">Chat</span>
+          <button
+            className={`app-title app-title-button ${workingModeEnabled ? "app-title-working" : ""} ${sidebar === "working" ? "active" : ""}`}
+            onClick={() => toggleSidebar("working")}
+            title={workingRuntime?.uid ? `Working Mode (${workingRuntime.uid})` : "Working Mode"}
+          >
+            {workingModeEnabled ? "Working" : "Chat"}
+          </button>
           <div className="toolbar-actions">
-            <button
-              className={`toolbar-btn ${sidebar === "working" ? "active" : ""}`}
-              onClick={() => toggleSidebar("working")}
-              title={workingRuntime?.uid ? `Working Mode (${workingRuntime.uid})` : "Working Mode"}
-            >
-              ⚡ Working
-              {workingRuntime?.enabled && (
-                <span className={`toolbar-btn-pill ${workingRuntime.status === "busy" ? "busy" : ""}`}>
-                  {workingRuntime.status === "busy" ? "BUSY" : "ON"}
-                </span>
-              )}
-            </button>
             <button
               className={`toolbar-btn ${sidebar === "agents" ? "active" : ""}`}
               onClick={() => toggleSidebar("agents")}
@@ -961,122 +956,122 @@ export default function App() {
         </header>
 
         {
-    profileExporting && (
-      <div className="profile-export-progress" role="progressbar" aria-busy="true" aria-live="polite">
-        <div className="profile-export-progress-label">{profileExportMessage}</div>
-        <div className="profile-export-progress-hint">Chat is locked during export and sending is disabled.</div>
-        <div className="profile-export-progress-track">
-          <div className="profile-export-progress-fill" />
-        </div>
-      </div>
-    )
-  }
+          profileExporting && (
+            <div className="profile-export-progress" role="progressbar" aria-busy="true" aria-live="polite">
+              <div className="profile-export-progress-label">{profileExportMessage}</div>
+              <div className="profile-export-progress-hint">Chat is locked during export and sending is disabled.</div>
+              <div className="profile-export-progress-track">
+                <div className="profile-export-progress-fill" />
+              </div>
+            </div>
+          )
+        }
 
-  {/* Messages */ }
-  <div className="messages">
-    {messages.length === 0 && (
-      <div className="empty-state">
-        <p>Start a conversation</p>
-        <p className="empty-hint">
-          Use <strong>Skills</strong> to set a system prompt, or configure the API in <strong>Settings</strong>.
-        </p>
-      </div>
-    )}
-    {messages.map((m) => (
-      <ChatMessage
-        key={m.id}
-        message={m}
-        showRetry={m.role === "user" && m.id === pendingRetryMessageId && !streaming}
-        onRetry={retryPendingUserMessage}
-      />
-    ))}
-    {error && <div className="error-banner">{error}</div>}
-    <div ref={bottomRef} />
-  </div>
-
-  {/* Input */ }
-  <div className="input-area" style={{ position: "relative", flexDirection: "column", alignItems: "stretch" }}>
-    {usage && (
-      <div className="usage-panel">
-        <div className="usage-line" role="status" aria-live="polite">
-          Tokens: {usage.prompt_tokens} prompt / {usage.completion_tokens} completion   {usageBarText} {usageTotal} / {usageMax} ({usagePercent}%)
+        {/* Messages */}
+        <div className="messages">
+          {messages.length === 0 && (
+            <div className="empty-state">
+              <p>Start a conversation</p>
+              <p className="empty-hint">
+                Use <strong>Skills</strong> to set a system prompt, or configure the API in <strong>Settings</strong>.
+              </p>
+            </div>
+          )}
+          {messages.map((m) => (
+            <ChatMessage
+              key={m.id}
+              message={m}
+              showRetry={m.role === "user" && m.id === pendingRetryMessageId && !streaming}
+              onRetry={retryPendingUserMessage}
+            />
+          ))}
+          {error && <div className="error-banner">{error}</div>}
+          <div ref={bottomRef} />
         </div>
-      </div>
-    )}
-    {attachments.length > 0 && (
-      <div className="attachments-bar">
-        {attachments.map((file, i) => (
-          <div key={i} className="attachment-pill">
-            <span className="attachment-name" title={file.name}>{file.name}</span>
-            <button className="attachment-remove" onClick={() => {
-              setAttachments(prev => prev.filter((_, idx) => idx !== i));
-            }}>×</button>
+
+        {/* Input */}
+        <div className="input-area" style={{ position: "relative", flexDirection: "column", alignItems: "stretch" }}>
+          {usage && (
+            <div className="usage-panel">
+              <div className="usage-line" role="status" aria-live="polite">
+                Tokens: {usage.prompt_tokens} prompt / {usage.completion_tokens} completion   {usageBarText} {usageTotal} / {usageMax} ({usagePercent}%)
+              </div>
+            </div>
+          )}
+          {attachments.length > 0 && (
+            <div className="attachments-bar">
+              {attachments.map((file, i) => (
+                <div key={i} className="attachment-pill">
+                  <span className="attachment-name" title={file.name}>{file.name}</span>
+                  <button className="attachment-remove" onClick={() => {
+                    setAttachments(prev => prev.filter((_, idx) => idx !== i));
+                  }}>×</button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="input-row">
+            <button
+              className="attach-btn"
+              title="Attach files"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={streaming || profileExporting || workingModeEnabled}
+            >
+              📎
+            </button>
+            <input
+              type="file"
+              multiple
+              accept=".txt,.md,.markdown,.csv,.tsv,.json,.jsonl,.yaml,.yml,.xml,.html,.htm,.css,.js,.ts,.jsx,.tsx,.py,.rs,.go,.java,.c,.cpp,.h,.hpp,.cs,.rb,.php,.sh,.bat,.ps1,.sql,.log,.ini,.cfg,.toml,.env,.diff,.patch,.tex,.rst,.adoc,.org,.r,.m,.scala,.swift,.kt,.dart,.lua,.pl,.ex,.exs,.clj,.hs,.ml,.fs,.erl,.vim,.conf,.cfg,.v"
+              ref={fileInputRef}
+              style={{ display: 'none' }}
+              onChange={async (e) => {
+                const files = e.target.files;
+                if (files && files.length > 0) {
+                  const newAttachments: { name: string; content: string }[] = [];
+                  for (const f of Array.from(files)) {
+                    try {
+                      const content = await f.text();
+                      newAttachments.push({ name: f.name, content });
+                    } catch (err) {
+                      console.error("Failed to read file", f.name, err);
+                    }
+                  }
+                  setAttachments(prev => [...prev, ...newAttachments]);
+                }
+                e.target.value = '';
+              }}
+            />
+            <textarea
+              ref={textareaRef}
+              className="chat-input"
+              rows={1}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={workingModeEnabled ? "Working mode is active. Manual chat is disabled." : "Type a message… (Enter to send, Shift+Enter for newline)"}
+              disabled={streaming || profileExporting || workingModeEnabled}
+            />
+            <select
+              className="model-select"
+              title="Select model"
+              value={selectedModel}
+              onChange={(e) => setSelectedModel(e.target.value)}
+              disabled={streaming || profileExporting}
+            >
+              {availableModels.map((model) => (
+                <option key={model} value={model}>{model}</option>
+              ))}
+            </select>
+            <button
+              className="send-btn"
+              onClick={streaming ? stopStreaming : sendMessage}
+              disabled={profileExporting || (!streaming && (workingModeEnabled || (!input.trim() && attachments.length === 0)))}
+            >
+              {streaming ? "Stop" : "Send"}
+            </button>
           </div>
-        ))}
-      </div>
-    )}
-    <div className="input-row">
-      <button
-        className="attach-btn"
-        title="Attach files"
-        onClick={() => fileInputRef.current?.click()}
-        disabled={streaming || profileExporting}
-      >
-        📎
-      </button>
-      <input
-        type="file"
-        multiple
-        accept=".txt,.md,.markdown,.csv,.tsv,.json,.jsonl,.yaml,.yml,.xml,.html,.htm,.css,.js,.ts,.jsx,.tsx,.py,.rs,.go,.java,.c,.cpp,.h,.hpp,.cs,.rb,.php,.sh,.bat,.ps1,.sql,.log,.ini,.cfg,.toml,.env,.diff,.patch,.tex,.rst,.adoc,.org,.r,.m,.scala,.swift,.kt,.dart,.lua,.pl,.ex,.exs,.clj,.hs,.ml,.fs,.erl,.vim,.conf,.cfg,.v"
-        ref={fileInputRef}
-        style={{ display: 'none' }}
-        onChange={async (e) => {
-          const files = e.target.files;
-          if (files && files.length > 0) {
-            const newAttachments: { name: string; content: string }[] = [];
-            for (const f of Array.from(files)) {
-              try {
-                const content = await f.text();
-                newAttachments.push({ name: f.name, content });
-              } catch (err) {
-                console.error("Failed to read file", f.name, err);
-              }
-            }
-            setAttachments(prev => [...prev, ...newAttachments]);
-          }
-          e.target.value = '';
-        }}
-      />
-      <textarea
-        ref={textareaRef}
-        className="chat-input"
-        rows={1}
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder="Type a message… (Enter to send, Shift+Enter for newline)"
-        disabled={streaming || profileExporting}
-      />
-      <select
-        className="model-select"
-        title="Select model"
-        value={selectedModel}
-        onChange={(e) => setSelectedModel(e.target.value)}
-        disabled={streaming || profileExporting}
-      >
-        {availableModels.map((model) => (
-          <option key={model} value={model}>{model}</option>
-        ))}
-      </select>
-      <button
-        className="send-btn"
-        onClick={streaming ? stopStreaming : sendMessage}
-        disabled={profileExporting || (!streaming && !input.trim() && attachments.length === 0)}
-      >
-        {streaming ? "Stop" : "Send"}
-      </button>
-    </div>
-  </div>
+        </div>
       </div >
     </div >
   );

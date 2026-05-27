@@ -129,6 +129,36 @@ body {
   letter-spacing: normal;
 }
 
+.app-title-button {
+  border: none;
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  cursor: pointer;
+  transition: color 0.25s ease, background-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.app-title-button:hover {
+  color: #0f1216;
+}
+
+.app-title-button.active {
+  color: #0f1216;
+}
+
+.app-title-button.app-title-working {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #e9f7ee;
+  color: #167a45;
+}
+
+.app-title-button.app-title-working:hover,
+.app-title-button.app-title-working.active {
+  background: #ddf2e5;
+  box-shadow: inset 0 0 0 1px rgba(22, 122, 69, 0.08);
+}
+
 .toolbar-actions {
   display: flex;
   align-items: center;
