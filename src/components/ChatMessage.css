@@ -1,23 +1,38 @@
+.chat-message-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: fit-content;
+  max-width: 80%;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.chat-message-shell.user {
+  align-self: flex-end;
+}
+
+.chat-message-shell.assistant {
+  align-self: flex-start;
+}
+
 .chat-message {
   display: flex;
   flex-direction: column;
   gap: 4px;
   padding: 12px 16px;
   border-radius: 4px;
-  max-width: 80%;
+  max-width: 100%;
   word-break: break-word;
   overflow: hidden;
-  flex-shrink: 0;
 }
 
 .chat-message.user {
-  align-self: flex-end;
   background: var(--c-hover);
   color: var(--c-text);
 }
 
 .chat-message.assistant {
-  align-self: flex-start;
   background: var(--c-surface);
   color: var(--c-body);
   border: 1px solid var(--c-border);
@@ -279,6 +294,38 @@
   display: flex;
   justify-content: flex-end;
   margin-top: 6px;
+}
+
+.message-export-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.message-export-btn {
+  border: 1px solid var(--c-border-i);
+  background: transparent;
+  color: var(--c-muted);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
+}
+
+.message-export-btn:hover:not(:disabled) {
+  background: var(--c-hover);
+  color: var(--c-text);
+  transform: translateY(-1px);
+}
+
+.message-export-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.message-export-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .message-retry-btn {

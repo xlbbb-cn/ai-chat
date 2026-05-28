@@ -46,6 +46,137 @@ md.disable(["link", "autolink"]);
 md.renderer.rules.link_open = () => "<span>";
 md.renderer.rules.link_close = () => "</span>";
 
+function buildPrintableMessageHtml(contentHtml: string, exportedAt: string): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${escapeHtml(exportedAt)}</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 32px;
+        background: #ffffff;
+        color: #171a20;
+        font-size: 14px;
+        line-height: 1.6;
+        word-break: break-word;
+      }
+
+      main {
+        width: 100%;
+      }
+
+      p {
+        margin: 0 0 0.75em;
+      }
+
+      ul,
+      ol {
+        margin: 0 0 0.75em;
+        padding-left: 1.5em;
+      }
+
+      li {
+        margin-bottom: 0.25em;
+      }
+
+      pre {
+        margin: 0.75em 0;
+        padding: 12px 14px;
+        background: #f4f4f4;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        overflow-x: auto;
+        white-space: pre-wrap;
+      }
+
+      code {
+        font-family: "Cascadia Code", "Consolas", monospace;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 0.75em 0;
+      }
+
+      th,
+      td {
+        border: 1px solid #d1d5db;
+        padding: 8px 10px;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        background: #f3f4f6;
+      }
+
+      .code-block-toolbar {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <main>${contentHtml}</main>
+  </body>
+</html>`;
+}
+
+function exportAssistantMessagePdf(contentHtml: string, messageId: string) {
+  const iframe = document.createElement("iframe");
+  const exportedAt = `assistant-message-${messageId}`;
+
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "0";
+  iframe.setAttribute("aria-hidden", "true");
+
+  const cleanup = () => {
+    iframe.remove();
+  };
+
+  iframe.addEventListener("load", () => {
+    const frameWindow = iframe.contentWindow;
+    const frameDocument = frameWindow?.document;
+    if (!frameWindow || !frameDocument) {
+      cleanup();
+      return;
+    }
+
+    frameDocument.open();
+    frameDocument.write(buildPrintableMessageHtml(contentHtml, exportedAt));
+    frameDocument.close();
+
+    const handleAfterPrint = () => {
+      frameWindow.removeEventListener("afterprint", handleAfterPrint);
+      window.setTimeout(cleanup, 0);
+    };
+
+    frameWindow.addEventListener("afterprint", handleAfterPrint);
+    window.setTimeout(() => {
+      frameWindow.focus();
+      frameWindow.print();
+    }, 50);
+  }, { once: true });
+
+  document.body.appendChild(iframe);
+}
+
 interface Props {
   message: Message;
   showRetry?: boolean;
@@ -91,6 +222,7 @@ function extractEmbeddedThoughtProcess(content: string): {
 
 export function ChatMessage({ message, showRetry = false, onRetry }: Props) {
   const isUser = message.role === "user";
+  const isAssistant = message.role === "assistant";
   const attachmentNames = isUser ? extractAttachmentNames(message.content) : [];
   const displayContent = isUser
     ? message.content.replace(/<details><summary>Attached File:[^<]*<\/summary>[\s\S]*?<\/details>/g, "").trim()
@@ -100,6 +232,8 @@ export function ChatMessage({ message, showRetry = false, onRetry }: Props) {
   const mainContent = message.reasoning_content
     ? displayContent
     : embeddedThought.mainContent;
+  const renderedReasoningContent = reasoningContent ? md.render(reasoningContent) : "";
+  const renderedMainContent = md.render(mainContent);
   const [reasoningFlowActive, setReasoningFlowActive] = useState(false);
   const reasoningUpdateTimerRef = useRef<number | null>(null);
   const lastReasoningRef = useRef(reasoningContent);
@@ -145,75 +279,91 @@ export function ChatMessage({ message, showRetry = false, onRetry }: Props) {
   }, []);
 
   return (
-    <div className={`chat-message ${isUser ? "user" : "assistant"}`}>
-      <div className="message-role">{isUser ? "You" : "Assistant"}</div>
+    <div className={`chat-message-shell ${isUser ? "user" : "assistant"}`}>
+      <div className={`chat-message ${isUser ? "user" : "assistant"}`}>
+        <div className="message-role">{isUser ? "You" : "Assistant"}</div>
 
-      {reasoningContent && (
-        <details className="message-reasoning">
-          <summary className={`message-reasoning-summary ${reasoningFlowActive ? "reasoning-flow-active" : ""}`}>
-            Thought Process
-          </summary>
-          <div
-            className="message-reasoning-content"
-            dangerouslySetInnerHTML={{ __html: md.render(reasoningContent) }}
-          />
-        </details>
-      )}
-      <div
-        className="message-content"
-        dangerouslySetInnerHTML={{ __html: md.render(mainContent) }}
-        onClick={(e) => {
-          const target = e.target as HTMLElement;
-          const copyButton = target.closest(".code-copy-btn") as HTMLButtonElement | null;
-          if (copyButton) {
-            const wrapper = copyButton.closest(".code-block-wrapper");
-            const code = wrapper?.querySelector("pre code");
-            const text = code?.textContent ?? "";
-            if (text) {
-              if (navigator.clipboard?.writeText) {
-                navigator.clipboard.writeText(text).catch(() => {
+        {reasoningContent && (
+          <details className="message-reasoning">
+            <summary className={`message-reasoning-summary ${reasoningFlowActive ? "reasoning-flow-active" : ""}`}>
+              Thought Process
+            </summary>
+            <div
+              className="message-reasoning-content"
+              dangerouslySetInnerHTML={{ __html: renderedReasoningContent }}
+            />
+          </details>
+        )}
+        <div
+          className="message-content"
+          dangerouslySetInnerHTML={{ __html: renderedMainContent }}
+          onClick={(e) => {
+            const target = e.target as HTMLElement;
+            const copyButton = target.closest(".code-copy-btn") as HTMLButtonElement | null;
+            if (copyButton) {
+              const wrapper = copyButton.closest(".code-block-wrapper");
+              const code = wrapper?.querySelector("pre code");
+              const text = code?.textContent ?? "";
+              if (text) {
+                if (navigator.clipboard?.writeText) {
+                  navigator.clipboard.writeText(text).catch(() => {
+                    const textarea = document.createElement("textarea");
+                    textarea.value = text;
+                    document.body.appendChild(textarea);
+                    textarea.select();
+                    document.execCommand("copy");
+                    document.body.removeChild(textarea);
+                  });
+                } else {
                   const textarea = document.createElement("textarea");
                   textarea.value = text;
                   document.body.appendChild(textarea);
                   textarea.select();
                   document.execCommand("copy");
                   document.body.removeChild(textarea);
-                });
-              } else {
-                const textarea = document.createElement("textarea");
-                textarea.value = text;
-                document.body.appendChild(textarea);
-                textarea.select();
-                document.execCommand("copy");
-                document.body.removeChild(textarea);
+                }
+                const originalText = copyButton.textContent;
+                copyButton.textContent = "Copied!";
+                window.setTimeout(() => {
+                  copyButton.textContent = originalText;
+                }, 1200);
               }
-              const originalText = copyButton.textContent;
-              copyButton.textContent = "Copied!";
-              window.setTimeout(() => {
-                copyButton.textContent = originalText;
-              }, 1200);
+              return;
             }
-            return;
-          }
-          const link = target.closest("a");
-          if (link) {
-            e.preventDefault();
-          }
-        }}
-      />
-      {message.streaming && <span className="cursor">|</span>}
-      {attachmentNames.length > 0 && (
-        <div className="message-attachments">
-          <span>Attached Files:</span>
-          {attachmentNames.map((name, i) => (
-            <span key={i} className="message-attachment-pill">📎 {name}</span>
-          ))}
-        </div>
-      )}
-      {isUser && showRetry && (
-        <div className="message-actions">
-          <button className="message-retry-btn" onClick={onRetry} title="Retry this unfinished user message">
-            Retry
+            const link = target.closest("a");
+            if (link) {
+              e.preventDefault();
+            }
+          }}
+        />
+        {message.streaming && <span className="cursor">|</span>}
+        {attachmentNames.length > 0 && (
+          <div className="message-attachments">
+            <span>Attached Files:</span>
+            {attachmentNames.map((name, i) => (
+              <span key={i} className="message-attachment-pill">📎 {name}</span>
+            ))}
+          </div>
+        )}
+        {isUser && showRetry && (
+          <div className="message-actions">
+            <button className="message-retry-btn" onClick={onRetry} title="Retry this unfinished user message">
+              Retry
+            </button>
+          </div>
+        )}
+      </div>
+
+      {isAssistant && (
+        <div className="message-export-actions">
+          <button
+            type="button"
+            className="message-export-btn"
+            onClick={() => exportAssistantMessagePdf(renderedMainContent, message.id)}
+            disabled={!mainContent.trim()}
+            title="Export this reply to PDF"
+          >
+            导出PDF
           </button>
         </div>
       )}
