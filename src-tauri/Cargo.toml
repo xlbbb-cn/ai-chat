@@ -1,6 +1,6 @@
 [package]
-name = "rustgui"
-version = "0.1.0"
+name = "ai-chat"
+version = "1.0.9"
 description = "OpenAI-compatible chat client with skills"
 authors = []
 edition = "2021"

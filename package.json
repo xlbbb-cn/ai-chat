@@ -1,13 +1,16 @@
 {
   "name": "ai-chat",
   "private": true,
-  "version": "1.0.8",
+  "version": "1.0.9",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "npm run sync-version:git-tag && tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "sync-version": "node scripts/sync-version.cjs",
+    "sync-version:git-tag": "node scripts/sync-version.cjs --from-git-tag",
+    "sync-version:bump-patch": "node scripts/sync-version.cjs --bump patch"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

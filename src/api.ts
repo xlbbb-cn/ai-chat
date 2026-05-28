@@ -268,3 +268,7 @@ export async function getInteraction(id: number): Promise<InteractionLogDetail> 
 export async function clearInteractions(sessionId: string): Promise<void> {
   return invoke("clear_interactions", { sessionId });
 }
+
+export async function saveMarkdownFile(path: string, content: string): Promise<void> {
+  return invoke("save_markdown_file", { path, content });
+}

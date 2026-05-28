@@ -28,11 +28,20 @@ use logger::{AppLogger, LoggerOutput};
 const OPEN_APP_DATA_DIR_MENU_ID: &str = "open-app-data-dir";
 const SAVE_PROFILE_MENU_ID: &str = "save-profile";
 const RESTORE_PROFILE_MENU_ID: &str = "restore-profile";
+const MARKDOWN_EDIT_MENU_ID: &str = "markdown-edit";
 const ABOUT_MENU_ID: &str = "about";
 const PROFILE_EXPORT_START_EVENT: &str = "profile-export-start";
 const PROFILE_EXPORT_STATUS_EVENT: &str = "profile-export-status";
 const PROFILE_EXPORT_DONE_EVENT: &str = "profile-export-done";
 const PROFILE_EXPORT_ERROR_EVENT: &str = "profile-export-error";
+const MARKDOWN_EDIT_OPEN_EVENT: &str = "markdown-edit-open";
+const MARKDOWN_EDIT_ERROR_EVENT: &str = "markdown-edit-error";
+
+#[derive(Debug, Clone, Serialize)]
+struct MarkdownEditPayload {
+    path: String,
+    content: String,
+}
 
 fn resolve_workspace_path(app: &AppHandle, workspace_dir: Option<&str>) -> Result<PathBuf, String> {
     Ok(match workspace_dir.filter(|s| !s.is_empty()) {
@@ -432,6 +441,11 @@ fn get_skill_roots(state: State<'_, AppState>) -> Vec<String> {
     paths
 }
 
+#[tauri::command]
+fn save_markdown_file(path: String, content: String) -> Result<(), String> {
+    fs::write(PathBuf::from(path), content).map_err(|e| e.to_string())
+}
+
 // ─── Entry point ─────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -472,6 +486,31 @@ pub fn run() {
                                 .lock()
                                 .unwrap()
                                 .log("ERROR", &format!("Restore profile failed: {err}"));
+                        }
+                    }
+                }
+            } else if event.id() == MARKDOWN_EDIT_MENU_ID {
+                if let Some(path) = app
+                    .dialog()
+                    .file()
+                    .add_filter("Markdown", &["md", "markdown", "mdown", "mkd"]) 
+                    .blocking_pick_file()
+                {
+                    let profile_path = path.into_path().map_err(|_| "unsupported markdown path").ok();
+                    if let Some(markdown_path) = profile_path {
+                        match fs::read_to_string(&markdown_path) {
+                            Ok(content) => {
+                                let payload = MarkdownEditPayload {
+                                    path: markdown_path.to_string_lossy().to_string(),
+                                    content,
+                                };
+                                let _ = app.emit(MARKDOWN_EDIT_OPEN_EVENT, payload);
+                            }
+                            Err(err) => {
+                                let msg = format!("Failed to open markdown file: {err}");
+                                app.state::<AppState>().logger.lock().unwrap().log("ERROR", &msg);
+                                let _ = app.emit(MARKDOWN_EDIT_ERROR_EVENT, msg);
+                            }
                         }
                     }
                 }
@@ -516,6 +555,14 @@ pub fn run() {
                 None::<&str>,
             )
             .expect("failed to create menu item");
+            let markdown_edit_item = MenuItem::with_id(
+                app,
+                MARKDOWN_EDIT_MENU_ID,
+                "Markdown Edit...",
+                true,
+                None::<&str>,
+            )
+            .expect("failed to create tools menu item");
             let file_menu = Submenu::with_items(
                 app,
                 "File",
@@ -523,17 +570,20 @@ pub fn run() {
                 &[&save_profile_item, &restore_profile_item, &open_app_data_dir_item],
             )
                 .expect("failed to create app menu");
+            let tools_menu = Submenu::with_items(app, "Tools", true, &[&markdown_edit_item])
+                .expect("failed to create tools menu");
             let about_item = MenuItem::with_id(
                 app,
                 ABOUT_MENU_ID,
-                "About",
+                "About AI Chat",
                 true,
                 None::<&str>,
             )
             .expect("failed to create about menu item");
-            let help_menu = Submenu::with_items(app, "Help", true, &[&about_item])
-                .expect("failed to create help menu");
-            let menu = Menu::with_items(app, &[&file_menu, &help_menu]).expect("failed to create app menu");
+            let about_menu = Submenu::with_items(app, "About", true, &[&about_item])
+                .expect("failed to create about menu");
+            let menu = Menu::with_items(app, &[&file_menu, &tools_menu, &about_menu])
+                .expect("failed to create app menu");
             app.set_menu(menu).expect("failed to set app menu");
 
             let skills_dir = data_dir.join("skills");
@@ -648,6 +698,7 @@ pub fn run() {
             fetch_models,
             get_workspace_dir,
             get_skill_roots,
+            save_markdown_file,
             skills::list_skills,
             skills::save_skill,
             skills::delete_skill,

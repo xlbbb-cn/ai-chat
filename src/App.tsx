@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { chatCompletion, getConfig, getAgentOrchestration, listMcpServers, listSubAgents, saveConfig, saveHistory, stopChatCompletion, confirmCommand } from "./api";
+import { chatCompletion, getConfig, getAgentOrchestration, listMcpServers, listSubAgents, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile } from "./api";
 
 import { ChatMessage } from "./components/ChatMessage";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -9,6 +9,7 @@ import { HistoryPanel } from "./components/HistoryPanel";
 import { ToolsPanel } from "./components/ToolsPanel";
 import { McpPanel } from "./components/McpPanel";
 import { AgentsPanel } from "./components/AgentsPanel";
+import { MarkdownPreview } from "./components/MarkdownPreview";
 import type { Message, AgentTaskEvent } from "./types";
 import "./App.css";
 
@@ -20,6 +21,11 @@ interface AgentStatus {
   summary?: string;
   error?: string;
   tokens?: number;
+}
+
+interface MarkdownEditPayload {
+  path: string;
+  content: string;
 }
 
 export default function App() {
@@ -60,6 +66,10 @@ export default function App() {
   const [profileExporting, setProfileExporting] = useState(false);
   const [profileExportMessage, setProfileExportMessage] = useState("Exporting and compressing profile...");
   const [pendingRetryMessageId, setPendingRetryMessageId] = useState<string | null>(null);
+  const [markdownEditorOpen, setMarkdownEditorOpen] = useState(false);
+  const [markdownPath, setMarkdownPath] = useState("");
+  const [markdownDraft, setMarkdownDraft] = useState("");
+  const [markdownSaving, setMarkdownSaving] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -212,6 +222,24 @@ export default function App() {
     });
     return () => {
       unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  useEffect(() => {
+    const unlisteners: Promise<() => void>[] = [];
+    unlisteners.push(
+      listen<MarkdownEditPayload>("markdown-edit-open", (event) => {
+        setMarkdownPath(event.payload.path);
+        setMarkdownDraft(event.payload.content ?? "");
+        setMarkdownEditorOpen(true);
+      }),
+      listen<string>("markdown-edit-error", (event) => {
+        setError(event.payload);
+      })
+    );
+
+    return () => {
+      unlisteners.forEach((p) => p.then((fn) => fn()));
     };
   }, []);
 
@@ -735,6 +763,23 @@ export default function App() {
     setStreaming(false);
   }
 
+  async function handleSaveMarkdownEditor() {
+    if (!markdownPath.trim()) {
+      setError("Markdown file path is empty.");
+      return;
+    }
+
+    setMarkdownSaving(true);
+    try {
+      await saveMarkdownFile(markdownPath, markdownDraft);
+      setMarkdownEditorOpen(false);
+    } catch (err) {
+      setError(`Failed to save markdown file: ${String(err)}`);
+    } finally {
+      setMarkdownSaving(false);
+    }
+  }
+
   const usageTotal = usage ? (usage.total_tokens ?? usage.prompt_tokens + usage.completion_tokens) : 0;
   const fallbackMaxTokens = 131072; // 128k tokens as a hard upper bound for usage ratio calculations when no explicit max is provided
   const usageMax = usage?.max_tokens ?? maxTokens ?? fallbackMaxTokens;
@@ -749,6 +794,53 @@ export default function App() {
   return (
     <div className="app-layout">
       {renderConfirmDialog()}
+      {markdownEditorOpen && (
+        <div className="markdown-editor-overlay" role="dialog" aria-modal="true" aria-label="Markdown editor">
+          <div className="markdown-editor-shell">
+            <div className="markdown-editor-header">
+              <h3>Markdown Edit</h3>
+              <div className="markdown-editor-file" title={markdownPath}>{markdownPath}</div>
+              <div className="markdown-editor-actions">
+                <button
+                  type="button"
+                  className="toolbar-btn"
+                  onClick={() => setMarkdownEditorOpen(false)}
+                  disabled={markdownSaving}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="send-btn"
+                  onClick={handleSaveMarkdownEditor}
+                  disabled={markdownSaving}
+                >
+                  {markdownSaving ? "Saving..." : "Save"}
+                </button>
+              </div>
+            </div>
+            <div className="markdown-editor-body">
+              <div className="markdown-editor-column">
+                <span>Markdown</span>
+                <textarea
+                  className="markdown-editor-textarea"
+                  value={markdownDraft}
+                  onChange={(e) => setMarkdownDraft(e.target.value)}
+                  placeholder="Write markdown here..."
+                />
+              </div>
+              <div className="markdown-editor-column">
+                <span>Preview</span>
+                <div className="markdown-editor-preview">
+                  {markdownDraft.trim()
+                    ? <MarkdownPreview content={markdownDraft} />
+                    : <p className="markdown-editor-preview-empty">Markdown preview will appear here.</p>}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Sidebar */}
       {sidebar && (
         <aside className={`sidebar ${sidebarMotion === "opening" ? "sidebar-opening" : ""} ${sidebarMotion === "closing" ? "sidebar-closing" : ""}`}>
