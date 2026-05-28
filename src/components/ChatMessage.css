@@ -48,11 +48,83 @@
   margin-bottom: 4px;
 }
 
+.message-reasoning-summary {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding-bottom: 4px;
+}
+
+.message-reasoning-summary::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  border-radius: 999px;
+  background: #D2D4D7;
+  opacity: 0.9;
+}
+
+.message-reasoning-summary.reasoning-flow-active::after {
+  background: linear-gradient(90deg,
+      #FF3D3D,
+      #FF9F1A,
+      #FFE347,
+      #4CD964,
+      #2BB3FF,
+      #6E44FF,
+      #FF3D9A,
+      #FF3D3D);
+  background-size: 220% 100%;
+  animation: reasoning-rainbow-flow 1.2s linear infinite;
+  box-shadow: 0 0 8px rgba(110, 68, 255, 0.35);
+}
+
 .message-reasoning-content {
   margin-top: 6px;
   font-size: 14px;
   color: #666;
   line-height: 1.5;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.message-reasoning-content p {
+  margin-top: 0;
+  margin-bottom: 0.5em;
+}
+
+.message-reasoning-content p:last-child {
+  margin-bottom: 0;
+}
+
+.message-reasoning-content ul,
+.message-reasoning-content ol {
+  margin-top: 0;
+  margin-bottom: 0.5em;
+  padding-left: 1.5em;
+}
+
+.message-reasoning-content li {
+  margin-bottom: 0.25em;
+}
+
+.message-reasoning-content li>p {
+  margin-bottom: 0;
+}
+
+.message-reasoning-content pre.hljs {
+  margin: 0.5em 0;
+  padding: 1em;
+  border-radius: 4px;
+  overflow-x: auto;
+  max-width: 100%;
+  box-sizing: border-box;
+  background: #F4F4F4;
+  border: 1px solid #EEEEEE;
 }
 
 .message-content {
@@ -236,5 +308,15 @@
 @keyframes blink {
   50% {
     opacity: 0;
+  }
+}
+
+@keyframes reasoning-rainbow-flow {
+  from {
+    background-position: 0% 50%;
+  }
+
+  to {
+    background-position: 220% 50%;
   }
 }

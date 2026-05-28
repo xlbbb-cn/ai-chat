@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { listSkills, saveSkill, deleteSkill } from "../api";
 import type { Skill } from "../types";
-import ReactMarkdown from "react-markdown";
+import { MarkdownPreview } from "./MarkdownPreview";
 import "./SkillsPanel.css";
 
 interface Props {
@@ -188,7 +188,7 @@ export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
                     <span>Preview</span>
                     <div className="prompt-preview">
                       {promptDraft.trim() ? (
-                        <ReactMarkdown>{promptDraft}</ReactMarkdown>
+                        <MarkdownPreview content={promptDraft} />
                       ) : (
                         <p className="prompt-preview-empty">Markdown preview will appear here.</p>
                       )}

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { fetchModels, getConfig, getWorkspaceDir, saveConfig } from "../api";
 import type { AppConfig, ModelSettings } from "../types";
-import ReactMarkdown from "react-markdown";
+import { MarkdownPreview } from "./MarkdownPreview";
 import { MonitorPanel } from "./MonitorPanel";
 import "./SettingsPanel.css";
 
@@ -414,7 +414,7 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
                 <span>Preview</span>
                 <div className="prompt-preview">
                   {messageDraft.trim() ? (
-                    <ReactMarkdown>{messageDraft}</ReactMarkdown>
+                    <MarkdownPreview content={messageDraft} />
                   ) : (
                     <p className="prompt-preview-empty">Markdown preview will appear here.</p>
                   )}

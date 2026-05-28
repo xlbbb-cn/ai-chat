@@ -1,5 +1,6 @@
 import type { Message } from "../types";
 import "./ChatMessage.css";
+import { useEffect, useRef, useState } from "react";
 import MarkdownIt from "markdown-it";
 import hljs from "highlight.js";
 import "highlight.js/styles/github.css";
@@ -99,6 +100,49 @@ export function ChatMessage({ message, showRetry = false, onRetry }: Props) {
   const mainContent = message.reasoning_content
     ? displayContent
     : embeddedThought.mainContent;
+  const [reasoningFlowActive, setReasoningFlowActive] = useState(false);
+  const reasoningUpdateTimerRef = useRef<number | null>(null);
+  const lastReasoningRef = useRef(reasoningContent);
+
+  useEffect(() => {
+    if (!message.streaming) {
+      if (reasoningUpdateTimerRef.current !== null) {
+        window.clearTimeout(reasoningUpdateTimerRef.current);
+        reasoningUpdateTimerRef.current = null;
+      }
+      setReasoningFlowActive(false);
+      lastReasoningRef.current = reasoningContent;
+      return;
+    }
+
+    if (!reasoningContent) {
+      setReasoningFlowActive(false);
+      return;
+    }
+
+    if (reasoningContent !== lastReasoningRef.current) {
+      lastReasoningRef.current = reasoningContent;
+      setReasoningFlowActive(true);
+
+      if (reasoningUpdateTimerRef.current !== null) {
+        window.clearTimeout(reasoningUpdateTimerRef.current);
+      }
+
+      // Keep the effect visible only while updates keep arriving.
+      reasoningUpdateTimerRef.current = window.setTimeout(() => {
+        setReasoningFlowActive(false);
+        reasoningUpdateTimerRef.current = null;
+      }, 700);
+    }
+  }, [message.streaming, reasoningContent]);
+
+  useEffect(() => {
+    return () => {
+      if (reasoningUpdateTimerRef.current !== null) {
+        window.clearTimeout(reasoningUpdateTimerRef.current);
+      }
+    };
+  }, []);
 
   return (
     <div className={`chat-message ${isUser ? "user" : "assistant"}`}>
@@ -106,7 +150,9 @@ export function ChatMessage({ message, showRetry = false, onRetry }: Props) {
 
       {reasoningContent && (
         <details className="message-reasoning">
-          <summary>Thought Process</summary>
+          <summary className={`message-reasoning-summary ${reasoningFlowActive ? "reasoning-flow-active" : ""}`}>
+            Thought Process
+          </summary>
           <div
             className="message-reasoning-content"
             dangerouslySetInnerHTML={{ __html: md.render(reasoningContent) }}

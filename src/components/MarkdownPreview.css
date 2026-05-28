@@ -1,0 +1,68 @@
+.md-preview {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    padding-left: 10px;
+    box-sizing: border-box;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.md-preview ul,
+.md-preview ol {
+    padding-left: 1.2em;
+    margin-left: 0;
+}
+
+.md-preview>* {
+    max-width: 100%;
+}
+
+.md-preview img,
+.md-preview video,
+.md-preview svg,
+.md-preview canvas,
+.md-preview iframe {
+    max-width: 100%;
+    height: auto;
+}
+
+.md-preview pre,
+.md-preview code {
+    max-width: 100%;
+}
+
+.md-preview pre {
+    overflow-x: auto;
+}
+
+.md-preview table {
+    display: block;
+    width: max-content;
+    min-width: 100%;
+    max-width: 100%;
+    border-collapse: collapse;
+    margin: 0.65em 0;
+    font-size: 13px;
+    overflow-x: auto;
+}
+
+.md-preview th,
+.md-preview td {
+    border: 1px solid #D1D5DB;
+    padding: 6px 8px;
+    text-align: left;
+    vertical-align: top;
+}
+
+.md-preview thead th {
+    background: #F8FAFC;
+    font-weight: 600;
+}
+
+.md-preview .katex-display {
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 2px 0;
+}

@@ -4,7 +4,7 @@ import {
   getAgentOrchestration, saveAgentOrchestration,
 } from "../api";
 import type { SubAgent, AgentOrchestration } from "../types";
-import ReactMarkdown from "react-markdown";
+import { MarkdownPreview } from "./MarkdownPreview";
 import "./AgentsPanel.css";
 
 const KNOWN_TOOLS = ["file_actions", "run_cmd", "run_shell", "knowledge_graph"];
@@ -276,7 +276,7 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
                     <span>Preview</span>
                     <div className="prompt-preview">
                       {promptDraft.trim() ? (
-                        <ReactMarkdown>{promptDraft}</ReactMarkdown>
+                        <MarkdownPreview content={promptDraft} />
                       ) : (
                         <p className="prompt-preview-empty">Markdown preview will appear here.</p>
                       )}
