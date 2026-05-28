@@ -64,12 +64,25 @@ function bumpVersion(version, type) {
 
 function getLatestGitTag() {
   try {
-    const tag = execSync('git describe --tags --abbrev=0', {
+    const tags = execSync('git tag --sort=-creatordate', {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'ignore'],
+    })
+      .trim()
+      .split(/\r?\n/)
+      .filter(Boolean);
+
+    if (tags.length > 0) {
+      return normalizeVersion(tags[0]);
+    }
+
+    const fallback = execSync('git describe --tags --abbrev=0', {
       cwd: root,
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'ignore'],
     }).trim();
-    return normalizeVersion(tag);
+    return normalizeVersion(fallback);
   } catch (error) {
     throw new Error('读取 git tag 失败，请确认仓库中存在标签。');
   }
