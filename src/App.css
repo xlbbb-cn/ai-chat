@@ -380,6 +380,98 @@ body {
   position: absolute;
 }
 
+/* Panel vertical scrollbar: show while scrolling, auto-hide when idle */
+.history-list,
+.settings-body,
+.skills-list,
+.skill-editor,
+.tools-list,
+.agents-list,
+.agent-editor,
+.mcp-list,
+.mcp-form {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.history-list::-webkit-scrollbar,
+.settings-body::-webkit-scrollbar,
+.skills-list::-webkit-scrollbar,
+.skill-editor::-webkit-scrollbar,
+.tools-list::-webkit-scrollbar,
+.agents-list::-webkit-scrollbar,
+.agent-editor::-webkit-scrollbar,
+.mcp-list::-webkit-scrollbar,
+.mcp-form::-webkit-scrollbar {
+  width: 2px;
+  height: 0;
+}
+
+.history-list::-webkit-scrollbar-thumb,
+.settings-body::-webkit-scrollbar-thumb,
+.skills-list::-webkit-scrollbar-thumb,
+.skill-editor::-webkit-scrollbar-thumb,
+.tools-list::-webkit-scrollbar-thumb,
+.agents-list::-webkit-scrollbar-thumb,
+.agent-editor::-webkit-scrollbar-thumb,
+.mcp-list::-webkit-scrollbar-thumb,
+.mcp-form::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 999px;
+}
+
+.history-list.scrolling-active,
+.settings-body.scrolling-active,
+.skills-list.scrolling-active,
+.skill-editor.scrolling-active,
+.tools-list.scrolling-active,
+.agents-list.scrolling-active,
+.agent-editor.scrolling-active,
+.mcp-list.scrolling-active,
+.mcp-form.scrolling-active {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #16A34A transparent;
+}
+
+.history-list.scrolling-active::-webkit-scrollbar,
+.settings-body.scrolling-active::-webkit-scrollbar,
+.skills-list.scrolling-active::-webkit-scrollbar,
+.skill-editor.scrolling-active::-webkit-scrollbar,
+.tools-list.scrolling-active::-webkit-scrollbar,
+.agents-list.scrolling-active::-webkit-scrollbar,
+.agent-editor.scrolling-active::-webkit-scrollbar,
+.mcp-list.scrolling-active::-webkit-scrollbar,
+.mcp-form.scrolling-active::-webkit-scrollbar {
+  width: 2px;
+}
+
+.history-list.scrolling-active::-webkit-scrollbar-track,
+.settings-body.scrolling-active::-webkit-scrollbar-track,
+.skills-list.scrolling-active::-webkit-scrollbar-track,
+.skill-editor.scrolling-active::-webkit-scrollbar-track,
+.tools-list.scrolling-active::-webkit-scrollbar-track,
+.agents-list.scrolling-active::-webkit-scrollbar-track,
+.agent-editor.scrolling-active::-webkit-scrollbar-track,
+.mcp-list.scrolling-active::-webkit-scrollbar-track,
+.mcp-form.scrolling-active::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.history-list.scrolling-active::-webkit-scrollbar-thumb,
+.settings-body.scrolling-active::-webkit-scrollbar-thumb,
+.skills-list.scrolling-active::-webkit-scrollbar-thumb,
+.skill-editor.scrolling-active::-webkit-scrollbar-thumb,
+.tools-list.scrolling-active::-webkit-scrollbar-thumb,
+.agents-list.scrolling-active::-webkit-scrollbar-thumb,
+.agent-editor.scrolling-active::-webkit-scrollbar-thumb,
+.mcp-list.scrolling-active::-webkit-scrollbar-thumb,
+.mcp-form.scrolling-active::-webkit-scrollbar-thumb {
+  background: #16A34A;
+  border-radius: 999px;
+}
+
 .toggle-switch-slider {
   width: 32px;
   height: 18px;

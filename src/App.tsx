@@ -131,6 +131,82 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const panelScrollableSelector = [
+      ".history-list",
+      ".settings-body",
+      ".skills-list",
+      ".skill-editor",
+      ".tools-list",
+      ".agents-list",
+      ".agent-editor",
+      ".mcp-list",
+      ".mcp-form",
+    ].join(", ");
+    const hideDelayMs = 900;
+    const minVisibleMs = 260;
+    const minScrollDelta = 5;
+    const hideTimers = new Map<HTMLElement, number>();
+    const lastShownAt = new Map<HTMLElement, number>();
+    const lastScrollTop = new Map<HTMLElement, number>();
+
+    const hideScrollbar = (el: HTMLElement) => {
+      el.classList.remove("scrolling-active");
+      hideTimers.delete(el);
+      lastShownAt.delete(el);
+    };
+
+    const scheduleHide = (el: HTMLElement) => {
+      const existingTimer = hideTimers.get(el);
+      if (existingTimer !== undefined) {
+        window.clearTimeout(existingTimer);
+      }
+
+      const nextTimer = window.setTimeout(() => {
+        const shownAt = lastShownAt.get(el) ?? Date.now();
+        const elapsed = Date.now() - shownAt;
+        if (elapsed < minVisibleMs) {
+          const holdTimer = window.setTimeout(() => hideScrollbar(el), minVisibleMs - elapsed);
+          hideTimers.set(el, holdTimer);
+          return;
+        }
+        hideScrollbar(el);
+      }, hideDelayMs);
+
+      hideTimers.set(el, nextTimer);
+    };
+
+    const handlePanelScroll = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (!target.matches(panelScrollableSelector)) return;
+      if (target.scrollHeight <= target.clientHeight) return;
+
+      const previousTop = lastScrollTop.get(target) ?? target.scrollTop;
+      const delta = Math.abs(target.scrollTop - previousTop);
+      lastScrollTop.set(target, target.scrollTop);
+
+      const isActive = target.classList.contains("scrolling-active");
+      if (!isActive && delta < minScrollDelta) return;
+
+      if (!isActive) {
+        target.classList.add("scrolling-active");
+        lastShownAt.set(target, Date.now());
+      }
+
+      scheduleHide(target);
+    };
+
+    document.addEventListener("scroll", handlePanelScroll, true);
+    return () => {
+      document.removeEventListener("scroll", handlePanelScroll, true);
+      hideTimers.forEach((timerId) => window.clearTimeout(timerId));
+      hideTimers.clear();
+      lastShownAt.clear();
+      lastScrollTop.clear();
+    };
+  }, []);
+
+  useEffect(() => {
     const unlisten = listen("request-set-workspace-dir", () => {
       setSidebar("settings");
     });
