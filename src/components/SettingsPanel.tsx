@@ -149,6 +149,25 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
 
       <div className="settings-body">
         <section className="settings-group">
+          <div className="settings-group-title">Appearance</div>
+          <label className="settings-field">
+            Color Mode
+          </label>
+          <div className="theme-segmented">
+            {(["auto", "light", "dark"] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                className={`theme-seg-btn${(config.theme ?? "auto") === t ? " active" : ""}`}
+                onClick={() => setConfig((prev) => ({ ...prev, theme: t }))}
+              >
+                {t === "auto" ? "Auto" : t === "light" ? "Light" : "Dark"}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="settings-group">
           <div className="settings-group-title">Workspace</div>
           <label className="settings-field">
             Workspace Directory

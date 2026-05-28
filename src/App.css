@@ -10,11 +10,47 @@
   font-family: "Universal Sans Text", -apple-system, Arial, sans-serif;
   font-size: 14px;
   color-scheme: light;
+
+  /* ── Theme tokens (light) ── */
+  --c-bg: #FFFFFF;
+  --c-surface: #FFFFFF;
+  --c-hover: #F4F4F4;
+  --c-text: #171A20;
+  --c-body: #393C41;
+  --c-muted: #5C5E62;
+  --c-placeholder: #8E8E8E;
+  --c-border: #EEEEEE;
+  --c-border-s: #E7E7E7;
+  --c-border-i: #D0D1D2;
+  --c-code: #F4F4F4;
+  --c-reason: #F9F9F9;
+  --c-reason-b: #D2D4D7;
+  --c-toolbar: rgba(255, 255, 255, 0.75);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* ── Theme tokens (dark) ── */
+  --c-bg: #171A20;
+  --c-surface: #1E2228;
+  --c-hover: #262B35;
+  --c-text: #E8E8EA;
+  --c-body: #B8B8BC;
+  --c-muted: #8A8A90;
+  --c-placeholder: #5A5A60;
+  --c-border: #2E3140;
+  --c-border-s: #252830;
+  --c-border-i: #404352;
+  --c-code: #242830;
+  --c-reason: #1A1E26;
+  --c-reason-b: #404352;
+  --c-toolbar: rgba(23, 26, 32, 0.85);
 }
 
 body {
-  background: #FFFFFF;
-  color: #393C41;
+  background: var(--c-bg);
+  color: var(--c-body);
   height: 100vh;
   overflow: hidden;
 }
@@ -40,11 +76,11 @@ body {
   left: 0;
   bottom: 0;
   flex-shrink: 0;
-  border-right: 1px solid #EEEEEE;
+  border-right: 1px solid var(--c-border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: #FFFFFF;
+  background: var(--c-bg);
   z-index: 900;
   box-shadow: 12px 0 32px rgba(23, 26, 32, 0.12);
 }
@@ -103,7 +139,7 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: #FFFFFF;
+  background: var(--c-bg);
   position: relative;
   z-index: 1;
 }
@@ -114,8 +150,8 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 10px 16px;
-  border-bottom: 1px solid #EEEEEE;
-  background: rgba(255, 255, 255, 0.75);
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-toolbar);
   backdrop-filter: blur(10px);
   flex-shrink: 0;
   z-index: 10;
@@ -125,7 +161,7 @@ body {
   font-family: "Universal Sans Display", -apple-system, Arial, sans-serif;
   font-size: 17px;
   font-weight: 500;
-  color: #171A20;
+  color: var(--c-text);
   letter-spacing: normal;
 }
 
@@ -141,7 +177,7 @@ body {
   background: transparent;
   border: none;
   border-radius: 4px;
-  color: #171A20;
+  color: var(--c-text);
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
@@ -151,8 +187,8 @@ body {
 
 .toolbar-btn:hover,
 .toolbar-btn.active {
-  background: #F4F4F4;
-  color: #171A20;
+  background: var(--c-hover);
+  color: var(--c-text);
 }
 
 .toolbar-btn-count {
@@ -163,8 +199,8 @@ body {
   height: 16px;
   padding: 0 4px;
   border-radius: 999px;
-  background: #171A20;
-  color: #FFFFFF;
+  background: var(--c-text);
+  color: var(--c-bg);
   font-size: 11px;
   line-height: 16px;
   text-align: center;
@@ -174,20 +210,20 @@ body {
 .profile-export-progress {
   flex-shrink: 0;
   padding: 10px 16px 12px;
-  border-bottom: 1px solid #EEEEEE;
-  background: rgba(255, 255, 255, 0.92);
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-toolbar);
 }
 
 .profile-export-progress-label {
   margin-bottom: 4px;
   font-size: 12px;
-  color: #5C5E62;
+  color: var(--c-muted);
 }
 
 .profile-export-progress-hint {
   margin-bottom: 8px;
   font-size: 11px;
-  color: #8E8E8E;
+  color: var(--c-placeholder);
 }
 
 .profile-export-progress-track {
@@ -228,32 +264,32 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  background: #FFFFFF;
+  background: var(--c-bg);
 }
 
 .empty-state {
   margin: auto;
   text-align: center;
-  color: #5C5E62;
+  color: var(--c-muted);
 }
 
 .empty-state p {
   font-size: 17px;
   font-weight: 500;
   margin-bottom: 8px;
-  color: #171A20;
+  color: var(--c-text);
 }
 
 .empty-hint {
   font-size: 14px !important;
   font-weight: 400 !important;
-  color: #5C5E62;
+  color: var(--c-muted);
 }
 
 .error-banner {
   padding: 10px 14px;
-  background: #F4F4F4;
-  color: #171A20;
+  background: var(--c-hover);
+  color: var(--c-text);
   border-radius: 4px;
   font-size: 14px;
   align-self: stretch;
@@ -265,8 +301,8 @@ body {
   display: flex;
   gap: 8px;
   padding: 12px 16px;
-  border-top: 1px solid #EEEEEE;
-  background: #FFFFFF;
+  border-top: 1px solid var(--c-border);
+  background: var(--c-bg);
   flex-shrink: 0;
 }
 
@@ -281,13 +317,13 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  color: #6B7280;
+  color: var(--c-muted);
   font-size: 11px;
   line-height: 1.2;
 }
 
 .usage-line {
-  color: #6B7280;
+  color: var(--c-muted);
   font-size: 11px;
   line-height: 1.2;
   font-family: Consolas, "Courier New", monospace;
@@ -323,13 +359,13 @@ body {
 
 .attach-btn {
   background: transparent;
-  border: 1px solid #EEEEEE;
+  border: 1px solid var(--c-border);
   border-radius: 4px;
   font-size: 18px;
   cursor: pointer;
   padding: 6px 12px;
   min-height: 42px;
-  color: #171A20;
+  color: var(--c-text);
   transition: background-color 0.3s, border-color 0.3s;
   display: flex;
   align-items: center;
@@ -337,8 +373,8 @@ body {
 }
 
 .attach-btn:hover:not(:disabled) {
-  background-color: #F4F4F4;
-  border-color: #171A20;
+  background-color: var(--c-hover);
+  border-color: var(--c-text);
 }
 
 .attach-btn:disabled {
@@ -357,12 +393,12 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  background: #F4F4F4;
+  background: var(--c-hover);
   border-radius: 12px;
   padding: 4px 10px;
   font-size: 12px;
-  color: #171A20;
-  border: 1px solid #EEEEEE;
+  color: var(--c-text);
+  border: 1px solid var(--c-border);
 }
 
 .toggle-switch {
@@ -539,9 +575,9 @@ body {
   flex: 1;
   padding: 10px 14px;
   background: transparent;
-  border: 1px solid #EEEEEE;
+  border: 1px solid var(--c-border);
   border-radius: 4px;
-  color: #171A20;
+  color: var(--c-text);
   font-size: 14px;
   font-family: inherit;
   font-weight: 400;
@@ -555,11 +591,11 @@ body {
 }
 
 .chat-input::placeholder {
-  color: #8E8E8E;
+  color: var(--c-placeholder);
 }
 
 .chat-input:focus {
-  border-color: #171A20;
+  border-color: var(--c-text);
 }
 
 .chat-input:disabled {
@@ -570,16 +606,16 @@ body {
   min-height: 42px;
   max-width: 220px;
   padding: 0 10px;
-  border: 1px solid #EEEEEE;
+  border: 1px solid var(--c-border);
   border-radius: 4px;
-  background: #FFFFFF;
-  color: #171A20;
+  background: var(--c-bg);
+  color: var(--c-text);
   font-size: 13px;
   outline: none;
 }
 
 .model-select:focus {
-  border-color: #171A20;
+  border-color: var(--c-text);
 }
 
 .model-select:disabled {
@@ -746,7 +782,7 @@ body {
   position: fixed;
   inset: 0;
   z-index: 1990;
-  background: #FFFFFF;
+  background: var(--c-bg);
 }
 
 .markdown-editor-shell {
@@ -761,14 +797,14 @@ body {
   align-items: center;
   gap: 12px;
   padding: 14px 18px;
-  border-bottom: 1px solid #E5E7EB;
+  border-bottom: 1px solid var(--c-border);
 }
 
 .markdown-editor-header h3 {
   margin: 0;
   font-size: 17px;
   font-weight: 600;
-  color: #171A20;
+  color: var(--c-text);
 }
 
 .markdown-editor-file {
@@ -776,7 +812,7 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #5C5E62;
+  color: var(--c-muted);
   font-size: 13px;
 }
 
@@ -803,7 +839,7 @@ body {
 
 .markdown-editor-column>span {
   font-size: 13px;
-  color: #4B5563;
+  color: var(--c-muted);
   font-weight: 500;
 }
 
@@ -812,24 +848,25 @@ body {
   height: 100%;
   min-height: 0;
   resize: none;
-  border: 1px solid #D1D5DB;
+  border: 1px solid var(--c-border-i);
   border-radius: 6px;
   padding: 12px;
   font-size: 14px;
   line-height: 1.6;
   font-family: Consolas, "Courier New", monospace;
-  color: #171A20;
+  color: var(--c-text);
+  background: var(--c-surface);
   outline: none;
 }
 
 .markdown-editor-textarea:focus {
-  border-color: #171A20;
+  border-color: var(--c-text);
 }
 
 .markdown-editor-preview {
   flex: 1;
   min-height: 0;
-  border: 1px solid #D1D5DB;
+  border: 1px solid var(--c-border-i);
   border-radius: 6px;
   overflow: auto;
   padding: 12px;
@@ -849,4 +886,331 @@ body {
   .markdown-editor-body {
     grid-template-columns: 1fr;
   }
+}
+
+/* ══════════════════════════════════════════
+   Dark mode overrides — applied via [data-theme="dark"] on <html>
+   ══════════════════════════════════════════ */
+
+/* Layout \u2014 no dark overrides needed; base selectors now use CSS variables */
+
+/* Confirm dialog */
+[data-theme="dark"] .confirm-dialog {
+  background: var(--c-surface);
+  border-color: var(--c-border);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+}
+
+[data-theme="dark"] .confirm-dialog h2 {
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .confirm-dialog p {
+  color: var(--c-body);
+}
+
+[data-theme="dark"] .confirm-dialog-credentials {
+  border-color: rgba(229, 62, 62, 0.3);
+}
+
+[data-theme="dark"] .confirm-dialog-credentials label {
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .confirm-dialog-credentials input {
+  background: var(--c-bg);
+  border-color: var(--c-border-i);
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .confirm-dialog-hint {
+  color: var(--c-muted);
+}
+
+[data-theme="dark"] .confirm-dialog-preview pre {
+  background: var(--c-code);
+  color: var(--c-body);
+}
+
+[data-theme="dark"] .confirm-dialog-button.cancel {
+  background: var(--c-hover);
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .confirm-dialog-button.confirm {
+  background: var(--c-text);
+  color: var(--c-bg);
+}
+
+/* Markdown editor — no dark overrides needed; base selectors use CSS variables */
+
+/* Settings panel */
+[data-theme="dark"] .settings-panel {
+  background: var(--c-bg);
+  color: var(--c-body);
+}
+
+[data-theme="dark"] .settings-header {
+  border-color: var(--c-border);
+}
+
+[data-theme="dark"] .settings-header h2 {
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .settings-body {
+  background: var(--c-bg);
+}
+
+[data-theme="dark"] .settings-body label {
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .settings-group {
+  background: var(--c-surface);
+  border-color: var(--c-border-s);
+}
+
+[data-theme="dark"] .settings-group-title {
+  color: var(--c-muted);
+}
+
+[data-theme="dark"] .settings-body input,
+[data-theme="dark"] .settings-body textarea,
+[data-theme="dark"] .settings-body select {
+  border-color: var(--c-border-i);
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .settings-body input:focus,
+[data-theme="dark"] .settings-body textarea:focus,
+[data-theme="dark"] .settings-body select:focus {
+  border-color: var(--c-text);
+}
+
+[data-theme="dark"] .settings-checkbox-copy small {
+  color: var(--c-muted);
+}
+
+[data-theme="dark"] .settings-checkbox-copy code {
+  background: var(--c-hover);
+}
+
+[data-theme="dark"] .settings-hint {
+  color: var(--c-muted);
+}
+
+[data-theme="dark"] .settings-hint code {
+  background: var(--c-hover);
+}
+
+[data-theme="dark"] .settings-footer {
+  border-color: var(--c-border);
+}
+
+[data-theme="dark"] .settings-section-title {
+  border-color: var(--c-border);
+  color: var(--c-muted);
+}
+
+[data-theme="dark"] .close-btn {
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .close-btn:hover {
+  background: var(--c-hover);
+}
+
+/* prompt editor overlay */
+[data-theme="dark"] .prompt-editor-overlay {
+  background: rgba(0, 0, 0, 0.65);
+}
+
+[data-theme="dark"] .prompt-editor-shell {
+  background: var(--c-bg);
+}
+
+[data-theme="dark"] .prompt-editor-header {
+  border-color: var(--c-border);
+}
+
+[data-theme="dark"] .prompt-editor-header h3 {
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .prompt-editor-textarea {
+  background: var(--c-surface);
+  border-color: var(--c-border-i);
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .prompt-editor-preview {
+  border-color: var(--c-border-i);
+}
+
+/* History panel — no dark overrides needed; HistoryPanel.css uses CSS variables */
+
+/* Skills panel */
+[data-theme="dark"] .skills-panel {
+  background: var(--c-bg);
+  color: var(--c-body);
+}
+
+[data-theme="dark"] .skills-header {
+  border-color: var(--c-border);
+}
+
+[data-theme="dark"] .skills-header h2 {
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .skill-item {
+  border-color: var(--c-border-i);
+}
+
+[data-theme="dark"] .skill-name {
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .skill-desc {
+  color: var(--c-muted);
+}
+
+[data-theme="dark"] .skill-actions-bottom button,
+[data-theme="dark"] .skill-actions button {
+  color: var(--c-muted);
+}
+
+[data-theme="dark"] .skill-actions-bottom button:hover,
+[data-theme="dark"] .skill-actions button:hover {
+  background: var(--c-hover);
+  color: var(--c-text);
+}
+
+/* Tools panel */
+[data-theme="dark"] .tools-panel {
+  background: var(--c-bg);
+  color: var(--c-body);
+}
+
+[data-theme="dark"] .tools-header {
+  border-color: var(--c-border);
+}
+
+[data-theme="dark"] .tools-header h2 {
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .tool-name {
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .tool-desc-expanded {
+  color: var(--c-muted);
+}
+
+[data-theme="dark"] .toggle-btn {
+  color: var(--c-muted);
+}
+
+[data-theme="dark"] .toggle-btn:hover {
+  background: var(--c-hover);
+}
+
+[data-theme="dark"] .search-engine-section {
+  border-color: var(--c-border);
+}
+
+[data-theme="dark"] .search-engine-label {
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .search-engine-select {
+  border-color: var(--c-border-i);
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .search-engine-select:focus {
+  border-color: var(--c-text);
+}
+
+/* Agents panel */
+[data-theme="dark"] .agents-panel {
+  background: var(--c-bg);
+  color: var(--c-body);
+}
+
+[data-theme="dark"] .agents-header {
+  border-color: var(--c-border);
+}
+
+[data-theme="dark"] .agents-header h2 {
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .orchestration-settings {
+  border-color: var(--c-border);
+}
+
+[data-theme="dark"] .orch-title {
+  color: var(--c-muted);
+}
+
+[data-theme="dark"] .orch-row {
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .orch-select,
+[data-theme="dark"] .orch-number {
+  border-color: var(--c-border-i);
+  color: var(--c-text);
+}
+
+/* MCP panel */
+[data-theme="dark"] .mcp-panel {
+  background: var(--c-bg);
+  color: var(--c-body);
+}
+
+[data-theme="dark"] .mcp-header {
+  border-color: var(--c-border);
+}
+
+[data-theme="dark"] .mcp-header h2 {
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .mcp-desc {
+  color: var(--c-muted);
+}
+
+[data-theme="dark"] .mcp-empty {
+  color: var(--c-placeholder);
+}
+
+[data-theme="dark"] .mcp-server-item {
+  border-color: var(--c-border-i);
+}
+
+/* Chat message — no dark overrides needed; ChatMessage.css uses CSS variables */
+
+/* Shared btn-primary/secondary in settings footer and panels */
+[data-theme="dark"] .btn-secondary {
+  background: var(--c-surface);
+  border-color: var(--c-border-i);
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .btn-secondary:hover:not(:disabled) {
+  background: var(--c-hover);
+  border-color: var(--c-text);
+}
+
+/* Toggle switch knob */
+[data-theme="dark"] .toggle-switch-slider {
+  background: var(--c-border-i);
+}
+
+[data-theme="dark"] .toggle-switch-slider::after {
+  background: var(--c-body);
 }

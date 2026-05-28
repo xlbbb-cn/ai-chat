@@ -6,6 +6,7 @@
     box-sizing: border-box;
     overflow-wrap: anywhere;
     word-break: break-word;
+    color: var(--c-body);
 }
 
 .md-preview ul,
@@ -32,8 +33,20 @@
     max-width: 100%;
 }
 
+.md-preview code {
+    background: var(--c-code);
+    color: var(--c-text);
+    border-radius: 4px;
+    padding: 1px 5px;
+}
+
 .md-preview pre {
     overflow-x: auto;
+    background: var(--c-code);
+    color: var(--c-text);
+    border: 1px solid var(--c-border);
+    border-radius: 6px;
+    padding: 10px;
 }
 
 .md-preview table {
@@ -49,14 +62,15 @@
 
 .md-preview th,
 .md-preview td {
-    border: 1px solid #D1D5DB;
+    border: 1px solid var(--c-border-i);
     padding: 6px 8px;
     text-align: left;
     vertical-align: top;
 }
 
 .md-preview thead th {
-    background: #F8FAFC;
+    background: var(--c-hover);
+    color: var(--c-text);
     font-weight: 600;
 }
 
@@ -65,4 +79,18 @@
     overflow-x: auto;
     overflow-y: hidden;
     padding: 2px 0;
+}
+
+[data-theme="dark"] .md-preview pre,
+[data-theme="dark"] .md-preview pre code {
+    background: var(--c-code);
+    color: #E8EAED;
+}
+
+[data-theme="dark"] .md-preview table {
+    background: var(--c-surface);
+}
+
+[data-theme="dark"] .md-preview tbody tr:nth-child(even) {
+    background: var(--c-reason);
 }

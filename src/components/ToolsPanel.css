@@ -144,3 +144,40 @@
     opacity: 0.5;
     cursor: not-allowed;
 }
+
+[data-theme="dark"] .tools-panel {
+    background: var(--c-bg);
+    color: var(--c-body);
+}
+
+[data-theme="dark"] .tools-header,
+[data-theme="dark"] .search-engine-section {
+    border-color: var(--c-border);
+}
+
+[data-theme="dark"] .tools-header h2,
+[data-theme="dark"] .tool-name,
+[data-theme="dark"] .search-engine-label,
+[data-theme="dark"] .close-btn {
+    color: var(--c-text);
+}
+
+[data-theme="dark"] .close-btn:hover,
+[data-theme="dark"] .toggle-btn:hover {
+    background: var(--c-hover);
+}
+
+[data-theme="dark"] .toggle-btn,
+[data-theme="dark"] .tool-desc-expanded {
+    color: var(--c-muted);
+}
+
+[data-theme="dark"] .search-engine-select {
+    border-color: var(--c-border-i);
+    color: var(--c-text);
+    background: var(--c-surface);
+}
+
+[data-theme="dark"] .search-engine-select:focus {
+    border-color: var(--c-text);
+}

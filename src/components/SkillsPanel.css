@@ -417,3 +417,92 @@
     min-width: 0;
   }
 }
+
+[data-theme="dark"] .skills-panel {
+  background: var(--c-bg);
+  color: var(--c-body);
+}
+
+[data-theme="dark"] .skills-header,
+[data-theme="dark"] .skills-footer {
+  border-color: var(--c-border);
+}
+
+[data-theme="dark"] .skills-header h2,
+[data-theme="dark"] .skill-name,
+[data-theme="dark"] .skill-editor label,
+[data-theme="dark"] .prompt-editor-header h3 {
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .close-btn,
+[data-theme="dark"] .skill-actions-bottom button,
+[data-theme="dark"] .skill-actions button,
+[data-theme="dark"] .btn-secondary,
+[data-theme="dark"] .inline-edit-btn {
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .close-btn:hover,
+[data-theme="dark"] .skill-actions-bottom button:hover,
+[data-theme="dark"] .skill-actions button:hover,
+[data-theme="dark"] .btn-secondary:hover,
+[data-theme="dark"] .inline-edit-btn:hover {
+  background: var(--c-hover);
+}
+
+[data-theme="dark"] .skill-item,
+[data-theme="dark"] .skill-actions button,
+[data-theme="dark"] .btn-secondary,
+[data-theme="dark"] .inline-edit-btn,
+[data-theme="dark"] .skill-editor input,
+[data-theme="dark"] .skill-editor textarea,
+[data-theme="dark"] .prompt-editor-textarea,
+[data-theme="dark"] .prompt-preview {
+  border-color: var(--c-border-i);
+}
+
+[data-theme="dark"] .skill-desc,
+[data-theme="dark"] .prompt-column {
+  color: var(--c-muted);
+}
+
+[data-theme="dark"] .skill-editor input,
+[data-theme="dark"] .skill-editor textarea,
+[data-theme="dark"] .prompt-editor-textarea {
+  background: var(--c-surface);
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .skill-editor input:focus,
+[data-theme="dark"] .skill-editor textarea:focus,
+[data-theme="dark"] .prompt-editor-textarea:focus {
+  border-color: var(--c-text);
+}
+
+[data-theme="dark"] .prompt-editor-overlay {
+  background: rgba(0, 0, 0, 0.65);
+}
+
+[data-theme="dark"] .prompt-editor-shell {
+  background: var(--c-bg);
+}
+
+[data-theme="dark"] .prompt-editor-header {
+  border-color: var(--c-border);
+}
+
+[data-theme="dark"] .prompt-preview {
+  background: var(--c-surface);
+  color: var(--c-body);
+}
+
+[data-theme="dark"] .prompt-preview-empty {
+  color: var(--c-placeholder);
+}
+
+[data-theme="dark"] .prompt-preview code,
+[data-theme="dark"] .prompt-preview pre {
+  background: var(--c-code);
+  color: var(--c-text);
+}

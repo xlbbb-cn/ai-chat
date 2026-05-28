@@ -437,3 +437,110 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ── Theme segmented control ── */
+.theme-segmented {
+  display: flex;
+  gap: 0;
+  border: 1px solid #D0D1D2;
+  border-radius: 4px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.theme-seg-btn {
+  flex: 1;
+  padding: 7px 0;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  border: none;
+  background: #FFFFFF;
+  color: #5C5E62;
+  cursor: pointer;
+  transition: background-color 0.33s, color 0.33s;
+  border-right: 1px solid #D0D1D2;
+}
+
+.theme-seg-btn:last-child {
+  border-right: none;
+}
+
+.theme-seg-btn:hover:not(.active) {
+  background: #F4F4F4;
+  color: #171A20;
+}
+
+.theme-seg-btn.active {
+  background: #171A20;
+  color: #FFFFFF;
+}
+
+/* Dark mode overrides for theme segmented control */
+[data-theme="dark"] .theme-segmented {
+  border-color: var(--c-border-i);
+}
+
+[data-theme="dark"] .theme-seg-btn {
+  background: var(--c-surface);
+  color: var(--c-muted);
+  border-color: var(--c-border-i);
+}
+
+[data-theme="dark"] .theme-seg-btn:hover:not(.active) {
+  background: var(--c-hover);
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .theme-seg-btn.active {
+  background: var(--c-text);
+  color: var(--c-bg);
+}
+
+/* Dark mode overrides for SettingsPanel internals not covered by App.css */
+[data-theme="dark"] .prompt-column {
+  color: var(--c-muted);
+}
+
+[data-theme="dark"] .prompt-editor-textarea {
+  background: var(--c-surface);
+  border-color: var(--c-border-i);
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .prompt-editor-textarea:focus {
+  border-color: var(--c-text);
+}
+
+[data-theme="dark"] .prompt-preview {
+  border-color: var(--c-border-i);
+  color: var(--c-body);
+}
+
+[data-theme="dark"] .prompt-preview code {
+  background: var(--c-code);
+}
+
+[data-theme="dark"] .prompt-preview pre {
+  background: var(--c-code);
+}
+
+[data-theme="dark"] .inline-edit-btn {
+  background: var(--c-surface);
+  border-color: var(--c-border-i);
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .inline-edit-btn:hover {
+  background: var(--c-hover);
+}
+
+[data-theme="dark"] .btn-secondary {
+  background: var(--c-surface);
+  border-color: var(--c-border-i);
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .btn-secondary:hover:not(:disabled) {
+  background: var(--c-hover);
+}

@@ -12,36 +12,36 @@
 
 .chat-message.user {
   align-self: flex-end;
-  background: #F4F4F4;
-  color: #171A20;
+  background: var(--c-hover);
+  color: var(--c-text);
 }
 
 .chat-message.assistant {
   align-self: flex-start;
-  background: #FFFFFF;
-  color: #393C41;
-  border: 1px solid #EEEEEE;
+  background: var(--c-surface);
+  color: var(--c-body);
+  border: 1px solid var(--c-border);
 }
 
 .message-role {
   font-size: 14px;
   font-weight: 500;
-  color: #5C5E62;
+  color: var(--c-muted);
   text-transform: none;
   letter-spacing: normal;
 }
 
 .message-reasoning {
   margin-bottom: 8px;
-  background-color: #F9F9F9;
-  border-left: 2px solid #D2D4D7;
+  background-color: var(--c-reason);
+  border-left: 2px solid var(--c-reason-b);
   padding: 8px 12px;
   border-radius: 0 4px 4px 0;
 }
 
 .message-reasoning summary {
   cursor: pointer;
-  color: #888;
+  color: var(--c-muted);
   font-weight: 500;
   user-select: none;
   font-size: 13px;
@@ -63,7 +63,7 @@
   bottom: 0;
   height: 2px;
   border-radius: 999px;
-  background: #D2D4D7;
+  background: var(--c-reason-b);
   opacity: 0.9;
 }
 
@@ -85,7 +85,7 @@
 .message-reasoning-content {
   margin-top: 6px;
   font-size: 14px;
-  color: #666;
+  color: var(--c-muted);
   line-height: 1.5;
   min-width: 0;
   overflow-wrap: anywhere;
@@ -123,8 +123,8 @@
   overflow-x: auto;
   max-width: 100%;
   box-sizing: border-box;
-  background: #F4F4F4;
-  border: 1px solid #EEEEEE;
+  background: var(--c-code);
+  border: 1px solid var(--c-border);
 }
 
 .message-content {
@@ -165,8 +165,8 @@
   overflow-x: auto;
   max-width: 100%;
   box-sizing: border-box;
-  background: #F4F4F4;
-  border: 1px solid #EEEEEE;
+  background: var(--c-code);
+  border: 1px solid var(--c-border);
 }
 
 .code-block-wrapper {
@@ -193,9 +193,9 @@
 .code-copy-btn {
   pointer-events: auto;
   font-size: 12px;
-  color: #1F2937;
-  background: rgba(255, 255, 255, 0.94);
-  border: 1px solid #D1D5DB;
+  color: var(--c-text);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border-i);
   border-radius: 999px;
   padding: 4px 8px;
   cursor: pointer;
@@ -203,7 +203,7 @@
 }
 
 .code-copy-btn:hover {
-  background-color: #F3F4F6;
+  background-color: var(--c-hover);
   transform: translateY(-1px);
 }
 
@@ -215,33 +215,33 @@
   width: 100%;
   border-collapse: collapse;
   margin: 0.75em 0;
-  border: 1px solid #D7DADF;
+  border: 1px solid var(--c-border-i);
   border-radius: 6px;
   overflow: hidden;
   font-size: 13px;
-  background: #FFFFFF;
+  background: var(--c-surface);
 }
 
 .message-content th,
 .message-content td {
-  border: 1px solid #D7DADF;
+  border: 1px solid var(--c-border-i);
   padding: 8px 10px;
   text-align: left;
   vertical-align: top;
 }
 
 .message-content thead th {
-  background: #F6F8FA;
-  color: #2F333A;
+  background: var(--c-hover);
+  color: var(--c-text);
   font-weight: 600;
 }
 
 .message-content tbody tr:nth-child(even) {
-  background: #FBFCFD;
+  background: var(--c-reason);
 }
 
 .message-content tbody tr:hover {
-  background: #F2F6FF;
+  background: var(--c-hover);
 }
 
 .message-attachments {
@@ -253,7 +253,7 @@
 
 .message-attachments span:first-child {
   font-size: 12px;
-  color: #888;
+  color: var(--c-muted);
   margin-right: 8px;
 }
 
@@ -261,10 +261,9 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  /* padding: 2px 8px; */
   border-radius: 2px;
-  background: #E0E0E0;
-  color: #555;
+  background: var(--c-hover);
+  color: var(--c-muted);
   font-size: 0.78em;
   max-width: 200px;
   white-space: nowrap;
@@ -319,4 +318,81 @@
   to {
     background-position: 220% 50%;
   }
+}
+
+[data-theme="dark"] .message-content .hljs,
+[data-theme="dark"] .message-reasoning-content .hljs,
+[data-theme="dark"] .message-content pre code.hljs,
+[data-theme="dark"] .message-reasoning-content pre code.hljs {
+  background: var(--c-code) !important;
+  color: #E8EAED !important;
+}
+
+[data-theme="dark"] .message-content .hljs-comment,
+[data-theme="dark"] .message-content .hljs-quote,
+[data-theme="dark"] .message-reasoning-content .hljs-comment,
+[data-theme="dark"] .message-reasoning-content .hljs-quote {
+  color: #8A8A90 !important;
+}
+
+[data-theme="dark"] .message-content .hljs-keyword,
+[data-theme="dark"] .message-content .hljs-selector-tag,
+[data-theme="dark"] .message-content .hljs-subst,
+[data-theme="dark"] .message-reasoning-content .hljs-keyword,
+[data-theme="dark"] .message-reasoning-content .hljs-selector-tag,
+[data-theme="dark"] .message-reasoning-content .hljs-subst {
+  color: #9DB7FF !important;
+}
+
+[data-theme="dark"] .message-content .hljs-string,
+[data-theme="dark"] .message-content .hljs-doctag,
+[data-theme="dark"] .message-content .hljs-regexp,
+[data-theme="dark"] .message-reasoning-content .hljs-string,
+[data-theme="dark"] .message-reasoning-content .hljs-doctag,
+[data-theme="dark"] .message-reasoning-content .hljs-regexp {
+  color: #C8E6A0 !important;
+}
+
+[data-theme="dark"] .message-content .hljs-title,
+[data-theme="dark"] .message-content .hljs-section,
+[data-theme="dark"] .message-content .hljs-name,
+[data-theme="dark"] .message-content .hljs-attr,
+[data-theme="dark"] .message-content .hljs-attribute,
+[data-theme="dark"] .message-content .hljs-type,
+[data-theme="dark"] .message-reasoning-content .hljs-title,
+[data-theme="dark"] .message-reasoning-content .hljs-section,
+[data-theme="dark"] .message-reasoning-content .hljs-name,
+[data-theme="dark"] .message-reasoning-content .hljs-attr,
+[data-theme="dark"] .message-reasoning-content .hljs-attribute,
+[data-theme="dark"] .message-reasoning-content .hljs-type {
+  color: #8EC5FF !important;
+}
+
+[data-theme="dark"] .message-content .hljs-number,
+[data-theme="dark"] .message-content .hljs-literal,
+[data-theme="dark"] .message-content .hljs-symbol,
+[data-theme="dark"] .message-content .hljs-bullet,
+[data-theme="dark"] .message-reasoning-content .hljs-number,
+[data-theme="dark"] .message-reasoning-content .hljs-literal,
+[data-theme="dark"] .message-reasoning-content .hljs-symbol,
+[data-theme="dark"] .message-reasoning-content .hljs-bullet {
+  color: #F2C38F !important;
+}
+
+[data-theme="dark"] .message-content .hljs-built_in,
+[data-theme="dark"] .message-content .hljs-code,
+[data-theme="dark"] .message-content .hljs-addition,
+[data-theme="dark"] .message-reasoning-content .hljs-built_in,
+[data-theme="dark"] .message-reasoning-content .hljs-code,
+[data-theme="dark"] .message-reasoning-content .hljs-addition {
+  color: #9ADBB7 !important;
+}
+
+[data-theme="dark"] .message-content .hljs-variable,
+[data-theme="dark"] .message-content .hljs-template-variable,
+[data-theme="dark"] .message-content .hljs-deletion,
+[data-theme="dark"] .message-reasoning-content .hljs-variable,
+[data-theme="dark"] .message-reasoning-content .hljs-template-variable,
+[data-theme="dark"] .message-reasoning-content .hljs-deletion {
+  color: #FFB4B4 !important;
 }

@@ -22,6 +22,7 @@ export interface AppConfig {
   neo4j_password?: string;
   workspace_dir?: string;
   logger_output?: "file" | "println";
+  theme?: "auto" | "light" | "dark";
 }
 
 export interface ModelSettings {

@@ -15,6 +15,12 @@ import "./App.css";
 
 type Sidebar = "settings" | "skills" | "history" | "tools" | "mcp" | "agents" | null;
 
+function applyTheme(theme: "auto" | "light" | "dark" | undefined) {
+  const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const resolved = theme === "dark" || (theme !== "light" && prefersDark) ? "dark" : "light";
+  document.documentElement.setAttribute("data-theme", resolved);
+}
+
 interface AgentStatus {
   status: "idle" | "running" | "done" | "error";
   description?: string;
@@ -75,6 +81,7 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
   const sidebarMotionTimerRef = useRef<number | null>(null);
+  const themeRef = useRef<"auto" | "light" | "dark">("auto");
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -285,8 +292,17 @@ export default function App() {
         setActiveSkillIds(cfg.selected_skills ?? []);
         setActiveToolCount((cfg.selected_tools ?? []).length);
         setSkillsLoadedFromConfig(true);
+        themeRef.current = cfg.theme ?? "auto";
+        applyTheme(cfg.theme);
       })
       .catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const handler = () => { if (themeRef.current === "auto") applyTheme("auto"); };
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
   }, []);
 
   useEffect(() => {
@@ -854,6 +870,8 @@ export default function App() {
                   setAvailableModels(catalog.length > 0 ? catalog : ["gpt-4o-mini"]);
                   setSelectedModel(cfg.model || "gpt-4o-mini");
                   setMaxTokens(cfg.model_settings?.max_tokens ?? null);
+                  themeRef.current = cfg.theme ?? "auto";
+                  applyTheme(cfg.theme);
                 }}
               />
             )}

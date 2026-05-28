@@ -1,9 +1,9 @@
 import type { Message } from "../types";
-import "./ChatMessage.css";
 import { useEffect, useRef, useState } from "react";
 import MarkdownIt from "markdown-it";
 import hljs from "highlight.js";
 import "highlight.js/styles/github.css";
+import "./ChatMessage.css";
 
 const escapeHtml = (value: string): string =>
   value
