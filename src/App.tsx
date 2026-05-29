@@ -83,9 +83,22 @@ export default function App() {
   const cleanupRef = useRef<(() => void) | null>(null);
   const sidebarMotionTimerRef = useRef<number | null>(null);
   const themeRef = useRef<"auto" | "light" | "dark">("auto");
-  const currentToolGroupIdRef = useRef<string | null>(null);
+  const currentAssistantMessageIdRef = useRef<string | null>(null);
   const hasRunningToolCallRef = useRef(false);
   const currentToolCallsRef = useRef<ToolCallEntry[]>([]);
+
+  const updateActiveAssistantToolCalls = useCallback((toolCalls: ToolCallEntry[]) => {
+    const assistantId = currentAssistantMessageIdRef.current;
+    if (!assistantId) return;
+
+    setMessages((prev) =>
+      prev.map((message) =>
+        message.id === assistantId
+          ? { ...message, tool_calls: toolCalls }
+          : message
+      )
+    );
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -395,28 +408,7 @@ export default function App() {
           status: "running",
         };
         currentToolCallsRef.current = [...currentToolCallsRef.current, entry];
-        if (currentToolGroupIdRef.current) {
-          const groupId = currentToolGroupIdRef.current;
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === groupId
-                ? { ...m, tool_calls: [...(m.tool_calls ?? []), entry] }
-                : m
-            )
-          );
-        } else {
-          const groupId = `tool-group-${crypto.randomUUID()}`;
-          currentToolGroupIdRef.current = groupId;
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: groupId,
-              role: "tool_group" as const,
-              content: "",
-              tool_calls: [entry],
-            },
-          ]);
-        }
+        updateActiveAssistantToolCalls(currentToolCallsRef.current);
       }),
       listen<AgentTaskEvent>("agent-task-done", (e) => {
         const { agent_id, summary, task_id } = e.payload;
@@ -424,28 +416,12 @@ export default function App() {
           ...prev,
           [agent_id]: { status: "done", summary: summary ?? "" },
         }));
-        const groupId = currentToolGroupIdRef.current;
-        if (groupId) {
-          currentToolCallsRef.current = currentToolCallsRef.current.map((entry) =>
-            entry.task_id === task_id
-              ? { ...entry, status: "done" as const, summary: summary ?? undefined }
-              : entry
-          );
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === groupId
-                ? {
-                    ...m,
-                    tool_calls: (m.tool_calls ?? []).map((entry) =>
-                      entry.task_id === task_id
-                        ? { ...entry, status: "done" as const, summary: summary ?? undefined }
-                        : entry
-                    ),
-                  }
-                : m
-            )
-          );
-        }
+        currentToolCallsRef.current = currentToolCallsRef.current.map((entry) =>
+          entry.task_id === task_id
+            ? { ...entry, status: "done" as const, summary: summary ?? undefined }
+            : entry
+        );
+        updateActiveAssistantToolCalls(currentToolCallsRef.current);
       }),
       listen<AgentTaskEvent>("agent-task-error", (e) => {
         const { agent_id, error, task_id } = e.payload;
@@ -453,28 +429,12 @@ export default function App() {
           ...prev,
           [agent_id]: { status: "error", error: error ?? "" },
         }));
-        const groupId = currentToolGroupIdRef.current;
-        if (groupId) {
-          currentToolCallsRef.current = currentToolCallsRef.current.map((entry) =>
-            entry.task_id === task_id
-              ? { ...entry, status: "error" as const, error: error ?? undefined }
-              : entry
-          );
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === groupId
-                ? {
-                    ...m,
-                    tool_calls: (m.tool_calls ?? []).map((entry) =>
-                      entry.task_id === task_id
-                        ? { ...entry, status: "error" as const, error: error ?? undefined }
-                        : entry
-                    ),
-                  }
-                : m
-            )
-          );
-        }
+        currentToolCallsRef.current = currentToolCallsRef.current.map((entry) =>
+          entry.task_id === task_id
+            ? { ...entry, status: "error" as const, error: error ?? undefined }
+            : entry
+        );
+        updateActiveAssistantToolCalls(currentToolCallsRef.current);
       }),
       listen("agent-plan-start", (e: { payload: { task_count: number } }) => {
         if (e.payload.task_count > 0) {
@@ -485,28 +445,7 @@ export default function App() {
             status: "done",
           };
           currentToolCallsRef.current = [...currentToolCallsRef.current, entry];
-          if (currentToolGroupIdRef.current) {
-            const groupId = currentToolGroupIdRef.current;
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === groupId
-                  ? { ...m, tool_calls: [...(m.tool_calls ?? []), entry] }
-                  : m
-              )
-            );
-          } else {
-            const groupId = `tool-group-${crypto.randomUUID()}`;
-            currentToolGroupIdRef.current = groupId;
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: groupId,
-                role: "tool_group" as const,
-                content: "",
-                tool_calls: [entry],
-              },
-            ]);
-          }
+          updateActiveAssistantToolCalls(currentToolCallsRef.current);
         }
       }),
       listen("agent-aggregate-start", () => {
@@ -517,28 +456,7 @@ export default function App() {
           status: "running",
         };
         currentToolCallsRef.current = [...currentToolCallsRef.current, entry];
-        if (currentToolGroupIdRef.current) {
-          const groupId = currentToolGroupIdRef.current;
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === groupId
-                ? { ...m, tool_calls: [...(m.tool_calls ?? []), entry] }
-                : m
-            )
-          );
-        } else {
-          const groupId = `tool-group-${crypto.randomUUID()}`;
-          currentToolGroupIdRef.current = groupId;
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: groupId,
-              role: "tool_group" as const,
-              content: "",
-              tool_calls: [entry],
-            },
-          ]);
-        }
+        updateActiveAssistantToolCalls(currentToolCallsRef.current);
       }),
       listen<string>("tool-call", (e) => {
         const text = e.payload;
@@ -557,51 +475,20 @@ export default function App() {
           summary: detail,
         };
 
-        if (currentToolGroupIdRef.current) {
-          const groupId = currentToolGroupIdRef.current;
-          // Mark any currently running entries as done, add the new one
-          currentToolCallsRef.current = [
-            ...currentToolCallsRef.current.map((tc) =>
-              tc.status === "running" ? { ...tc, status: "done" as const } : tc
-            ),
-            entry,
-          ];
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === groupId
-                ? {
-                    ...m,
-                    tool_calls: [
-                      ...(m.tool_calls ?? []).map((tc) =>
-                        tc.status === "running" ? { ...tc, status: "done" as const } : tc
-                      ),
-                      entry,
-                    ],
-                  }
-                : m
-            )
-          );
-        } else {
-          const groupId = `tool-group-${crypto.randomUUID()}`;
-          currentToolGroupIdRef.current = groupId;
-          currentToolCallsRef.current = [entry];
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: groupId,
-              role: "tool_group" as const,
-              content: "",
-              tool_calls: [entry],
-            },
-          ]);
-        }
+        currentToolCallsRef.current = [
+          ...currentToolCallsRef.current.map((tc) =>
+            tc.status === "running" ? { ...tc, status: "done" as const } : tc
+          ),
+          entry,
+        ];
+        updateActiveAssistantToolCalls(currentToolCallsRef.current);
         hasRunningToolCallRef.current = true;
       }),
     );
     return () => {
       unlisteners.forEach((p) => p.then((fn) => fn()));
     };
-  }, []);
+  }, [updateActiveAssistantToolCalls]);
 
   const sendMessage = useCallback(async () => {
     if (profileExporting) return;
@@ -619,6 +506,9 @@ export default function App() {
     const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: text };
     const assistantId = crypto.randomUUID();
     const assistantMsg: Message = { id: assistantId, role: "assistant", content: "", streaming: true };
+    currentAssistantMessageIdRef.current = assistantId;
+    currentToolCallsRef.current = [];
+    hasRunningToolCallRef.current = false;
 
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
     setInput("");
@@ -642,16 +532,19 @@ export default function App() {
         if (shouldMarkDone) hasRunningToolCallRef.current = false;
         setMessages((prev) =>
           prev.map((m) => {
-            if (m.id === assistantId) return { ...m, content: accumulatedContent };
-            if (shouldMarkDone && m.role === "tool_group" && m.id === currentToolGroupIdRef.current) {
-              return {
-                ...m,
-                tool_calls: (m.tool_calls ?? []).map((e) =>
-                  e.status === "running" ? { ...e, status: "done" as const } : e
-                ),
-              };
-            }
-            return m;
+            if (m.id !== assistantId) return m;
+
+            const nextToolCalls = shouldMarkDone
+              ? (m.tool_calls ?? []).map((e) =>
+                e.status === "running" ? { ...e, status: "done" as const } : e
+              )
+              : m.tool_calls;
+
+            return {
+              ...m,
+              content: accumulatedContent,
+              ...(nextToolCalls ? { tool_calls: nextToolCalls } : {}),
+            };
           })
         );
       },
@@ -669,16 +562,12 @@ export default function App() {
           : accumulatedContent;
 
         saveHistory(sessionId, "assistant", finalContentToSave, currentToolCallsRef.current.length > 0 ? JSON.stringify(currentToolCallsRef.current) : undefined);
-        currentToolCallsRef.current = [];
-        // Merge tool_group tool_calls into the assistant message and remove the standalone tool_group
-        const toolGroupId = currentToolGroupIdRef.current;
         setMessages((prev) => {
-          const toolGroupMsg = toolGroupId ? prev.find((m) => m.id === toolGroupId) : null;
-          const finalToolCalls = toolGroupMsg?.tool_calls?.map((e) =>
+          const finalToolCalls = currentToolCallsRef.current.map((e) =>
             e.status === "running" ? { ...e, status: "done" as const } : e
           );
           return prev
-            .filter((m) => !m.id.startsWith("agent-progress-") && m.id !== toolGroupId)
+            .filter((m) => !m.id.startsWith("agent-progress-"))
             .map((m) => {
               if (m.id === assistantId) return { ...m, streaming: false, ...(finalToolCalls?.length ? { tool_calls: finalToolCalls } : {}) };
               return m;
@@ -686,7 +575,7 @@ export default function App() {
         });
         setAgentStatuses({});
         hasRunningToolCallRef.current = false;
-        currentToolGroupIdRef.current = null;
+        currentAssistantMessageIdRef.current = null;
         currentToolCallsRef.current = [];
         setStreaming(false);
         cleanupRef.current = null;
@@ -705,7 +594,7 @@ export default function App() {
         setPendingRetryMessageId(userMsg.id);
         setAgentStatuses({});
         hasRunningToolCallRef.current = false;
-        currentToolGroupIdRef.current = null;
+        currentAssistantMessageIdRef.current = null;
         currentToolCallsRef.current = [];
         setStreaming(false);
         cleanupRef.current = null;
@@ -720,6 +609,9 @@ export default function App() {
 
     const assistantId = crypto.randomUUID();
     const assistantMsg: Message = { id: assistantId, role: "assistant", content: "", streaming: true };
+    currentAssistantMessageIdRef.current = assistantId;
+    currentToolCallsRef.current = [];
+    hasRunningToolCallRef.current = false;
 
     setMessages((prev) => [...prev, assistantMsg]);
     setStreaming(true);
@@ -739,16 +631,19 @@ export default function App() {
         if (shouldMarkDone) hasRunningToolCallRef.current = false;
         setMessages((prev) =>
           prev.map((m) => {
-            if (m.id === assistantId) return { ...m, content: accumulatedContent };
-            if (shouldMarkDone && m.role === "tool_group" && m.id === currentToolGroupIdRef.current) {
-              return {
-                ...m,
-                tool_calls: (m.tool_calls ?? []).map((e) =>
-                  e.status === "running" ? { ...e, status: "done" as const } : e
-                ),
-              };
-            }
-            return m;
+            if (m.id !== assistantId) return m;
+
+            const nextToolCalls = shouldMarkDone
+              ? (m.tool_calls ?? []).map((e) =>
+                e.status === "running" ? { ...e, status: "done" as const } : e
+              )
+              : m.tool_calls;
+
+            return {
+              ...m,
+              content: accumulatedContent,
+              ...(nextToolCalls ? { tool_calls: nextToolCalls } : {}),
+            };
           })
         );
       },
@@ -766,15 +661,12 @@ export default function App() {
           : accumulatedContent;
 
         saveHistory(sessionId, "assistant", finalContentToSave, currentToolCallsRef.current.length > 0 ? JSON.stringify(currentToolCallsRef.current) : undefined);
-        currentToolCallsRef.current = [];
-        const toolGroupId = currentToolGroupIdRef.current;
         setMessages((prev) => {
-          const toolGroupMsg = toolGroupId ? prev.find((m) => m.id === toolGroupId) : null;
-          const finalToolCalls = toolGroupMsg?.tool_calls?.map((e) =>
+          const finalToolCalls = currentToolCallsRef.current.map((e) =>
             e.status === "running" ? { ...e, status: "done" as const } : e
           );
           return prev
-            .filter((m) => !m.id.startsWith("agent-progress-") && m.id !== toolGroupId)
+            .filter((m) => !m.id.startsWith("agent-progress-"))
             .map((m) => {
               if (m.id === assistantId) return { ...m, streaming: false, ...(finalToolCalls?.length ? { tool_calls: finalToolCalls } : {}) };
               return m;
@@ -782,7 +674,7 @@ export default function App() {
         });
         setPendingRetryMessageId(null);
         setAgentStatuses({});
-        currentToolGroupIdRef.current = null;
+        currentAssistantMessageIdRef.current = null;
         currentToolCallsRef.current = [];
         setStreaming(false);
         cleanupRef.current = null;
@@ -800,7 +692,7 @@ export default function App() {
         );
         setAgentStatuses({});
         hasRunningToolCallRef.current = false;
-        currentToolGroupIdRef.current = null;
+        currentAssistantMessageIdRef.current = null;
         currentToolCallsRef.current = [];
         setStreaming(false);
         cleanupRef.current = null;
