@@ -710,7 +710,7 @@ pub async fn chat_completion(
 
     let os_info = os_info::get();
     let os_sys_msg = format!(
-        "System information:\n- OS: {} {}\n- CPU: {:?}\n\nCRITICAL DIRECTIVES:\n1. For all file operations, you MUST treat the workspace as the default and primary root directory. Operating on other external directories is strictly PROHIBITED.\n2. For all 'run_cmd' and 'run_shell' tool executions, your first step MUST be to switch to the workspace directory (`cd <workspace>`) before executing further commands.\n3. Unless you explicitly intend to access a skill-owned file and provide an explicit skill path prefix, all file paths MUST be interpreted relative to the workspace directory.\n4. Never guess that a file might be inside a skill directory. If the path does not explicitly indicate a skill location, search only inside the workspace.",
+        "System information:\n- OS: {} {}\n- CPU: {:?}\n\nCRITICAL DIRECTIVES:\n1. For all file operations, you MUST treat the workspace as the default and primary root directory. Operating on other external directories is strictly PROHIBITED.\n2. For all 'run_cmd' and 'run_shell' tool executions, your first step MUST be to switch to the workspace directory (`cd <workspace>`) before executing further commands.\n3. Workspace paths MUST be written with a `./` prefix such as `./src/App.tsx` or `./package.json`. Do NOT use `workspace/...` as a path prefix.\n4. App-managed skill paths MUST use the explicit prefix `app_data/skills/<skill_name>/...`.\n5. Unless a path explicitly indicates a skill location, search only inside the workspace.",
         os_info.os_type(),
         os_info.version(),
         os_info.architecture()
@@ -825,7 +825,8 @@ pub async fn chat_completion(
                  - Before modifying any skill file, create a sibling backup with suffix `.bak.<number>`.\n\
                  - Use `file_actions` for these edits so backup creation is enforced automatically.\n\
                  - Workspace remains the default search root. Only access a skill root when the task explicitly requires skill-owned files.\n\
-                 - When you intentionally access a skill root, use an explicit path prefix such as `skills/<skill_name>/...` for workspace skills or `app_data/skills/<skill_name>/...` for app-managed skills. Ambiguous relative paths such as `ref/index.md` stay in the workspace and do not search skill roots.\n\
+                 - Workspace paths must use `./...` and must not use a `workspace/...` prefix.\n\
+                 - When you intentionally access a skill root, use an explicit path prefix such as `./skills/<skill_name>/...` for workspace skills or `app_data/skills/<skill_name>/...` for app-managed skills. Ambiguous relative paths such as `ref/index.md` stay in the workspace and do not search skill roots.\n\
                  - If you read or list a file inside a skill root, reuse that exact returned path when patching or writing it.\n\
                  - Unless the user explicitly asks otherwise, do not access paths outside the workspace root or these skill roots."
             )
@@ -862,8 +863,9 @@ pub async fn chat_completion(
                 - Active skill root directories are:\n\
                 {active_skill_roots_display}\n\
                 - Default rule: if a path is not explicitly marked as a skill path, it belongs to the workspace root.\n\
-                - For workspace files, use paths relative to the workspace root (e.g. \"src/foo.txt\").\n\
-                - Only when you intentionally need skill-owned files, use an explicit skill path prefix: `skills/<skill_name>/...` for workspace skills, `app_data/skills/<skill_name>/...` for app-managed skills, or an exact absolute path returned by a previous tool call.\n\
+                - Workspace paths must start with `./`, for example `./src/foo.txt`. Do not use `workspace/...`.\n\
+                - Only when you intentionally need skill-owned files, use an explicit skill path prefix: `./skills/<skill_name>/...` for workspace skills, `app_data/skills/<skill_name>/...` for app-managed skills, or an exact absolute path returned by a previous tool call.\n\
+                - Do not write app-managed skill paths as `./app_data/...`; use `app_data/...` directly.\n\
                 - Do not use ambiguous relative paths such as \"ref/index.md\" for skill data. Those paths stay in the workspace and will not search skill roots.\n\
                 - When you read a file from a skill root, write back to that same skill-root path instead of recreating it under the workspace root.\n\
                 - You may also provide an exact absolute path under the workspace root or an active skill root; backend will strip the matched root prefix automatically.\n\
