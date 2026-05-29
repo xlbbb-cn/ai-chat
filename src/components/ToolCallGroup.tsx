@@ -23,9 +23,9 @@ export function ToolCallGroup({ message }: Props) {
   if (isRunning) {
     summaryLabel = `[${runningEntry!.agent_name}] ${runningEntry!.description}`;
   } else if (errorCount > 0) {
-    summaryLabel = `${entries.length} 个工具调用 — ${errorCount} 个失败`;
+    summaryLabel = `${entries.length} tool calls — ${errorCount} failed`;
   } else {
-    summaryLabel = `${doneCount} 个工具调用完成`;
+    summaryLabel = `${doneCount} tool calls completed`;
   }
 
   return (
@@ -34,7 +34,7 @@ export function ToolCallGroup({ message }: Props) {
         <summary className="tool-call-group-summary">
           <span className={`tool-call-group-indicator${isRunning ? " running" : ""}`} />
           <span className="tool-call-group-label">{summaryLabel}</span>
-          <span className="tool-call-group-count">{entries.length} 步</span>
+          <span className="tool-call-group-count">{entries.length} steps</span>
         </summary>
         <ul className="tool-call-group-list">
           {entries.map((entry) => (

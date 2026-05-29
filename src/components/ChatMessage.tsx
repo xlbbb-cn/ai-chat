@@ -365,7 +365,7 @@ export function ChatMessage({ message, showRetry = false, onRetry }: Props) {
             disabled={!mainContent.trim()}
             title="Export this reply to PDF"
           >
-            导出PDF
+            Export PDF
           </button>
         </div>
       )}

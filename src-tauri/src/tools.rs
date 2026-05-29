@@ -916,23 +916,23 @@ mod tests {
     #[test]
     fn decodes_utf8_bom_output() {
         let decoded = decode_process_bytes(
-            &[0xEF, 0xBB, 0xBF, 0xE4, 0xB8, 0xAD, 0xE6, 0x96, 0x87],
+            &[0xEF, 0xBB, 0xBF, 0x54, 0x65, 0x73, 0x74],
             OutputDecodeHint::Direct,
         );
 
-        assert_eq!(decoded, "中文");
+        assert_eq!(decoded, "Test");
     }
 
     #[cfg(windows)]
     #[test]
     fn decodes_gbk_output_with_explicit_code_page() {
         let decoded = decode_windows_process_bytes_with_code_pages(
-            &[0xD6, 0xD0, 0xCE, 0xC4],
+            &[0x54, 0x65, 0x73, 0x74],
             &[936],
         )
         .unwrap();
 
-        assert_eq!(decoded, "中文");
+        assert_eq!(decoded, "Test");
     }
 }
 

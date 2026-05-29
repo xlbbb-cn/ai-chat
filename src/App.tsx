@@ -442,7 +442,7 @@ export default function App() {
           const entry: ToolCallEntry = {
             task_id: `plan-${Date.now()}`,
             agent_name: "Planner",
-            description: `规划完成 — 共 ${e.payload.task_count} 个任务`,
+            description: `Plan completed — ${e.payload.task_count} tasks total`,
             status: "done",
           };
           currentToolCallsRef.current = [...currentToolCallsRef.current, entry];
@@ -453,7 +453,7 @@ export default function App() {
         const entry: ToolCallEntry = {
           task_id: `aggregate-${Date.now()}`,
           agent_name: "Aggregator",
-          description: "正在汇总所有子任务结果...",
+          description: "Aggregating all subtask results...",
           status: "running",
         };
         currentToolCallsRef.current = [...currentToolCallsRef.current, entry];
@@ -867,8 +867,8 @@ export default function App() {
     setMessages((prev) =>
       prev.map((m) => {
         if (!m.streaming) return m;
-        const stopSuffix = "\n\n[已停止生成]";
-        const content = m.content.includes("[已停止生成]")
+        const stopSuffix = "\n\n[Generation stopped]";
+        const content = m.content.includes("[Generation stopped]")
           ? m.content
           : (m.content || "") + stopSuffix;
         return { ...m, content, streaming: false };
@@ -1004,7 +1004,7 @@ export default function App() {
                 disableSessionSwitch={streaming}
                 onLoad={(sid, msgs) => {
                   if (streaming) {
-                    setError("当前正在生成回复，请先停止后再切换历史会话。");
+                    setError("A reply is currently being generated. Please stop it before switching history sessions.");
                     return;
                   }
                   if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null; }
@@ -1051,7 +1051,7 @@ export default function App() {
             <button
               className={`toolbar-btn ${sidebar === "agents" ? "active" : ""}`}
               onClick={() => toggleSidebar("agents")}
-              title={`Sub Agents${useAgentsEnabled ? " (启用中)" : ""}`}
+              title={`Sub Agents${useAgentsEnabled ? " (Enabled)" : ""}`}
             >
               🤖 Agents
               {activeAgentCount > 0 && useAgentsEnabled && (

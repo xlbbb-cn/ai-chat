@@ -104,7 +104,7 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
           aria-label="Search history sessions"
         />
         {disableSessionSwitch && (
-          <p className="history-switch-hint">正在生成回复，暂不可切换会话</p>
+          <p className="history-switch-hint">A reply is being generated, switching sessions is temporarily unavailable</p>
         )}
       </div>
 
