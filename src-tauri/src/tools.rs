@@ -130,6 +130,155 @@ fn split_command_line(code: &str) -> Vec<String> {
     args
 }
 
+enum SearchMatcher {
+    Literal {
+        needle: String,
+        needle_lower: String,
+        case_sensitive: bool,
+    },
+    Regex(regex::Regex),
+}
+
+impl SearchMatcher {
+    fn build(query: &str, case_sensitive: bool, use_regex: bool) -> Result<Self, String> {
+        if use_regex {
+            let regex = regex::RegexBuilder::new(query)
+                .case_insensitive(!case_sensitive)
+                .build()
+                .map_err(|e| format!("Invalid search regex: {}", e))?;
+            Ok(Self::Regex(regex))
+        } else {
+            Ok(Self::Literal {
+                needle: query.to_string(),
+                needle_lower: query.to_lowercase(),
+                case_sensitive,
+            })
+        }
+    }
+
+    fn is_match(&self, line: &str) -> bool {
+        match self {
+            SearchMatcher::Literal {
+                needle,
+                needle_lower,
+                case_sensitive,
+            } => {
+                if *case_sensitive {
+                    line.contains(needle)
+                } else {
+                    line.to_lowercase().contains(needle_lower)
+                }
+            }
+            SearchMatcher::Regex(regex) => regex.is_match(line),
+        }
+    }
+}
+
+fn build_search_display_path(target: &Path, root: &Path) -> String {
+    target
+        .strip_prefix(root)
+        .ok()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or(target)
+        .to_string_lossy()
+        .to_string()
+}
+
+fn is_probably_binary(bytes: &[u8]) -> bool {
+    bytes.iter().take(1024).any(|&byte| byte == 0)
+}
+
+fn search_file_contents(
+    target: &Path,
+    target_root: &Path,
+    matcher: &SearchMatcher,
+    results: &mut Vec<String>,
+) -> Result<(), String> {
+    let bytes = fs::read(target)
+        .map_err(|e| format!("Failed to read '{}': {}", target.display(), e))?;
+
+    if is_probably_binary(&bytes) {
+        return Ok(());
+    }
+
+    let text = String::from_utf8_lossy(&bytes);
+    let display_path = build_search_display_path(target, target_root);
+    for (index, line) in text.lines().enumerate() {
+        if matcher.is_match(line) {
+            results.push(format!("{}:{}:{}", display_path, index + 1, line));
+        }
+    }
+
+    Ok(())
+}
+
+fn run_integrated_search(
+    query: &str,
+    target: &Path,
+    target_root: &Path,
+    recursive: bool,
+    case_sensitive: bool,
+    use_regex: bool,
+) -> Result<String, String> {
+    let matcher = SearchMatcher::build(query, case_sensitive, use_regex)?;
+    let mut results = Vec::new();
+    let mut errors = Vec::new();
+
+    if target.is_file() {
+        search_file_contents(target, target_root, &matcher, &mut results)?;
+    } else if target.is_dir() {
+        let mut walker = ignore::WalkBuilder::new(target);
+        walker.standard_filters(false);
+        walker.hidden(false);
+        walker.git_ignore(false);
+        walker.git_exclude(false);
+        walker.parents(false);
+        walker.ignore(false);
+        walker.follow_links(false);
+
+        if !recursive {
+            walker.max_depth(Some(1));
+        }
+
+        for entry in walker.build() {
+            match entry {
+                Ok(entry) => {
+                    if !entry.file_type().is_some_and(|file_type| file_type.is_file()) {
+                        continue;
+                    }
+
+                    if let Err(err) = search_file_contents(
+                        entry.path(),
+                        target_root,
+                        &matcher,
+                        &mut results,
+                    ) {
+                        errors.push(err);
+                    }
+                }
+                Err(err) => errors.push(err.to_string()),
+            }
+        }
+    } else {
+        return Err(format!("Search target '{}' does not exist", target.display()));
+    }
+
+    if results.is_empty() && errors.is_empty() {
+        return Ok("(no matches)".to_string());
+    }
+
+    let mut output = results.join("\n");
+    if !errors.is_empty() {
+        if !output.is_empty() {
+            output.push('\n');
+        }
+        output.push_str("STDERR:\n");
+        output.push_str(&errors.join("\n"));
+    }
+
+    Ok(output)
+}
+
 fn is_sudo_executable(token: &str) -> bool {
     Path::new(token)
         .file_stem()
@@ -472,18 +621,18 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "file_actions",
-                "description": "Perform file operations (read, write, list, mkdir, rename/move, patch, delete) inside the current workspace root. Existing paths can also resolve relative to active skill roots, self-evolution skill roots, and protected self-evolution files when enabled. When protected skill/sub-agent files are modified through this tool, a sibling `.bak.<number>` backup is created automatically first.",
+                "description": "Perform file operations (read, write, list, search, mkdir, rename/move, patch, delete) inside the current workspace root. Existing paths can also resolve relative to active skill roots, self-evolution skill roots, and protected self-evolution files when enabled. When protected skill/sub-agent files are modified through this tool, a sibling `.bak.<number>` backup is created automatically first.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["read", "write", "list", "mkdir", "patch", "rename", "move", "delete"],
-                            "description": "The file action to perform: read file content, write/overwrite a file, list directory entries, recursively create directories, apply a unified diff patch, rename a file/directory, move a file/directory, or delete a file/directory."
+                            "enum": ["read", "write", "list", "search", "mkdir", "patch", "rename", "move", "delete"],
+                            "description": "The file action to perform: read file content, write/overwrite a file, list directory entries, search file contents with the built-in search engine, recursively create directories, apply a unified diff patch, rename a file/directory, move a file/directory, or delete a file/directory."
                         },
                         "path": {
                             "type": "string",
-                            "description": "Relative path to the file or directory. Use '.' for root when listing."
+                            "description": "Relative path to the file or directory. Use '.' for root when listing or searching."
                         },
                         "new_path": {
                             "type": "string",
@@ -502,6 +651,22 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
                         "content": {
                             "type": "string",
                             "description": "Content to write (only for 'write')."
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "Content search text or regex pattern (only for 'search'). No external rg executable is required."
+                        },
+                        "recursive": {
+                            "type": "boolean",
+                            "description": "Whether to search subdirectories recursively when path is a directory (only for 'search'). Defaults to true."
+                        },
+                        "case_sensitive": {
+                            "type": "boolean",
+                            "description": "Whether the content search is case-sensitive (only for 'search'). Defaults to false."
+                        },
+                        "use_regex": {
+                            "type": "boolean",
+                            "description": "Whether query should be treated as a regular expression instead of plain text (only for 'search'). Defaults to false."
                         },
                         "patch": {
                             "type": "string",
@@ -853,6 +1018,7 @@ mod tests {
     #[cfg(windows)]
     use super::decode_windows_process_bytes_with_code_pages;
     use super::OutputDecodeHint;
+    use super::run_integrated_search;
     use super::resolve_safe_path_with_roots;
     use std::fs;
     use std::path::PathBuf;
@@ -921,6 +1087,39 @@ mod tests {
         );
 
         assert_eq!(decoded, "Test");
+    }
+
+    #[test]
+    fn searches_directory_non_recursively() {
+        let root = make_temp_dir("search-non-recursive");
+        let dir = root.join("src");
+        let nested = dir.join("nested");
+        fs::create_dir_all(&dir).unwrap();
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(dir.join("top.txt"), "Needle in top level\n").unwrap();
+        fs::write(nested.join("deep.txt"), "Needle in nested\n").unwrap();
+
+        let output = run_integrated_search("needle", &dir, &root, false, false, false).unwrap();
+
+        assert!(output.contains("src\\top.txt:1:Needle in top level"));
+        assert!(!output.contains("deep.txt"));
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn searches_with_regex_recursively() {
+        let root = make_temp_dir("search-regex");
+        let dir = root.join("src");
+        let nested = dir.join("nested");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join("deep.txt"), "prefix Alpha42 suffix\n").unwrap();
+
+        let output = run_integrated_search("alpha\\d+", &dir, &root, true, false, true).unwrap();
+
+        assert!(output.contains("src\\nested\\deep.txt:1:prefix Alpha42 suffix"));
+
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[cfg(windows)]
@@ -1514,6 +1713,47 @@ pub async fn execute_tool(
                                     }
                                 }
                                 Err(e) => format!("Error listing directory: {}", e),
+                            }
+                        }
+                        Err(e) => format!("Error: {}", e),
+                    }
+                }
+                "search" => {
+                    let query = args["query"].as_str().unwrap_or("");
+                    let recursive = args["recursive"].as_bool().unwrap_or(true);
+                    let case_sensitive = args["case_sensitive"].as_bool().unwrap_or(false);
+                    let use_regex = args["use_regex"].as_bool().unwrap_or(false);
+
+                    if query.is_empty() {
+                        return "Error: query is required for search.".to_string();
+                    }
+
+                    let _ = app.emit(
+                        "tool-call",
+                        format!(
+                            "🔎 *Searching {} for {}*\n\n",
+                            path_str,
+                            serde_json::to_string(query).unwrap_or_else(|_| query.to_string())
+                        ),
+                    );
+
+                    match resolve_file_path(path_str, true) {
+                        Ok((p, resolved_root)) => {
+                            if !p.exists() {
+                                return format!("Error: {} does not exist", path_str);
+                            }
+
+                            match run_integrated_search(
+                                query,
+                                &p,
+                                &resolved_root,
+                                recursive,
+                                case_sensitive,
+                                use_regex,
+                            )
+                            {
+                                Ok(output) => output,
+                                Err(e) => format!("Error: {}", e),
                             }
                         }
                         Err(e) => format!("Error: {}", e),

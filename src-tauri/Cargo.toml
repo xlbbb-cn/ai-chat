@@ -32,6 +32,8 @@ diffy = "0.4"
 uuid = { version = "1", features = ["v4"] }
 zip = "0.6"
 tiktoken-rs = "0.7"
+ignore = "0.4"
+regex = "1"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Globalization"] }
