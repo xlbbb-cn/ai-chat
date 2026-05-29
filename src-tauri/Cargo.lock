@@ -36,6 +36,7 @@ dependencies = [
  "diffy",
  "dirs 5.0.1",
  "futures-util",
+ "globset",
  "ignore",
  "neo4rs",
  "os_info",

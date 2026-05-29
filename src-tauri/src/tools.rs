@@ -174,6 +174,51 @@ impl SearchMatcher {
     }
 }
 
+struct SearchOptions<'a> {
+    recursive: bool,
+    case_sensitive: bool,
+    use_regex: bool,
+    smart_case: bool,
+    include_hidden: bool,
+    respect_gitignore: bool,
+    glob: Option<&'a str>,
+}
+
+fn should_use_case_sensitive_search(
+    query: &str,
+    case_sensitive: bool,
+    smart_case: bool,
+) -> bool {
+    case_sensitive || (smart_case && query.chars().any(|ch| ch.is_uppercase()))
+}
+
+fn normalize_search_match_path(path: &Path, root: &Path) -> String {
+    path.strip_prefix(root)
+        .ok()
+        .filter(|relative| !relative.as_os_str().is_empty())
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn build_search_glob_matcher(glob: Option<&str>) -> Result<Option<globset::GlobSet>, String> {
+    let Some(glob) = glob.map(str::trim).filter(|glob| !glob.is_empty()) else {
+        return Ok(None);
+    };
+
+    let compiled_glob = globset::GlobBuilder::new(glob)
+        .literal_separator(true)
+        .build()
+        .map_err(|e| format!("Invalid search glob: {}", e))?;
+
+    let mut builder = globset::GlobSetBuilder::new();
+    builder.add(compiled_glob);
+    builder
+        .build()
+        .map(Some)
+        .map_err(|e| format!("Invalid search glob set: {}", e))
+}
+
 fn build_search_display_path(target: &Path, root: &Path) -> String {
     target
         .strip_prefix(root)
@@ -192,8 +237,16 @@ fn search_file_contents(
     target: &Path,
     target_root: &Path,
     matcher: &SearchMatcher,
+    glob_matcher: Option<&globset::GlobSet>,
     results: &mut Vec<String>,
 ) -> Result<(), String> {
+    if let Some(glob_matcher) = glob_matcher {
+        let match_path = normalize_search_match_path(target, target_root);
+        if !glob_matcher.is_match(&match_path) {
+            return Ok(());
+        }
+    }
+
     let bytes = fs::read(target)
         .map_err(|e| format!("Failed to read '{}': {}", target.display(), e))?;
 
@@ -216,27 +269,37 @@ fn run_integrated_search(
     query: &str,
     target: &Path,
     target_root: &Path,
-    recursive: bool,
-    case_sensitive: bool,
-    use_regex: bool,
+    options: SearchOptions<'_>,
 ) -> Result<String, String> {
-    let matcher = SearchMatcher::build(query, case_sensitive, use_regex)?;
+    let case_sensitive = should_use_case_sensitive_search(
+        query,
+        options.case_sensitive,
+        options.smart_case,
+    );
+    let matcher = SearchMatcher::build(query, case_sensitive, options.use_regex)?;
+    let glob_matcher = build_search_glob_matcher(options.glob)?;
     let mut results = Vec::new();
     let mut errors = Vec::new();
 
     if target.is_file() {
-        search_file_contents(target, target_root, &matcher, &mut results)?;
+        search_file_contents(
+            target,
+            target_root,
+            &matcher,
+            glob_matcher.as_ref(),
+            &mut results,
+        )?;
     } else if target.is_dir() {
         let mut walker = ignore::WalkBuilder::new(target);
         walker.standard_filters(false);
-        walker.hidden(false);
-        walker.git_ignore(false);
-        walker.git_exclude(false);
-        walker.parents(false);
-        walker.ignore(false);
+        walker.hidden(!options.include_hidden);
+        walker.git_ignore(options.respect_gitignore);
+        walker.git_exclude(options.respect_gitignore);
+        walker.parents(options.respect_gitignore);
+        walker.ignore(options.respect_gitignore);
         walker.follow_links(false);
 
-        if !recursive {
+        if !options.recursive {
             walker.max_depth(Some(1));
         }
 
@@ -251,6 +314,7 @@ fn run_integrated_search(
                         entry.path(),
                         target_root,
                         &matcher,
+                        glob_matcher.as_ref(),
                         &mut results,
                     ) {
                         errors.push(err);
@@ -664,9 +728,25 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
                             "type": "boolean",
                             "description": "Whether the content search is case-sensitive (only for 'search'). Defaults to false."
                         },
+                        "smart_case": {
+                            "type": "boolean",
+                            "description": "Whether uppercase letters in query should automatically switch search to case-sensitive when case_sensitive is false (only for 'search'). Defaults to false."
+                        },
                         "use_regex": {
                             "type": "boolean",
                             "description": "Whether query should be treated as a regular expression instead of plain text (only for 'search'). Defaults to false."
+                        },
+                        "glob": {
+                            "type": "string",
+                            "description": "Optional file path glob filter for search targets, such as '**/*.rs' or 'src/**/*.ts' (only for 'search')."
+                        },
+                        "include_hidden": {
+                            "type": "boolean",
+                            "description": "Whether hidden files and directories should be included during directory searches (only for 'search'). Defaults to true."
+                        },
+                        "respect_gitignore": {
+                            "type": "boolean",
+                            "description": "Whether .gitignore, .ignore, and git exclude rules should be respected during directory searches (only for 'search'). Defaults to false."
                         },
                         "patch": {
                             "type": "string",
@@ -1018,6 +1098,7 @@ mod tests {
     #[cfg(windows)]
     use super::decode_windows_process_bytes_with_code_pages;
     use super::OutputDecodeHint;
+    use super::SearchOptions;
     use super::run_integrated_search;
     use super::resolve_safe_path_with_roots;
     use std::fs;
@@ -1099,7 +1180,21 @@ mod tests {
         fs::write(dir.join("top.txt"), "Needle in top level\n").unwrap();
         fs::write(nested.join("deep.txt"), "Needle in nested\n").unwrap();
 
-        let output = run_integrated_search("needle", &dir, &root, false, false, false).unwrap();
+        let output = run_integrated_search(
+            "needle",
+            &dir,
+            &root,
+            SearchOptions {
+                recursive: false,
+                case_sensitive: false,
+                use_regex: false,
+                smart_case: false,
+                include_hidden: true,
+                respect_gitignore: false,
+                glob: None,
+            },
+        )
+        .unwrap();
 
         assert!(output.contains("src\\top.txt:1:Needle in top level"));
         assert!(!output.contains("deep.txt"));
@@ -1115,9 +1210,88 @@ mod tests {
         fs::create_dir_all(&nested).unwrap();
         fs::write(nested.join("deep.txt"), "prefix Alpha42 suffix\n").unwrap();
 
-        let output = run_integrated_search("alpha\\d+", &dir, &root, true, false, true).unwrap();
+        let output = run_integrated_search(
+            "alpha\\d+",
+            &dir,
+            &root,
+            SearchOptions {
+                recursive: true,
+                case_sensitive: false,
+                use_regex: true,
+                smart_case: false,
+                include_hidden: true,
+                respect_gitignore: false,
+                glob: None,
+            },
+        )
+        .unwrap();
 
         assert!(output.contains("src\\nested\\deep.txt:1:prefix Alpha42 suffix"));
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn smart_case_upgrades_to_case_sensitive_search() {
+        let root = make_temp_dir("search-smart-case");
+        let file = root.join("sample.txt");
+        fs::write(&file, "needle\nNeedle\n").unwrap();
+
+        let output = run_integrated_search(
+            "Needle",
+            &file,
+            &root,
+            SearchOptions {
+                recursive: true,
+                case_sensitive: false,
+                use_regex: false,
+                smart_case: true,
+                include_hidden: true,
+                respect_gitignore: false,
+                glob: None,
+            },
+        )
+        .unwrap();
+
+        assert!(!output.contains("sample.txt:1:needle"));
+        assert!(output.contains("sample.txt:2:Needle"));
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn search_glob_and_filters_limit_directory_results() {
+        let root = make_temp_dir("search-filters");
+        let dir = root.join("src");
+        let git_dir = root.join(".git");
+        fs::create_dir_all(&dir).unwrap();
+        fs::create_dir_all(&git_dir).unwrap();
+        fs::write(root.join(".gitignore"), "src/ignored.md\n").unwrap();
+        fs::write(dir.join("keep.md"), "needle keep\n").unwrap();
+        fs::write(dir.join("keep.txt"), "needle text\n").unwrap();
+        fs::write(dir.join("ignored.md"), "needle ignored\n").unwrap();
+        fs::write(dir.join(".hidden.md"), "needle hidden\n").unwrap();
+
+        let output = run_integrated_search(
+            "needle",
+            &dir,
+            &root,
+            SearchOptions {
+                recursive: true,
+                case_sensitive: false,
+                use_regex: false,
+                smart_case: false,
+                include_hidden: false,
+                respect_gitignore: true,
+                glob: Some("**/*.md"),
+            },
+        )
+        .unwrap();
+
+        assert!(output.contains("src\\keep.md:1:needle keep"));
+        assert!(!output.contains("keep.txt"));
+        assert!(!output.contains("ignored.md"));
+        assert!(!output.contains(".hidden.md"));
 
         let _ = fs::remove_dir_all(&root);
     }
@@ -1722,7 +1896,11 @@ pub async fn execute_tool(
                     let query = args["query"].as_str().unwrap_or("");
                     let recursive = args["recursive"].as_bool().unwrap_or(true);
                     let case_sensitive = args["case_sensitive"].as_bool().unwrap_or(false);
+                    let smart_case = args["smart_case"].as_bool().unwrap_or(false);
                     let use_regex = args["use_regex"].as_bool().unwrap_or(false);
+                    let glob = args["glob"].as_str();
+                    let include_hidden = args["include_hidden"].as_bool().unwrap_or(true);
+                    let respect_gitignore = args["respect_gitignore"].as_bool().unwrap_or(false);
 
                     if query.is_empty() {
                         return "Error: query is required for search.".to_string();
@@ -1747,9 +1925,15 @@ pub async fn execute_tool(
                                 query,
                                 &p,
                                 &resolved_root,
-                                recursive,
-                                case_sensitive,
-                                use_regex,
+                                SearchOptions {
+                                    recursive,
+                                    case_sensitive,
+                                    use_regex,
+                                    smart_case,
+                                    include_hidden,
+                                    respect_gitignore,
+                                    glob,
+                                },
                             )
                             {
                                 Ok(output) => output,

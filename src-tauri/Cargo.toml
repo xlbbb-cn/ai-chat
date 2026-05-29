@@ -34,6 +34,7 @@ zip = "0.6"
 tiktoken-rs = "0.7"
 ignore = "0.4"
 regex = "1"
+globset = "0.4"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Globalization"] }
