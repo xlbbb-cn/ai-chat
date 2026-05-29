@@ -595,6 +595,7 @@ pub fn run() {
             let db_path = data_dir.join("chat.db");
             let db = Connection::open(&db_path).unwrap();
             db.execute("CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)", []).unwrap();
+            let _ = db.execute("ALTER TABLE history ADD COLUMN tool_calls TEXT", []);
             db.execute(
                 "CREATE TABLE IF NOT EXISTS session_summaries (\
                     session_id TEXT PRIMARY KEY, \

@@ -85,6 +85,7 @@ export default function App() {
   const themeRef = useRef<"auto" | "light" | "dark">("auto");
   const currentToolGroupIdRef = useRef<string | null>(null);
   const hasRunningToolCallRef = useRef(false);
+  const currentToolCallsRef = useRef<ToolCallEntry[]>([]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -393,6 +394,7 @@ export default function App() {
           description: description ?? "",
           status: "running",
         };
+        currentToolCallsRef.current = [...currentToolCallsRef.current, entry];
         if (currentToolGroupIdRef.current) {
           const groupId = currentToolGroupIdRef.current;
           setMessages((prev) =>
@@ -424,6 +426,11 @@ export default function App() {
         }));
         const groupId = currentToolGroupIdRef.current;
         if (groupId) {
+          currentToolCallsRef.current = currentToolCallsRef.current.map((entry) =>
+            entry.task_id === task_id
+              ? { ...entry, status: "done" as const, summary: summary ?? undefined }
+              : entry
+          );
           setMessages((prev) =>
             prev.map((m) =>
               m.id === groupId
@@ -448,6 +455,11 @@ export default function App() {
         }));
         const groupId = currentToolGroupIdRef.current;
         if (groupId) {
+          currentToolCallsRef.current = currentToolCallsRef.current.map((entry) =>
+            entry.task_id === task_id
+              ? { ...entry, status: "error" as const, error: error ?? undefined }
+              : entry
+          );
           setMessages((prev) =>
             prev.map((m) =>
               m.id === groupId
@@ -472,6 +484,7 @@ export default function App() {
             description: `规划完成 — 共 ${e.payload.task_count} 个任务`,
             status: "done",
           };
+          currentToolCallsRef.current = [...currentToolCallsRef.current, entry];
           if (currentToolGroupIdRef.current) {
             const groupId = currentToolGroupIdRef.current;
             setMessages((prev) =>
@@ -503,6 +516,7 @@ export default function App() {
           description: "正在汇总所有子任务结果...",
           status: "running",
         };
+        currentToolCallsRef.current = [...currentToolCallsRef.current, entry];
         if (currentToolGroupIdRef.current) {
           const groupId = currentToolGroupIdRef.current;
           setMessages((prev) =>
@@ -546,6 +560,12 @@ export default function App() {
         if (currentToolGroupIdRef.current) {
           const groupId = currentToolGroupIdRef.current;
           // Mark any currently running entries as done, add the new one
+          currentToolCallsRef.current = [
+            ...currentToolCallsRef.current.map((tc) =>
+              tc.status === "running" ? { ...tc, status: "done" as const } : tc
+            ),
+            entry,
+          ];
           setMessages((prev) =>
             prev.map((m) =>
               m.id === groupId
@@ -564,6 +584,7 @@ export default function App() {
         } else {
           const groupId = `tool-group-${crypto.randomUUID()}`;
           currentToolGroupIdRef.current = groupId;
+          currentToolCallsRef.current = [entry];
           setMessages((prev) => [
             ...prev,
             {
@@ -647,27 +668,26 @@ export default function App() {
           ? `<details><summary>Thought Process</summary>\n\n${accumulatedReasoning}\n</details>\n\n${accumulatedContent}`
           : accumulatedContent;
 
-        saveHistory(sessionId, "assistant", finalContentToSave);
-        // Remove legacy agent-progress messages; mark any remaining running tool-calls as done
-        setMessages((prev) =>
-          prev
-            .filter((m) => !m.id.startsWith("agent-progress-"))
+        saveHistory(sessionId, "assistant", finalContentToSave, currentToolCallsRef.current.length > 0 ? JSON.stringify(currentToolCallsRef.current) : undefined);
+        currentToolCallsRef.current = [];
+        // Merge tool_group tool_calls into the assistant message and remove the standalone tool_group
+        const toolGroupId = currentToolGroupIdRef.current;
+        setMessages((prev) => {
+          const toolGroupMsg = toolGroupId ? prev.find((m) => m.id === toolGroupId) : null;
+          const finalToolCalls = toolGroupMsg?.tool_calls?.map((e) =>
+            e.status === "running" ? { ...e, status: "done" as const } : e
+          );
+          return prev
+            .filter((m) => !m.id.startsWith("agent-progress-") && m.id !== toolGroupId)
             .map((m) => {
-              if (m.id === assistantId) return { ...m, streaming: false };
-              if (m.role === "tool_group" && m.tool_calls?.some((e) => e.status === "running")) {
-                return {
-                  ...m,
-                  tool_calls: m.tool_calls.map((e) =>
-                    e.status === "running" ? { ...e, status: "done" as const } : e
-                  ),
-                };
-              }
+              if (m.id === assistantId) return { ...m, streaming: false, ...(finalToolCalls?.length ? { tool_calls: finalToolCalls } : {}) };
               return m;
-            })
-        );
+            });
+        });
         setAgentStatuses({});
         hasRunningToolCallRef.current = false;
         currentToolGroupIdRef.current = null;
+        currentToolCallsRef.current = [];
         setStreaming(false);
         cleanupRef.current = null;
       },
@@ -686,6 +706,7 @@ export default function App() {
         setAgentStatuses({});
         hasRunningToolCallRef.current = false;
         currentToolGroupIdRef.current = null;
+        currentToolCallsRef.current = [];
         setStreaming(false);
         cleanupRef.current = null;
       },
@@ -744,15 +765,25 @@ export default function App() {
           ? `<details><summary>Thought Process</summary>\n\n${accumulatedReasoning}\n</details>\n\n${accumulatedContent}`
           : accumulatedContent;
 
-        saveHistory(sessionId, "assistant", finalContentToSave);
-        setMessages((prev) =>
-          prev
-            .filter((m) => !m.id.startsWith("agent-progress-"))
-            .map((m) => (m.id === assistantId ? { ...m, streaming: false } : m))
-        );
+        saveHistory(sessionId, "assistant", finalContentToSave, currentToolCallsRef.current.length > 0 ? JSON.stringify(currentToolCallsRef.current) : undefined);
+        currentToolCallsRef.current = [];
+        const toolGroupId = currentToolGroupIdRef.current;
+        setMessages((prev) => {
+          const toolGroupMsg = toolGroupId ? prev.find((m) => m.id === toolGroupId) : null;
+          const finalToolCalls = toolGroupMsg?.tool_calls?.map((e) =>
+            e.status === "running" ? { ...e, status: "done" as const } : e
+          );
+          return prev
+            .filter((m) => !m.id.startsWith("agent-progress-") && m.id !== toolGroupId)
+            .map((m) => {
+              if (m.id === assistantId) return { ...m, streaming: false, ...(finalToolCalls?.length ? { tool_calls: finalToolCalls } : {}) };
+              return m;
+            });
+        });
         setPendingRetryMessageId(null);
         setAgentStatuses({});
         currentToolGroupIdRef.current = null;
+        currentToolCallsRef.current = [];
         setStreaming(false);
         cleanupRef.current = null;
       },
@@ -770,6 +801,7 @@ export default function App() {
         setAgentStatuses({});
         hasRunningToolCallRef.current = false;
         currentToolGroupIdRef.current = null;
+        currentToolCallsRef.current = [];
         setStreaming(false);
         cleanupRef.current = null;
       },

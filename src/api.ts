@@ -124,8 +124,8 @@ export async function chatCompletion(
   return cleanup;
 }
 
-export async function saveHistory(sessionId: string, role: string, content: string): Promise<void> {
-  return invoke("save_history", { sessionId, role, content });
+export async function saveHistory(sessionId: string, role: string, content: string, toolCalls?: string): Promise<void> {
+  return invoke("save_history", { sessionId, role, content, toolCalls: toolCalls ?? null });
 }
 
 export interface HistoryRecord {
@@ -134,6 +134,7 @@ export interface HistoryRecord {
   role: string;
   content: string;
   timestamp: string;
+  tool_calls?: string;
 }
 
 export async function loadHistory(): Promise<HistoryRecord[]> {

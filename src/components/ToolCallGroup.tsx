@@ -13,6 +13,7 @@ function statusIcon(status: ToolCallEntry["status"]): string {
 
 export function ToolCallGroup({ message }: Props) {
   const entries = message.tool_calls ?? [];
+  if (entries.length === 0) return null;
   const runningEntry = entries.find((e) => e.status === "running");
   const isRunning = runningEntry !== undefined;
   const doneCount = entries.filter((e) => e.status === "done").length;

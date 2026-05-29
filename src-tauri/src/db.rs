@@ -8,6 +8,7 @@ pub struct HistoryRecord {
     pub role: String,
     pub content: String,
     pub timestamp: String,
+    pub tool_calls: Option<String>,
 }
 
 #[tauri::command]
@@ -15,12 +16,13 @@ pub fn save_history(
     session_id: String,
     role: String,
     content: String,
+    tool_calls: Option<String>,
     state: tauri::State<'_, crate::AppState>,
 ) -> Result<(), String> {
     let db = state.db.lock().unwrap();
     db.execute(
-        "INSERT INTO history (session_id, role, content) VALUES (?1, ?2, ?3)",
-        rusqlite::params![session_id, role, content],
+        "INSERT INTO history (session_id, role, content, tool_calls) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![session_id, role, content, tool_calls],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -33,7 +35,7 @@ pub fn load_history(
     let db = state.db.lock().unwrap();
     let mut stmt = db
         .prepare(
-            "SELECT id, session_id, role, content, COALESCE(timestamp, '') \
+            "SELECT id, session_id, role, content, COALESCE(timestamp, ''), tool_calls \
              FROM history ORDER BY id ASC LIMIT 500",
         )
         .map_err(|e| e.to_string())?;
@@ -45,6 +47,7 @@ pub fn load_history(
                 role: row.get(2)?,
                 content: row.get(3)?,
                 timestamp: row.get(4)?,
+                tool_calls: row.get(5)?,
             })
         })
         .map_err(|e| e.to_string())?

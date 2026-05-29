@@ -1,5 +1,6 @@
 import type { Message } from "../types";
 import { useEffect, useRef, useState } from "react";
+import { ToolCallGroup } from "./ToolCallGroup";
 import MarkdownIt from "markdown-it";
 import hljs from "highlight.js";
 import "highlight.js/styles/github.css";
@@ -294,6 +295,7 @@ export function ChatMessage({ message, showRetry = false, onRetry }: Props) {
             />
           </details>
         )}
+        {isAssistant && <ToolCallGroup message={message} />}
         <div
           className="message-content"
           dangerouslySetInnerHTML={{ __html: renderedMainContent }}

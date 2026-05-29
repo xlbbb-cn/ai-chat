@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { loadHistory, deleteHistory } from "../api";
 import type { HistoryRecord } from "../api";
-import type { Message } from "../types";
+import type { Message, ToolCallEntry } from "../types";
 import "./HistoryPanel.css";
 
 interface Props {
@@ -41,11 +41,25 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
   function handleLoad(sessionId: string, sessionRecords: HistoryRecord[]) {
     if (disableSessionSwitch) return;
 
-    const messages: Message[] = sessionRecords.map((r) => ({
-      id: crypto.randomUUID(),
-      role: r.role as "user" | "assistant",
-      content: r.content,
-    }));
+    const messages: Message[] = [];
+    for (const r of sessionRecords) {
+      let toolCalls: ToolCallEntry[] | undefined;
+      if (r.tool_calls) {
+        try {
+          const parsed = (JSON.parse(r.tool_calls) as ToolCallEntry[]).map((e) => ({
+            ...e,
+            status: "done" as const,
+          }));
+          if (parsed.length > 0) toolCalls = parsed;
+        } catch { /* ignore malformed */ }
+      }
+      messages.push({
+        id: crypto.randomUUID(),
+        role: r.role as "user" | "assistant",
+        content: r.content,
+        tool_calls: toolCalls,
+      });
+    }
 
     onLoad(sessionId, messages);
   }
