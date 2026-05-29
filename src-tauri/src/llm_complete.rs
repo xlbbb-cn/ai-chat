@@ -824,6 +824,7 @@ pub async fn chat_completion(
                  - Before modifying any skill file, create a sibling backup with suffix `.bak.<number>`.\n\
                  - Use `file_actions` for these edits so backup creation is enforced automatically.\n\
                  - Prefer absolute paths when working in skill roots to avoid ambiguity with workspace files.\n\
+                 - For reading skill-owned reference data stored under app-managed skills, you may also use paths like `app_data/skills/<skill_name>/...`.\n\
                  - If you read or list a file inside a skill root, reuse that exact returned path when patching or writing it.\n\
                  - If you use a relative path that starts with a skill root directory name (for example `skills/demo/skill.md` or `.skills/demo/skill.md`), treat it as a path inside that skill root, not inside the workspace.\n\
                  - Unless the user explicitly asks otherwise, do not access paths outside the workspace root or these skill roots."
@@ -862,6 +863,7 @@ pub async fn chat_completion(
                 {active_skill_roots_display}\n\
                 - For workspace files, use paths relative to the workspace root (e.g. \"src/foo.txt\").\n\
                 - For skill reference files (e.g. \"ref/index.md\"), you may use a relative path; backend resolves existing files under workspace root first, then active skill roots.\n\
+                - For app-managed skill data, reads may also use the virtual prefix `app_data/skills/<skill_name>/...`.\n\
                 - When you read a file from a skill root, write back to that same skill-root path instead of recreating it under the workspace root.\n\
                 - Relative paths that begin with a skill root directory name (for example \"skills/demo/skill.md\") are interpreted as belonging to that skill root.\n\
                 - You may also provide an absolute path under the workspace root or any active skill root; backend will strip the matched root prefix automatically.\n\

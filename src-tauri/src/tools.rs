@@ -941,22 +941,56 @@ fn build_root_relative_candidates(root: &Path, input_path: &str) -> Vec<PathBuf>
         return candidates;
     };
 
-    if first != root_name {
-        return candidates;
-    }
+    if first == root_name {
+        let mut stripped = PathBuf::new();
+        for component in components {
+            match component {
+                std::path::Component::Normal(segment) => stripped.push(segment),
+                std::path::Component::ParentDir => stripped.push(".."),
+                std::path::Component::CurDir => {}
+                _ => {}
+            }
+        }
 
-    let mut stripped = PathBuf::new();
-    for component in components {
-        match component {
-            std::path::Component::Normal(segment) => stripped.push(segment),
-            std::path::Component::ParentDir => stripped.push(".."),
-            std::path::Component::CurDir => {}
-            _ => {}
+        if !stripped.as_os_str().is_empty() && !candidates.iter().any(|p| p == &stripped) {
+            candidates.push(stripped);
         }
     }
 
-    if !stripped.as_os_str().is_empty() && !candidates.iter().any(|p| p == &stripped) {
-        candidates.push(stripped);
+    let input_components: Vec<_> = input
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(segment) => Some(segment.to_os_string()),
+            _ => None,
+        })
+        .collect();
+
+    let root_parent_name = root
+        .parent()
+        .and_then(|parent| parent.file_name())
+        .map(|name| name.to_os_string());
+
+    if input_components.len() >= 3
+        && input_components[0] == "app_data"
+        && input_components[1] == "skills"
+        && input_components[2] == root_name
+        && root_parent_name.as_deref() == Some(std::ffi::OsStr::new("skills"))
+    {
+        let mut virtual_stripped = PathBuf::new();
+        for component in input.components().skip(3) {
+            match component {
+                std::path::Component::Normal(segment) => virtual_stripped.push(segment),
+                std::path::Component::ParentDir => virtual_stripped.push(".."),
+                std::path::Component::CurDir => {}
+                _ => {}
+            }
+        }
+
+        if !virtual_stripped.as_os_str().is_empty()
+            && !candidates.iter().any(|p| p == &virtual_stripped)
+        {
+            candidates.push(virtual_stripped);
+        }
     }
 
     candidates
@@ -1320,6 +1354,30 @@ mod tests {
 
         let _ = fs::remove_dir_all(&workspace_root);
         let _ = fs::remove_dir_all(skill_root.parent().unwrap());
+    }
+
+    #[test]
+    fn resolves_existing_app_data_skill_file_with_virtual_prefix() {
+        let workspace_root = make_temp_dir("workspace");
+        let app_data_root = make_temp_dir("app-data");
+        let skill_root = app_data_root.join("skills").join("demo");
+        let skill_file = skill_root.join("ref").join("index.md");
+        fs::create_dir_all(skill_file.parent().unwrap()).unwrap();
+        fs::write(&skill_file, "content").unwrap();
+
+        let resolved = resolve_safe_path_with_roots(
+            &workspace_root,
+            std::slice::from_ref(&skill_root),
+            "app_data/skills/demo/ref/index.md",
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(normalize(&resolved.0), normalize(&skill_file));
+        assert_eq!(normalize(&resolved.1), normalize(&skill_root));
+
+        let _ = fs::remove_dir_all(&workspace_root);
+        let _ = fs::remove_dir_all(&app_data_root);
     }
 
     #[test]
