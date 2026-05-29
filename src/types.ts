@@ -101,3 +101,27 @@ export interface AgentTaskEvent {
   summary?: string;
   error?: string;
 }
+
+export interface AgentMissionTask {
+  task_id: string;
+  name: string;
+  description: string;
+  status: "pending" | "in_progress" | "completed" | string;
+}
+
+export interface AgentMissionSnapshot {
+  mission_id: string;
+  session_id: string;
+  agent_id: string;
+  agent_name: string;
+  root_task_description: string;
+  root_task_context: string;
+  status: string;
+  mission_accomplished: boolean;
+  episodic_summary: string;
+  final_report: string;
+  active_tasks: AgentMissionTask[];
+  active_task_count: number;
+  created_at: string;
+  updated_at: string;
+}

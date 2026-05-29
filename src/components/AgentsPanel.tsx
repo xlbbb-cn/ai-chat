@@ -23,6 +23,7 @@ interface Props {
   useAgentsEnabled: boolean;
   onToggleUseAgents: (enabled: boolean) => void;
   agentStatuses: Record<string, AgentStatus>;
+  onOpenMonitor: () => void;
 }
 
 const emptyAgent = (): SubAgent => ({
@@ -39,7 +40,7 @@ const emptyAgent = (): SubAgent => ({
   enabled: true,
 });
 
-export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggleUseAgents, agentStatuses }: Props) {
+export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggleUseAgents, agentStatuses, onOpenMonitor }: Props) {
   const [agents, setAgents] = useState<SubAgent[]>([]);
   const [orchestration, setOrchestration] = useState<AgentOrchestration>({
     use_agents: false,
@@ -133,7 +134,12 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
     <div className="agents-panel">
       <div className="agents-header">
         <h2>Sub Agents</h2>
-        <button className="close-btn" onClick={onClose}>✕</button>
+        <div className="agents-header-actions">
+          <button className="agents-monitor-btn" type="button" onClick={onOpenMonitor}>
+            ◎ Monitor
+          </button>
+          <button className="close-btn" onClick={onClose}>✕</button>
+        </div>
       </div>
 
       {editing ? (
@@ -209,13 +215,17 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
               Max iter
               <input
                 type="number"
-                min={1}
-                max={50}
+                min={0}
+                max={500}
                 value={editing.max_iterations}
                 onChange={(e) =>
-                  setEditing({ ...editing, max_iterations: Number(e.target.value) || 10 })
+                  setEditing({
+                    ...editing,
+                    max_iterations: e.target.value === "" ? 10 : Math.max(0, Number(e.target.value) || 0),
+                  })
                 }
               />
+              <small>0 means no iteration limit; mission completion is controlled by external task state.</small>
             </label>
           </div>
           <label>

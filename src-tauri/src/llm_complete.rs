@@ -1236,6 +1236,7 @@ pub async fn chat_completion(
                                 &client,
                                 &url,
                                 &config,
+                                &session_id,
                                 agent,
                                 &task,
                                 workspace_dir,
@@ -1331,6 +1332,7 @@ pub async fn chat_completion(
                     &accessible_skill_roots,
                     &self_evolution_roots,
                     &self_evolution_files,
+                    None,
                 )
                 .await;
                 let duration_ms = start_time.elapsed().as_millis() as i64;

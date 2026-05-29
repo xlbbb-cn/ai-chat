@@ -544,3 +544,81 @@
 [data-theme="dark"] .btn-secondary:hover:not(:disabled) {
   background: var(--c-hover);
 }
+
+[data-theme="dark"] .settings-panel,
+[data-theme="dark"] .settings-body,
+[data-theme="dark"] .settings-footer,
+[data-theme="dark"] .prompt-editor-overlay,
+[data-theme="dark"] .prompt-editor-shell,
+[data-theme="dark"] .prompt-editor-header,
+[data-theme="dark"] .prompt-editor-body {
+  background: var(--c-bg);
+  color: var(--c-body);
+}
+
+[data-theme="dark"] .settings-header,
+[data-theme="dark"] .settings-footer,
+[data-theme="dark"] .settings-group,
+[data-theme="dark"] .settings-section-title,
+[data-theme="dark"] .prompt-editor-header,
+[data-theme="dark"] .prompt-preview,
+[data-theme="dark"] .message-preview {
+  border-color: var(--c-border);
+}
+
+[data-theme="dark"] .settings-group,
+[data-theme="dark"] .message-preview,
+[data-theme="dark"] .settings-checkbox-copy code,
+[data-theme="dark"] .settings-hint code {
+  background: var(--c-surface);
+}
+
+[data-theme="dark"] .settings-header h2,
+[data-theme="dark"] .settings-body label,
+[data-theme="dark"] .settings-group-title,
+[data-theme="dark"] .settings-section-title,
+[data-theme="dark"] .settings-toolbar,
+[data-theme="dark"] .field-title-row,
+[data-theme="dark"] .prompt-editor-header h3 {
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .close-btn {
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .close-btn:hover {
+  background: var(--c-hover);
+}
+
+[data-theme="dark"] .settings-checkbox-copy small,
+[data-theme="dark"] .settings-hint,
+[data-theme="dark"] .settings-toggle-icon,
+[data-theme="dark"] .settings-error,
+[data-theme="dark"] .prompt-preview-empty {
+  color: var(--c-muted);
+}
+
+[data-theme="dark"] .settings-body input,
+[data-theme="dark"] .settings-body textarea,
+[data-theme="dark"] .settings-body select {
+  background: var(--c-surface);
+  border-color: var(--c-border-i);
+  color: var(--c-text);
+}
+
+[data-theme="dark"] .settings-body input::placeholder,
+[data-theme="dark"] .settings-body textarea::placeholder {
+  color: var(--c-placeholder);
+}
+
+[data-theme="dark"] .settings-body input:focus,
+[data-theme="dark"] .settings-body textarea:focus,
+[data-theme="dark"] .settings-body select:focus {
+  border-color: var(--c-text);
+}
+
+[data-theme="dark"] .settings-body select option {
+  background: var(--c-surface);
+  color: var(--c-text);
+}

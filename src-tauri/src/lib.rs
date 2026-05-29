@@ -637,6 +637,41 @@ pub fn run() {
                 )",
                 [],
             ).unwrap();
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS agent_missions (\
+                    mission_id TEXT PRIMARY KEY, \
+                    session_id TEXT, \
+                    parent_task_id TEXT, \
+                    agent_id TEXT NOT NULL, \
+                    root_task_description TEXT NOT NULL, \
+                    root_task_context TEXT NOT NULL DEFAULT '', \
+                    status TEXT NOT NULL DEFAULT 'running', \
+                    mission_accomplished INTEGER NOT NULL DEFAULT 0, \
+                    episodic_summary TEXT NOT NULL DEFAULT '', \
+                    final_report TEXT NOT NULL DEFAULT '', \
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP, \
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP\
+                )",
+                [],
+            ).unwrap();
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS agent_tasks (\
+                    task_id TEXT PRIMARY KEY, \
+                    mission_id TEXT NOT NULL, \
+                    name TEXT NOT NULL, \
+                    description TEXT NOT NULL, \
+                    status TEXT NOT NULL DEFAULT 'pending', \
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP, \
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, \
+                    completed_at DATETIME\
+                )",
+                [],
+            ).unwrap();
+            db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_agent_tasks_mission_status \
+                 ON agent_tasks (mission_id, status)",
+                [],
+            ).unwrap();
 
             let config_path = data_dir.join("config.json");
             let config = if config_path.exists() {
@@ -722,6 +757,7 @@ pub fn run() {
             agents::delete_sub_agent,
             agents::get_agent_orchestration,
             agents::save_agent_orchestration,
+            agents::list_agent_missions,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

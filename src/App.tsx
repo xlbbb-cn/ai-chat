@@ -10,11 +10,12 @@ import { HistoryPanel } from "./components/HistoryPanel";
 import { ToolsPanel } from "./components/ToolsPanel";
 import { McpPanel } from "./components/McpPanel";
 import { AgentsPanel } from "./components/AgentsPanel";
+import { AgentMissionPanel } from "./components/AgentMissionPanel";
 import { MarkdownPreview } from "./components/MarkdownPreview";
 import type { Message, AgentTaskEvent, ToolCallEntry } from "./types";
 import "./App.css";
 
-type Sidebar = "settings" | "skills" | "history" | "tools" | "mcp" | "agents" | null;
+type Sidebar = "settings" | "skills" | "history" | "tools" | "mcp" | "agents" | "monitor" | null;
 
 function applyTheme(theme: "auto" | "light" | "dark" | undefined) {
   const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -956,8 +957,8 @@ export default function App() {
       )}
       {/* Sidebar */}
       {sidebar && (
-        <aside className={`sidebar ${sidebarMotion === "opening" ? "sidebar-opening" : ""} ${sidebarMotion === "closing" ? "sidebar-closing" : ""}`}>
-          <div className={`sidebar-shell ${sidebar === "settings" ? "panel-settings" : ""} ${sidebar === "skills" ? "panel-skills" : ""} ${sidebar === "history" ? "panel-history" : ""} ${sidebar === "tools" ? "panel-tools" : ""} ${sidebar === "mcp" ? "panel-mcp" : ""} ${sidebar === "agents" ? "panel-agents" : ""}`} key={sidebar}>
+        <aside className={`sidebar ${sidebar === "monitor" ? "sidebar-wide" : ""} ${sidebarMotion === "opening" ? "sidebar-opening" : ""} ${sidebarMotion === "closing" ? "sidebar-closing" : ""}`}>
+          <div className={`sidebar-shell ${sidebar === "settings" ? "panel-settings" : ""} ${sidebar === "skills" ? "panel-skills" : ""} ${sidebar === "history" ? "panel-history" : ""} ${sidebar === "tools" ? "panel-tools" : ""} ${sidebar === "mcp" ? "panel-mcp" : ""} ${sidebar === "agents" ? "panel-agents" : ""} ${sidebar === "monitor" ? "panel-monitor" : ""}`} key={sidebar}>
             {sidebar === "settings" && (
               <SettingsPanel
                 sessionId={sessionId}
@@ -1028,6 +1029,13 @@ export default function App() {
                 useAgentsEnabled={useAgentsEnabled}
                 onToggleUseAgents={setUseAgentsEnabled}
                 agentStatuses={agentStatuses}
+                onOpenMonitor={() => toggleSidebar("monitor")}
+              />
+            )}
+            {sidebar === "monitor" && (
+              <AgentMissionPanel
+                sessionId={sessionId}
+                onClose={closeSidebar}
               />
             )}
           </div>

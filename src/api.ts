@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import type { AppConfig, Message, Skill, McpServer, SubAgent, AgentOrchestration, AgentTaskEvent } from "./types";
+import type { AppConfig, Message, Skill, McpServer, SubAgent, AgentOrchestration, AgentTaskEvent, AgentMissionSnapshot } from "./types";
 
 export async function getConfig(): Promise<AppConfig> {
   return invoke("get_config");
@@ -227,6 +227,10 @@ export async function getAgentOrchestration(): Promise<AgentOrchestration> {
 
 export async function saveAgentOrchestration(orchestration: AgentOrchestration): Promise<void> {
   return invoke("save_agent_orchestration", { orchestration });
+}
+
+export async function listAgentMissions(sessionId: string): Promise<AgentMissionSnapshot[]> {
+  return invoke("list_agent_missions", { sessionId });
 }
 
 // ─── Interaction Log Monitor ──────────────────────────────────────────────────

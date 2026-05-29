@@ -670,3 +670,26 @@
   background: var(--c-code);
   color: var(--c-text);
 }
+
+.agents-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.agents-monitor-btn {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid #D0D1D2;
+  border-radius: 999px;
+  background: #FFFFFF;
+  color: #171A20;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s, border-color 0.2s;
+}
+
+.agents-monitor-btn:hover {
+  background: #F4F4F4;
+}

@@ -534,6 +534,81 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
     tools
 }
 
+pub fn get_agent_task_tools() -> Vec<Value> {
+    vec![
+        json!({
+            "type": "function",
+            "function": {
+                "name": "add_task",
+                "description": "Add a new task to the current autonomous mission. Use this instead of relying on chat history to remember future work.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Short task title"
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "Detailed task description"
+                        }
+                    },
+                    "required": ["description"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "update_task_status",
+                "description": "Update the status of an existing mission task.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "task_id": {
+                            "type": "string",
+                            "description": "Mission task identifier"
+                        },
+                        "status": {
+                            "type": "string",
+                            "enum": ["pending", "in_progress", "completed"],
+                            "description": "New task status"
+                        }
+                    },
+                    "required": ["task_id", "status"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "get_active_tasks",
+                "description": "Return all active mission tasks that are not completed.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "mark_mission_accomplished",
+                "description": "Mark the current mission as accomplished so the autonomous loop can terminate cleanly.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "final_report": {
+                            "type": "string",
+                            "description": "Optional final report to persist as the mission outcome"
+                        }
+                    }
+                }
+            }
+        }),
+    ]
+}
+
 fn resolve_safe_path(root_dir: &Path, rel_path: &str) -> Result<PathBuf, String> {
     // If an absolute path is given and it starts with root_dir, strip the prefix
     // so the AI can pass either relative or absolute paths within the workspace.
@@ -941,9 +1016,98 @@ pub async fn execute_tool(
     protected_skill_roots: &[PathBuf],
     // Exact files that require automatic `.bak.N` backups before mutation.
     protected_exact_files: &[PathBuf],
+    // Current autonomous mission identifier when executing inside a sub-agent.
+    mission_id: Option<&str>,
 ) -> String {
     let args: Value = serde_json::from_str(args_str).unwrap_or_default();
     match name {
+        "add_task" => {
+            let Some(mission_id) = mission_id else {
+                return "Error: add_task is only available inside an autonomous sub-agent mission.".to_string();
+            };
+            let description = args["description"].as_str().unwrap_or("");
+            let name = args["name"].as_str().unwrap_or(description);
+            let state = app.state::<crate::AppState>();
+            let db = match state.db.lock() {
+                Ok(db) => db,
+                Err(err) => return format!("Error: failed to lock mission database: {err}"),
+            };
+            match crate::agents::add_mission_task(&db, mission_id, name, description) {
+                Ok(task) => {
+                    let payload = json!({
+                        "mission_id": mission_id,
+                        "task": task,
+                    });
+                    let _ = app.emit("agent-task-state", payload.clone());
+                    serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string())
+                }
+                Err(err) => format!("Error: {err}"),
+            }
+        }
+        "update_task_status" => {
+            let Some(mission_id) = mission_id else {
+                return "Error: update_task_status is only available inside an autonomous sub-agent mission.".to_string();
+            };
+            let task_id = args["task_id"].as_str().unwrap_or("");
+            let status = args["status"].as_str().unwrap_or("");
+            let state = app.state::<crate::AppState>();
+            let db = match state.db.lock() {
+                Ok(db) => db,
+                Err(err) => return format!("Error: failed to lock mission database: {err}"),
+            };
+            match crate::agents::update_mission_task_status(&db, mission_id, task_id, status) {
+                Ok(task) => {
+                    let payload = json!({
+                        "mission_id": mission_id,
+                        "task": task,
+                    });
+                    let _ = app.emit("agent-task-state", payload.clone());
+                    serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string())
+                }
+                Err(err) => format!("Error: {err}"),
+            }
+        }
+        "get_active_tasks" => {
+            let Some(mission_id) = mission_id else {
+                return "Error: get_active_tasks is only available inside an autonomous sub-agent mission.".to_string();
+            };
+            let state = app.state::<crate::AppState>();
+            let db = match state.db.lock() {
+                Ok(db) => db,
+                Err(err) => return format!("Error: failed to lock mission database: {err}"),
+            };
+            match crate::agents::get_active_mission_tasks(&db, mission_id) {
+                Ok(tasks) => serde_json::to_string_pretty(&json!({
+                    "mission_id": mission_id,
+                    "active_tasks": tasks,
+                }))
+                .unwrap_or_else(|_| "[]".to_string()),
+                Err(err) => format!("Error: {err}"),
+            }
+        }
+        "mark_mission_accomplished" => {
+            let Some(mission_id) = mission_id else {
+                return "Error: mark_mission_accomplished is only available inside an autonomous sub-agent mission.".to_string();
+            };
+            let final_report = args["final_report"].as_str();
+            let state = app.state::<crate::AppState>();
+            let db = match state.db.lock() {
+                Ok(db) => db,
+                Err(err) => return format!("Error: failed to lock mission database: {err}"),
+            };
+            match crate::agents::mark_mission_accomplished(&db, mission_id, final_report) {
+                Ok(()) => {
+                    let payload = json!({
+                        "mission_id": mission_id,
+                        "status": "completed",
+                        "final_report": final_report.unwrap_or(""),
+                    });
+                    let _ = app.emit("agent-task-state", payload.clone());
+                    serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string())
+                }
+                Err(err) => format!("Error: {err}"),
+            }
+        }
         "run_cmd" => {
             let command = args["command"].as_str().unwrap_or("").to_string();
             let command_cwd = command_skill_roots

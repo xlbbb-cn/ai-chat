@@ -1,0 +1,318 @@
+.mission-monitor-shell {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    background: var(--c-bg);
+}
+
+.mission-monitor-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px 18px 14px;
+    border-bottom: 1px solid var(--c-border);
+}
+
+.mission-monitor-header h2 {
+    margin: 0;
+    color: var(--c-text);
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.mission-monitor-header p {
+    margin-top: 6px;
+    color: var(--c-muted);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.mission-monitor-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.mission-monitor-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--c-muted);
+    font-size: 12px;
+}
+
+.mission-monitor-refresh {
+    min-height: 30px;
+    padding: 0 12px;
+    border: 1px solid var(--c-border-i);
+    border-radius: 999px;
+    background: var(--c-surface);
+    color: var(--c-text);
+    cursor: pointer;
+}
+
+.mission-monitor-shell .close-btn {
+    background: transparent;
+    border: none;
+    color: var(--c-muted);
+    font-size: 20px;
+    cursor: pointer;
+    padding: 4px 8px;
+}
+
+.mission-monitor-shell .close-btn:hover {
+    color: var(--c-text);
+}
+
+.mission-monitor-body {
+    display: flex;
+    min-height: 0;
+    flex: 1;
+}
+
+.mission-monitor-list-panel {
+    width: 280px;
+    min-width: 280px;
+    border-right: 1px solid var(--c-border);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.mission-monitor-list-header,
+.mission-monitor-detail-panel {
+    min-height: 0;
+}
+
+.mission-monitor-list-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--c-border);
+}
+
+.mission-monitor-list-header h3 {
+    margin: 0;
+    color: var(--c-text);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.mission-monitor-loading {
+    color: var(--c-muted);
+    animation: mission-spin 1s linear infinite;
+}
+
+@keyframes mission-spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.mission-monitor-list,
+.mission-monitor-detail-content {
+    overflow-y: auto;
+}
+
+.mission-monitor-list {
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.mission-monitor-item {
+    width: 100%;
+    text-align: left;
+    border: 1px solid var(--c-border);
+    border-radius: 12px;
+    background: var(--c-surface);
+    padding: 12px;
+    cursor: pointer;
+    transition: border-color 0.2s ease, transform 0.2s ease, background-color 0.2s ease;
+}
+
+.mission-monitor-item:hover,
+.mission-monitor-item.selected {
+    border-color: #3e6ae1;
+    background: var(--c-hover);
+}
+
+.mission-monitor-item.selected {
+    transform: translateX(2px);
+}
+
+.mission-monitor-item-header,
+.mission-monitor-meta,
+.mission-task-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.mission-monitor-status {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 84px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: lowercase;
+}
+
+.mission-running,
+.mission-in_progress {
+    background: rgba(245, 158, 11, 0.16);
+    color: #b45309;
+}
+
+.mission-completed {
+    background: rgba(34, 197, 94, 0.16);
+    color: #15803d;
+}
+
+.mission-pending {
+    background: rgba(59, 130, 246, 0.14);
+    color: #1d4ed8;
+}
+
+.mission-monitor-agent,
+.mission-monitor-meta,
+.mission-task-id,
+.mission-task-description {
+    color: var(--c-muted);
+}
+
+.mission-monitor-title,
+.mission-task-name {
+    color: var(--c-text);
+    font-weight: 600;
+}
+
+.mission-monitor-title {
+    margin: 10px 0 8px;
+    line-height: 1.4;
+}
+
+.mission-monitor-meta {
+    font-size: 11px;
+}
+
+.mission-monitor-detail-panel {
+    flex: 1;
+    min-width: 0;
+}
+
+.mission-monitor-detail-content {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 18px;
+    height: 100%;
+}
+
+.mission-monitor-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.mission-monitor-section label {
+    color: var(--c-muted);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.mission-monitor-section.two-column {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.mission-monitor-value,
+.mission-monitor-code,
+.mission-task-item {
+    border: 1px solid var(--c-border);
+    border-radius: 12px;
+    background: var(--c-surface);
+}
+
+.mission-monitor-value {
+    padding: 12px;
+    color: var(--c-text);
+    line-height: 1.45;
+}
+
+.mission-monitor-code {
+    margin: 0;
+    padding: 12px;
+    color: var(--c-text);
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: var(--c-code);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.mission-task-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.mission-task-item {
+    padding: 12px;
+}
+
+.mission-task-description {
+    margin-top: 8px;
+    line-height: 1.45;
+    font-size: 12px;
+}
+
+.mission-task-id {
+    margin-top: 8px;
+    font-size: 11px;
+    font-family: Consolas, "Courier New", monospace;
+}
+
+.mission-monitor-empty {
+    padding: 28px 20px;
+    color: var(--c-muted);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.mission-monitor-empty.detail {
+    padding: 32px;
+}
+
+@media (max-width: 1100px) {
+    .mission-monitor-body {
+        flex-direction: column;
+    }
+
+    .mission-monitor-list-panel {
+        width: 100%;
+        min-width: 0;
+        max-height: 260px;
+        border-right: none;
+        border-bottom: 1px solid var(--c-border);
+    }
+
+    .mission-monitor-section.two-column {
+        grid-template-columns: 1fr;
+    }
+}
