@@ -616,7 +616,7 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "run_cmd",
-                "description": "Run an executable program directly (without a shell) on the user's machine. The first token is the executable; the rest are arguments. Preferred for simple commands like curl, wget, git, etc. If called by a skill, runs in the skill's directory; otherwise in the managed workspace directory. Dangerous or privileged operations (sudo) will require explicit user confirmation before execution.",
+                "description": "Run an executable program directly (without a shell) on the user's machine. The first token is the executable; the rest are arguments. Preferred for simple commands like curl, wget, git, etc. CRITICAL: The tool always runs with the workspace directory as its current working directory. Dangerous or privileged operations (sudo) will require explicit user confirmation before execution.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -642,11 +642,7 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "run_shell",
-                "description": "Execute a script in a shell on the user's machine. 
-                                Supports pipes, loops, variables, and other shell features. 
-                                If called by a skill, runs in the skill's directory; 
-                                otherwise in the managed workspace directory. 
-                                Dangerous or privileged operations (sudo / admin elevation) will require explicit user confirmation before execution.",
+                "description": "Execute a script in a shell on the user's machine. \n                                Supports pipes, loops, variables, and other shell features. \n                                CRITICAL: The tool always switches to the workspace directory before running the script, and directory changes must stay within the workspace root. \n                                Dangerous or privileged operations (sudo / admin elevation) will require explicit user confirmation.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -685,7 +681,7 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "file_actions",
-                "description": "Perform file operations (read, write, list, search, mkdir, rename/move, patch, delete) inside the current workspace root. Existing paths can also resolve relative to active skill roots, self-evolution skill roots, and protected self-evolution files when enabled. When protected skill/sub-agent files are modified through this tool, a sibling `.bak.<number>` backup is created automatically first.",
+                "description": "Perform file operations. CRITICAL: Writes are restricted to the workspace root. Active skill directories are read-only reference roots, and only workspace/skills becomes writable when self-evolution mode is enabled. Changes to protected files create automated backups.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -1092,15 +1088,181 @@ fn resolve_safe_path_with_roots(
     resolve_safe_path(primary_root, input_path).map(|p| (p, primary_root.to_path_buf()))
 }
 
+fn normalize_path_for_comparison(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn path_is_within(path: &Path, root: &Path) -> bool {
+    normalize_path_for_comparison(path).starts_with(normalize_path_for_comparison(root))
+}
+
+fn path_is_within_any_root(path: &Path, roots: &[PathBuf]) -> bool {
+    roots.iter().any(|root| path_is_within(path, root))
+}
+
+fn workspace_skills_root(workspace_dir: &Path) -> PathBuf {
+    workspace_dir.join("skills")
+}
+
+fn ensure_mutation_target_allowed(
+    path: &Path,
+    workspace_dir: &Path,
+    writable_skill_roots: &[PathBuf],
+) -> Result<(), String> {
+    let workspace_skills = workspace_skills_root(workspace_dir);
+    if path_is_within(path, &workspace_skills) && !path_is_within_any_root(path, writable_skill_roots)
+    {
+        return Err(
+            "Skill directories are read-only. Only workspace/skills is writable in self-evolution mode."
+                .to_string(),
+        );
+    }
+
+    Ok(())
+}
+
+fn strip_matching_quotes(value: &str) -> &str {
+    if value.len() >= 2 {
+        let bytes = value.as_bytes();
+        if (bytes[0] == b'\'' && bytes[value.len() - 1] == b'\'')
+            || (bytes[0] == b'"' && bytes[value.len() - 1] == b'"')
+        {
+            return &value[1..value.len() - 1];
+        }
+    }
+
+    value
+}
+
+fn contains_dynamic_shell_path_syntax(value: &str) -> bool {
+    value.contains('$') || value.contains('%') || value.contains('`')
+}
+
+fn validate_directory_change_target(workspace_dir: &Path, raw_target: &str) -> Result<(), String> {
+    let trimmed = strip_matching_quotes(raw_target.trim()).trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    if contains_dynamic_shell_path_syntax(trimmed) {
+        return Err(
+            "Shell directory changes must use literal paths that stay within the workspace root."
+                .to_string(),
+        );
+    }
+
+    resolve_safe_path(workspace_dir, trimmed)
+        .map(|_| ())
+        .map_err(|_| {
+            format!(
+                "Shell directory changes must stay within the workspace root '{}'.",
+                workspace_dir.display()
+            )
+        })
+}
+
+fn extract_directory_change_target(shell_type: &str, statement: &str) -> Option<String> {
+    let lower = statement.to_ascii_lowercase();
+    let command = if shell_type == "powershell" {
+        ["set-location", "push-location", "pushd", "cd", "sl"]
+            .into_iter()
+            .find(|candidate| {
+                lower == *candidate
+                    || lower.starts_with(&format!("{candidate} "))
+                    || lower.starts_with(&format!("{candidate}\t"))
+            })?
+    } else {
+        ["cd", "pushd"]
+            .into_iter()
+            .find(|candidate| {
+                lower == *candidate
+                    || lower.starts_with(&format!("{candidate} "))
+                    || lower.starts_with(&format!("{candidate}\t"))
+            })?
+    };
+
+    let rest = statement[command.len()..].trim();
+    if rest.is_empty() {
+        return None;
+    }
+
+    let mut parts = split_command_line(rest);
+    if shell_type == "powershell" {
+        parts.retain(|part| {
+            !part.eq_ignore_ascii_case("-path") && !part.eq_ignore_ascii_case("-literalpath")
+        });
+    }
+
+    parts.into_iter().next()
+}
+
+fn validate_shell_working_directory_changes(
+    shell_type: &str,
+    code: &str,
+    workspace_dir: &Path,
+) -> Result<(), String> {
+    for statement in code.replace(';', "\n").lines() {
+        let trimmed = statement.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if let Some(target) = extract_directory_change_target(shell_type, trimmed) {
+            validate_directory_change_target(workspace_dir, &target)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn quote_cmd_path(path: &Path) -> String {
+    format!("\"{}\"", path.display().to_string().replace('"', "\"\""))
+}
+
+fn quote_powershell_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+#[cfg(not(windows))]
+fn quote_posix_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn build_workspace_scoped_shell_code(shell_type: &str, workspace_dir: &Path, code: &str) -> String {
+    match shell_type {
+        "powershell" => format!(
+            "Set-Location -LiteralPath {};\n{}",
+            quote_powershell_literal(&workspace_dir.display().to_string()),
+            code
+        ),
+        _ => {
+            #[cfg(windows)]
+            {
+                format!("cd /d {} && {}", quote_cmd_path(workspace_dir), code)
+            }
+
+            #[cfg(not(windows))]
+            {
+                format!(
+                    "cd {}\n{}",
+                    quote_posix_literal(&workspace_dir.display().to_string()),
+                    code
+                )
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::decode_process_bytes;
     #[cfg(windows)]
     use super::decode_windows_process_bytes_with_code_pages;
+    use super::ensure_mutation_target_allowed;
     use super::OutputDecodeHint;
     use super::SearchOptions;
     use super::run_integrated_search;
     use super::resolve_safe_path_with_roots;
+    use super::validate_shell_working_directory_changes;
     use std::fs;
     use std::path::PathBuf;
     use uuid::Uuid;
@@ -1307,6 +1469,51 @@ mod tests {
 
         assert_eq!(decoded, "Test");
     }
+
+    #[test]
+    fn workspace_skill_dir_is_read_only_without_self_evolution() {
+        let workspace_root = make_temp_dir("readonly-skills");
+        let skill_file = workspace_root.join("skills").join("demo").join("skill.md");
+
+        let err = ensure_mutation_target_allowed(&skill_file, &workspace_root, &[]).unwrap_err();
+
+        assert!(err.contains("read-only"));
+
+        let _ = fs::remove_dir_all(&workspace_root);
+    }
+
+    #[test]
+    fn workspace_skill_dir_is_writable_in_self_evolution_mode() {
+        let workspace_root = make_temp_dir("writable-skills");
+        let writable_root = workspace_root.join("skills");
+        let skill_file = writable_root.join("demo").join("skill.md");
+
+        let result = ensure_mutation_target_allowed(
+            &skill_file,
+            &workspace_root,
+            std::slice::from_ref(&writable_root),
+        );
+
+        assert!(result.is_ok());
+
+        let _ = fs::remove_dir_all(&workspace_root);
+    }
+
+    #[test]
+    fn shell_directory_changes_cannot_escape_workspace() {
+        let workspace_root = make_temp_dir("shell-dir-guard");
+
+        let err = validate_shell_working_directory_changes(
+            "powershell",
+            "Set-Location ..\\..",
+            &workspace_root,
+        )
+        .unwrap_err();
+
+        assert!(err.contains("workspace root"));
+
+        let _ = fs::remove_dir_all(&workspace_root);
+    }
 }
 
 fn is_path_protected(
@@ -1381,11 +1588,11 @@ pub async fn execute_tool(
     config: &crate::AppConfig,
     // Allowlist of executable names from the active skill (empty = unrestricted).
     allowed_commands: &[String],
-    // Root directories of active skills used as the default command cwd.
-    command_skill_roots: &[PathBuf],
-    // Extra roots allowed for file access, such as skill directories available in self-evolution mode.
-    accessible_skill_roots: &[PathBuf],
-    // Skill roots that require automatic `.bak.N` backups before mutation.
+    // Active skill roots are readable for skill-owned reference data.
+    _command_skill_roots: &[PathBuf],
+    // Read-only skill roots that can be addressed by file_actions reads/searches.
+    readable_skill_roots: &[PathBuf],
+    // Writable skill roots that require automatic `.bak.N` backups before mutation.
     protected_skill_roots: &[PathBuf],
     // Exact files that require automatic `.bak.N` backups before mutation.
     protected_exact_files: &[PathBuf],
@@ -1483,10 +1690,7 @@ pub async fn execute_tool(
         }
         "run_cmd" => {
             let command = args["command"].as_str().unwrap_or("").to_string();
-            let command_cwd = command_skill_roots
-                .first()
-                .cloned()
-                .unwrap_or_else(|| workspace_dir.clone());
+            let command_cwd = workspace_dir.clone();
 
             // ── Allowed-commands enforcement (skill context) ──────────────────
             if !allowed_commands.is_empty() {
@@ -1603,14 +1807,21 @@ pub async fn execute_tool(
             let code = args["code"].as_str().unwrap_or("").to_string();
             let sudo_flag = args["sudo"].as_bool().unwrap_or(false);
             let elevated_flag = args["elevated"].as_bool().unwrap_or(false);
-            let command_cwd = command_skill_roots
-                .first()
-                .cloned()
-                .unwrap_or_else(|| workspace_dir.clone());
+            let command_cwd = workspace_dir.clone();
             let timeout_secs = args["timeout_seconds"]
                 .as_i64()
                 .unwrap_or(30)
                 .clamp(1, 3600) as u64;
+
+            if let Err(err) = validate_shell_working_directory_changes(
+                &shell_type,
+                &code,
+                &workspace_dir,
+            ) {
+                return format!("⛔ {}", err);
+            }
+
+            let scoped_code = build_workspace_scoped_shell_code(&shell_type, &workspace_dir, &code);
 
             let sudo_requested = shell_type == "bash" && (sudo_flag || code_requests_sudo(&code));
             let elevated_requested = shell_type == "powershell" && elevated_flag;
@@ -1669,7 +1880,7 @@ pub async fn execute_tool(
                     "tool-call",
                     format!(
                         "⚙️ *Running {} (sudo):*\n```{}\n{}\n```\n\n",
-                        shell_type, shell_type, code
+                        shell_type, shell_type, scoped_code
                     ),
                 );
 
@@ -1678,7 +1889,7 @@ pub async fn execute_tool(
                 if let Some(u) = username {
                     cmd.arg("-u").arg(u);
                 }
-                cmd.arg("bash").arg("-lc").arg(code);
+                cmd.arg("bash").arg("-lc").arg(scoped_code.clone());
                 cmd.current_dir(command_cwd);
 
                 return tokio::time::timeout(
@@ -1695,13 +1906,13 @@ pub async fn execute_tool(
                     "tool-call",
                     format!(
                         "⚙️ *Running {} (elevated):*\n```{}\n{}\n```\n\n",
-                        shell_type, shell_type, code
+                        shell_type, shell_type, scoped_code
                     ),
                 );
 
                 return tokio::time::timeout(
                     std::time::Duration::from_secs(timeout_secs),
-                    run_powershell_elevated(code, Some(command_cwd)),
+                    run_powershell_elevated(scoped_code.clone(), Some(command_cwd)),
                 )
                 .await
                 .unwrap_or_else(|_| Ok(format!("Command timed out after {} seconds.", timeout_secs)))
@@ -1712,12 +1923,12 @@ pub async fn execute_tool(
                 "tool-call",
                 format!(
                     "⚙️ *Running {}:*\n```{}\n{}\n```\n\n",
-                    shell_type, shell_type, code
+                    shell_type, shell_type, scoped_code
                 ),
             );
             tokio::time::timeout(
                 std::time::Duration::from_secs(timeout_secs),
-                run_command(shell_type, code, Some(command_cwd)),
+                run_command(shell_type, scoped_code, Some(command_cwd)),
             )
             .await
             .unwrap_or_else(|_| Ok(format!("Command timed out after {} seconds.", timeout_secs)))
@@ -1727,12 +1938,12 @@ pub async fn execute_tool(
             let action = args["action"].as_str().unwrap_or("");
             let path_str = args["path"].as_str().unwrap_or("");
             let root_dir = workspace_dir.clone();
-            let resolve_file_path = |input: &str, require_exists: bool| {
+            let resolve_read_path = |input: &str, require_exists: bool| {
                 resolve_safe_explicit_file(input, protected_exact_files)
                     .or_else(|| {
                         resolve_safe_path_with_roots(
                             &root_dir,
-                            accessible_skill_roots,
+                            readable_skill_roots,
                             input,
                             require_exists,
                         )
@@ -1746,12 +1957,34 @@ pub async fn execute_tool(
                         )
                     })
             };
+            let resolve_write_path = |input: &str, require_exists: bool| {
+                resolve_safe_path(&root_dir, input)
+                    .map(|path| (path, root_dir.clone()))
+                    .map_err(|_| {
+                        format!(
+                            "Path '{}' must stay under workspace root '{}'",
+                            input,
+                            root_dir.display()
+                        )
+                    })
+                    .and_then(|(path, resolved_root)| {
+                        if require_exists && !path.exists() {
+                            return Err(format!(
+                                "Path '{}' was not found under workspace root '{}'",
+                                input,
+                                root_dir.display()
+                            ));
+                        }
+                        ensure_mutation_target_allowed(&path, &root_dir, protected_skill_roots)?;
+                        Ok((path, resolved_root))
+                    })
+            };
             match action {
                 "read" => {
                     let _ = app.emit("tool-call", format!("📄 *Reading {}*\n\n", path_str));
                     let start_line = args["start_line"].as_i64();
                     let end_line = args["end_line"].as_i64();
-                    match resolve_file_path(path_str, true) {
+                    match resolve_read_path(path_str, true) {
                         Ok((p, _)) => {
                             match fs::metadata(&p) {
                                 Ok(metadata) if metadata.is_dir() => {
@@ -1813,7 +2046,7 @@ pub async fn execute_tool(
                 "write" => {
                     let content_str = args["content"].as_str().unwrap_or("");
                     let _ = app.emit("tool-call", format!("💾 *Writing {}*\n\n", path_str));
-                    match resolve_file_path(path_str, false) {
+                    match resolve_write_path(path_str, false) {
                         Ok((p, _)) => {
                             let backup = match backup_protected_file(
                                 &p,
@@ -1846,7 +2079,7 @@ pub async fn execute_tool(
                 }
                 "list" => {
                     let _ = app.emit("tool-call", format!("📂 *Listing {}*\n\n", path_str));
-                    match resolve_file_path(path_str, true) {
+                    match resolve_read_path(path_str, true) {
                         Ok((p, _)) => {
                             match fs::metadata(&p) {
                                 Ok(metadata) => {
@@ -1915,7 +2148,7 @@ pub async fn execute_tool(
                         ),
                     );
 
-                    match resolve_file_path(path_str, true) {
+                    match resolve_read_path(path_str, true) {
                         Ok((p, resolved_root)) => {
                             if !p.exists() {
                                 return format!("Error: {} does not exist", path_str);
@@ -1952,13 +2185,8 @@ pub async fn execute_tool(
                     if new_path.is_empty() {
                         return "Error: new_path is required for move/rename.".to_string();
                     }
-                    match resolve_file_path(path_str, true) {
-                        Ok((src, src_root)) => match resolve_safe_path_with_roots(
-                            &src_root,
-                            accessible_skill_roots,
-                            new_path,
-                            false,
-                        ) {
+                    match resolve_write_path(path_str, true) {
+                        Ok((src, _)) => match resolve_write_path(new_path, false) {
                             Ok((dst, _)) => {
                                 let backup = match backup_protected_file(
                                     &src,
@@ -2003,7 +2231,7 @@ pub async fn execute_tool(
                 "patch" => {
                     let patch_str = args["patch"].as_str().unwrap_or("");
                     let _ = app.emit("tool-call", format!("🩹 *Patching {}*\n\n", path_str));
-                    match resolve_file_path(path_str, true) {
+                    match resolve_write_path(path_str, true) {
                         Ok((p, _)) => {
                             let backup = match backup_protected_file(
                                 &p,
@@ -2045,12 +2273,7 @@ pub async fn execute_tool(
                         "tool-call",
                         format!("📁 *Creating directory {}*\n\n", path_str),
                     );
-                    match resolve_safe_path_with_roots(
-                        &root_dir,
-                        accessible_skill_roots,
-                        path_str,
-                        false,
-                    ) {
+                    match resolve_write_path(path_str, false) {
                         Ok((p, _)) => {
                             if p.exists() && p.is_file() {
                                 return format!("Error: {} is an existing file", path_str);
@@ -2065,7 +2288,7 @@ pub async fn execute_tool(
                 }
                 "delete" => {
                     let _ = app.emit("tool-call", format!("🗑️ *Deleting {}*\n\n", path_str));
-                    match resolve_file_path(path_str, true) {
+                    match resolve_write_path(path_str, true) {
                         Ok((p, _)) => {
                             let backup = match backup_protected_file(
                                 &p,
@@ -2243,6 +2466,7 @@ async fn run_powershell_elevated(_code: String, cwd: Option<PathBuf>) -> Result<
         let script_path_s = script_path.to_string_lossy().to_string();
         let out_path_s = out_path.to_string_lossy().to_string();
         let err_path_s = err_path.to_string_lossy().to_string();
+        let cwd_s = cwd.as_ref().map(|dir| dir.to_string_lossy().to_string());
 
         let launcher = format!(
             "$ErrorActionPreference='Stop';\n\
@@ -2250,11 +2474,13 @@ async fn run_powershell_elevated(_code: String, cwd: Option<PathBuf>) -> Result<
             $out={out};\n\
             $err={err};\n\
             $args=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$script);\n\
-            $p=Start-Process -FilePath 'powershell' -ArgumentList $args -Verb RunAs -Wait -PassThru -RedirectStandardOutput $out -RedirectStandardError $err;\n\
+            $working={working};\n\
+            $p=Start-Process -FilePath 'powershell' -ArgumentList $args -WorkingDirectory $working -Verb RunAs -Wait -PassThru -RedirectStandardOutput $out -RedirectStandardError $err;\n\
             exit $p.ExitCode\n",
             script = ps_quote(&script_path_s),
             out = ps_quote(&out_path_s),
-            err = ps_quote(&err_path_s)
+            err = ps_quote(&err_path_s),
+            working = ps_quote(cwd_s.as_deref().unwrap_or("."))
         );
 
         let mut cmd = tokio::process::Command::new("powershell");

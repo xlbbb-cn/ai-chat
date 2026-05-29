@@ -441,13 +441,10 @@ fn get_workspace_dir(state: State<'_, AppState>) -> String {
 #[tauri::command]
 fn get_skill_roots(state: State<'_, AppState>) -> Vec<String> {
     let workspace_dir = state.workspace_dir.lock().unwrap().clone();
-    let mut paths: Vec<String> =
-        skills::collect_self_evolution_roots(&state.skills_dir, Some(&workspace_dir), true)
-            .into_iter()
-            .map(|path| path.to_string_lossy().to_string())
-            .collect();
-    paths.push(state.agents_config_path.to_string_lossy().to_string());
-    paths
+    vec![
+        state.skills_dir.to_string_lossy().to_string(),
+        workspace_dir.join("skills").to_string_lossy().to_string(),
+    ]
 }
 
 #[tauri::command]

@@ -887,11 +887,7 @@ pub async fn orchestrate(
     let workspace_dir = state.workspace_dir.lock().unwrap().clone();
     let skill_access_roots =
         crate::skills::collect_self_evolution_roots(&state.skills_dir, Some(&workspace_dir), config.self_evolution_mode);
-    let protected_evolution_files = if config.self_evolution_mode {
-        vec![state.agents_config_path.clone()]
-    } else {
-        Vec::new()
-    };
+    let protected_evolution_files = Vec::new();
     let results = execute_tasks(
         app,
         &client,
@@ -1671,7 +1667,7 @@ pub async fn run_sub_agent(
                         config,
                         &[],
                         &[],
-                        &skill_access_roots,
+                        &[],
                         &skill_access_roots,
                         &protected_evolution_files,
                         Some(&mission_id),

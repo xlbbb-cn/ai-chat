@@ -643,7 +643,6 @@ pub async fn chat_completion(
     let config = state.config.lock().unwrap().clone();
     let multi_agent_enabled = use_agents.unwrap_or(false);
     let self_evolution_enabled = config.self_evolution_mode;
-    let subagent_evolution_enabled = multi_agent_enabled && config.self_evolution_mode;
     log_event(
         &state,
         "INFO",
@@ -683,11 +682,7 @@ pub async fn chat_completion(
     } else {
         Vec::new()
     };
-    let self_evolution_files = if subagent_evolution_enabled {
-        vec![state.agents_config_path.clone()]
-    } else {
-        Vec::new()
-    };
+    let self_evolution_files: Vec<std::path::PathBuf> = Vec::new();
 
     // 1. Determine which skills have already been loaded in this session
     // We scan the assistant messages for "🧠 *Loading skill: xxx*"
@@ -715,7 +710,7 @@ pub async fn chat_completion(
 
     let os_info = os_info::get();
     let os_sys_msg = format!(
-        "System information:\n- OS: {} {}\n- CPU: {:?}\n",
+        "System information:\n- OS: {} {}\n- CPU: {:?}\n\nCRITICAL DIRECTIVES:\n1. For all file operations, you MUST only operate with the workspace as the root directory. Operating on other external directories is strictly PROHIBITED.\n2. For all 'run_cmd' and 'run_shell' tool executions, your first step MUST be to switch to the workspace directory (`cd <workspace>`) before executing further commands.\n3. Except for explicitly provided absolute paths in skills, everything MUST use the workspace directory as the root.",
         os_info.os_type(),
         os_info.version(),
         os_info.architecture()
@@ -818,21 +813,6 @@ pub async fn chat_completion(
             .map(|p| format!("- {}", p.display()))
             .collect::<Vec<String>>()
             .join("\n");
-        let subagent_config_section = if subagent_evolution_enabled {
-            format!(
-                "- You may also inspect and update the sub-agent config file at:\n\\
-                 {}\n\\
-",
-                state.agents_config_path.display()
-            )
-        } else {
-            String::new()
-        };
-        let backup_scope_line = if subagent_evolution_enabled {
-            "- Before modifying any skill file or the sub-agent config file, create a sibling backup with suffix `.bak.<number>`."
-        } else {
-            "- Before modifying any skill file, create a sibling backup with suffix `.bak.<number>`."
-        };
         all_messages.push(json!({
             "role": "system",
             "content": format!(
@@ -840,14 +820,13 @@ pub async fn chat_completion(
                  Self-evolution mode is ENABLED.\n\
                  - You may inspect, create, and update reusable skills under these skill roots:\n\
                  {skill_roots_display}\n\
-                 {subagent_config_section}
                  - When it directly helps the user's request, you may improve existing skills or create new ones for future reuse.\n\
-                 {backup_scope_line}\n\
+                 - Before modifying any skill file, create a sibling backup with suffix `.bak.<number>`.\n\
                  - Use `file_actions` for these edits so backup creation is enforced automatically.\n\
                  - Prefer absolute paths when working in skill roots to avoid ambiguity with workspace files.\n\
                  - If you read or list a file inside a skill root, reuse that exact returned path when patching or writing it.\n\
                  - If you use a relative path that starts with a skill root directory name (for example `skills/demo/skill.md` or `.skills/demo/skill.md`), treat it as a path inside that skill root, not inside the workspace.\n\
-                 - Unless the user explicitly asks otherwise, do not access paths outside the workspace root, these skill roots, or the sub-agent config file."
+                 - Unless the user explicitly asks otherwise, do not access paths outside the workspace root or these skill roots."
             )
         }));
     }
@@ -1360,15 +1339,6 @@ pub async fn chat_completion(
                 result
             } else {
                 let workspace_dir = state.workspace_dir.lock().unwrap().clone();
-                let mut accessible_skill_roots = active_skill_roots.clone();
-                for root in &self_evolution_roots {
-                    if !accessible_skill_roots
-                        .iter()
-                        .any(|existing| existing == root)
-                    {
-                        accessible_skill_roots.push(root.clone());
-                    }
-                }
                 let start_time = std::time::Instant::now();
                 let tool_result = tools::execute_tool(
                     &app,
@@ -1378,7 +1348,7 @@ pub async fn chat_completion(
                     &config,
                     &skill_allowed_commands,
                     &active_skill_roots,
-                    &accessible_skill_roots,
+                    &active_skill_roots,
                     &self_evolution_roots,
                     &self_evolution_files,
                     None,

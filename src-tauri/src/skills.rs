@@ -111,28 +111,22 @@ pub fn load_skill_by_name(skills_dir: &PathBuf, name: &str) -> Result<Skill, Str
 }
 
 /// Collect skill roots eligible for self-evolution edits.
-/// Includes the app-managed skills directory and optionally the
-/// `skills/` subdirectory inside the active workspace. The `~/.skills`
-/// user directory is intentionally excluded.
+/// Self-evolution is restricted to `workspace/skills`.
+/// App-managed skills remain readable and listable, but are not writable
+/// by tool execution.
 pub fn collect_self_evolution_roots(
     managed_skills_dir: &Path,
     workspace_dir: Option<&Path>,
     enabled: bool,
 ) -> Vec<PathBuf> {
+    let _ = managed_skills_dir;
     if !enabled {
         return Vec::new();
     }
 
-    let mut roots = vec![managed_skills_dir.to_path_buf()];
-
-    if let Some(ws_dir) = workspace_dir {
-        let ws_skills = ws_dir.join("skills");
-        if !roots.iter().any(|root| root == &ws_skills) {
-            roots.push(ws_skills);
-        }
-    }
-
-    roots
+    workspace_dir
+        .map(|ws_dir| vec![ws_dir.join("skills")])
+        .unwrap_or_default()
 }
 
 #[tauri::command]
