@@ -337,7 +337,7 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
               </label>
 
               <label className="settings-field">
-                Max Tokens
+                Max Completion Tokens
                 <input
                   type="number"
                   min={1}
@@ -352,7 +352,7 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
                       }),
                     }));
                   }}
-                  placeholder="default (leave empty)"
+                  placeholder="default completion limit (leave empty)"
                 />
               </label>
 

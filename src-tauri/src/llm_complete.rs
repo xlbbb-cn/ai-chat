@@ -90,7 +90,7 @@ fn is_retryable_network_error(err: &str) -> bool {
     patterns.iter().any(|p| lower.contains(p))
 }
 
-fn extract_upstream_error_message(body: &str) -> String {
+pub(crate) fn extract_upstream_error_message(body: &str) -> String {
     serde_json::from_str::<Value>(body)
         .ok()
         .and_then(|v| {
@@ -106,7 +106,7 @@ fn is_retryable_http_error_body(body: &str) -> bool {
     is_retryable_network_error(&extract_upstream_error_message(body))
 }
 
-fn build_http_client() -> Result<Client, String> {
+pub(crate) fn build_http_client() -> Result<Client, String> {
     Client::builder()
         .connect_timeout(Duration::from_secs(12))
         .timeout(Duration::from_secs(300))
@@ -114,6 +114,106 @@ fn build_http_client() -> Result<Client, String> {
         .tcp_keepalive(Duration::from_secs(60))
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {e}"))
+}
+
+pub(crate) fn apply_completion_token_limit(req_body: &mut Value, max_tokens: u32) {
+    req_body["max_completion_tokens"] = json!(max_tokens);
+    req_body["max_tokens"] = json!(max_tokens);
+}
+
+fn process_stream_chunk(
+    app: &AppHandle,
+    parsed: &Value,
+    opts: &StreamOptions<'_>,
+    finish_reason: &mut String,
+    tool_calls: &mut Vec<(String, String, String)>,
+    content: &mut String,
+    prompt_tokens: &mut u32,
+    completion_tokens: &mut u32,
+    got_tool_calls: &mut bool,
+) {
+    if opts.emit_usage {
+        if let Some(usage) = parsed.get("usage").filter(|v| !v.is_null()) {
+            *prompt_tokens = usage
+                .get("prompt_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32;
+            *completion_tokens = usage
+                .get("completion_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32;
+            let total_tokens = usage
+                .get("total_tokens")
+                .and_then(|v| v.as_u64())
+                .map(|total| total as u32)
+                .unwrap_or_else(|| prompt_tokens.saturating_add(*completion_tokens));
+            let usage_ratio = opts
+                .usage_max_tokens
+                .filter(|max| *max > 0)
+                .map(|max| total_tokens as f64 / max as f64)
+                .unwrap_or(0.0);
+            let _ = app.emit(
+                "chat-usage",
+                json!({
+                    "prompt_tokens": *prompt_tokens,
+                    "completion_tokens": *completion_tokens,
+                    "total_tokens": total_tokens,
+                    "max_tokens": opts.usage_max_tokens,
+                    "usage_ratio": usage_ratio
+                }),
+            );
+        }
+    }
+
+    let Some(choice) = parsed["choices"].get(0) else {
+        return;
+    };
+    let delta = &choice["delta"];
+
+    if let Some(fr) = choice["finish_reason"].as_str() {
+        if !fr.is_empty() {
+            *finish_reason = fr.to_string();
+            if fr == "tool_calls" {
+                *got_tool_calls = true;
+            }
+        }
+    }
+
+    if opts.emit_reasoning {
+        if let Some(reasoning) = delta.get("reasoning_content").and_then(|v| v.as_str()) {
+            let _ = app.emit("chat-reasoning-token", reasoning.to_string());
+        }
+    }
+
+    if let Some(tcs) = delta["tool_calls"].as_array() {
+        for tc in tcs {
+            let idx = tc["index"].as_u64().unwrap_or(0) as usize;
+            while tool_calls.len() <= idx {
+                tool_calls.push((String::new(), String::new(), String::new()));
+            }
+            if let Some(id) = tc["id"].as_str() {
+                tool_calls[idx].0 = id.to_string();
+            }
+            if let Some(name) = tc["function"]["name"].as_str() {
+                tool_calls[idx].1 = name.to_string();
+            }
+            if let Some(args) = tc["function"]["arguments"].as_str() {
+                tool_calls[idx].2.push_str(args);
+            }
+        }
+    }
+
+    if let Some(token) = delta["content"].as_str() {
+        content.push_str(token);
+        if let Some(task_id) = opts.task_id {
+            let _ = app.emit(
+                opts.token_event,
+                json!({ "task_id": task_id, "token": token }),
+            );
+        } else {
+            let _ = app.emit(opts.token_event, token.to_string());
+        }
+    }
 }
 
 fn truncate_text(value: &str, max_chars: usize) -> String {
@@ -321,6 +421,7 @@ pub async fn stream_llm_request(
     for attempt in 1..=STREAM_MAX_RETRIES {
         let res = match client
             .post(url)
+            .header(reqwest::header::ACCEPT, "text/event-stream")
             .bearer_auth(api_key)
             .json(&req_body)
             .send()
@@ -340,9 +441,9 @@ pub async fn stream_llm_request(
         };
 
         if !res.status().is_success() {
-            let err = res.text().await.unwrap_or_default();
-            let retryable =
-                is_retryable_http_error_body(&err) && attempt < STREAM_MAX_RETRIES;
+            let err_body = res.text().await.unwrap_or_default();
+            let err = extract_upstream_error_message(&err_body);
+            let retryable = is_retryable_http_error_body(&err_body) && attempt < STREAM_MAX_RETRIES;
             last_err = Some(err.clone());
             if retryable {
                 tokio::time::sleep(Duration::from_millis(retry_backoff_ms(attempt))).await;
@@ -416,87 +517,35 @@ pub async fn stream_llm_request(
                 let Ok(parsed) = serde_json::from_str::<Value>(json_str) else {
                     continue;
                 };
+                process_stream_chunk(
+                    app,
+                    &parsed,
+                    &opts,
+                    &mut finish_reason,
+                    &mut tool_calls,
+                    &mut content,
+                    &mut prompt_tokens,
+                    &mut completion_tokens,
+                    &mut got_tool_calls,
+                );
+            }
+        }
 
-                if opts.emit_usage {
-                    if let Some(usage) = parsed.get("usage").filter(|v| !v.is_null()) {
-                        prompt_tokens = usage
-                            .get("prompt_tokens")
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(0) as u32;
-                        completion_tokens = usage
-                            .get("completion_tokens")
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(0) as u32;
-                        let total_tokens = prompt_tokens.saturating_add(completion_tokens);
-                        let usage_ratio = opts
-                            .usage_max_tokens
-                            .filter(|max| *max > 0)
-                            .map(|max| total_tokens as f64 / max as f64)
-                            .unwrap_or(0.0);
-                        let _ = app.emit(
-                            "chat-usage",
-                            json!({
-                                "prompt_tokens": prompt_tokens,
-                                "completion_tokens": completion_tokens,
-                                "total_tokens": total_tokens,
-                                "max_tokens": opts.usage_max_tokens,
-                                "usage_ratio": usage_ratio
-                            }),
-                        );
-                    }
-                }
-
-                let Some(choice) = parsed["choices"].get(0) else {
-                    continue;
-                };
-                let delta = &choice["delta"];
-
-                if let Some(fr) = choice["finish_reason"].as_str() {
-                    if !fr.is_empty() {
-                        finish_reason = fr.to_string();
-                        if fr == "tool_calls" {
-                            got_tool_calls = true;
-                        }
-                    }
-                }
-
-                // DeepSeek/Qwen reasoning tokens — main agent only
-                if opts.emit_reasoning {
-                    if let Some(reasoning) = delta.get("reasoning_content").and_then(|v| v.as_str()) {
-                        let _ = app.emit("chat-reasoning-token", reasoning.to_string());
-                    }
-                }
-
-                // Accumulate streamed tool call chunks by index
-                if let Some(tcs) = delta["tool_calls"].as_array() {
-                    for tc in tcs {
-                        let idx = tc["index"].as_u64().unwrap_or(0) as usize;
-                        while tool_calls.len() <= idx {
-                            tool_calls.push((String::new(), String::new(), String::new()));
-                        }
-                        if let Some(id) = tc["id"].as_str() {
-                            tool_calls[idx].0 = id.to_string();
-                        }
-                        if let Some(name) = tc["function"]["name"].as_str() {
-                            tool_calls[idx].1 = name.to_string();
-                        }
-                        if let Some(args) = tc["function"]["arguments"].as_str() {
-                            tool_calls[idx].2.push_str(args);
-                        }
-                    }
-                }
-
-                // Emit content token
-                if let Some(token) = delta["content"].as_str() {
-                    content.push_str(token);
-                    if let Some(task_id) = opts.task_id {
-                        let _ = app.emit(
-                            opts.token_event,
-                            json!({ "task_id": task_id, "token": token }),
-                        );
-                    } else {
-                        let _ = app.emit(opts.token_event, token.to_string());
-                    }
+        let trailing_line = buffer.trim();
+        if !trailing_line.is_empty() && trailing_line != "data: [DONE]" {
+            if let Some(json_str) = trailing_line.strip_prefix("data: ") {
+                if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
+                    process_stream_chunk(
+                        app,
+                        &parsed,
+                        &opts,
+                        &mut finish_reason,
+                        &mut tool_calls,
+                        &mut content,
+                        &mut prompt_tokens,
+                        &mut completion_tokens,
+                        &mut got_tool_calls,
+                    );
                 }
             }
         }
@@ -973,7 +1022,7 @@ pub async fn chat_completion(
             req_body["reasoning_effort"] = json!(config.model_settings.reasoning_effort);
         }
         if let Some(max_tokens) = config.model_settings.max_tokens {
-            req_body["max_tokens"] = json!(max_tokens);
+            apply_completion_token_limit(&mut req_body, max_tokens);
         }
 
         let started_at = std::time::Instant::now();

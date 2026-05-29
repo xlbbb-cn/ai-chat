@@ -359,22 +359,31 @@ async fn fetch_models(state: State<'_, AppState>) -> Result<Vec<String>, String>
     let config = state.config.lock().unwrap().clone();
     let url = format!("{}/models", config.api_base_url.trim_end_matches('/'));
 
-    let client = reqwest::Client::new();
+    let client = llm_complete::build_http_client()?;
     let res = client
         .get(&url)
+        .header(reqwest::header::ACCEPT, "application/json")
         .bearer_auth(config.api_key)
         .send()
         .await
         .map_err(|e| e.to_string())?;
 
     if !res.status().is_success() {
-        return Err(res
+        let body = res
             .text()
             .await
-            .unwrap_or_else(|_| "failed to fetch models".to_string()));
+            .unwrap_or_else(|_| "failed to fetch models".to_string());
+        return Err(llm_complete::extract_upstream_error_message(&body));
     }
 
     let body: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+    if let Some(object_type) = body.get("object").and_then(|v| v.as_str()) {
+        if object_type != "list" {
+            return Err(format!(
+                "Invalid models response: expected object='list', got '{object_type}'"
+            ));
+        }
+    }
     let models = body
         .get("data")
         .and_then(|v| v.as_array())

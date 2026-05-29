@@ -8,7 +8,10 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
 use crate::{
-    llm_complete::{stream_llm_request, StreamOptions},
+    llm_complete::{
+        apply_completion_token_limit, extract_upstream_error_message, stream_llm_request,
+        StreamOptions,
+    },
     tools, AppConfig, AppState,
 };
 
@@ -796,11 +799,11 @@ async fn call_llm_once(
     model: &str,
     max_tokens: u32,
 ) -> Result<String, String> {
-    let body = json!({
+    let mut body = json!({
         "model": model,
-        "max_tokens": max_tokens,
         "messages": messages,
     });
+    apply_completion_token_limit(&mut body, max_tokens);
     let res = client
         .post(url)
         .bearer_auth(api_key)
@@ -810,7 +813,8 @@ async fn call_llm_once(
         .map_err(|e| e.to_string())?;
 
     if !res.status().is_success() {
-        return Err(res.text().await.unwrap_or_default());
+        let body = res.text().await.unwrap_or_default();
+        return Err(extract_upstream_error_message(&body));
     }
     let parsed: Value = res.json().await.map_err(|e| e.to_string())?;
     Ok(parsed["choices"][0]["message"]["content"]
@@ -1494,11 +1498,11 @@ pub async fn run_sub_agent(
 
         let mut req_body = json!({
             "model": model,
-            "max_tokens": max_tokens,
             "messages": messages,
             "stream": true,
             "stream_options": { "include_usage": true },
         });
+        apply_completion_token_limit(&mut req_body, max_tokens);
         if let Some(temp) = agent.temperature {
             req_body["temperature"] = json!(temp);
         }
@@ -1788,13 +1792,13 @@ async fn aggregate_results(
         }),
     ];
 
-    let req_body = json!({
+    let mut req_body = json!({
         "model": model,
-        "max_tokens": 4096,
         "messages": agg_messages,
         "stream": true,
         "stream_options": { "include_usage": true },
     });
+    apply_completion_token_limit(&mut req_body, 4096);
 
     let cancelled = AtomicBool::new(false);
     let sr = stream_llm_request(

@@ -185,7 +185,7 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
           </label>
           <div className="agent-editor-row">
             <label style={{ flex: 1 }}>
-              Max tokens
+              Max completion tokens
               <input
                 type="number"
                 min={512}
@@ -194,7 +194,7 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
                 onChange={(e) =>
                   setEditing({ ...editing, max_tokens: e.target.value ? Number(e.target.value) : undefined })
                 }
-                placeholder="Default 8192"
+                placeholder="Default completion limit 8192"
               />
             </label>
             <label style={{ flex: 1 }}>
