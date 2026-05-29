@@ -1326,15 +1326,11 @@ pub async fn run_sub_agent(
             "\n\nSelf-evolution mode is enabled for this task.\n\
              You may inspect and update reusable skills under these roots when it helps the task:\n\
              {roots}\n\
-             You may also optimize the sub-agent config file at:\n\
-             {}\n\
-             Before modifying any skill file or the sub-agent config file, create a sibling backup with suffix `.bak.<number>`.\n\
+             Workspace remains the default search root. Only access skill-owned files when the task explicitly requires them.\n\
+             When you intentionally access skill-owned files, use explicit prefixes such as `skills/<skill_name>/...` or `app_data/skills/<skill_name>/...`. Do not use ambiguous relative paths for skill data.\n\
+             Before modifying any skill file, create a sibling backup with suffix `.bak.<number>`.\n\
              Use `file_actions` for these edits so backup creation is enforced automatically.\n\
-             Prefer absolute paths for protected files.",
-            protected_evolution_files
-                .first()
-                .map(|path| path.display().to_string())
-                .unwrap_or_default()
+             Reuse exact returned paths when you operate inside a skill root."
         )
     };
 

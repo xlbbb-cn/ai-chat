@@ -710,7 +710,7 @@ pub async fn chat_completion(
 
     let os_info = os_info::get();
     let os_sys_msg = format!(
-        "System information:\n- OS: {} {}\n- CPU: {:?}\n\nCRITICAL DIRECTIVES:\n1. For all file operations, you MUST only operate with the workspace as the root directory. Operating on other external directories is strictly PROHIBITED.\n2. For all 'run_cmd' and 'run_shell' tool executions, your first step MUST be to switch to the workspace directory (`cd <workspace>`) before executing further commands.\n3. Except for explicitly provided absolute paths in skills, everything MUST use the workspace directory as the root.",
+        "System information:\n- OS: {} {}\n- CPU: {:?}\n\nCRITICAL DIRECTIVES:\n1. For all file operations, you MUST treat the workspace as the default and primary root directory. Operating on other external directories is strictly PROHIBITED.\n2. For all 'run_cmd' and 'run_shell' tool executions, your first step MUST be to switch to the workspace directory (`cd <workspace>`) before executing further commands.\n3. Unless you explicitly intend to access a skill-owned file and provide an explicit skill path prefix, all file paths MUST be interpreted relative to the workspace directory.\n4. Never guess that a file might be inside a skill directory. If the path does not explicitly indicate a skill location, search only inside the workspace.",
         os_info.os_type(),
         os_info.version(),
         os_info.architecture()
@@ -764,7 +764,8 @@ pub async fn chat_completion(
         let skills_sys_msg = format!(
             "You have access to the following skills. You currently only see their descriptions. \
             If you decide that a skill is relevant to the user's request, you MUST call the `use_skill` \
-            tool with the skill's name to load its detailed instructions. Once loaded, the instructions will be appended as a dedicated context message for the rest of the session.\n\n\
+            tool with the skill's name to load its detailed instructions. Once loaded, the instructions will be appended as a dedicated context message for the rest of the session.\n\
+            Do not call `use_skill` speculatively. Load a skill only when the user request clearly needs that skill's domain knowledge or files.\n\n\
             Available skills:\n{}",
             available_skills_info
         );
@@ -823,10 +824,9 @@ pub async fn chat_completion(
                  - When it directly helps the user's request, you may improve existing skills or create new ones for future reuse.\n\
                  - Before modifying any skill file, create a sibling backup with suffix `.bak.<number>`.\n\
                  - Use `file_actions` for these edits so backup creation is enforced automatically.\n\
-                 - Prefer absolute paths when working in skill roots to avoid ambiguity with workspace files.\n\
-                 - For reading skill-owned reference data stored under app-managed skills, you may also use paths like `app_data/skills/<skill_name>/...`.\n\
+                 - Workspace remains the default search root. Only access a skill root when the task explicitly requires skill-owned files.\n\
+                 - When you intentionally access a skill root, use an explicit path prefix such as `skills/<skill_name>/...` for workspace skills or `app_data/skills/<skill_name>/...` for app-managed skills. Ambiguous relative paths such as `ref/index.md` stay in the workspace and do not search skill roots.\n\
                  - If you read or list a file inside a skill root, reuse that exact returned path when patching or writing it.\n\
-                 - If you use a relative path that starts with a skill root directory name (for example `skills/demo/skill.md` or `.skills/demo/skill.md`), treat it as a path inside that skill root, not inside the workspace.\n\
                  - Unless the user explicitly asks otherwise, do not access paths outside the workspace root or these skill roots."
             )
         }));
@@ -861,12 +861,12 @@ pub async fn chat_completion(
                 - The workspace root directory (absolute path on this machine) is: {workspace_root_display}\n\
                 - Active skill root directories are:\n\
                 {active_skill_roots_display}\n\
+                - Default rule: if a path is not explicitly marked as a skill path, it belongs to the workspace root.\n\
                 - For workspace files, use paths relative to the workspace root (e.g. \"src/foo.txt\").\n\
-                - For skill reference files (e.g. \"ref/index.md\"), you may use a relative path; backend resolves existing files under workspace root first, then active skill roots.\n\
-                - For app-managed skill data, reads may also use the virtual prefix `app_data/skills/<skill_name>/...`.\n\
+                - Only when you intentionally need skill-owned files, use an explicit skill path prefix: `skills/<skill_name>/...` for workspace skills, `app_data/skills/<skill_name>/...` for app-managed skills, or an exact absolute path returned by a previous tool call.\n\
+                - Do not use ambiguous relative paths such as \"ref/index.md\" for skill data. Those paths stay in the workspace and will not search skill roots.\n\
                 - When you read a file from a skill root, write back to that same skill-root path instead of recreating it under the workspace root.\n\
-                - Relative paths that begin with a skill root directory name (for example \"skills/demo/skill.md\") are interpreted as belonging to that skill root.\n\
-                - You may also provide an absolute path under the workspace root or any active skill root; backend will strip the matched root prefix automatically.\n\
+                - You may also provide an exact absolute path under the workspace root or an active skill root; backend will strip the matched root prefix automatically.\n\
                 - Except for explicitly requested paths, you MUST NOT access any file or directory outside workspace root or active skill roots.\n\
                 - Operating on paths outside these roots is STRICTLY FORBIDDEN.\n\n\
                 The following skills are CURRENTLY ACTIVE and their detailed instructions are provided below:{}",
@@ -940,7 +940,7 @@ pub async fn chat_completion(
             "type": "function",
             "function": {
                 "name": "use_skill",
-                "description": "Load detailed instructions for a specific skill. You MUST call this before using a skill's capabilities.",
+                "description": "Load detailed instructions for a specific skill. Call this only when the current request clearly requires that skill's domain knowledge or files. Do not load skills speculatively.",
                 "parameters": {
                     "type": "object",
                     "properties": {

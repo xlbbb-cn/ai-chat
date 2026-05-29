@@ -681,7 +681,7 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "file_actions",
-                "description": "Perform file operations. CRITICAL: Writes are restricted to the workspace root. Active skill directories are read-only reference roots, and only workspace/skills becomes writable when self-evolution mode is enabled. Changes to protected files create automated backups.",
+                "description": "Perform file operations. CRITICAL: Workspace is the default read and write root. Writes are restricted to the workspace root. Active skill directories are read-only reference roots, and skill reads should use explicit prefixes such as `skills/<skill_name>/...` or `app_data/skills/<skill_name>/...` instead of ambiguous relative paths. Only workspace/skills becomes writable when self-evolution mode is enabled. Changes to protected files create automated backups.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -692,7 +692,7 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
                         },
                         "path": {
                             "type": "string",
-                            "description": "Relative path to the file or directory. Use '.' for root when listing or searching."
+                            "description": "Path to the file or directory. By default this is relative to the workspace root. Only use explicit skill prefixes such as 'skills/<skill_name>/...' or 'app_data/skills/<skill_name>/...' when you intentionally want to access skill-owned data. Use '.' for root when listing or searching."
                         },
                         "new_path": {
                             "type": "string",
@@ -1122,6 +1122,58 @@ fn resolve_safe_path_with_roots(
     resolve_safe_path(primary_root, input_path).map(|p| (p, primary_root.to_path_buf()))
 }
 
+fn is_explicit_app_data_skill_path(input_path: &str) -> bool {
+    let mut components = Path::new(input_path)
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(segment) => Some(segment),
+            _ => None,
+        });
+
+    matches!(
+        (components.next(), components.next(), components.next()),
+        (Some(first), Some(second), Some(_third))
+            if first == std::ffi::OsStr::new("app_data")
+                && second == std::ffi::OsStr::new("skills")
+    )
+}
+
+fn resolve_workspace_read_path(
+    workspace_root: &Path,
+    input_path: &str,
+    require_exists: bool,
+) -> Result<(PathBuf, PathBuf), String> {
+    let resolved = resolve_safe_path(workspace_root, input_path)?;
+    if require_exists && !resolved.exists() {
+        return Err(format!(
+            "Path '{}' was not found under workspace root '{}'",
+            input_path,
+            workspace_root.display()
+        ));
+    }
+
+    Ok((resolved, workspace_root.to_path_buf()))
+}
+
+fn resolve_read_path(
+    workspace_root: &Path,
+    readable_skill_roots: &[PathBuf],
+    input_path: &str,
+    require_exists: bool,
+) -> Result<(PathBuf, PathBuf), String> {
+    let input = Path::new(input_path);
+    if input.is_absolute() || is_explicit_app_data_skill_path(input_path) {
+        return resolve_safe_path_with_roots(
+            workspace_root,
+            readable_skill_roots,
+            input_path,
+            require_exists,
+        );
+    }
+
+    resolve_workspace_read_path(workspace_root, input_path, require_exists)
+}
+
 fn normalize_path_for_comparison(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
@@ -1295,6 +1347,7 @@ mod tests {
     use super::OutputDecodeHint;
     use super::SearchOptions;
     use super::run_integrated_search;
+    use super::resolve_read_path;
     use super::resolve_safe_path_with_roots;
     use super::validate_shell_working_directory_changes;
     use std::fs;
@@ -1375,6 +1428,29 @@ mod tests {
 
         assert_eq!(normalize(&resolved.0), normalize(&skill_file));
         assert_eq!(normalize(&resolved.1), normalize(&skill_root));
+
+        let _ = fs::remove_dir_all(&workspace_root);
+        let _ = fs::remove_dir_all(&app_data_root);
+    }
+
+    #[test]
+    fn ambiguous_relative_read_path_does_not_fallback_to_skill_root() {
+        let workspace_root = make_temp_dir("workspace");
+        let app_data_root = make_temp_dir("app-data");
+        let skill_root = app_data_root.join("skills").join("demo");
+        let skill_file = skill_root.join("ref").join("index.md");
+        fs::create_dir_all(skill_file.parent().unwrap()).unwrap();
+        fs::write(&skill_file, "content").unwrap();
+
+        let err = resolve_read_path(
+            &workspace_root,
+            std::slice::from_ref(&skill_root),
+            "ref/index.md",
+            true,
+        )
+        .unwrap_err();
+
+        assert!(err.contains("workspace root"));
 
         let _ = fs::remove_dir_all(&workspace_root);
         let _ = fs::remove_dir_all(&app_data_root);
@@ -1998,18 +2074,10 @@ pub async fn execute_tool(
             let root_dir = workspace_dir.clone();
             let resolve_read_path = |input: &str, require_exists: bool| {
                 resolve_safe_explicit_file(input, protected_exact_files)
-                    .or_else(|| {
-                        resolve_safe_path_with_roots(
-                            &root_dir,
-                            readable_skill_roots,
-                            input,
-                            require_exists,
-                        )
-                        .ok()
-                    })
+                    .or_else(|| resolve_read_path(&root_dir, readable_skill_roots, input, require_exists).ok())
                     .ok_or_else(|| {
                         format!(
-                            "Path '{}' was not found under workspace root '{}' or any allowed self-evolution target",
+                            "Path '{}' was not found under workspace root '{}' or any explicit skill path",
                             input,
                             root_dir.display()
                         )
