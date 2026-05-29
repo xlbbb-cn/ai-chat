@@ -1201,7 +1201,7 @@ pub async fn chat_completion(
                             "content": skill_context
                         }));
                         let _ = app.emit(
-                            "chat-token",
+                            "tool-call",
                             format!("🧠 *Loading skill: {}*\n\n", skill_name),
                         );
                         format!("Skill '{}' detailed instructions have been successfully loaded and appended to context messages. You can now follow its instructions to fulfill the user's request. There is no need to call use_skill for this skill again.", skill_name)
@@ -1266,7 +1266,7 @@ pub async fn chat_completion(
                     format!("Args for MCP tool '{}': {}", actual_tool_name, args_json),
                 );
                 let _ = app.emit(
-                    "chat-token",
+                    "tool-call",
                     format!("🔌 *MCP [{}]: {}*\n\n", mcp_server.name, actual_tool_name),
                 );
                 let start_time = std::time::Instant::now();

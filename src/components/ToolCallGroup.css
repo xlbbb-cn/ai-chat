@@ -1,0 +1,209 @@
+.tool-call-group {
+  align-self: flex-start;
+  max-width: 80%;
+  min-width: 200px;
+  border: 1px solid var(--c-border);
+  border-radius: 6px;
+  background: var(--c-surface);
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+  overflow: hidden;
+}
+
+.tool-call-group--running {
+  border-color: #22c55e;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.18), 0 0 12px rgba(34, 197, 94, 0.12);
+  animation: tool-group-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes tool-group-pulse {
+
+  0%,
+  100% {
+    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.18), 0 0 12px rgba(34, 197, 94, 0.12);
+  }
+
+  50% {
+    box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.30), 0 0 20px rgba(34, 197, 94, 0.22);
+  }
+}
+
+.tool-call-group-details {
+  width: 100%;
+}
+
+.tool-call-group-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 13px;
+  color: var(--c-muted);
+  list-style: none;
+}
+
+.tool-call-group-summary::-webkit-details-marker {
+  display: none;
+}
+
+.tool-call-group-details[open] .tool-call-group-summary {
+  border-bottom: 1px solid var(--c-border);
+}
+
+/* Spinning/static indicator dot */
+.tool-call-group-indicator {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c-muted);
+  opacity: 0.5;
+  transition: background 0.3s ease, opacity 0.3s ease;
+}
+
+.tool-call-group-indicator.running {
+  background: #22c55e;
+  opacity: 1;
+  animation: tool-dot-spin 1s linear infinite;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: #22c55e;
+  background: transparent;
+  box-shadow: 0 0 0 1.5px rgba(34, 197, 94, 0.3);
+  width: 10px;
+  height: 10px;
+}
+
+@keyframes tool-dot-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.tool-call-group-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+  color: var(--c-text);
+}
+
+.tool-call-group-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--c-muted);
+  background: var(--c-hover);
+  border-radius: 999px;
+  padding: 2px 7px;
+}
+
+/* Expand chevron via ::before on summary */
+.tool-call-group-summary::before {
+  content: "›";
+  flex-shrink: 0;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--c-muted);
+  transition: transform 0.2s ease;
+  transform: rotate(0deg);
+  margin-left: auto;
+  order: 99;
+}
+
+.tool-call-group-details[open] .tool-call-group-summary::before {
+  transform: rotate(90deg);
+}
+
+/* Entry list */
+.tool-call-group-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px 0;
+}
+
+.tool-call-entry {
+  display: grid;
+  grid-template-columns: 16px auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 8px;
+  row-gap: 1px;
+  align-items: start;
+  padding: 6px 12px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.tool-call-entry+.tool-call-entry {
+  border-top: 1px solid var(--c-border);
+}
+
+.tool-call-entry-icon {
+  grid-row: 1;
+  grid-column: 1;
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.tool-call-entry--running .tool-call-entry-icon {
+  color: #22c55e;
+  animation: spin-icon 1s linear infinite;
+  display: inline-block;
+}
+
+@keyframes spin-icon {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.tool-call-entry--done .tool-call-entry-icon {
+  color: #22c55e;
+}
+
+.tool-call-entry--error .tool-call-entry-icon {
+  color: #ef4444;
+}
+
+.tool-call-entry-name {
+  grid-row: 1;
+  grid-column: 2;
+  font-weight: 600;
+  color: var(--c-muted);
+  white-space: nowrap;
+}
+
+.tool-call-entry-desc {
+  grid-row: 1;
+  grid-column: 3;
+  color: var(--c-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-call-entry-summary,
+.tool-call-entry-error {
+  grid-row: 2;
+  grid-column: 2 / -1;
+  font-size: 11px;
+  color: var(--c-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-call-entry-error {
+  color: #ef4444;
+}

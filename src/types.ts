@@ -1,9 +1,19 @@
+export interface ToolCallEntry {
+  task_id: string;
+  agent_name: string;
+  description: string;
+  status: "running" | "done" | "error";
+  summary?: string;
+  error?: string;
+}
+
 export interface Message {
   id: string;
-  role: "user" | "assistant" | "system";
+  role: "user" | "assistant" | "system" | "tool_group";
   content: string;
   reasoning_content?: string;
   streaming?: boolean;
+  tool_calls?: ToolCallEntry[];
 }
 
 export interface AppConfig {

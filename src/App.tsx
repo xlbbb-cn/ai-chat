@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { chatCompletion, getConfig, getAgentOrchestration, listMcpServers, listSubAgents, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile } from "./api";
 
 import { ChatMessage } from "./components/ChatMessage";
+import { ToolCallGroup } from "./components/ToolCallGroup";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { SkillsPanel } from "./components/SkillsPanel";
 import { HistoryPanel } from "./components/HistoryPanel";
@@ -10,7 +11,7 @@ import { ToolsPanel } from "./components/ToolsPanel";
 import { McpPanel } from "./components/McpPanel";
 import { AgentsPanel } from "./components/AgentsPanel";
 import { MarkdownPreview } from "./components/MarkdownPreview";
-import type { Message, AgentTaskEvent } from "./types";
+import type { Message, AgentTaskEvent, ToolCallEntry } from "./types";
 import "./App.css";
 
 type Sidebar = "settings" | "skills" | "history" | "tools" | "mcp" | "agents" | null;
@@ -82,6 +83,8 @@ export default function App() {
   const cleanupRef = useRef<(() => void) | null>(null);
   const sidebarMotionTimerRef = useRef<number | null>(null);
   const themeRef = useRef<"auto" | "light" | "dark">("auto");
+  const currentToolGroupIdRef = useRef<string | null>(null);
+  const hasRunningToolCallRef = useRef(false);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -384,64 +387,194 @@ export default function App() {
           ...prev,
           [agent_id]: { status: "running", description },
         }));
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `agent-progress-${task_id}`,
-            role: "system" as const,
-            content: `🤖 **[${agent_name}]** 正在执行: ${description ?? ""}`,
-          },
-        ]);
-      }),
-      listen<AgentTaskEvent>("agent-task-done", (e) => {
-        const { agent_id, agent_name, summary, task_id } = e.payload;
-        setAgentStatuses((prev) => ({
-          ...prev,
-          [agent_id]: { status: "done", summary: summary ?? "" },
-        }));
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === `agent-progress-${task_id}`
-              ? { ...m, content: `✅ **[${agent_name}]** 完成` }
-              : m
-          )
-        );
-      }),
-      listen<AgentTaskEvent>("agent-task-error", (e) => {
-        const { agent_id, agent_name, error, task_id } = e.payload;
-        setAgentStatuses((prev) => ({
-          ...prev,
-          [agent_id]: { status: "error", error: error ?? "" },
-        }));
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === `agent-progress-${task_id}`
-              ? { ...m, content: `❌ **[${agent_name}]** 失败: ${error}` }
-              : m
-          )
-        );
-      }),
-      listen("agent-plan-start", (e: { payload: { task_count: number } }) => {
-        if (e.payload.task_count > 0) {
+        const entry: ToolCallEntry = {
+          task_id,
+          agent_name,
+          description: description ?? "",
+          status: "running",
+        };
+        if (currentToolGroupIdRef.current) {
+          const groupId = currentToolGroupIdRef.current;
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === groupId
+                ? { ...m, tool_calls: [...(m.tool_calls ?? []), entry] }
+                : m
+            )
+          );
+        } else {
+          const groupId = `tool-group-${crypto.randomUUID()}`;
+          currentToolGroupIdRef.current = groupId;
           setMessages((prev) => [
             ...prev,
             {
-              id: "agent-progress-plan",
-              role: "system" as const,
-              content: `🗂 **规划完成** — 共 ${e.payload.task_count} 个任务`,
+              id: groupId,
+              role: "tool_group" as const,
+              content: "",
+              tool_calls: [entry],
             },
           ]);
         }
       }),
-      listen("agent-aggregate-start", () => {
-        setMessages((prev) => [
+      listen<AgentTaskEvent>("agent-task-done", (e) => {
+        const { agent_id, summary, task_id } = e.payload;
+        setAgentStatuses((prev) => ({
           ...prev,
-          {
-            id: "agent-progress-aggregate",
-            role: "system" as const,
-            content: `📝 **正在汇总所有子任务结果...**`,
-          },
-        ]);
+          [agent_id]: { status: "done", summary: summary ?? "" },
+        }));
+        const groupId = currentToolGroupIdRef.current;
+        if (groupId) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === groupId
+                ? {
+                    ...m,
+                    tool_calls: (m.tool_calls ?? []).map((entry) =>
+                      entry.task_id === task_id
+                        ? { ...entry, status: "done" as const, summary: summary ?? undefined }
+                        : entry
+                    ),
+                  }
+                : m
+            )
+          );
+        }
+      }),
+      listen<AgentTaskEvent>("agent-task-error", (e) => {
+        const { agent_id, error, task_id } = e.payload;
+        setAgentStatuses((prev) => ({
+          ...prev,
+          [agent_id]: { status: "error", error: error ?? "" },
+        }));
+        const groupId = currentToolGroupIdRef.current;
+        if (groupId) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === groupId
+                ? {
+                    ...m,
+                    tool_calls: (m.tool_calls ?? []).map((entry) =>
+                      entry.task_id === task_id
+                        ? { ...entry, status: "error" as const, error: error ?? undefined }
+                        : entry
+                    ),
+                  }
+                : m
+            )
+          );
+        }
+      }),
+      listen("agent-plan-start", (e: { payload: { task_count: number } }) => {
+        if (e.payload.task_count > 0) {
+          const entry: ToolCallEntry = {
+            task_id: `plan-${Date.now()}`,
+            agent_name: "Planner",
+            description: `规划完成 — 共 ${e.payload.task_count} 个任务`,
+            status: "done",
+          };
+          if (currentToolGroupIdRef.current) {
+            const groupId = currentToolGroupIdRef.current;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === groupId
+                  ? { ...m, tool_calls: [...(m.tool_calls ?? []), entry] }
+                  : m
+              )
+            );
+          } else {
+            const groupId = `tool-group-${crypto.randomUUID()}`;
+            currentToolGroupIdRef.current = groupId;
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: groupId,
+                role: "tool_group" as const,
+                content: "",
+                tool_calls: [entry],
+              },
+            ]);
+          }
+        }
+      }),
+      listen("agent-aggregate-start", () => {
+        const entry: ToolCallEntry = {
+          task_id: `aggregate-${Date.now()}`,
+          agent_name: "Aggregator",
+          description: "正在汇总所有子任务结果...",
+          status: "running",
+        };
+        if (currentToolGroupIdRef.current) {
+          const groupId = currentToolGroupIdRef.current;
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === groupId
+                ? { ...m, tool_calls: [...(m.tool_calls ?? []), entry] }
+                : m
+            )
+          );
+        } else {
+          const groupId = `tool-group-${crypto.randomUUID()}`;
+          currentToolGroupIdRef.current = groupId;
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: groupId,
+              role: "tool_group" as const,
+              content: "",
+              tool_calls: [entry],
+            },
+          ]);
+        }
+      }),
+      listen<string>("tool-call", (e) => {
+        const text = e.payload;
+        // Parse label from *italics* and optional code block detail
+        const firstLine = text.split('\n')[0];
+        const labelMatch = firstLine.match(/\*(.+?)\*/);
+        const label = labelMatch ? labelMatch[1] : firstLine.replace(/[*]/g, '').trim();
+        const codeMatch = text.match(/```(?:\w+)?\n([\s\S]+?)\n```/);
+        const detail = codeMatch ? codeMatch[1].trim() : undefined;
+
+        const entry: ToolCallEntry = {
+          task_id: crypto.randomUUID(),
+          agent_name: "Tool",
+          description: label,
+          status: "running",
+          summary: detail,
+        };
+
+        if (currentToolGroupIdRef.current) {
+          const groupId = currentToolGroupIdRef.current;
+          // Mark any currently running entries as done, add the new one
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === groupId
+                ? {
+                    ...m,
+                    tool_calls: [
+                      ...(m.tool_calls ?? []).map((tc) =>
+                        tc.status === "running" ? { ...tc, status: "done" as const } : tc
+                      ),
+                      entry,
+                    ],
+                  }
+                : m
+            )
+          );
+        } else {
+          const groupId = `tool-group-${crypto.randomUUID()}`;
+          currentToolGroupIdRef.current = groupId;
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: groupId,
+              role: "tool_group" as const,
+              content: "",
+              tool_calls: [entry],
+            },
+          ]);
+        }
+        hasRunningToolCallRef.current = true;
       }),
     );
     return () => {
@@ -473,7 +606,7 @@ export default function App() {
     setError(null);
 
     const history = [...messages, userMsg]
-      .filter((m) => !m.streaming && !m.id.startsWith("agent-progress-"))
+      .filter((m) => !m.streaming && !m.id.startsWith("agent-progress-") && m.role !== "tool_group")
       .map((m) => ({ role: m.role, content: m.content }));
 
     saveHistory(sessionId, "user", text);
@@ -484,10 +617,21 @@ export default function App() {
     const cleanup = await chatCompletion(history, activeSkillIds, sessionId, selectedModel, {
       onToken(token) {
         accumulatedContent += token;
+        const shouldMarkDone = hasRunningToolCallRef.current;
+        if (shouldMarkDone) hasRunningToolCallRef.current = false;
         setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId ? { ...m, content: accumulatedContent } : m
-          )
+          prev.map((m) => {
+            if (m.id === assistantId) return { ...m, content: accumulatedContent };
+            if (shouldMarkDone && m.role === "tool_group" && m.id === currentToolGroupIdRef.current) {
+              return {
+                ...m,
+                tool_calls: (m.tool_calls ?? []).map((e) =>
+                  e.status === "running" ? { ...e, status: "done" as const } : e
+                ),
+              };
+            }
+            return m;
+          })
         );
       },
       onReasoningToken(token) {
@@ -504,13 +648,26 @@ export default function App() {
           : accumulatedContent;
 
         saveHistory(sessionId, "assistant", finalContentToSave);
-        // Remove all agent progress system messages and finalize assistant message
+        // Remove legacy agent-progress messages; mark any remaining running tool-calls as done
         setMessages((prev) =>
           prev
             .filter((m) => !m.id.startsWith("agent-progress-"))
-            .map((m) => (m.id === assistantId ? { ...m, streaming: false } : m))
+            .map((m) => {
+              if (m.id === assistantId) return { ...m, streaming: false };
+              if (m.role === "tool_group" && m.tool_calls?.some((e) => e.status === "running")) {
+                return {
+                  ...m,
+                  tool_calls: m.tool_calls.map((e) =>
+                    e.status === "running" ? { ...e, status: "done" as const } : e
+                  ),
+                };
+              }
+              return m;
+            })
         );
         setAgentStatuses({});
+        hasRunningToolCallRef.current = false;
+        currentToolGroupIdRef.current = null;
         setStreaming(false);
         cleanupRef.current = null;
       },
@@ -527,6 +684,8 @@ export default function App() {
         );
         setPendingRetryMessageId(userMsg.id);
         setAgentStatuses({});
+        hasRunningToolCallRef.current = false;
+        currentToolGroupIdRef.current = null;
         setStreaming(false);
         cleanupRef.current = null;
       },
@@ -546,7 +705,7 @@ export default function App() {
     setError(null);
 
     const history = [...messages]
-      .filter((m) => !m.streaming && !m.id.startsWith("agent-progress-"))
+      .filter((m) => !m.streaming && !m.id.startsWith("agent-progress-") && m.role !== "tool_group")
       .map((m) => ({ role: m.role, content: m.content }));
 
     let accumulatedContent = "";
@@ -555,10 +714,21 @@ export default function App() {
     const cleanup = await chatCompletion(history, activeSkillIds, sessionId, selectedModel, {
       onToken(token) {
         accumulatedContent += token;
+        const shouldMarkDone = hasRunningToolCallRef.current;
+        if (shouldMarkDone) hasRunningToolCallRef.current = false;
         setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId ? { ...m, content: accumulatedContent } : m
-          )
+          prev.map((m) => {
+            if (m.id === assistantId) return { ...m, content: accumulatedContent };
+            if (shouldMarkDone && m.role === "tool_group" && m.id === currentToolGroupIdRef.current) {
+              return {
+                ...m,
+                tool_calls: (m.tool_calls ?? []).map((e) =>
+                  e.status === "running" ? { ...e, status: "done" as const } : e
+                ),
+              };
+            }
+            return m;
+          })
         );
       },
       onReasoningToken(token) {
@@ -582,6 +752,7 @@ export default function App() {
         );
         setPendingRetryMessageId(null);
         setAgentStatuses({});
+        currentToolGroupIdRef.current = null;
         setStreaming(false);
         cleanupRef.current = null;
       },
@@ -597,6 +768,8 @@ export default function App() {
             )
         );
         setAgentStatuses({});
+        hasRunningToolCallRef.current = false;
+        currentToolGroupIdRef.current = null;
         setStreaming(false);
         cleanupRef.current = null;
       },
@@ -1027,14 +1200,18 @@ export default function App() {
               </p>
             </div>
           )}
-          {messages.map((m) => (
-            <ChatMessage
-              key={m.id}
-              message={m}
-              showRetry={m.role === "user" && m.id === pendingRetryMessageId && !streaming}
-              onRetry={retryPendingUserMessage}
-            />
-          ))}
+          {messages.map((m) =>
+            m.role === "tool_group" ? (
+              <ToolCallGroup key={m.id} message={m} />
+            ) : (
+              <ChatMessage
+                key={m.id}
+                message={m}
+                showRetry={m.role === "user" && m.id === pendingRetryMessageId && !streaming}
+                onRetry={retryPendingUserMessage}
+              />
+            )
+          )}
           {error && <div className="error-banner">{error}</div>}
           <div ref={bottomRef} />
         </div>
