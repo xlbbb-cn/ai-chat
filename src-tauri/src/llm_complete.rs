@@ -67,9 +67,8 @@ const STREAM_MAX_RETRIES: usize = 3;
 const STREAM_RETRY_BACKOFF_MS: [u64; 2] = [300, 900];
 
 fn retry_backoff_ms(attempt: usize) -> u64 {
-    let idx = attempt.saturating_sub(1).min(STREAM_RETRY_BACKOFF_MS.len());
     STREAM_RETRY_BACKOFF_MS
-        .get(idx)
+        .get(attempt.saturating_sub(1))
         .copied()
         .unwrap_or(1500)
 }
@@ -302,6 +301,24 @@ fn merge_summary_lines(existing_summary: Option<&str>, new_lines: &[String]) -> 
     merged.join("\n")
 }
 
+fn rebuild_without_compression(
+    all_messages: &mut Vec<Value>,
+    pinned: Vec<Value>,
+    compressible: Vec<Value>,
+    existing_summary_body: Option<String>,
+) {
+    let mut rebuilt = Vec::with_capacity(pinned.len() + compressible.len() + 1);
+    rebuilt.extend(pinned);
+    rebuilt.extend(compressible);
+    if let Some(body) = existing_summary_body {
+        rebuilt.insert(
+            rebuilt.len().min(1),
+            json!({ "role": "system", "content": format!("{CONTEXT_SUMMARY_MARKER}\n{body}") }),
+        );
+    }
+    *all_messages = rebuilt;
+}
+
 fn compress_session_context(all_messages: &mut Vec<Value>) -> Option<String> {
     if all_messages.len() <= CONTEXT_KEEP_RECENT_MESSAGES + 2 {
         return None;
@@ -329,7 +346,6 @@ fn compress_session_context(all_messages: &mut Vec<Value>) -> Option<String> {
             .unwrap_or(false);
 
         if role == "tool" || has_tool_calls {
-            // Explicitly drop tool invocation context from compression strategy.
             continue;
         }
 
@@ -341,64 +357,31 @@ fn compress_session_context(all_messages: &mut Vec<Value>) -> Option<String> {
     }
 
     if compressible.len() <= CONTEXT_KEEP_RECENT_MESSAGES + 2 {
-        let mut rebuilt = Vec::with_capacity(pinned.len() + compressible.len());
-        rebuilt.extend(pinned);
-        rebuilt.extend(compressible);
-
-        if let Some(existing_summary_body) = existing_summary_body {
-            rebuilt.insert(
-                rebuilt.len().min(1),
-                json!({
-                    "role": "system",
-                    "content": format!("{CONTEXT_SUMMARY_MARKER}\n{existing_summary_body}")
-                }),
-            );
-        }
-
-        *all_messages = rebuilt;
+        rebuild_without_compression(all_messages, pinned, compressible, existing_summary_body);
         return None;
     }
 
-    let split_idx = compressible
-        .len()
-        .saturating_sub(CONTEXT_KEEP_RECENT_MESSAGES);
-    let (older, recent) = compressible.split_at(split_idx);
-
-    let summary_lines: Vec<String> = older
+    let split_idx = compressible.len().saturating_sub(CONTEXT_KEEP_RECENT_MESSAGES);
+    let summary_lines: Vec<String> = compressible[..split_idx]
         .iter()
         .filter_map(summarize_message_for_context)
         .collect();
 
     if summary_lines.is_empty() {
-        let mut rebuilt = Vec::with_capacity(pinned.len() + compressible.len());
-        rebuilt.extend(pinned);
-        rebuilt.extend(compressible);
-
-        if let Some(existing_summary_body) = existing_summary_body {
-            rebuilt.insert(
-                rebuilt.len().min(1),
-                json!({
-                    "role": "system",
-                    "content": format!("{CONTEXT_SUMMARY_MARKER}\n{existing_summary_body}")
-                }),
-            );
-        }
-
-        *all_messages = rebuilt;
+        rebuild_without_compression(all_messages, pinned, compressible, existing_summary_body);
         return None;
     }
 
+    let recent = compressible.split_off(split_idx);
     let merged_summary = merge_summary_lines(existing_summary_body.as_deref(), &summary_lines);
-
     let summary_message = json!({
         "role": "system",
         "content": format!("{CONTEXT_SUMMARY_MARKER}\n{merged_summary}")
     });
-
     let mut rebuilt = Vec::with_capacity(pinned.len() + 1 + recent.len());
     rebuilt.extend(pinned);
     rebuilt.push(summary_message);
-    rebuilt.extend(recent.iter().cloned());
+    rebuilt.extend(recent);
     *all_messages = rebuilt;
     Some(merged_summary)
 }
@@ -710,7 +693,12 @@ pub async fn chat_completion(
 
     let os_info = os_info::get();
     let os_sys_msg = format!(
-        "System information:\n- OS: {} {}\n- CPU: {:?}\n\nCRITICAL DIRECTIVES:\n1. For all file operations, you MUST treat the workspace as the default and primary root directory. Operating on other external directories is strictly PROHIBITED.\n2. For all 'run_cmd' and 'run_shell' tool executions, your first step MUST be to switch to the workspace directory (`cd <workspace>`) before executing further commands.\n3. Workspace paths MUST be written with a `./` prefix such as `./src/App.tsx` or `./package.json`. Do NOT use `workspace/...` as a path prefix.\n4. App-managed skill paths MUST use the explicit prefix `app_data/skills/<skill_name>/...`.\n5. Unless a path explicitly indicates a skill location, search only inside the workspace.",
+        "OS: {} {} ({:?})\n\nPath rules:\n\
+         1. Workspace is the default root; no access to external paths.\n\
+         2. Before shell commands, `cd` to the workspace first.\n\
+         3. Workspace paths: `./src/file.ts` style — never use `workspace/...` prefix.\n\
+         4. App-managed skill paths: `app_data/skills/<name>/...`.\n\
+         5. Non-skill paths resolve inside the workspace only.",
         os_info.os_type(),
         os_info.version(),
         os_info.architecture()
@@ -762,10 +750,8 @@ pub async fn chat_completion(
 
     if !available_skills_info.is_empty() {
         let skills_sys_msg = format!(
-            "You have access to the following skills. You currently only see their descriptions. \
-            If you decide that a skill is relevant to the user's request, you MUST call the `use_skill` \
-            tool with the skill's name to load its detailed instructions. Once loaded, the instructions will be appended as a dedicated context message for the rest of the session.\n\
-            Do not call `use_skill` speculatively. Load a skill only when the user request clearly needs that skill's domain knowledge or files.\n\n\
+            "Available skills (descriptions only). Call `use_skill` with the skill name to load \
+            full instructions — only when the request clearly requires that skill's knowledge or files.\n\n\
             Available skills:\n{}",
             available_skills_info
         );
@@ -817,18 +803,14 @@ pub async fn chat_completion(
         all_messages.push(json!({
             "role": "system",
             "content": format!(
-                "INTERNAL CONTEXT - SELF EVOLUTION MODE (not a user request):\n\
-                 Self-evolution mode is ENABLED.\n\
-                 - You may inspect, create, and update reusable skills under these skill roots:\n\
+                "INTERNAL CONTEXT - SELF EVOLUTION MODE:\n\
+                 Skill roots (inspect/create/update when directly helpful):\n\
                  {skill_roots_display}\n\
-                 - When it directly helps the user's request, you may improve existing skills or create new ones for future reuse.\n\
-                 - Before modifying any skill file, create a sibling backup with suffix `.bak.<number>`.\n\
-                 - Use `file_actions` for these edits so backup creation is enforced automatically.\n\
-                 - Workspace remains the default search root. Only access a skill root when the task explicitly requires skill-owned files.\n\
-                 - Workspace paths must use `./...` and must not use a `workspace/...` prefix.\n\
-                 - When you intentionally access a skill root, use an explicit path prefix such as `./skills/<skill_name>/...` for workspace skills or `app_data/skills/<skill_name>/...` for app-managed skills. Ambiguous relative paths such as `ref/index.md` stay in the workspace and do not search skill roots.\n\
-                 - If you read or list a file inside a skill root, reuse that exact returned path when patching or writing it.\n\
-                 - Unless the user explicitly asks otherwise, do not access paths outside the workspace root or these skill roots."
+                 Rules: use `file_actions` for edits (auto-creates `.bak.<n>` backups); \
+                 workspace is the default root — access skill roots only when task requires it; \
+                 workspace paths use `./...`; skill paths use `./skills/<name>/...` (workspace) \
+                 or `app_data/skills/<name>/...` (app-managed); reuse exact paths returned by tools; \
+                 no access outside workspace or these skill roots."
             )
         }));
     }
@@ -857,21 +839,14 @@ pub async fn chat_completion(
                 .join("\n")
         };
         let active_skills_context = format!(
-               "INTERNAL CONTEXT - ACTIVE SKILLS (not a user request):\n\
-                IMPORTANT SKILL PATH ISOLATION RULE:\n\
-                - The workspace root directory (absolute path on this machine) is: {workspace_root_display}\n\
-                - Active skill root directories are:\n\
-                {active_skill_roots_display}\n\
-                - Default rule: if a path is not explicitly marked as a skill path, it belongs to the workspace root.\n\
-                - Workspace paths must start with `./`, for example `./src/foo.txt`. Do not use `workspace/...`.\n\
-                - Only when you intentionally need skill-owned files, use an explicit skill path prefix: `./skills/<skill_name>/...` for workspace skills, `app_data/skills/<skill_name>/...` for app-managed skills, or an exact absolute path returned by a previous tool call.\n\
-                - Do not write app-managed skill paths as `./app_data/...`; use `app_data/...` directly.\n\
-                - Do not use ambiguous relative paths such as \"ref/index.md\" for skill data. Those paths stay in the workspace and will not search skill roots.\n\
-                - When you read a file from a skill root, write back to that same skill-root path instead of recreating it under the workspace root.\n\
-                - You may also provide an exact absolute path under the workspace root or an active skill root; backend will strip the matched root prefix automatically.\n\
-                - Except for explicitly requested paths, you MUST NOT access any file or directory outside workspace root or active skill roots.\n\
-                - Operating on paths outside these roots is STRICTLY FORBIDDEN.\n\n\
-                The following skills are CURRENTLY ACTIVE and their detailed instructions are provided below:{}",
+            "INTERNAL CONTEXT - ACTIVE SKILLS:\n\
+             Workspace root: {workspace_root_display}\n\
+             Active skill roots:\n{active_skill_roots_display}\n\n\
+             Path rules: workspace paths start with `./`; skill paths use `./skills/<name>/...` \
+             (workspace) or `app_data/skills/<name>/...` (app-managed, never `./app_data/...`); \
+             exact absolute paths also accepted. Reuse paths returned by tools. \
+             No access outside workspace or active skill roots.\n\n\
+             Active skill instructions:{}",
             loaded_skills_content
         );
         all_messages.push(json!({ "role": "user", "content": active_skills_context }));

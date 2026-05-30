@@ -513,7 +513,12 @@ fn build_agent_system_prompt(
     };
 
     format!(
-        "{}\n\nYou are an autonomous execution sub-agent. The LLM context is only a reasoning surface; external mission state is the source of truth for task tracking.\nMission ID: {}\nPrimary task: {}\nContext: {}\n{}\nActive tasks from external state:\n{}\nEpisodic memory summary:\n{}\nRules:\n- Use add_task, update_task_status, get_active_tasks, and mark_mission_accomplished instead of relying on chat history to remember the task list.\n- Keep outputs concise and execution-focused.\n- If work branches, create explicit tasks for the branches.\n- Before finishing, make sure the active task list is empty or intentionally resolved.{}",
+        "{}\n\nAutonomous execution sub-agent. External mission state is authoritative for task tracking.\n\
+         Mission ID: {}\nPrimary task: {}\nContext: {}\n{}\n\
+         Active tasks:\n{}\nEpisodic memory:\n{}\n\
+         Rules: track tasks via add_task/update_task_status/get_active_tasks/mark_mission_accomplished \
+         (not chat history); keep outputs execution-focused; create tasks for branches; \
+         clear active tasks before finishing.{}",
         agent.system_prompt,
         mission.mission_id,
         mission.root_task_description,
@@ -1323,15 +1328,11 @@ pub async fn run_sub_agent(
             .collect::<Vec<_>>()
             .join("\n");
         format!(
-            "\n\nSelf-evolution mode is enabled for this task.\n\
-             You may inspect and update reusable skills under these roots when it helps the task:\n\
-             {roots}\n\
-             Workspace remains the default search root. Only access skill-owned files when the task explicitly requires them.\n\
-             Workspace paths must use `./...` and must not use `workspace/...`.\n\
-             When you intentionally access skill-owned files, use explicit prefixes such as `./skills/<skill_name>/...` or `app_data/skills/<skill_name>/...`. Do not use ambiguous relative paths for skill data.\n\
-             Before modifying any skill file, create a sibling backup with suffix `.bak.<number>`.\n\
-             Use `file_actions` for these edits so backup creation is enforced automatically.\n\
-             Reuse exact returned paths when you operate inside a skill root."
+            "\n\nSelf-evolution: skill roots available:\n{roots}\n\
+             Use `file_actions` for skill edits (auto-creates `.bak.<n>` backups). \
+             Workspace is the default root; use skill paths (`./skills/<name>/...` or \
+             `app_data/skills/<name>/...`) only when the task requires it. \
+             Reuse exact paths returned by tools."
         )
     };
 
