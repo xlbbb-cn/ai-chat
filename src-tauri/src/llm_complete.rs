@@ -693,12 +693,7 @@ pub async fn chat_completion(
 
     let os_info = os_info::get();
     let os_sys_msg = format!(
-        "OS: {} {} ({:?})\n\nPath rules:\n\
-         1. Workspace is the default root; no access to external paths.\n\
-         2. Before shell commands, `cd` to the workspace first.\n\
-         3. Workspace paths: `./src/file.ts` style — never use `workspace/...` prefix.\n\
-         4. App-managed skill paths: `app_data/skills/<name>/...`.\n\
-         5. Non-skill paths resolve inside the workspace only.",
+        "OS: {} {} ({:?})",
         os_info.os_type(),
         os_info.version(),
         os_info.architecture()
@@ -751,7 +746,9 @@ pub async fn chat_completion(
     if !available_skills_info.is_empty() {
         let skills_sys_msg = format!(
             "Available skills (descriptions only). Call `use_skill` with the skill name to load \
-            full instructions — only when the request clearly requires that skill's knowledge or files.\n\n\
+            full instructions — only when the request clearly requires that skill's knowledge or files.\n\
+            Skill files are accessed via `app_data/skills/<name>/...` (app-managed) \
+            or `./skills/<name>/...` (workspace skills); never use `./app_data/...`.\n\n\
             Available skills:\n{}",
             available_skills_info
         );

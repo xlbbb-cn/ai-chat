@@ -681,7 +681,7 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "file_actions",
-                "description": "Perform file operations. CRITICAL: Workspace is the default read and write root, and workspace paths must use the `./...` form instead of `workspace/...`. Writes are restricted to the workspace root. Active skill directories are read-only reference roots, and skill reads should use explicit prefixes such as `./skills/<skill_name>/...` or `app_data/skills/<skill_name>/...` instead of ambiguous relative paths. Only workspace/skills becomes writable when self-evolution mode is enabled. Changes to protected files create automated backups.",
+                "description": "Perform file operations. Path rules: workspace is the default root — always use `./...` form (e.g. `./src/App.tsx`), never `workspace/...`. Writes are restricted to the workspace root. Skill files are read-only references: use `./skills/<name>/...` for workspace skills or `app_data/skills/<name>/...` for app-managed skills — never `./app_data/...`. workspace/skills becomes writable when self-evolution mode is enabled. Changes to protected files create automated backups.",
                 "parameters": {
                     "type": "object",
                     "properties": {
