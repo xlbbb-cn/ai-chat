@@ -312,18 +312,28 @@ fn build_stdio_cmd(server: &McpServer) -> tokio::process::Command {
             || std::path::Path::new(&server.command).is_absolute();
 
         if !is_absolute || is_known_stdio_runtime {
-            // Wrap in cmd /C so that PATH is inherited from the Windows shell
-            let mut args_str = shell_escape_windows(&server.command);
+            // Wrap in PowerShell so that PATH is inherited from the Windows shell
+            // and the console uses UTF-8 for stdin/stdout.
+            let mut args_str = shell_escape_powershell(&server.command);
             for arg in &server.args {
                 args_str.push(' ');
-                args_str.push_str(&shell_escape_windows(arg));
+                args_str.push_str(&shell_escape_powershell(arg));
             }
-            let wrapped = format!("chcp 65001>nul & {args_str}");
-            let mut cmd = tokio::process::Command::new("cmd.exe");
-            cmd.args(["/D", "/S", "/C", &wrapped])
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::null());
+            let wrapped = format!(
+                "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::InputEncoding = [System.Text.Encoding]::UTF8; & {args_str}"
+            );
+            let mut cmd = tokio::process::Command::new("powershell.exe");
+            cmd.args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                &wrapped,
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
             for (k, v) in &server.env {
                 cmd.env(k, v);
             }
@@ -372,11 +382,18 @@ fn build_stdio_cmd(server: &McpServer) -> tokio::process::Command {
     cmd
 }
 
+
 #[cfg(windows)]
-fn shell_escape_windows(s: &str) -> String {
-    // Wrap in double-quotes and escape inner double-quotes
-    if s.contains(' ') || s.contains('"') || s.contains('\t') {
-        format!("\"{}\"", s.replace('"', "\\\""))
+fn shell_escape_powershell(s: &str) -> String {
+    if s.is_empty() {
+        return "''".to_string();
+    }
+    let needs_quotes = s.contains(' ') || s.contains('"') || s.contains('\t') || s.contains('&')
+        || s.contains('|') || s.contains(';') || s.contains('>') || s.contains('<')
+        || s.contains('$') || s.contains('`') || s.contains('(') || s.contains(')');
+    if needs_quotes {
+        let escaped = s.replace('\'', "''");
+        format!("'{}'", escaped)
     } else {
         s.to_string()
     }
