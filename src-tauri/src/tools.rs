@@ -605,6 +605,86 @@ async fn request_tool_confirmation(
         })
 }
 
+fn external_absolute_path_candidate(workspace_dir: &Path, input: &str) -> Option<PathBuf> {
+    let candidate = PathBuf::from(input);
+    if !candidate.is_absolute() {
+        return None;
+    }
+
+    let normalized = candidate
+        .canonicalize()
+        .unwrap_or_else(|_| candidate.clone());
+    let canonical_root = workspace_dir
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_dir.to_path_buf());
+
+    (!normalized.starts_with(&canonical_root)).then_some(normalized)
+}
+
+async fn resolve_file_action_path(
+    app: &AppHandle,
+    action: &str,
+    input: &str,
+    workspace_dir: &Path,
+    require_exists: bool,
+) -> Result<PathBuf, String> {
+    match resolve_safe_path(workspace_dir, input) {
+        Ok(path) => {
+            if require_exists && !path.exists() {
+                return Err(format!(
+                    "Path '{}' was not found under workspace root '{}'",
+                    input,
+                    workspace_dir.display()
+                ));
+            }
+            Ok(path)
+        }
+        Err(_) => {
+            let Some(path) = external_absolute_path_candidate(workspace_dir, input) else {
+                return Err(format!(
+                    "Path '{}' is outside the workspace root '{}'",
+                    input,
+                    workspace_dir.display()
+                ));
+            };
+
+            let confirm = request_tool_confirmation(
+                app,
+                format!(
+                    "external absolute path access requested outside workspace root '{}'",
+                    workspace_dir.display()
+                ),
+                "file_actions".to_string(),
+                format!("{}: {}", action, path.display()),
+                "external_path",
+                "none",
+            )
+            .await;
+
+            if !confirm.confirmed {
+                return Err("⛔ External absolute path access denied by user.".to_string());
+            }
+
+            if require_exists && !path.exists() {
+                return Err(format!(
+                    "Path '{}' does not exist",
+                    path.display()
+                ));
+            }
+
+            Ok(path)
+        }
+    }
+}
+
+fn format_file_action_error(err: String) -> String {
+    if err.starts_with('⛔') {
+        err
+    } else {
+        format!("Error: {}", err)
+    }
+}
+
 pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
     let mut tools = vec![];
 
@@ -1300,6 +1380,25 @@ mod tests {
         let _ = fs::remove_dir_all(&workspace_root);
         let _ = fs::remove_dir_all(&external_root);
     }
+
+    #[test]
+    fn detects_external_absolute_path_candidate() {
+        let workspace_root = make_temp_dir("external-path-candidate-workspace");
+        let external_root = make_temp_dir("external-path-candidate-external");
+        let external_file = external_root.join("outside.txt");
+        fs::write(&external_file, "outside").unwrap();
+
+        let resolved = super::external_absolute_path_candidate(
+            &workspace_root,
+            &external_file.display().to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(resolved, external_file.canonicalize().unwrap());
+
+        let _ = fs::remove_dir_all(&workspace_root);
+        let _ = fs::remove_dir_all(&external_root);
+    }
 }
 
 fn is_path_protected(
@@ -1710,38 +1809,12 @@ pub async fn execute_tool(
             let action = args["action"].as_str().unwrap_or("");
             let path_str = args["path"].as_str().unwrap_or("");
             let root_dir = workspace_dir.clone();
-            let resolve_workspace_path = |input: &str, require_exists: bool| {
-                resolve_safe_path(&root_dir, input)
-                    .map_err(|_| {
-                        format!(
-                            "Path '{}' is outside the workspace root '{}'",
-                            input,
-                            root_dir.display()
-                        )
-                    })
-                    .and_then(|path| {
-                        if require_exists && !path.exists() {
-                            return Err(format!(
-                                "Path '{}' was not found under workspace root '{}'",
-                                input,
-                                root_dir.display()
-                            ));
-                        }
-                        Ok(path)
-                    })
-            };
-            let resolve_write_path = |input: &str, require_exists: bool| {
-                resolve_workspace_path(input, require_exists).and_then(|path| {
-                        ensure_mutation_target_allowed(&path, &root_dir, protected_skill_roots)?;
-                        Ok(path)
-                    })
-            };
             match action {
                 "read" => {
                     let _ = app.emit("tool-call", format!("📄 *Reading {}*\n\n", path_str));
                     let start_line = args["start_line"].as_i64();
                     let end_line = args["end_line"].as_i64();
-                    match resolve_workspace_path(path_str, true) {
+                    match resolve_file_action_path(app, action, path_str, &root_dir, true).await {
                         Ok(p) => {
                             match fs::metadata(&p) {
                                 Ok(metadata) if metadata.is_dir() => {
@@ -1797,14 +1870,17 @@ pub async fn execute_tool(
                                 Err(e) => format!("Error opening file: {}", e),
                             }
                         }
-                        Err(e) => format!("Error: {}", e),
+                        Err(e) => format_file_action_error(e),
                     }
                 }
                 "write" => {
                     let content_str = args["content"].as_str().unwrap_or("");
                     let _ = app.emit("tool-call", format!("💾 *Writing {}*\n\n", path_str));
-                    match resolve_write_path(path_str, false) {
+                    match resolve_file_action_path(app, action, path_str, &root_dir, false).await {
                         Ok(p) => {
+                            if let Err(e) = ensure_mutation_target_allowed(&p, &root_dir, protected_skill_roots) {
+                                return format_file_action_error(e);
+                            }
                             let backup = match backup_protected_file(&p, protected_skill_roots) {
                                 Ok(backup) => backup,
                                 Err(e) => return format!("Error: {}", e),
@@ -1827,12 +1903,12 @@ pub async fn execute_tool(
                                 Err(e) => format!("Error writing file: {}", e),
                             }
                         }
-                        Err(e) => format!("Error: {}", e),
+                        Err(e) => format_file_action_error(e),
                     }
                 }
                 "list" => {
                     let _ = app.emit("tool-call", format!("📂 *Listing {}*\n\n", path_str));
-                    match resolve_workspace_path(path_str, true) {
+                    match resolve_file_action_path(app, action, path_str, &root_dir, true).await {
                         Ok(p) => {
                             match fs::metadata(&p) {
                                 Ok(metadata) => {
@@ -1880,7 +1956,7 @@ pub async fn execute_tool(
                                 Err(e) => format!("Error listing directory: {}", e),
                             }
                         }
-                        Err(e) => format!("Error: {}", e),
+                        Err(e) => format_file_action_error(e),
                     }
                 }
                 "search" => {
@@ -1906,7 +1982,7 @@ pub async fn execute_tool(
                         ),
                     );
 
-                    match resolve_workspace_path(path_str, true) {
+                    match resolve_file_action_path(app, action, path_str, &root_dir, true).await {
                         Ok(p) => {
                             match run_integrated_search(
                                 query,
@@ -1927,7 +2003,7 @@ pub async fn execute_tool(
                                 Err(e) => format!("Error: {}", e),
                             }
                         }
-                        Err(e) => format!("Error: {}", e),
+                        Err(e) => format_file_action_error(e),
                     }
                 }
                 "rename" | "move" => {
@@ -1939,9 +2015,16 @@ pub async fn execute_tool(
                     if new_path.is_empty() {
                         return "Error: new_path is required for move/rename.".to_string();
                     }
-                    match resolve_write_path(path_str, true) {
-                        Ok(src) => match resolve_write_path(new_path, false) {
+                    match resolve_file_action_path(app, action, path_str, &root_dir, true).await {
+                        Ok(src) => {
+                            if let Err(e) = ensure_mutation_target_allowed(&src, &root_dir, protected_skill_roots) {
+                                return format_file_action_error(e);
+                            }
+                            match resolve_file_action_path(app, action, new_path, &root_dir, false).await {
                             Ok(dst) => {
+                                if let Err(e) = ensure_mutation_target_allowed(&dst, &root_dir, protected_skill_roots) {
+                                    return format_file_action_error(e);
+                                }
                                 let backup = match backup_protected_file(&src, protected_skill_roots)
                                 {
                                     Ok(backup) => backup,
@@ -1974,16 +2057,20 @@ pub async fn execute_tool(
                                     Err(e) => format!("Error moving file: {}", e),
                                 }
                             }
-                            Err(e) => format!("Error: {}", e),
-                        },
-                        Err(e) => format!("Error: {}", e),
+                            Err(e) => format_file_action_error(e),
+                        }
+                        }
+                        Err(e) => format_file_action_error(e),
                     }
                 }
                 "patch" => {
                     let patch_str = args["patch"].as_str().unwrap_or("");
                     let _ = app.emit("tool-call", format!("🩹 *Patching {}*\n\n", path_str));
-                    match resolve_write_path(path_str, true) {
+                    match resolve_file_action_path(app, action, path_str, &root_dir, true).await {
                         Ok(p) => {
+                            if let Err(e) = ensure_mutation_target_allowed(&p, &root_dir, protected_skill_roots) {
+                                return format_file_action_error(e);
+                            }
                             let backup = match backup_protected_file(&p, protected_skill_roots) {
                                 Ok(backup) => backup,
                                 Err(e) => return format!("Error: {}", e),
@@ -2012,7 +2099,7 @@ pub async fn execute_tool(
                                 Err(e) => format!("Error reading file: {}", e),
                             }
                         }
-                        Err(e) => format!("Error: {}", e),
+                        Err(e) => format_file_action_error(e),
                     }
                 }
                 "mkdir" => {
@@ -2020,8 +2107,11 @@ pub async fn execute_tool(
                         "tool-call",
                         format!("📁 *Creating directory {}*\n\n", path_str),
                     );
-                    match resolve_write_path(path_str, false) {
+                    match resolve_file_action_path(app, action, path_str, &root_dir, false).await {
                         Ok(p) => {
+                            if let Err(e) = ensure_mutation_target_allowed(&p, &root_dir, protected_skill_roots) {
+                                return format_file_action_error(e);
+                            }
                             if p.exists() && p.is_file() {
                                 return format!("Error: {} is an existing file", path_str);
                             }
@@ -2030,13 +2120,16 @@ pub async fn execute_tool(
                                 Err(e) => format!("Error creating directory: {}", e),
                             }
                         }
-                        Err(e) => format!("Error: {}", e),
+                        Err(e) => format_file_action_error(e),
                     }
                 }
                 "delete" => {
                     let _ = app.emit("tool-call", format!("🗑️ *Deleting {}*\n\n", path_str));
-                    match resolve_write_path(path_str, true) {
+                    match resolve_file_action_path(app, action, path_str, &root_dir, true).await {
                         Ok(p) => {
+                            if let Err(e) = ensure_mutation_target_allowed(&p, &root_dir, protected_skill_roots) {
+                                return format_file_action_error(e);
+                            }
                             let backup = match backup_protected_file(&p, protected_skill_roots) {
                                 Ok(backup) => backup,
                                 Err(e) => return format!("Error: {}", e),
@@ -2063,7 +2156,7 @@ pub async fn execute_tool(
                                 }
                             }
                         }
-                        Err(e) => format!("Error: {}", e),
+                        Err(e) => format_file_action_error(e),
                     }
                 }
                 _ => format!("Unknown action '{}' for file_actions tool.", action),

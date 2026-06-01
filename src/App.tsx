@@ -66,7 +66,7 @@ export default function App() {
     reason: string;
     cmd_type: string;
     code: string;
-    confirm_kind?: "dangerous" | "sudo" | "elevation";
+    confirm_kind?: "dangerous" | "sudo" | "elevation" | "external_path";
     requires_auth?: "none" | "sudo" | "elevation";
   } | null>(null);
   const [confirmUsername, setConfirmUsername] = useState("");
@@ -274,7 +274,7 @@ export default function App() {
       reason: string;
       cmd_type: string;
       code: string;
-      confirm_kind?: "dangerous" | "sudo" | "elevation";
+      confirm_kind?: "dangerous" | "sudo" | "elevation" | "external_path";
       requires_auth?: "none" | "sudo" | "elevation";
     }>(
       "confirm-required",
@@ -772,16 +772,21 @@ export default function App() {
     }
     const requiresSudo = confirmDialog.requires_auth === "sudo";
     const requiresElevation = confirmDialog.requires_auth === "elevation";
+    const isExternalPath = confirmDialog.confirm_kind === "external_path";
     const title = requiresSudo
       ? "⚠️ Privileged operation (sudo)"
       : requiresElevation
         ? "⚠️ Privileged operation (administrator)"
-        : "⚠️ Dangerous command detected";
+        : isExternalPath
+          ? "⚠️ External file access request"
+          : "⚠️ Dangerous command detected";
     const badge = requiresSudo
       ? "SUDO"
       : requiresElevation
         ? "ADMIN"
-        : "DANGEROUS";
+        : isExternalPath
+          ? "PATH"
+          : "DANGEROUS";
     const preview =
       confirmDialog.code.length > 400
         ? confirmDialog.code.slice(0, 400) + "…"
@@ -827,6 +832,12 @@ export default function App() {
           {requiresElevation && (
             <p className="confirm-dialog-hint">
               This will request administrator elevation (UAC) and may modify system settings.
+            </p>
+          )}
+          {isExternalPath && (
+            <p className="confirm-dialog-hint">
+              This file action wants to access an absolute path outside the current workspace root.
+              Allow it only if that external location is intentional.
             </p>
           )}
           <div className="confirm-dialog-preview">

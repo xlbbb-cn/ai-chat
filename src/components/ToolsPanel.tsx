@@ -15,7 +15,7 @@ const AVAILABLE_TOOLS = [
         description: [
             "Read, write, list, search, patch, rename, move, create, and delete files only inside the current workspace root.",
             "Use `./...` paths such as `./src/App.tsx`, `./skills/demo/skill.md`, or `.` for the workspace root.",
-            "Rejected paths: `workspace/...`, `../...`, and absolute paths outside the workspace.",
+            "Paths such as `workspace/...` and `../...` are rejected. Absolute paths outside the workspace require an explicit approval dialog before access is allowed.",
         ].join("\n"),
     },
     {
