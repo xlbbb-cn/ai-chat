@@ -1318,9 +1318,9 @@ pub async fn run_sub_agent(
             .join("\n");
         format!(
             "\n\nSelf-evolution: skill roots available:\n{roots}\n\
-             Use `file_actions` for skill edits (auto-creates `.bak.<n>` backups). \
-             Workspace is the default root; use skill paths (`./skills/<name>/...` or \
-             `app_data/skills/<name>/...`) only when the task requires it. \
+             Use `file_actions` only with workspace-relative paths. \
+             Skill edits are limited to `./skills/...` under the workspace and create `.bak.<n>` backups automatically. \
+             Do not reference app-data skill paths or any path outside the workspace root. \
              Reuse exact paths returned by tools."
         )
     };
@@ -1654,7 +1654,6 @@ pub async fn run_sub_agent(
                         config,
                         &[],
                         &skill_access_roots,
-                        &[],
                         Some(&mission_id),
                     )
                     .await;

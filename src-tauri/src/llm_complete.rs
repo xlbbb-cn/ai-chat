@@ -694,16 +694,16 @@ pub async fn chat_completion(
 
     for skill_name in &skill_ids {
         let ws_skills_dir = workspace_dir_for_roots.join("skills");
-        
+
         let skill_opt = if let Ok(skill) = skills::load_skill_by_name(&ws_skills_dir, skill_name) {
-            Some((skill, ws_skills_dir.join(skill_name)))
+            Some(skill)
         } else if let Ok(skill) = skills::load_skill_by_name(&state.skills_dir, skill_name) {
-            Some((skill, state.skills_dir.join(skill_name)))
+            Some(skill)
         } else {
             None
         };
 
-        if let Some((skill, _spath)) = skill_opt {
+        if let Some(skill) = skill_opt {
             merge_allowed_commands(&mut skill_allowed_commands, &skill.allowed_commands);
 
             if activated_skills.contains(&skill.name) {
@@ -791,7 +791,7 @@ pub async fn chat_completion(
         let active_skills_context = format!(
             "INTERNAL CONTEXT - ACTIVE SKILLS:\n\
              Workspace root: {workspace_root_display}\n\n\
-             Path rules: workspace paths use `./...`; reuse exact paths returned by tools.\n\n\
+             Path rules: `file_actions` can access only files under the workspace root. Use `./...` paths or `.` for the workspace root, and reuse exact paths returned by tools. Do not reference app-data paths or external absolute paths.\n\n\
              Active skill instructions:{}",
             loaded_skills_content
         );
@@ -1268,7 +1268,6 @@ pub async fn chat_completion(
                     workspace_dir,
                     &config,
                     &skill_allowed_commands,
-                    &[],
                     &[],
                     None,
                 )

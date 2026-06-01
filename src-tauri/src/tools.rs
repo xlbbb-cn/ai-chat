@@ -681,7 +681,7 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "file_actions",
-                "description": "Perform file operations. Path rules: workspace is the default root — always use `./...` form (e.g. `./src/App.tsx`), never `workspace/...`. Writes are restricted to the workspace root. Changes to protected files create automated backups.",
+                "description": "Perform file operations strictly within the current workspace root. Always use `./...` paths (for example `./src/App.tsx`) or `.` for the workspace root. Absolute paths and any path outside the workspace are rejected. Protected self-evolution targets create automated backups before mutation.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -692,7 +692,7 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
                         },
                         "path": {
                             "type": "string",
-                            "description": "Path to the file or directory. Workspace paths should use the `./...` form, for example `./src/App.tsx`, and should not use `workspace/...`. Use '.' or './' for the workspace root when listing or searching."
+                            "description": "Workspace-relative path to the file or directory. Use the `./...` form, for example `./src/App.tsx`, or `.`/`./` for the workspace root when listing or searching. External or absolute paths outside the workspace are not allowed."
                         },
                         "new_path": {
                             "type": "string",
@@ -914,66 +914,6 @@ fn resolve_safe_path(root_dir: &Path, rel_path: &str) -> Result<PathBuf, String>
     }
 }
 
-fn is_backup_variant(base_file: &Path, candidate: &Path) -> bool {
-    let Some(base_name) = base_file.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-    let Some(candidate_name) = candidate.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-
-    candidate_name
-        .strip_prefix(&format!("{base_name}.bak."))
-        .is_some_and(|suffix| !suffix.is_empty() && suffix.chars().all(|ch| ch.is_ascii_digit()))
-        && candidate.parent() == base_file.parent()
-}
-
-fn resolve_safe_explicit_file(
-    input_path: &str,
-    allowed_files: &[PathBuf],
-) -> Option<(PathBuf, PathBuf)> {
-    let input = Path::new(input_path);
-    let is_bare_name = input
-        .parent()
-        .map(|parent| parent.as_os_str().is_empty())
-        .unwrap_or(true);
-    let input_abs = input
-        .is_absolute()
-        .then(|| input.canonicalize().unwrap_or_else(|_| input.to_path_buf()));
-
-    for file in allowed_files {
-        let file_abs = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-        let parent = file_abs
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("/"));
-
-        let matched = if let Some(input_abs) = &input_abs {
-            input_abs == &file_abs || is_backup_variant(&file_abs, input_abs)
-        } else if !is_bare_name {
-            false
-        } else {
-            input
-                .file_name()
-                .map(|name| parent.join(name))
-                .is_some_and(|candidate| {
-                    candidate == file_abs || is_backup_variant(&file_abs, &candidate)
-                })
-        };
-
-        if matched {
-            let resolved = if let Some(input_abs) = &input_abs {
-                input_abs.clone()
-            } else {
-                parent.join(input.file_name()?)
-            };
-            return Some((resolved, parent));
-        }
-    }
-
-    None
-}
-
 fn path_is_within(path: &Path, root: &Path) -> bool {
     path.canonicalize()
         .map(|p| p.starts_with(root.canonicalize().unwrap_or_else(|_| root.to_path_buf())))
@@ -988,8 +928,7 @@ fn workspace_skills_root(workspace_dir: &Path) -> PathBuf {
     workspace_dir.join("skills")
 }
 
-fn with_root_header(_workspace_root: &Path, _resolved_root: &Path, body: String) -> String {
-    // Since file_actions now only accesses workspace, the root is always "./"
+fn with_root_header(body: String) -> String {
     if body.is_empty() {
         "ROOT: ./".to_string()
     } else {
@@ -1345,19 +1284,31 @@ mod tests {
 
         let _ = fs::remove_dir_all(&workspace_root);
     }
+
+    #[test]
+    fn resolve_safe_path_rejects_external_absolute_paths() {
+        let workspace_root = make_temp_dir("resolve-safe-path");
+        let external_root = make_temp_dir("resolve-safe-path-external");
+        let external_file = external_root.join("outside.txt");
+        fs::write(&external_file, "outside").unwrap();
+
+        let err = super::resolve_safe_path(&workspace_root, &external_file.display().to_string())
+            .unwrap_err();
+
+        assert!(err.contains("outside the workspace root"));
+
+        let _ = fs::remove_dir_all(&workspace_root);
+        let _ = fs::remove_dir_all(&external_root);
+    }
 }
 
 fn is_path_protected(
     path: &Path,
     protected_roots: &[PathBuf],
-    protected_files: &[PathBuf],
 ) -> bool {
     let normalized = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
 
-    protected_files.iter().any(|file| {
-        let normalized_file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-        normalized == normalized_file || is_backup_variant(&normalized_file, &normalized)
-    }) || protected_roots.iter().any(|root| {
+    protected_roots.iter().any(|root| {
         let normalized_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
         normalized.starts_with(&normalized_root)
     })
@@ -1390,12 +1341,8 @@ fn next_backup_path(path: &Path) -> Result<PathBuf, String> {
 fn backup_protected_file(
     path: &Path,
     protected_roots: &[PathBuf],
-    protected_files: &[PathBuf],
 ) -> Result<Option<PathBuf>, String> {
-    if !path.exists()
-        || !path.is_file()
-        || !is_path_protected(path, protected_roots, protected_files)
-    {
+    if !path.exists() || !path.is_file() || !is_path_protected(path, protected_roots) {
         return Ok(None);
     }
 
@@ -1421,8 +1368,6 @@ pub async fn execute_tool(
     allowed_commands: &[String],
     // Writable skill roots that require automatic `.bak.N` backups before mutation.
     protected_skill_roots: &[PathBuf],
-    // Exact files that require automatic `.bak.N` backups before mutation.
-    protected_exact_files: &[PathBuf],
     // Current autonomous mission identifier when executing inside a sub-agent.
     mission_id: Option<&str>,
 ) -> String {
@@ -1765,24 +1710,8 @@ pub async fn execute_tool(
             let action = args["action"].as_str().unwrap_or("");
             let path_str = args["path"].as_str().unwrap_or("");
             let root_dir = workspace_dir.clone();
-            let resolve_read_path = |input: &str, _require_exists: bool| {
-                resolve_safe_explicit_file(input, protected_exact_files)
-                    .or_else(|| {
-                        resolve_safe_path(&root_dir, input)
-                            .map(|p| (p, root_dir.clone()))
-                            .ok()
-                    })
-                    .ok_or_else(|| {
-                        format!(
-                            "Path '{}' is outside the workspace root '{}'",
-                            input,
-                            root_dir.display()
-                        )
-                    })
-            };
-            let resolve_write_path = |input: &str, require_exists: bool| {
+            let resolve_workspace_path = |input: &str, require_exists: bool| {
                 resolve_safe_path(&root_dir, input)
-                    .map(|p| (p, root_dir.clone()))
                     .map_err(|_| {
                         format!(
                             "Path '{}' is outside the workspace root '{}'",
@@ -1790,7 +1719,7 @@ pub async fn execute_tool(
                             root_dir.display()
                         )
                     })
-                    .and_then(|(path, resolved_root)| {
+                    .and_then(|path| {
                         if require_exists && !path.exists() {
                             return Err(format!(
                                 "Path '{}' was not found under workspace root '{}'",
@@ -1798,8 +1727,13 @@ pub async fn execute_tool(
                                 root_dir.display()
                             ));
                         }
+                        Ok(path)
+                    })
+            };
+            let resolve_write_path = |input: &str, require_exists: bool| {
+                resolve_workspace_path(input, require_exists).and_then(|path| {
                         ensure_mutation_target_allowed(&path, &root_dir, protected_skill_roots)?;
-                        Ok((path, resolved_root))
+                        Ok(path)
                     })
             };
             match action {
@@ -1807,8 +1741,8 @@ pub async fn execute_tool(
                     let _ = app.emit("tool-call", format!("📄 *Reading {}*\n\n", path_str));
                     let start_line = args["start_line"].as_i64();
                     let end_line = args["end_line"].as_i64();
-                    match resolve_read_path(path_str, true) {
-                        Ok((p, _)) => {
+                    match resolve_workspace_path(path_str, true) {
+                        Ok(p) => {
                             match fs::metadata(&p) {
                                 Ok(metadata) if metadata.is_dir() => {
                                     return format!("Error: {} is a directory", path_str);
@@ -1870,12 +1804,8 @@ pub async fn execute_tool(
                     let content_str = args["content"].as_str().unwrap_or("");
                     let _ = app.emit("tool-call", format!("💾 *Writing {}*\n\n", path_str));
                     match resolve_write_path(path_str, false) {
-                        Ok((p, _)) => {
-                            let backup = match backup_protected_file(
-                                &p,
-                                protected_skill_roots,
-                                protected_exact_files,
-                            ) {
+                        Ok(p) => {
+                            let backup = match backup_protected_file(&p, protected_skill_roots) {
                                 Ok(backup) => backup,
                                 Err(e) => return format!("Error: {}", e),
                             };
@@ -1902,8 +1832,8 @@ pub async fn execute_tool(
                 }
                 "list" => {
                     let _ = app.emit("tool-call", format!("📂 *Listing {}*\n\n", path_str));
-                    match resolve_read_path(path_str, true) {
-                        Ok((p, resolved_root)) => {
+                    match resolve_workspace_path(path_str, true) {
+                        Ok(p) => {
                             match fs::metadata(&p) {
                                 Ok(metadata) => {
                                     if metadata.is_file() {
@@ -1912,11 +1842,11 @@ pub async fn execute_tool(
                                             .and_then(|n| n.to_str())
                                             .unwrap_or(path_str)
                                             .to_string();
-                                        return with_root_header(
-                                            &root_dir,
-                                            &resolved_root,
-                                            format!("{} ({} bytes)", name, metadata.len()),
-                                        );
+                                        return with_root_header(format!(
+                                            "{} ({} bytes)",
+                                            name,
+                                            metadata.len()
+                                        ));
                                     }
                                 }
                                 Err(_) => {}
@@ -1945,7 +1875,7 @@ pub async fn execute_tool(
                                     } else {
                                         res.join("\n")
                                     };
-                                    with_root_header(&root_dir, &resolved_root, body)
+                                    with_root_header(body)
                                 }
                                 Err(e) => format!("Error listing directory: {}", e),
                             }
@@ -1976,16 +1906,12 @@ pub async fn execute_tool(
                         ),
                     );
 
-                    match resolve_read_path(path_str, true) {
-                        Ok((p, resolved_root)) => {
-                            if !p.exists() {
-                                return format!("Error: {} does not exist", path_str);
-                            }
-
+                    match resolve_workspace_path(path_str, true) {
+                        Ok(p) => {
                             match run_integrated_search(
                                 query,
                                 &p,
-                                &resolved_root,
+                                &root_dir,
                                 SearchOptions {
                                     recursive,
                                     case_sensitive,
@@ -1997,7 +1923,7 @@ pub async fn execute_tool(
                                 },
                             )
                             {
-                                Ok(output) => with_root_header(&root_dir, &resolved_root, output),
+                                Ok(output) => with_root_header(output),
                                 Err(e) => format!("Error: {}", e),
                             }
                         }
@@ -2014,13 +1940,10 @@ pub async fn execute_tool(
                         return "Error: new_path is required for move/rename.".to_string();
                     }
                     match resolve_write_path(path_str, true) {
-                        Ok((src, _)) => match resolve_write_path(new_path, false) {
-                            Ok((dst, _)) => {
-                                let backup = match backup_protected_file(
-                                    &src,
-                                    protected_skill_roots,
-                                    protected_exact_files,
-                                ) {
+                        Ok(src) => match resolve_write_path(new_path, false) {
+                            Ok(dst) => {
+                                let backup = match backup_protected_file(&src, protected_skill_roots)
+                                {
                                     Ok(backup) => backup,
                                     Err(e) => return format!("Error: {}", e),
                                 };
@@ -2060,12 +1983,8 @@ pub async fn execute_tool(
                     let patch_str = args["patch"].as_str().unwrap_or("");
                     let _ = app.emit("tool-call", format!("🩹 *Patching {}*\n\n", path_str));
                     match resolve_write_path(path_str, true) {
-                        Ok((p, _)) => {
-                            let backup = match backup_protected_file(
-                                &p,
-                                protected_skill_roots,
-                                protected_exact_files,
-                            ) {
+                        Ok(p) => {
+                            let backup = match backup_protected_file(&p, protected_skill_roots) {
                                 Ok(backup) => backup,
                                 Err(e) => return format!("Error: {}", e),
                             };
@@ -2102,7 +2021,7 @@ pub async fn execute_tool(
                         format!("📁 *Creating directory {}*\n\n", path_str),
                     );
                     match resolve_write_path(path_str, false) {
-                        Ok((p, _)) => {
+                        Ok(p) => {
                             if p.exists() && p.is_file() {
                                 return format!("Error: {} is an existing file", path_str);
                             }
@@ -2117,12 +2036,8 @@ pub async fn execute_tool(
                 "delete" => {
                     let _ = app.emit("tool-call", format!("🗑️ *Deleting {}*\n\n", path_str));
                     match resolve_write_path(path_str, true) {
-                        Ok((p, _)) => {
-                            let backup = match backup_protected_file(
-                                &p,
-                                protected_skill_roots,
-                                protected_exact_files,
-                            ) {
+                        Ok(p) => {
+                            let backup = match backup_protected_file(&p, protected_skill_roots) {
                                 Ok(backup) => backup,
                                 Err(e) => return format!("Error: {}", e),
                             };
