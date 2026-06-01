@@ -58,6 +58,13 @@ pub struct Skill {
     pub system_prompt: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct ResolvedSkill {
+    pub skill: Skill,
+    pub skill_dir: PathBuf,
+    pub skill_file: PathBuf,
+}
+
 pub fn parse_skill_md(content: &str) -> Result<Skill, String> {
     let content = content.trim_start_matches('\u{feff}');
     let rest = content
@@ -104,10 +111,30 @@ pub fn skill_to_md(skill: &Skill) -> Result<String, String> {
     ))
 }
 
-pub fn load_skill_by_name(skills_dir: &PathBuf, name: &str) -> Result<Skill, String> {
-    let path = skills_dir.join(name).join("skill.md");
-    let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    parse_skill_md(&content)
+pub fn resolve_skill_by_name(
+    workspace_skills_dir: &Path,
+    managed_skills_dir: &Path,
+    name: &str,
+) -> Result<ResolvedSkill, String> {
+    fn load_from_root(skills_dir: &Path, name: &str) -> Result<ResolvedSkill, String> {
+        let skill_dir = skills_dir.join(name);
+        let skill_file = skill_dir.join("skill.md");
+        let content = fs::read_to_string(&skill_file).map_err(|e| e.to_string())?;
+        let skill = parse_skill_md(&content)?;
+        Ok(ResolvedSkill {
+            skill,
+            skill_dir,
+            skill_file,
+        })
+    }
+
+    load_from_root(workspace_skills_dir, name).or_else(|workspace_err| {
+        load_from_root(managed_skills_dir, name).map_err(|managed_err| {
+            format!(
+                "failed to load skill '{name}' from workspace ({workspace_err}) or app-managed root ({managed_err})"
+            )
+        })
+    })
 }
 
 /// Collect skill roots eligible for self-evolution edits.

@@ -694,16 +694,8 @@ pub async fn chat_completion(
 
     for skill_name in &skill_ids {
         let ws_skills_dir = workspace_dir_for_roots.join("skills");
-
-        let skill_opt = if let Ok(skill) = skills::load_skill_by_name(&ws_skills_dir, skill_name) {
-            Some(skill)
-        } else if let Ok(skill) = skills::load_skill_by_name(&state.skills_dir, skill_name) {
-            Some(skill)
-        } else {
-            None
-        };
-
-        if let Some(skill) = skill_opt {
+        if let Ok(resolved_skill) = skills::resolve_skill_by_name(&ws_skills_dir, &state.skills_dir, skill_name) {
+            let skill = resolved_skill.skill;
             merge_allowed_commands(&mut skill_allowed_commands, &skill.allowed_commands);
 
             if activated_skills.contains(&skill.name) {
@@ -716,8 +708,12 @@ pub async fn chat_completion(
                     )
                 };
                 loaded_skills_content.push_str(&format!(
-                    "\n\n--- Skill: {} ---\n{}{}",
-                    skill.name, cmd_constraint, skill.system_prompt
+                    "\n\n--- Skill: {} ---\n[Skill root: {}]\n[Skill file: {}]\n{}{}",
+                    skill.name,
+                    resolved_skill.skill_dir.display(),
+                    resolved_skill.skill_file.display(),
+                    cmd_constraint,
+                    skill.system_prompt
                 ));
             } else {
                 available_skills_info.push_str(&format!(
@@ -1099,16 +1095,10 @@ pub async fn chat_completion(
                 let skill_name = args_json["skill_name"].as_str().unwrap_or("");
                 let ws_skills_dir = workspace_dir_for_roots.join("skills");
 
-                let skill_opt =
-                    if let Ok(skill) = skills::load_skill_by_name(&ws_skills_dir, skill_name) {
-                        Some((skill, ws_skills_dir.join(skill_name)))
-                    } else if let Ok(skill) = skills::load_skill_by_name(&state.skills_dir, skill_name) {
-                        Some((skill, state.skills_dir.join(skill_name)))
-                    } else {
-                        None
-                    };
-
-                if let Some((skill, _skill_root)) = skill_opt {
+                if let Ok(resolved_skill) =
+                    skills::resolve_skill_by_name(&ws_skills_dir, &state.skills_dir, skill_name)
+                {
+                    let skill = resolved_skill.skill;
                     let dyn_marker = format!("--- Skill (Dynamically Loaded): {} ---", skill.name);
                     let static_marker = format!("--- Skill: {} ---", skill.name);
 
@@ -1143,8 +1133,12 @@ pub async fn chat_completion(
                         };
                         let skill_context = format!(
                             "INTERNAL CONTEXT - DYNAMICALLY LOADED SKILL (not a user request):\n\
-{}\n{}{}",
-                            dyn_marker, cmd_constraint, skill.system_prompt
+{}\n[Skill root: {}]\n[Skill file: {}]\n{}{}",
+                            dyn_marker,
+                            resolved_skill.skill_dir.display(),
+                            resolved_skill.skill_file.display(),
+                            cmd_constraint,
+                            skill.system_prompt
                         );
                         pending_skill_context_messages.push(json!({
                             "role": "user",

@@ -320,6 +320,7 @@ pub struct AppState {
     pub config_path: PathBuf,
     pub workspace_dir: Mutex<PathBuf>,
     pub db_path: PathBuf,
+    // App-managed skills root under app data. Workspace-local skills live under workspace_dir/skills.
     pub skills_dir: PathBuf,
     pub mcp_servers_path: PathBuf,
     pub agents_config_path: PathBuf,
@@ -436,15 +437,6 @@ fn get_workspace_dir(state: State<'_, AppState>) -> String {
         .unwrap()
         .to_string_lossy()
         .to_string()
-}
-
-#[tauri::command]
-fn get_skill_roots(state: State<'_, AppState>) -> Vec<String> {
-    let workspace_dir = state.workspace_dir.lock().unwrap().clone();
-    vec![
-        state.skills_dir.to_string_lossy().to_string(),
-        workspace_dir.join("skills").to_string_lossy().to_string(),
-    ]
 }
 
 #[tauri::command]
@@ -739,7 +731,6 @@ pub fn run() {
             save_config,
             fetch_models,
             get_workspace_dir,
-            get_skill_roots,
             save_markdown_file,
             skills::list_skills,
             skills::save_skill,
