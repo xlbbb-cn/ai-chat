@@ -892,7 +892,6 @@ pub async fn orchestrate(
     let workspace_dir = state.workspace_dir.lock().unwrap().clone();
     let skill_access_roots =
         crate::skills::collect_self_evolution_roots(&state.skills_dir, Some(&workspace_dir), config.self_evolution_mode);
-    let protected_evolution_files = Vec::new();
     let results = execute_tasks(
         app,
         &client,
@@ -903,7 +902,6 @@ pub async fn orchestrate(
         plan.tasks,
         workspace_dir,
         skill_access_roots,
-        protected_evolution_files,
         use_parallel,
         orchestration.max_concurrent,
         &state.chat_cancelled,
@@ -1098,7 +1096,6 @@ async fn execute_tasks(
     tasks: Vec<Task>,
     workspace_dir: PathBuf,
     skill_access_roots: Vec<PathBuf>,
-    protected_evolution_files: Vec<PathBuf>,
     use_parallel: bool,
     max_concurrent: usize,
     cancelled: &AtomicBool,
@@ -1114,7 +1111,6 @@ async fn execute_tasks(
             tasks,
             workspace_dir,
             skill_access_roots,
-            protected_evolution_files,
             max_concurrent,
             cancelled,
         )
@@ -1130,7 +1126,6 @@ async fn execute_tasks(
             tasks,
             workspace_dir,
             skill_access_roots,
-            protected_evolution_files,
             cancelled,
         )
         .await
@@ -1147,7 +1142,6 @@ async fn execute_parallel(
     tasks: Vec<Task>,
     workspace_dir: PathBuf,
     skill_access_roots: Vec<PathBuf>,
-    protected_evolution_files: Vec<PathBuf>,
     max_concurrent: usize,
     cancelled: &AtomicBool,
 ) -> Vec<TaskResult> {
@@ -1199,7 +1193,6 @@ async fn execute_parallel(
                 let task_c = task.clone();
                 let wd_c = workspace_dir.clone();
                 let skill_roots_c = skill_access_roots.clone();
-                let protected_files_c = protected_evolution_files.clone();
                 let is_cancelled = cancelled.load(Ordering::SeqCst);
 
                 join_set.spawn(async move {
@@ -1224,7 +1217,6 @@ async fn execute_parallel(
                         &task_c,
                         wd_c,
                         skill_roots_c,
-                        protected_files_c,
                     )
                     .await
                 });
@@ -1250,7 +1242,6 @@ async fn execute_sequential(
     tasks: Vec<Task>,
     workspace_dir: PathBuf,
     skill_access_roots: Vec<PathBuf>,
-    protected_evolution_files: Vec<PathBuf>,
     cancelled: &AtomicBool,
 ) -> Vec<TaskResult> {
     let mut results = Vec::new();
@@ -1272,7 +1263,6 @@ async fn execute_sequential(
             &task,
             workspace_dir.clone(),
             skill_access_roots.clone(),
-            protected_evolution_files.clone(),
         )
         .await;
         results.push(res);
@@ -1292,7 +1282,6 @@ pub async fn run_sub_agent(
     task: &Task,
     workspace_dir: PathBuf,
     skill_access_roots: Vec<PathBuf>,
-    protected_evolution_files: Vec<PathBuf>,
 ) -> TaskResult {
     let _ = app.emit(
         "agent-task-start",
@@ -1664,10 +1653,8 @@ pub async fn run_sub_agent(
                         workspace_dir.clone(),
                         config,
                         &[],
-                        &[],
-                        &[],
                         &skill_access_roots,
-                        &protected_evolution_files,
+                        &[],
                         Some(&mission_id),
                     )
                     .await;

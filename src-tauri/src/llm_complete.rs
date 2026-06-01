@@ -625,7 +625,6 @@ pub async fn chat_completion(
     state.chat_cancelled.store(false, Ordering::SeqCst);
     let config = state.config.lock().unwrap().clone();
     let multi_agent_enabled = use_agents.unwrap_or(false);
-    let self_evolution_enabled = config.self_evolution_mode;
     log_event(
         &state,
         "INFO",
@@ -654,18 +653,7 @@ pub async fn chat_completion(
 
     let mut all_messages: Vec<Value> = vec![];
     let mut skill_allowed_commands: Vec<String> = Vec::new();
-    let mut active_skill_roots: Vec<std::path::PathBuf> = Vec::new();
     let workspace_dir_for_roots = state.workspace_dir.lock().unwrap().clone();
-    let self_evolution_roots = if self_evolution_enabled {
-        skills::collect_self_evolution_roots(
-            &state.skills_dir,
-            Some(&workspace_dir_for_roots),
-            true,
-        )
-    } else {
-        Vec::new()
-    };
-    let self_evolution_files: Vec<std::path::PathBuf> = Vec::new();
 
     // 1. Determine which skills have already been loaded in this session
     // We scan the assistant messages for "🧠 *Loading skill: xxx*"
@@ -715,13 +703,10 @@ pub async fn chat_completion(
             None
         };
 
-        if let Some((skill, spath)) = skill_opt {
+        if let Some((skill, _spath)) = skill_opt {
             merge_allowed_commands(&mut skill_allowed_commands, &skill.allowed_commands);
 
             if activated_skills.contains(&skill.name) {
-                if !active_skill_roots.iter().any(|p| p == &spath) {
-                    active_skill_roots.push(spath.clone());
-                }
                 let cmd_constraint = if skill.allowed_commands.is_empty() {
                     String::new()
                 } else {
@@ -746,9 +731,7 @@ pub async fn chat_completion(
     if !available_skills_info.is_empty() {
         let skills_sys_msg = format!(
             "Available skills (descriptions only). Call `use_skill` with the skill name to load \
-            full instructions — only when the request clearly requires that skill's knowledge or files.\n\
-            Skill files are accessed via `app_data/skills/<name>/...` (app-managed) \
-            or `./skills/<name>/...` (workspace skills); never use `./app_data/...`.\n\n\
+            full instructions — only when the request clearly requires that skill's knowledge or files.\n\n\
             Available skills:\n{}",
             available_skills_info
         );
@@ -791,27 +774,6 @@ pub async fn chat_completion(
         all_messages.push(json!({ "role": "system", "content": system_content }));
     }
 
-    if self_evolution_enabled && !self_evolution_roots.is_empty() {
-        let skill_roots_display = self_evolution_roots
-            .iter()
-            .map(|p| format!("- {}", p.display()))
-            .collect::<Vec<String>>()
-            .join("\n");
-        all_messages.push(json!({
-            "role": "system",
-            "content": format!(
-                "INTERNAL CONTEXT - SELF EVOLUTION MODE:\n\
-                 Skill roots (inspect/create/update when directly helpful):\n\
-                 {skill_roots_display}\n\
-                 Rules: use `file_actions` for edits (auto-creates `.bak.<n>` backups); \
-                 workspace is the default root — access skill roots only when task requires it; \
-                 workspace paths use `./...`; skill paths use `./skills/<name>/...` (workspace) \
-                 or `app_data/skills/<name>/...` (app-managed); reuse exact paths returned by tools; \
-                 no access outside workspace or these skill roots."
-            )
-        }));
-    }
-
     if let Ok(db_guard) = state.db.lock() {
         if let Ok(Some(saved_summary)) = db::get_session_summary(&db_guard, &session_id) {
             if !saved_summary.trim().is_empty() {
@@ -826,23 +788,10 @@ pub async fn chat_completion(
     if !loaded_skills_content.is_empty() {
         let workspace_dir = state.workspace_dir.lock().unwrap().clone();
         let workspace_root_display = workspace_dir.display().to_string();
-        let active_skill_roots_display = if active_skill_roots.is_empty() {
-            "(none)".to_string()
-        } else {
-            active_skill_roots
-                .iter()
-                .map(|p| format!("- {}", p.display()))
-                .collect::<Vec<String>>()
-                .join("\n")
-        };
         let active_skills_context = format!(
             "INTERNAL CONTEXT - ACTIVE SKILLS:\n\
-             Workspace root: {workspace_root_display}\n\
-             Active skill roots:\n{active_skill_roots_display}\n\n\
-             Path rules: workspace paths start with `./`; skill paths use `./skills/<name>/...` \
-             (workspace) or `app_data/skills/<name>/...` (app-managed, never `./app_data/...`); \
-             exact absolute paths also accepted. Reuse paths returned by tools. \
-             No access outside workspace or active skill roots.\n\n\
+             Workspace root: {workspace_root_display}\n\n\
+             Path rules: workspace paths use `./...`; reuse exact paths returned by tools.\n\n\
              Active skill instructions:{}",
             loaded_skills_content
         );
@@ -1159,7 +1108,7 @@ pub async fn chat_completion(
                         None
                     };
 
-                if let Some((skill, skill_root)) = skill_opt {
+                if let Some((skill, _skill_root)) = skill_opt {
                     let dyn_marker = format!("--- Skill (Dynamically Loaded): {} ---", skill.name);
                     let static_marker = format!("--- Skill: {} ---", skill.name);
 
@@ -1184,9 +1133,6 @@ pub async fn chat_completion(
                             &mut skill_allowed_commands,
                             &skill.allowed_commands,
                         );
-                        if !active_skill_roots.iter().any(|p| p == &skill_root) {
-                            active_skill_roots.push(skill_root);
-                        }
                         let cmd_constraint = if skill.allowed_commands.is_empty() {
                             String::new()
                         } else {
@@ -1244,8 +1190,7 @@ pub async fn chat_completion(
                                 agent,
                                 &task,
                                 workspace_dir,
-                                self_evolution_roots.clone(),
-                                self_evolution_files.clone(),
+                                vec![],
                             )
                             .await;
 
@@ -1323,10 +1268,8 @@ pub async fn chat_completion(
                     workspace_dir,
                     &config,
                     &skill_allowed_commands,
-                    &active_skill_roots,
-                    &active_skill_roots,
-                    &self_evolution_roots,
-                    &self_evolution_files,
+                    &[],
+                    &[],
                     None,
                 )
                 .await;

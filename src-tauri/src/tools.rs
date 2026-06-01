@@ -681,7 +681,7 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "file_actions",
-                "description": "Perform file operations. Path rules: workspace is the default root — always use `./...` form (e.g. `./src/App.tsx`), never `workspace/...`. Writes are restricted to the workspace root. Skill files are read-only references: use `./skills/<name>/...` for workspace skills or `app_data/skills/<name>/...` for app-managed skills — never `./app_data/...`. workspace/skills becomes writable when self-evolution mode is enabled. Changes to protected files create automated backups.",
+                "description": "Perform file operations. Path rules: workspace is the default root — always use `./...` form (e.g. `./src/App.tsx`), never `workspace/...`. Writes are restricted to the workspace root. Changes to protected files create automated backups.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -692,7 +692,7 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
                         },
                         "path": {
                             "type": "string",
-                            "description": "Path to the file or directory. Workspace paths should use the `./...` form, for example `./src/App.tsx`, and should not use `workspace/...`. Only use explicit skill prefixes such as './skills/<skill_name>/...' or 'app_data/skills/<skill_name>/...' when you intentionally want to access skill-owned data. Use '.' or './' for the workspace root when listing or searching."
+                            "description": "Path to the file or directory. Workspace paths should use the `./...` form, for example `./src/App.tsx`, and should not use `workspace/...`. Use '.' or './' for the workspace root when listing or searching."
                         },
                         "new_path": {
                             "type": "string",
@@ -914,92 +914,6 @@ fn resolve_safe_path(root_dir: &Path, rel_path: &str) -> Result<PathBuf, String>
     }
 }
 
-fn build_candidate_roots(primary_root: &Path, extra_roots: &[PathBuf]) -> Vec<PathBuf> {
-    let mut roots = vec![primary_root.to_path_buf()];
-    for root in extra_roots {
-        if !roots.iter().any(|r| r == root) {
-            roots.push(root.clone());
-        }
-    }
-    roots
-}
-
-fn build_root_relative_candidates(root: &Path, input_path: &str) -> Vec<PathBuf> {
-    let input = Path::new(input_path);
-    let mut candidates = vec![input.to_path_buf()];
-
-    if input.is_absolute() {
-        return candidates;
-    }
-
-    let Some(root_name) = root.file_name() else {
-        return candidates;
-    };
-
-    let mut components = input.components();
-    let Some(std::path::Component::Normal(first)) = components.next() else {
-        return candidates;
-    };
-
-    if first == root_name {
-        let mut stripped = PathBuf::new();
-        for component in components {
-            match component {
-                std::path::Component::Normal(segment) => stripped.push(segment),
-                std::path::Component::ParentDir => stripped.push(".."),
-                std::path::Component::CurDir => {}
-                _ => {}
-            }
-        }
-
-        if !stripped.as_os_str().is_empty() && !candidates.iter().any(|p| p == &stripped) {
-            candidates.push(stripped);
-        }
-    }
-
-    let input_components: Vec<_> = input
-        .components()
-        .filter_map(|component| match component {
-            std::path::Component::Normal(segment) => Some(segment.to_os_string()),
-            _ => None,
-        })
-        .collect();
-
-    let root_parent_name = root
-        .parent()
-        .and_then(|parent| parent.file_name())
-        .map(|name| name.to_os_string());
-
-    if input_components.len() >= 3
-        && input_components[0] == "app_data"
-        && input_components[1] == "skills"
-        && input_components[2] == root_name
-        && root_parent_name.as_deref() == Some(std::ffi::OsStr::new("skills"))
-    {
-        let mut virtual_stripped = PathBuf::new();
-        for component in input.components().skip(3) {
-            match component {
-                std::path::Component::Normal(segment) => virtual_stripped.push(segment),
-                std::path::Component::ParentDir => virtual_stripped.push(".."),
-                std::path::Component::CurDir => {}
-                _ => {}
-            }
-        }
-
-        let candidate = if virtual_stripped.as_os_str().is_empty() {
-            PathBuf::from(".")
-        } else {
-            virtual_stripped
-        };
-
-        if !candidates.iter().any(|p| p == &candidate) {
-            candidates.push(candidate);
-        }
-    }
-
-    candidates
-}
-
 fn is_backup_variant(base_file: &Path, candidate: &Path) -> bool {
     let Some(base_name) = base_file.file_name().and_then(|name| name.to_str()) else {
         return false;
@@ -1060,233 +974,10 @@ fn resolve_safe_explicit_file(
     None
 }
 
-fn resolve_safe_path_with_roots(
-    primary_root: &Path,
-    extra_roots: &[PathBuf],
-    input_path: &str,
-    require_exists: bool,
-) -> Result<(PathBuf, PathBuf), String> {
-    let roots = build_candidate_roots(primary_root, extra_roots);
-
-    // 1. Try to find the exact existing file in ANY root
-    for root in &roots {
-        for candidate in build_root_relative_candidates(root, input_path) {
-            if let Ok(resolved) = resolve_safe_path(root, &candidate.to_string_lossy()) {
-                if resolved.exists() {
-                    return Ok((resolved, root.clone()));
-                }
-            }
-        }
-    }
-
-    if require_exists {
-        return Err(format!(
-            "Path '{}' was not found under workspace root '{}' or any active skill root",
-            input_path,
-            primary_root.display()
-        ));
-    }
-
-    // 2. File doesn't exist, and require_exists is false.
-    let is_absolute = Path::new(input_path).is_absolute();
-    if is_absolute {
-        for root in &roots {
-            for candidate in build_root_relative_candidates(root, input_path) {
-                if let Ok(resolved) = resolve_safe_path(root, &candidate.to_string_lossy()) {
-                    return Ok((resolved, root.clone()));
-                }
-            }
-        }
-        return Err(format!(
-            "Absolute path '{}' does not belong to workspace or any active skill root",
-            input_path
-        ));
-    }
-
-    // 3. For relative paths, see if the target's parent directory already exists in a skill root.
-    // This allows creating new files in existing skill subdirectories.
-    if let Some(parent) = Path::new(input_path).parent() {
-        if !parent.as_os_str().is_empty() {
-            // Check skill roots (skip the primary root at index 0 initially)
-            for root in roots.iter().skip(1) {
-                for candidate in build_root_relative_candidates(root, input_path) {
-                    if let Ok(resolved) = resolve_safe_path(root, &candidate.to_string_lossy()) {
-                        if let Some(resolved_parent) = resolved.parent() {
-                            if resolved_parent.exists() {
-                                return Ok((resolved, root.clone()));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // 4. Default to primary workspace root for new relative paths
-    resolve_safe_path(primary_root, input_path).map(|p| (p, primary_root.to_path_buf()))
-}
-
-fn strip_explicit_app_data_skills_prefix(input_path: &str) -> Option<PathBuf> {
-    let input = Path::new(input_path);
-    if input.is_absolute() {
-        return None;
-    }
-
-    let components: Vec<_> = input
-        .components()
-        .filter(|component| !matches!(component, std::path::Component::CurDir))
-        .collect();
-    if components.len() < 2 {
-        return None;
-    }
-
-    match (&components[0], &components[1]) {
-        (
-            std::path::Component::Normal(first),
-            std::path::Component::Normal(second),
-        ) if *first == std::ffi::OsStr::new("app_data")
-            && *second == std::ffi::OsStr::new("skills") =>
-        {
-            let mut suffix = PathBuf::new();
-            for component in components.into_iter().skip(2) {
-                match component {
-                    std::path::Component::Normal(segment) => suffix.push(segment),
-                    std::path::Component::ParentDir => suffix.push(".."),
-                    std::path::Component::CurDir => {}
-                    _ => {}
-                }
-            }
-
-            if suffix.as_os_str().is_empty() {
-                Some(PathBuf::from("."))
-            } else {
-                Some(suffix)
-            }
-        }
-        _ => None,
-    }
-}
-
-fn resolve_app_data_skills_read_path(
-    app_data_skills_dir: &Path,
-    input_path: &str,
-    require_exists: bool,
-) -> Result<(PathBuf, PathBuf), String> {
-    let Some(relative_suffix) = strip_explicit_app_data_skills_prefix(input_path) else {
-        return Err("Path is not under app_data/skills".to_string());
-    };
-
-    let resolved = resolve_safe_path(app_data_skills_dir, &relative_suffix.to_string_lossy())?;
-    if require_exists && !resolved.exists() {
-        return Err(format!(
-            "Path '{}' was not found under app_data skills root '{}'",
-            input_path,
-            app_data_skills_dir.display()
-        ));
-    }
-
-    Ok((resolved, app_data_skills_dir.to_path_buf()))
-}
-
-fn resolve_workspace_read_path(
-    workspace_root: &Path,
-    input_path: &str,
-    require_exists: bool,
-) -> Result<(PathBuf, PathBuf), String> {
-    let resolved = resolve_safe_path(workspace_root, input_path)?;
-    if require_exists && !resolved.exists() {
-        return Err(format!(
-            "Path '{}' was not found under workspace root '{}'",
-            input_path,
-            workspace_root.display()
-        ));
-    }
-
-    Ok((resolved, workspace_root.to_path_buf()))
-}
-
-fn resolve_read_path(
-    workspace_root: &Path,
-    app_data_skills_dir: &Path,
-    readable_skill_roots: &[PathBuf],
-    input_path: &str,
-    require_exists: bool,
-) -> Result<(PathBuf, PathBuf), String> {
-    let input = Path::new(input_path);
-    if strip_explicit_app_data_skills_prefix(input_path).is_some() {
-        return resolve_app_data_skills_read_path(app_data_skills_dir, input_path, require_exists);
-    }
-
-    if input.is_absolute() {
-        let mut readable_roots = readable_skill_roots.to_vec();
-        if !readable_roots.iter().any(|root| root == app_data_skills_dir) {
-            readable_roots.push(app_data_skills_dir.to_path_buf());
-        }
-        return resolve_safe_path_with_roots(
-            workspace_root,
-            &readable_roots,
-            input_path,
-            require_exists,
-        );
-    }
-
-    resolve_workspace_read_path(workspace_root, input_path, require_exists)
-}
-
-fn logical_root_label(workspace_root: &Path, resolved_root: &Path) -> String {
-    let normalized_workspace = normalize_path_for_comparison(workspace_root);
-    let normalized_root = normalize_path_for_comparison(resolved_root);
-
-    if let Ok(relative) = normalized_root.strip_prefix(&normalized_workspace) {
-        if relative.as_os_str().is_empty() {
-            return "./".to_string();
-        }
-
-        return format!(
-            "./{}",
-            relative.to_string_lossy().replace('\\', "/")
-        );
-    }
-
-    if normalized_root
-        .file_name()
-        .is_some_and(|name| name == std::ffi::OsStr::new("skills"))
-    {
-        return "app_data/skills".to_string();
-    }
-
-    if normalized_root
-        .parent()
-        .and_then(|parent| parent.file_name())
-        .is_some_and(|name| name == std::ffi::OsStr::new("skills"))
-    {
-        return format!(
-            "app_data/skills/{}",
-            normalized_root
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or_default()
-        );
-    }
-
-    normalized_root.to_string_lossy().replace('\\', "/")
-}
-
-fn with_root_header(workspace_root: &Path, resolved_root: &Path, body: String) -> String {
-    let header = format!("ROOT: {}", logical_root_label(workspace_root, resolved_root));
-    if body.is_empty() {
-        header
-    } else {
-        format!("{header}\n{body}")
-    }
-}
-
-fn normalize_path_for_comparison(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
-}
-
 fn path_is_within(path: &Path, root: &Path) -> bool {
-    normalize_path_for_comparison(path).starts_with(normalize_path_for_comparison(root))
+    path.canonicalize()
+        .map(|p| p.starts_with(root.canonicalize().unwrap_or_else(|_| root.to_path_buf())))
+        .unwrap_or(false)
 }
 
 fn path_is_within_any_root(path: &Path, roots: &[PathBuf]) -> bool {
@@ -1295,6 +986,15 @@ fn path_is_within_any_root(path: &Path, roots: &[PathBuf]) -> bool {
 
 fn workspace_skills_root(workspace_dir: &Path) -> PathBuf {
     workspace_dir.join("skills")
+}
+
+fn with_root_header(_workspace_root: &Path, _resolved_root: &Path, body: String) -> String {
+    // Since file_actions now only accesses workspace, the root is always "./"
+    if body.is_empty() {
+        "ROOT: ./".to_string()
+    } else {
+        format!("ROOT: ./\n{body}")
+    }
 }
 
 fn ensure_mutation_target_allowed(
@@ -1453,10 +1153,7 @@ mod tests {
     use super::ensure_mutation_target_allowed;
     use super::OutputDecodeHint;
     use super::SearchOptions;
-    use super::logical_root_label;
     use super::run_integrated_search;
-    use super::resolve_read_path;
-    use super::resolve_safe_path_with_roots;
     use super::validate_shell_working_directory_changes;
     use std::fs;
     use std::path::PathBuf;
@@ -1466,216 +1163,6 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ai-chat-tools-{label}-{}", Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
         dir
-    }
-
-    fn normalize(path: &PathBuf) -> PathBuf {
-        path.canonicalize().unwrap_or_else(|_| path.clone())
-    }
-
-    #[test]
-    fn resolves_existing_skill_file_with_root_name_prefix() {
-        let workspace_root = make_temp_dir("workspace");
-        let skill_root = make_temp_dir("skills").join("skills");
-        let skill_file = skill_root.join("demo").join("skill.md");
-        fs::create_dir_all(skill_file.parent().unwrap()).unwrap();
-        fs::write(&skill_file, "content").unwrap();
-
-        let resolved = resolve_safe_path_with_roots(
-            &workspace_root,
-            std::slice::from_ref(&skill_root),
-            "skills/demo/skill.md",
-            true,
-        )
-        .unwrap();
-
-        assert_eq!(normalize(&resolved.0), normalize(&skill_file));
-        assert_eq!(normalize(&resolved.1), normalize(&skill_root));
-
-        let _ = fs::remove_dir_all(&workspace_root);
-        let _ = fs::remove_dir_all(skill_root.parent().unwrap());
-    }
-
-    #[test]
-    fn resolves_new_skill_file_with_root_name_prefix_to_skill_root() {
-        let workspace_root = make_temp_dir("workspace");
-        let skill_root = make_temp_dir("skills").join("skills");
-        let existing_dir = skill_root.join("demo");
-        fs::create_dir_all(&existing_dir).unwrap();
-
-        let resolved = resolve_safe_path_with_roots(
-            &workspace_root,
-            std::slice::from_ref(&skill_root),
-            "skills/demo/improved.md",
-            false,
-        )
-        .unwrap();
-
-        assert_eq!(resolved.0, existing_dir.join("improved.md"));
-        assert_eq!(normalize(&resolved.1), normalize(&skill_root));
-
-        let _ = fs::remove_dir_all(&workspace_root);
-        let _ = fs::remove_dir_all(skill_root.parent().unwrap());
-    }
-
-    #[test]
-    fn resolves_existing_app_data_skill_file_with_virtual_prefix() {
-        let workspace_root = make_temp_dir("workspace");
-        let app_data_root = make_temp_dir("app-data");
-        let skill_root = app_data_root.join("skills").join("demo");
-        let skill_file = skill_root.join("ref").join("index.md");
-        fs::create_dir_all(skill_file.parent().unwrap()).unwrap();
-        fs::write(&skill_file, "content").unwrap();
-
-        let resolved = resolve_safe_path_with_roots(
-            &workspace_root,
-            std::slice::from_ref(&skill_root),
-            "app_data/skills/demo/ref/index.md",
-            true,
-        )
-        .unwrap();
-
-        assert_eq!(normalize(&resolved.0), normalize(&skill_file));
-        assert_eq!(normalize(&resolved.1), normalize(&skill_root));
-
-        let _ = fs::remove_dir_all(&workspace_root);
-        let _ = fs::remove_dir_all(&app_data_root);
-    }
-
-    #[test]
-    fn resolves_existing_app_data_skill_root_directory_with_virtual_prefix() {
-        let workspace_root = make_temp_dir("workspace");
-        let app_data_root = make_temp_dir("app-data");
-        let app_data_skills_dir = app_data_root.join("skills");
-        let skill_root = app_data_skills_dir.join("zhangxuefeng-perspective");
-        fs::create_dir_all(skill_root.join("ref")).unwrap();
-
-        let resolved = resolve_read_path(
-            &workspace_root,
-            &app_data_skills_dir,
-            std::slice::from_ref(&skill_root),
-            "app_data/skills/zhangxuefeng-perspective",
-            true,
-        )
-        .unwrap();
-
-        assert_eq!(normalize(&resolved.0), normalize(&skill_root));
-        assert_eq!(normalize(&resolved.1), normalize(&app_data_skills_dir));
-
-        let _ = fs::remove_dir_all(&workspace_root);
-        let _ = fs::remove_dir_all(&app_data_root);
-    }
-
-    #[test]
-    fn resolves_dot_prefixed_app_data_skill_path() {
-        let workspace_root = make_temp_dir("workspace");
-        let app_data_root = make_temp_dir("app-data");
-        let app_data_skills_dir = app_data_root.join("skills");
-        let skill_root = app_data_skills_dir.join("zhangxuefeng-perspective");
-        let references = skill_root.join("references");
-        fs::create_dir_all(&references).unwrap();
-
-        let resolved = resolve_read_path(
-            &workspace_root,
-            &app_data_skills_dir,
-            std::slice::from_ref(&skill_root),
-            "./app_data/skills/zhangxuefeng-perspective/references",
-            true,
-        )
-        .unwrap();
-
-        assert_eq!(normalize(&resolved.0), normalize(&references));
-        assert_eq!(normalize(&resolved.1), normalize(&app_data_skills_dir));
-
-        let _ = fs::remove_dir_all(&workspace_root);
-        let _ = fs::remove_dir_all(&app_data_root);
-    }
-
-    #[test]
-    fn labels_workspace_root_as_dot_slash() {
-        let workspace_root = make_temp_dir("workspace");
-
-        assert_eq!(logical_root_label(&workspace_root, &workspace_root), "./");
-
-        let _ = fs::remove_dir_all(&workspace_root);
-    }
-
-    #[test]
-    fn labels_app_data_skill_root_with_virtual_prefix() {
-        let workspace_root = make_temp_dir("workspace");
-        let app_data_root = make_temp_dir("app-data");
-        let skill_root = app_data_root.join("skills").join("zhangxuefeng-perspective");
-        fs::create_dir_all(&skill_root).unwrap();
-
-        assert_eq!(
-            logical_root_label(&workspace_root, &skill_root),
-            "app_data/skills/zhangxuefeng-perspective"
-        );
-
-        let _ = fs::remove_dir_all(&workspace_root);
-        let _ = fs::remove_dir_all(&app_data_root);
-    }
-
-    #[test]
-    fn labels_app_data_skills_directory_root() {
-        let workspace_root = make_temp_dir("workspace");
-        let app_data_root = make_temp_dir("app-data");
-        let app_data_skills_dir = app_data_root.join("skills");
-        fs::create_dir_all(&app_data_skills_dir).unwrap();
-
-        assert_eq!(
-            logical_root_label(&workspace_root, &app_data_skills_dir),
-            "app_data/skills"
-        );
-
-        let _ = fs::remove_dir_all(&workspace_root);
-        let _ = fs::remove_dir_all(&app_data_root);
-    }
-
-    #[test]
-    fn resolves_app_data_skills_directory_root() {
-        let workspace_root = make_temp_dir("workspace");
-        let app_data_root = make_temp_dir("app-data");
-        let app_data_skills_dir = app_data_root.join("skills");
-        fs::create_dir_all(app_data_skills_dir.join("zhangxuefeng-perspective")).unwrap();
-
-        let resolved = resolve_read_path(
-            &workspace_root,
-            &app_data_skills_dir,
-            &[],
-            "app_data/skills",
-            true,
-        )
-        .unwrap();
-
-        assert_eq!(normalize(&resolved.0), normalize(&app_data_skills_dir));
-        assert_eq!(normalize(&resolved.1), normalize(&app_data_skills_dir));
-
-        let _ = fs::remove_dir_all(&workspace_root);
-        let _ = fs::remove_dir_all(&app_data_root);
-    }
-
-    #[test]
-    fn ambiguous_relative_read_path_does_not_fallback_to_skill_root() {
-        let workspace_root = make_temp_dir("workspace");
-        let app_data_root = make_temp_dir("app-data");
-        let skill_root = app_data_root.join("skills").join("demo");
-        let skill_file = skill_root.join("ref").join("index.md");
-        fs::create_dir_all(skill_file.parent().unwrap()).unwrap();
-        fs::write(&skill_file, "content").unwrap();
-
-        let err = resolve_read_path(
-            &workspace_root,
-            &app_data_root.join("skills"),
-            std::slice::from_ref(&skill_root),
-            "ref/index.md",
-            true,
-        )
-        .unwrap_err();
-
-        assert!(err.contains("workspace root"));
-
-        let _ = fs::remove_dir_all(&workspace_root);
-        let _ = fs::remove_dir_all(&app_data_root);
     }
 
     #[test]
@@ -1827,18 +1314,6 @@ mod tests {
     }
 
     #[test]
-    fn workspace_skill_dir_is_read_only_without_self_evolution() {
-        let workspace_root = make_temp_dir("readonly-skills");
-        let skill_file = workspace_root.join("skills").join("demo").join("skill.md");
-
-        let err = ensure_mutation_target_allowed(&skill_file, &workspace_root, &[]).unwrap_err();
-
-        assert!(err.contains("read-only"));
-
-        let _ = fs::remove_dir_all(&workspace_root);
-    }
-
-    #[test]
     fn workspace_skill_dir_is_writable_in_self_evolution_mode() {
         let workspace_root = make_temp_dir("writable-skills");
         let writable_root = workspace_root.join("skills");
@@ -1944,10 +1419,6 @@ pub async fn execute_tool(
     config: &crate::AppConfig,
     // Allowlist of executable names from the active skill (empty = unrestricted).
     allowed_commands: &[String],
-    // Active skill roots are readable for skill-owned reference data.
-    _command_skill_roots: &[PathBuf],
-    // Read-only skill roots that can be addressed by file_actions reads/searches.
-    readable_skill_roots: &[PathBuf],
     // Writable skill roots that require automatic `.bak.N` backups before mutation.
     protected_skill_roots: &[PathBuf],
     // Exact files that require automatic `.bak.N` backups before mutation.
@@ -2294,22 +1765,16 @@ pub async fn execute_tool(
             let action = args["action"].as_str().unwrap_or("");
             let path_str = args["path"].as_str().unwrap_or("");
             let root_dir = workspace_dir.clone();
-            let app_data_skills_dir = app.state::<crate::AppState>().skills_dir.clone();
-            let resolve_read_path = |input: &str, require_exists: bool| {
+            let resolve_read_path = |input: &str, _require_exists: bool| {
                 resolve_safe_explicit_file(input, protected_exact_files)
                     .or_else(|| {
-                        resolve_read_path(
-                            &root_dir,
-                            &app_data_skills_dir,
-                            readable_skill_roots,
-                            input,
-                            require_exists,
-                        )
-                        .ok()
+                        resolve_safe_path(&root_dir, input)
+                            .map(|p| (p, root_dir.clone()))
+                            .ok()
                     })
                     .ok_or_else(|| {
                         format!(
-                            "Path '{}' was not found under workspace root '{}' or any explicit skill path",
+                            "Path '{}' is outside the workspace root '{}'",
                             input,
                             root_dir.display()
                         )
@@ -2317,10 +1782,10 @@ pub async fn execute_tool(
             };
             let resolve_write_path = |input: &str, require_exists: bool| {
                 resolve_safe_path(&root_dir, input)
-                    .map(|path| (path, root_dir.clone()))
+                    .map(|p| (p, root_dir.clone()))
                     .map_err(|_| {
                         format!(
-                            "Path '{}' must stay under workspace root '{}'",
+                            "Path '{}' is outside the workspace root '{}'",
                             input,
                             root_dir.display()
                         )
