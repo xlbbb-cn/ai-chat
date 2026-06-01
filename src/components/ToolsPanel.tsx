@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { getConfig, saveConfig } from "../api";
-import type { AppConfig } from "../types";
+import type { AppConfig, ConfirmKind } from "../types";
 import "./ToolsPanel.css";
 
 interface Props {
@@ -41,6 +41,35 @@ const KG_ENGINES = [
     { value: "neo4j", label: "Neo4j" }
 ];
 
+const AUTO_ACCEPT_OPTIONS: Array<{
+    kind: ConfirmKind;
+    label: string;
+    description: string;
+}> = [
+        {
+            kind: "dangerous",
+            label: "Dangerous commands",
+            description: "Skip the approval prompt for dangerous run_cmd or run_shell requests.",
+        },
+        {
+            kind: "sudo",
+            label: "sudo requests",
+            description: "Auto-confirms the approval step for sudo. It does not provide a password automatically.",
+        },
+        {
+            kind: "elevation",
+            label: "Administrator elevation",
+            description: "Skip the approval prompt before PowerShell elevation (UAC) requests.",
+        },
+        {
+            kind: "external_path",
+            label: "External absolute paths",
+            description: "Allow file_actions to access absolute paths outside the workspace without prompting.",
+        },
+    ];
+
+const AUTO_ACCEPT_KIND_SET = new Set<ConfirmKind>(AUTO_ACCEPT_OPTIONS.map((option) => option.kind));
+
 export function ToolsPanel({ onClose, onToolsChange }: Props) {
     const [config, setConfig] = useState<AppConfig | null>(null);
     const [expandedTool, setExpandedTool] = useState<string | null>(null);
@@ -76,6 +105,20 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
         await saveConfig(newConfig);
     }
 
+    async function toggleAutoAccept(kind: ConfirmKind) {
+        if (!config) return;
+        const current = (config.auto_accept_confirm_kinds ?? []).filter((value): value is ConfirmKind =>
+            AUTO_ACCEPT_KIND_SET.has(value as ConfirmKind)
+        );
+        const updated = current.includes(kind)
+            ? current.filter((value) => value !== kind)
+            : [...current, kind];
+
+        const newConfig = { ...config, auto_accept_confirm_kinds: updated };
+        setConfig(newConfig);
+        await saveConfig(newConfig);
+    }
+
     if (!config) {
         return <div className="tools-panel">Loading...</div>;
     }
@@ -83,6 +126,9 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
     const selectedTools = config.selected_tools ?? [];
     const kgEngine = config.kg_engine ?? "neo4j";
     const kgEnabled = selectedTools.includes("knowledge_graph");
+    const autoAcceptKinds = (config.auto_accept_confirm_kinds ?? []).filter((value): value is ConfirmKind =>
+        AUTO_ACCEPT_KIND_SET.has(value as ConfirmKind)
+    );
 
     return (
         <div className="tools-panel">
@@ -145,6 +191,37 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                         </option>
                     ))}
                 </select>
+            </div>
+
+            <div className="tools-footer-section">
+                <div className="tools-footer-title">AutoAccept Mode</div>
+                <div className="tools-footer-hint">
+                    Auto-allow selected confirmation types. Use this only when you trust the active tools and prompts.
+                </div>
+                <div className="auto-accept-list">
+                    {AUTO_ACCEPT_OPTIONS.map((option) => {
+                        const checked = autoAcceptKinds.includes(option.kind);
+                        return (
+                            <label key={option.kind} className="auto-accept-item">
+                                <div className="auto-accept-copy">
+                                    <span className="auto-accept-name">{option.label}</span>
+                                    <span className="auto-accept-desc">{option.description}</span>
+                                </div>
+                                <div className="auto-accept-control">
+                                    <span className="auto-accept-kind">{option.kind}</span>
+                                    <span className="toggle-switch" onClick={(event) => event.stopPropagation()}>
+                                        <input
+                                            type="checkbox"
+                                            checked={checked}
+                                            onChange={() => void toggleAutoAccept(option.kind)}
+                                        />
+                                        <span className="toggle-switch-slider" />
+                                    </span>
+                                </div>
+                            </label>
+                        );
+                    })}
+                </div>
             </div>
         </div>
     );

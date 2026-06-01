@@ -291,6 +291,8 @@ pub struct AppConfig {
     pub workspace_dir: Option<String>,
     #[serde(default)]
     pub logger_output: LoggerOutput,
+    #[serde(default)]
+    pub auto_accept_confirm_kinds: Vec<String>,
 }
 
 impl Default for AppConfig {
@@ -311,6 +313,7 @@ impl Default for AppConfig {
             neo4j_password: Some(String::new()),
             workspace_dir: None,
             logger_output: LoggerOutput::default(),
+            auto_accept_confirm_kinds: vec![],
         }
     }
 }

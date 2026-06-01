@@ -577,6 +577,27 @@ async fn request_tool_confirmation(
     confirm_kind: &'static str,
     requires_auth: &'static str,
 ) -> crate::ToolConfirmation {
+    let auto_accept_enabled = app
+        .state::<crate::AppState>()
+        .config
+        .lock()
+        .ok()
+        .map(|config| {
+            config
+                .auto_accept_confirm_kinds
+                .iter()
+                .any(|kind| kind == confirm_kind)
+        })
+        .unwrap_or(false);
+
+    if auto_accept_enabled {
+        return crate::ToolConfirmation {
+            confirmed: true,
+            username: None,
+            password: None,
+        };
+    }
+
     let _ = app.emit(
         "confirm-required",
         serde_json::json!({

@@ -16,6 +16,8 @@ export interface Message {
   tool_calls?: ToolCallEntry[];
 }
 
+export type ConfirmKind = "dangerous" | "sudo" | "elevation" | "external_path";
+
 export interface AppConfig {
   api_base_url: string;
   api_key: string;
@@ -33,6 +35,7 @@ export interface AppConfig {
   workspace_dir?: string;
   logger_output?: "file" | "println";
   theme?: "auto" | "light" | "dark";
+  auto_accept_confirm_kinds?: ConfirmKind[];
 }
 
 export interface ModelSettings {
