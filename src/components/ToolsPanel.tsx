@@ -9,22 +9,24 @@ interface Props {
 }
 
 const AVAILABLE_TOOLS = [
-
-
     {
         id: "file_actions",
         name: "File Actions",
-        description: "he file action to perform: read file content, write/overwrite a file, list directory entries, edit by replacing a string, or apply a unified diff patch.",
+        description: [
+            "Read, write, list, search, patch, rename, move, create, and delete files only inside the current workspace root.",
+            "Use `./...` paths such as `./src/App.tsx`, `./skills/demo/skill.md`, or `.` for the workspace root.",
+            "Rejected paths: `workspace/...`, `../...`, and absolute paths outside the workspace.",
+        ].join("\n"),
     },
     {
         id: "run_cmd",
         name: "Run Command",
-        description: "Run an executable program directly (without a shell). Preferred for simple commands like curl, git, wget, etc. Privileged operations (sudo) and dangerous commands require explicit confirmation.",
+        description: "Run an executable program directly (without a shell). The process starts in the workspace root. Preferred for simple commands like curl, git, or wget. Privileged operations and dangerous commands require explicit confirmation.",
     },
     {
         id: "run_shell",
         name: "Run Shell",
-        description: "Execute a script in a shell (PowerShell or Bash). Supports pipes, loops, variables, and other shell features. Privileged operations (sudo / admin elevation) and dangerous commands require explicit confirmation.",
+        description: "Execute a script in a shell (PowerShell or Bash). The shell starts in the workspace root, and directory changes must stay inside that workspace. Supports pipes, loops, variables, and other shell features. Privileged operations and dangerous commands require explicit confirmation.",
     },
     {
         id: "knowledge_graph",
