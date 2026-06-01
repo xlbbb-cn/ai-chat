@@ -73,6 +73,7 @@ const AUTO_ACCEPT_KIND_SET = new Set<ConfirmKind>(AUTO_ACCEPT_OPTIONS.map((optio
 export function ToolsPanel({ onClose, onToolsChange }: Props) {
     const [config, setConfig] = useState<AppConfig | null>(null);
     const [expandedTool, setExpandedTool] = useState<string | null>(null);
+    const [expandedAutoAccept, setExpandedAutoAccept] = useState<ConfirmKind | null>(null);
 
     useEffect(() => {
         getConfig()
@@ -201,24 +202,36 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                 <div className="auto-accept-list">
                     {AUTO_ACCEPT_OPTIONS.map((option) => {
                         const checked = autoAcceptKinds.includes(option.kind);
+                        const expanded = expandedAutoAccept === option.kind;
                         return (
-                            <label key={option.kind} className="auto-accept-item">
-                                <div className="auto-accept-copy">
-                                    <span className="auto-accept-name">{option.label}</span>
-                                    <span className="auto-accept-desc">{option.description}</span>
-                                </div>
-                                <div className="auto-accept-control">
-                                    <span className="auto-accept-kind">{option.kind}</span>
-                                    <span className="toggle-switch" onClick={(event) => event.stopPropagation()}>
+                            <div key={option.kind} className={`auto-accept-item ${expanded ? "expanded" : ""}`}>
+                                <div className="auto-accept-row">
+                                    <button
+                                        type="button"
+                                        className="auto-accept-summary"
+                                        onClick={() => setExpandedAutoAccept(expanded ? null : option.kind)}
+                                        aria-expanded={expanded}
+                                    >
+                                        <span className="auto-accept-name">{option.label}</span>
+                                        <span className="auto-accept-chevron">{expanded ? "▲" : "▼"}</span>
+                                    </button>
+                                    <label className="toggle-switch" onClick={(event) => event.stopPropagation()}>
                                         <input
                                             type="checkbox"
                                             checked={checked}
                                             onChange={() => void toggleAutoAccept(option.kind)}
                                         />
                                         <span className="toggle-switch-slider" />
-                                    </span>
+                                    </label>
                                 </div>
-                            </label>
+
+                                {expanded && (
+                                    <div className="auto-accept-details">
+                                        <span className="auto-accept-kind">{option.kind}</span>
+                                        <span className="auto-accept-desc">{option.description}</span>
+                                    </div>
+                                )}
+                            </div>
                         );
                     })}
                 </div>

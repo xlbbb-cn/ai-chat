@@ -170,22 +170,52 @@
 .auto-accept-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
 }
 
 .auto-accept-item {
     display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 10px 0;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 0;
 }
 
-.auto-accept-copy {
+.auto-accept-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.auto-accept-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex: 1;
+    padding: 0;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    text-align: left;
+}
+
+.auto-accept-summary:hover .auto-accept-name,
+.auto-accept-summary:focus-visible .auto-accept-name {
+    color: #000000;
+}
+
+.auto-accept-summary:focus-visible {
+    outline: 1px solid #171A20;
+    outline-offset: 4px;
+    border-radius: 4px;
+}
+
+.auto-accept-details {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    min-width: 0;
+    padding-left: 4px;
 }
 
 .auto-accept-name {
@@ -194,17 +224,16 @@
     color: #171A20;
 }
 
+.auto-accept-chevron {
+    font-size: 11px;
+    color: #5C5E62;
+    flex-shrink: 0;
+}
+
 .auto-accept-desc {
     font-size: 12px;
     line-height: 1.5;
     color: #5C5E62;
-}
-
-.auto-accept-control {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-shrink: 0;
 }
 
 .auto-accept-kind {
@@ -243,9 +272,19 @@
     background: var(--c-hover);
 }
 
+[data-theme="dark"] .auto-accept-summary:hover .auto-accept-name,
+[data-theme="dark"] .auto-accept-summary:focus-visible .auto-accept-name {
+    color: var(--c-text);
+}
+
+[data-theme="dark"] .auto-accept-summary:focus-visible {
+    outline-color: var(--c-text);
+}
+
 [data-theme="dark"] .toggle-btn,
 [data-theme="dark"] .tool-desc-expanded,
 [data-theme="dark"] .tools-footer-hint,
+[data-theme="dark"] .auto-accept-chevron,
 [data-theme="dark"] .auto-accept-desc,
 [data-theme="dark"] .auto-accept-kind {
     color: var(--c-muted);
