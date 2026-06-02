@@ -96,7 +96,6 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-weight: 600;
     color: var(--c-text);
     letter-spacing: -0.005em;
 }
@@ -108,7 +107,6 @@
     background: var(--c-hover);
     border-radius: var(--r-pill);
     padding: 2px 8px;
-    font-weight: 500;
 }
 
 .tool-call-group-summary::before {
@@ -184,7 +182,6 @@
 .tool-call-entry-name {
     grid-row: 1;
     grid-column: 2;
-    font-weight: 600;
     color: var(--c-muted);
     white-space: nowrap;
 }

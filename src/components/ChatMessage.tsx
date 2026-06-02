@@ -57,7 +57,7 @@ function buildPrintableMessageHtml(contentHtml: string, exportedAt: string): str
     <style>
       :root {
         color-scheme: light;
-        font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+        font-family: "SourceHanSansSC", "Segoe UI", "Microsoft YaHei", sans-serif;
       }
 
       * {

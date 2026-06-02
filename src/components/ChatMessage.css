@@ -42,7 +42,6 @@
 
 .message-role {
   font-size: 12px;
-  font-weight: 600;
   color: var(--c-muted);
   text-transform: none;
   letter-spacing: 0.02em;
@@ -64,11 +63,13 @@
 .message-reasoning summary {
   cursor: pointer;
   color: var(--c-muted);
-  font-weight: 500;
   user-select: none;
   font-size: 13px;
   margin-bottom: 4px;
-  letter-spacing: -0.005em;
+  letter-spacing: 0;
+  font-family: "Inter", "SF Pro Text", "Segoe UI", "Helvetica Neue",
+    Arial, "SourceHanSansSC", "Microsoft YaHei", "PingFang SC",
+    "Noto Sans CJK SC", sans-serif;
 }
 
 .message-reasoning-summary {
@@ -109,10 +110,17 @@
   margin-top: 6px;
   font-size: 14px;
   color: var(--c-muted);
-  line-height: 1.55;
+  line-height: 1.65;
   min-width: 0;
   overflow-wrap: anywhere;
   word-break: break-word;
+  letter-spacing: 0;
+  font-family: "Inter", "SF Pro Text", "Segoe UI", "Helvetica Neue",
+    Arial, "SourceHanSansSC", "Microsoft YaHei", "PingFang SC",
+    "Noto Sans CJK SC", sans-serif;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 .message-reasoning-content p {
@@ -152,10 +160,28 @@
 
 .message-content {
   font-size: 14px;
-  font-weight: 400;
-  line-height: 1.5;
+  line-height: 1.65;
   min-width: 0;
-  letter-spacing: -0.005em;
+  letter-spacing: 0;
+  /* Two-family stack: latin glyphs first, then CJK fallback.  The browser
+     picks per-character, so Chinese renders with SourceHanSansSC while
+     ASCII letters / digits use the system UI font — fixing the "mixed
+     OpenType + jagged letters" look. */
+  font-family: "Inter", "SF Pro Text", "Segoe UI", "Helvetica Neue",
+    Arial, "SourceHanSansSC", "Microsoft YaHei", "PingFang SC",
+    "Noto Sans CJK SC", sans-serif;
+  font-feature-settings: "kern" 1, "liga" 1, "calt" 1, "tnum" 0;
+  font-variant-numeric: proportional-nums;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.message-content :lang(zh),
+.message-content :lang(ja),
+.message-content :lang(ko) {
+  font-family: "SourceHanSansSC", "Microsoft YaHei", "PingFang SC",
+    "Noto Sans CJK SC", sans-serif;
 }
 
 .message-content p {
@@ -225,7 +251,6 @@
   padding: 4px 10px;
   cursor: pointer;
   transition: background-color 0.2s ease, transform 0.15s ease, box-shadow 0.2s;
-  font-weight: 500;
   box-shadow: var(--shadow-sm);
 }
 
@@ -271,7 +296,6 @@
 .message-content thead th {
   background: var(--c-hover);
   color: var(--c-text);
-  font-weight: 600;
 }
 
 .message-content tbody tr:nth-child(even) {
@@ -334,7 +358,6 @@
   font-size: 12px;
   line-height: 1;
   cursor: pointer;
-  font-weight: 500;
   transition: background-color 0.18s ease, color 0.18s ease, transform 0.18s ease, box-shadow 0.2s;
   box-shadow: var(--shadow-sm);
 }
@@ -361,7 +384,6 @@
   border-radius: var(--r-pill);
   padding: 6px 14px;
   font-size: 12px;
-  font-weight: 500;
   cursor: pointer;
   font-family: inherit;
   box-shadow: 0 2px 6px rgba(255, 59, 48, 0.20);

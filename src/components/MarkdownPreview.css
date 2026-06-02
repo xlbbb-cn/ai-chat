@@ -7,12 +7,70 @@
     overflow-wrap: anywhere;
     word-break: break-word;
     color: var(--c-body);
+    font-size: 13px;
+    line-height: 1.65;
+    letter-spacing: 0;
+    font-family: "Inter", "SF Pro Text", "Segoe UI", "Helvetica Neue",
+        Arial, "SourceHanSansSC", "Microsoft YaHei", "PingFang SC",
+        "Noto Sans CJK SC", sans-serif;
+    font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
 }
 
 .md-preview ul,
 .md-preview ol {
     padding-left: 1.2em;
     margin-left: 0;
+}
+
+.md-preview h1,
+.md-preview h2,
+.md-preview h3,
+.md-preview h4,
+.md-preview h5,
+.md-preview h6 {
+    letter-spacing: -0.005em;
+    color: var(--c-text);
+}
+
+.md-preview p {
+    margin: 0 0 0.6em;
+}
+
+.md-preview strong {
+    color: var(--c-text);
+}
+
+.md-preview em {
+    font-style: italic;
+}
+
+.md-preview a {
+    color: var(--c-accent);
+    text-decoration: none;
+    border-bottom: 0.5px solid var(--c-accent-soft);
+    transition: border-color 0.2s;
+}
+
+.md-preview a:hover {
+    border-bottom-color: var(--c-accent);
+}
+
+.md-preview hr {
+    border: none;
+    border-top: 0.5px solid var(--c-border);
+    margin: 1em 0;
+}
+
+.md-preview blockquote {
+    margin: 0.6em 0;
+    padding: 4px 12px;
+    border-left: 3px solid var(--c-border-i);
+    color: var(--c-muted);
+    background: var(--c-reason);
+    border-radius: 0 var(--r-sm) var(--r-sm) 0;
 }
 
 .md-preview>* {
@@ -89,7 +147,6 @@
 .md-preview thead th {
     background: var(--c-hover);
     color: var(--c-text);
-    font-weight: 600;
 }
 
 .md-preview .katex-display {
