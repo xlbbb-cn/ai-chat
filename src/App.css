@@ -540,7 +540,7 @@ body {
 .mcp-form.scrolling-active {
   scrollbar-gutter: stable;
   scrollbar-width: thin;
-  scrollbar-color: #16A34A transparent;
+  scrollbar-color: #3e3f3e transparent;
 }
 
 .history-list.scrolling-active::-webkit-scrollbar,
