@@ -73,7 +73,7 @@ const AUTO_ACCEPT_KIND_SET = new Set<ConfirmKind>(AUTO_ACCEPT_OPTIONS.map((optio
 export function ToolsPanel({ onClose, onToolsChange }: Props) {
     const [config, setConfig] = useState<AppConfig | null>(null);
     const [expandedTool, setExpandedTool] = useState<string | null>(null);
-    const [autoAcceptExpanded, setAutoAcceptExpanded] = useState(false);
+    const [autoAcceptExpanded, setAutoAcceptExpanded] = useState(true);
 
     useEffect(() => {
         getConfig()
@@ -88,7 +88,7 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                     auto_accept_confirm_kinds: selectedAutoAcceptKinds,
                 };
                 setConfig(sanitized);
-                setAutoAcceptExpanded(selectedAutoAcceptKinds.length > 0);
+                setAutoAcceptExpanded(true);
                 onToolsChange(selected);
             })
             .catch(console.error);

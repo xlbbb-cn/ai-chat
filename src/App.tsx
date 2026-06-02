@@ -12,6 +12,7 @@ import { McpPanel } from "./components/McpPanel";
 import { AgentsPanel } from "./components/AgentsPanel";
 import { AgentMissionPanel } from "./components/AgentMissionPanel";
 import { MarkdownPreview } from "./components/MarkdownPreview";
+import { Portal } from "./components/Portal";
 import type { Message, AgentTaskEvent, ToolCallEntry } from "./types";
 import "./App.css";
 
@@ -920,51 +921,53 @@ export default function App() {
     <div className="app-layout">
       {renderConfirmDialog()}
       {markdownEditorOpen && (
-        <div className="markdown-editor-overlay" role="dialog" aria-modal="true" aria-label="Markdown editor">
-          <div className="markdown-editor-shell">
-            <div className="markdown-editor-header">
-              <h3>Markdown Edit</h3>
-              <div className="markdown-editor-file" title={markdownPath}>{markdownPath}</div>
-              <div className="markdown-editor-actions">
-                <button
-                  type="button"
-                  className="toolbar-btn"
-                  onClick={() => setMarkdownEditorOpen(false)}
-                  disabled={markdownSaving}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="send-btn"
-                  onClick={handleSaveMarkdownEditor}
-                  disabled={markdownSaving}
-                >
-                  {markdownSaving ? "Saving..." : "Save"}
-                </button>
+        <Portal>
+          <div className="markdown-editor-overlay" role="dialog" aria-modal="true" aria-label="Markdown editor">
+            <div className="markdown-editor-shell">
+              <div className="markdown-editor-header">
+                <h3>Markdown Edit</h3>
+                <div className="markdown-editor-file" title={markdownPath}>{markdownPath}</div>
+                <div className="markdown-editor-actions">
+                  <button
+                    type="button"
+                    className="toolbar-btn"
+                    onClick={() => setMarkdownEditorOpen(false)}
+                    disabled={markdownSaving}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="send-btn"
+                    onClick={handleSaveMarkdownEditor}
+                    disabled={markdownSaving}
+                  >
+                    {markdownSaving ? "Saving..." : "Save"}
+                  </button>
+                </div>
               </div>
-            </div>
-            <div className="markdown-editor-body">
-              <div className="markdown-editor-column">
-                <span>Markdown</span>
-                <textarea
-                  className="markdown-editor-textarea"
-                  value={markdownDraft}
-                  onChange={(e) => setMarkdownDraft(e.target.value)}
-                  placeholder="Write markdown here..."
-                />
-              </div>
-              <div className="markdown-editor-column">
-                <span>Preview</span>
-                <div className="markdown-editor-preview">
-                  {markdownDraft.trim()
-                    ? <MarkdownPreview content={markdownDraft} />
-                    : <p className="markdown-editor-preview-empty">Markdown preview will appear here.</p>}
+              <div className="markdown-editor-body">
+                <div className="markdown-editor-column">
+                  <span>Markdown</span>
+                  <textarea
+                    className="markdown-editor-textarea"
+                    value={markdownDraft}
+                    onChange={(e) => setMarkdownDraft(e.target.value)}
+                    placeholder="Write markdown here..."
+                  />
+                </div>
+                <div className="markdown-editor-column">
+                  <span>Preview</span>
+                  <div className="markdown-editor-preview">
+                    {markdownDraft.trim()
+                      ? <MarkdownPreview content={markdownDraft} />
+                      : <p className="markdown-editor-preview-empty">Markdown preview will appear here.</p>}
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
+        </Portal>
       )}
       {/* Sidebar */}
       {sidebar && (

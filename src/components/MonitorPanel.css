@@ -4,42 +4,48 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: rgba(31, 30, 30, 0.329);
+    background-color: rgba(0, 0, 0, 0.45);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 1000;
     padding: 16px;
+    animation: fade-in 200ms ease;
 }
 
 .monitor-shell {
-    background-color: #363636;
-    border: 1px solid #333;
-    border-radius: 8px;
+    background-color: #1e1e1e;
+    border: 0.5px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
     display: flex;
     flex-direction: column;
     width: 100%;
     height: 100%;
-    /* max-width: 1400px;
-    max-height: 90vh; */
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 0 0.5px rgba(255, 255, 255, 0.04);
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
 }
 
 .monitor-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 16px;
-    border-bottom: 1px solid #333;
-    background-color: #252526;
-    border-radius: 8px 8px 0 0;
+    padding: 14px 18px;
+    border-bottom: 0.5px solid rgba(255, 255, 255, 0.08);
+    background-color: rgba(45, 45, 45, 0.85);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
+    border-radius: 14px 14px 0 0;
 }
 
 .monitor-header h2 {
     margin: 0;
-    font-size: 18px;
+    font-size: 15px;
     font-weight: 600;
     color: #fff;
+    letter-spacing: -0.01em;
 }
 
 .monitor-controls {
@@ -55,30 +61,36 @@
     cursor: pointer;
     font-size: 12px;
     color: #b0b0b0;
+    user-select: none;
 }
 
 .monitor-checkbox input {
     cursor: pointer;
+    accent-color: #0A84FF;
+    width: 14px;
+    height: 14px;
 }
 
 .close-btn {
     background: transparent;
     border: none;
     color: #999;
-    font-size: 20px;
+    font-size: 18px;
     cursor: pointer;
     padding: 4px 8px;
-    transition: transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1), color 0.2s;
-    will-change: transform;
+    border-radius: 6px;
+    line-height: 1;
+    transition: background-color 0.2s, color 0.2s, transform 0.1s;
 }
 
 .close-btn:hover {
     color: #fff;
-    transform: translateX(-1px);
+    background: rgba(255, 255, 255, 0.08);
 }
 
 .close-btn:active {
-    transform: translateX(-3px) scale(0.92) rotate(-6deg);
+    transform: scale(0.92);
+    background: rgba(255, 255, 255, 0.12);
 }
 
 .monitor-body {
@@ -88,13 +100,13 @@
     gap: 0;
 }
 
-/* Left Panel: Interaction List */
 .monitor-list-panel {
     display: flex;
     flex-direction: column;
     width: 35%;
-    border-right: 1px solid #333;
+    border-right: 0.5px solid rgba(255, 255, 255, 0.08);
     background-color: #1e1e1e;
+    min-width: 280px;
 }
 
 .monitor-list-header {
@@ -102,15 +114,17 @@
     justify-content: space-between;
     align-items: center;
     padding: 12px 16px;
-    background-color: #2d2d2d;
-    border-bottom: 1px solid #333;
+    background-color: rgba(45, 45, 45, 0.6);
+    border-bottom: 0.5px solid rgba(255, 255, 255, 0.08);
 }
 
 .monitor-list-header h3 {
     margin: 0;
-    font-size: 14px;
+    font-size: 12px;
     font-weight: 600;
     color: #ddd;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
 }
 
 .loading-spinner {
@@ -137,18 +151,19 @@
 
 .monitor-item {
     padding: 12px 16px;
-    border-bottom: 1px solid #333;
+    border-bottom: 0.5px solid rgba(255, 255, 255, 0.04);
     cursor: pointer;
     transition: background-color 0.15s;
+    border-left: 3px solid transparent;
 }
 
 .monitor-item:hover {
-    background-color: #2d2d2d;
+    background-color: rgba(255, 255, 255, 0.05);
 }
 
 .monitor-item.selected {
-    background-color: #264f78;
-    border-left: 3px solid #007acc;
+    background-color: rgba(10, 132, 255, 0.18);
+    border-left-color: #0A84FF;
 }
 
 .monitor-item-header {
@@ -160,11 +175,12 @@
 
 .monitor-type-badge {
     display: inline-block;
-    padding: 2px 8px;
-    border-radius: 3px;
+    padding: 2px 9px;
+    border-radius: 999px;
     font-size: 11px;
     font-weight: 600;
     color: #fff;
+    letter-spacing: 0.01em;
 }
 
 .monitor-actor {
@@ -187,7 +203,7 @@
 
 .monitor-item-error {
     font-size: 11px;
-    color: #f48771;
+    color: #FF6B6B;
     margin-bottom: 4px;
 }
 
@@ -207,13 +223,13 @@
     font-size: 13px;
 }
 
-/* Right Panel: Details */
 .monitor-detail-panel {
     flex: 1;
     display: flex;
     flex-direction: column;
     background-color: #1e1e1e;
     overflow: hidden;
+    min-width: 0;
 }
 
 .monitor-detail-header {
@@ -221,20 +237,23 @@
     justify-content: space-between;
     align-items: center;
     padding: 12px 16px;
-    background-color: #2d2d2d;
-    border-bottom: 1px solid #333;
+    background-color: rgba(45, 45, 45, 0.6);
+    border-bottom: 0.5px solid rgba(255, 255, 255, 0.08);
 }
 
 .monitor-detail-header h3 {
     margin: 0;
-    font-size: 14px;
+    font-size: 12px;
     font-weight: 600;
     color: #ddd;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
 }
 
 .monitor-detail-id {
-    font-size: 12px;
+    font-size: 11px;
     color: #888;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
 .monitor-detail-content {
@@ -249,67 +268,69 @@
 
 .detail-label {
     display: block;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
     color: #ddd;
     margin-bottom: 6px;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.06em;
 }
 
 .detail-value {
     font-size: 13px;
     color: #e0e0e0;
     word-break: break-all;
-    padding: 8px;
-    background-color: #2d2d2d;
-    border-radius: 4px;
-    border-left: 2px solid #007acc;
+    padding: 10px 12px;
+    background-color: rgba(45, 45, 45, 0.6);
+    border-radius: 8px;
+    border-left: 2px solid #0A84FF;
 }
 
 .error-section .detail-value {
-    border-left-color: #f48771;
+    border-left-color: #FF6B6B;
 }
 
 .error-text {
-    color: #f48771;
+    color: #FF6B6B;
 }
 
 .detail-code {
     font-size: 12px;
-    color: #ce9178;
-    background-color: #2d2d2d;
-    border-radius: 4px;
+    color: #CE9178;
+    background-color: rgba(45, 45, 45, 0.6);
+    border-radius: 8px;
     padding: 12px;
-    border-left: 2px solid #007acc;
+    border-left: 2px solid #0A84FF;
     overflow-x: auto;
     white-space: pre-wrap;
     word-break: break-word;
     margin: 0;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    line-height: 1.55;
 }
 
-/* Scrollbar styling */
 .monitor-list::-webkit-scrollbar,
 .monitor-detail-content::-webkit-scrollbar,
 .detail-code::-webkit-scrollbar {
     width: 8px;
+    height: 8px;
 }
 
 .monitor-list::-webkit-scrollbar-track,
 .monitor-detail-content::-webkit-scrollbar-track,
 .detail-code::-webkit-scrollbar-track {
-    background: #1e1e1e;
+    background: transparent;
 }
 
 .monitor-list::-webkit-scrollbar-thumb,
 .monitor-detail-content::-webkit-scrollbar-thumb,
 .detail-code::-webkit-scrollbar-thumb {
-    background: #464647;
+    background: rgba(255, 255, 255, 0.12);
     border-radius: 4px;
 }
 
 .monitor-list::-webkit-scrollbar-thumb:hover,
 .monitor-detail-content::-webkit-scrollbar-thumb:hover,
 .detail-code::-webkit-scrollbar-thumb:hover {
-    background: #5e5e5f;
+    background: rgba(255, 255, 255, 0.22);
 }

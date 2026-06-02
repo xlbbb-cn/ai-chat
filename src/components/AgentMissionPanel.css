@@ -4,6 +4,7 @@
     width: 100%;
     height: 100%;
     background: var(--c-bg);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
 }
 
 .mission-monitor-header {
@@ -11,19 +12,23 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: 16px;
-    padding: 18px 18px 14px;
-    border-bottom: 1px solid var(--c-border);
+    padding: 16px 20px 14px;
+    border-bottom: 0.5px solid var(--c-border);
+    background: var(--c-toolbar);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
 }
 
 .mission-monitor-header h2 {
     margin: 0;
     color: var(--c-text);
-    font-size: 18px;
+    font-size: 15px;
     font-weight: 600;
+    letter-spacing: -0.01em;
 }
 
 .mission-monitor-header p {
-    margin-top: 6px;
+    margin-top: 4px;
     color: var(--c-muted);
     font-size: 12px;
     line-height: 1.45;
@@ -41,28 +46,49 @@
     gap: 6px;
     color: var(--c-muted);
     font-size: 12px;
+    cursor: pointer;
+}
+
+.mission-monitor-checkbox input {
+    accent-color: var(--c-accent);
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
 }
 
 .mission-monitor-refresh {
-    min-height: 30px;
+    min-height: 28px;
     padding: 0 12px;
-    border: 1px solid var(--c-border-i);
-    border-radius: 999px;
+    border: 0.5px solid var(--c-border-i);
+    border-radius: var(--r-pill);
     background: var(--c-surface);
     color: var(--c-text);
+    font-size: 12px;
+    font-weight: 500;
+    font-family: inherit;
     cursor: pointer;
+    transition: background-color 0.2s, border-color 0.2s;
+}
+
+.mission-monitor-refresh:hover {
+    background: var(--c-hover);
+    border-color: var(--c-border);
 }
 
 .mission-monitor-shell .close-btn {
     background: transparent;
     border: none;
     color: var(--c-muted);
-    font-size: 20px;
+    font-size: 18px;
     cursor: pointer;
     padding: 4px 8px;
+    border-radius: var(--r-sm);
+    line-height: 1;
+    transition: background-color 0.2s, color 0.2s;
 }
 
 .mission-monitor-shell .close-btn:hover {
+    background: var(--c-hover);
     color: var(--c-text);
 }
 
@@ -75,10 +101,11 @@
 .mission-monitor-list-panel {
     width: 280px;
     min-width: 280px;
-    border-right: 1px solid var(--c-border);
+    border-right: 0.5px solid var(--c-border);
     display: flex;
     flex-direction: column;
     min-height: 0;
+    background: var(--c-bg);
 }
 
 .mission-monitor-list-header,
@@ -91,19 +118,22 @@
     align-items: center;
     justify-content: space-between;
     padding: 12px 18px;
-    border-bottom: 1px solid var(--c-border);
+    border-bottom: 0.5px solid var(--c-border);
 }
 
 .mission-monitor-list-header h3 {
     margin: 0;
     color: var(--c-text);
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
 }
 
 .mission-monitor-loading {
     color: var(--c-muted);
     animation: mission-spin 1s linear infinite;
+    display: inline-block;
 }
 
 @keyframes mission-spin {
@@ -122,7 +152,7 @@
 }
 
 .mission-monitor-list {
-    padding: 8px;
+    padding: 10px;
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -131,22 +161,26 @@
 .mission-monitor-item {
     width: 100%;
     text-align: left;
-    border: 1px solid var(--c-border);
-    border-radius: 12px;
+    border: 0.5px solid var(--c-border-i);
+    border-radius: var(--r-md);
     background: var(--c-surface);
     padding: 12px;
     cursor: pointer;
-    transition: border-color 0.2s ease, transform 0.2s ease, background-color 0.2s ease;
+    font-family: inherit;
+    color: inherit;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+    box-shadow: var(--shadow-sm);
 }
 
-.mission-monitor-item:hover,
-.mission-monitor-item.selected {
-    border-color: #3e6ae1;
+.mission-monitor-item:hover {
+    border-color: var(--c-accent);
     background: var(--c-hover);
 }
 
 .mission-monitor-item.selected {
-    transform: translateX(2px);
+    border-color: var(--c-accent);
+    background: var(--c-accent-soft);
+    box-shadow: 0 0 0 3px var(--c-accent-soft);
 }
 
 .mission-monitor-item-header,
@@ -163,27 +197,28 @@
     align-items: center;
     justify-content: center;
     min-width: 84px;
-    padding: 2px 8px;
-    border-radius: 999px;
+    padding: 2px 10px;
+    border-radius: var(--r-pill);
     font-size: 11px;
     font-weight: 600;
     text-transform: lowercase;
+    letter-spacing: 0.01em;
 }
 
 .mission-running,
 .mission-in_progress {
-    background: rgba(245, 158, 11, 0.16);
-    color: #b45309;
+    background: var(--c-warning-soft);
+    color: var(--c-warning);
 }
 
 .mission-completed {
-    background: rgba(34, 197, 94, 0.16);
-    color: #15803d;
+    background: var(--c-success-soft);
+    color: var(--c-success);
 }
 
 .mission-pending {
-    background: rgba(59, 130, 246, 0.14);
-    color: #1d4ed8;
+    background: var(--c-accent-soft);
+    color: var(--c-accent);
 }
 
 .mission-monitor-agent,
@@ -200,8 +235,9 @@
 }
 
 .mission-monitor-title {
-    margin: 10px 0 8px;
+    margin: 8px 0 6px;
     line-height: 1.4;
+    font-size: 13px;
 }
 
 .mission-monitor-meta {
@@ -211,13 +247,14 @@
 .mission-monitor-detail-panel {
     flex: 1;
     min-width: 0;
+    background: var(--c-bg);
 }
 
 .mission-monitor-detail-content {
     display: flex;
     flex-direction: column;
     gap: 16px;
-    padding: 18px;
+    padding: 18px 20px;
     height: 100%;
 }
 
@@ -231,7 +268,7 @@
     color: var(--c-muted);
     font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
 }
 
@@ -244,15 +281,17 @@
 .mission-monitor-value,
 .mission-monitor-code,
 .mission-task-item {
-    border: 1px solid var(--c-border);
-    border-radius: 12px;
+    border: 0.5px solid var(--c-border-i);
+    border-radius: var(--r-md);
     background: var(--c-surface);
+    box-shadow: var(--shadow-sm);
 }
 
 .mission-monitor-value {
     padding: 12px;
     color: var(--c-text);
     line-height: 1.45;
+    font-size: 13px;
 }
 
 .mission-monitor-code {
@@ -264,6 +303,8 @@
     background: var(--c-code);
     font-size: 12px;
     line-height: 1.5;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    border-radius: var(--r-md);
 }
 
 .mission-task-list {
@@ -285,7 +326,7 @@
 .mission-task-id {
     margin-top: 8px;
     font-size: 11px;
-    font-family: Consolas, "Courier New", monospace;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
 .mission-monitor-empty {
@@ -309,7 +350,7 @@
         min-width: 0;
         max-height: 260px;
         border-right: none;
-        border-bottom: 1px solid var(--c-border);
+        border-bottom: 0.5px solid var(--c-border);
     }
 
     .mission-monitor-section.two-column {

@@ -5,6 +5,7 @@ import {
 } from "../api";
 import type { SubAgent, AgentOrchestration } from "../types";
 import { MarkdownPreview } from "./MarkdownPreview";
+import { Portal } from "./Portal";
 import "./AgentsPanel.css";
 
 const KNOWN_TOOLS = ["file_actions", "run_cmd", "run_shell", "knowledge_graph"];
@@ -257,44 +258,46 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
           </div>
 
           {isPromptEditorOpen && (
-            <div className="prompt-editor-overlay" role="dialog" aria-modal="true" aria-label="Edit system prompt">
-              <div className="prompt-editor-shell">
-                <div className="prompt-editor-header">
-                  <h3>System Prompt Editor</h3>
-                  <div className="prompt-editor-actions">
-                    <button type="button" className="btn-secondary" onClick={closePromptEditor}>
-                      Cancel
-                    </button>
-                    <button type="button" className="btn-primary" onClick={applyPromptEditor}>
-                      Done
-                    </button>
-                  </div>
-                </div>
-
-                <div className="prompt-editor-body">
-                  <div className="prompt-column">
-                    <span>Markdown</span>
-                    <textarea
-                      className="prompt-editor-textarea"
-                      value={promptDraft}
-                      onChange={(e) => setPromptDraft(e.target.value)}
-                      placeholder="Write your system prompt in Markdown..."
-                    />
+            <Portal>
+              <div className="prompt-editor-overlay" role="dialog" aria-modal="true" aria-label="Edit system prompt">
+                <div className="prompt-editor-shell">
+                  <div className="prompt-editor-header">
+                    <h3>System Prompt Editor</h3>
+                    <div className="prompt-editor-actions">
+                      <button type="button" className="btn-secondary" onClick={closePromptEditor}>
+                        Cancel
+                      </button>
+                      <button type="button" className="btn-primary" onClick={applyPromptEditor}>
+                        Done
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="prompt-column">
-                    <span>Preview</span>
-                    <div className="prompt-preview">
-                      {promptDraft.trim() ? (
-                        <MarkdownPreview content={promptDraft} />
-                      ) : (
-                        <p className="prompt-preview-empty">Markdown preview will appear here.</p>
-                      )}
+                  <div className="prompt-editor-body">
+                    <div className="prompt-column">
+                      <span>Markdown</span>
+                      <textarea
+                        className="prompt-editor-textarea"
+                        value={promptDraft}
+                        onChange={(e) => setPromptDraft(e.target.value)}
+                        placeholder="Write your system prompt in Markdown..."
+                      />
+                    </div>
+
+                    <div className="prompt-column">
+                      <span>Preview</span>
+                      <div className="prompt-preview">
+                        {promptDraft.trim() ? (
+                          <MarkdownPreview content={promptDraft} />
+                        ) : (
+                          <p className="prompt-preview-empty">Markdown preview will appear here.</p>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
-            </div>
+            </Portal>
           )}
         </div>
       ) : (

@@ -36,17 +36,22 @@
 .md-preview code {
     background: var(--c-code);
     color: var(--c-text);
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     padding: 1px 5px;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.92em;
 }
 
 .md-preview pre {
     overflow-x: auto;
     background: var(--c-code);
     color: var(--c-text);
-    border: 1px solid var(--c-border);
-    border-radius: 6px;
-    padding: 10px;
+    border: 0.5px solid var(--c-border-i);
+    border-radius: var(--r-md);
+    padding: 10px 12px;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.55;
 }
 
 .md-preview table {
@@ -54,18 +59,31 @@
     width: max-content;
     min-width: 100%;
     max-width: 100%;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     margin: 0.65em 0;
     font-size: 13px;
     overflow-x: auto;
+    border: 0.5px solid var(--c-border-i);
+    border-radius: var(--r-sm);
 }
 
 .md-preview th,
 .md-preview td {
-    border: 1px solid var(--c-border-i);
-    padding: 6px 8px;
+    border-bottom: 0.5px solid var(--c-border-i);
+    border-right: 0.5px solid var(--c-border-i);
+    padding: 7px 10px;
     text-align: left;
     vertical-align: top;
+}
+
+.md-preview th:last-child,
+.md-preview td:last-child {
+    border-right: none;
+}
+
+.md-preview tr:last-child td {
+    border-bottom: none;
 }
 
 .md-preview thead th {
@@ -79,18 +97,4 @@
     overflow-x: auto;
     overflow-y: hidden;
     padding: 2px 0;
-}
-
-[data-theme="dark"] .md-preview pre,
-[data-theme="dark"] .md-preview pre code {
-    background: var(--c-code);
-    color: #E8EAED;
-}
-
-[data-theme="dark"] .md-preview table {
-    background: var(--c-surface);
-}
-
-[data-theme="dark"] .md-preview tbody tr:nth-child(even) {
-    background: var(--c-reason);
 }

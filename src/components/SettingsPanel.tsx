@@ -3,6 +3,7 @@ import { fetchModels, getConfig, getWorkspaceDir, saveConfig } from "../api";
 import type { AppConfig, ModelSettings } from "../types";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { MonitorPanel } from "./MonitorPanel";
+import { Portal } from "./Portal";
 import "./SettingsPanel.css";
 
 interface Props {
@@ -405,44 +406,46 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
       </div>
 
       {isMessageEditorOpen && (
-        <div className="prompt-editor-overlay" role="dialog" aria-modal="true" aria-label="Edit system message">
-          <div className="prompt-editor-shell">
-            <div className="prompt-editor-header">
-              <h3>System Message Editor</h3>
-              <div className="prompt-editor-actions">
-                <button type="button" className="btn-secondary" onClick={closeMessageEditor} disabled={messageSaving}>
-                  Cancel
-                </button>
-                <button type="button" className="btn-primary" onClick={applyMessageEditor} disabled={messageSaving}>
-                  {messageSaving ? "Saving…" : "Done"}
-                </button>
-              </div>
-            </div>
-
-            <div className="prompt-editor-body">
-              <div className="prompt-column">
-                <span>Markdown</span>
-                <textarea
-                  className="prompt-editor-textarea"
-                  value={messageDraft}
-                  onChange={(e) => setMessageDraft(e.target.value)}
-                  placeholder="Write your system message in Markdown..."
-                />
+        <Portal>
+          <div className="prompt-editor-overlay" role="dialog" aria-modal="true" aria-label="Edit system message">
+            <div className="prompt-editor-shell">
+              <div className="prompt-editor-header">
+                <h3>System Message Editor</h3>
+                <div className="prompt-editor-actions">
+                  <button type="button" className="btn-secondary" onClick={closeMessageEditor} disabled={messageSaving}>
+                    Cancel
+                  </button>
+                  <button type="button" className="btn-primary" onClick={applyMessageEditor} disabled={messageSaving}>
+                    {messageSaving ? "Saving…" : "Done"}
+                  </button>
+                </div>
               </div>
 
-              <div className="prompt-column">
-                <span>Preview</span>
-                <div className="prompt-preview">
-                  {messageDraft.trim() ? (
-                    <MarkdownPreview content={messageDraft} />
-                  ) : (
-                    <p className="prompt-preview-empty">Markdown preview will appear here.</p>
-                  )}
+              <div className="prompt-editor-body">
+                <div className="prompt-column">
+                  <span>Markdown</span>
+                  <textarea
+                    className="prompt-editor-textarea"
+                    value={messageDraft}
+                    onChange={(e) => setMessageDraft(e.target.value)}
+                    placeholder="Write your system message in Markdown..."
+                  />
+                </div>
+
+                <div className="prompt-column">
+                  <span>Preview</span>
+                  <div className="prompt-preview">
+                    {messageDraft.trim() ? (
+                      <MarkdownPreview content={messageDraft} />
+                    ) : (
+                      <p className="prompt-preview-empty">Markdown preview will appear here.</p>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
+        </Portal>
       )}
 
       <div className="settings-footer">
@@ -453,7 +456,9 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
       </div>
 
       {showMonitor && (
-        <MonitorPanel sessionId={sessionId!} onClose={() => setShowMonitor(false)} />
+        <Portal>
+          <MonitorPanel sessionId={sessionId!} onClose={() => setShowMonitor(false)} />
+        </Portal>
       )}
     </div>
   );

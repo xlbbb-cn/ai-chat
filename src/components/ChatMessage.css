@@ -1,7 +1,7 @@
 .chat-message-shell {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   width: fit-content;
   max-width: 80%;
   min-width: 0;
@@ -21,37 +21,44 @@
   flex-direction: column;
   gap: 4px;
   padding: 12px 16px;
-  border-radius: 4px;
+  border-radius: var(--r-lg);
   max-width: 100%;
   word-break: break-word;
   overflow: hidden;
+  box-shadow: var(--shadow-sm);
 }
 
 .chat-message.user {
-  background: var(--c-hover);
-  color: var(--c-text);
+  background: var(--c-accent);
+  color: #FFFFFF;
+  box-shadow: 0 1px 3px rgba(0, 122, 255, 0.20), var(--shadow-sm);
 }
 
 .chat-message.assistant {
   background: var(--c-surface);
   color: var(--c-body);
-  border: 1px solid var(--c-border);
+  border: 0.5px solid var(--c-border-s);
 }
 
 .message-role {
-  font-size: 14px;
-  font-weight: 500;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--c-muted);
   text-transform: none;
-  letter-spacing: normal;
+  letter-spacing: 0.02em;
+  margin-bottom: 2px;
+}
+
+.chat-message.user .message-role {
+  color: rgba(255, 255, 255, 0.85);
 }
 
 .message-reasoning {
-  margin-bottom: 8px;
+  margin-bottom: 10px;
   background-color: var(--c-reason);
   border-left: 2px solid var(--c-reason-b);
   padding: 8px 12px;
-  border-radius: 0 4px 4px 0;
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
 }
 
 .message-reasoning summary {
@@ -61,6 +68,7 @@
   user-select: none;
   font-size: 13px;
   margin-bottom: 4px;
+  letter-spacing: -0.005em;
 }
 
 .message-reasoning-summary {
@@ -77,7 +85,7 @@
   right: 0;
   bottom: 0;
   height: 2px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--c-reason-b);
   opacity: 0.9;
 }
@@ -101,7 +109,7 @@
   margin-top: 6px;
   font-size: 14px;
   color: var(--c-muted);
-  line-height: 1.5;
+  line-height: 1.55;
   min-width: 0;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -134,19 +142,20 @@
 .message-reasoning-content pre.hljs {
   margin: 0.5em 0;
   padding: 1em;
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   overflow-x: auto;
   max-width: 100%;
   box-sizing: border-box;
   background: var(--c-code);
-  border: 1px solid var(--c-border);
+  border: 0.5px solid var(--c-border-s);
 }
 
 .message-content {
   font-size: 14px;
   font-weight: 400;
-  line-height: 1.43;
+  line-height: 1.5;
   min-width: 0;
+  letter-spacing: -0.005em;
 }
 
 .message-content p {
@@ -176,12 +185,13 @@
 .message-content pre.hljs {
   margin: 0.5em 0;
   padding: 1em;
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   overflow-x: auto;
   max-width: 100%;
   box-sizing: border-box;
   background: var(--c-code);
-  border: 1px solid var(--c-border);
+  border: 0.5px solid var(--c-border-s);
+  font-size: 13px;
 }
 
 .code-block-wrapper {
@@ -210,11 +220,13 @@
   font-size: 12px;
   color: var(--c-text);
   background: var(--c-surface);
-  border: 1px solid var(--c-border-i);
-  border-radius: 999px;
-  padding: 4px 8px;
+  border: 0.5px solid var(--c-border-i);
+  border-radius: var(--r-pill);
+  padding: 4px 10px;
   cursor: pointer;
-  transition: background-color 0.2s ease, transform 0.15s ease;
+  transition: background-color 0.2s ease, transform 0.15s ease, box-shadow 0.2s;
+  font-weight: 500;
+  box-shadow: var(--shadow-sm);
 }
 
 .code-copy-btn:hover {
@@ -228,10 +240,11 @@
 
 .message-content table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   margin: 0.75em 0;
-  border: 1px solid var(--c-border-i);
-  border-radius: 6px;
+  border: 0.5px solid var(--c-border-i);
+  border-radius: var(--r-sm);
   overflow: hidden;
   font-size: 13px;
   background: var(--c-surface);
@@ -239,10 +252,20 @@
 
 .message-content th,
 .message-content td {
-  border: 1px solid var(--c-border-i);
-  padding: 8px 10px;
+  border-bottom: 0.5px solid var(--c-border-s);
+  border-right: 0.5px solid var(--c-border-s);
+  padding: 8px 12px;
   text-align: left;
   vertical-align: top;
+}
+
+.message-content th:last-child,
+.message-content td:last-child {
+  border-right: none;
+}
+
+.message-content tr:last-child td {
+  border-bottom: none;
 }
 
 .message-content thead th {
@@ -276,7 +299,7 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  border-radius: 2px;
+  border-radius: var(--r-sm);
   background: var(--c-hover);
   color: var(--c-muted);
   font-size: 0.78em;
@@ -284,6 +307,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  padding: 2px 8px;
 }
 
 .cursor {
@@ -302,15 +326,17 @@
 }
 
 .message-export-btn {
-  border: 1px solid var(--c-border-i);
-  background: transparent;
+  border: 0.5px solid var(--c-border-i);
+  background: var(--c-surface);
   color: var(--c-muted);
-  border-radius: 999px;
-  padding: 6px 12px;
+  border-radius: var(--r-pill);
+  padding: 5px 12px;
   font-size: 12px;
   line-height: 1;
   cursor: pointer;
-  transition: background-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
+  font-weight: 500;
+  transition: background-color 0.18s ease, color 0.18s ease, transform 0.18s ease, box-shadow 0.2s;
+  box-shadow: var(--shadow-sm);
 }
 
 .message-export-btn:hover:not(:disabled) {
@@ -330,25 +356,27 @@
 
 .message-retry-btn {
   border: 0;
-  background: #DC2626;
+  background: var(--c-danger);
   color: #FFFFFF;
-  border-radius: 6px;
-  padding: 6px 12px;
+  border-radius: var(--r-pill);
+  padding: 6px 14px;
   font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
-  box-shadow: 0 6px 18px rgba(220, 38, 38, 0.18);
+  font-family: inherit;
+  box-shadow: 0 2px 6px rgba(255, 59, 48, 0.20);
   transition: transform 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
 }
 
 .message-retry-btn:hover {
-  background: #B91C1C;
+  background: #E5342B;
   transform: translateY(-1px);
-  box-shadow: 0 8px 22px rgba(220, 38, 38, 0.22);
+  box-shadow: 0 4px 10px rgba(255, 59, 48, 0.28);
 }
 
 .message-retry-btn:active {
   transform: translateY(0);
-  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.18);
+  box-shadow: 0 2px 4px rgba(255, 59, 48, 0.20);
 }
 
 @keyframes blink {
