@@ -11,6 +11,34 @@ interface Props {
   onClose: () => void;
 }
 
+function formatHistoryTimestamp(timestamp: string): string {
+  const parsed = Date.parse(timestamp);
+  if (Number.isNaN(parsed)) return timestamp;
+
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(parsed);
+}
+
+function getSessionCreatedAt(sessionRecords: HistoryRecord[]): string {
+  let earliest = Number.POSITIVE_INFINITY;
+  let createdAt = sessionRecords[0]?.timestamp ?? "";
+
+  for (const record of sessionRecords) {
+    const parsed = Date.parse(record.timestamp);
+    if (!Number.isNaN(parsed) && parsed < earliest) {
+      earliest = parsed;
+      createdAt = record.timestamp;
+    }
+  }
+
+  return createdAt;
+}
+
 export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = false, onClose }: Props) {
   const [records, setRecords] = useState<HistoryRecord[]>([]);
   const [searchKeyword, setSearchKeyword] = useState("");
@@ -117,6 +145,7 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
           filteredSessions.map(([sid, recs]) => {
             const preview = recs.find((r) => r.role === "user")?.content ?? "(empty)";
             const isCurrent = sid === currentSessionId;
+            const createdAt = formatHistoryTimestamp(getSessionCreatedAt(recs));
             return (
               <div
                 key={sid}
@@ -127,9 +156,12 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
                   <span className="history-preview">
                     {preview.length > 60 ? preview.slice(0, 60) + "…" : preview}
                   </span>
-                  <span className="history-meta">
-                    {recs.length} messages{isCurrent ? " · current" : ""}
-                  </span>
+                  <div className="history-footer">
+                    <span className="history-meta">
+                      {recs.length} messages{isCurrent ? " · current" : ""}
+                    </span>
+                    <span className="history-created">Created {createdAt}</span>
+                  </div>
                 </div>
                 <button
                   className="history-delete-btn"

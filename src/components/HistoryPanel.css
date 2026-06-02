@@ -172,3 +172,16 @@
   font-size: 14px;
   color: var(--c-muted);
 }
+
+.history-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.history-created {
+  font-size: 12px;
+  color: var(--c-placeholder);
+}

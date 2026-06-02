@@ -73,14 +73,22 @@ const AUTO_ACCEPT_KIND_SET = new Set<ConfirmKind>(AUTO_ACCEPT_OPTIONS.map((optio
 export function ToolsPanel({ onClose, onToolsChange }: Props) {
     const [config, setConfig] = useState<AppConfig | null>(null);
     const [expandedTool, setExpandedTool] = useState<string | null>(null);
-    const [expandedAutoAccept, setExpandedAutoAccept] = useState<ConfirmKind | null>(null);
+    const [autoAcceptExpanded, setAutoAcceptExpanded] = useState(false);
 
     useEffect(() => {
         getConfig()
             .then((cfg) => {
                 const selected = (cfg.selected_tools ?? []).filter((id) => AVAILABLE_TOOL_IDS.has(id));
-                const sanitized = { ...cfg, selected_tools: selected };
+                const selectedAutoAcceptKinds = (cfg.auto_accept_confirm_kinds ?? []).filter((value): value is ConfirmKind =>
+                    AUTO_ACCEPT_KIND_SET.has(value as ConfirmKind)
+                );
+                const sanitized = {
+                    ...cfg,
+                    selected_tools: selected,
+                    auto_accept_confirm_kinds: selectedAutoAcceptKinds,
+                };
                 setConfig(sanitized);
+                setAutoAcceptExpanded(selectedAutoAcceptKinds.length > 0);
                 onToolsChange(selected);
             })
             .catch(console.error);
@@ -195,46 +203,37 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
             </div>
 
             <div className="tools-footer-section">
-                <div className="tools-footer-title">AutoAccept Mode</div>
-                <div className="tools-footer-hint">
-                    Auto-allow selected confirmation types. Use this only when you trust the active tools and prompts.
-                </div>
-                <div className="auto-accept-list">
-                    {AUTO_ACCEPT_OPTIONS.map((option) => {
-                        const checked = autoAcceptKinds.includes(option.kind);
-                        const expanded = expandedAutoAccept === option.kind;
-                        return (
-                            <div key={option.kind} className={`auto-accept-item ${expanded ? "expanded" : ""}`}>
-                                <div className="auto-accept-row">
-                                    <button
-                                        type="button"
-                                        className="auto-accept-summary"
-                                        onClick={() => setExpandedAutoAccept(expanded ? null : option.kind)}
-                                        aria-expanded={expanded}
-                                    >
-                                        <span className="auto-accept-name">{option.label}</span>
-                                        <span className="auto-accept-chevron">{expanded ? "▲" : "▼"}</span>
-                                    </button>
-                                    <label className="toggle-switch" onClick={(event) => event.stopPropagation()}>
-                                        <input
-                                            type="checkbox"
-                                            checked={checked}
-                                            onChange={() => void toggleAutoAccept(option.kind)}
-                                        />
-                                        <span className="toggle-switch-slider" />
-                                    </label>
-                                </div>
+                <button
+                    type="button"
+                    className="tools-footer-toggle"
+                    onClick={() => setAutoAcceptExpanded((expanded) => !expanded)}
+                    aria-expanded={autoAcceptExpanded}
+                >
+                    <span className="tools-footer-title">AutoAccept Mode</span>
+                    <span className="auto-accept-chevron">{autoAcceptExpanded ? "▲" : "▼"}</span>
+                </button>
 
-                                {expanded && (
-                                    <div className="auto-accept-details">
-                                        <span className="auto-accept-kind">{option.kind}</span>
+                {autoAcceptExpanded && (
+                    <div className="auto-accept-list">
+                        {AUTO_ACCEPT_OPTIONS.map((option) => {
+                            const checked = autoAcceptKinds.includes(option.kind);
+                            return (
+                                <label key={option.kind} className="auto-accept-option">
+                                    <input
+                                        className="auto-accept-checkbox"
+                                        type="checkbox"
+                                        checked={checked}
+                                        onChange={() => void toggleAutoAccept(option.kind)}
+                                    />
+                                    <div className="auto-accept-option-body">
+                                        <span className="auto-accept-name">{option.label}</span>
                                         <span className="auto-accept-desc">{option.description}</span>
                                     </div>
-                                )}
-                            </div>
-                        );
-                    })}
-                </div>
+                                </label>
+                            );
+                        })}
+                    </div>
+                )}
             </div>
         </div>
     );
