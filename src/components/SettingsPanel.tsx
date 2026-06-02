@@ -70,7 +70,8 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
     setModelsError(null);
     try {
       const remoteModels = await fetchModels();
-      const merged = mergeModels(config.model_catalog, remoteModels);
+      //const merged = Array.from(new Set([...(config.model_catalog ?? []), ...remoteModels])));
+      const merged = mergeModels([], remoteModels);
       setConfig((prev) => ({
         ...prev,
         model_catalog: merged,
