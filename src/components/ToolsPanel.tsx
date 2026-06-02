@@ -88,7 +88,7 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                     auto_accept_confirm_kinds: selectedAutoAcceptKinds,
                 };
                 setConfig(sanitized);
-                setAutoAcceptExpanded(true);
+                setAutoAcceptExpanded(false);
                 onToolsChange(selected);
             })
             .catch(console.error);
