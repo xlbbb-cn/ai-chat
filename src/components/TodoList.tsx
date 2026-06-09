@@ -84,14 +84,21 @@ export function TodoList() {
                     break;
 
                 case "todo_updated":
-                    // Single todo updated
-                    if (event.todo && todoList) {
+                    // Single todo updated - recalculate counts
+                    if (event.todo) {
                         setTodoList(prev => {
                             if (!prev) return prev;
                             const updatedTodos = prev.todos.map(t =>
                                 t.id === event.todo!.id ? event.todo! : t
                             );
-                            return { ...prev, todos: updatedTodos };
+                            const completed = updatedTodos.filter(t => t.status === "completed").length;
+                            const total = updatedTodos.length;
+                            return {
+                                ...prev,
+                                todos: updatedTodos,
+                                completed,
+                                total,
+                            };
                         });
                     }
                     break;
