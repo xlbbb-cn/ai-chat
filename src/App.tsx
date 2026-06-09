@@ -464,8 +464,16 @@ export default function App() {
         const text = e.payload;
         // Parse label from *italics* and optional code block detail
         const firstLine = text.split('\n')[0];
-        const labelMatch = firstLine.match(/\*(.+?)\*/);
-        const label = labelMatch ? labelMatch[1] : firstLine.replace(/[*]/g, '').trim();
+        // Capture emoji before asterisks and the label inside asterisks
+        const labelMatch = firstLine.match(/^(.*?)\*(.+?)\*$/);
+        let label: string;
+        if (labelMatch) {
+          const emoji = labelMatch[1].trim();
+          const text = labelMatch[2];
+          label = emoji ? `${emoji} ${text}` : text;
+        } else {
+          label = firstLine.replace(/[*]/g, '').trim();
+        }
         const codeMatch = text.match(/```(?:\w+)?\n([\s\S]+?)\n```/);
         const detail = codeMatch ? codeMatch[1].trim() : undefined;
 
