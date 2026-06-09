@@ -32,6 +32,11 @@ const AVAILABLE_TOOLS = [
         id: "knowledge_graph",
         name: "Knowledge Graph",
         description: "Connect to a knowledge graph and perform queries",
+    },
+    {
+        id: "todo_list",
+        name: "Todo List",
+        description: "Track complex multi-step work with a session-scoped todo list. The assistant can add items, update statuses, check progress, clear completed items, and archive finished lists.",
     }
 ];
 

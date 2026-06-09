@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 
-use crate::{agents, db, mcp, skills, tools, AppState};
+use crate::{agents, db, mcp, skills, todos, tools, AppState};
 
 fn log_event(state: &State<'_, AppState>, level: &str, message: String) {
     if let Ok(logger) = state.logger.lock() {
@@ -361,7 +361,9 @@ fn compress_session_context(all_messages: &mut Vec<Value>) -> Option<String> {
         return None;
     }
 
-    let split_idx = compressible.len().saturating_sub(CONTEXT_KEEP_RECENT_MESSAGES);
+    let split_idx = compressible
+        .len()
+        .saturating_sub(CONTEXT_KEEP_RECENT_MESSAGES);
     let summary_lines: Vec<String> = compressible[..split_idx]
         .iter()
         .filter_map(summarize_message_for_context)
@@ -694,7 +696,9 @@ pub async fn chat_completion(
 
     for skill_name in &skill_ids {
         let ws_skills_dir = workspace_dir_for_roots.join("skills");
-        if let Ok(resolved_skill) = skills::resolve_skill_by_name(&ws_skills_dir, &state.skills_dir, skill_name) {
+        if let Ok(resolved_skill) =
+            skills::resolve_skill_by_name(&ws_skills_dir, &state.skills_dir, skill_name)
+        {
             let skill = resolved_skill.skill;
             merge_allowed_commands(&mut skill_allowed_commands, &skill.allowed_commands);
 
@@ -778,6 +782,17 @@ pub async fn chat_completion(
                     "content": format!("{CONTEXT_SUMMARY_MARKER}\n{}", saved_summary)
                 }));
             }
+        }
+    }
+
+    // Inject the active todo list (if any) so the assistant can always
+    // re-orient itself to the current plan, even mid-turn.
+    if let Ok(db_guard) = state.db.lock() {
+        if let Some(todo_block) = todos::render_active_list_for_context(&session_id, &db_guard) {
+            all_messages.push(json!({
+                "role": "system",
+                "content": format!("INTERNAL CONTEXT - ACTIVE TODO LIST:\n{}", todo_block)
+            }));
         }
     }
 
@@ -1264,6 +1279,7 @@ pub async fn chat_completion(
                     &skill_allowed_commands,
                     &[],
                     None,
+                    Some(&session_id),
                 )
                 .await;
                 let duration_ms = start_time.elapsed().as_millis() as i64;

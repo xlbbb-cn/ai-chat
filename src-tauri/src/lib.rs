@@ -21,6 +21,7 @@ mod logger;
 pub mod mcp;
 pub mod neo4j_db;
 mod skills;
+mod todos;
 mod tools;
 
 use logger::{AppLogger, LoggerOutput};
@@ -758,6 +759,15 @@ pub fn run() {
             agents::get_agent_orchestration,
             agents::save_agent_orchestration,
             agents::list_agent_missions,
+            todos::get_session_todo,
+            todos::get_todo_list,
+            todos::create_session_todo,
+            todos::update_todo_status_cmd,
+            todos::update_todo_text_cmd,
+            todos::delete_todo_cmd,
+            todos::clear_completed_todos,
+            todos::archive_todo_list,
+            todos::create_todo_list,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -11,12 +11,14 @@ import { ToolsPanel } from "./components/ToolsPanel";
 import { McpPanel } from "./components/McpPanel";
 import { AgentsPanel } from "./components/AgentsPanel";
 import { AgentMissionPanel } from "./components/AgentMissionPanel";
+import { TodoPanel } from "./components/TodoPanel";
+import { getSessionTodo } from "./api";
 import { MarkdownPreview } from "./components/MarkdownPreview";
 import { Portal } from "./components/Portal";
 import type { Message, AgentTaskEvent, ToolCallEntry } from "./types";
 import "./App.css";
 
-type Sidebar = "settings" | "skills" | "history" | "tools" | "mcp" | "agents" | "monitor" | null;
+type Sidebar = "settings" | "skills" | "history" | "tools" | "mcp" | "agents" | "monitor" | "todos" | null;
 
 function applyTheme(theme: "auto" | "light" | "dark" | undefined) {
   const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -60,6 +62,7 @@ export default function App() {
   const [activeToolCount, setActiveToolCount] = useState(0);
   const [activeMcpCount, setActiveMcpCount] = useState(0);
   const [activeAgentCount, setActiveAgentCount] = useState(0);
+  const [activeTodoCount, setActiveTodoCount] = useState(0);
   const [useAgentsEnabled, setUseAgentsEnabled] = useState(false);
   const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
   const [skillsLoadedFromConfig, setSkillsLoadedFromConfig] = useState(false);
@@ -338,6 +341,28 @@ export default function App() {
       .then((orch) => setUseAgentsEnabled(orch.use_agents))
       .catch(console.error);
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      getSessionTodo(sessionId)
+        .then((data) => {
+          if (cancelled) return;
+          setActiveTodoCount(
+            (data?.pending ?? 0) + (data?.in_progress ?? 0)
+          );
+        })
+        .catch(() => {
+          if (!cancelled) setActiveTodoCount(0);
+        });
+    };
+    refresh();
+    const unlistenPromise = listen("todo-state", () => refresh());
+    return () => {
+      cancelled = true;
+      unlistenPromise.then((fn) => fn()).catch(() => undefined);
+    };
+  }, [sessionId]);
 
   useEffect(() => {
     const unlisten = listen("profile-restored", async () => {
@@ -972,7 +997,7 @@ export default function App() {
       {/* Sidebar */}
       {sidebar && (
         <aside className={`sidebar ${sidebar === "monitor" ? "sidebar-wide" : ""} ${sidebarMotion === "opening" ? "sidebar-opening" : ""} ${sidebarMotion === "closing" ? "sidebar-closing" : ""}`}>
-          <div className={`sidebar-shell ${sidebar === "settings" ? "panel-settings" : ""} ${sidebar === "skills" ? "panel-skills" : ""} ${sidebar === "history" ? "panel-history" : ""} ${sidebar === "tools" ? "panel-tools" : ""} ${sidebar === "mcp" ? "panel-mcp" : ""} ${sidebar === "agents" ? "panel-agents" : ""} ${sidebar === "monitor" ? "panel-monitor" : ""}`} key={sidebar}>
+          <div className={`sidebar-shell ${sidebar === "settings" ? "panel-settings" : ""} ${sidebar === "skills" ? "panel-skills" : ""} ${sidebar === "history" ? "panel-history" : ""} ${sidebar === "tools" ? "panel-tools" : ""} ${sidebar === "mcp" ? "panel-mcp" : ""} ${sidebar === "agents" ? "panel-agents" : ""} ${sidebar === "monitor" ? "panel-monitor" : ""} ${sidebar === "todos" ? "panel-todos" : ""}`} key={sidebar}>
             {sidebar === "settings" && (
               <SettingsPanel
                 sessionId={sessionId}
@@ -1052,6 +1077,12 @@ export default function App() {
                 onClose={closeSidebar}
               />
             )}
+            {sidebar === "todos" && (
+              <TodoPanel
+                sessionId={sessionId}
+                onClose={closeSidebar}
+              />
+            )}
           </div>
         </aside>
       )}
@@ -1070,6 +1101,16 @@ export default function App() {
               🤖 Agents
               {activeAgentCount > 0 && useAgentsEnabled && (
                 <span className="toolbar-btn-count">{activeAgentCount}</span>
+              )}
+            </button>
+            <button
+              className={`toolbar-btn ${sidebar === "todos" ? "active" : ""}`}
+              onClick={() => toggleSidebar("todos")}
+              title="Todo List — track complex work step by step"
+            >
+              ✓ Todos
+              {activeTodoCount > 0 && (
+                <span className="toolbar-btn-count">{activeTodoCount}</span>
               )}
             </button>
             <button

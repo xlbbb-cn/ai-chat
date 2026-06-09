@@ -184,11 +184,7 @@ struct SearchOptions<'a> {
     glob: Option<&'a str>,
 }
 
-fn should_use_case_sensitive_search(
-    query: &str,
-    case_sensitive: bool,
-    smart_case: bool,
-) -> bool {
+fn should_use_case_sensitive_search(query: &str, case_sensitive: bool, smart_case: bool) -> bool {
     case_sensitive || (smart_case && query.chars().any(|ch| ch.is_uppercase()))
 }
 
@@ -247,8 +243,8 @@ fn search_file_contents(
         }
     }
 
-    let bytes = fs::read(target)
-        .map_err(|e| format!("Failed to read '{}': {}", target.display(), e))?;
+    let bytes =
+        fs::read(target).map_err(|e| format!("Failed to read '{}': {}", target.display(), e))?;
 
     if is_probably_binary(&bytes) {
         return Ok(());
@@ -271,11 +267,8 @@ fn run_integrated_search(
     target_root: &Path,
     options: SearchOptions<'_>,
 ) -> Result<String, String> {
-    let case_sensitive = should_use_case_sensitive_search(
-        query,
-        options.case_sensitive,
-        options.smart_case,
-    );
+    let case_sensitive =
+        should_use_case_sensitive_search(query, options.case_sensitive, options.smart_case);
     let matcher = SearchMatcher::build(query, case_sensitive, options.use_regex)?;
     let glob_matcher = build_search_glob_matcher(options.glob)?;
     let mut results = Vec::new();
@@ -306,7 +299,10 @@ fn run_integrated_search(
         for entry in walker.build() {
             match entry {
                 Ok(entry) => {
-                    if !entry.file_type().is_some_and(|file_type| file_type.is_file()) {
+                    if !entry
+                        .file_type()
+                        .is_some_and(|file_type| file_type.is_file())
+                    {
                         continue;
                     }
 
@@ -324,7 +320,10 @@ fn run_integrated_search(
             }
         }
     } else {
-        return Err(format!("Search target '{}' does not exist", target.display()));
+        return Err(format!(
+            "Search target '{}' does not exist",
+            target.display()
+        ));
     }
 
     if results.is_empty() && errors.is_empty() {
@@ -384,7 +383,9 @@ fn decode_process_bytes(bytes: &[u8], hint: OutputDecodeHint) -> String {
 
 fn decode_with_bom(bytes: &[u8]) -> Option<String> {
     if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
-        return std::str::from_utf8(&bytes[3..]).ok().map(|text| text.to_string());
+        return std::str::from_utf8(&bytes[3..])
+            .ok()
+            .map(|text| text.to_string());
     }
 
     if bytes.starts_with(&[0xFF, 0xFE]) {
@@ -687,10 +688,7 @@ async fn resolve_file_action_path(
             }
 
             if require_exists && !path.exists() {
-                return Err(format!(
-                    "Path '{}' does not exist",
-                    path.display()
-                ));
+                return Err(format!("Path '{}' does not exist", path.display()));
             }
 
             Ok(path)
@@ -873,6 +871,90 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
         }));
     }
 
+    if selected_tools.iter().any(|t| t == "todo_list") {
+        tools.push(json!({
+            "type": "function",
+            "function": {
+                "name": "todo_add",
+                "description": "Add a new todo item to the active session todo list. Use this to plan out work for any non-trivial task. Returns the full list including the new item.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "title": {
+                            "type": "string",
+                            "description": "Short, action-oriented title of the todo item."
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "Optional longer description with concrete acceptance criteria."
+                        }
+                    },
+                    "required": ["title"]
+                }
+            }
+        }));
+        tools.push(json!({
+            "type": "function",
+            "function": {
+                "name": "todo_update_status",
+                "description": "Update the status of an existing todo item by id. Use this to mark items as in_progress when you start them, completed when done, or cancelled when no longer relevant.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "todo_id": {
+                            "type": "string",
+                            "description": "The id of the todo item to update."
+                        },
+                        "status": {
+                            "type": "string",
+                            "enum": ["pending", "in_progress", "completed", "cancelled"],
+                            "description": "The new status for the todo item."
+                        }
+                    },
+                    "required": ["todo_id", "status"]
+                }
+            }
+        }));
+        tools.push(json!({
+            "type": "function",
+            "function": {
+                "name": "todo_list",
+                "description": "Return the current active todo list for this session, including all items with their ids, statuses, and descriptions. Call this whenever you need to check progress, re-plan, or pick the next todo to work on.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }
+        }));
+        tools.push(json!({
+            "type": "function",
+            "function": {
+                "name": "todo_clear_completed",
+                "description": "Remove every completed todo item from the active list. Use this after finishing a batch of work to keep the list focused.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }
+        }));
+        tools.push(json!({
+            "type": "function",
+            "function": {
+                "name": "todo_archive",
+                "description": "Archive the current todo list and start a fresh one. Use this when the previous plan is finished and a new round of work begins.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "new_title": {
+                            "type": "string",
+                            "description": "Optional title for the new active list. Defaults to 'Working plan'."
+                        }
+                    }
+                }
+            }
+        }));
+    }
+
     tools
 }
 
@@ -1043,7 +1125,8 @@ fn ensure_mutation_target_allowed(
     writable_skill_roots: &[PathBuf],
 ) -> Result<(), String> {
     let workspace_skills = workspace_skills_root(workspace_dir);
-    if path_is_within(path, &workspace_skills) && !path_is_within_any_root(path, writable_skill_roots)
+    if path_is_within(path, &workspace_skills)
+        && !path_is_within_any_root(path, writable_skill_roots)
     {
         return Err(
             "Skill directories are read-only. Only workspace/skills is writable in self-evolution mode."
@@ -1104,13 +1187,11 @@ fn extract_directory_change_target(shell_type: &str, statement: &str) -> Option<
                     || lower.starts_with(&format!("{candidate}\t"))
             })?
     } else {
-        ["cd", "pushd"]
-            .into_iter()
-            .find(|candidate| {
-                lower == *candidate
-                    || lower.starts_with(&format!("{candidate} "))
-                    || lower.starts_with(&format!("{candidate}\t"))
-            })?
+        ["cd", "pushd"].into_iter().find(|candidate| {
+            lower == *candidate
+                || lower.starts_with(&format!("{candidate} "))
+                || lower.starts_with(&format!("{candidate}\t"))
+        })?
     };
 
     let rest = statement[command.len()..].trim();
@@ -1191,10 +1272,10 @@ mod tests {
     #[cfg(windows)]
     use super::decode_windows_process_bytes_with_code_pages;
     use super::ensure_mutation_target_allowed;
-    use super::OutputDecodeHint;
-    use super::SearchOptions;
     use super::run_integrated_search;
     use super::validate_shell_working_directory_changes;
+    use super::OutputDecodeHint;
+    use super::SearchOptions;
     use std::fs;
     use std::path::PathBuf;
     use uuid::Uuid;
@@ -1344,11 +1425,9 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn decodes_gbk_output_with_explicit_code_page() {
-        let decoded = decode_windows_process_bytes_with_code_pages(
-            &[0x54, 0x65, 0x73, 0x74],
-            &[936],
-        )
-        .unwrap();
+        let decoded =
+            decode_windows_process_bytes_with_code_pages(&[0x54, 0x65, 0x73, 0x74], &[936])
+                .unwrap();
 
         assert_eq!(decoded, "Test");
     }
@@ -1422,10 +1501,7 @@ mod tests {
     }
 }
 
-fn is_path_protected(
-    path: &Path,
-    protected_roots: &[PathBuf],
-) -> bool {
+fn is_path_protected(path: &Path, protected_roots: &[PathBuf]) -> bool {
     let normalized = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
 
     protected_roots.iter().any(|root| {
@@ -1490,12 +1566,15 @@ pub async fn execute_tool(
     protected_skill_roots: &[PathBuf],
     // Current autonomous mission identifier when executing inside a sub-agent.
     mission_id: Option<&str>,
+    // Current chat session id (used by session-scoped helpers like todo_add).
+    session_id: Option<&str>,
 ) -> String {
     let args: Value = serde_json::from_str(args_str).unwrap_or_default();
     match name {
         "add_task" => {
             let Some(mission_id) = mission_id else {
-                return "Error: add_task is only available inside an autonomous sub-agent mission.".to_string();
+                return "Error: add_task is only available inside an autonomous sub-agent mission."
+                    .to_string();
             };
             let description = args["description"].as_str().unwrap_or("");
             let name = args["name"].as_str().unwrap_or(description);
@@ -1576,6 +1655,105 @@ pub async fn execute_tool(
                     });
                     let _ = app.emit("agent-task-state", payload.clone());
                     serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string())
+                }
+                Err(err) => format!("Error: {err}"),
+            }
+        }
+        "todo_add" => {
+            let Some(session_id) = session_id else {
+                return "Error: todo_add requires an active chat session.".to_string();
+            };
+            let title = args["title"].as_str().unwrap_or("").to_string();
+            if title.trim().is_empty() {
+                return "Error: todo title cannot be empty.".to_string();
+            }
+            let description = args["description"].as_str().unwrap_or("").to_string();
+            match crate::todos::add_todo(app, session_id, &title, &description) {
+                Ok(summary) => {
+                    let payload = json!({
+                        "type": "todo_state",
+                        "list_id": summary.list_id,
+                        "session_id": summary.session_id,
+                        "summary": &summary,
+                    });
+                    let _ = app.emit("todo-state", payload.clone());
+                    serde_json::to_string_pretty(&summary).unwrap_or_else(|_| payload.to_string())
+                }
+                Err(err) => format!("Error: {err}"),
+            }
+        }
+        "todo_update_status" => {
+            let todo_id = args["todo_id"].as_str().unwrap_or("");
+            let status = args["status"].as_str().unwrap_or("");
+            if todo_id.is_empty() {
+                return "Error: todo_id is required.".to_string();
+            }
+            match crate::todos::update_todo_status(app, todo_id, status) {
+                Ok(record) => {
+                    let _ = app.emit(
+                        "todo-state",
+                        json!({
+                            "type": "todo_updated",
+                            "todo": &record,
+                        }),
+                    );
+                    serde_json::to_string_pretty(&record).unwrap_or_else(|_| record.id.clone())
+                }
+                Err(err) => format!("Error: {err}"),
+            }
+        }
+        "todo_list" => {
+            let Some(session_id) = session_id else {
+                return "Error: todo_list requires an active chat session.".to_string();
+            };
+            match crate::todos::get_active_list(app, session_id) {
+                Ok(Some(summary)) => {
+                    serde_json::to_string_pretty(&summary).unwrap_or_else(|_| "null".to_string())
+                }
+                Ok(None) => "No active todo list for this session. Call `todo_add` to start one."
+                    .to_string(),
+                Err(err) => format!("Error: {err}"),
+            }
+        }
+        "todo_clear_completed" => {
+            let Some(session_id) = session_id else {
+                return "Error: todo_clear_completed requires an active chat session.".to_string();
+            };
+            match crate::todos::clear_completed(app, session_id) {
+                Ok(summary) => {
+                    let _ = app.emit(
+                        "todo-state",
+                        json!({
+                            "type": "todo_cleared",
+                            "list_id": summary.list_id,
+                        }),
+                    );
+                    serde_json::to_string_pretty(&summary)
+                        .unwrap_or_else(|_| summary.list_id.clone())
+                }
+                Err(err) => format!("Error: {err}"),
+            }
+        }
+        "todo_archive" => {
+            let Some(session_id) = session_id else {
+                return "Error: todo_archive requires an active chat session.".to_string();
+            };
+            let new_title = args["new_title"].as_str();
+            // Archive the current list (if any) and start a new active one.
+            if let Ok(Some(current)) = crate::todos::get_active_list(app, session_id) {
+                let _ = crate::todos::archive_list(app, &current.list_id);
+            }
+            match crate::todos::new_list(app, session_id, new_title, None) {
+                Ok(summary) => {
+                    let _ = app.emit(
+                        "todo-state",
+                        json!({
+                            "type": "todo_list_changed",
+                            "list_id": summary.list_id,
+                        }),
+                    );
+                    serde_json::to_string_pretty(&summary)
+                        .unwrap_or_else(|_| summary.list_id.clone())
                 }
                 Err(err) => format!("Error: {err}"),
             }
@@ -1678,7 +1856,9 @@ pub async fn execute_tool(
                     run_command_with_stdin(cmd, format!("{}\n", password)),
                 )
                 .await
-                .unwrap_or_else(|_| Ok(format!("Command timed out after {} seconds.", timeout_secs)))
+                .unwrap_or_else(|_| {
+                    Ok(format!("Command timed out after {} seconds.", timeout_secs))
+                })
                 .unwrap_or_else(|e| format!("Error: {}", e));
             }
 
@@ -1705,11 +1885,9 @@ pub async fn execute_tool(
                 .unwrap_or(30)
                 .clamp(1, 3600) as u64;
 
-            if let Err(err) = validate_shell_working_directory_changes(
-                &shell_type,
-                &code,
-                &workspace_dir,
-            ) {
+            if let Err(err) =
+                validate_shell_working_directory_changes(&shell_type, &code, &workspace_dir)
+            {
                 return format!("⛔ {}", err);
             }
 
@@ -1789,7 +1967,9 @@ pub async fn execute_tool(
                     run_command_with_stdin(cmd, format!("{}\n", password)),
                 )
                 .await
-                .unwrap_or_else(|_| Ok(format!("Command timed out after {} seconds.", timeout_secs)))
+                .unwrap_or_else(|_| {
+                    Ok(format!("Command timed out after {} seconds.", timeout_secs))
+                })
                 .unwrap_or_else(|e| format!("Error: {}", e));
             }
 
@@ -1807,7 +1987,9 @@ pub async fn execute_tool(
                     run_powershell_elevated(scoped_code.clone(), Some(command_cwd)),
                 )
                 .await
-                .unwrap_or_else(|_| Ok(format!("Command timed out after {} seconds.", timeout_secs)))
+                .unwrap_or_else(|_| {
+                    Ok(format!("Command timed out after {} seconds.", timeout_secs))
+                })
                 .unwrap_or_else(|e| format!("Error: {}", e));
             }
 
@@ -1899,7 +2081,9 @@ pub async fn execute_tool(
                     let _ = app.emit("tool-call", format!("💾 *Writing {}*\n\n", path_str));
                     match resolve_file_action_path(app, action, path_str, &root_dir, false).await {
                         Ok(p) => {
-                            if let Err(e) = ensure_mutation_target_allowed(&p, &root_dir, protected_skill_roots) {
+                            if let Err(e) =
+                                ensure_mutation_target_allowed(&p, &root_dir, protected_skill_roots)
+                            {
                                 return format_file_action_error(e);
                             }
                             let backup = match backup_protected_file(&p, protected_skill_roots) {
@@ -2018,8 +2202,7 @@ pub async fn execute_tool(
                                     respect_gitignore,
                                     glob,
                                 },
-                            )
-                            {
+                            ) {
                                 Ok(output) => with_root_header(output),
                                 Err(e) => format!("Error: {}", e),
                             }
@@ -2038,48 +2221,58 @@ pub async fn execute_tool(
                     }
                     match resolve_file_action_path(app, action, path_str, &root_dir, true).await {
                         Ok(src) => {
-                            if let Err(e) = ensure_mutation_target_allowed(&src, &root_dir, protected_skill_roots) {
+                            if let Err(e) = ensure_mutation_target_allowed(
+                                &src,
+                                &root_dir,
+                                protected_skill_roots,
+                            ) {
                                 return format_file_action_error(e);
                             }
-                            match resolve_file_action_path(app, action, new_path, &root_dir, false).await {
-                            Ok(dst) => {
-                                if let Err(e) = ensure_mutation_target_allowed(&dst, &root_dir, protected_skill_roots) {
-                                    return format_file_action_error(e);
-                                }
-                                let backup = match backup_protected_file(&src, protected_skill_roots)
-                                {
-                                    Ok(backup) => backup,
-                                    Err(e) => return format!("Error: {}", e),
-                                };
-                                if let Some(parent) = dst.parent() {
-                                    if let Err(e) = fs::create_dir_all(parent) {
-                                        return format!(
-                                            "Error creating destination directory: {}",
-                                            e
-                                        );
+                            match resolve_file_action_path(app, action, new_path, &root_dir, false)
+                                .await
+                            {
+                                Ok(dst) => {
+                                    if let Err(e) = ensure_mutation_target_allowed(
+                                        &dst,
+                                        &root_dir,
+                                        protected_skill_roots,
+                                    ) {
+                                        return format_file_action_error(e);
                                     }
-                                }
-                                match fs::rename(&src, &dst) {
-                                    Ok(_) => {
-                                        if let Some(backup) = backup {
-                                            format!(
+                                    let backup =
+                                        match backup_protected_file(&src, protected_skill_roots) {
+                                            Ok(backup) => backup,
+                                            Err(e) => return format!("Error: {}", e),
+                                        };
+                                    if let Some(parent) = dst.parent() {
+                                        if let Err(e) = fs::create_dir_all(parent) {
+                                            return format!(
+                                                "Error creating destination directory: {}",
+                                                e
+                                            );
+                                        }
+                                    }
+                                    match fs::rename(&src, &dst) {
+                                        Ok(_) => {
+                                            if let Some(backup) = backup {
+                                                format!(
                                                 "Successfully backed up to {} and moved {} to {}",
                                                 backup.display(),
                                                 path_str,
                                                 new_path
                                             )
-                                        } else {
-                                            format!(
-                                                "Successfully moved {} to {}",
-                                                path_str, new_path
-                                            )
+                                            } else {
+                                                format!(
+                                                    "Successfully moved {} to {}",
+                                                    path_str, new_path
+                                                )
+                                            }
                                         }
+                                        Err(e) => format!("Error moving file: {}", e),
                                     }
-                                    Err(e) => format!("Error moving file: {}", e),
                                 }
+                                Err(e) => format_file_action_error(e),
                             }
-                            Err(e) => format_file_action_error(e),
-                        }
                         }
                         Err(e) => format_file_action_error(e),
                     }
@@ -2089,7 +2282,9 @@ pub async fn execute_tool(
                     let _ = app.emit("tool-call", format!("🩹 *Patching {}*\n\n", path_str));
                     match resolve_file_action_path(app, action, path_str, &root_dir, true).await {
                         Ok(p) => {
-                            if let Err(e) = ensure_mutation_target_allowed(&p, &root_dir, protected_skill_roots) {
+                            if let Err(e) =
+                                ensure_mutation_target_allowed(&p, &root_dir, protected_skill_roots)
+                            {
                                 return format_file_action_error(e);
                             }
                             let backup = match backup_protected_file(&p, protected_skill_roots) {
@@ -2130,7 +2325,9 @@ pub async fn execute_tool(
                     );
                     match resolve_file_action_path(app, action, path_str, &root_dir, false).await {
                         Ok(p) => {
-                            if let Err(e) = ensure_mutation_target_allowed(&p, &root_dir, protected_skill_roots) {
+                            if let Err(e) =
+                                ensure_mutation_target_allowed(&p, &root_dir, protected_skill_roots)
+                            {
                                 return format_file_action_error(e);
                             }
                             if p.exists() && p.is_file() {
@@ -2148,7 +2345,9 @@ pub async fn execute_tool(
                     let _ = app.emit("tool-call", format!("🗑️ *Deleting {}*\n\n", path_str));
                     match resolve_file_action_path(app, action, path_str, &root_dir, true).await {
                         Ok(p) => {
-                            if let Err(e) = ensure_mutation_target_allowed(&p, &root_dir, protected_skill_roots) {
+                            if let Err(e) =
+                                ensure_mutation_target_allowed(&p, &root_dir, protected_skill_roots)
+                            {
                                 return format_file_action_error(e);
                             }
                             let backup = match backup_protected_file(&p, protected_skill_roots) {
