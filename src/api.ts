@@ -9,9 +9,6 @@ import type {
   AgentOrchestration,
   AgentTaskEvent,
   AgentMissionSnapshot,
-  TodoRecord,
-  TodoListSummary,
-  TodoStatus,
 } from "./types";
 
 export async function getConfig(): Promise<AppConfig> {
@@ -284,70 +281,4 @@ export async function clearInteractions(sessionId: string): Promise<void> {
 
 export async function saveMarkdownFile(path: string, content: string): Promise<void> {
   return invoke("save_markdown_file", { path, content });
-}
-
-// ─── Session Todo Lists ───────────────────────────────────────────────────────
-
-export async function getSessionTodo(
-  sessionId: string,
-): Promise<TodoListSummary | null> {
-  return invoke("get_session_todo", { sessionId });
-}
-
-export async function getTodoList(listId: string): Promise<TodoListSummary> {
-  return invoke("get_todo_list", { listId });
-}
-
-export async function createSessionTodo(
-  sessionId: string,
-  title: string,
-  description?: string,
-): Promise<TodoListSummary> {
-  return invoke("create_session_todo", {
-    sessionId,
-    title,
-    description: description ?? null,
-  });
-}
-
-export async function updateTodoStatusCmd(
-  todoId: string,
-  status: TodoStatus | string,
-): Promise<TodoRecord> {
-  return invoke("update_todo_status_cmd", { todoId, status });
-}
-
-export async function updateTodoTextCmd(
-  todoId: string,
-  updates: { title?: string; description?: string },
-): Promise<TodoRecord> {
-  return invoke("update_todo_text_cmd", {
-    todoId,
-    title: updates.title ?? null,
-    description: updates.description ?? null,
-  });
-}
-
-export async function deleteTodoCmd(todoId: string): Promise<void> {
-  return invoke("delete_todo_cmd", { todoId });
-}
-
-export async function clearCompletedTodos(sessionId: string): Promise<TodoListSummary> {
-  return invoke("clear_completed_todos", { sessionId });
-}
-
-export async function archiveTodoList(listId: string): Promise<void> {
-  return invoke("archive_todo_list", { listId });
-}
-
-export async function createTodoList(
-  sessionId: string,
-  title?: string,
-  description?: string,
-): Promise<TodoListSummary> {
-  return invoke("create_todo_list", {
-    sessionId,
-    title: title ?? null,
-    description: description ?? null,
-  });
 }

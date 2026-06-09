@@ -1668,6 +1668,7 @@ pub async fn execute_tool(
                 return "Error: todo title cannot be empty.".to_string();
             }
             let description = args["description"].as_str().unwrap_or("").to_string();
+            let _ = app.emit("tool-call", format!("✅ *Adding todo: {}*\n", title.trim()));
             match crate::todos::add_todo(app, session_id, &title, &description) {
                 Ok(summary) => {
                     let payload = json!({
@@ -1688,6 +1689,14 @@ pub async fn execute_tool(
             if todo_id.is_empty() {
                 return "Error: todo_id is required.".to_string();
             }
+            let _ = app.emit(
+                "tool-call",
+                format!(
+                    "🔄 *Updating todo status: {} → {}*\n",
+                    &todo_id[..8.min(todo_id.len())],
+                    status
+                ),
+            );
             match crate::todos::update_todo_status(app, todo_id, status) {
                 Ok(record) => {
                     let _ = app.emit(
@@ -1706,6 +1715,7 @@ pub async fn execute_tool(
             let Some(session_id) = session_id else {
                 return "Error: todo_list requires an active chat session.".to_string();
             };
+            let _ = app.emit("tool-call", "📋 *Listing active todos*\n".to_string());
             match crate::todos::get_active_list(app, session_id) {
                 Ok(Some(summary)) => {
                     serde_json::to_string_pretty(&summary).unwrap_or_else(|_| "null".to_string())
@@ -1719,6 +1729,7 @@ pub async fn execute_tool(
             let Some(session_id) = session_id else {
                 return "Error: todo_clear_completed requires an active chat session.".to_string();
             };
+            let _ = app.emit("tool-call", "🧹 *Clearing completed todos*\n".to_string());
             match crate::todos::clear_completed(app, session_id) {
                 Ok(summary) => {
                     let _ = app.emit(
@@ -1739,6 +1750,13 @@ pub async fn execute_tool(
                 return "Error: todo_archive requires an active chat session.".to_string();
             };
             let new_title = args["new_title"].as_str();
+            let _ = app.emit(
+                "tool-call",
+                format!(
+                    "📦 *Archiving todo list, starting new: {}*\n",
+                    new_title.unwrap_or("Working plan")
+                ),
+            );
             // Archive the current list (if any) and start a new active one.
             if let Ok(Some(current)) = crate::todos::get_active_list(app, session_id) {
                 let _ = crate::todos::archive_list(app, &current.list_id);

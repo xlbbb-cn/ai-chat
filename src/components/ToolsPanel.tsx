@@ -29,14 +29,14 @@ const AVAILABLE_TOOLS = [
         description: "Execute a script in a shell (PowerShell or Bash). The shell starts in the workspace root, and directory changes must stay inside that workspace. Supports pipes, loops, variables, and other shell features. Privileged operations and dangerous commands require explicit confirmation.",
     },
     {
-        id: "knowledge_graph",
-        name: "Knowledge Graph",
-        description: "Connect to a knowledge graph and perform queries",
-    },
-    {
         id: "todo_list",
         name: "Todo List",
         description: "Track complex multi-step work with a session-scoped todo list. The assistant can add items, update statuses, check progress, clear completed items, and archive finished lists.",
+    },
+    {
+        id: "knowledge_graph",
+        name: "Knowledge Graph",
+        description: "Connect to a knowledge graph and perform queries",
     }
 ];
 

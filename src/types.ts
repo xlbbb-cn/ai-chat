@@ -128,33 +128,3 @@ export interface AgentMissionSnapshot {
   created_at: string;
   updated_at: string;
 }
-
-export type TodoStatus = "pending" | "in_progress" | "completed" | "cancelled";
-
-export interface TodoRecord {
-  id: string;
-  session_id: string;
-  list_id: string;
-  title: string;
-  description: string;
-  status: TodoStatus | string;
-  position: number;
-  created_at: string;
-  updated_at: string;
-  completed_at?: string | null;
-}
-
-export interface TodoListSummary {
-  list_id: string;
-  session_id: string;
-  title: string;
-  description: string;
-  total: number;
-  pending: number;
-  in_progress: number;
-  completed: number;
-  cancelled: number;
-  created_at: string;
-  updated_at: string;
-  todos: TodoRecord[];
-}
