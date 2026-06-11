@@ -148,6 +148,14 @@ fn export_profile(app: &AppHandle, profile_path: &PathBuf) -> Result<(), String>
     zip.write_all(config_json.as_bytes())
         .map_err(|e| e.to_string())?;
 
+    emit_profile_export_status(app, "Writing profiles.json");
+    let config_json = serde_json::to_string_pretty(&state.config.lock().unwrap().clone())
+        .map_err(|e| e.to_string())?;
+    zip.start_file("profiles.json", options)
+        .map_err(|e| e.to_string())?;
+    zip.write_all(config_json.as_bytes())
+        .map_err(|e| e.to_string())?;
+
     emit_profile_export_status(app, "Writing mcp_servers.json");
     let mcp_json = serde_json::json!({ "servers": mcp::load_servers(&state.mcp_servers_path) });
     let mcp_json = serde_json::to_string_pretty(&mcp_json).map_err(|e| e.to_string())?;
