@@ -124,7 +124,7 @@ body {
 
 /* Sidebar */
 .sidebar {
-  width: 300px;
+  width: 450px;
   position: fixed;
   top: 0;
   left: 0;
@@ -186,7 +186,7 @@ body {
 }
 
 .sidebar-wide {
-  width: 800px;
+  width: 1200px;
 }
 
 /* Chat area */

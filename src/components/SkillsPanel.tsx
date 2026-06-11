@@ -26,7 +26,9 @@ export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
   const [promptDraft, setPromptDraft] = useState("");
 
   useEffect(() => {
-    listSkills().then(setSkills).catch(console.error);
+    listSkills()
+      .then((skills) => setSkills(skills.sort((a, b) => a.name.localeCompare(b.name))))
+      .catch(console.error);
   }, []);
 
   async function handleSave() {

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { fetchModels, getConfig, getWorkspaceDir, saveConfig } from "../api";
-import type { AppConfig, ModelSettings } from "../types";
+import { fetchModels, getConfig, getWorkspaceDir, saveConfig, listProfiles, saveProfile, deleteProfile, applyProfile, listMcpServers, listSubAgents, getAgentOrchestration } from "../api";
+import type { AppConfig, ModelSettings, Profile } from "../types";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { MonitorPanel } from "./MonitorPanel";
 import { Portal } from "./Portal";
@@ -50,9 +50,14 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
   const [messageDraft, setMessageDraft] = useState("");
   const [messageSaving, setMessageSaving] = useState(false);
   const [showMonitor, setShowMonitor] = useState(false);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [newProfileName, setNewProfileName] = useState("");
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileApplying, setProfileApplying] = useState<string | null>(null);
 
   useEffect(() => {
     getWorkspaceDir().then(setWorkspaceDirActual).catch(console.error);
+    listProfiles().then(setProfiles).catch(console.error);
   }, []);
 
   useEffect(() => {
@@ -142,6 +147,63 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
     }
   }
 
+  async function handleSaveProfile() {
+    if (!newProfileName.trim()) return;
+    setProfileSaving(true);
+    try {
+      const [mcpServers, agents, orchestration] = await Promise.all([
+        listMcpServers(),
+        listSubAgents(),
+        getAgentOrchestration(),
+      ]);
+      const profile: Profile = {
+        name: newProfileName.trim(),
+        selected_skills: config.selected_skills || [],
+        selected_tools: config.selected_tools || [],
+        agents,
+        orchestration,
+        mcp_servers: mcpServers,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      await saveProfile(profile);
+      setNewProfileName("");
+      const updated = await listProfiles();
+      setProfiles(updated);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setProfileSaving(false);
+    }
+  }
+
+  async function handleApplyProfile(name: string) {
+    setProfileApplying(name);
+    try {
+      await applyProfile(name);
+      const cfg = await getConfig();
+      const modelCatalog = mergeModels(cfg.model_catalog, [cfg.model]);
+      setConfig({ ...cfg, model_catalog: modelCatalog, model_settings: cfg.model_settings ?? {} });
+      onConfigSaved?.(cfg);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setProfileApplying(null);
+    }
+  }
+
+  async function handleDeleteProfile(name: string) {
+    try {
+      await deleteProfile(name);
+      const updated = await listProfiles();
+      setProfiles(updated);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
   return (
     <div className="settings-panel">
       <div className="settings-header">
@@ -202,6 +264,55 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
               </small>
             </div>
           </label>
+
+          <div className="profile-section">
+            <div className="profile-section-title">Configuration Profiles</div>
+            <div className="profile-create-row">
+              <input
+                type="text"
+                value={newProfileName}
+                onChange={(e) => setNewProfileName(e.target.value)}
+                placeholder="Profile name"
+                onKeyDown={(e) => e.key === "Enter" && handleSaveProfile()}
+              />
+              <button
+                className="btn-secondary"
+                onClick={handleSaveProfile}
+                disabled={!newProfileName.trim() || profileSaving}
+              >
+                {profileSaving ? "Saving..." : "Save Current"}
+              </button>
+            </div>
+            {profiles.length > 0 && (
+              <div className="profile-list">
+                {profiles.map((profile) => (
+                  <div key={profile.name} className="profile-item">
+                    <div className="profile-item-info">
+                      <span className="profile-item-name">{profile.name}</span>
+                      <span className="profile-item-meta">
+                        {profile.selected_skills.length} skills · {profile.selected_tools.length} tools · {profile.agents.length} agents
+                      </span>
+                    </div>
+                    <div className="profile-item-actions">
+                      <button
+                        className="btn-secondary btn-sm"
+                        onClick={() => handleApplyProfile(profile.name)}
+                        disabled={profileApplying !== null}
+                      >
+                        {profileApplying === profile.name ? "Applying..." : "Apply"}
+                      </button>
+                      <button
+                        className="btn-danger btn-sm"
+                        onClick={() => handleDeleteProfile(profile.name)}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </section>
 
         <section className="settings-group">

@@ -9,6 +9,7 @@ import type {
   AgentOrchestration,
   AgentTaskEvent,
   AgentMissionSnapshot,
+  Profile,
 } from "./types";
 
 export async function getConfig(): Promise<AppConfig> {
@@ -281,4 +282,22 @@ export async function clearInteractions(sessionId: string): Promise<void> {
 
 export async function saveMarkdownFile(path: string, content: string): Promise<void> {
   return invoke("save_markdown_file", { path, content });
+}
+
+// ─── Named Profiles ──────────────────────────────────────────────────────────
+
+export async function listProfiles(): Promise<Profile[]> {
+  return invoke("list_profiles");
+}
+
+export async function saveProfile(profile: Profile): Promise<void> {
+  return invoke("save_profile_config", { profile });
+}
+
+export async function deleteProfile(name: string): Promise<void> {
+  return invoke("delete_profile_config", { name });
+}
+
+export async function applyProfile(name: string): Promise<void> {
+  return invoke("apply_profile_config", { name });
 }

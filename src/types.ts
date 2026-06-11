@@ -128,3 +128,14 @@ export interface AgentMissionSnapshot {
   created_at: string;
   updated_at: string;
 }
+
+export interface Profile {
+  name: string;
+  selected_skills: string[];
+  selected_tools: string[];
+  agents: SubAgent[];
+  orchestration: AgentOrchestration;
+  mcp_servers: McpServer[];
+  created_at: string;
+  updated_at: string;
+}

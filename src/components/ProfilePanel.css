@@ -1,0 +1,132 @@
+.profile-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: var(--c-bg);
+    color: var(--c-body);
+}
+
+.profile-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    border-bottom: 0.5px solid var(--c-border);
+    flex-shrink: 0;
+}
+
+.profile-header h2 {
+    margin: 0;
+    font-size: 15px;
+    color: var(--c-text);
+    letter-spacing: -0.01em;
+}
+
+.profile-body {
+    flex: 1;
+    padding: 18px;
+    overflow-y: auto;
+}
+
+.profile-create {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+}
+
+.profile-create input {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-sm);
+    background: var(--c-bg);
+    color: var(--c-body);
+    font-size: 13px;
+}
+
+.profile-create input:focus {
+    outline: none;
+    border-color: var(--c-accent);
+}
+
+.profile-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.profile-empty {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--c-muted);
+    font-size: 13px;
+}
+
+.profile-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 14px;
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-md);
+    background: var(--c-bg-secondary);
+    transition: border-color 0.2s;
+}
+
+.profile-item:hover {
+    border-color: var(--c-accent);
+}
+
+.profile-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.profile-name {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--c-text);
+    margin-bottom: 6px;
+}
+
+.profile-meta {
+    display: flex;
+    gap: 12px;
+    font-size: 12px;
+    color: var(--c-muted);
+    margin-bottom: 4px;
+}
+
+.profile-date {
+    font-size: 11px;
+    color: var(--c-muted);
+    opacity: 0.7;
+}
+
+.profile-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+    margin-left: 12px;
+}
+
+.btn-danger {
+    padding: 6px 12px;
+    border: 1px solid var(--c-danger, #e53935);
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--c-danger, #e53935);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-danger:hover {
+    background: var(--c-danger, #e53935);
+    color: white;
+}
+
+.btn-danger:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}

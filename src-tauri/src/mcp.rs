@@ -47,8 +47,8 @@ pub struct McpServer {
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
-struct McpServersFile {
-    servers: Vec<McpServer>,
+pub struct McpServersFile {
+    pub servers: Vec<McpServer>,
 }
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
@@ -382,15 +382,23 @@ fn build_stdio_cmd(server: &McpServer) -> tokio::process::Command {
     cmd
 }
 
-
 #[cfg(windows)]
 fn shell_escape_powershell(s: &str) -> String {
     if s.is_empty() {
         return "''".to_string();
     }
-    let needs_quotes = s.contains(' ') || s.contains('"') || s.contains('\t') || s.contains('&')
-        || s.contains('|') || s.contains(';') || s.contains('>') || s.contains('<')
-        || s.contains('$') || s.contains('`') || s.contains('(') || s.contains(')');
+    let needs_quotes = s.contains(' ')
+        || s.contains('"')
+        || s.contains('\t')
+        || s.contains('&')
+        || s.contains('|')
+        || s.contains(';')
+        || s.contains('>')
+        || s.contains('<')
+        || s.contains('$')
+        || s.contains('`')
+        || s.contains('(')
+        || s.contains(')');
     if needs_quotes {
         let escaped = s.replace('\'', "''");
         format!("'{}'", escaped)

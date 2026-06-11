@@ -328,6 +328,7 @@ pub struct AppState {
     pub skills_dir: PathBuf,
     pub mcp_servers_path: PathBuf,
     pub agents_config_path: PathBuf,
+    pub profiles_path: PathBuf,
     pub db: Mutex<Connection>,
     pub logger: Mutex<AppLogger>,
     pub chat_cancelled: AtomicBool,
@@ -446,6 +447,115 @@ fn get_workspace_dir(state: State<'_, AppState>) -> String {
 #[tauri::command]
 fn save_markdown_file(path: String, content: String) -> Result<(), String> {
     fs::write(PathBuf::from(path), content).map_err(|e| e.to_string())
+}
+
+// ─── Named Profiles ──────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Profile {
+    pub name: String,
+    pub selected_skills: Vec<String>,
+    pub selected_tools: Vec<String>,
+    pub agents: Vec<agents::SubAgent>,
+    pub orchestration: agents::AgentOrchestration,
+    pub mcp_servers: Vec<mcp::McpServer>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct ProfilesFile {
+    profiles: Vec<Profile>,
+}
+
+fn load_profiles(path: &PathBuf) -> Vec<Profile> {
+    if !path.exists() {
+        return vec![];
+    }
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<ProfilesFile>(&s).ok())
+        .map(|f| f.profiles)
+        .unwrap_or_default()
+}
+
+fn save_profiles(path: &PathBuf, profiles: &[Profile]) -> Result<(), String> {
+    let file = ProfilesFile {
+        profiles: profiles.to_vec(),
+    };
+    let json = serde_json::to_string_pretty(&file).map_err(|e| e.to_string())?;
+    fs::write(path, json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn list_profiles(state: State<'_, AppState>) -> Vec<Profile> {
+    load_profiles(&state.profiles_path)
+}
+
+#[tauri::command]
+fn save_profile_config(state: State<'_, AppState>, profile: Profile) -> Result<(), String> {
+    let mut profiles = load_profiles(&state.profiles_path);
+
+    // Update timestamps
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut updated_profile = profile;
+
+    if let Some(existing) = profiles.iter_mut().find(|p| p.name == updated_profile.name) {
+        updated_profile.created_at = existing.created_at.clone();
+        updated_profile.updated_at = now;
+        *existing = updated_profile;
+    } else {
+        updated_profile.created_at = now.clone();
+        updated_profile.updated_at = now;
+        profiles.push(updated_profile);
+    }
+
+    save_profiles(&state.profiles_path, &profiles)
+}
+
+#[tauri::command]
+fn delete_profile_config(state: State<'_, AppState>, name: String) -> Result<(), String> {
+    let mut profiles = load_profiles(&state.profiles_path);
+    profiles.retain(|p| p.name != name);
+    save_profiles(&state.profiles_path, &profiles)
+}
+
+#[tauri::command]
+fn apply_profile_config(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<(), String> {
+    let profiles = load_profiles(&state.profiles_path);
+    let profile = profiles
+        .into_iter()
+        .find(|p| p.name == name)
+        .ok_or_else(|| format!("Profile '{}' not found", name))?;
+
+    // Update config with profile's selected_skills and selected_tools
+    let mut config = state.config.lock().unwrap().clone();
+    config.selected_skills = profile.selected_skills;
+    config.selected_tools = profile.selected_tools;
+
+    apply_config(&app, &state, config)?;
+
+    // Save agents config
+    let agents_config = agents::AgentsConfig {
+        agents: profile.agents,
+        orchestration: profile.orchestration,
+    };
+    let agents_json = serde_json::to_string_pretty(&agents_config).map_err(|e| e.to_string())?;
+    fs::write(&state.agents_config_path, agents_json).map_err(|e| e.to_string())?;
+
+    // Save MCP servers
+    let mcp_file = mcp::McpServersFile {
+        servers: profile.mcp_servers,
+    };
+    let mcp_json = serde_json::to_string_pretty(&mcp_file).map_err(|e| e.to_string())?;
+    fs::write(&state.mcp_servers_path, mcp_json).map_err(|e| e.to_string())?;
+
+    let _ = app.emit("profile-restored", ());
+    Ok(())
 }
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
@@ -593,6 +703,7 @@ pub fn run() {
 
             let mcp_servers_path = data_dir.join("mcp_servers.json");
             let agents_config_path = data_dir.join("sub_agents.json");
+            let profiles_path = data_dir.join("profiles.json");
 
             let db_path = data_dir.join("chat.db");
             let db = Connection::open(&db_path).unwrap();
@@ -710,6 +821,7 @@ pub fn run() {
                 skills_dir,
                 mcp_servers_path: mcp_servers_path.clone(),
                 agents_config_path,
+                profiles_path,
                 chat_cancelled: AtomicBool::new(false),
                 confirm_sender: Mutex::new(None),
             });
@@ -768,6 +880,10 @@ pub fn run() {
             todos::clear_completed_todos,
             todos::archive_todo_list,
             todos::create_todo_list,
+            list_profiles,
+            save_profile_config,
+            delete_profile_config,
+            apply_profile_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
