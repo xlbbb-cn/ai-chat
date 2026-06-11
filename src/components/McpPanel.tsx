@@ -220,7 +220,13 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                                 <span className="mcp-toggle-slider" />
                             </label>
                             <div className="mcp-server-info">
-                                <span className="mcp-server-name">{s.name || "(unnamed)"}</span>
+                                <span
+                                    className={`mcp-server-name ${s.enabled ? "active" : ""}`}
+                                    title={`Click to ${s.enabled ? "disable" : "enable"} ${s.name}`}
+                                    onClick={() => void toggleEnabled(s)}
+                                >
+                                    {s.name || "(unnamed)"}
+                                </span>
                                 <span className="mcp-server-transport">
                                     {s.transport === "stdio"
                                         ? `stdio: ${s.command}${s.args.length ? " " + s.args.join(" ") : ""}`

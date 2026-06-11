@@ -224,7 +224,11 @@ export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
                         />
                         <span className="toggle-switch-slider" />
                       </label>
-                      <span className="skill-name" title={skill.name}>
+                      <span
+                        className={`skill-name ${isActive ? "active" : ""}`}
+                        title={`Click to ${isActive ? "disable" : "enable"} ${skill.name}`}
+                        onClick={(e) => { e.stopPropagation(); onToggle(skill.name, !isActive); }}
+                      >
                         {skill.name}
                       </span>
                     </div>

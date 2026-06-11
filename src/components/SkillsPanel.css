@@ -143,8 +143,18 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  cursor: default;
+  cursor: pointer;
   letter-spacing: -0.005em;
+  transition: color 0.2s;
+}
+
+.skill-name:hover {
+  color: var(--c-accent);
+}
+
+.skill-name.active {
+  color: var(--c-accent);
+  font-weight: 500;
 }
 
 .skill-desc {

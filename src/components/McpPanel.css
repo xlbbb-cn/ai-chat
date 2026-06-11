@@ -107,6 +107,17 @@
     overflow: hidden;
     text-overflow: ellipsis;
     letter-spacing: -0.005em;
+    cursor: pointer;
+    transition: color 0.2s;
+}
+
+.mcp-server-name:hover {
+    color: var(--c-accent);
+}
+
+.mcp-server-name.active {
+    color: var(--c-accent);
+    font-weight: 500;
 }
 
 .mcp-server-transport {
