@@ -683,7 +683,7 @@ pub async fn chat_completion(
 
     let os_info = os_info::get();
     let os_sys_msg = format!(
-        "OS: {} {} ({:?})",
+        "Local OS: {} {} ({:?})",
         os_info.os_type(),
         os_info.version(),
         os_info.architecture()
@@ -692,7 +692,17 @@ pub async fn chat_completion(
     if !system_content.is_empty() {
         system_content.push_str("\n\n");
     }
-    system_content.push_str(&os_sys_msg); //Add system info to system prompt
+    system_content.push_str(&os_sys_msg);
+    system_content.push_str(
+        "\n\n\
+        Explicit invocation syntax (user can call capabilities directly in the chat):\n\
+        - {tool:<name>}     — invoke a local tool by name, e.g. {tool:run_shell}\n\
+        - {mcp:<server>.<tool>} — invoke an MCP server tool, e.g. {mcp:filesystem.read_file}.\n\
+        - {skill:<name>}    — load a skill's detailed instructions on demand, e.g. {skill:mx-search}.\n\
+        When the user's message contains an explicit invocation token, treat it as a direct request: \
+        call the matching tool (for {tool:...} / {mcp:...}) or load the skill via the use_skill tool (for {skill:...}) \
+        before answering. Do not ask for confirmation when the user uses the explicit form."
+    ); //Add system info & explicit invocation syntax to system prompt
 
     for skill_name in &skill_ids {
         let ws_skills_dir = workspace_dir_for_roots.join("skills");
