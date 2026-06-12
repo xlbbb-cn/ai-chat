@@ -741,7 +741,7 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "run_shell",
-                "description": "Execute a script in a shell on the user's machine. \n                                Supports pipes, loops, variables, and other shell features. \n                                CRITICAL: The tool always switches to the workspace directory before running the script, and directory changes must stay within the workspace root. \n                                Dangerous or privileged operations (sudo / admin elevation) will require explicit user confirmation.",
+                "description": "Execute a script in a shell on the user's machine.\nDangerous or privileged operations (sudo / admin elevation) will require explicit user confirmation.",
                 "parameters": {
                     "type": "object",
                     "properties": {

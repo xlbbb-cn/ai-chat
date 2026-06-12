@@ -683,10 +683,9 @@ pub async fn chat_completion(
 
     let os_info = os_info::get();
     let os_sys_msg = format!(
-        "Local OS: {} {} ({:?})",
+        "user's machine: {} {}",
         os_info.os_type(),
-        os_info.version(),
-        os_info.architecture()
+        os_info.version()
     );
 
     if !system_content.is_empty() {
