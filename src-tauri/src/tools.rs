@@ -360,7 +360,7 @@ fn code_requests_sudo(code: &str) -> bool {
     false
 }
 
-fn decode_process_bytes(bytes: &[u8], hint: OutputDecodeHint) -> String {
+fn decode_process_bytes(bytes: &[u8], _hint: OutputDecodeHint) -> String {
     if bytes.is_empty() {
         return String::new();
     }
@@ -492,14 +492,16 @@ fn decode_windows_code_page(bytes: &[u8], code_page: u32) -> Option<String> {
     Some(String::from_utf16_lossy(&wide[..written as usize]))
 }
 
-#[cfg(windows)]
+#[cfg_attr(not(windows), allow(dead_code))]
 fn wrap_cmd_script_for_utf8(code: &str) -> String {
-    format!("chcp 65001>nul & {code}")
-}
-
-#[cfg(not(windows))]
-fn wrap_cmd_script_for_utf8(code: &str) -> String {
-    code.to_string()
+    #[cfg(windows)]
+    {
+        format!("chcp 65001>nul & {code}")
+    }
+    #[cfg(not(windows))]
+    {
+        code.to_string()
+    }
 }
 
 fn wrap_powershell_script_for_utf8(code: &str) -> String {
@@ -1228,6 +1230,7 @@ fn validate_shell_working_directory_changes(
     Ok(())
 }
 
+#[cfg(windows)]
 fn quote_cmd_path(path: &Path) -> String {
     format!("\"{}\"", path.display().to_string().replace('"', "\"\""))
 }
