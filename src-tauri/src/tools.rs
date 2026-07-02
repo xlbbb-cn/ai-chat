@@ -960,6 +960,79 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
     tools
 }
 
+/// Build the `skill_read` tool definition.
+/// This tool is auto-injected when one or more skills are active in the session.
+pub fn get_skill_read_tool() -> Value {
+    json!({
+        "type": "function",
+        "function": {
+            "name": "skill_read",
+            "description": "Read, list, or search files within an active skill's directory. Use this to access supplementary files (templates, configs, data, examples) that accompany a skill's SKILL.md. Paths are relative to the skill's root directory.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["read", "list", "search"],
+                        "description": "The operation to perform: 'read' file content, 'list' directory entries, or 'search' file contents with the built-in search engine."
+                    },
+                    "skill_name": {
+                        "type": "string",
+                        "description": "Name of the active skill whose directory to access."
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Path relative to the skill's root directory. Use '.' for the skill root itself. For example 'templates/prompt.md' or 'data/config.json'. Defaults to '.' if omitted."
+                    },
+                    "start_line": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Optional 1-based starting line number to read from (inclusive). Only used for 'read'."
+                    },
+                    "end_line": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Optional 1-based ending line number to read to (inclusive). Only used for 'read'."
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Content search text or regex pattern (only for 'search')."
+                    },
+                    "recursive": {
+                        "type": "boolean",
+                        "description": "Whether to search subdirectories recursively (only for 'search'). Defaults to true."
+                    },
+                    "case_sensitive": {
+                        "type": "boolean",
+                        "description": "Whether the content search is case-sensitive (only for 'search'). Defaults to false."
+                    },
+                    "smart_case": {
+                        "type": "boolean",
+                        "description": "Whether uppercase letters in query should automatically switch to case-sensitive search (only for 'search'). Defaults to false."
+                    },
+                    "use_regex": {
+                        "type": "boolean",
+                        "description": "Whether query should be treated as a regular expression (only for 'search'). Defaults to false."
+                    },
+                    "glob": {
+                        "type": "string",
+                        "description": "Optional file path glob filter for search targets, such as '**/*.md' (only for 'search')."
+                    },
+                    "include_hidden": {
+                        "type": "boolean",
+                        "description": "Whether hidden files/directories should be included (only for 'search'). Defaults to true."
+                    },
+                    "respect_gitignore": {
+                        "type": "boolean",
+                        "description": "Whether .gitignore rules should be respected (only for 'search'). Defaults to false."
+                    }
+                },
+                "required": ["action", "skill_name"]
+            }
+        }
+    })
+}
+
 pub fn get_agent_task_tools() -> Vec<Value> {
     vec![
         json!({
@@ -1571,6 +1644,8 @@ pub async fn execute_tool(
     mission_id: Option<&str>,
     // Current chat session id (used by session-scoped helpers like todo_add).
     session_id: Option<&str>,
+    // Active skill directories accessible via skill_read tool (empty = tool not available).
+    active_skill_dirs: &[(String, PathBuf)],
 ) -> String {
     let args: Value = serde_json::from_str(args_str).unwrap_or_default();
     match name {
@@ -1777,6 +1852,223 @@ pub async fn execute_tool(
                         .unwrap_or_else(|_| summary.list_id.clone())
                 }
                 Err(err) => format!("Error: {err}"),
+            }
+        }
+        "skill_read" => {
+            let action = args["action"].as_str().unwrap_or("");
+            let skill_name = args["skill_name"].as_str().unwrap_or("");
+            let rel_path = args["path"].as_str().unwrap_or(".");
+
+            if skill_name.is_empty() {
+                return "Error: skill_name is required.".to_string();
+            }
+
+            // Find the skill directory
+            let skill_dir = match active_skill_dirs.iter().find(|(name, _)| name == skill_name) {
+                Some((_, dir)) => dir.clone(),
+                None => {
+                    return format!(
+                        "Error: skill '{}' is not active or not found. Active skills: {:?}",
+                        skill_name,
+                        active_skill_dirs.iter().map(|(n, _)| n).collect::<Vec<_>>()
+                    );
+                }
+            };
+
+            // Resolve the target path within the skill directory
+            let target_path = if rel_path == "." || rel_path.is_empty() {
+                skill_dir.clone()
+            } else {
+                let resolved = skill_dir.join(rel_path);
+                // Security check: ensure the resolved path is still within the skill directory
+                match (resolved.canonicalize(), skill_dir.canonicalize()) {
+                    (Ok(resolved_canonical), Ok(skill_dir_canonical)) => {
+                        if !resolved_canonical.starts_with(&skill_dir_canonical) {
+                            return format!(
+                                "Error: path '{}' escapes skill directory '{}'",
+                                rel_path, skill_name
+                            );
+                        }
+                        resolved_canonical
+                    }
+                    _ => {
+                        // Path doesn't exist yet or can't be canonicalized, use as-is
+                        if !resolved.starts_with(&skill_dir) {
+                            return format!(
+                                "Error: path '{}' escapes skill directory '{}'",
+                                rel_path, skill_name
+                            );
+                        }
+                        resolved
+                    }
+                }
+            };
+
+            match action {
+                "read" => {
+                    let _ = app.emit(
+                        "tool-call",
+                        format!("📄 *Reading skill file {}/{}*\n\n", skill_name, rel_path),
+                    );
+
+                    if !target_path.exists() {
+                        return format!("Error: file '{}' does not exist in skill '{}'", rel_path, skill_name);
+                    }
+
+                    if target_path.is_dir() {
+                        return format!("Error: '{}' is a directory, use action 'list' instead", rel_path);
+                    }
+
+                    let start_line = args["start_line"].as_i64();
+                    let end_line = args["end_line"].as_i64();
+
+                    if start_line.is_none() && end_line.is_none() {
+                        return fs::read_to_string(&target_path)
+                            .unwrap_or_else(|e| format!("Error reading file: {}", e));
+                    }
+
+                    let start = start_line.unwrap_or(1);
+                    let end = end_line.unwrap_or(i64::MAX);
+                    if start <= 0 || end < start {
+                        return "Error: invalid line range. start_line must be >= 1 and end_line must be >= start_line.".to_string();
+                    }
+
+                    match fs::File::open(&target_path) {
+                        Ok(file) => {
+                            let reader = BufReader::new(file);
+                            let mut result = String::new();
+                            for (index, line) in reader.lines().enumerate() {
+                                let line_num = (index + 1) as i64;
+                                if line_num < start {
+                                    continue;
+                                }
+                                if line_num > end {
+                                    break;
+                                }
+                                match line {
+                                    Ok(text) => {
+                                        if !result.is_empty() {
+                                            result.push('\n');
+                                        }
+                                        result.push_str(&text);
+                                    }
+                                    Err(e) => {
+                                        return format!("Error reading file: {}", e);
+                                    }
+                                }
+                            }
+                            if result.is_empty() {
+                                "(no matching lines)".to_string()
+                            } else {
+                                result
+                            }
+                        }
+                        Err(e) => format!("Error opening file: {}", e),
+                    }
+                }
+                "list" => {
+                    let _ = app.emit(
+                        "tool-call",
+                        format!("📂 *Listing skill directory {}/{}*\n\n", skill_name, rel_path),
+                    );
+
+                    if !target_path.exists() {
+                        return format!("Error: directory '{}' does not exist in skill '{}'", rel_path, skill_name);
+                    }
+
+                    if !target_path.is_dir() {
+                        // It's a file, return file info
+                        match fs::metadata(&target_path) {
+                            Ok(metadata) => {
+                                let name = target_path
+                                    .file_name()
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or(rel_path)
+                                    .to_string();
+                                return format!("{} ({} bytes)", name, metadata.len());
+                            }
+                            Err(e) => return format!("Error reading file metadata: {}", e),
+                        }
+                    }
+
+                    match fs::read_dir(&target_path) {
+                        Ok(entries) => {
+                            let mut res = Vec::new();
+                            for entry in entries.flatten() {
+                                if let Ok(name) = entry.file_name().into_string() {
+                                    let is_dir = entry
+                                        .file_type()
+                                        .map(|t| t.is_dir())
+                                        .unwrap_or(false);
+                                    if is_dir {
+                                        res.push(format!("{}/", name));
+                                    } else {
+                                        let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                                        res.push(format!("{} ({} bytes)", name, size));
+                                    }
+                                }
+                            }
+                            if res.is_empty() {
+                                "(empty directory)".to_string()
+                            } else {
+                                res.join("\n")
+                            }
+                        }
+                        Err(e) => format!("Error listing directory: {}", e),
+                    }
+                }
+                "search" => {
+                    let query = args["query"].as_str().unwrap_or("");
+                    let recursive = args["recursive"].as_bool().unwrap_or(true);
+                    let case_sensitive = args["case_sensitive"].as_bool().unwrap_or(false);
+                    let smart_case = args["smart_case"].as_bool().unwrap_or(false);
+                    let use_regex = args["use_regex"].as_bool().unwrap_or(false);
+                    let glob = args["glob"].as_str();
+                    let include_hidden = args["include_hidden"].as_bool().unwrap_or(true);
+                    let respect_gitignore = args["respect_gitignore"].as_bool().unwrap_or(false);
+
+                    if query.is_empty() {
+                        return "Error: query is required for search.".to_string();
+                    }
+
+                    let _ = app.emit(
+                        "tool-call",
+                        format!(
+                            "🔎 *Searching skill {} for {}*\n\n",
+                            skill_name,
+                            serde_json::to_string(query).unwrap_or_else(|_| query.to_string())
+                        ),
+                    );
+
+                    if !target_path.exists() {
+                        return format!("Error: path '{}' does not exist in skill '{}'", rel_path, skill_name);
+                    }
+
+                    match run_integrated_search(
+                        query,
+                        &target_path,
+                        &skill_dir,
+                        SearchOptions {
+                            recursive,
+                            case_sensitive,
+                            use_regex,
+                            smart_case,
+                            include_hidden,
+                            respect_gitignore,
+                            glob,
+                        },
+                    ) {
+                        Ok(output) => {
+                            if output.is_empty() || output == "(no matches)" {
+                                "(no matches)".to_string()
+                            } else {
+                                output
+                            }
+                        }
+                        Err(e) => format!("Error: {}", e),
+                    }
+                }
+                _ => format!("Unknown action '{}' for skill_read tool. Supported actions: read, list, search", action),
             }
         }
         "run_cmd" => {

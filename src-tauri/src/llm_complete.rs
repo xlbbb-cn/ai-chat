@@ -3,6 +3,7 @@ use os_info;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
@@ -680,6 +681,8 @@ pub async fn chat_completion(
     let mut system_content = config.system_message.clone(); //top-level system instructions from config
     let mut loaded_skills_content = String::new();
     let mut available_skills_info = String::new();
+    // Track active skill name→directory pairs for skill_read tool injection.
+    let mut active_skill_dirs: Vec<(String, PathBuf)> = Vec::new();
 
     let os_info = os_info::get();
     let os_sys_msg = format!(
@@ -710,6 +713,11 @@ pub async fn chat_completion(
         {
             let skill = resolved_skill.skill;
             merge_allowed_commands(&mut skill_allowed_commands, &skill.allowed_commands);
+
+            // Track skill dir for skill_read tool injection
+            if !active_skill_dirs.iter().any(|(n, _)| n == &skill.name) {
+                active_skill_dirs.push((skill.name.clone(), resolved_skill.skill_dir.clone()));
+            }
 
             if activated_skills.contains(&skill.name) {
                 let cmd_constraint = if skill.allowed_commands.is_empty() {
@@ -829,6 +837,13 @@ pub async fn chat_completion(
     let client = build_http_client()?;
 
     let mut tools_list = tools::get_all_tools(&config.selected_tools);
+
+    // ── Skill-read tool ─────────────────────────────────────────────────────
+    // Auto-inject skill_read when one or more skills are active.
+    if !active_skill_dirs.is_empty() {
+        tools_list.push(tools::get_skill_read_tool());
+    }
+
     let active_model = model_override
         .map(|m| m.trim().to_string())
         .filter(|m| !m.is_empty())
@@ -1147,6 +1162,10 @@ pub async fn chat_completion(
                             &mut skill_allowed_commands,
                             &skill.allowed_commands,
                         );
+                        // Track skill dir for skill_read tool injection
+                        if !active_skill_dirs.iter().any(|(n, _)| n == &skill.name) {
+                            active_skill_dirs.push((skill.name.clone(), resolved_skill.skill_dir.clone()));
+                        }
                         let cmd_constraint = if skill.allowed_commands.is_empty() {
                             String::new()
                         } else {
@@ -1289,6 +1308,7 @@ pub async fn chat_completion(
                     &[],
                     None,
                     Some(&session_id),
+                    &active_skill_dirs,
                 )
                 .await;
                 let duration_ms = start_time.elapsed().as_millis() as i64;

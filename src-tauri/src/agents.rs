@@ -1656,6 +1656,7 @@ pub async fn run_sub_agent(
                         &skill_access_roots,
                         Some(&mission_id),
                         Some(session_id),
+                        &[], // sub-agents don't track active skill dirs for skill_read
                     )
                     .await;
                     working_memory.push(json!({ "role": "tool", "tool_call_id": id, "content": result }));
