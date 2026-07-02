@@ -573,6 +573,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .on_menu_event(|app, event| {
             if event.id() == OPEN_APP_DATA_DIR_MENU_ID {
                 if let Ok(data_dir) = app.path().app_data_dir() {

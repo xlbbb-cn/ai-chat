@@ -7,6 +7,8 @@ import hljs from "highlight.js";
 import "highlight.js/styles/github.css";
 import "./ChatMessage.css";
 
+import { writeText as tauriWriteText } from "@tauri-apps/plugin-clipboard-manager";
+
 const escapeHtml = (value: string): string =>
   value
     .replace(/&/g, "&amp;")
@@ -309,8 +311,10 @@ export function ChatMessage({ message, showRetry = false, onRetry }: Props) {
               const code = wrapper?.querySelector("pre code");
               const text = code?.textContent ?? "";
               if (text) {
-                if (navigator.clipboard?.writeText) {
+                tauriWriteText(text).catch(() => {
+                  // Fallback: standard Web API
                   navigator.clipboard.writeText(text).catch(() => {
+                    // Fallback: legacy execCommand
                     const textarea = document.createElement("textarea");
                     textarea.value = text;
                     document.body.appendChild(textarea);
@@ -318,14 +322,7 @@ export function ChatMessage({ message, showRetry = false, onRetry }: Props) {
                     document.execCommand("copy");
                     document.body.removeChild(textarea);
                   });
-                } else {
-                  const textarea = document.createElement("textarea");
-                  textarea.value = text;
-                  document.body.appendChild(textarea);
-                  textarea.select();
-                  document.execCommand("copy");
-                  document.body.removeChild(textarea);
-                }
+                });
                 const originalText = copyButton.textContent;
                 copyButton.textContent = "Copied!";
                 window.setTimeout(() => {
