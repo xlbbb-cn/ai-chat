@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 use tauri::{
-    menu::{Menu, MenuItem, Submenu},
+    menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     AppHandle, Emitter, Manager, State,
 };
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
@@ -693,6 +693,24 @@ pub fn run() {
                 .expect("failed to create app menu");
             let tools_menu = Submenu::with_items(app, "Tools", true, &[&markdown_edit_item])
                 .expect("failed to create tools menu");
+
+            // Standard Edit menu for copy/paste/select-all keyboard shortcuts
+            let edit_menu = Submenu::with_items(
+                app,
+                "Edit",
+                true,
+                &[
+                    &PredefinedMenuItem::undo(app, None::<&str>).expect("failed to create undo menu item"),
+                    &PredefinedMenuItem::redo(app, None::<&str>).expect("failed to create redo menu item"),
+                    &PredefinedMenuItem::separator(app).expect("failed to create separator"),
+                    &PredefinedMenuItem::cut(app, None::<&str>).expect("failed to create cut menu item"),
+                    &PredefinedMenuItem::copy(app, None::<&str>).expect("failed to create copy menu item"),
+                    &PredefinedMenuItem::paste(app, None::<&str>).expect("failed to create paste menu item"),
+                    &PredefinedMenuItem::select_all(app, None::<&str>).expect("failed to create select all menu item"),
+                ],
+            )
+            .expect("failed to create edit menu");
+
             let about_item = MenuItem::with_id(
                 app,
                 ABOUT_MENU_ID,
@@ -703,7 +721,7 @@ pub fn run() {
             .expect("failed to create about menu item");
             let about_menu = Submenu::with_items(app, "About", true, &[&about_item])
                 .expect("failed to create about menu");
-            let menu = Menu::with_items(app, &[&file_menu, &tools_menu, &about_menu])
+            let menu = Menu::with_items(app, &[&file_menu, &edit_menu, &tools_menu, &about_menu])
                 .expect("failed to create app menu");
             app.set_menu(menu).expect("failed to set app menu");
 

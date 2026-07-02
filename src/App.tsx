@@ -156,15 +156,7 @@ export default function App() {
     };
   }, []);
 
-  useEffect(() => {
-    const preventContextMenu = (event: MouseEvent) => {
-      event.preventDefault();
-    };
-    document.addEventListener("contextmenu", preventContextMenu);
-    return () => {
-      document.removeEventListener("contextmenu", preventContextMenu);
-    };
-  }, []);
+  // Context menu is now allowed so users can right-click to copy/paste.
 
   useEffect(() => {
     const panelScrollableSelector = [
