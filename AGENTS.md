@@ -1,113 +1,123 @@
-# Rust GUI Project — Tauri 2.0 (AI Chat)
+# AI Chat — Tauri 2.0 (Rust + React)
 
-This is an **OpenAI-compatible chat desktop app** built with Tauri 2.0 (Rust backend) + React + TypeScript frontend.
-Users can configure any OpenAI-compatible API endpoint, switch models, and use **Skills** (named system prompts), **Tools**, and **Sub-Agents** to customize assistant behavior.
+Desktop AI chat client (Tauri 2 + React 19 + TS + Vite, Rust backend) that talks to any OpenAI-compatible API and adds **Skills**, **Tools**, and **Sub-Agents**.
 
-## Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Desktop shell | Tauri 2.0 |
-| Backend logic | Rust — `src-tauri/src/lib.rs` |
-| Frontend | React 19 + TypeScript + Vite |
-| IPC | Tauri commands + streaming events |
-| HTTP client | `reqwest` 0.12 (async + SSE streaming) |
-
-## Key Architecture
-
-- **`chat_completion`** Tauri command streams SSE from the API and emits `chat-token` / `chat-done` / `chat-error` / `chat-usage` events to the frontend.
-- **Config** (`get_config`/`save_config`) stored as `config.json` in the OS app data dir (`~/.local/share/ai-chat/` on Linux, `~/Library/Application Support/ai-chat/` on macOS).
-- **Skills** are configured locally. **Skill Path Isolation Rule**: Except for explicitly requested paths, any operation executed by a skill MUST use the directory containing the skill's `SKILL.md` as its root path. Operating on paths outside this root is strictly forbidden. All paths referenced within a skill are evaluated relative to this root path.
-- **Sub-Agents** support task orchestration with dedicated events (`agent-task-start` / `agent-task-token` / `agent-task-done` / `agent-task-error`) and a top-level orchestration switch (`use_agents`).
-- **Tools** include `run_cmd`, `run_shell`, `file_actions`, and `knowledge_graph`. Dangerous command patterns trigger a frontend confirmation flow before execution.
-- Frontend entrypoint: `src/App.tsx`. API layer: `src/api.ts`. Types: `src/types.ts`.
-- Main UI components: `ChatMessage`, `HistoryPanel`, `SettingsPanel`, `SkillsPanel`, `ToolsPanel`, `McpPanel`, `AgentsPanel`.
-
-## Prerequisites
+## Commands
 
 ```sh
-# Rust toolchain
-rustup update stable
+# Dev (hot-reload). Runs `npm run dev` (Vite on :1420) then launches Tauri.
+npm run tauri dev
 
-# Tauri CLI (v2)
-cargo install tauri-cli --version "^2"
+# Frontend only (Vite on :1420, strictPort — must be free)
+npm run dev
 
-# Node.js deps (from project root)
-npm install   # or pnpm install / yarn
+# Production build. NOTE: this runs `sync-version:git-tag` first, so the
+# repo must have a git tag (e.g. v1.1.1) or the build aborts.
+npm run tauri build
+
+# Type-checks
+npx tsc --noEmit                                  # frontend
+cargo check --manifest-path src-tauri/Cargo.toml  # rust
+
+# Version sync (package.json ↔ Cargo.toml ↔ tauri.conf.json)
+node scripts/sync-version.cjs --from-git-tag
+node scripts/sync-version.cjs --bump patch
+npm run sync-version:git-tag
+npm run sync-version:bump-patch
+
+# Rust unit tests (only `todos` and `tools` modules have tests)
+cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-## Build & Dev Commands
+### Cargo mirror (CN / restricted networks)
 
-> **Note**: The default `~/.cargo/config` uses the USTC git registry which may be unavailable. Use the `--config` override below for any `cargo` command that fetches dependencies:
+`~/.cargo/config` may point at the USTC git registry, which can be unreachable. If `cargo` fails to fetch deps, override the source:
 
 ```sh
-# Dev (hot-reload) — run from project root
-npm run tauri dev
-# If cargo needs to fetch deps, run with the mirror override:
 cargo check --manifest-path src-tauri/Cargo.toml \
   --config 'source.crates-io.replace-with="rsproxy-sparse"' \
   --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'
-
-# Frontend only (Vite)
-npm run dev
-
-# Production build
-npm run tauri build
-
-# Rust-only type-check
-cargo check --manifest-path src-tauri/Cargo.toml
-
-# Frontend type-check
-npx tsc --noEmit
 ```
 
-## Project Layout
+## Architecture
+
+- **Entry points**: `src/main.tsx` → `src/App.tsx`; Rust `src-tauri/src/main.rs` → `src-tauri/src/lib.rs` (command registration, state, app setup).
+- **Streaming chat**: `chat_completion` command opens an SSE connection (`reqwest` + `futures-util`) and emits to the frontend:
+  `chat-token`, `chat-reasoning-token`, `chat-done`, `chat-error`, `chat-usage`.
+- **Agent orchestration** (toggle via `use_agents` in config): `agent-plan-start`, `agent-task-start`, `agent-task-token`, `agent-task-done`, `agent-task-error`, `agent-aggregate-start`.
+- **Profiles**: `save_profile_config` / `apply_profile_config` / `delete_profile_config` zip skills + config for export/import. Triggered from the app menu (`save-profile` / `restore-profile`).
+- **MCP warmup**: enabled servers in `mcp_servers.json` are spawned at app startup (`mcp::spawn_warmup`).
+- **API layer**: `src/api.ts` wraps `invoke` + `listen`. `src/types.ts` is the canonical TS shape for `AppConfig`, `Skill`, `McpServer`, `SubAgent`, `AgentOrchestration`, `Profile`, `AgentMissionSnapshot`.
+- **Persistence**: SQLite (`chat.db`) for history, API request monitor, interaction logs, and agent missions. `app.log` is written next to the DB.
+
+## On-disk layout (runtime)
+
+Config and DB live in the OS app data dir (`name` from `tauri.conf.json` identifier `com.leonard.aichat`):
+
+- macOS: `~/Library/Application Support/ai-chat/`
+- Linux: `~/.local/share/ai-chat/`
+- Windows: `%APPDATA%/../Local/ai-chat/`
+
+Contents: `config.json`, `chat.db`, `mcp_servers.json`, `agents.json`, `app.log`, `profiles/`, and a `workspace/` dir (default — overridable via `workspace_dir` in config). `workspace/skills/` is created on first launch.
+
+## Skills — path isolation rule
+
+> Except for explicitly requested paths, any operation executed by a skill MUST treat the directory containing the skill's `SKILL.md` as its root. Operating outside this root is forbidden; all in-skill paths are evaluated relative to it.
+
+This is enforced by the skills/tools layer. Don't add code that lets a skill escape its `SKILL.md` directory.
+
+## Tools & dangerous commands
+
+- Tools: `run_cmd`, `run_shell`, `file_actions`, `knowledge_graph` (Neo4j backend), plus `web_search` / `fetch_web` in `tools.rs`.
+- Some command patterns raise a frontend confirmation dialog. The Rust side blocks on `confirm_command` until the user replies. **If a tool call appears to hang, check the React tree for a pending `ConfirmDialog` / dangerous-command prompt before debugging the Rust side.**
+- `ConfirmKind` values: `dangerous`, `sudo`, `elevation`, `external_path`. Users can auto-accept some kinds via `auto_accept_confirm_kinds` in config.
+
+## Tauri 2 specifics for this repo
+
+- **Identifier**: `com.leonard.aichat` (set in `tauri.conf.json`).
+- **Window label**: `main` (the only window).
+- **Plugins registered in `lib.rs`**: `tauri-plugin-opener`, `tauri-plugin-dialog`, `tauri-plugin-clipboard-manager`. No `fs` / `shell` / `http` plugins. If you need them, add the crate to `Cargo.toml`, register with `.plugin(...)`, AND add the permission to `src-tauri/capabilities/default.json` (Tauri 2 denies by default).
+- **App menu**: defined in `lib.rs` — items include `open-app-data-dir`, `save-profile`, `restore-profile`, `markdown-edit`, `about`.
+- **Vite dev server**: port `1420`, `strictPort: true`. If the port is busy, Tauri dev fails. HMR uses `1421` if `TAURI_DEV_HOST` is set.
+- **Vite watcher ignores** `**/src-tauri/**` (so Rust edits don't trigger Vite reloads — recompile via `cargo`).
+- **Commands return** `Result<T, String>` (or another `Serialize` error). Frontend `invoke()` rejects on `Err` — always `await`.
+
+## Project layout
 
 ```
-ai-chat/
-├── src/                  # Frontend source (TypeScript/JS/HTML)
-│   ├── App.tsx
-│   ├── api.ts
-│   ├── types.ts
-│   └── components/
-├── src-tauri/
-│   ├── src/
-│   │   ├── main.rs       # Tauri app entry point
-│   │   ├── lib.rs        # Command handlers & app state
-│   │   ├── llm_complete.rs
-│   │   ├── tools.rs
-│   │   ├── skills.rs
-│   │   ├── mcp.rs
-│   │   ├── agents.rs
-│   │   ├── db.rs
-│   │   └── logger.rs
-│   ├── Cargo.toml        # Rust dependencies
-│   └── tauri.conf.json   # Tauri app config (identifier, bundle, permissions)
-├── package.json
-└── vite.config.ts
+src/                       # React 19 + TS frontend
+  App.tsx                  # main UI shell
+  api.ts                   # invoke/listen wrappers
+  types.ts                 # shared TS types
+  components/              # ChatMessage, HistoryPanel, SettingsPanel,
+                           # SkillsPanel, ToolsPanel, McpPanel, AgentsPanel,
+                           # AgentMissionPanel, ProfilePanel, MonitorPanel,
+                           # MarkdownPreview, TodoList, ToolCallGroup, Portal
+
+src-tauri/
+  src/lib.rs               # state, menu, command registration, app setup
+  src/llm_complete.rs      # chat_completion (SSE streaming)
+  src/skills.rs            # SKILL.md frontmatter parser, list/save/delete
+  src/tools.rs             # run_cmd/run_shell/file_actions/kg/web_search
+  src/mcp.rs               # MCP stdio/SSE servers, warmup, test
+  src/agents.rs            # sub-agents, orchestration, missions
+  src/todos.rs             # todo lists (also has unit tests)
+  src/db.rs                # SQLite: history, API monitor, interaction log
+  src/neo4j_db.rs          # Neo4j client wrapper
+  src/search.rs            # web search / fetch helpers
+  src/logger.rs            # file + println AppLogger
+  capabilities/default.json
+  tauri.conf.json
+  Cargo.toml
+
+scripts/sync-version.cjs   # 3-way version sync (pkg / cargo / tauri.conf)
 ```
 
-## Tauri 2.0 Key Conventions
+## Common gotchas
 
-- **Commands**: Expose Rust functions to the frontend with `#[tauri::command]` and register them in `tauri::Builder::invoke_handler`.
-- **Permissions (v2 breaking change)**: Every capability (filesystem, shell, HTTP, etc.) must be declared in `src-tauri/capabilities/*.json`. Tauri 2.0 denies all by default — add required permissions explicitly.
-- **Plugin system**: Core features (clipboard, dialog, fs, http, shell, notification) are now separate crates under `tauri-plugin-*`. Add them to `Cargo.toml` and register with `.plugin(tauri_plugin_xxx::init())`.
-- **Events**: Use `app_handle.emit("event-name", payload)` (Rust→JS) and `listen("event-name", handler)` in JS (JS→Rust via `emit`).
-- **State management**: Share app state across commands via `tauri::State<T>` — register with `.manage(MyState::new())`.
-- **Window labels**: Multi-window apps address windows by label string defined in `tauri.conf.json` or created at runtime.
-
-## Common Pitfalls
-
-- `tauri.conf.json` field `identifier` must be a valid reverse-domain string (e.g. `com.example.rustgui`) — build fails otherwise.
-- Capability JSON files must be placed in `src-tauri/capabilities/` and referenced; missing capabilities cause runtime permission errors, not compile errors.
-- `async` Tauri commands must return `Result<T, String>` (or a serializable error type) — the frontend `invoke()` rejects on `Err`.
-- Avoid blocking the async runtime in commands; use `tokio::task::spawn_blocking` for CPU-heavy work.
-- Frontend `invoke()` calls are **async** — always `await` them.
-- If command execution appears to stall, check whether a dangerous-command confirmation is pending in the frontend.
-
-## Useful References
-
-- [Tauri 2.0 docs](https://v2.tauri.app/)
-- [Tauri 2.0 migration guide](https://v2.tauri.app/start/migrate/from-tauri-1/)
-- [Plugin list](https://v2.tauri.app/plugin/)
-- [Security model & capabilities](https://v2.tauri.app/security/)
+- **Production build fails on missing git tag.** `npm run build` → `sync-version:git-tag` calls `git tag --sort=-creatordate`; no tag = hard error. Tag first or use `--version x.y.z`.
+- **Tauri 2 permissions are runtime, not compile-time.** A new `fs`/`shell`/`http` call will fail at runtime if the permission is missing from `capabilities/default.json`.
+- **`async` commands returning `Result<T, E>`** — `E` must be `Serialize`. Use `String` for ad-hoc errors.
+- **Vite `strictPort: 1420`** — don't change the port; Tauri expects it.
+- **Workspace dir** is mutable at runtime via `get_workspace_dir` / config; skills, profiles, and the in-app browser operate on it. Hot-swap carefully — open handles may be invalidated.
+- **Tauri codegen**: `src-tauri/gen/` is auto-generated (gitignored). If IPC types look stale, run `npm run tauri dev` once to regenerate.

@@ -4,7 +4,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     AppHandle, Emitter, Manager, State,
@@ -343,6 +343,9 @@ pub struct AppState {
     /// One-shot channel sender used to relay the user's confirm/deny response
     /// back to a waiting `execute_tool` call.
     pub confirm_sender: Mutex<Option<tokio::sync::oneshot::Sender<ToolConfirmation>>>,
+    /// Per-server runtime registry for the MCP monitor (status, pid, stop signal).
+    /// Shared with `mcp.rs` so commands and reader tasks can mutate it.
+    pub mcp_runtimes: Arc<Mutex<mcp::McpRuntimeMap>>,
 }
 
 #[derive(Clone, Debug)]
@@ -851,11 +854,17 @@ pub fn run() {
                 profiles_path,
                 chat_cancelled: AtomicBool::new(false),
                 confirm_sender: Mutex::new(None),
+                mcp_runtimes: Arc::new(Mutex::new(Default::default())),
             });
 
-            // Warm up enabled MCP servers as soon as the app starts.
+            // Spawn monitor sessions for enabled MCP servers as soon as the app starts.
+            let app_handle = app.handle().clone();
+            let mcp_runtimes = app
+                .state::<AppState>()
+                .mcp_runtimes
+                .clone();
             for server in mcp::load_servers(&mcp_servers_path).into_iter().filter(|s| s.enabled) {
-                mcp::spawn_warmup(server);
+                mcp::spawn_monitor_session(app_handle.clone(), server, mcp_runtimes.clone());
             }
 
             // Set window title to show current workspace directory
@@ -892,6 +901,10 @@ pub fn run() {
             mcp::save_mcp_server,
             mcp::delete_mcp_server,
             mcp::test_mcp_server,
+            mcp::start_mcp_server,
+            mcp::stop_mcp_server,
+            mcp::restart_mcp_server,
+            mcp::list_mcp_status,
             agents::list_sub_agents,
             agents::save_sub_agent,
             agents::delete_sub_agent,

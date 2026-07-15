@@ -1,12 +1,32 @@
-import { useState, useEffect } from "react";
-import { listMcpServers, saveMcpServer, deleteMcpServer, testMcpServer } from "../api";
-import type { McpServer, McpTransport } from "../types";
+import { useState, useEffect, useRef } from "react";
+import {
+    listMcpServers,
+    saveMcpServer,
+    deleteMcpServer,
+    testMcpServer,
+    startMcpServer,
+    stopMcpServer,
+    restartMcpServer,
+    listMcpStatus,
+    onMcpStatus,
+    onMcpLog,
+} from "../api";
+import type {
+    McpServer,
+    McpTransport,
+    McpStatus,
+    McpLogEvent,
+    McpLogStream,
+    McpStatusKind,
+} from "../types";
 import "./McpPanel.css";
 
 interface Props {
     onClose: () => void;
     onServersChange?: (enabledCount: number) => void;
 }
+
+const MAX_LOG_LINES = 200;
 
 function emptyServer(): McpServer {
     return {
@@ -22,6 +42,27 @@ function emptyServer(): McpServer {
     };
 }
 
+function formatLogTime(ts: number): string {
+    const d = new Date(ts);
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    const ss = String(d.getSeconds()).padStart(2, "0");
+    const ms = String(d.getMilliseconds()).padStart(3, "0");
+    return `${hh}:${mm}:${ss}.${ms}`;
+}
+
+function formatUptime(startedAtMs: number | null): string {
+    if (!startedAtMs) return "—";
+    const ms = Date.now() - startedAtMs;
+    if (ms < 0) return "—";
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m ${s % 60}s`;
+    const h = Math.floor(m / 60);
+    return `${h}h ${m % 60}m`;
+}
+
 export function McpPanel({ onClose, onServersChange }: Props) {
     const [servers, setServers] = useState<McpServer[]>([]);
     const [editing, setEditing] = useState<McpServer | null>(null);
@@ -30,6 +71,15 @@ export function McpPanel({ onClose, onServersChange }: Props) {
     const [argsInput, setArgsInput] = useState("");
     const [envInput, setEnvInput] = useState("");
 
+    // Monitor state
+    const [runtimes, setRuntimes] = useState<Record<string, McpStatus>>({});
+    const [logs, setLogs] = useState<Record<string, McpLogEvent[]>>({});
+    const [selectedId, setSelectedId] = useState<string | null>(null);
+    const [streamFilter, setStreamFilter] = useState<"all" | McpLogStream>("all");
+    const [, setTick] = useState(0); // for uptime ticker
+    const logScrollRef = useRef<HTMLDivElement>(null);
+    const logStuckToBottom = useRef(true);
+
     useEffect(() => {
         listMcpServers().then(setServers).catch(console.error);
     }, []);
@@ -37,6 +87,79 @@ export function McpPanel({ onClose, onServersChange }: Props) {
     useEffect(() => {
         onServersChange?.(servers.filter((s) => s.enabled).length);
     }, [servers, onServersChange]);
+
+    // Subscribe to MCP monitor events
+    useEffect(() => {
+        let unlistenStatus: (() => void) | null = null;
+        let unlistenLog: (() => void) | null = null;
+        listMcpStatus()
+            .then((list) =>
+                setRuntimes(
+                    list.reduce<Record<string, McpStatus>>((acc, s) => {
+                        acc[s.id] = s;
+                        return acc;
+                    }, {}),
+                ),
+            )
+            .catch(console.error);
+        onMcpStatus((s) => {
+            setRuntimes((prev) => ({ ...prev, [s.id]: s }));
+        }).then((u) => {
+            unlistenStatus = u;
+        });
+        onMcpLog((e) => {
+            setLogs((prev) => {
+                const list = prev[e.id] ?? [];
+                const next = list.length >= MAX_LOG_LINES
+                    ? [...list.slice(list.length - MAX_LOG_LINES + 1), e]
+                    : [...list, e];
+                return { ...prev, [e.id]: next };
+            });
+        }).then((u) => {
+            unlistenLog = u;
+        });
+        return () => {
+            unlistenStatus?.();
+            unlistenLog?.();
+        };
+    }, []);
+
+    // Re-render every second to refresh uptime
+    useEffect(() => {
+        const t = window.setInterval(() => setTick((x) => x + 1), 1000);
+        return () => window.clearInterval(t);
+    }, []);
+
+    // Auto-scroll log to bottom on new lines if user is at the bottom
+    useEffect(() => {
+        if (logStuckToBottom.current && logScrollRef.current) {
+            logScrollRef.current.scrollTop = logScrollRef.current.scrollHeight;
+        }
+    }, [logs, selectedId, streamFilter]);
+
+    // Clear monitor state for a removed server
+    useEffect(() => {
+        const known = new Set(servers.map((s) => s.id));
+        const dangling = Object.keys(runtimes).filter((id) => !known.has(id));
+        if (dangling.length > 0) {
+            setRuntimes((prev) => {
+                const next = { ...prev };
+                for (const id of dangling) delete next[id];
+                return next;
+            });
+        }
+        const danglingLogs = Object.keys(logs).filter((id) => !known.has(id));
+        if (danglingLogs.length > 0) {
+            setLogs((prev) => {
+                const next = { ...prev };
+                for (const id of danglingLogs) delete next[id];
+                return next;
+            });
+        }
+        if (selectedId && !known.has(selectedId)) {
+            setSelectedId(null);
+        }
+    }, [servers, runtimes, logs, selectedId]);
 
     function startAdd() {
         const s = emptyServer();
@@ -193,6 +316,8 @@ export function McpPanel({ onClose, onServersChange }: Props) {
         );
     }
 
+    const enabledServers = servers.filter((s) => s.enabled);
+
     return (
         <div className="mcp-panel">
             <div className="mcp-header">
@@ -265,6 +390,147 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                         )}
                     </div>
                 ))}
+            </div>
+
+            <div className="mcp-monitor">
+                <div className="mcp-monitor-header">
+                    <span className="mcp-monitor-title">Monitor</span>
+                    {selectedId && (
+                        <button
+                            className="mcp-monitor-clear"
+                            onClick={() => setLogs((prev) => ({ ...prev, [selectedId]: [] }))}
+                            title="Clear logs for selected server"
+                        >
+                            Clear
+                        </button>
+                    )}
+                </div>
+
+                <div className="mcp-monitor-status">
+                    {enabledServers.length === 0 ? (
+                        <div className="mcp-monitor-empty">No enabled servers.</div>
+                    ) : (
+                        enabledServers.map((s) => {
+                            const rt = runtimes[s.id];
+                            const status: McpStatusKind = rt?.status ?? "stopped";
+                            return (
+                                <div
+                                    key={s.id}
+                                    className={`mcp-monitor-row ${selectedId === s.id ? "selected" : ""}`}
+                                    onClick={() => setSelectedId(s.id)}
+                                >
+                                    <span className={`mcp-status-dot ${status}`} />
+                                    <span
+                                        className="mcp-monitor-name"
+                                        title={rt?.last_error ?? ""}
+                                    >
+                                        {s.name || "(unnamed)"}
+                                    </span>
+                                    <span className={`mcp-status-badge ${status}`}>{status}</span>
+                                    {rt?.pid != null && (
+                                        <span className="mcp-monitor-pid">pid {rt.pid}</span>
+                                    )}
+                                    <span className="mcp-monitor-uptime">
+                                        {status === "running" || status === "ready"
+                                            ? formatUptime(rt?.started_at_ms ?? null)
+                                            : "—"}
+                                    </span>
+                                    <div
+                                        className="mcp-monitor-actions"
+                                        onClick={(e) => e.stopPropagation()}
+                                    >
+                                        {status === "running" || status === "starting" ? (
+                                            <button
+                                                className="mcp-action-btn"
+                                                title="Stop"
+                                                onClick={() =>
+                                                    stopMcpServer(s.id).catch(console.error)
+                                                }
+                                            >
+                                                ⏹
+                                            </button>
+                                        ) : (
+                                            <button
+                                                className="mcp-action-btn"
+                                                title="Start"
+                                                onClick={() =>
+                                                    startMcpServer(s.id).catch(console.error)
+                                                }
+                                            >
+                                                ▶
+                                            </button>
+                                        )}
+                                        <button
+                                            className="mcp-action-btn"
+                                            title="Restart"
+                                            onClick={() =>
+                                                restartMcpServer(s.id).catch(console.error)
+                                            }
+                                            disabled={s.transport !== "stdio"}
+                                        >
+                                            ↻
+                                        </button>
+                                    </div>
+                                </div>
+                            );
+                        })
+                    )}
+                </div>
+
+                <div className="mcp-monitor-logs">
+                    <div className="mcp-monitor-logs-header">
+                        <span className="mcp-monitor-logs-title">
+                            {selectedId
+                                ? `Logs: ${enabledServers.find((s) => s.id === selectedId)?.name ?? selectedId}`
+                                : "Logs"}
+                        </span>
+                        <select
+                            className="mcp-monitor-stream-filter"
+                            value={streamFilter}
+                            onChange={(e) =>
+                                setStreamFilter(e.target.value as "all" | McpLogStream)
+                            }
+                            disabled={!selectedId}
+                        >
+                            <option value="all">all</option>
+                            <option value="stdout">stdout</option>
+                            <option value="stderr">stderr</option>
+                        </select>
+                    </div>
+                    <div
+                        className="mcp-monitor-log-list"
+                        ref={logScrollRef}
+                        onScroll={(e) => {
+                            const el = e.currentTarget;
+                            const distFromBottom =
+                                el.scrollHeight - el.scrollTop - el.clientHeight;
+                            logStuckToBottom.current = distFromBottom < 20;
+                        }}
+                    >
+                        {!selectedId && (
+                            <div className="mcp-monitor-empty">
+                                Select a server above to view its logs.
+                            </div>
+                        )}
+                        {selectedId && (logs[selectedId]?.length ?? 0) === 0 && (
+                            <div className="mcp-monitor-empty">No log output yet.</div>
+                        )}
+                        {selectedId &&
+                            (logs[selectedId] ?? [])
+                                .filter(
+                                    (l) => streamFilter === "all" || l.stream === streamFilter
+                                )
+                                .map((l, i) => (
+                                    <div key={i} className={`mcp-log-line ${l.stream}`}>
+                                        <span className="mcp-log-time">
+                                            {formatLogTime(l.ts)}
+                                        </span>
+                                        <span className="mcp-log-stream">{l.stream}</span>
+                                        <span className="mcp-log-text">{l.line}</span>
+                                    </div>
+                                ))}
+                    </div>
+                </div>
             </div>
 
             <div className="mcp-footer">

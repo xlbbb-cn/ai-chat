@@ -5,6 +5,8 @@ import type {
   Message,
   Skill,
   McpServer,
+  McpStatus,
+  McpLogEvent,
   SubAgent,
   AgentOrchestration,
   AgentTaskEvent,
@@ -164,7 +166,33 @@ export async function deleteMcpServer(id: string): Promise<void> {
 }
 
 export async function testMcpServer(server: McpServer): Promise<string> {
-  return invoke("test_mcp_server", { server });
+    return invoke("test_mcp_server", { server });
+}
+
+// ─── MCP Monitor ─────────────────────────────────────────────────────────────
+
+export async function startMcpServer(id: string): Promise<void> {
+    return invoke("start_mcp_server", { id });
+}
+
+export async function stopMcpServer(id: string): Promise<void> {
+    return invoke("stop_mcp_server", { id });
+}
+
+export async function restartMcpServer(id: string): Promise<void> {
+    return invoke("restart_mcp_server", { id });
+}
+
+export async function listMcpStatus(): Promise<McpStatus[]> {
+    return invoke("list_mcp_status");
+}
+
+export function onMcpStatus(handler: (s: McpStatus) => void): Promise<UnlistenFn> {
+    return listen<McpStatus>("mcp-status", (e) => handler(e.payload));
+}
+
+export function onMcpLog(handler: (e: McpLogEvent) => void): Promise<UnlistenFn> {
+    return listen<McpLogEvent>("mcp-log", (e) => handler(e.payload));
 }
 
 // ─── API Request Monitor ──────────────────────────────────────────────────────
