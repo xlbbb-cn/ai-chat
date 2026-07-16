@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { fetchModels, getConfig, getWorkspaceDir, saveConfig, listProfiles, saveProfile, deleteProfile, applyProfile, listMcpServers, listSubAgents, getAgentOrchestration } from "../api";
 import type { AppConfig, ModelSettings, Profile } from "../types";
 import { MarkdownPreview } from "./MarkdownPreview";
@@ -46,6 +47,7 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
   const [manualModel, setManualModel] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(true);
   const [workspaceDirActual, setWorkspaceDirActual] = useState("");
+  const [pickingWorkspace, setPickingWorkspace] = useState(false);
   const [isMessageEditorOpen, setIsMessageEditorOpen] = useState(false);
   const [messageDraft, setMessageDraft] = useState("");
   const [messageSaving, setMessageSaving] = useState(false);
@@ -70,6 +72,34 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
   }, []);
 
   const modelCatalog = mergeModels(config.model_catalog, [config.model]);
+
+  async function handlePickWorkspace() {
+    if (pickingWorkspace) return;
+    setPickingWorkspace(true);
+    try {
+      const selected = await openDialog({
+        directory: true,
+        multiple: false,
+        title: "Select workspace directory",
+        defaultPath: config.workspace_dir || workspaceDirActual || undefined,
+      });
+      if (typeof selected === "string" && selected) {
+        setConfig((prev) => ({ ...prev, workspace_dir: selected }));
+      }
+    } catch (err) {
+      console.error("Failed to open directory picker:", err);
+    } finally {
+      setPickingWorkspace(false);
+    }
+  }
+
+  function handleClearWorkspace() {
+    setConfig((prev) => {
+      const { workspace_dir: _drop, ...rest } = prev;
+      void _drop;
+      return rest;
+    });
+  }
 
   async function handleFetchModels() {
     setLoadingModels(true);
@@ -235,14 +265,47 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
           <div className="settings-group-title">Workspace</div>
           <label className="settings-field">
             Workspace Directory
-            <input
-              type="text"
-              value={config.workspace_dir ?? ""}
-              onChange={(e) =>
-                setConfig({ ...config, workspace_dir: e.target.value || undefined })
-              }
-              placeholder={workspaceDirActual || "Default workspace directory"}
-            />
+            <div className="workspace-dir-row">
+              <input
+                type="text"
+                readOnly
+                value={config.workspace_dir ?? ""}
+                placeholder={workspaceDirActual || "Default workspace directory"}
+                title={config.workspace_dir || workspaceDirActual || "Default workspace directory"}
+                onClick={handlePickWorkspace}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    handlePickWorkspace();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={handlePickWorkspace}
+                disabled={pickingWorkspace}
+                title="Browse for a folder"
+              >
+                {pickingWorkspace ? "Picking…" : "Browse…"}
+              </button>
+              {config.workspace_dir && (
+                <button
+                  type="button"
+                  className="btn-secondary workspace-dir-clear"
+                  onClick={handleClearWorkspace}
+                  title="Use the default workspace directory"
+                  aria-label="Reset workspace directory to default"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+            <small className="settings-hint">
+              {config.workspace_dir
+                ? "Custom workspace in use. Click Browse to change, or Reset to use the default."
+                : `Using default: ${workspaceDirActual || "OS app data directory"}`}
+            </small>
           </label>
 
           <label className="settings-checkbox">
@@ -258,10 +321,6 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
             />
             <div className="settings-checkbox-copy">
               <span>Enable Self-Evolution Mode</span>
-              <small>
-                Allow the main agent and sub-agents to inspect and update skill directories and
-                sub-agent config so they can iteratively optimize reusable skills and sub-agents.
-              </small>
             </div>
           </label>
 

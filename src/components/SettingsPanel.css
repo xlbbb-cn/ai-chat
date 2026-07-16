@@ -224,6 +224,34 @@
   line-height: 1.4;
 }
 
+.workspace-dir-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+}
+
+.workspace-dir-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  cursor: pointer;
+  text-overflow: ellipsis;
+}
+
+.workspace-dir-row input:hover:not(:focus) {
+  border-color: var(--c-border);
+}
+
+.workspace-dir-row .btn-secondary {
+  flex: 0 0 auto;
+  padding: 7px 12px;
+  min-height: 36px;
+}
+
+.workspace-dir-clear {
+  padding: 7px 10px !important;
+}
+
 .settings-hint code {
   font-size: 12px;
   background: var(--c-hover);
