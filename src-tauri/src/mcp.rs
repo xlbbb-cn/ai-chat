@@ -195,12 +195,7 @@ pub fn delete_mcp_server(state: State<'_, AppState>, id: String) -> Result<(), S
     servers.retain(|s| s.id != id);
     let save_result = save_servers(&state.mcp_servers_path, &servers);
     if save_result.is_ok() {
-        append_mcp_log(
-            &state,
-            &id,
-            McpLogLevel::Info,
-            "Server deleted".to_string(),
-        );
+        append_mcp_log(&state, &id, McpLogLevel::Info, "Server deleted".to_string());
         // Drop the log buffer for the removed server.
         state.mcp_logs.lock().unwrap().remove(&id);
     }
@@ -225,20 +220,86 @@ pub fn clear_mcp_logs(state: State<'_, AppState>, id: String) {
     state.mcp_logs.lock().unwrap().remove(&id);
 }
 
+/// Cancel a running MCP server test.
+#[tauri::command]
+pub fn cancel_mcp_test(state: State<'_, AppState>, id: String) {
+    state.mcp_cancelled_tests.lock().unwrap().insert(id);
+}
+
+/// Check whether a test has been cancelled for the given server id.
+fn is_test_cancelled(state: &AppState, id: &str) -> bool {
+    state.mcp_cancelled_tests.lock().unwrap().contains(id)
+}
+
+/// Remove a test from the cancelled set (called when the test finishes).
+fn clear_test_cancelled(state: &AppState, id: &str) {
+    state.mcp_cancelled_tests.lock().unwrap().remove(id);
+}
+
 /// Test connectivity to an MCP server.
 /// Returns Ok(message) on success or Err(message) on failure.
 #[tauri::command]
-pub async fn test_mcp_server(state: State<'_, AppState>, server: McpServer) -> Result<String, String> {
+pub async fn test_mcp_server(
+    state: State<'_, AppState>,
+    server: McpServer,
+) -> Result<String, String> {
+    // Clear any stale cancellation for this server
+    clear_test_cancelled(&state, &server.id);
+
     append_mcp_log(
         &state,
         &server.id,
         McpLogLevel::Info,
         format!("Test started: {}", summarise_server_for_log(&server)),
     );
-    let result = match server.transport {
-        McpTransport::Stdio => test_stdio_server(&state, &server).await,
-        McpTransport::Sse => test_sse_server(&state, &server).await,
+
+    // Log the test timeout
+    let test_timeout_s = 120u64;
+    append_mcp_log(
+        &state,
+        &server.id,
+        McpLogLevel::Info,
+        format!(
+            "Test timeout set to {}s (first run may install packages)",
+            test_timeout_s
+        ),
+    );
+
+    let result = {
+        let test_fut = async {
+            match server.transport {
+                McpTransport::Stdio => test_stdio_server(&state, &server).await,
+                McpTransport::Sse => test_sse_server(&state, &server).await,
+            }
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(test_timeout_s), test_fut)
+            .await
+            .unwrap_or_else(|_| {
+                append_mcp_log(
+                    &state,
+                    &server.id,
+                    McpLogLevel::Error,
+                    format!(
+                        "Test timed out after {}s (package installation may still be in progress)",
+                        test_timeout_s
+                    ),
+                );
+                Err(format!("Test timed out after {}s", test_timeout_s))
+            })
     };
+
+    // If the test was cancelled, return a cancelled message
+    if is_test_cancelled(&state, &server.id) {
+        clear_test_cancelled(&state, &server.id);
+        append_mcp_log(
+            &state,
+            &server.id,
+            McpLogLevel::Warn,
+            "Test cancelled by user".to_string(),
+        );
+        return Err("Test cancelled by user".to_string());
+    }
+
     match &result {
         Ok(msg) => append_mcp_log(
             &state,
@@ -875,18 +936,26 @@ async fn test_stdio_server(state: &AppState, server: &McpServer) -> Result<Strin
         return Err(msg);
     }
 
+    // Early cancellation check
+    if is_test_cancelled(state, &id) {
+        return Err("Test cancelled by user".to_string());
+    }
+
     let started = std::time::Instant::now();
     log(
         McpLogLevel::Info,
         format!(
-            "Spawning process: {} {}",
+            "⏳ Phase: spawning — {} {}",
             server.command,
             server.args.join(" ")
         ),
     );
     log(
         McpLogLevel::Info,
-        format!("Env vars: {} (keys only, values redacted)", server.env.len()),
+        format!(
+            "Env vars: {} (keys only, values redacted)",
+            server.env.len()
+        ),
     );
 
     // MCP initialize request (protocol version 2025-03-26)
@@ -904,6 +973,10 @@ async fn test_stdio_server(state: &AppState, server: &McpServer) -> Result<Strin
         "id": 1
     });
     let request_line = format!("{}\n", init_request);
+
+    if is_test_cancelled(state, &id) {
+        return Err("Test cancelled by user".to_string());
+    }
 
     let mut cmd = build_stdio_cmd(server, true);
     let mut child = match cmd.spawn() {
@@ -931,6 +1004,16 @@ async fn test_stdio_server(state: &AppState, server: &McpServer) -> Result<Strin
     let mut stdin = child.stdin.take().ok_or("No stdin")?;
     let mut stdout = child.stdout.take().ok_or("No stdout")?;
 
+    if is_test_cancelled(state, &id) {
+        let _ = child.kill().await;
+        return Err("Test cancelled by user".to_string());
+    }
+
+    log(
+        McpLogLevel::Info,
+        "⏳ Phase: initializing — sending MCP initialize request".to_string(),
+    );
+
     if let Err(e) = stdin.write_all(request_line.as_bytes()).await {
         let msg = format!("Write error: {e}");
         log(McpLogLevel::Error, msg.clone());
@@ -938,9 +1021,17 @@ async fn test_stdio_server(state: &AppState, server: &McpServer) -> Result<Strin
         return Err(msg);
     }
     drop(stdin);
-    log(McpLogLevel::Info, "Sent initialize request (id=1)".to_string());
+    log(
+        McpLogLevel::Info,
+        "Sent initialize request (id=1)".to_string(),
+    );
 
-    let read_result = timeout(Duration::from_secs(5), async {
+    log(
+        McpLogLevel::Info,
+        "⏳ Phase: waiting for response — may take a while if installing packages...".to_string(),
+    );
+
+    let read_result = timeout(Duration::from_secs(120), async {
         let mut reader = tokio::io::BufReader::new(&mut stdout);
         let mut line = String::new();
         reader.read_line(&mut line).await.map(|_| line)
@@ -948,6 +1039,11 @@ async fn test_stdio_server(state: &AppState, server: &McpServer) -> Result<Strin
     .await;
 
     let _ = child.kill().await;
+
+    // Check cancellation again after the long wait
+    if is_test_cancelled(state, &id) {
+        return Err("Test cancelled by user".to_string());
+    }
 
     let result = match read_result {
         Ok(Ok(line)) if !line.trim().is_empty() => {
@@ -957,7 +1053,7 @@ async fn test_stdio_server(state: &AppState, server: &McpServer) -> Result<Strin
             );
             if line.contains("\"result\"") || line.contains("jsonrpc") {
                 Ok(format!(
-                    "Connected successfully (received {} bytes)",
+                    "✅ Connected successfully (received {} bytes)",
                     line.len()
                 ))
             } else {
@@ -980,7 +1076,7 @@ async fn test_stdio_server(state: &AppState, server: &McpServer) -> Result<Strin
             Err(msg)
         }
         Err(_) => {
-            let msg = "Timeout: no response within 5 seconds".to_string();
+            let msg = "⏱ Timeout: no response within 120 seconds (package installation may still be in progress)".to_string();
             log(McpLogLevel::Error, msg.clone());
             Err(msg)
         }
@@ -1007,7 +1103,10 @@ async fn test_sse_server(state: &AppState, server: &McpServer) -> Result<String,
     let url_display = if server.auth_token.is_empty() {
         server.url.clone()
     } else {
-        format!("{}?<token redacted>", server.url.split('?').next().unwrap_or(&server.url))
+        format!(
+            "{}?<token redacted>",
+            server.url.split('?').next().unwrap_or(&server.url)
+        )
     };
     log(McpLogLevel::Info, format!("GET {url_display}"));
 

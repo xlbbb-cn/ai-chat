@@ -346,7 +346,11 @@ pub struct AppState {
     /// Per-server diagnostic log buffer (in-memory ring buffer, last
     /// `MAX_MCP_LOG_ENTRIES` entries per server). Populated by mcp.rs at
     /// every save / test / tool call so the UI can show what happened.
-    pub mcp_logs: std::sync::Arc<Mutex<std::collections::HashMap<String, std::collections::VecDeque<mcp::McpLogEntry>>>>,
+    pub mcp_logs: std::sync::Arc<
+        Mutex<std::collections::HashMap<String, std::collections::VecDeque<mcp::McpLogEntry>>>,
+    >,
+    /// Server IDs whose current test has been cancelled by the user.
+    pub mcp_cancelled_tests: std::sync::Arc<Mutex<std::collections::HashSet<String>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -856,6 +860,7 @@ pub fn run() {
                 chat_cancelled: AtomicBool::new(false),
                 confirm_sender: Mutex::new(None),
                 mcp_logs: std::sync::Arc::new(Mutex::new(Default::default())),
+                mcp_cancelled_tests: std::sync::Arc::new(Mutex::new(Default::default())),
             });
 
             // Set window title to show current workspace directory
@@ -892,6 +897,7 @@ pub fn run() {
             mcp::save_mcp_server,
             mcp::delete_mcp_server,
             mcp::test_mcp_server,
+            mcp::cancel_mcp_test,
             mcp::get_mcp_logs,
             mcp::clear_mcp_logs,
             agents::list_sub_agents,

@@ -4,6 +4,7 @@ import {
     saveMcpServer,
     deleteMcpServer,
     testMcpServer,
+    cancelMcpTest,
     getMcpLogs,
     clearMcpLogs,
 } from "../api";
@@ -153,6 +154,9 @@ export function McpPanel({ onClose, onServersChange }: Props) {
 
     async function runTest(s: McpServer) {
         setTesting(s.id);
+        // Auto-open the log modal so the user can see real-time stderr output
+        // during package installation or startup.
+        openLogs(s);
         try {
             const msg = await testMcpServer(s);
             setTestStatus((prev) => ({ ...prev, [s.id]: { ok: true, msg } }));
@@ -161,8 +165,7 @@ export function McpPanel({ onClose, onServersChange }: Props) {
         } finally {
             setTesting(null);
         }
-        // If the log modal is open for this server, refresh it now so the
-        // user can see the test trace without manually clicking refresh.
+        // Refresh logs after test completes
         if (logServer?.id === s.id) {
             try {
                 const entries = await getMcpLogs(s.id);
@@ -170,6 +173,14 @@ export function McpPanel({ onClose, onServersChange }: Props) {
             } catch (err) {
                 console.error(err);
             }
+        }
+    }
+
+    async function cancelTest(s: McpServer) {
+        try {
+            await cancelMcpTest(s.id);
+        } catch (err) {
+            console.error("cancelMcpTest failed", err);
         }
     }
 
@@ -329,6 +340,12 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                                     onClick={() => void toggleEnabled(s)}
                                 >
                                     {s.name || "(unnamed)"}
+                                    {testing === s.id && (
+                                        <span className="mcp-testing-badge" title="Testing connection…">
+                                            <span className="mcp-testing-spinner" />
+                                            testing…
+                                        </span>
+                                    )}
                                 </span>
                                 <span className="mcp-server-transport">
                                     {s.transport === "stdio"
@@ -343,7 +360,7 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                                     onClick={() => void runTest(s)}
                                     disabled={testing === s.id}
                                 >
-                                    {testing === s.id ? "…" : "⚡"}
+                                    ⚡
                                 </button>
                                 <button
                                     className="mcp-action-btn"
@@ -396,6 +413,14 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                                 </span>
                             </div>
                             <div className="mcp-log-modal-actions">
+                                {testing === logServer.id && (
+                                    <button
+                                        className="mcp-log-btn danger"
+                                        onClick={() => void cancelTest(logServer)}
+                                    >
+                                        ⏹ Cancel Test
+                                    </button>
+                                )}
                                 <button
                                     className="mcp-log-btn"
                                     onClick={() => void refreshLogs()}
@@ -413,9 +438,15 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                             </div>
                         </div>
                         <div className="mcp-log-modal-meta">
-                            {logEntries.length === 0
-                                ? "No log entries yet. Run a test (⚡) to populate."
-                                : `${logEntries.length} entries (auto-refresh every 1.5s)`}
+                            {testing === logServer.id ? (
+                                <span className="mcp-log-modal-testing">
+                                    <span className="mcp-testing-spinner" /> Test in progress — logs auto-refresh every 1.5s
+                                </span>
+                            ) : logEntries.length === 0 ? (
+                                "No log entries yet. Run a test (⚡) to populate."
+                            ) : (
+                                `${logEntries.length} entries (auto-refresh every 1.5s)`
+                            )}
                         </div>
                         <div
                             className="mcp-log-modal-list"

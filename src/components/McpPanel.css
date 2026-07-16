@@ -109,6 +109,9 @@
     letter-spacing: -0.005em;
     cursor: pointer;
     transition: color 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 4px;
 }
 
 .mcp-server-name:hover {
@@ -177,6 +180,57 @@
 .mcp-test-result.fail {
     background: var(--c-danger-soft);
     color: var(--c-danger);
+}
+
+/* ─── Testing state badge ────────────────────────────────────────────────── */
+
+.mcp-testing-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 6px;
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--c-accent);
+    vertical-align: middle;
+    animation: mcp-testing-fade 1.2s ease-in-out infinite;
+}
+
+.mcp-testing-spinner {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border: 1.5px solid var(--c-accent);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: mcp-spin 0.7s linear infinite;
+}
+
+@keyframes mcp-spin {
+    to { transform: rotate(360deg); }
+}
+
+@keyframes mcp-testing-fade {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.mcp-log-modal-testing {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--c-accent);
+    font-weight: 500;
+}
+
+.mcp-log-btn.danger {
+    color: var(--c-danger);
+    border-color: var(--c-danger-soft);
+}
+
+.mcp-log-btn.danger:hover {
+    background: var(--c-danger-soft);
+    border-color: var(--c-danger);
 }
 
 .mcp-toggle {
