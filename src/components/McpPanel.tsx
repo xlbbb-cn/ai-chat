@@ -128,9 +128,16 @@ export function McpPanel({ onClose, onServersChange }: Props) {
     }
 
     async function toggleEnabled(s: McpServer) {
-        const updated = { ...s, enabled: !s.enabled };
+        const enabling = !s.enabled;
+        const updated = { ...s, enabled: enabling };
         await saveMcpServer(updated);
         setServers((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+
+        // Auto-start the server when enabling: run a connectivity test so the
+        // user gets immediate feedback and the process boots up.
+        if (enabling) {
+            await runTest(updated);
+        }
     }
 
     async function remove(id: string) {

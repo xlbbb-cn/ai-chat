@@ -360,7 +360,7 @@ fn code_requests_sudo(code: &str) -> bool {
     false
 }
 
-fn decode_process_bytes(bytes: &[u8], _hint: OutputDecodeHint) -> String {
+fn decode_process_bytes(bytes: &[u8], hint: OutputDecodeHint) -> String {
     if bytes.is_empty() {
         return String::new();
     }
@@ -1864,7 +1864,10 @@ pub async fn execute_tool(
             }
 
             // Find the skill directory
-            let skill_dir = match active_skill_dirs.iter().find(|(name, _)| name == skill_name) {
+            let skill_dir = match active_skill_dirs
+                .iter()
+                .find(|(name, _)| name == skill_name)
+            {
                 Some((_, dir)) => dir.clone(),
                 None => {
                     return format!(
