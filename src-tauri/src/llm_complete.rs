@@ -787,6 +787,28 @@ pub async fn chat_completion(
         system_content.push_str(&agents_sys_msg);
     }
 
+    // ── Memory guidance ─────────────────────────────────────────────────────
+    // When the memory tool is enabled, instruct the LLM to consult and update
+    // memories proactively at the start and end of every turn.
+    if config.selected_tools.iter().any(|t| t == "memory") {
+        let memory_guidance = "\
+        MEMORY INSTRUCTIONS:\n\
+        You have access to a `memory` tool with three scopes: `session` (short-term, in-memory), `user` (long-term, file-backed), and `repo` (long-term, repository-scoped).\n\n\
+        At the BEGINNING of every turn:\n\
+        - Call `memory` with action `search` (scope `session`) using keywords from the user's request to check for relevant short-term context.\n\
+        - If the request involves cross-session preferences, facts about the user, or repository conventions, also search `user` and/or `repo` scopes.\n\n\
+        At the END of every turn:\n\
+        - Save key decisions, discovered facts, user preferences, and important context using `memory` with action `add`.\n\
+        - Use `session` scope for temporary working state and task tracking.\n\
+        - Use `user` scope for personal preferences, reusable patterns, and general knowledge.\n\
+        - Use `repo` scope for codebase conventions, build commands, project structure facts, and verified practices.\n\n\
+        Always prefer consulting memory BEFORE answering — stale answers are worse than admitting you don't know.";
+        if !system_content.is_empty() {
+            system_content.push_str("\n\n");
+        }
+        system_content.push_str(memory_guidance);
+    }
+
     if !system_content.is_empty() {
         all_messages.push(json!({ "role": "system", "content": system_content }));
     }
@@ -1164,7 +1186,8 @@ pub async fn chat_completion(
                         );
                         // Track skill dir for skill_read tool injection
                         if !active_skill_dirs.iter().any(|(n, _)| n == &skill.name) {
-                            active_skill_dirs.push((skill.name.clone(), resolved_skill.skill_dir.clone()));
+                            active_skill_dirs
+                                .push((skill.name.clone(), resolved_skill.skill_dir.clone()));
                         }
                         let cmd_constraint = if skill.allowed_commands.is_empty() {
                             String::new()
@@ -1258,7 +1281,8 @@ pub async fn chat_completion(
                 );
                 let start_time = std::time::Instant::now();
                 let mcp_result =
-                    mcp::invoke_mcp_tool(&state, mcp_server, actual_tool_name, args_json.clone()).await;
+                    mcp::invoke_mcp_tool(&state, mcp_server, actual_tool_name, args_json.clone())
+                        .await;
                 let duration_ms = start_time.elapsed().as_millis() as i64;
                 let result = match &mcp_result {
                     Ok(result) => {
