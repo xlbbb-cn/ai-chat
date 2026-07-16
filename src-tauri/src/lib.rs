@@ -343,6 +343,10 @@ pub struct AppState {
     /// One-shot channel sender used to relay the user's confirm/deny response
     /// back to a waiting `execute_tool` call.
     pub confirm_sender: Mutex<Option<tokio::sync::oneshot::Sender<ToolConfirmation>>>,
+    /// Per-server diagnostic log buffer (in-memory ring buffer, last
+    /// `MAX_MCP_LOG_ENTRIES` entries per server). Populated by mcp.rs at
+    /// every save / test / tool call so the UI can show what happened.
+    pub mcp_logs: std::sync::Arc<Mutex<std::collections::HashMap<String, std::collections::VecDeque<mcp::McpLogEntry>>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -851,6 +855,7 @@ pub fn run() {
                 profiles_path,
                 chat_cancelled: AtomicBool::new(false),
                 confirm_sender: Mutex::new(None),
+                mcp_logs: std::sync::Arc::new(Mutex::new(Default::default())),
             });
 
             // Set window title to show current workspace directory
@@ -887,6 +892,8 @@ pub fn run() {
             mcp::save_mcp_server,
             mcp::delete_mcp_server,
             mcp::test_mcp_server,
+            mcp::get_mcp_logs,
+            mcp::clear_mcp_logs,
             agents::list_sub_agents,
             agents::save_sub_agent,
             agents::delete_sub_agent,

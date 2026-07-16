@@ -5,6 +5,7 @@ import type {
   Message,
   Skill,
   McpServer,
+  McpLogEntry,
   SubAgent,
   AgentOrchestration,
   AgentTaskEvent,
@@ -165,6 +166,16 @@ export async function deleteMcpServer(id: string): Promise<void> {
 
 export async function testMcpServer(server: McpServer): Promise<string> {
     return invoke("test_mcp_server", { server });
+}
+
+// ─── MCP Diagnostic Log ───────────────────────────────────────────────────────
+
+export async function getMcpLogs(id: string): Promise<McpLogEntry[]> {
+    return invoke<McpLogEntry[]>("get_mcp_logs", { id });
+}
+
+export async function clearMcpLogs(id: string): Promise<void> {
+    return invoke("clear_mcp_logs", { id });
 }
 
 // ─── API Request Monitor ──────────────────────────────────────────────────────

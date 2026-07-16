@@ -75,6 +75,15 @@ export interface McpServer {
     enabled: boolean;
 }
 
+export type McpLogLevel = "info" | "warn" | "error";
+
+export interface McpLogEntry {
+    /** Milliseconds since UNIX epoch. */
+    ts: number;
+    level: McpLogLevel;
+    message: string;
+}
+
 export interface SubAgent {
   id: string;
   name: string;

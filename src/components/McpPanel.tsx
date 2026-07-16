@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
     listMcpServers,
     saveMcpServer,
     deleteMcpServer,
     testMcpServer,
+    getMcpLogs,
+    clearMcpLogs,
 } from "../api";
-import type { McpServer, McpTransport } from "../types";
+import type { McpServer, McpTransport, McpLogEntry } from "../types";
 import "./McpPanel.css";
 
 interface Props {
@@ -27,6 +29,15 @@ function emptyServer(): McpServer {
     };
 }
 
+function formatLogTime(ts: number): string {
+    const d = new Date(ts);
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    const ss = String(d.getSeconds()).padStart(2, "0");
+    const ms = String(d.getMilliseconds()).padStart(3, "0");
+    return `${hh}:${mm}:${ss}.${ms}`;
+}
+
 export function McpPanel({ onClose, onServersChange }: Props) {
     const [servers, setServers] = useState<McpServer[]>([]);
     const [editing, setEditing] = useState<McpServer | null>(null);
@@ -35,6 +46,13 @@ export function McpPanel({ onClose, onServersChange }: Props) {
     const [argsInput, setArgsInput] = useState("");
     const [envInput, setEnvInput] = useState("");
 
+    // Diagnostic log modal state
+    const [logServer, setLogServer] = useState<McpServer | null>(null);
+    const [logEntries, setLogEntries] = useState<McpLogEntry[]>([]);
+    const [logLoading, setLogLoading] = useState(false);
+    const logScrollRef = useRef<HTMLDivElement>(null);
+    const logStuckToBottom = useRef(true);
+
     useEffect(() => {
         listMcpServers().then(setServers).catch(console.error);
     }, []);
@@ -42,6 +60,35 @@ export function McpPanel({ onClose, onServersChange }: Props) {
     useEffect(() => {
         onServersChange?.(servers.filter((s) => s.enabled).length);
     }, [servers, onServersChange]);
+
+    // Auto-refresh the open log modal every 1.5s so newly captured stderr /
+    // tool-call results stream in while the user is watching.
+    useEffect(() => {
+        if (!logServer) return;
+        let cancelled = false;
+        const refresh = async () => {
+            if (cancelled) return;
+            try {
+                const entries = await getMcpLogs(logServer.id);
+                if (!cancelled) setLogEntries(entries);
+            } catch (err) {
+                console.error("getMcpLogs failed", err);
+            }
+        };
+        void refresh();
+        const t = window.setInterval(refresh, 1500);
+        return () => {
+            cancelled = true;
+            window.clearInterval(t);
+        };
+    }, [logServer]);
+
+    // Auto-scroll log to bottom if the user hasn't scrolled up.
+    useEffect(() => {
+        if (logStuckToBottom.current && logScrollRef.current) {
+            logScrollRef.current.scrollTop = logScrollRef.current.scrollHeight;
+        }
+    }, [logEntries]);
 
     function startAdd() {
         const s = emptyServer();
@@ -94,6 +141,7 @@ export function McpPanel({ onClose, onServersChange }: Props) {
             delete next[id];
             return next;
         });
+        if (logServer?.id === id) closeLogs();
     }
 
     async function runTest(s: McpServer) {
@@ -105,6 +153,49 @@ export function McpPanel({ onClose, onServersChange }: Props) {
             setTestStatus((prev) => ({ ...prev, [s.id]: { ok: false, msg: String(err) } }));
         } finally {
             setTesting(null);
+        }
+        // If the log modal is open for this server, refresh it now so the
+        // user can see the test trace without manually clicking refresh.
+        if (logServer?.id === s.id) {
+            try {
+                const entries = await getMcpLogs(s.id);
+                setLogEntries(entries);
+            } catch (err) {
+                console.error(err);
+            }
+        }
+    }
+
+    function openLogs(s: McpServer) {
+        logStuckToBottom.current = true;
+        setLogServer(s);
+    }
+
+    function closeLogs() {
+        setLogServer(null);
+        setLogEntries([]);
+    }
+
+    async function refreshLogs() {
+        if (!logServer) return;
+        setLogLoading(true);
+        try {
+            const entries = await getMcpLogs(logServer.id);
+            setLogEntries(entries);
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setLogLoading(false);
+        }
+    }
+
+    async function clearLogs() {
+        if (!logServer) return;
+        try {
+            await clearMcpLogs(logServer.id);
+            setLogEntries([]);
+        } catch (err) {
+            console.error(err);
         }
     }
 
@@ -249,6 +340,13 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                                 </button>
                                 <button
                                     className="mcp-action-btn"
+                                    title="View diagnostic logs"
+                                    onClick={() => openLogs(s)}
+                                >
+                                    🗒
+                                </button>
+                                <button
+                                    className="mcp-action-btn"
                                     title="Edit"
                                     onClick={() => startEdit(s)}
                                 >
@@ -275,6 +373,72 @@ export function McpPanel({ onClose, onServersChange }: Props) {
             <div className="mcp-footer">
                 <button className="btn-primary" onClick={startAdd}>+ Add Server</button>
             </div>
+
+            {logServer && (
+                <div className="mcp-log-modal-backdrop" onClick={closeLogs}>
+                    <div className="mcp-log-modal" onClick={(e) => e.stopPropagation()}>
+                        <div className="mcp-log-modal-header">
+                            <div className="mcp-log-modal-title">
+                                <span className="mcp-log-modal-title-main">
+                                    Logs: {logServer.name || "(unnamed)"}
+                                </span>
+                                <span className="mcp-log-modal-title-sub">
+                                    {logServer.transport === "stdio"
+                                        ? `stdio: ${logServer.command}${logServer.args.length ? " " + logServer.args.join(" ") : ""}`
+                                        : `sse: ${logServer.url}`}
+                                </span>
+                            </div>
+                            <div className="mcp-log-modal-actions">
+                                <button
+                                    className="mcp-log-btn"
+                                    onClick={() => void refreshLogs()}
+                                    disabled={logLoading}
+                                >
+                                    Refresh
+                                </button>
+                                <button
+                                    className="mcp-log-btn"
+                                    onClick={() => void clearLogs()}
+                                >
+                                    Clear
+                                </button>
+                                <button className="mcp-log-btn" onClick={closeLogs}>✕</button>
+                            </div>
+                        </div>
+                        <div className="mcp-log-modal-meta">
+                            {logEntries.length === 0
+                                ? "No log entries yet. Run a test (⚡) to populate."
+                                : `${logEntries.length} entries (auto-refresh every 1.5s)`}
+                        </div>
+                        <div
+                            className="mcp-log-modal-list"
+                            ref={logScrollRef}
+                            onScroll={(e) => {
+                                const el = e.currentTarget;
+                                const distFromBottom =
+                                    el.scrollHeight - el.scrollTop - el.clientHeight;
+                                logStuckToBottom.current = distFromBottom < 20;
+                            }}
+                        >
+                            {logEntries.length === 0 ? (
+                                <div className="mcp-log-modal-empty">
+                                    Diagnostic info will appear here once you run a test.
+                                </div>
+                            ) : (
+                                logEntries.map((entry, i) => (
+                                    <div key={i} className={`mcp-log-modal-entry mcp-log-level-${entry.level}`}>
+                                        <span className="mcp-log-modal-time">
+                                            {formatLogTime(entry.ts)}
+                                        </span>
+                                        <span className="mcp-log-modal-level">{entry.level}</span>
+                                        <span className="mcp-log-modal-message">{entry.message}</span>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

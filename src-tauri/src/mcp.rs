@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::State;
 use tokio::io::AsyncBufReadExt;
 
@@ -52,6 +53,56 @@ pub struct McpServersFile {
     pub servers: Vec<McpServer>,
 }
 
+// ─── Diagnostic log ──────────────────────────────────────────────────────────
+
+/// Per-server diagnostic log entry. Kept in memory (ring-buffered) so the
+/// UI can show "what happened" without writing to disk. Useful for telling
+/// "the MCP process wouldn't start" from "the tool returned an error" — the
+/// former produces spawn / stderr / exit-status entries, the latter produces
+/// a single tools/call error.
+#[derive(Debug, Clone, Serialize)]
+pub struct McpLogEntry {
+    /// Milliseconds since UNIX epoch.
+    pub ts: u64,
+    pub level: McpLogLevel,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum McpLogLevel {
+    Info,
+    Warn,
+    Error,
+}
+
+/// Max entries kept per server in the in-memory ring buffer.
+pub const MAX_MCP_LOG_ENTRIES: usize = 200;
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Append an entry to the per-server ring buffer. No-op if `state` is
+/// somehow not initialised (defensive — should never happen in practice).
+pub fn append_mcp_log(state: &AppState, id: &str, level: McpLogLevel, message: String) {
+    let mut map = state.mcp_logs.lock().unwrap();
+    let buf = map
+        .entry(id.to_string())
+        .or_insert_with(|| VecDeque::with_capacity(MAX_MCP_LOG_ENTRIES));
+    if buf.len() >= MAX_MCP_LOG_ENTRIES {
+        buf.pop_front();
+    }
+    buf.push_back(McpLogEntry {
+        ts: now_ms(),
+        level,
+        message,
+    });
+}
+
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
 pub fn load_servers(path: &PathBuf) -> Vec<McpServer> {
@@ -73,6 +124,39 @@ fn save_servers(path: &PathBuf, servers: &[McpServer]) -> Result<(), String> {
     fs::write(path, json).map_err(|e| e.to_string())
 }
 
+/// Sanitize env keys/values for logging — never log env VALUES, just the
+/// key names and a count. Auth tokens are also redacted from URLs.
+fn summarise_server_for_log(server: &McpServer) -> String {
+    match server.transport {
+        McpTransport::Stdio => format!(
+            "transport=stdio command={:?} args={} env_keys={} enabled={}",
+            server.command,
+            server.args.len(),
+            server.env.len(),
+            server.enabled
+        ),
+        McpTransport::Sse => {
+            let url = if server.auth_token.is_empty() {
+                server.url.clone()
+            } else {
+                // crude redaction: keep scheme://host[:port]/path, drop query
+                let base = server.url.split('?').next().unwrap_or(&server.url);
+                format!("{base}?<token redacted>")
+            };
+            format!(
+                "transport=sse url={} auth_token={} enabled={}",
+                url,
+                if server.auth_token.is_empty() {
+                    "no"
+                } else {
+                    "yes"
+                },
+                server.enabled
+            )
+        }
+    }
+}
+
 // ─── Tauri commands ───────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -83,29 +167,93 @@ pub fn list_mcp_servers(state: State<'_, AppState>) -> Vec<McpServer> {
 #[tauri::command]
 pub fn save_mcp_server(state: State<'_, AppState>, server: McpServer) -> Result<(), String> {
     let mut servers = load_servers(&state.mcp_servers_path);
-    if let Some(existing) = servers.iter_mut().find(|s| s.id == server.id) {
-        *existing = server;
+    let action = if servers.iter().any(|s| s.id == server.id) {
+        "updated"
     } else {
-        servers.push(server);
+        "added"
+    };
+    if let Some(existing) = servers.iter_mut().find(|s| s.id == server.id) {
+        *existing = server.clone();
+    } else {
+        servers.push(server.clone());
     }
-    save_servers(&state.mcp_servers_path, &servers)
+    let save_result = save_servers(&state.mcp_servers_path, &servers);
+    if save_result.is_ok() {
+        append_mcp_log(
+            &state,
+            &server.id,
+            McpLogLevel::Info,
+            format!("Server {}: {}", action, summarise_server_for_log(&server)),
+        );
+    }
+    save_result
 }
 
 #[tauri::command]
 pub fn delete_mcp_server(state: State<'_, AppState>, id: String) -> Result<(), String> {
     let mut servers = load_servers(&state.mcp_servers_path);
     servers.retain(|s| s.id != id);
-    save_servers(&state.mcp_servers_path, &servers)
+    let save_result = save_servers(&state.mcp_servers_path, &servers);
+    if save_result.is_ok() {
+        append_mcp_log(
+            &state,
+            &id,
+            McpLogLevel::Info,
+            "Server deleted".to_string(),
+        );
+        // Drop the log buffer for the removed server.
+        state.mcp_logs.lock().unwrap().remove(&id);
+    }
+    save_result
+}
+
+/// Return the most recent diagnostic log entries for a server.
+#[tauri::command]
+pub fn get_mcp_logs(state: State<'_, AppState>, id: String) -> Vec<McpLogEntry> {
+    state
+        .mcp_logs
+        .lock()
+        .unwrap()
+        .get(&id)
+        .map(|buf| buf.iter().cloned().collect())
+        .unwrap_or_default()
+}
+
+/// Clear the diagnostic log for a server.
+#[tauri::command]
+pub fn clear_mcp_logs(state: State<'_, AppState>, id: String) {
+    state.mcp_logs.lock().unwrap().remove(&id);
 }
 
 /// Test connectivity to an MCP server.
 /// Returns Ok(message) on success or Err(message) on failure.
 #[tauri::command]
-pub async fn test_mcp_server(server: McpServer) -> Result<String, String> {
-    match server.transport {
-        McpTransport::Stdio => test_stdio_server(&server).await,
-        McpTransport::Sse => test_sse_server(&server).await,
+pub async fn test_mcp_server(state: State<'_, AppState>, server: McpServer) -> Result<String, String> {
+    append_mcp_log(
+        &state,
+        &server.id,
+        McpLogLevel::Info,
+        format!("Test started: {}", summarise_server_for_log(&server)),
+    );
+    let result = match server.transport {
+        McpTransport::Stdio => test_stdio_server(&state, &server).await,
+        McpTransport::Sse => test_sse_server(&state, &server).await,
+    };
+    match &result {
+        Ok(msg) => append_mcp_log(
+            &state,
+            &server.id,
+            McpLogLevel::Info,
+            format!("Test passed: {msg}"),
+        ),
+        Err(err) => append_mcp_log(
+            &state,
+            &server.id,
+            McpLogLevel::Error,
+            format!("Test failed: {err}"),
+        ),
     }
+    result
 }
 
 // ─── LLM integration helpers ──────────────────────────────────────────────────
@@ -195,9 +343,12 @@ pub fn sanitize_fn_name(s: &str) -> String {
 /// The fix is to route through `cmd.exe /C` so the shell resolves PATH.
 /// On Unix, we use `sh -c` for the same reason.
 ///
-/// Stderr is sent to `/dev/null` to avoid backpressure on a noisy server —
-/// the JSON-RPC conversation happens over stdin/stdout only.
-fn build_stdio_cmd(server: &McpServer) -> tokio::process::Command {
+/// `pipe_stderr` controls whether stderr is captured. Diagnostic paths
+/// (test, stdio_init used by the LLM) pipe stderr so it can be drained
+/// asynchronously and surfaced in the server's log buffer. Callers that
+/// don't read stderr (i.e. would block on a noisy server) should pass
+/// `false` and let stderr go to `/dev/null`.
+fn build_stdio_cmd(server: &McpServer, pipe_stderr: bool) -> tokio::process::Command {
     use std::process::Stdio;
 
     let normalized = server.command.trim().to_lowercase();
@@ -205,6 +356,12 @@ fn build_stdio_cmd(server: &McpServer) -> tokio::process::Command {
         normalized.as_str(),
         "uvx" | "ux" | "python" | "python3" | "py" | "node"
     );
+
+    let stderr_cfg = if pipe_stderr {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    };
 
     #[cfg(windows)]
     {
@@ -235,7 +392,7 @@ fn build_stdio_cmd(server: &McpServer) -> tokio::process::Command {
             ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(stderr_cfg);
             for (k, v) in &server.env {
                 cmd.env(k, v);
             }
@@ -259,7 +416,7 @@ fn build_stdio_cmd(server: &McpServer) -> tokio::process::Command {
             cmd.args(["-c", &shell_cmd])
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::null());
+                .stderr(stderr_cfg);
             for (k, v) in &server.env {
                 cmd.env(k, v);
             }
@@ -272,7 +429,7 @@ fn build_stdio_cmd(server: &McpServer) -> tokio::process::Command {
     cmd.args(&server.args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        .stderr(stderr_cfg);
     for (k, v) in &server.env {
         cmd.env(k, v);
     }
@@ -282,6 +439,46 @@ fn build_stdio_cmd(server: &McpServer) -> tokio::process::Command {
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
     cmd
+}
+
+/// Spawn a background task that drains `stderr` from a child process and
+/// appends each line to the server's diagnostic log. Returns immediately.
+/// Exits naturally when the child closes stderr (typically on process exit).
+fn spawn_stderr_drain<R: tokio::io::AsyncRead + Unpin + Send + 'static>(
+    state: std::sync::Arc<std::sync::Mutex<HashMap<String, VecDeque<McpLogEntry>>>>,
+    id: String,
+    name: String,
+    stderr: R,
+) {
+    use tokio::io::BufReader;
+    tokio::spawn(async move {
+        let mut reader = BufReader::new(stderr);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line).await {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {
+                    let trimmed = line.trim_end();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    let mut map = state.lock().unwrap();
+                    let buf = map
+                        .entry(id.clone())
+                        .or_insert_with(|| VecDeque::with_capacity(MAX_MCP_LOG_ENTRIES));
+                    if buf.len() >= MAX_MCP_LOG_ENTRIES {
+                        buf.pop_front();
+                    }
+                    buf.push_back(McpLogEntry {
+                        ts: now_ms(),
+                        level: McpLogLevel::Warn,
+                        message: format!("[{name} stderr] {trimmed}"),
+                    });
+                }
+            }
+        }
+    });
 }
 
 #[cfg(windows)]
@@ -365,8 +562,13 @@ async fn stdio_read_response(
 
 /// Spawn an MCP stdio process and run `initialize` + `notifications/initialized`.
 /// Returns (child, stdin, stdout_reader) ready for further RPC calls.
+///
+/// `on_stderr` is invoked once the child is spawned so the caller can move
+/// `stderr` into a background drainer (logging each line to the per-server
+/// diagnostic buffer). Pass `|_| {}` if you don't want stderr captured.
 async fn stdio_init(
     server: &McpServer,
+    on_stderr: impl FnOnce(tokio::process::ChildStderr) + Send,
 ) -> Result<
     (
         tokio::process::Child,
@@ -375,10 +577,13 @@ async fn stdio_init(
     ),
     String,
 > {
-    let mut cmd = build_stdio_cmd(server);
+    let mut cmd = build_stdio_cmd(server, true);
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("Failed to start process: {e}"))?;
+    if let Some(stderr) = child.stderr.take() {
+        on_stderr(stderr);
+    }
     let mut stdin = child.stdin.take().ok_or("no stdin")?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
     let mut reader = tokio::io::BufReader::new(stdout);
@@ -411,15 +616,50 @@ async fn stdio_init(
 // ── Public functions used by llm_complete ───────────────────────────────────
 
 /// Get the list of tools from an MCP server, in OpenAI /chat/completions tool format.
-pub async fn get_server_tools(server: &McpServer) -> Result<Vec<serde_json::Value>, String> {
-    match server.transport {
-        McpTransport::Stdio => get_tools_stdio(server).await,
+pub async fn get_server_tools(
+    state: &AppState,
+    server: &McpServer,
+) -> Result<Vec<serde_json::Value>, String> {
+    append_mcp_log(
+        state,
+        &server.id,
+        McpLogLevel::Info,
+        "LLM requested tools/list".to_string(),
+    );
+    let result = match server.transport {
+        McpTransport::Stdio => get_tools_stdio(state, server).await,
         McpTransport::Sse => get_tools_sse(server).await,
+    };
+    if let Err(ref err) = result {
+        append_mcp_log(
+            state,
+            &server.id,
+            McpLogLevel::Error,
+            format!("tools/list failed: {err}"),
+        );
+    } else {
+        let count = result.as_ref().map(|t| t.len()).unwrap_or(0);
+        append_mcp_log(
+            state,
+            &server.id,
+            McpLogLevel::Info,
+            format!("tools/list returned {count} tools"),
+        );
     }
+    result
 }
 
-async fn get_tools_stdio(server: &McpServer) -> Result<Vec<serde_json::Value>, String> {
-    let (mut child, mut stdin, mut reader) = stdio_init(server).await?;
+async fn get_tools_stdio(
+    state: &AppState,
+    server: &McpServer,
+) -> Result<Vec<serde_json::Value>, String> {
+    let id = server.id.clone();
+    let name = server.name.clone();
+    let logs = state.mcp_logs.clone();
+    let (mut child, mut stdin, mut reader) = stdio_init(server, |stderr| {
+        spawn_stderr_drain(logs, id, name, stderr);
+    })
+    .await?;
 
     let list_req = serde_json::json!({
         "jsonrpc": "2.0",
@@ -504,22 +744,45 @@ fn convert_mcp_tools(mcp_tools: Vec<serde_json::Value>) -> Vec<serde_json::Value
 
 /// Call a tool on an MCP server and return its text result.
 pub async fn invoke_mcp_tool(
+    state: &AppState,
     server: &McpServer,
     tool_name: &str,
     arguments: serde_json::Value,
 ) -> Result<String, String> {
-    match server.transport {
-        McpTransport::Stdio => invoke_tool_stdio(server, tool_name, arguments).await,
+    append_mcp_log(
+        state,
+        &server.id,
+        McpLogLevel::Info,
+        format!("LLM tools/call: {tool_name}"),
+    );
+    let result = match server.transport {
+        McpTransport::Stdio => invoke_tool_stdio(state, server, tool_name, arguments).await,
         McpTransport::Sse => invoke_tool_sse(server, tool_name, arguments).await,
+    };
+    if let Err(ref err) = result {
+        append_mcp_log(
+            state,
+            &server.id,
+            McpLogLevel::Error,
+            format!("tools/call failed: {err}"),
+        );
     }
+    result
 }
 
 async fn invoke_tool_stdio(
+    state: &AppState,
     server: &McpServer,
     tool_name: &str,
     arguments: serde_json::Value,
 ) -> Result<String, String> {
-    let (mut child, mut stdin, mut reader) = stdio_init(server).await?;
+    let id = server.id.clone();
+    let name = server.name.clone();
+    let logs = state.mcp_logs.clone();
+    let (mut child, mut stdin, mut reader) = stdio_init(server, |stderr| {
+        spawn_stderr_drain(logs, id, name, stderr);
+    })
+    .await?;
 
     let call_req = serde_json::json!({
         "jsonrpc": "2.0",
@@ -598,13 +861,33 @@ fn extract_tool_result(result: &serde_json::Value) -> String {
     serde_json::to_string_pretty(result).unwrap_or_default()
 }
 
-async fn test_stdio_server(server: &McpServer) -> Result<String, String> {
+async fn test_stdio_server(state: &AppState, server: &McpServer) -> Result<String, String> {
     use tokio::io::AsyncWriteExt;
     use tokio::time::{timeout, Duration};
 
+    let id = server.id.clone();
+    let name = server.name.clone();
+    let log = |level: McpLogLevel, msg: String| append_mcp_log(state, &id, level, msg);
+
     if server.command.trim().is_empty() {
-        return Err("Command is empty".to_string());
+        let msg = "Command is empty".to_string();
+        log(McpLogLevel::Error, msg.clone());
+        return Err(msg);
     }
+
+    let started = std::time::Instant::now();
+    log(
+        McpLogLevel::Info,
+        format!(
+            "Spawning process: {} {}",
+            server.command,
+            server.args.join(" ")
+        ),
+    );
+    log(
+        McpLogLevel::Info,
+        format!("Env vars: {} (keys only, values redacted)", server.env.len()),
+    );
 
     // MCP initialize request (protocol version 2025-03-26)
     let init_request = serde_json::json!({
@@ -622,19 +905,40 @@ async fn test_stdio_server(server: &McpServer) -> Result<String, String> {
     });
     let request_line = format!("{}\n", init_request);
 
-    let mut cmd = build_stdio_cmd(server);
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("Failed to start process: {e}"))?;
+    let mut cmd = build_stdio_cmd(server, true);
+    let mut child = match cmd.spawn() {
+        Ok(c) => {
+            log(
+                McpLogLevel::Info,
+                format!("Process spawned (pid={:?})", c.id()),
+            );
+            c
+        }
+        Err(e) => {
+            let msg = format!("Failed to start process: {e}");
+            log(McpLogLevel::Error, msg.clone());
+            return Err(msg);
+        }
+    };
+
+    // Drain stderr into the log buffer so the user can see why a server
+    // crashed at startup. The drain task ends when stderr closes (EOF).
+    if let Some(stderr) = child.stderr.take() {
+        let logs_arc = state.mcp_logs.clone();
+        spawn_stderr_drain(logs_arc, id.clone(), name.clone(), stderr);
+    }
 
     let mut stdin = child.stdin.take().ok_or("No stdin")?;
     let mut stdout = child.stdout.take().ok_or("No stdout")?;
 
-    stdin
-        .write_all(request_line.as_bytes())
-        .await
-        .map_err(|e| format!("Write error: {e}"))?;
+    if let Err(e) = stdin.write_all(request_line.as_bytes()).await {
+        let msg = format!("Write error: {e}");
+        log(McpLogLevel::Error, msg.clone());
+        let _ = child.kill().await;
+        return Err(msg);
+    }
     drop(stdin);
+    log(McpLogLevel::Info, "Sent initialize request (id=1)".to_string());
 
     let read_result = timeout(Duration::from_secs(5), async {
         let mut reader = tokio::io::BufReader::new(&mut stdout);
@@ -645,31 +949,67 @@ async fn test_stdio_server(server: &McpServer) -> Result<String, String> {
 
     let _ = child.kill().await;
 
-    match read_result {
+    let result = match read_result {
         Ok(Ok(line)) if !line.trim().is_empty() => {
-            // Validate it looks like a JSON-RPC response
+            log(
+                McpLogLevel::Info,
+                format!("Received {} bytes from server", line.len()),
+            );
             if line.contains("\"result\"") || line.contains("jsonrpc") {
                 Ok(format!(
                     "Connected successfully (received {} bytes)",
                     line.len()
                 ))
             } else {
-                Err(format!(
-                    "Unexpected response: {}",
-                    line.chars().take(200).collect::<String>()
-                ))
+                let preview: String = line.chars().take(200).collect();
+                log(
+                    McpLogLevel::Warn,
+                    format!("Response did not look like JSON-RPC: {preview}"),
+                );
+                Err(format!("Unexpected response: {preview}"))
             }
         }
-        Ok(Ok(_)) => Err("Server closed connection without response".to_string()),
-        Ok(Err(e)) => Err(format!("Read error: {e}")),
-        Err(_) => Err("Timeout: no response within 5 seconds".to_string()),
-    }
+        Ok(Ok(_)) => {
+            let msg = "Server closed connection without response".to_string();
+            log(McpLogLevel::Error, msg.clone());
+            Err(msg)
+        }
+        Ok(Err(e)) => {
+            let msg = format!("Read error: {e}");
+            log(McpLogLevel::Error, msg.clone());
+            Err(msg)
+        }
+        Err(_) => {
+            let msg = "Timeout: no response within 5 seconds".to_string();
+            log(McpLogLevel::Error, msg.clone());
+            Err(msg)
+        }
+    };
+    let elapsed_ms = started.elapsed().as_millis();
+    log(
+        McpLogLevel::Info,
+        format!("Test finished in {} ms", elapsed_ms),
+    );
+    result
 }
 
-async fn test_sse_server(server: &McpServer) -> Result<String, String> {
+async fn test_sse_server(state: &AppState, server: &McpServer) -> Result<String, String> {
+    let id = server.id.clone();
+    let log = |level: McpLogLevel, msg: String| append_mcp_log(state, &id, level, msg);
+
     if server.url.trim().is_empty() {
-        return Err("URL is empty".to_string());
+        let msg = "URL is empty".to_string();
+        log(McpLogLevel::Error, msg.clone());
+        return Err(msg);
     }
+
+    let started = std::time::Instant::now();
+    let url_display = if server.auth_token.is_empty() {
+        server.url.clone()
+    } else {
+        format!("{}?<token redacted>", server.url.split('?').next().unwrap_or(&server.url))
+    };
+    log(McpLogLevel::Info, format!("GET {url_display}"));
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(8))
@@ -683,13 +1023,18 @@ async fn test_sse_server(server: &McpServer) -> Result<String, String> {
     // For SSE endpoints, request the event stream content type
     req = req.header("Accept", "text/event-stream,application/json");
 
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {e}"))?;
+    let resp = match req.send().await {
+        Ok(r) => r,
+        Err(e) => {
+            let msg = format!("Request failed: {e}");
+            log(McpLogLevel::Error, msg.clone());
+            return Err(msg);
+        }
+    };
     let status = resp.status();
+    log(McpLogLevel::Info, format!("HTTP {status}"));
 
-    if status.is_success() {
+    let result = if status.is_success() {
         let content_type = resp
             .headers()
             .get("content-type")
@@ -699,5 +1044,11 @@ async fn test_sse_server(server: &McpServer) -> Result<String, String> {
         Ok(format!("Connected: HTTP {status} ({content_type})"))
     } else {
         Err(format!("Server returned HTTP {status}"))
-    }
+    };
+    let elapsed_ms = started.elapsed().as_millis();
+    log(
+        McpLogLevel::Info,
+        format!("Test finished in {} ms", elapsed_ms),
+    );
+    result
 }

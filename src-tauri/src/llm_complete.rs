@@ -859,7 +859,7 @@ pub async fn chat_completion(
             .collect();
 
         for (idx, server) in enabled_servers.iter().enumerate() {
-            match mcp::get_server_tools(server).await {
+            match mcp::get_server_tools(&state, server).await {
                 Ok(server_tools) => {
                     for tool in server_tools {
                         let Some(actual_name) = tool["function"]["name"].as_str() else {
@@ -1258,7 +1258,7 @@ pub async fn chat_completion(
                 );
                 let start_time = std::time::Instant::now();
                 let mcp_result =
-                    mcp::invoke_mcp_tool(mcp_server, actual_tool_name, args_json.clone()).await;
+                    mcp::invoke_mcp_tool(&state, mcp_server, actual_tool_name, args_json.clone()).await;
                 let duration_ms = start_time.elapsed().as_millis() as i64;
                 let result = match &mcp_result {
                     Ok(result) => {
