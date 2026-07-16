@@ -29,6 +29,19 @@ const AVAILABLE_TOOLS = [
         description: "Execute a script in a shell (PowerShell or Bash). The shell starts in the workspace root, and directory changes must stay inside that workspace. Supports pipes, loops, variables, and other shell features. Privileged operations and dangerous commands require explicit confirmation.",
     },
     {
+        id: "memory",
+        name: "Memory",
+        description: [
+            "Persistent memory system with three scopes for storing notes and information across conversations.",
+            "",
+            "**session** — Short-term, in-memory only. Survives for the current chat session. Use for task-specific context and in-progress notes.",
+            "**user** — Long-term, file-backed. Cross-session persistent. Use for user preferences, patterns, and general insights.",
+            "**repo** — Long-term, file-backed. Repository-scoped. Use for codebase conventions, build commands, and project facts.",
+            "",
+            "Supports add, get, list, search, and delete operations.",
+        ].join("\n"),
+    },
+    {
         id: "todo_list",
         name: "Todo List",
         description: "Track complex multi-step work with a session-scoped todo list. The assistant can add items, update statuses, check progress, clear completed items, and archive finished lists.",

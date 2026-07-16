@@ -351,6 +351,10 @@ pub struct AppState {
     >,
     /// Server IDs whose current test has been cancelled by the user.
     pub mcp_cancelled_tests: std::sync::Arc<Mutex<std::collections::HashSet<String>>>,
+    /// Session-scoped memories: session_id -> key -> JSON entry.
+    pub session_memories: Mutex<
+        std::collections::HashMap<String, std::collections::HashMap<String, serde_json::Value>>,
+    >,
 }
 
 #[derive(Clone, Debug)]
@@ -861,6 +865,7 @@ pub fn run() {
                 confirm_sender: Mutex::new(None),
                 mcp_logs: std::sync::Arc::new(Mutex::new(Default::default())),
                 mcp_cancelled_tests: std::sync::Arc::new(Mutex::new(Default::default())),
+                session_memories: Mutex::new(Default::default()),
             });
 
             // Set window title to show current workspace directory

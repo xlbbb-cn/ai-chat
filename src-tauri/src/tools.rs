@@ -873,6 +873,49 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
         }));
     }
 
+    if selected_tools.iter().any(|t| t == "memory") {
+        tools.push(json!({
+            "type": "function",
+            "function": {
+                "name": "memory",
+                "description": "Manage a persistent memory system with three scopes:\n- `session`: Short-term, in-memory only. Survives for the current chat session. Use for task-specific context and in-progress notes.\n- `user`: Long-term, file-backed. Cross-session persistent. Use for user preferences, patterns, and general insights.\n- `repo`: Long-term, file-backed. Repository-scoped. Use for codebase conventions, build commands, and project facts.\n\nSession memories are automatically discarded when the app restarts. User and repo memories persist as markdown files in the workspace memory directory.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["add", "get", "list", "search", "delete"],
+                            "description": "The memory operation: 'add' to store a new entry, 'get' to retrieve by key, 'list' to list all entries in a scope, 'search' to find entries by content, 'delete' to remove an entry."
+                        },
+                        "scope": {
+                            "type": "string",
+                            "enum": ["session", "user", "repo"],
+                            "description": "Memory scope. 'session' is in-memory only (cleared on restart). 'user' and 'repo' are file-backed and persist across sessions. Defaults to 'session'."
+                        },
+                        "key": {
+                            "type": "string",
+                            "description": "Unique key for the memory entry (required for add/get/delete). Use a short, descriptive slug like 'api-keys' or 'project-setup'."
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "The content to store (required for 'add'). Markdown is supported."
+                        },
+                        "tags": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Optional tags for categorization (only for 'add')."
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "Search query text (required for 'search'). Searches across keys and content."
+                        }
+                    },
+                    "required": ["action"]
+                }
+            }
+        }));
+    }
+
     if selected_tools.iter().any(|t| t == "todo_list") {
         tools.push(json!({
             "type": "function",
@@ -1735,6 +1778,313 @@ pub async fn execute_tool(
                     serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string())
                 }
                 Err(err) => format!("Error: {err}"),
+            }
+        }
+        "memory" => {
+            let action = args["action"].as_str().unwrap_or("");
+            let scope = args["scope"].as_str().unwrap_or("session");
+            let key = args["key"].as_str().unwrap_or("").to_string();
+            let content = args["content"].as_str().unwrap_or("").to_string();
+            let query = args["query"].as_str().unwrap_or("").to_string();
+            let tags: Vec<String> = args["tags"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            // ── Session-scoped (in-memory) ──────────────────────────────────
+            if scope == "session" {
+                let session_id = session_id.unwrap_or("default");
+                let state = app.state::<crate::AppState>();
+                let mut memories = state.session_memories.lock().unwrap();
+                let session_mem = memories.entry(session_id.to_string()).or_default();
+
+                match action {
+                    "add" => {
+                        if key.is_empty() {
+                            return "Error: 'key' is required for memory add.".to_string();
+                        }
+                        let entry = serde_json::json!({
+                            "key": key,
+                            "content": content,
+                            "tags": tags,
+                            "scope": "session",
+                        });
+                        session_mem.insert(key.clone(), entry.clone());
+                        let _ = app.emit(
+                            "tool-call",
+                            format!("🧠 *Session memory stored: {}*\n", key),
+                        );
+                        serde_json::to_string_pretty(&entry).unwrap_or_else(|_| entry.to_string())
+                    }
+                    "get" => {
+                        if key.is_empty() {
+                            return "Error: 'key' is required for memory get.".to_string();
+                        }
+                        match session_mem.get(&key) {
+                            Some(entry) => {
+                                let _ = app.emit(
+                                    "tool-call",
+                                    format!("🧠 *Session memory retrieved: {}*\n", key),
+                                );
+                                serde_json::to_string_pretty(entry)
+                                    .unwrap_or_else(|_| entry.to_string())
+                            }
+                            None => format!("No session memory found for key '{}'.", key),
+                        }
+                    }
+                    "list" => {
+                        if session_mem.is_empty() {
+                            return "(no session memories)".to_string();
+                        }
+                        let keys: Vec<&String> = session_mem.keys().collect();
+                        let _ = app.emit(
+                            "tool-call",
+                            format!("🧠 *Listing {} session memories*\n", keys.len()),
+                        );
+                        serde_json::to_string_pretty(&json!({
+                            "scope": "session",
+                            "keys": keys,
+                            "count": keys.len(),
+                        }))
+                        .unwrap_or_else(|_| "[]".to_string())
+                    }
+                    "search" => {
+                        if query.is_empty() {
+                            return "Error: 'query' is required for memory search.".to_string();
+                        }
+                        let query_lower = query.to_lowercase();
+                        let matches: Vec<&serde_json::Value> = session_mem
+                            .values()
+                            .filter(|entry| {
+                                let key_match = entry["key"]
+                                    .as_str()
+                                    .map(|k| k.to_lowercase().contains(&query_lower))
+                                    .unwrap_or(false);
+                                let content_match = entry["content"]
+                                    .as_str()
+                                    .map(|c| c.to_lowercase().contains(&query_lower))
+                                    .unwrap_or(false);
+                                key_match || content_match
+                            })
+                            .collect();
+                        let _ = app.emit(
+                            "tool-call",
+                            format!("🧠 *Searching session memories for '{}'*\n", query),
+                        );
+                        if matches.is_empty() {
+                            format!("No session memories match '{}'.", query)
+                        } else {
+                            serde_json::to_string_pretty(&json!({
+                                "scope": "session",
+                                "query": query,
+                                "matches": matches,
+                                "count": matches.len(),
+                            }))
+                            .unwrap_or_else(|_| "[]".to_string())
+                        }
+                    }
+                    "delete" => {
+                        if key.is_empty() {
+                            return "Error: 'key' is required for memory delete.".to_string();
+                        }
+                        match session_mem.remove(&key) {
+                            Some(_) => {
+                                let _ = app.emit(
+                                    "tool-call",
+                                    format!("🧠 *Session memory deleted: {}*\n", key),
+                                );
+                                format!("Session memory '{}' deleted.", key)
+                            }
+                            None => format!("No session memory found for key '{}'.", key),
+                        }
+                    }
+                    _ => format!(
+                        "Unknown memory action '{}'. Supported: add, get, list, search, delete.",
+                        action
+                    ),
+                }
+            // ── User / Repo scoped (file-backed) ────────────────────────────
+            } else if scope == "user" || scope == "repo" {
+                let memory_root = workspace_dir.join("memory").join(scope);
+                let _ = fs::create_dir_all(&memory_root);
+
+                match action {
+                    "add" => {
+                        if key.is_empty() {
+                            return "Error: 'key' is required for memory add.".to_string();
+                        }
+                        // Sanitize key for use as filename
+                        let safe_key = key
+                            .chars()
+                            .map(|c| {
+                                if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                                    c
+                                } else {
+                                    '_'
+                                }
+                            })
+                            .collect::<String>();
+                        let file_path = memory_root.join(format!("{}.md", safe_key));
+
+                        let tags_line = if tags.is_empty() {
+                            String::new()
+                        } else {
+                            format!("\ntags: {}\n", tags.join(", "))
+                        };
+
+                        let file_content = format!("# {key}\n\n{content}{tags_line}\n");
+
+                        match fs::write(&file_path, &file_content) {
+                            Ok(_) => {
+                                let _ = app.emit(
+                                    "tool-call",
+                                    format!("🧠 *{} memory stored: {}*\n", scope, key),
+                                );
+                                let entry = json!({
+                                    "key": key,
+                                    "content": content,
+                                    "tags": tags,
+                                    "scope": scope,
+                                    "file": file_path.to_string_lossy(),
+                                });
+                                serde_json::to_string_pretty(&entry)
+                                    .unwrap_or_else(|_| entry.to_string())
+                            }
+                            Err(e) => format!("Error writing memory file: {}", e),
+                        }
+                    }
+                    "get" => {
+                        if key.is_empty() {
+                            return "Error: 'key' is required for memory get.".to_string();
+                        }
+                        let safe_key = key
+                            .chars()
+                            .map(|c| {
+                                if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                                    c
+                                } else {
+                                    '_'
+                                }
+                            })
+                            .collect::<String>();
+                        let file_path = memory_root.join(format!("{}.md", safe_key));
+
+                        match fs::read_to_string(&file_path) {
+                            Ok(content) => {
+                                let _ = app.emit(
+                                    "tool-call",
+                                    format!("🧠 *{} memory retrieved: {}*\n", scope, key),
+                                );
+                                content
+                            }
+                            Err(_) => format!("No {} memory found for key '{}'.", scope, key),
+                        }
+                    }
+                    "list" => match fs::read_dir(&memory_root) {
+                        Ok(entries) => {
+                            let mut items: Vec<serde_json::Value> = Vec::new();
+                            for entry in entries.flatten() {
+                                let name = entry.file_name().to_string_lossy().to_string();
+                                if name.ends_with(".md") {
+                                    let display_key = name.trim_end_matches(".md").to_string();
+                                    let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                                    items.push(json!({
+                                        "key": display_key,
+                                        "file": name,
+                                        "size_bytes": size,
+                                    }));
+                                }
+                            }
+                            let _ = app.emit(
+                                "tool-call",
+                                format!("🧠 *Listing {} {} memories*\n", items.len(), scope),
+                            );
+                            if items.is_empty() {
+                                format!("(no {} memories)", scope)
+                            } else {
+                                serde_json::to_string_pretty(&json!({
+                                    "scope": scope,
+                                    "entries": items,
+                                    "count": items.len(),
+                                }))
+                                .unwrap_or_else(|_| "[]".to_string())
+                            }
+                        }
+                        Err(e) => format!("Error listing memory directory: {}", e),
+                    },
+                    "search" => {
+                        if query.is_empty() {
+                            return "Error: 'query' is required for memory search.".to_string();
+                        }
+                        let _ = app.emit(
+                            "tool-call",
+                            format!("🧠 *Searching {} memories for '{}'*\n", scope, query),
+                        );
+                        match run_integrated_search(
+                            &query,
+                            &memory_root,
+                            &workspace_dir,
+                            SearchOptions {
+                                recursive: true,
+                                case_sensitive: false,
+                                use_regex: false,
+                                smart_case: false,
+                                include_hidden: false,
+                                respect_gitignore: false,
+                                glob: Some("**/*.md"),
+                            },
+                        ) {
+                            Ok(output) => {
+                                if output.is_empty() || output == "(no matches)" {
+                                    format!("No {} memories match '{}'.", scope, query)
+                                } else {
+                                    output
+                                }
+                            }
+                            Err(e) => format!("Error searching memories: {}", e),
+                        }
+                    }
+                    "delete" => {
+                        if key.is_empty() {
+                            return "Error: 'key' is required for memory delete.".to_string();
+                        }
+                        let safe_key = key
+                            .chars()
+                            .map(|c| {
+                                if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                                    c
+                                } else {
+                                    '_'
+                                }
+                            })
+                            .collect::<String>();
+                        let file_path = memory_root.join(format!("{}.md", safe_key));
+
+                        match fs::remove_file(&file_path) {
+                            Ok(_) => {
+                                let _ = app.emit(
+                                    "tool-call",
+                                    format!("🧠 *{} memory deleted: {}*\n", scope, key),
+                                );
+                                format!("{} memory '{}' deleted.", scope, key)
+                            }
+                            Err(e) => format!("Error deleting memory '{}': {}", key, e),
+                        }
+                    }
+                    _ => format!(
+                        "Unknown memory action '{}'. Supported: add, get, list, search, delete.",
+                        action
+                    ),
+                }
+            } else {
+                format!(
+                    "Unknown memory scope '{}'. Supported scopes: session, user, repo.",
+                    scope
+                )
             }
         }
         "todo_add" => {
