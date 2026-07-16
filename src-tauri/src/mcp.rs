@@ -2,12 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter, State};
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Child;
-use tokio::sync::Notify;
+use tauri::State;
+use tokio::io::AsyncBufReadExt;
 
 use crate::AppState;
 
@@ -56,75 +52,6 @@ pub struct McpServersFile {
     pub servers: Vec<McpServer>,
 }
 
-// ─── Monitor status / log event payloads ──────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum McpStatusKind {
-    Starting,
-    Running,
-    Stopped,
-    Error,
-    /// SSE transport — no process to monitor, just an endpoint.
-    Ready,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct McpStatus {
-    pub id: String,
-    pub name: String,
-    pub status: McpStatusKind,
-    pub pid: Option<u32>,
-    /// Milliseconds since UNIX epoch.
-    pub started_at_ms: Option<u64>,
-    pub last_error: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum McpLogStream {
-    Stdout,
-    Stderr,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct McpLogEvent {
-    pub id: String,
-    pub name: String,
-    pub stream: McpLogStream,
-    pub line: String,
-    /// Milliseconds since UNIX epoch.
-    pub ts: u64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct McpStatusEvent {
-    pub id: String,
-    pub name: String,
-    pub status: McpStatusKind,
-    pub pid: Option<u32>,
-    pub message: Option<String>,
-}
-
-pub const MCP_STATUS_EVENT: &str = "mcp-status";
-pub const MCP_LOG_EVENT: &str = "mcp-log";
-
-// ─── Internal: runtime registry ───────────────────────────────────────────────
-
-/// Per-server runtime metadata kept in `AppState::mcp_runtimes`.
-pub struct McpRuntime {
-    pub id: String,
-    pub name: String,
-    pub status: McpStatusKind,
-    pub pid: Option<u32>,
-    pub started_at_ms: Option<u64>,
-    pub last_error: Option<String>,
-    /// Notify handle the wait task listens on. `None` for SSE (no process).
-    pub stop: Option<Arc<Notify>>,
-}
-
-pub type McpRuntimeMap = HashMap<String, McpRuntime>;
-
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
 pub fn load_servers(path: &PathBuf) -> Vec<McpServer> {
@@ -146,46 +73,6 @@ fn save_servers(path: &PathBuf, servers: &[McpServer]) -> Result<(), String> {
     fs::write(path, json).map_err(|e| e.to_string())
 }
 
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
-
-fn emit_status(
-    app: &AppHandle,
-    id: &str,
-    name: &str,
-    status: McpStatusKind,
-    pid: Option<u32>,
-    message: Option<String>,
-) {
-    let _ = app.emit(
-        MCP_STATUS_EVENT,
-        McpStatusEvent {
-            id: id.to_string(),
-            name: name.to_string(),
-            status,
-            pid,
-            message,
-        },
-    );
-}
-
-fn emit_log(app: &AppHandle, id: &str, name: &str, stream: McpLogStream, line: String) {
-    let _ = app.emit(
-        MCP_LOG_EVENT,
-        McpLogEvent {
-            id: id.to_string(),
-            name: name.to_string(),
-            stream,
-            line,
-            ts: now_ms(),
-        },
-    );
-}
-
 // ─── Tauri commands ───────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -194,49 +81,18 @@ pub fn list_mcp_servers(state: State<'_, AppState>) -> Vec<McpServer> {
 }
 
 #[tauri::command]
-pub fn save_mcp_server(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    server: McpServer,
-) -> Result<(), String> {
-    let was_enabled = load_servers(&state.mcp_servers_path)
-        .into_iter()
-        .find(|s| s.id == server.id)
-        .map(|s| s.enabled)
-        .unwrap_or(false);
-
+pub fn save_mcp_server(state: State<'_, AppState>, server: McpServer) -> Result<(), String> {
     let mut servers = load_servers(&state.mcp_servers_path);
     if let Some(existing) = servers.iter_mut().find(|s| s.id == server.id) {
-        *existing = server.clone();
+        *existing = server;
     } else {
-        servers.push(server.clone());
+        servers.push(server);
     }
-    let save_result = save_servers(&state.mcp_servers_path, &servers);
-    if save_result.is_err() {
-        return save_result;
-    }
-
-    // Reconcile monitor session: start if newly enabled, stop if newly disabled,
-    // restart if transport/command/args/env/url/auth_token changed while enabled.
-    let runtimes = state.mcp_runtimes.clone();
-    if server.enabled {
-        if !was_enabled {
-            spawn_monitor_session(app, server, runtimes);
-        } else {
-            // Could compare fields and restart; for simplicity, always restart on save.
-            stop_persistent_session(&server.id, &state.mcp_runtimes);
-            spawn_monitor_session(app, server, runtimes);
-        }
-    } else if was_enabled {
-        stop_persistent_session(&server.id, &state.mcp_runtimes);
-    }
-
-    Ok(())
+    save_servers(&state.mcp_servers_path, &servers)
 }
 
 #[tauri::command]
 pub fn delete_mcp_server(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    stop_persistent_session(&id, &state.mcp_runtimes);
     let mut servers = load_servers(&state.mcp_servers_path);
     servers.retain(|s| s.id != id);
     save_servers(&state.mcp_servers_path, &servers)
@@ -249,296 +105,6 @@ pub async fn test_mcp_server(server: McpServer) -> Result<String, String> {
     match server.transport {
         McpTransport::Stdio => test_stdio_server(&server).await,
         McpTransport::Sse => test_sse_server(&server).await,
-    }
-}
-
-#[tauri::command]
-pub fn start_mcp_server(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<(), String> {
-    let server = load_servers(&state.mcp_servers_path)
-        .into_iter()
-        .find(|s| s.id == id)
-        .ok_or_else(|| format!("Server {id} not found"))?;
-    if !server.enabled {
-        return Err("Server is disabled".to_string());
-    }
-    spawn_monitor_session(app, server, state.mcp_runtimes.clone());
-    Ok(())
-}
-
-#[tauri::command]
-pub fn stop_mcp_server(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    stop_persistent_session(&id, &state.mcp_runtimes);
-    Ok(())
-}
-
-#[tauri::command]
-pub fn restart_mcp_server(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<(), String> {
-    let server = load_servers(&state.mcp_servers_path)
-        .into_iter()
-        .find(|s| s.id == id)
-        .ok_or_else(|| format!("Server {id} not found"))?;
-    if !server.enabled {
-        return Err("Server is disabled".to_string());
-    }
-    stop_persistent_session(&id, &state.mcp_runtimes);
-    spawn_monitor_session(app, server, state.mcp_runtimes.clone());
-    Ok(())
-}
-
-#[tauri::command]
-pub fn list_mcp_status(state: State<'_, AppState>) -> Vec<McpStatus> {
-    let map = state.mcp_runtimes.lock().unwrap();
-    map.values()
-        .map(|rt| McpStatus {
-            id: rt.id.clone(),
-            name: rt.name.clone(),
-            status: rt.status.clone(),
-            pid: rt.pid,
-            started_at_ms: rt.started_at_ms,
-            last_error: rt.last_error.clone(),
-        })
-        .collect()
-}
-
-// ─── Persistent session lifecycle ─────────────────────────────────────────────
-
-/// Fire-and-forget: spawn a long-lived monitor process for the given server
-/// and stream its stdout/stderr to the frontend via Tauri events.
-pub fn spawn_monitor_session(
-    app: AppHandle,
-    server: McpServer,
-    runtimes: Arc<Mutex<McpRuntimeMap>>,
-) {
-    tauri::async_runtime::spawn(async move {
-        let _ = start_monitor_session_inner(app, server, runtimes).await;
-    });
-}
-
-async fn start_monitor_session_inner(
-    app: AppHandle,
-    server: McpServer,
-    runtimes: Arc<Mutex<McpRuntimeMap>>,
-) -> Result<(), String> {
-    if !matches!(server.transport, McpTransport::Stdio) {
-        // SSE has no child process to monitor; record as Ready so the UI can show it.
-        let started = now_ms();
-        {
-            let mut map = runtimes.lock().unwrap();
-            map.insert(
-                server.id.clone(),
-                McpRuntime {
-                    id: server.id.clone(),
-                    name: server.name.clone(),
-                    status: McpStatusKind::Ready,
-                    pid: None,
-                    started_at_ms: Some(started),
-                    last_error: None,
-                    stop: None,
-                },
-            );
-        }
-        emit_status(
-            &app,
-            &server.id,
-            &server.name,
-            McpStatusKind::Ready,
-            None,
-            None,
-        );
-        return Ok(());
-    }
-
-    // Stdio path
-    emit_status(
-        &app,
-        &server.id,
-        &server.name,
-        McpStatusKind::Starting,
-        None,
-        None,
-    );
-
-    let mut cmd = build_stdio_cmd(&server, true);
-    let mut child: Child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => {
-            let err = format!("Failed to start process: {e}");
-            {
-                let mut map = runtimes.lock().unwrap();
-                map.insert(
-                    server.id.clone(),
-                    McpRuntime {
-                        id: server.id.clone(),
-                        name: server.name.clone(),
-                        status: McpStatusKind::Error,
-                        pid: None,
-                        started_at_ms: None,
-                        last_error: Some(err.clone()),
-                        stop: None,
-                    },
-                );
-            }
-            emit_status(
-                &app,
-                &server.id,
-                &server.name,
-                McpStatusKind::Error,
-                None,
-                Some(err.clone()),
-            );
-            return Err(err);
-        }
-    };
-    let pid = child.id();
-
-    let stdout = child.stdout.take().ok_or_else(|| "no stdout".to_string())?;
-    let stderr = child.stderr.take().ok_or_else(|| "no stderr".to_string())?;
-    // Leave stdin attached to the Child. The monitor process never sends
-    // commands, so the server typically blocks on stdin read and stays alive
-    // until we kill it. Closing stdin would deliver EOF and likely cause the
-    // server to exit before we have a chance to observe its output.
-
-    let stop = Arc::new(Notify::new());
-    {
-        let mut map = runtimes.lock().unwrap();
-        map.insert(
-            server.id.clone(),
-            McpRuntime {
-                id: server.id.clone(),
-                name: server.name.clone(),
-                status: McpStatusKind::Starting,
-                pid,
-                started_at_ms: Some(now_ms()),
-                last_error: None,
-                stop: Some(stop.clone()),
-            },
-        );
-    }
-
-    // Stdout reader task
-    {
-        let app = app.clone();
-        let id = server.id.clone();
-        let name = server.name.clone();
-        tokio::spawn(async move {
-            let mut reader = BufReader::new(stdout);
-            let mut line = String::new();
-            loop {
-                line.clear();
-                match reader.read_line(&mut line).await {
-                    Ok(0) | Err(_) => break,
-                    Ok(_) => {
-                        let trimmed = line.trim_end();
-                        if !trimmed.is_empty() {
-                            emit_log(&app, &id, &name, McpLogStream::Stdout, trimmed.to_string());
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    // Stderr reader task
-    {
-        let app = app.clone();
-        let id = server.id.clone();
-        let name = server.name.clone();
-        tokio::spawn(async move {
-            let mut reader = BufReader::new(stderr);
-            let mut line = String::new();
-            loop {
-                line.clear();
-                match reader.read_line(&mut line).await {
-                    Ok(0) | Err(_) => break,
-                    Ok(_) => {
-                        let trimmed = line.trim_end();
-                        if !trimmed.is_empty() {
-                            emit_log(&app, &id, &name, McpLogStream::Stderr, trimmed.to_string());
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    // Promote to running now that readers are attached.
-    {
-        let mut map = runtimes.lock().unwrap();
-        if let Some(rt) = map.get_mut(&server.id) {
-            rt.status = McpStatusKind::Running;
-        }
-    }
-    emit_status(
-        &app,
-        &server.id,
-        &server.name,
-        McpStatusKind::Running,
-        pid,
-        None,
-    );
-
-    // Wait task: handle either user-initiated stop or natural exit.
-    {
-        let app = app.clone();
-        let id = server.id.clone();
-        let name = server.name.clone();
-        let runtimes = runtimes.clone();
-        let stop = stop.clone();
-        tokio::spawn(async move {
-            let (final_status, message) = tokio::select! {
-                biased;
-                _ = stop.notified() => {
-                    let _ = child.start_kill();
-                    let _ = child.wait().await;
-                    (McpStatusKind::Stopped, Some("stopped by user".to_string()))
-                }
-                res = child.wait() => match res {
-                    Ok(s) => (McpStatusKind::Stopped, Some(format!("exited: {s}"))),
-                    Err(e) => (McpStatusKind::Error, Some(format!("wait error: {e}"))),
-                },
-            };
-            {
-                let mut map = runtimes.lock().unwrap();
-                if let Some(rt) = map.get_mut(&id) {
-                    // Only mutate if the entry's stop handle still points at
-                    // THIS session. A restart replaces the entry, so the
-                    // previous wait task must not clobber the new one.
-                    let same_session = rt
-                        .stop
-                        .as_ref()
-                        .map(|s| Arc::ptr_eq(s, &stop))
-                        .unwrap_or(false);
-                    if same_session {
-                        rt.status = final_status.clone();
-                        rt.pid = None;
-                        rt.last_error = message.clone();
-                    }
-                }
-            }
-            emit_status(&app, &id, &name, final_status, None, message);
-        });
-    }
-
-    Ok(())
-}
-
-/// Signal the wait task of a running monitor session to stop the process.
-/// SSE sessions have no stop handle and are a no-op.
-pub fn stop_persistent_session(id: &str, runtimes: &Arc<Mutex<McpRuntimeMap>>) {
-    let stop = {
-        let map = runtimes.lock().unwrap();
-        map.get(id).and_then(|rt| rt.stop.clone())
-    };
-    if let Some(stop) = stop {
-        stop.notify_one();
     }
 }
 
@@ -629,10 +195,9 @@ pub fn sanitize_fn_name(s: &str) -> String {
 /// The fix is to route through `cmd.exe /C` so the shell resolves PATH.
 /// On Unix, we use `sh -c` for the same reason.
 ///
-/// `pipe_stderr` controls whether stderr is piped. The persistent monitor
-/// process pipes stderr so it can stream to the UI; one-shot test/warmup
-/// calls keep it null to avoid backpressure on a noisy server.
-fn build_stdio_cmd(server: &McpServer, pipe_stderr: bool) -> tokio::process::Command {
+/// Stderr is sent to `/dev/null` to avoid backpressure on a noisy server —
+/// the JSON-RPC conversation happens over stdin/stdout only.
+fn build_stdio_cmd(server: &McpServer) -> tokio::process::Command {
     use std::process::Stdio;
 
     let normalized = server.command.trim().to_lowercase();
@@ -640,12 +205,6 @@ fn build_stdio_cmd(server: &McpServer, pipe_stderr: bool) -> tokio::process::Com
         normalized.as_str(),
         "uvx" | "ux" | "python" | "python3" | "py" | "node"
     );
-
-    let stderr_cfg = if pipe_stderr {
-        Stdio::piped()
-    } else {
-        Stdio::null()
-    };
 
     #[cfg(windows)]
     {
@@ -676,7 +235,7 @@ fn build_stdio_cmd(server: &McpServer, pipe_stderr: bool) -> tokio::process::Com
             ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(stderr_cfg);
+            .stderr(Stdio::null());
             for (k, v) in &server.env {
                 cmd.env(k, v);
             }
@@ -700,7 +259,7 @@ fn build_stdio_cmd(server: &McpServer, pipe_stderr: bool) -> tokio::process::Com
             cmd.args(["-c", &shell_cmd])
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
-                .stderr(stderr_cfg);
+                .stderr(Stdio::null());
             for (k, v) in &server.env {
                 cmd.env(k, v);
             }
@@ -713,7 +272,7 @@ fn build_stdio_cmd(server: &McpServer, pipe_stderr: bool) -> tokio::process::Com
     cmd.args(&server.args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(stderr_cfg);
+        .stderr(Stdio::null());
     for (k, v) in &server.env {
         cmd.env(k, v);
     }
@@ -816,7 +375,7 @@ async fn stdio_init(
     ),
     String,
 > {
-    let mut cmd = build_stdio_cmd(server, false);
+    let mut cmd = build_stdio_cmd(server);
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("Failed to start process: {e}"))?;
@@ -1063,7 +622,7 @@ async fn test_stdio_server(server: &McpServer) -> Result<String, String> {
     });
     let request_line = format!("{}\n", init_request);
 
-    let mut cmd = build_stdio_cmd(server, false);
+    let mut cmd = build_stdio_cmd(server);
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("Failed to start process: {e}"))?;
@@ -1141,12 +700,4 @@ async fn test_sse_server(server: &McpServer) -> Result<String, String> {
     } else {
         Err(format!("Server returned HTTP {status}"))
     }
-}
-
-/// Start a non-blocking monitor session for an enabled MCP server.
-/// Used at app startup and on server enable.
-/// (Retained for compatibility with `lib.rs` startup; equivalent to
-/// `spawn_monitor_session`.)
-pub fn spawn_warmup(server: McpServer, app: AppHandle, runtimes: Arc<Mutex<McpRuntimeMap>>) {
-    spawn_monitor_session(app, server, runtimes);
 }

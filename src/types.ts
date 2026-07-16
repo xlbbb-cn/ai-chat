@@ -75,37 +75,6 @@ export interface McpServer {
     enabled: boolean;
 }
 
-export type McpStatusKind = "starting" | "running" | "stopped" | "error" | "ready";
-
-export interface McpStatus {
-    id: string;
-    name: string;
-    status: McpStatusKind;
-    pid: number | null;
-    /** Milliseconds since UNIX epoch. */
-    started_at_ms: number | null;
-    last_error: string | null;
-}
-
-export type McpLogStream = "stdout" | "stderr";
-
-export interface McpLogEvent {
-    id: string;
-    name: string;
-    stream: McpLogStream;
-    line: string;
-    /** Milliseconds since UNIX epoch. */
-    ts: number;
-}
-
-export interface McpStatusEvent {
-    id: string;
-    name: string;
-    status: McpStatusKind;
-    pid: number | null;
-    message: string | null;
-}
-
 export interface SubAgent {
   id: string;
   name: string;
