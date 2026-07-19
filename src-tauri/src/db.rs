@@ -109,6 +109,92 @@ pub fn delete_session_summary(db: &Connection, session_id: &str) -> Result<(), S
     Ok(())
 }
 
+// ─── Session History Search (for memory tool) ────────────────────────────────
+
+#[derive(Serialize)]
+pub struct HistoryMatch {
+    pub session_id: String,
+    pub role: String,
+    pub content: String,
+    pub timestamp: String,
+}
+
+/// Search past chat history messages across all sessions (excluding the current one)
+/// using LIKE-based substring matching. Results are ordered most-recent-first.
+pub fn search_history_messages(
+    db: &Connection,
+    current_session_id: &str,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<HistoryMatch>, String> {
+    let pattern = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
+    let mut stmt = db
+        .prepare(
+            "SELECT session_id, role, content, COALESCE(timestamp, '') \
+             FROM history \
+             WHERE session_id != ?1 AND content LIKE ?2 ESCAPE '\\' \
+             ORDER BY id DESC \
+             LIMIT ?3",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let results = stmt
+        .query_map(
+            rusqlite::params![current_session_id, pattern, limit as i64],
+            |row| {
+                Ok(HistoryMatch {
+                    session_id: row.get(0)?,
+                    role: row.get(1)?,
+                    content: row.get(2)?,
+                    timestamp: row.get(3)?,
+                })
+            },
+        )
+        .map_err(|e| e.to_string())?
+        .filter_map(Result::ok)
+        .collect();
+
+    Ok(results)
+}
+
+/// Search session summaries across all sessions (excluding the current one)
+/// for summaries matching the query.
+pub fn search_session_summaries(
+    db: &Connection,
+    current_session_id: &str,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<HistoryMatch>, String> {
+    let pattern = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
+    let mut stmt = db
+        .prepare(
+            "SELECT session_id, summary, COALESCE(updated_at, '') \
+             FROM session_summaries \
+             WHERE session_id != ?1 AND summary LIKE ?2 ESCAPE '\\' \
+             ORDER BY updated_at DESC \
+             LIMIT ?3",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let results = stmt
+        .query_map(
+            rusqlite::params![current_session_id, pattern, limit as i64],
+            |row| {
+                Ok(HistoryMatch {
+                    session_id: row.get(0)?,
+                    role: "summary".to_string(),
+                    content: row.get(1)?,
+                    timestamp: row.get(2)?,
+                })
+            },
+        )
+        .map_err(|e| e.to_string())?
+        .filter_map(Result::ok)
+        .collect();
+
+    Ok(results)
+}
+
 // ─── API Request Monitor ──────────────────────────────────────────────────────
 
 #[derive(Serialize)]

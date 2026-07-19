@@ -1,3 +1,4 @@
+use crate::db;
 use serde_json::{json, Value};
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -360,7 +361,7 @@ fn code_requests_sudo(code: &str) -> bool {
     false
 }
 
-fn decode_process_bytes(bytes: &[u8], hint: OutputDecodeHint) -> String {
+fn decode_process_bytes(bytes: &[u8], _hint: OutputDecodeHint) -> String {
     if bytes.is_empty() {
         return String::new();
     }
@@ -1856,8 +1857,10 @@ pub async fn execute_tool(
                         if query.is_empty() {
                             return "Error: 'query' is required for memory search.".to_string();
                         }
+
+                        // ── In-memory search ──
                         let query_lower = query.to_lowercase();
-                        let matches: Vec<&serde_json::Value> = session_mem
+                        let in_memory_matches: Vec<&serde_json::Value> = session_mem
                             .values()
                             .filter(|entry| {
                                 let key_match = entry["key"]
@@ -1871,20 +1874,51 @@ pub async fn execute_tool(
                                 key_match || content_match
                             })
                             .collect();
+
+                        // ── DB history search across past sessions ──
+                        let db_guard = state.db.lock().unwrap();
+                        let history_matches =
+                            db::search_history_messages(&db_guard, session_id, &query, 20);
+                        let summary_matches =
+                            db::search_session_summaries(&db_guard, session_id, &query, 5);
+                        drop(db_guard);
+
                         let _ = app.emit(
                             "tool-call",
                             format!("🧠 *Searching session memories for '{}'*\n", query),
                         );
-                        if matches.is_empty() {
-                            format!("No session memories match '{}'.", query)
+
+                        let has_in_memory = !in_memory_matches.is_empty();
+                        let has_history = history_matches
+                            .as_ref()
+                            .map(|h| !h.is_empty())
+                            .unwrap_or(false);
+                        let has_summaries = summary_matches
+                            .as_ref()
+                            .map(|s| !s.is_empty())
+                            .unwrap_or(false);
+
+                        if !has_in_memory && !has_history && !has_summaries {
+                            format!("No session memories or past conversations match '{}'.", query)
                         } else {
-                            serde_json::to_string_pretty(&json!({
+                            let mut result = json!({
                                 "scope": "session",
                                 "query": query,
-                                "matches": matches,
-                                "count": matches.len(),
-                            }))
-                            .unwrap_or_else(|_| "[]".to_string())
+                                "in_memory_matches": in_memory_matches,
+                                "in_memory_count": in_memory_matches.len(),
+                            });
+                            if let Ok(hist) = history_matches {
+                                result["session_history_matches"] =
+                                    serde_json::to_value(&hist).unwrap_or_default();
+                                result["session_history_count"] = json!(hist.len());
+                            }
+                            if let Ok(sum) = summary_matches {
+                                result["session_summaries"] =
+                                    serde_json::to_value(&sum).unwrap_or_default();
+                                result["session_summaries_count"] = json!(sum.len());
+                            }
+                            serde_json::to_string_pretty(&result)
+                                .unwrap_or_else(|_| result.to_string())
                         }
                     }
                     "delete" => {
