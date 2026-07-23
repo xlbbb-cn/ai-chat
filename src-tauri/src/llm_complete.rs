@@ -841,7 +841,27 @@ pub async fn chat_completion(
         let active_skills_context = format!(
             "INTERNAL CONTEXT - ACTIVE SKILLS:\n\
              Workspace root: {workspace_root_display}\n\n\
-             Path rules: `file_actions` can access only files under the workspace root. Use `./...` paths or `.` for the workspace root, and reuse exact paths returned by tools. Do not reference app-data paths or external absolute paths.\n\n\
+             VIRTUAL SANDBOX (applies to ALL tools, not just `file_actions`):\n\
+             Every tool that touches the local filesystem is confined to the workspace root. \
+             This is enforced by the runtime — paths that resolve outside the workspace are \
+             rejected or require explicit user confirmation. The rules are:\n\
+             - `file_actions`: only files/dirs under the workspace root. Use `./...` paths \
+             or `.` for the workspace root; reuse exact paths returned by tools. Absolute \
+             paths and paths outside the workspace are rejected.\n\
+             - `run_cmd` / `run_shell`: the command's current working directory is the \
+             workspace root. `cd` / `Set-Location` / `pushd` to a path outside the workspace \
+             is rejected; destructive patterns and `sudo`/UAC elevation require explicit user \
+             confirmation. Treat the shell as also scoped to the workspace.\n\
+             - `memory` (user / repo scopes): entries are written to \
+             `<workspace>/memory/user/` and `<workspace>/memory/repo/`. The `key` field is \
+             sanitised to a filename — you cannot escape the workspace via the key.\n\
+             - `skill_read`: paths are locked to the active skill's own directory. Escape \
+             attempts via `..` are rejected.\n\
+             - MCP tools: NOT sandboxed — they can access any path the MCP server is \
+             configured to reach. Treat their path arguments as opaque; do not assume \
+             workspace-relative semantics.\n\
+             Do not reference app-data paths or external absolute paths in tool arguments; \
+             if a tool result points to a file, reuse the exact path it returned.\n\n\
              Active skill instructions:{}",
             loaded_skills_content
         );
@@ -1266,10 +1286,10 @@ pub async fn chat_completion(
                     )
                 }
             } else if let Some((mcp_server, actual_tool_name)) = mcp_tool_map.get(name) {
-                let mut args_json: Value = serde_json::from_str(args).unwrap_or_default();
-                // Resolve any relative file paths in arguments to absolute paths
-                let workspace_dir = state.workspace_dir.lock().unwrap().clone();
-                mcp::resolve_paths_in_args(&mut args_json, &workspace_dir);
+                let args_json: Value = serde_json::from_str(args).unwrap_or_default();
+                // MCP tools are NOT sandboxed — path arguments are forwarded
+                // verbatim to the MCP server. The server itself decides what
+                // paths it can access.
                 log_event(
                     &state,
                     "INFO",
