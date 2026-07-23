@@ -730,13 +730,9 @@ pub async fn chat_completion(
     system_content.push_str(&os_sys_msg);
     system_content.push_str(
         "\n\n\
-        Explicit invocation syntax (user can call capabilities directly in the chat):\n\
-        - {tool:<name>}     — invoke a local tool by name, e.g. {tool:run_shell}\n\
-        - {mcp:<server>.<tool>} — invoke an MCP server tool, e.g. {mcp:filesystem.read_file}.\n\
-        - {skill:<name>}    — load a skill's detailed instructions on demand, e.g. {skill:mx-search}.\n\
-        When the user's message contains an explicit invocation token, treat it as a direct request: \
-        call the matching tool (for {tool:...} / {mcp:...}) or load the skill via the use_skill tool (for {skill:...}) \
-        before answering. Do not ask for confirmation when the user uses the explicit form."
+        Explicit invocation: {tool:<name>}, {mcp:<server>.<tool>}, {skill:<name>}. \
+        Treat these as direct requests — call the tool or load the skill before answering, \
+        without asking for confirmation."
     ); //Add system info & explicit invocation syntax to system prompt
 
     for skill_name in &skill_ids {
@@ -930,7 +926,7 @@ pub async fn chat_completion(
             .filter(|s| s.enabled)
             .collect();
 
-        for (idx, server) in enabled_servers.iter().enumerate() {
+        for server in enabled_servers.iter() {
             match mcp::get_server_tools(&state, server).await {
                 Ok(server_tools) => {
                     for tool in server_tools {
@@ -938,7 +934,17 @@ pub async fn chat_completion(
                             continue;
                         };
                         let safe_name = mcp::sanitize_fn_name(actual_name);
-                        let raw_fn = format!("mcp_{idx}_{safe_name}");
+                        // Use a stable short hash of the server id instead of
+                        // the array index, so tool names don't drift when the
+                        // server list is reordered or a server is disabled.
+                        let server_hash = {
+                            use std::collections::hash_map::DefaultHasher;
+                            use std::hash::{Hash, Hasher};
+                            let mut h = DefaultHasher::new();
+                            server.id.hash(&mut h);
+                            format!("{:x}", h.finish())
+                        };
+                        let raw_fn = format!("mcp_{server_hash}_{safe_name}");
                         let fn_name: String = raw_fn.chars().take(64).collect();
 
                         let mut openai_tool = tool.clone();
@@ -1264,9 +1270,9 @@ pub async fn chat_completion(
                             "tool-call",
                             format!("🧠 *Loading skill: {}*\n\n", skill_name),
                         );
-                        format!("Skill '{}' detailed instructions have been successfully loaded and appended to context messages. You can now follow its instructions to fulfill the user's request. There is no need to call use_skill for this skill again.", skill_name)
+                        format!("Skill '{}' loaded. Follow its instructions to fulfill the request.", skill_name)
                     } else {
-                        format!("Skill '{}' is already loaded in context messages. There is no need to call use_skill for this skill again.", skill_name)
+                        format!("Skill '{}' already loaded.", skill_name)
                     }
                 } else {
                     format!("Error: Skill '{}' not found.", skill_name)

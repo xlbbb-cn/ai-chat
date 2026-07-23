@@ -963,7 +963,7 @@ async fn auto_configure_agents(
         .iter()
         .map(|a| {
             format!(
-                "  - id={:?} name={:?} description={:?}",
+                "  - id={} name={} description={}",
                 a.id, a.name, a.description
             )
         })
@@ -1051,7 +1051,7 @@ async fn plan_tasks(
         .iter()
         .map(|a| {
             format!(
-                "  - id={:?} name={:?} description={:?}",
+                "  - id={} name={} description={}",
                 a.id, a.name, a.description
             )
         })

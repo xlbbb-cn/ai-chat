@@ -1051,7 +1051,7 @@ pub fn get_skill_read_tool() -> Value {
                     },
                     "path": {
                         "type": "string",
-                        "description": "Path relative to the skill's root directory. Use '.' for the skill root itself. For example 'templates/prompt.md' or 'data/config.json'. Defaults to '.' if omitted."
+                        "description": "Path relative to the skill's root directory. Use '.' for the skill root itself. Defaults to '.' if omitted."
                     },
                     "start_line": {
                         "type": "integer",
@@ -1075,10 +1075,6 @@ pub fn get_skill_read_tool() -> Value {
                         "type": "boolean",
                         "description": "Whether the content search is case-sensitive (only for 'search'). Defaults to false."
                     },
-                    "smart_case": {
-                        "type": "boolean",
-                        "description": "Whether uppercase letters in query should automatically switch to case-sensitive search (only for 'search'). Defaults to false."
-                    },
                     "use_regex": {
                         "type": "boolean",
                         "description": "Whether query should be treated as a regular expression (only for 'search'). Defaults to false."
@@ -1086,14 +1082,6 @@ pub fn get_skill_read_tool() -> Value {
                     "glob": {
                         "type": "string",
                         "description": "Optional file path glob filter for search targets, such as '**/*.md' (only for 'search')."
-                    },
-                    "include_hidden": {
-                        "type": "boolean",
-                        "description": "Whether hidden files/directories should be included (only for 'search'). Defaults to true."
-                    },
-                    "respect_gitignore": {
-                        "type": "boolean",
-                        "description": "Whether .gitignore rules should be respected (only for 'search'). Defaults to false."
                     }
                 },
                 "required": ["action", "skill_name"]
