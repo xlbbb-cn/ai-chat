@@ -826,8 +826,10 @@ pub async fn chat_completion(
 
     // Inject the active todo list (if any) so the assistant can always
     // re-orient itself to the current plan, even mid-turn.
-    if let Ok(db_guard) = state.db.lock() {
-        if let Some(todo_block) = todos::render_active_list_for_context(&session_id, &db_guard) {
+    if let Ok(workspace_guard) = state.workspace_dir.lock() {
+        if let Some(todo_block) =
+            todos::render_active_list_for_context(&workspace_guard, &session_id)
+        {
             all_messages.push(json!({
                 "role": "system",
                 "content": format!("INTERNAL CONTEXT - ACTIVE TODO LIST:\n{}", todo_block)

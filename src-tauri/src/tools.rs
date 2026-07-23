@@ -375,7 +375,7 @@ fn decode_process_bytes(bytes: &[u8], _hint: OutputDecodeHint) -> String {
     }
 
     #[cfg(windows)]
-    if let Some(decoded) = decode_windows_process_bytes(bytes, hint) {
+    if let Some(decoded) = decode_windows_process_bytes(bytes, _hint) {
         return decoded;
     }
 
@@ -1899,7 +1899,10 @@ pub async fn execute_tool(
                             .unwrap_or(false);
 
                         if !has_in_memory && !has_history && !has_summaries {
-                            format!("No session memories or past conversations match '{}'.", query)
+                            format!(
+                                "No session memories or past conversations match '{}'.",
+                                query
+                            )
                         } else {
                             let mut result = json!({
                                 "scope": "session",
