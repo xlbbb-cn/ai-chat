@@ -548,7 +548,7 @@ fn format_process_output(output: std::process::Output, hint: OutputDecodeHint) -
     if result.is_empty() {
         result = "(no output)".to_string();
     }
-    result
+    truncate_tool_output(result)
 }
 
 async fn run_command_with_stdin(
@@ -707,6 +707,31 @@ fn format_file_action_error(err: String) -> String {
     }
 }
 
+/// Hard cap on tool result text fed back into the LLM context. Huge outputs
+/// (build logs, large file reads, broad searches) would otherwise flood the
+/// context window, force an early compression pass, and invalidate the whole
+/// prompt-cache prefix. Head+tail are kept so errors at the end of a log stay
+/// visible; the model can always re-read a smaller range.
+const TOOL_OUTPUT_HEAD_CHARS: usize = 6_000;
+const TOOL_OUTPUT_TAIL_CHARS: usize = 2_000;
+
+fn truncate_tool_output(output: String) -> String {
+    let total = output.chars().count();
+    let budget = TOOL_OUTPUT_HEAD_CHARS + TOOL_OUTPUT_TAIL_CHARS;
+    if total <= budget {
+        return output;
+    }
+    let head: String = output.chars().take(TOOL_OUTPUT_HEAD_CHARS).collect();
+    let tail: String = output
+        .chars()
+        .skip(total - TOOL_OUTPUT_TAIL_CHARS)
+        .collect();
+    format!(
+        "{head}\n\n...[truncated {} of {total} chars — output too large; narrow the command or read a smaller range]...\n\n{tail}",
+        total - budget,
+    )
+}
+
 pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
     let mut tools = vec![];
 
@@ -744,7 +769,7 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "run_shell",
-                "description": "Execute a script in a shell on the user's machine.\nDangerous or privileged operations (sudo / admin elevation) will require explicit user confirmation.",
+                "description": "Execute a script in a shell on the user's machine. The script always runs with the workspace directory as its working directory; changing to a path outside the workspace is rejected.\nDangerous or privileged operations (sudo / admin elevation) will require explicit user confirmation.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -1692,7 +1717,7 @@ pub async fn execute_tool(
     active_skill_dirs: &[(String, PathBuf)],
 ) -> String {
     let args: Value = serde_json::from_str(args_str).unwrap_or_default();
-    match name {
+    let tool_output = match name {
         "add_task" => {
             let Some(mission_id) = mission_id else {
                 return "Error: add_task is only available inside an autonomous sub-agent mission."
@@ -2314,6 +2339,7 @@ pub async fn execute_tool(
 
                     if start_line.is_none() && end_line.is_none() {
                         return fs::read_to_string(&target_path)
+                            .map(truncate_tool_output)
                             .unwrap_or_else(|e| format!("Error reading file: {}", e));
                     }
 
@@ -2734,6 +2760,7 @@ pub async fn execute_tool(
 
                             if start_line.is_none() && end_line.is_none() {
                                 return fs::read_to_string(&p)
+                                    .map(truncate_tool_output)
                                     .unwrap_or_else(|e| format!("Error reading file: {}", e));
                             }
 
@@ -3122,7 +3149,9 @@ pub async fn execute_tool(
             }
         }
         _ => format!("Unknown tool: {}", name),
-    }
+    };
+
+    truncate_tool_output(tool_output)
 }
 
 pub async fn run_command(

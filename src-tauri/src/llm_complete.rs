@@ -62,6 +62,7 @@ pub struct StreamOptions<'a> {
 const CONTEXT_COMPRESSION_THRESHOLD: f32 = 0.9;
 const CONTEXT_KEEP_RECENT_MESSAGES: usize = 12;
 const CONTEXT_SUMMARY_MARKER: &str = "INTERNAL CONTEXT - SESSION SUMMARY";
+const CONTEXT_TODO_MARKER: &str = "INTERNAL CONTEXT - ACTIVE TODO LIST";
 const CONTEXT_SUMMARY_MAX_LINES: usize = 120;
 const DEFAULT_MODEL_MAX_TOKENS: u32 = 131_072;
 const STREAM_MAX_RETRIES: usize = 3;
@@ -307,16 +308,19 @@ fn rebuild_without_compression(
     pinned: Vec<Value>,
     compressible: Vec<Value>,
     existing_summary_body: Option<String>,
+    todo_block: Option<Value>,
 ) {
-    let mut rebuilt = Vec::with_capacity(pinned.len() + compressible.len() + 1);
+    let mut rebuilt = Vec::with_capacity(pinned.len() + compressible.len() + 2);
     rebuilt.extend(pinned);
-    rebuilt.extend(compressible);
     if let Some(body) = existing_summary_body {
-        rebuilt.insert(
-            rebuilt.len().min(1),
+        rebuilt.push(
             json!({ "role": "system", "content": format!("{CONTEXT_SUMMARY_MARKER}\n{body}") }),
         );
     }
+    if let Some(todo) = todo_block {
+        rebuilt.push(todo);
+    }
+    rebuilt.extend(compressible);
     *all_messages = rebuilt;
 }
 
@@ -328,6 +332,7 @@ fn compress_session_context(all_messages: &mut Vec<Value>) -> Option<String> {
     let mut pinned: Vec<Value> = Vec::new();
     let mut compressible: Vec<Value> = Vec::new();
     let mut existing_summary_body: Option<String> = None;
+    let mut todo_block: Option<Value> = None;
 
     for msg in all_messages.drain(..) {
         let existing_summary = msg
@@ -336,6 +341,19 @@ fn compress_session_context(all_messages: &mut Vec<Value>) -> Option<String> {
             .and_then(extract_summary_body);
         if let Some(summary_body) = existing_summary {
             existing_summary_body = Some(summary_body);
+            continue;
+        }
+
+        // The active todo list is re-rendered from disk every turn. Keep it
+        // verbatim at the tail (cache-friendly) instead of pinning it to the
+        // head or folding it into the summary.
+        let is_todo_block = msg
+            .get("content")
+            .and_then(|v| v.as_str())
+            .map(|content| content.starts_with(CONTEXT_TODO_MARKER))
+            .unwrap_or(false);
+        if is_todo_block {
+            todo_block = Some(msg);
             continue;
         }
 
@@ -358,7 +376,13 @@ fn compress_session_context(all_messages: &mut Vec<Value>) -> Option<String> {
     }
 
     if compressible.len() <= CONTEXT_KEEP_RECENT_MESSAGES + 2 {
-        rebuild_without_compression(all_messages, pinned, compressible, existing_summary_body);
+        rebuild_without_compression(
+            all_messages,
+            pinned,
+            compressible,
+            existing_summary_body,
+            todo_block,
+        );
         return None;
     }
 
@@ -371,7 +395,13 @@ fn compress_session_context(all_messages: &mut Vec<Value>) -> Option<String> {
         .collect();
 
     if summary_lines.is_empty() {
-        rebuild_without_compression(all_messages, pinned, compressible, existing_summary_body);
+        rebuild_without_compression(
+            all_messages,
+            pinned,
+            compressible,
+            existing_summary_body,
+            todo_block,
+        );
         return None;
     }
 
@@ -381,9 +411,12 @@ fn compress_session_context(all_messages: &mut Vec<Value>) -> Option<String> {
         "role": "system",
         "content": format!("{CONTEXT_SUMMARY_MARKER}\n{merged_summary}")
     });
-    let mut rebuilt = Vec::with_capacity(pinned.len() + 1 + recent.len());
+    let mut rebuilt = Vec::with_capacity(pinned.len() + 2 + recent.len());
     rebuilt.extend(pinned);
     rebuilt.push(summary_message);
+    if let Some(todo) = todo_block {
+        rebuilt.push(todo);
+    }
     rebuilt.extend(recent);
     *all_messages = rebuilt;
     Some(merged_summary)
@@ -719,6 +752,13 @@ pub async fn chat_completion(
                 active_skill_dirs.push((skill.name.clone(), resolved_skill.skill_dir.clone()));
             }
 
+            // Keep the available-skills listing stable across turns (prompt-cache
+            // friendly): activated skills stay listed here AND additionally get
+            // their full instructions appended to the loaded-skills block below.
+            available_skills_info.push_str(&format!(
+                "- Name: {}\n  Description: {}\n",
+                skill.name, skill.description
+            ));
             if activated_skills.contains(&skill.name) {
                 let cmd_constraint = if skill.allowed_commands.is_empty() {
                     String::new()
@@ -735,11 +775,6 @@ pub async fn chat_completion(
                     resolved_skill.skill_file.display(),
                     cmd_constraint,
                     skill.system_prompt
-                ));
-            } else {
-                available_skills_info.push_str(&format!(
-                    "- Name: {}\n  Description: {}\n",
-                    skill.name, skill.description
                 ));
             }
         }
@@ -788,31 +823,57 @@ pub async fn chat_completion(
     }
 
     // ── Memory guidance ─────────────────────────────────────────────────────
-    // When the memory tool is enabled, instruct the LLM to consult and update
-    // memories proactively at the start and end of every turn.
+    // Short reminder only — the full scope/usage details live in the `memory`
+    // tool description, which is sent whenever the tool is enabled anyway.
     if config.selected_tools.iter().any(|t| t == "memory") {
         let memory_guidance = "\
-        MEMORY INSTRUCTIONS:\n\
-        You have access to a `memory` tool with three scopes: `session` (short-term, in-memory), `user` (long-term, file-backed), and `repo` (long-term, repository-scoped).\n\n\
-        At the BEGINNING of every turn:\n\
-        - Call `memory` with action `search` (scope `session`) using keywords from the user's request to check for relevant short-term context.\n\
-        - If the request involves cross-session preferences, facts about the user, or repository conventions, also search `user` and/or `repo` scopes.\n\n\
-        At the END of every turn:\n\
-        - Save key decisions, discovered facts, user preferences, and important context using `memory` with action `add`.\n\
-        - Use `session` scope for temporary working state and task tracking.\n\
-        - Use `user` scope for personal preferences, reusable patterns, and general knowledge.\n\
-        - Use `repo` scope for codebase conventions, build commands, project structure facts, and verified practices.\n\n\
-        Always prefer consulting memory BEFORE answering — stale answers are worse than admitting you don't know.";
+        MEMORY: You have a `memory` tool (scopes: `session`, `user`, `repo`). \
+        Search memory before answering; at the end of the turn, save key decisions, \
+        user preferences, and repo facts. See the tool description for details.";
         if !system_content.is_empty() {
             system_content.push_str("\n\n");
         }
         system_content.push_str(memory_guidance);
     }
 
+    // ── Message layout (prompt-cache conscious) ─────────────────────────────
+    // Static prefix first (system prompt, skill context, conversation history),
+    // dynamic blocks (session summary, todo list) last — right before the
+    // latest user message — so turn-to-turn changes invalidate as little
+    // cached prefix as possible.
     if !system_content.is_empty() {
         all_messages.push(json!({ "role": "system", "content": system_content }));
     }
 
+    if !loaded_skills_content.is_empty() {
+        let workspace_dir = state.workspace_dir.lock().unwrap().clone();
+        let workspace_root_display = workspace_dir.display().to_string();
+        // Generic sandbox rules live in the tool descriptions (always sent);
+        // only skill-specific notes are repeated here.
+        let active_skills_context = format!(
+            "INTERNAL CONTEXT - ACTIVE SKILLS:\n\
+             Workspace root: {workspace_root_display}\n\
+             All local filesystem tools are sandboxed to the workspace root (see tool descriptions). \
+             `skill_read` paths are locked to each skill's own directory — `..` escapes are rejected. \
+             Skill edits are limited to `./skills/...` and create `.bak.<n>` backups automatically. \
+             MCP tools are NOT sandboxed — treat their path arguments as opaque. \
+             Reuse exact paths returned by tools; do not reference app-data or external absolute paths.\n\n\
+             Active skill instructions:{}",
+            loaded_skills_content
+        );
+        all_messages.push(json!({ "role": "user", "content": active_skills_context }));
+    }
+
+    // Conversation history, keeping the latest user message for the tail.
+    let (history, last_user_msg) = match messages.last() {
+        Some(m) if m.role == "user" => (&messages[..messages.len() - 1], Some(m)),
+        _ => (&messages[..], None),
+    };
+    for m in history {
+        all_messages.push(json!({ "role": m.role, "content": m.content }));
+    }
+
+    // ── Dynamic blocks (change between turns → placed near the tail) ────────
     if let Ok(db_guard) = state.db.lock() {
         if let Ok(Some(saved_summary)) = db::get_session_summary(&db_guard, &session_id) {
             if !saved_summary.trim().is_empty() {
@@ -832,45 +893,12 @@ pub async fn chat_completion(
         {
             all_messages.push(json!({
                 "role": "system",
-                "content": format!("INTERNAL CONTEXT - ACTIVE TODO LIST:\n{}", todo_block)
+                "content": format!("{CONTEXT_TODO_MARKER}\n{}", todo_block)
             }));
         }
     }
 
-    if !loaded_skills_content.is_empty() {
-        let workspace_dir = state.workspace_dir.lock().unwrap().clone();
-        let workspace_root_display = workspace_dir.display().to_string();
-        let active_skills_context = format!(
-            "INTERNAL CONTEXT - ACTIVE SKILLS:\n\
-             Workspace root: {workspace_root_display}\n\n\
-             VIRTUAL SANDBOX (applies to ALL tools, not just `file_actions`):\n\
-             Every tool that touches the local filesystem is confined to the workspace root. \
-             This is enforced by the runtime — paths that resolve outside the workspace are \
-             rejected or require explicit user confirmation. The rules are:\n\
-             - `file_actions`: only files/dirs under the workspace root. Use `./...` paths \
-             or `.` for the workspace root; reuse exact paths returned by tools. Absolute \
-             paths and paths outside the workspace are rejected.\n\
-             - `run_cmd` / `run_shell`: the command's current working directory is the \
-             workspace root. `cd` / `Set-Location` / `pushd` to a path outside the workspace \
-             is rejected; destructive patterns and `sudo`/UAC elevation require explicit user \
-             confirmation. Treat the shell as also scoped to the workspace.\n\
-             - `memory` (user / repo scopes): entries are written to \
-             `<workspace>/memory/user/` and `<workspace>/memory/repo/`. The `key` field is \
-             sanitised to a filename — you cannot escape the workspace via the key.\n\
-             - `skill_read`: paths are locked to the active skill's own directory. Escape \
-             attempts via `..` are rejected.\n\
-             - MCP tools: NOT sandboxed — they can access any path the MCP server is \
-             configured to reach. Treat their path arguments as opaque; do not assume \
-             workspace-relative semantics.\n\
-             Do not reference app-data paths or external absolute paths in tool arguments; \
-             if a tool result points to a file, reuse the exact path it returned.\n\n\
-             Active skill instructions:{}",
-            loaded_skills_content
-        );
-        all_messages.push(json!({ "role": "user", "content": active_skills_context }));
-    }
-
-    for m in &messages {
+    if let Some(m) = last_user_msg {
         all_messages.push(json!({ "role": m.role, "content": m.content }));
     }
 

@@ -1,10 +1,10 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tiktoken_rs::cl100k_base;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, Manager, State};
+use tiktoken_rs::cl100k_base;
 use uuid::Uuid;
 
 use crate::{
@@ -440,7 +440,8 @@ fn build_active_tasks_snapshot(tasks: &[MissionTaskRecord]) -> String {
         return "- none".to_string();
     }
 
-    tasks.iter()
+    tasks
+        .iter()
         .map(|task| {
             format!(
                 "- [{}] {} (id: {})\\n  {}",
@@ -460,7 +461,10 @@ fn truncate_for_summary(text: &str, max_chars: usize) -> String {
 }
 
 fn summarize_message_for_memory(message: &Value) -> Option<String> {
-    let role = message.get("role").and_then(|value| value.as_str()).unwrap_or("unknown");
+    let role = message
+        .get("role")
+        .and_then(|value| value.as_str())
+        .unwrap_or("unknown");
 
     if let Some(tool_calls) = message.get("tool_calls").and_then(|value| value.as_array()) {
         let tool_names = tool_calls
@@ -470,7 +474,10 @@ fn summarize_message_for_memory(message: &Value) -> Option<String> {
             .filter_map(|name| name.as_str())
             .collect::<Vec<_>>();
         if !tool_names.is_empty() {
-            return Some(format!("- assistant requested tools: {}", tool_names.join(", ")));
+            return Some(format!(
+                "- assistant requested tools: {}",
+                tool_names.join(", ")
+            ));
         }
     }
 
@@ -495,11 +502,23 @@ fn format_memory_excerpt(messages: &[Value]) -> String {
         .join("\n")
 }
 
-fn build_agent_system_prompt(
-    agent: &SubAgent,
-    mission: &MissionStateSnapshot,
-    self_evolution_context: &str,
-) -> String {
+/// Static part of the sub-agent prompt — computed once per mission and reused
+/// across iterations so the LLM prompt cache keeps hitting on the prefix.
+fn build_agent_static_system_prompt(agent: &SubAgent, self_evolution_context: &str) -> String {
+    format!(
+        "{}\n\nAutonomous execution sub-agent. External mission state is authoritative for task tracking.\n\
+         Rules: track tasks via add_task/update_task_status/get_active_tasks/mark_mission_accomplished \
+         (not chat history); keep outputs execution-focused; create tasks for branches; \
+         clear active tasks before finishing. \
+         The latest mission snapshot is appended as the final system message every turn — \
+         always treat it as authoritative.{}",
+        agent.system_prompt, self_evolution_context,
+    )
+}
+
+/// Dynamic mission snapshot — refreshed every iteration and appended as the
+/// LAST message so changes never invalidate the cached prefix before it.
+fn build_mission_snapshot_prompt(mission: &MissionStateSnapshot) -> String {
     let episodic_summary = if mission.episodic_summary.trim().is_empty() {
         "(empty)".to_string()
     } else {
@@ -513,27 +532,27 @@ fn build_agent_system_prompt(
     };
 
     format!(
-        "{}\n\nAutonomous execution sub-agent. External mission state is authoritative for task tracking.\n\
+        "MISSION SNAPSHOT (refreshed each turn):\n\
          Mission ID: {}\nPrimary task: {}\nContext: {}\n{}\n\
-         Active tasks:\n{}\nEpisodic memory:\n{}\n\
-         Rules: track tasks via add_task/update_task_status/get_active_tasks/mark_mission_accomplished \
-         (not chat history); keep outputs execution-focused; create tasks for branches; \
-         clear active tasks before finishing.{}",
-        agent.system_prompt,
+         Active tasks:\n{}\nEpisodic memory:\n{}",
         mission.mission_id,
         mission.root_task_description,
         mission.root_task_context,
         completion_state,
         build_active_tasks_snapshot(&mission.active_tasks),
         episodic_summary,
-        self_evolution_context,
     )
 }
 
-fn build_agent_messages(system_prompt: &str, working_memory: &[Value]) -> Vec<Value> {
-    let mut messages = Vec::with_capacity(working_memory.len() + 1);
-    messages.push(json!({ "role": "system", "content": system_prompt }));
+fn build_agent_messages(
+    static_system_prompt: &str,
+    working_memory: &[Value],
+    snapshot_prompt: &str,
+) -> Vec<Value> {
+    let mut messages = Vec::with_capacity(working_memory.len() + 2);
+    messages.push(json!({ "role": "system", "content": static_system_prompt }));
     messages.extend(working_memory.iter().cloned());
+    messages.push(json!({ "role": "system", "content": snapshot_prompt }));
     messages
 }
 
@@ -603,12 +622,14 @@ async fn compress_working_memory_if_needed(
     url: &str,
     api_key: &str,
     model: &str,
-    system_prompt: &str,
+    static_system_prompt: &str,
+    snapshot_prompt: &str,
     working_memory: &mut Vec<Value>,
     episodic_summary: &mut String,
     context_budget: usize,
 ) -> Result<bool, String> {
-    let candidate_messages = build_agent_messages(system_prompt, working_memory);
+    let candidate_messages =
+        build_agent_messages(static_system_prompt, working_memory, snapshot_prompt);
     let estimated_tokens = estimate_message_tokens(&candidate_messages);
     let threshold = (context_budget as f32 * AGENT_CONTEXT_COMPRESSION_THRESHOLD) as usize;
     let should_compress = working_memory.len() > AGENT_WORKING_MEMORY_MESSAGES
@@ -621,7 +642,9 @@ async fn compress_working_memory_if_needed(
     let keep_count = if working_memory.len() > AGENT_WORKING_MEMORY_MESSAGES {
         AGENT_WORKING_MEMORY_MESSAGES
     } else {
-        working_memory.len().saturating_sub(AGENT_MIN_RECENT_MESSAGES)
+        working_memory
+            .len()
+            .saturating_sub(AGENT_MIN_RECENT_MESSAGES)
     };
 
     if working_memory.len() <= keep_count || keep_count == 0 {
@@ -745,22 +768,23 @@ pub fn list_agent_missions(
             )
             .map_err(|e| e.to_string())?;
 
-        let mapped_rows = stmt.query_map(rusqlite::params![session_id], |row| {
-            Ok(MissionRow {
-                mission_id: row.get(0)?,
-                session_id: row.get(1)?,
-                agent_id: row.get(2)?,
-                root_task_description: row.get(3)?,
-                root_task_context: row.get(4)?,
-                status: row.get(5)?,
-                mission_accomplished: row.get::<_, i64>(6)? != 0,
-                episodic_summary: row.get(7)?,
-                final_report: row.get(8)?,
-                created_at: row.get(9)?,
-                updated_at: row.get(10)?,
+        let mapped_rows = stmt
+            .query_map(rusqlite::params![session_id], |row| {
+                Ok(MissionRow {
+                    mission_id: row.get(0)?,
+                    session_id: row.get(1)?,
+                    agent_id: row.get(2)?,
+                    root_task_description: row.get(3)?,
+                    root_task_context: row.get(4)?,
+                    status: row.get(5)?,
+                    mission_accomplished: row.get::<_, i64>(6)? != 0,
+                    episodic_summary: row.get(7)?,
+                    final_report: row.get(8)?,
+                    created_at: row.get(9)?,
+                    updated_at: row.get(10)?,
+                })
             })
-        })
-        .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
 
         mapped_rows
             .collect::<Result<Vec<_>, _>>()
@@ -890,8 +914,11 @@ pub async fn orchestrate(
     // Step 3: Execute
     let use_parallel = orchestration.mode != "sequential" && plan.execution_mode != "sequential";
     let workspace_dir = state.workspace_dir.lock().unwrap().clone();
-    let skill_access_roots =
-        crate::skills::collect_self_evolution_roots(&state.skills_dir, Some(&workspace_dir), config.self_evolution_mode);
+    let skill_access_roots = crate::skills::collect_self_evolution_roots(
+        &state.skills_dir,
+        Some(&workspace_dir),
+        config.self_evolution_mode,
+    );
     let results = execute_tasks(
         app,
         &client,
@@ -1377,6 +1404,8 @@ pub async fn run_sub_agent(
         "role": "user",
         "content": task_system,
     })];
+    // Static system prompt: built once, reused every iteration (cache-friendly).
+    let static_system_prompt = build_agent_static_system_prompt(agent, &self_evolution_context);
     let max_iterations = (agent.max_iterations > 0).then_some(agent.max_iterations);
     let mut iterations: u32 = 0;
 
@@ -1397,7 +1426,8 @@ pub async fn run_sub_agent(
             let db = match state.db.lock() {
                 Ok(db) => db,
                 Err(err) => {
-                    let error = format!("Failed to lock database while loading mission state: {err}");
+                    let error =
+                        format!("Failed to lock database while loading mission state: {err}");
                     let _ = app.emit(
                         "agent-task-error",
                         json!({ "task_id": task.id, "agent_id": agent.id, "error": error }),
@@ -1434,14 +1464,15 @@ pub async fn run_sub_agent(
             }
         };
 
-        let system_prompt = build_agent_system_prompt(agent, &mission_snapshot, &self_evolution_context);
+        let snapshot_prompt = build_mission_snapshot_prompt(&mission_snapshot);
 
         match compress_working_memory_if_needed(
             client,
             url,
             &config.api_key,
             model,
-            &system_prompt,
+            &static_system_prompt,
+            &snapshot_prompt,
             &mut working_memory,
             &mut mission_snapshot.episodic_summary,
             context_budget,
@@ -1451,7 +1482,8 @@ pub async fn run_sub_agent(
             Ok(true) => {
                 let state = app.state::<AppState>();
                 if let Ok(db) = state.db.lock() {
-                    let _ = save_mission_summary(&db, &mission_id, &mission_snapshot.episodic_summary);
+                    let _ =
+                        save_mission_summary(&db, &mission_id, &mission_snapshot.episodic_summary);
                 };
                 let _ = app.emit(
                     "agent-task-state",
@@ -1476,8 +1508,11 @@ pub async fn run_sub_agent(
             }
         }
 
-        let system_prompt = build_agent_system_prompt(agent, &mission_snapshot, &self_evolution_context);
-        let messages = build_agent_messages(&system_prompt, &working_memory);
+        // Rebuild the snapshot after a possible compression (episodic summary
+        // may have changed), then append it as the final message.
+        let snapshot_prompt = build_mission_snapshot_prompt(&mission_snapshot);
+        let messages =
+            build_agent_messages(&static_system_prompt, &working_memory, &snapshot_prompt);
 
         let mut req_body = json!({
             "model": model,
@@ -1539,7 +1574,8 @@ pub async fn run_sub_agent(
 
                 if agent_tool_calls.is_empty() {
                     if !content.trim().is_empty() {
-                        working_memory.push(json!({ "role": "assistant", "content": content.clone() }));
+                        working_memory
+                            .push(json!({ "role": "assistant", "content": content.clone() }));
                     }
 
                     let mission_snapshot = {
@@ -1547,7 +1583,8 @@ pub async fn run_sub_agent(
                         let db = match state.db.lock() {
                             Ok(db) => db,
                             Err(err) => {
-                                let error = format!("Failed to lock database after agent turn: {err}");
+                                let error =
+                                    format!("Failed to lock database after agent turn: {err}");
                                 let _ = app.emit(
                                     "agent-task-error",
                                     json!({ "task_id": task.id, "agent_id": agent.id, "error": error }),
@@ -1619,7 +1656,8 @@ pub async fn run_sub_agent(
                         };
                     }
 
-                    working_memory.push(json!({ "role": "user", "content": AGENT_CONTINUE_PROMPT }));
+                    working_memory
+                        .push(json!({ "role": "user", "content": AGENT_CONTINUE_PROMPT }));
                     continue;
                 }
 
@@ -1659,7 +1697,8 @@ pub async fn run_sub_agent(
                         &[], // sub-agents don't track active skill dirs for skill_read
                     )
                     .await;
-                    working_memory.push(json!({ "role": "tool", "tool_call_id": id, "content": result }));
+                    working_memory
+                        .push(json!({ "role": "tool", "tool_call_id": id, "content": result }));
                 }
             }
         }
@@ -1716,7 +1755,11 @@ pub async fn run_sub_agent(
         task_id: task.id.clone(),
         agent_id: agent.id.clone(),
         agent_name: agent.name.clone(),
-        status: if mission_summary.as_ref().map(|mission| mission.mission_accomplished).unwrap_or(false) {
+        status: if mission_summary
+            .as_ref()
+            .map(|mission| mission.mission_accomplished)
+            .unwrap_or(false)
+        {
             "success".to_string()
         } else {
             "stopped".to_string()
