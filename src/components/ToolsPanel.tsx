@@ -163,43 +163,52 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                 <h2>Tools</h2>
                 <button className="close-btn" onClick={onClose}>✕</button>
             </div>
+            <div className="tools-description">
+                这是内置工具集
+            </div>
             <div className="tools-list">
                 {AVAILABLE_TOOLS.map(tool => (
-                    <div key={tool.id} className="tool-item-container">
-                        <div
-                            className={`tool-item ${selectedTools.includes(tool.id) ? "active" : ""}`}
-                            onClick={() => toggleTool(tool.id)}
-                        >
-                            <div className="tool-row">
-                                <label className="toggle-switch">
-                                    <input
-                                        type="checkbox"
-                                        checked={selectedTools.includes(tool.id)}
-                                        onChange={() => { }}
-                                    />
-                                    <span className="toggle-switch-slider" />
-                                </label>
-                                <div className="tool-info">
-                                    <span className="tool-name">{tool.name}</span>
-                                </div>
-                                <div className="tool-actions">
-                                    <button
-                                        className="tool-action-btn"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            setExpandedTool(expandedTool === tool.id ? null : tool.id);
-                                        }}
-                                    >
-                                        {expandedTool === tool.id ? "▲" : "▼"}
-                                    </button>
-                                </div>
+                    <div
+                        key={tool.id}
+                        className={`tool-item ${!selectedTools.includes(tool.id) ? "disabled" : ""}`}
+                    >
+                        <div className="tool-row">
+                            <label className="tool-toggle" title={selectedTools.includes(tool.id) ? "Disable" : "Enable"}>
+                                <input
+                                    type="checkbox"
+                                    checked={selectedTools.includes(tool.id)}
+                                    onChange={() => toggleTool(tool.id)}
+                                />
+                                <span className="tool-toggle-slider" />
+                            </label>
+                            <div className="tool-info">
+                                <span
+                                    className={`tool-name ${selectedTools.includes(tool.id) ? "active" : ""}`}
+                                    onClick={() => toggleTool(tool.id)}
+                                >
+                                    {tool.name}
+                                </span>
+                                <span className="tool-transport">
+                                    {tool.description.split('\n')[0]}
+                                </span>
                             </div>
-                            {expandedTool === tool.id && (
-                                <div className="tool-desc-expanded">
-                                    {tool.description}
-                                </div>
-                            )}
+                            <div className="tool-actions">
+                                <button
+                                    className="tool-action-btn"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setExpandedTool(expandedTool === tool.id ? null : tool.id);
+                                    }}
+                                >
+                                    {expandedTool === tool.id ? "▲" : "▼"}
+                                </button>
+                            </div>
                         </div>
+                        {expandedTool === tool.id && (
+                            <div className="tool-desc-expanded">
+                                {tool.description}
+                            </div>
+                        )}
                     </div>
                 ))}
             </div>
