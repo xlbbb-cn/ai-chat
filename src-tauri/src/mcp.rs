@@ -338,11 +338,13 @@ pub fn sanitize_fn_name(s: &str) -> String {
 /// On Windows, Tauri apps may not inherit the full system PATH, making
 /// commands like `npx` or `uvx` fail with "program not found".
 /// The fix is to route through `cmd.exe /C` so the shell resolves PATH.
-/// On Unix, we wrap through a shell for the same reason.  On macOS we use
-/// the user's login shell (`zsh -l`) so that `.zprofile` / `.zshrc` are
-/// sourced — this is essential for commands like `npx` installed via nvm
-/// or other version managers that modify PATH in shell init files. Other
-/// Unix flavours use `sh -c` as before.
+/// On Unix, we wrap through a shell for the same reason.  We detect the
+/// user's login shell (`$SHELL`) and run with `-l -c` so that shell init
+/// files (`.profile`, `.bashrc`, `.zshrc`, etc.) are sourced, picking up
+/// PATH modifications from nvm, Homebrew, rustup, pyenv, etc.  GUI apps
+/// (or any non-terminal-launched process) don't inherit the full PATH of
+/// an interactive shell, so wrapping through a login shell is the only
+/// portable way to make commands like `npx` work.
 ///
 /// `pipe_stderr` controls whether stderr is captured. Diagnostic paths
 /// (test, stdio_init used by the LLM) pipe stderr so it can be drained
@@ -414,26 +416,33 @@ fn build_stdio_cmd(server: &McpServer, pipe_stderr: bool) -> tokio::process::Com
                 shell_cmd.push_str(&shell_quote_unix(arg));
             }
 
-            // On macOS, use the user's login shell (defaulting to zsh) so
-            // that `.zprofile` / `.zshrc` is sourced, giving access to
-            // PATH modifications from nvm, brew, rustup, etc.
-            // On other Unix, fall back to plain `sh -c`.
-            #[cfg(target_os = "macos")]
-            let mut cmd = {
-                let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-                let mut c = tokio::process::Command::new(&shell);
-                c.args(["-l", "-c", &shell_cmd]);
-                c
+            // Use the user's login shell (`$SHELL`) with `-l -c` so that
+            // shell init files (`.profile`, `.bashrc`, `.zshrc`) are
+            // sourced.  GUI apps don't inherit the full PATH from the
+            // interactive shell, so wrapping through a login shell is the
+            // only portable way to make commands like `npx` work.
+            // `.zshrc` / `.bashrc` are normally NOT sourced by login
+            // shells (only interactive ones), so we also source them
+            // explicitly when the shell is zsh or bash.
+            let shell = std::env::var("SHELL").unwrap_or_else(|_| {
+                #[cfg(target_os = "macos")]
+                { "/bin/zsh".to_string() }
+                #[cfg(not(target_os = "macos"))]
+                { "/bin/sh".to_string() }
+            });
+            let shell_name = std::path::Path::new(&shell)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("sh");
+            let source_rc = match shell_name {
+                "zsh" => "[ -r ~/.zshrc ] && source ~/.zshrc; ",
+                "bash" => "[ -r ~/.bashrc ] && source ~/.bashrc; ",
+                _ => "",
             };
-
-            #[cfg(not(target_os = "macos"))]
-            let mut cmd = {
-                let mut c = tokio::process::Command::new("sh");
-                c.args(["-c", &shell_cmd]);
-                c
-            };
-
-            cmd.stdin(Stdio::piped())
+            let full_cmd = format!("{}{}", source_rc, shell_cmd);
+            let mut cmd = tokio::process::Command::new(&shell);
+            cmd.args(["-l", "-c", &full_cmd])
+                .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(stderr_cfg);
             for (k, v) in &server.env {

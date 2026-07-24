@@ -3075,12 +3075,33 @@ pub async fn execute_tool(
                     ),
                 );
 
+                // Use the user's login shell (`$SHELL`) with `-lc` so
+                // that shell init files are sourced, picking up PATH
+                // modifications from nvm, Homebrew, rustup, etc.
                 let mut cmd = tokio::process::Command::new("sudo");
                 cmd.arg("-S").arg("-p").arg("");
                 if let Some(u) = username {
                     cmd.arg("-u").arg(u);
                 }
-                cmd.arg("bash").arg("-lc").arg(scoped_code.clone());
+
+                let sudo_shell = std::env::var("SHELL").unwrap_or_else(|_| {
+                    #[cfg(target_os = "macos")]
+                    { "/bin/zsh".to_string() }
+                    #[cfg(not(target_os = "macos"))]
+                    { "/bin/sh".to_string() }
+                });
+                let sudo_shell_name = std::path::Path::new(&sudo_shell)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("sh");
+                let sudo_source_rc = match sudo_shell_name {
+                    "zsh" => "[ -r ~/.zshrc ] && source ~/.zshrc; ",
+                    "bash" => "[ -r ~/.bashrc ] && source ~/.bashrc; ",
+                    _ => "",
+                };
+                let full_scoped = format!("{}{}", sudo_source_rc, scoped_code);
+                cmd.arg(&sudo_shell).arg("-lc").arg(full_scoped);
+
                 cmd.current_dir(command_cwd);
 
                 return tokio::time::timeout(
@@ -3582,8 +3603,29 @@ pub async fn run_command(
 
             #[cfg(not(windows))]
             let c = {
-                let mut cmd = tokio::process::Command::new("bash");
-                cmd.args(["-c", &code]);
+                // Use the user's login shell (`$SHELL`) with `-l -c` so
+                // that shell init files are sourced, picking up PATH
+                // modifications from nvm, Homebrew, rustup, etc.
+                // `.zshrc` / `.bashrc` are only loaded for interactive
+                // shells, so we source them explicitly here.
+                let shell = std::env::var("SHELL").unwrap_or_else(|_| {
+                    #[cfg(target_os = "macos")]
+                    { "/bin/zsh".to_string() }
+                    #[cfg(not(target_os = "macos"))]
+                    { "/bin/sh".to_string() }
+                });
+                let shell_name = std::path::Path::new(&shell)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("sh");
+                let source_rc = match shell_name {
+                    "zsh" => "[ -r ~/.zshrc ] && source ~/.zshrc; ",
+                    "bash" => "[ -r ~/.bashrc ] && source ~/.bashrc; ",
+                    _ => "",
+                };
+                let full_cmd = format!("{}{}", source_rc, code);
+                let mut cmd = tokio::process::Command::new(&shell);
+                cmd.args(["-l", "-c", &full_cmd]);
                 cmd
             };
 
