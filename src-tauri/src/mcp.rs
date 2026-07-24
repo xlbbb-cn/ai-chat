@@ -338,7 +338,11 @@ pub fn sanitize_fn_name(s: &str) -> String {
 /// On Windows, Tauri apps may not inherit the full system PATH, making
 /// commands like `npx` or `uvx` fail with "program not found".
 /// The fix is to route through `cmd.exe /C` so the shell resolves PATH.
-/// On Unix, we use `sh -c` for the same reason.
+/// On Unix, we wrap through a shell for the same reason.  On macOS we use
+/// the user's login shell (`zsh -l`) so that `.zprofile` / `.zshrc` are
+/// sourced — this is essential for commands like `npx` installed via nvm
+/// or other version managers that modify PATH in shell init files. Other
+/// Unix flavours use `sh -c` as before.
 ///
 /// `pipe_stderr` controls whether stderr is captured. Diagnostic paths
 /// (test, stdio_init used by the LLM) pipe stderr so it can be drained
@@ -409,9 +413,27 @@ fn build_stdio_cmd(server: &McpServer, pipe_stderr: bool) -> tokio::process::Com
                 shell_cmd.push(' ');
                 shell_cmd.push_str(&shell_quote_unix(arg));
             }
-            let mut cmd = tokio::process::Command::new("sh");
-            cmd.args(["-c", &shell_cmd])
-                .stdin(Stdio::piped())
+
+            // On macOS, use the user's login shell (defaulting to zsh) so
+            // that `.zprofile` / `.zshrc` is sourced, giving access to
+            // PATH modifications from nvm, brew, rustup, etc.
+            // On other Unix, fall back to plain `sh -c`.
+            #[cfg(target_os = "macos")]
+            let mut cmd = {
+                let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+                let mut c = tokio::process::Command::new(&shell);
+                c.args(["-l", "-c", &shell_cmd]);
+                c
+            };
+
+            #[cfg(not(target_os = "macos"))]
+            let mut cmd = {
+                let mut c = tokio::process::Command::new("sh");
+                c.args(["-c", &shell_cmd]);
+                c
+            };
+
+            cmd.stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(stderr_cfg);
             for (k, v) in &server.env {
