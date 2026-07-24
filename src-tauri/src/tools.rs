@@ -15,89 +15,491 @@ enum OutputDecodeHint {
     PowerShell,
 }
 
-// ─── Dangerous command detection ─────────────────────────────────────────────
+// ─── Command risk classification ─────────────────────────────────────────────
 
-/// Patterns that indicate a script may have destructive/system-altering effects.
-static DANGEROUS_SCRIPT_PATTERNS: &[&str] = &[
-    "rm -rf",
-    "rm -fr",
-    "del /f",
-    "del /s",
-    "rd /s",
-    "rmdir /s",
-    "format ",
+/// Risk level assigned to a command before execution.
+/// Lower numeric value = higher risk (L0 is most dangerous).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RiskLevel {
+    /// L0 — System risk: could modify OS files, boot config, kernel, or system services.
+    L0 = 0,
+    /// L1 — User-data risk: could modify/delete user files, install software, etc.
+    L1 = 1,
+    /// L6 — Safe: read-only, informational, or purely non-destructive.
+    L6 = 6,
+}
+
+impl RiskLevel {
+    pub fn description(self) -> &'static str {
+        match self {
+            RiskLevel::L0 => "L0 system risk — may affect OS integrity",
+            RiskLevel::L1 => "L1 file risk — may modify or delete files",
+            RiskLevel::L6 => "L6 safe — read-only or non-destructive",
+        }
+    }
+
+    /// Confirmation `kind` string sent to the frontend; also used for auto-accept config.
+    pub fn confirm_kind(self) -> &'static str {
+        match self {
+            RiskLevel::L0 => "dangerous",
+            RiskLevel::L1 => "file_risk",
+            RiskLevel::L6 => "safe",
+        }
+    }
+}
+
+// ─── Sorted executable name sets (binary_search, O(log n)) ───────────────────
+
+/// L0 executables — always system-risk.
+static L0_EXECUTABLES: &[&str] = &[
+    "attrib",
+    "bcdedit",
+    "chkconfig",
+    "dd",
     "diskpart",
     "fdisk",
-    "reg add",
-    "reg delete",
-    "reg import",
-    "netsh ",
-    "net user",
-    "net localgroup",
-    "sc delete",
-    "sc stop",
-    "sc config",
-    "schtasks /create",
-    "schtasks /delete",
-    "bcdedit",
-    "bootcfg",
-    "takeown",
-    "icacls",
-    "apt install",
-    "apt remove",
-    "apt purge",
-    "yum install",
-    "yum remove",
-    "dnf remove",
-    "winget install",
-    "winget uninstall",
-    "choco install",
-    "choco uninstall",
-    "pip install",
-    "pip uninstall",
-    "pip3 install",
-    "npm install -g",
-    "npm uninstall -g",
-    "set-executionpolicy",
-    "invoke-expression",
-    "shutdown",
-    "reboot",
+    "format",
     "halt",
+    "icacls",
+    "insmod",
+    "iptables",
+    "mkfs",
+    "modprobe",
+    "mount",
+    "netsh",
+    "nft",
     "poweroff",
+    "reboot",
+    "reg",
+    "regedit",
+    "rmmod",
+    "sc",
+    "schtasks",
+    "shutdown",
+    "systemctl",
+    "takeown",
+    "umount",
 ];
 
-/// Executables considered dangerous when used in direct mode.
-static DANGEROUS_EXECUTABLES: &[&str] = &[
-    "rm", "del", "format", "fdisk", "diskpart", "netsh", "sc", "reg", "regedit", "bcdedit",
-    "schtasks", "net", "takeown", "icacls", "dd", "mkfs", "shutdown", "reboot", "halt", "poweroff",
-    "attrib",
+/// L1 executables — may modify files/data but not typically system-critical.
+static L1_EXECUTABLES: &[&str] = &[
+    "apt",
+    "apt-get",
+    "brew",
+    "cargo",
+    "chmod",
+    "choco",
+    "chown",
+    "composer",
+    "cp",
+    "del",
+    "dnf",
+    "gem",
+    "git",
+    "make",
+    "mkdir",
+    "mv",
+    "npm",
+    "npx",
+    "pacman",
+    "pip",
+    "pip3",
+    "pnpm",
+    "rename",
+    "rm",
+    "rmdir",
+    "tee",
+    "touch",
+    "winget",
+    "yarn",
+    "yum",
 ];
 
-/// Returns a human-readable reason if the command is considered dangerous, or None.
-fn is_dangerous(cmd_type: &str, code: &str) -> Option<String> {
+/// L6 executables — known-safe, read-only or informational.
+static L6_EXECUTABLES: &[&str] = &[
+    "alias",
+    "arch",
+    "awk",
+    "basename",
+    "cat",
+    "cmp",
+    "comm",
+    "curl",
+    "cut",
+    "date",
+    "df",
+    "diff",
+    "dirname",
+    "du",
+    "echo",
+    "env",
+    "file",
+    "find",
+    "free",
+    "grep",
+    "head",
+    "help",
+    "history",
+    "hostname",
+    "htop",
+    "info",
+    "less",
+    "ln",
+    "locate",
+    "ls",
+    "man",
+    "more",
+    "printenv",
+    "printf",
+    "ps",
+    "pwd",
+    "readlink",
+    "realpath",
+    "sed",
+    "sort",
+    "stat",
+    "tail",
+    "time",
+    "top",
+    "tr",
+    "type",
+    "uname",
+    "uniq",
+    "uptime",
+    "wc",
+    "wget",
+    "whatis",
+    "whereis",
+    "which",
+    "whoami",
+];
+
+// ─── Subcommand-aware classification for meta-tools ──────────────────────────
+
+/// (executable, subcommand_or_flag_substring, risk_level)
+static SUBCOMMAND_RISK: &[(&str, &str, RiskLevel)] = &[
+    // git — L1 for destructive operations
+    ("git", "reset --hard", RiskLevel::L1),
+    ("git", "reset --merge", RiskLevel::L1),
+    ("git", "clean -f", RiskLevel::L1),
+    ("git", "push --force", RiskLevel::L1),
+    ("git", "push -f", RiskLevel::L1),
+    ("git", "push --delete", RiskLevel::L1),
+    ("git", "branch -D", RiskLevel::L1),
+    ("git", "stash drop", RiskLevel::L1),
+    ("git", "stash clear", RiskLevel::L1),
+    ("git", "checkout --", RiskLevel::L1),
+    // cargo — L1 for install/publish, L6 for build/check/test
+    ("cargo", "install", RiskLevel::L1),
+    ("cargo", "uninstall", RiskLevel::L1),
+    ("cargo", "publish", RiskLevel::L1),
+    ("cargo", "clean", RiskLevel::L1),
+    // npm/npx — L1 for install/uninstall
+    ("npm", "install", RiskLevel::L1),
+    ("npm", "uninstall", RiskLevel::L1),
+    ("npm", "update", RiskLevel::L1),
+    ("npm", "publish", RiskLevel::L1),
+    // pip — L1 for install/uninstall
+    ("pip", "install", RiskLevel::L1),
+    ("pip", "uninstall", RiskLevel::L1),
+    ("pip3", "install", RiskLevel::L1),
+    ("pip3", "uninstall", RiskLevel::L1),
+    // make — L1 for install/uninstall
+    ("make", "install", RiskLevel::L1),
+    ("make", "uninstall", RiskLevel::L1),
+    // rm — L0 if targeting root
+    ("rm", "-rf /", RiskLevel::L0),
+    ("rm", "-fr /", RiskLevel::L0),
+    // chmod/chown — L0 if 777 on / or root ownership
+    ("chmod", "777 /", RiskLevel::L0),
+    ("chown", "root:", RiskLevel::L0),
+];
+
+/// Known-safe git subcommands → L6.
+static L6_GIT_SUBCOMMANDS: &[&str] = &[
+    "blame",
+    "branch",
+    "cherry",
+    "config",
+    "describe",
+    "diff",
+    "grep",
+    "log",
+    "ls-files",
+    "ls-tree",
+    "reflog",
+    "remote",
+    "rev-list",
+    "rev-parse",
+    "shortlog",
+    "show",
+    "stash",
+    "status",
+    "tag",
+    "whatchanged",
+];
+
+/// Known-safe cargo subcommands → L6.
+static L6_CARGO_SUBCOMMANDS: &[&str] = &[
+    "audit",
+    "bench",
+    "build",
+    "check",
+    "clippy",
+    "doc",
+    "fmt",
+    "help",
+    "metadata",
+    "report",
+    "run",
+    "test",
+    "tree",
+    "version",
+];
+
+/// Known-safe npm subcommands → L6.
+static L6_NPM_SUBCOMMANDS: &[&str] = &[
+    "audit",
+    "bin",
+    "build",
+    "config",
+    "dev",
+    "docs",
+    "exec",
+    "explore",
+    "format",
+    "fund",
+    "help",
+    "lint",
+    "list",
+    "ls",
+    "outdated",
+    "prefix",
+    "repo",
+    "restart",
+    "root",
+    "run",
+    "search",
+    "start",
+    "stop",
+    "test",
+    "version",
+    "view",
+    "watch",
+];
+
+// ─── System path prefixes (escalate to L0 if targeted by a destructive cmd) ──
+
+static SYSTEM_PATH_PREFIXES: &[&str] = &[
+    "/etc/",
+    "/boot/",
+    "/sys/",
+    "/proc/",
+    "/dev/",
+    "/usr/lib/",
+    "/usr/share/",
+    "/usr/local/lib/",
+    "/lib/",
+    "/lib64/",
+    "/bin/",
+    "/sbin/",
+    "/usr/bin/",
+    "/usr/sbin/",
+    "/System/",
+    "/Library/",
+    "/Applications/",
+    "c:\\windows\\",
+    "c:\\program files\\",
+    "c:\\program files (x86)\\",
+    "c:\\programdata\\",
+    "hkey_local_machine",
+    "hklm\\",
+];
+
+// ─── Compiled regex sets (built once, matched in a single pass) ──────────────
+
+fn l0_regex_set() -> &'static regex::RegexSet {
+    use std::sync::OnceLock;
+    static SET: OnceLock<regex::RegexSet> = OnceLock::new();
+    SET.get_or_init(|| {
+        regex::RegexSet::new([
+            // Disk destruction
+            r"dd\s+if=.*of=/dev/",
+            r"mkfs\.",
+            r">\s*/dev/sd",
+            r">\s*/dev/nvme",
+            r">\s*/dev/xvd",
+            r">\s*/dev/mmcblk",
+            // System services
+            r"systemctl\s+(stop|disable|mask)\s",
+            r"sc\s+(stop|delete|config)\s",
+            // Boot/OS config
+            r"bcdedit\s+/",
+            r"grub-install",
+            r"update-grub",
+            // Security bypass
+            r"set-executionpolicy\s+(unrestricted|bypass|remotesigned)",
+            r"invoke-expression\s",
+            r"\biex\s",
+            // Firewall
+            r"iptables\s+-[ADIF]",
+            r"nft\s+(add|delete|insert)\s",
+            r"ufw\s+(enable|disable|deny|allow)",
+            // Kernel modules
+            r"(insmod|modprobe|rmmod)\s",
+            // Shutdown/reboot
+            r"\b(shutdown|reboot|halt|poweroff|init\s+[06])\b",
+            // Format/partition
+            r"\b(format|fdisk|diskpart)\b",
+            // Registry (Windows)
+            r"reg\s+(add|delete|import)\s",
+            r"schtasks\s+/(create|delete)",
+            // netsh
+            r"netsh\s",
+        ])
+        .expect("L0 regex patterns must compile")
+    })
+}
+
+fn l1_regex_set() -> &'static regex::RegexSet {
+    use std::sync::OnceLock;
+    static SET: OnceLock<regex::RegexSet> = OnceLock::new();
+    SET.get_or_init(|| {
+        regex::RegexSet::new([
+            // File deletion
+            r"rm\s+-rf",
+            r"rm\s+-fr",
+            r"rm\s+-r\b",
+            r"del\s+/[fs]",
+            r"rd\s+/s",
+            r"rmdir\s+/s",
+            // Forceful git
+            r"git\s+(push\s+--force|push\s+-f|reset\s+--hard|clean\s+-f|branch\s+-D|stash\s+(drop|clear))",
+            // Package manager install/remove
+            r"(apt|apt-get|yum|dnf|brew|pacman|choco|winget)\s+(install|remove|purge|uninstall)\s",
+            r"(pip|pip3)\s+(install|uninstall)\s",
+            r"npm\s+(install|uninstall)\s",
+            r"cargo\s+(install|uninstall)\s",
+            // Global npm install
+            r"npm\s+install\s+-g",
+            // make install
+            r"make\s+install",
+            // Recursive chmod/chown
+            r"ch(mod|own)\s+-R\s",
+        ])
+        .expect("L1 regex patterns must compile")
+    })
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+fn sorted_contains(slice: &[&str], needle: &str) -> bool {
+    slice.binary_search(&needle).is_ok()
+}
+
+fn targets_system_path(args_lower: &str) -> bool {
+    SYSTEM_PATH_PREFIXES
+        .iter()
+        .any(|prefix| args_lower.contains(prefix))
+}
+
+fn check_subcommand_risk(exe: &str, full_code_lower: &str) -> Option<RiskLevel> {
+    for (tool, pattern, risk) in SUBCOMMAND_RISK {
+        if *tool == exe && full_code_lower.contains(pattern) {
+            return Some(*risk);
+        }
+    }
+
+    // Meta-tools: known-safe subcommands → downgrade to L6
+    let first_token = full_code_lower.split_whitespace().nth(1).unwrap_or("");
+    match exe {
+        "git" if sorted_contains(L6_GIT_SUBCOMMANDS, first_token) => Some(RiskLevel::L6),
+        "cargo" if sorted_contains(L6_CARGO_SUBCOMMANDS, first_token) => Some(RiskLevel::L6),
+        "npm" if sorted_contains(L6_NPM_SUBCOMMANDS, first_token) => Some(RiskLevel::L6),
+        _ => None,
+    }
+}
+
+fn classify_executable(exe_name: &str, full_code: &str) -> RiskLevel {
+    let exe_lower = exe_name.to_lowercase();
+    let code_lower = full_code.to_lowercase();
+
+    // 1) Fast path: known-safe → L6 (unless subcommand overrides)
+    if sorted_contains(L6_EXECUTABLES, &exe_lower) {
+        if let Some(risk) = check_subcommand_risk(&exe_lower, &code_lower) {
+            return risk;
+        }
+        return RiskLevel::L6;
+    }
+
+    // 2) System-risk executables
+    if sorted_contains(L0_EXECUTABLES, &exe_lower) {
+        // Escalate to L0 if targeting system paths
+        if targets_system_path(&code_lower) {
+            return RiskLevel::L0;
+        }
+        return RiskLevel::L1;
+    }
+
+    // 3) User-data risk executables
+    if sorted_contains(L1_EXECUTABLES, &exe_lower) {
+        if let Some(risk) = check_subcommand_risk(&exe_lower, &code_lower) {
+            return risk;
+        }
+        return RiskLevel::L1;
+    }
+
+    // 4) Unknown executable — conservative: treat as L1
+    RiskLevel::L1
+}
+
+fn classify_script_risk(code: &str) -> RiskLevel {
     let lower = code.to_lowercase();
+
+    // L0 patterns (most critical)
+    if l0_regex_set().is_match(&lower) {
+        return RiskLevel::L0;
+    }
+
+    // Destructive operation + system path → L0
+    let has_destructive = lower.contains("rm ")
+        || lower.contains("del ")
+        || lower.contains("mv ")
+        || lower.contains('>')
+        || lower.contains("chmod ")
+        || lower.contains("chown ")
+        || lower.contains("dd ");
+    if has_destructive && targets_system_path(&lower) {
+        return RiskLevel::L0;
+    }
+
+    // L1 patterns
+    if l1_regex_set().is_match(&lower) {
+        return RiskLevel::L1;
+    }
+
+    RiskLevel::L6
+}
+
+/// Classify a command's risk level into L0 (system), L1 (file/data), or L6 (safe).
+///
+/// For `cmd_type == "direct"` the executable name drives classification with
+/// subcommand awareness (e.g. `git log` → L6, `git reset --hard` → L1).
+/// For shell types the full script body is matched against compiled regex sets.
+pub fn classify_risk(cmd_type: &str, code: &str) -> RiskLevel {
     if cmd_type == "direct" {
         let parts = split_command_line(code);
         if let Some(first) = parts.first() {
             let exe_name = Path::new(first.as_str())
                 .file_stem()
                 .and_then(|s| s.to_str())
-                .unwrap_or(first.as_str())
-                .to_lowercase();
-            if DANGEROUS_EXECUTABLES.contains(&exe_name.as_str()) {
-                return Some(format!(
-                    "executable '{}' is potentially destructive",
-                    exe_name
-                ));
-            }
+                .unwrap_or(first.as_str());
+            return classify_executable(exe_name, code);
         }
+        return RiskLevel::L6;
     }
-    for pattern in DANGEROUS_SCRIPT_PATTERNS {
-        if lower.contains(pattern) {
-            return Some(format!("dangerous pattern detected: '{}'", pattern));
-        }
-    }
-    None
+
+    classify_script_risk(code)
 }
 
 /// Simple command-line splitter that handles single and double quotes.
@@ -2502,12 +2904,13 @@ pub async fn execute_tool(
 
             let parts = split_command_line(&command);
             let sudo_requested = parts.first().is_some_and(|p| is_sudo_executable(p));
+            let risk = classify_risk("direct", &command);
             let mut reasons: Vec<String> = vec![];
             if sudo_requested {
                 reasons.push("privileged execution requested via sudo".to_string());
             }
-            if let Some(reason) = is_dangerous("direct", &command) {
-                reasons.push(reason);
+            if risk <= RiskLevel::L1 {
+                reasons.push(risk.description().to_string());
             }
 
             // ── Confirmation / privilege prompts ─────────────────────────────
@@ -2515,7 +2918,7 @@ pub async fn execute_tool(
             let mut sudo_password: Option<String> = None;
             if !reasons.is_empty() {
                 let requires_auth = if sudo_requested { "sudo" } else { "none" };
-                let kind = if sudo_requested { "sudo" } else { "dangerous" };
+                let kind = if sudo_requested { "sudo" } else { risk.confirm_kind() };
                 let confirm = request_tool_confirmation(
                     app,
                     reasons.join("; "),
@@ -2620,8 +3023,9 @@ pub async fn execute_tool(
             if elevated_requested {
                 reasons.push("administrator elevation requested (UAC)".to_string());
             }
-            if let Some(reason) = is_dangerous(&shell_type, &code) {
-                reasons.push(reason);
+            let risk = classify_risk(&shell_type, &code);
+            if risk <= RiskLevel::L1 {
+                reasons.push(risk.description().to_string());
             }
 
             let mut sudo_username: Option<String> = None;
@@ -2632,7 +3036,7 @@ pub async fn execute_tool(
                 } else if elevated_requested {
                     ("elevation", "elevation")
                 } else {
-                    ("dangerous", "none")
+                    (risk.confirm_kind(), "none")
                 };
 
                 let confirm = request_tool_confirmation(
