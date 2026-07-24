@@ -9,8 +9,8 @@ use uuid::Uuid;
 
 use crate::{
     llm_complete::{
-        apply_completion_token_limit, extract_upstream_error_message, stream_llm_request,
-        StreamOptions,
+        apply_completion_token_limit, extract_upstream_error_message, sanitize_tool_pairs,
+        stream_llm_request, StreamOptions,
     },
     tools, AppConfig, AppState,
 };
@@ -824,10 +824,11 @@ async fn call_llm_once(
     client: &Client,
     url: &str,
     api_key: &str,
-    messages: Vec<Value>,
+    mut messages: Vec<Value>,
     model: &str,
     max_tokens: u32,
 ) -> Result<String, String> {
+    sanitize_tool_pairs(&mut messages);
     let mut body = json!({
         "model": model,
         "messages": messages,
@@ -1511,8 +1512,9 @@ pub async fn run_sub_agent(
         // Rebuild the snapshot after a possible compression (episodic summary
         // may have changed), then append it as the final message.
         let snapshot_prompt = build_mission_snapshot_prompt(&mission_snapshot);
-        let messages =
+        let mut messages =
             build_agent_messages(&static_system_prompt, &working_memory, &snapshot_prompt);
+        sanitize_tool_pairs(&mut messages);
 
         let mut req_body = json!({
             "model": model,

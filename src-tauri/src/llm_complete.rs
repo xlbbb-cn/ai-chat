@@ -303,6 +303,82 @@ fn merge_summary_lines(existing_summary: Option<&str>, new_lines: &[String]) -> 
     merged.join("\n")
 }
 
+/// Validate and sanitize the messages array before sending to the API.
+///
+/// Ensures that every `role: "tool"` message has a preceding `role: "assistant"`
+/// message whose `tool_calls` array contains a matching `tool_call_id`.  Any
+/// orphaned tool message (no matching assistant), duplicate tool response for
+/// an already-satisfied id, and incomplete assistant round (one or more of its
+/// tool_call_ids never received a response) are **all** removed — including the
+/// tool messages tied to an incomplete assistant.
+pub fn sanitize_tool_pairs(all_messages: &mut Vec<Value>) {
+    if all_messages.is_empty() {
+        return;
+    }
+
+    let mut keep = vec![true; all_messages.len()];
+
+    // Stack entries: (assistant_index, unconsumed_ids, consumed_tool_indices)
+    let mut assistant_stack: Vec<(usize, std::collections::HashSet<String>, Vec<usize>)> =
+        Vec::new();
+
+    for (i, msg) in all_messages.iter().enumerate() {
+        let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("");
+
+        if role == "assistant" {
+            if let Some(tcs) = msg.get("tool_calls").and_then(|v| v.as_array()) {
+                if !tcs.is_empty() {
+                    let ids: std::collections::HashSet<String> = tcs
+                        .iter()
+                        .filter_map(|tc| tc.get("id").and_then(|v| v.as_str()))
+                        .map(|s| s.to_string())
+                        .collect();
+                    assistant_stack.push((i, ids, Vec::new()));
+                }
+            }
+        } else if role == "tool" {
+            let call_id = msg
+                .get("tool_call_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            // Search from newest assistant backwards so a tool response is
+            // paired with the most recent round that declared its id.
+            let mut found = false;
+            for (_, ref mut ids, ref mut consumed) in assistant_stack.iter_mut().rev() {
+                if ids.remove(&call_id) {
+                    consumed.push(i);
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                keep[i] = false; // orphaned (or duplicate) — no matching assistant tool_call
+            }
+        }
+    }
+
+    // Remove incomplete assistants (unconsumed ids remain) AND their tool
+    // messages, so we never send a partial round to the API.
+    for &(idx, ref remaining_ids, ref tool_indices) in &assistant_stack {
+        if !remaining_ids.is_empty() {
+            keep[idx] = false; // incomplete round
+            for &ti in tool_indices {
+                keep[ti] = false;
+            }
+        }
+    }
+
+    // ── Apply removals ───────────────────────────────────────────────────────
+    let mut cleaned: Vec<Value> = Vec::with_capacity(all_messages.len());
+    for (i, msg) in all_messages.drain(..).enumerate() {
+        if keep[i] {
+            cleaned.push(msg);
+        }
+    }
+    *all_messages = cleaned;
+}
+
 fn rebuild_without_compression(
     all_messages: &mut Vec<Value>,
     pinned: Vec<Value>,
@@ -1013,6 +1089,10 @@ pub async fn chat_completion(
     }
 
     loop {
+        // Sanitize tool call pairs before each request to prevent the API error:
+        // "Messages with role 'tool' must be a response to a preceding message with 'tool_calls'"
+        sanitize_tool_pairs(&mut all_messages);
+
         let effective_max_tokens = config
             .model_settings
             .max_tokens
