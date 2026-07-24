@@ -285,7 +285,7 @@ export function ChatMessage({ message, showRetry = false, onRetry }: Props) {
   return (
     <div className={`chat-message-shell ${isUser ? "user" : "assistant"}`}>
       <div className={`chat-message ${isUser ? "user" : "assistant"}`}>
-        <div className="message-role">{isUser ? "You" : "Assistant"}</div>
+        {/* <div className="message-role">{isUser ? "You" : "Assistant"}</div> */}
 
         {reasoningContent && (
           <details className="message-reasoning">
