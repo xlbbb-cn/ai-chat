@@ -159,6 +159,7 @@
 }
 
 .message-content {
+  margin-bottom: 20px;
   font-size: 14px;
   line-height: 1.65;
   min-width: 0;
