@@ -212,32 +212,31 @@ export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
               return (
                 <div
                   key={skill.name}
-                  className={`skill-item ${isActive ? "active" : ""}`}
+                  className={`skill-item ${!isActive ? "disabled" : ""}`}
                 >
-                  <div className="skill-content">
-                    <div className="skill-title-row">
-                      <label className="toggle-switch">
-                        <input
-                          type="checkbox"
-                          checked={isActive}
-                          onChange={(e) => onToggle(skill.name, e.target.checked)}
-                        />
-                        <span className="toggle-switch-slider" />
-                      </label>
+                  <div className="skill-row">
+                    <label className="skill-toggle" title={isActive ? "Disable" : "Enable"}>
+                      <input
+                        type="checkbox"
+                        checked={isActive}
+                        onChange={(e) => onToggle(skill.name, e.target.checked)}
+                      />
+                      <span className="skill-toggle-slider" />
+                    </label>
+                    <div className="skill-info">
                       <span
                         className={`skill-name ${isActive ? "active" : ""}`}
-                        title={`Click to ${isActive ? "disable" : "enable"} ${skill.name}`}
-                        onClick={(e) => { e.stopPropagation(); onToggle(skill.name, !isActive); }}
+                        onClick={() => onToggle(skill.name, !isActive)}
                       >
                         {skill.name}
                       </span>
+                      <span className="skill-transport">{skill.description}</span>
                     </div>
-                    <span className="skill-desc" title={skill.description}>{skill.description}</span>
-                    <div className="skill-actions-bottom" onClick={(e) => e.stopPropagation()}>
-                      <button className="mcp-action-btn" onClick={() => startEdit(skill)} title="Edit">
+                    <div className="skill-actions">
+                      <button className="skill-action-btn" onClick={() => startEdit(skill)} title="Edit">
                         ✎
                       </button>
-                      <button className="mcp-action-btn danger" onClick={() => handleDelete(skill.name)} title="Delete">
+                      <button className="skill-action-btn danger" onClick={() => handleDelete(skill.name)} title="Delete">
                         ✕
                       </button>
                     </div>

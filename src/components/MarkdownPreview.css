@@ -8,6 +8,7 @@
     word-break: break-word;
     color: var(--c-body);
     font-size: 13px;
+    text-transform: none;
     line-height: 1.65;
     letter-spacing: 0;
     font-family: "Inter", "SF Pro Text", "Segoe UI", "Helvetica Neue",

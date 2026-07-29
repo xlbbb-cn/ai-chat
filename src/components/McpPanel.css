@@ -207,12 +207,21 @@
 }
 
 @keyframes mcp-spin {
-    to { transform: rotate(360deg); }
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 @keyframes mcp-testing-fade {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.5;
+    }
 }
 
 .mcp-log-modal-testing {
@@ -235,9 +244,8 @@
 
 .mcp-toggle {
     position: relative;
-    display: inline-flex;
-    align-items: center;
-    cursor: pointer;
+    width: 36px;
+    height: 20px;
     flex-shrink: 0;
 }
 
@@ -245,38 +253,44 @@
     opacity: 0;
     width: 0;
     height: 0;
-    position: absolute;
 }
 
 .mcp-toggle-slider {
-    width: 38px;
-    height: 22px;
-    background: var(--c-border-i);
-    border-radius: var(--r-pill);
-    transition: background 0.2s;
-    position: relative;
-    flex-shrink: 0;
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: var(--c-border);
+    transition: 0.2s;
+    border-radius: 20px;
 }
 
-.mcp-toggle-slider::after {
-    content: "";
+.mcp-toggle-slider:before {
     position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 18px;
-    height: 18px;
-    background: var(--c-surface);
+    content: "";
+    height: 14px;
+    width: 14px;
+    left: 3px;
+    bottom: 3px;
+    background-color: var(--c-bg);
+    transition: 0.2s;
     border-radius: 50%;
-    transition: transform 0.2s;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15), 0 0 0 0.5px rgba(0, 0, 0, 0.05);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
 .mcp-toggle input:checked+.mcp-toggle-slider {
-    background: var(--c-success);
+    background-color: var(--c-accent);
 }
 
-.mcp-toggle input:checked+.mcp-toggle-slider::after {
+.mcp-toggle input:checked+.mcp-toggle-slider:before {
     transform: translateX(16px);
+}
+
+.mcp-toggle input:focus-visible+.mcp-toggle-slider {
+    outline: 2px solid var(--c-accent);
+    outline-offset: 2px;
 }
 
 .mcp-footer {
