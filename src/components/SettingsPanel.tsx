@@ -301,11 +301,13 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
                 </button>
               )}
             </div>
-            <small className="settings-hint">
-              {config.workspace_dir
-                ? "Custom workspace in use. Click Browse to change, or Reset to use the default."
-                : `Using default: ${workspaceDirActual || "OS app data directory"}`}
-            </small>
+            <div className="settings-hint-wrapper">
+              <small className="settings-hint">
+                {config.workspace_dir
+                  ? "Custom workspace in use. Click Browse to change, or Reset to use the default."
+                  : `Using default: ${workspaceDirActual || "OS app data directory"}`}
+              </small>
+            </div>
           </label>
 
           <label className="settings-checkbox">
@@ -526,26 +528,6 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
                   }}
                   placeholder="default completion limit (leave empty)"
                 />
-              </label>
-
-              <label className="settings-field">
-                Reasoning effort
-                <select
-                  value={config.model_settings?.reasoning_effort ?? ""}
-                  onChange={(e) =>
-                    setConfig((prev) => ({
-                      ...prev,
-                      model_settings: updateModelSettings(prev.model_settings, {
-                        reasoning_effort: e.target.value,
-                      }),
-                    }))
-                  }
-                >
-                  <option value="">— not set —</option>
-                  <option value="low">low</option>
-                  <option value="medium">medium</option>
-                  <option value="high">high</option>
-                </select>
               </label>
             </div>
           )}
