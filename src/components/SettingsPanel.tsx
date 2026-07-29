@@ -301,13 +301,6 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
                 </button>
               )}
             </div>
-            <div className="settings-hint-wrapper">
-              <small className="settings-hint">
-                {config.workspace_dir
-                  ? "Custom workspace in use. Click Browse to change, or Reset to use the default."
-                  : `Using default: ${workspaceDirActual || "OS app data directory"}`}
-              </small>
-            </div>
           </label>
 
           <label className="settings-checkbox">

@@ -551,6 +551,10 @@ pub fn render_active_list_for_context(workspace: &Path, session_id: &str) -> Opt
     if summary.todos.is_empty() {
         return None;
     }
+    // Skip injecting the todo list when everything is done — nothing left to track.
+    if summary.completed == summary.total {
+        return None;
+    }
     let mut body = String::new();
     body.push_str(&format!(
         "Active session todo list: \"{}\" ({}/{})\n",
