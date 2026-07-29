@@ -1,14 +1,14 @@
 /* ===================================================================
-   SettingsPanel — Tesla Design System
+   SettingsPanel — Tesla Design System (theme-aware)
    ===================================================================
-   Key principles applied:
-   • Zero shadows, zero gradients, zero decorative borders on containers
-   • Photography carries visual weight (not applicable here, so whitespace does)
-   • Single accent colour (#3E6AE1) for primary calls-to-action only
+   Key principles:
+   • Zero shadows, zero gradients, zero decorative borders
+   • Single accent colour for primary CTAs only
    • Typography: weight 400/500 only, no uppercase transforms
-   • Border-radius: 4px for all interactive elements
+   • Border-radius: 4px throughout
    • Transitions: 0.33s cubic-bezier(0.5, 0, 0, 0.75) universally
    • Whitespace as luxury — generous spacing between groups
+   • Uses project CSS variables for full light/dark theme support
    =================================================================== */
 
 /* ---- Panel shell ---- */
@@ -17,9 +17,8 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: #FFFFFF;
-  color: #393C41;
-  font-family: "Universal Sans Text", -apple-system, Arial, sans-serif;
+  background: var(--c-bg);
+  color: var(--c-body);
 }
 
 /* ---- Header ---- */
@@ -36,14 +35,14 @@
   margin: 0;
   font-size: 17px;
   font-weight: 500;
-  color: #171A20;
+  color: var(--c-text);
   letter-spacing: normal;
 }
 
 .close-btn {
   background: transparent;
   border: none;
-  color: #5C5E62;
+  color: var(--c-muted);
   font-size: 18px;
   cursor: pointer;
   padding: 4px 8px;
@@ -53,13 +52,13 @@
 }
 
 .close-btn:hover {
-  background: #F4F4F4;
-  color: #171A20;
+  background: var(--c-hover);
+  color: var(--c-text);
 }
 
 .close-btn:active {
-  background: #EEEEEE;
-  color: #171A20;
+  background: var(--c-active);
+  color: var(--c-text);
 }
 
 /* ---- Body (scrollable area) ---- */
@@ -72,7 +71,7 @@
   gap: 20px;
   overflow-y: auto;
   overflow-x: hidden;
-  background: #FFFFFF;
+  background: var(--c-bg);
 }
 
 .settings-body label {
@@ -81,14 +80,14 @@
   gap: 6px;
   font-size: 14px;
   font-weight: 400;
-  color: #393C41;
+  color: var(--c-body);
   letter-spacing: normal;
 }
 
 /* ---- Group cards — no borders, no shadows, just whitespace separation ---- */
 
 .settings-group {
-  background: #F4F4F4;
+  background: var(--c-surface);
   border-radius: 4px;
   padding: 20px;
   display: flex;
@@ -100,7 +99,7 @@
 .settings-group-title {
   font-size: 14px;
   font-weight: 500;
-  color: #171A20;
+  color: var(--c-text);
   letter-spacing: normal;
   text-transform: none;
 }
@@ -113,13 +112,13 @@
   width: 100%;
   box-sizing: border-box;
   padding: 8px 12px;
-  background: #FFFFFF;
-  border: 1px solid #D0D1D2;
+  background: var(--c-bg);
+  border: 1px solid var(--c-border-i);
   border-radius: 4px;
-  color: #171A20;
+  color: var(--c-text);
   font-size: 14px;
   font-weight: 400;
-  font-family: "Universal Sans Text", -apple-system, Arial, sans-serif;
+  font-family: inherit;
   outline: none;
   transition: border-color 0.33s cubic-bezier(0.5, 0, 0, 0.75);
 }
@@ -131,12 +130,12 @@
 .settings-body input:focus,
 .settings-body textarea:focus,
 .settings-body select:focus {
-  border-color: #3E6AE1;
+  border-color: var(--c-accent);
 }
 
 .settings-body input::placeholder,
 .settings-body textarea::placeholder {
-  color: #8E8E8E;
+  color: var(--c-placeholder);
 }
 
 /* Minimal select arrow — a simple SVG chevron */
@@ -162,7 +161,7 @@
   width: 16px;
   height: 16px;
   margin: 3px 0 0;
-  accent-color: #3E6AE1;
+  accent-color: var(--c-accent);
   cursor: pointer;
 }
 
@@ -176,13 +175,13 @@
 .settings-checkbox-copy span {
   font-size: 14px;
   font-weight: 400;
-  color: #171A20;
+  color: var(--c-text);
 }
 
 .settings-checkbox-copy small {
   font-size: 13px;
   line-height: 1.45;
-  color: #5C5E62;
+  color: var(--c-muted);
 }
 
 .settings-checkbox-copy code {
@@ -190,10 +189,10 @@
   word-break: break-all;
   font-size: 13px;
   line-height: 1.45;
-  background: #EEEEEE;
+  background: var(--c-hover);
   padding: 6px 8px;
   border-radius: 4px;
-  font-family: "Universal Sans Text", -apple-system, Arial, sans-serif;
+  font-family: inherit;
 }
 
 /* ---- Toggle / accordion ---- */
@@ -208,7 +207,7 @@
 
 .settings-toggle-icon {
   transition: transform 0.33s cubic-bezier(0.5, 0, 0, 0.75);
-  color: #5C5E62;
+  color: var(--c-muted);
   font-size: 12px;
 }
 
@@ -245,7 +244,7 @@
 /* ---- Error text ---- */
 
 .settings-error {
-  color: #D12B2B;
+  color: var(--c-danger);
   font-size: 13px;
   margin-top: 0;
 }
@@ -276,16 +275,16 @@
 .settings-hint {
   font-size: 13px;
   font-weight: 400;
-  color: #5C5E62;
+  color: var(--c-muted);
   line-height: 1.4;
 }
 
 .settings-hint code {
   font-size: 13px;
-  background: #EEEEEE;
+  background: var(--c-hover);
   padding: 2px 6px;
   border-radius: 4px;
-  font-family: "Universal Sans Text", -apple-system, Arial, sans-serif;
+  font-family: inherit;
 }
 
 /* ---- Workspace directory row ---- */
@@ -305,7 +304,7 @@
 }
 
 .workspace-dir-row input:hover:not(:focus) {
-  border-color: #D0D1D2;
+  border-color: var(--c-border);
 }
 
 .workspace-dir-row .btn-secondary {
@@ -325,15 +324,15 @@
   display: flex;
   gap: 12px;
   justify-content: flex-end;
-  background: #FFFFFF;
+  background: var(--c-bg);
 }
 
 /* ===================================================================
    Buttons — Tesla-style
    ===================================================================
    • 4px border-radius throughout
-   • Electric Blue (#3E6AE1) for primary CTAs only
-   • White background for secondary
+   • Accent colour for primary CTAs only
+   • Surface background for secondary
    • No shadows at any state
    • Colour-only hover/active transitions at 0.33s
    =================================================================== */
@@ -345,25 +344,25 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #3E6AE1;
+  background: var(--c-accent);
   color: #FFFFFF;
   border: 3px solid transparent;
   border-radius: 4px;
   font-size: 14px;
   font-weight: 500;
-  font-family: "Universal Sans Text", -apple-system, Arial, sans-serif;
+  font-family: inherit;
   cursor: pointer;
   letter-spacing: normal;
   transition: border-color 0.33s cubic-bezier(0.5, 0, 0, 0.75), background-color 0.33s cubic-bezier(0.5, 0, 0, 0.75), color 0.33s cubic-bezier(0.5, 0, 0, 0.75);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: #2D53C5;
+  background: var(--c-accent-hover);
 }
 
 .btn-primary:active:not(:disabled) {
-  background: #2D53C5;
-  border-color: #3E6AE1;
+  background: var(--c-accent-hover);
+  border-color: var(--c-accent);
 }
 
 .btn-primary:disabled {
@@ -373,26 +372,26 @@
 
 .btn-secondary {
   padding: 7px 14px;
-  border: 1px solid #D0D1D2;
-  background: #FFFFFF;
-  color: #393C41;
+  border: 1px solid var(--c-border-i);
+  background: var(--c-surface);
+  color: var(--c-body);
   border-radius: 4px;
   cursor: pointer;
   white-space: nowrap;
-  font-family: "Universal Sans Text", -apple-system, Arial, sans-serif;
+  font-family: inherit;
   font-size: 14px;
   font-weight: 500;
   transition: background-color 0.33s cubic-bezier(0.5, 0, 0, 0.75), border-color 0.33s cubic-bezier(0.5, 0, 0, 0.75), color 0.33s cubic-bezier(0.5, 0, 0, 0.75);
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background: #F4F4F4;
-  border-color: #D0D1D2;
+  background: var(--c-hover);
+  border-color: var(--c-border);
 }
 
 .btn-secondary:active:not(:disabled) {
-  background: #EEEEEE;
-  border-color: #D0D1D2;
+  background: var(--c-active);
+  border-color: var(--c-border);
 }
 
 .btn-secondary:disabled {
@@ -403,21 +402,21 @@
 /* ---- Inline edit button ---- */
 
 .inline-edit-btn {
-  border: 1px solid #D0D1D2;
-  background: #FFFFFF;
-  color: #393C41;
+  border: 1px solid var(--c-border-i);
+  background: var(--c-surface);
+  color: var(--c-body);
   border-radius: 4px;
   padding: 4px 10px;
   font-size: 14px;
   font-weight: 500;
-  font-family: "Universal Sans Text", -apple-system, Arial, sans-serif;
+  font-family: inherit;
   cursor: pointer;
   transition: background-color 0.33s cubic-bezier(0.5, 0, 0, 0.75), border-color 0.33s cubic-bezier(0.5, 0, 0, 0.75);
 }
 
 .inline-edit-btn:hover {
-  background: #F4F4F4;
-  border-color: #D0D1D2;
+  background: var(--c-hover);
+  border-color: var(--c-border);
 }
 
 /* ---- Small button variant ---- */
@@ -429,22 +428,22 @@
 }
 
 .btn-danger {
-  border: 1px solid #D0D1D2;
-  background: #FFFFFF;
-  color: #D12B2B;
+  border: 1px solid var(--c-border-i);
+  background: var(--c-surface);
+  color: var(--c-danger);
   border-radius: 4px;
   padding: 5px 10px;
   font-size: 13px;
   font-weight: 500;
-  font-family: "Universal Sans Text", -apple-system, Arial, sans-serif;
+  font-family: inherit;
   cursor: pointer;
   transition: background-color 0.33s cubic-bezier(0.5, 0, 0, 0.75), border-color 0.33s cubic-bezier(0.5, 0, 0, 0.75);
   min-height: 30px;
 }
 
 .btn-danger:hover {
-  background: #FEF2F2;
-  border-color: #D12B2B;
+  background: var(--c-hover);
+  border-color: var(--c-danger);
 }
 
 /* ===================================================================
@@ -460,7 +459,7 @@
 .profile-section-title {
   font-size: 14px;
   font-weight: 500;
-  color: #171A20;
+  color: var(--c-text);
 }
 
 .profile-create-row {
@@ -486,7 +485,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 10px 12px;
-  background: #FFFFFF;
+  background: var(--c-bg);
   border-radius: 4px;
 }
 
@@ -500,12 +499,12 @@
 .profile-item-name {
   font-size: 14px;
   font-weight: 500;
-  color: #171A20;
+  color: var(--c-text);
 }
 
 .profile-item-meta {
   font-size: 13px;
-  color: #5C5E62;
+  color: var(--c-muted);
 }
 
 .profile-item-actions {
@@ -521,7 +520,7 @@
 .theme-segmented {
   display: flex;
   gap: 0;
-  border: 1px solid #D0D1D2;
+  border: 1px solid var(--c-border-i);
   border-radius: 4px;
   overflow: hidden;
   align-self: flex-start;
@@ -531,25 +530,25 @@
   padding: 6px 18px;
   font-size: 14px;
   font-weight: 500;
-  font-family: "Universal Sans Text", -apple-system, Arial, sans-serif;
-  background: #FFFFFF;
-  color: #393C41;
+  font-family: inherit;
+  background: var(--c-surface);
+  color: var(--c-body);
   border: none;
   cursor: pointer;
   transition: background-color 0.33s cubic-bezier(0.5, 0, 0, 0.75), color 0.33s cubic-bezier(0.5, 0, 0, 0.75);
 }
 
 .theme-seg-btn+.theme-seg-btn {
-  border-left: 1px solid #D0D1D2;
+  border-left: 1px solid var(--c-border-i);
 }
 
 .theme-seg-btn.active {
-  background: #3E6AE1;
+  background: var(--c-accent);
   color: #FFFFFF;
 }
 
 .theme-seg-btn:hover:not(.active) {
-  background: #F4F4F4;
+  background: var(--c-hover);
 }
 
 /* ===================================================================
@@ -560,7 +559,7 @@
   position: fixed;
   inset: 0;
   z-index: 9999;
-  background: #FFFFFF;
+  background: var(--c-bg);
   animation: settings-fade-in 0.33s cubic-bezier(0.5, 0, 0, 0.75);
 }
 
@@ -586,7 +585,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  background: rgba(255, 255, 255, 0.75);
+  background: var(--c-toolbar);
   -webkit-backdrop-filter: blur(20px);
   backdrop-filter: blur(20px);
 }
@@ -595,7 +594,7 @@
   margin: 0;
   font-size: 17px;
   font-weight: 500;
-  color: #171A20;
+  color: var(--c-text);
   letter-spacing: normal;
 }
 
@@ -627,7 +626,7 @@
   gap: 8px;
   font-size: 13px;
   font-weight: 500;
-  color: #5C5E62;
+  color: var(--c-muted);
   text-transform: none;
   letter-spacing: normal;
 }
@@ -637,38 +636,38 @@
   min-height: 0;
   width: 100%;
   resize: none;
-  border: 1px solid #D0D1D2;
+  border: 1px solid var(--c-border-i);
   border-radius: 4px;
   padding: 14px;
   font-size: 14px;
   line-height: 1.6;
-  font-family: "Universal Sans Text", -apple-system, Arial, sans-serif;
-  color: #171A20;
-  background: #FFFFFF;
+  font-family: inherit;
+  color: var(--c-text);
+  background: var(--c-surface);
   outline: none;
   transition: border-color 0.33s cubic-bezier(0.5, 0, 0, 0.75);
 }
 
 .prompt-editor-textarea:focus {
-  border-color: #3E6AE1;
+  border-color: var(--c-accent);
 }
 
 .prompt-preview {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  border: 1px solid #D0D1D2;
+  border: 1px solid var(--c-border-i);
   border-radius: 4px;
   padding: 14px;
   font-size: 14px;
   line-height: 1.6;
-  color: #393C41;
-  background: #FFFFFF;
+  color: var(--c-body);
+  background: var(--c-surface);
 }
 
 .prompt-preview-empty {
   margin: 0;
-  color: #8E8E8E;
+  color: var(--c-placeholder);
 }
 
 .prompt-preview h1,
@@ -678,158 +677,15 @@
 }
 
 .prompt-preview code {
-  background: #F4F4F4;
+  background: var(--c-hover);
   border-radius: 4px;
   padding: 1px 5px;
-  font-family: "Universal Sans Text", -apple-system, Arial, sans-serif;
+  font-family: inherit;
 }
 
 .prompt-preview pre {
   background: var(--c-code);
-  border-radius: var(--r-sm);
+  border-radius: 4px;
   padding: 10px;
   overflow: auto;
-}
-
-/* ── Profile Section ── */
-.profile-section {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 0.5px solid var(--c-border-s);
-}
-
-.profile-section-title {
-  font-size: 12px;
-  color: var(--c-muted);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  margin-bottom: 10px;
-}
-
-.profile-create-row {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.profile-create-row input {
-  flex: 1;
-}
-
-.profile-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.profile-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 12px;
-  background: var(--c-surface);
-  border: 0.5px solid var(--c-border-s);
-  border-radius: var(--r-sm);
-  gap: 10px;
-}
-
-.profile-item-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
-  min-width: 0;
-}
-
-.profile-item-name {
-  font-size: 13px;
-  color: var(--c-text);
-  font-weight: 500;
-}
-
-.profile-item-meta {
-  font-size: 11px;
-  color: var(--c-muted);
-}
-
-.profile-item-actions {
-  display: flex;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.btn-sm {
-  padding: 4px 10px;
-  font-size: 12px;
-}
-
-.btn-danger {
-  background: transparent;
-  border: 0.5px solid var(--c-danger, #e53935);
-  color: var(--c-danger, #e53935);
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.btn-danger:hover {
-  background: var(--c-danger, #e53935);
-  color: white;
-}
-
-@media (max-width: 900px) {
-  .prompt-editor-header {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .prompt-editor-actions {
-    width: 100%;
-    min-width: 0;
-  }
-
-  .settings-inline-row {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* ── Theme segmented control (macOS pill style) ── */
-.theme-segmented {
-  display: flex;
-  gap: 0;
-  border-radius: var(--r-sm);
-  overflow: hidden;
-  width: 100%;
-  background: var(--c-hover);
-  padding: 2px;
-  border: none;
-}
-
-.theme-seg-btn {
-  flex: 1;
-  padding: 5px 0;
-  font-size: 12px;
-  font-family: inherit;
-  border: none;
-  background: transparent;
-  color: var(--c-muted);
-  cursor: pointer;
-  transition: background-color 0.2s, color 0.2s, box-shadow 0.2s;
-  border-radius: 5px;
-  letter-spacing: -0.005em;
-}
-
-.theme-seg-btn:last-child {
-  border-right: none;
-}
-
-.theme-seg-btn:hover:not(.active) {
-  background: var(--c-hover);
-  color: var(--c-text);
-}
-
-.theme-seg-btn.active {
-  background: var(--c-surface);
-  color: var(--c-text);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 0 0 0.5px var(--c-border-i);
 }
