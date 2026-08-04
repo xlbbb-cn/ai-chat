@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { chatCompletion, getConfig, getAgentOrchestration, listMcpServers, listSubAgents, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile } from "./api";
+import { chatCompletion, getConfig, getAgentOrchestration, listMcpServers, listSubAgents, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession } from "./api";
 
 import { ChatMessage } from "./components/ChatMessage";
 import { ToolCallGroup } from "./components/ToolCallGroup";
@@ -522,7 +522,11 @@ export default function App() {
       .filter((m) => !m.streaming && !m.id.startsWith("agent-progress-") && m.role !== "tool_group")
       .map((m) => ({ role: m.role, content: m.content }));
 
-    saveHistory(sessionId, "user", text);
+    saveHistory(sessionId, "user", text).then((dbId) => {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === userMsg.id ? { ...m, dbId } : m))
+      );
+    }).catch(console.error);
 
     let accumulatedContent = "";
     let accumulatedReasoning = "";
@@ -563,7 +567,13 @@ export default function App() {
           ? `<details><summary>Thought Process</summary>\n\n${accumulatedReasoning}\n</details>\n\n${accumulatedContent}`
           : accumulatedContent;
 
-        saveHistory(sessionId, "assistant", finalContentToSave, currentToolCallsRef.current.length > 0 ? JSON.stringify(currentToolCallsRef.current) : undefined);
+        saveHistory(sessionId, "assistant", finalContentToSave, currentToolCallsRef.current.length > 0 ? JSON.stringify(currentToolCallsRef.current) : undefined)
+          .then((dbId) => {
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantId ? { ...m, dbId } : m))
+            );
+          })
+          .catch(console.error);
         setMessages((prev) => {
           const finalToolCalls = currentToolCallsRef.current.map((e) =>
             e.status === "running" ? { ...e, status: "done" as const } : e
@@ -662,7 +672,13 @@ export default function App() {
           ? `<details><summary>Thought Process</summary>\n\n${accumulatedReasoning}\n</details>\n\n${accumulatedContent}`
           : accumulatedContent;
 
-        saveHistory(sessionId, "assistant", finalContentToSave, currentToolCallsRef.current.length > 0 ? JSON.stringify(currentToolCallsRef.current) : undefined);
+        saveHistory(sessionId, "assistant", finalContentToSave, currentToolCallsRef.current.length > 0 ? JSON.stringify(currentToolCallsRef.current) : undefined)
+          .then((dbId) => {
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantId ? { ...m, dbId } : m))
+            );
+          })
+          .catch(console.error);
         setMessages((prev) => {
           const finalToolCalls = currentToolCallsRef.current.map((e) =>
             e.status === "running" ? { ...e, status: "done" as const } : e
@@ -703,6 +719,39 @@ export default function App() {
 
     cleanupRef.current = cleanup;
   }, [messages, streaming, pendingRetryMessageId, activeSkillIds, sessionId, selectedModel, useAgentsEnabled]);
+
+  const handleDeleteMessage = useCallback(async (messageId: string) => {
+    const msg = messages.find((m) => m.id === messageId);
+    if (!msg || msg.dbId === undefined) return;
+
+    try {
+      await deleteMessage(msg.dbId);
+      setMessages((prev) => prev.filter((m) => m.id !== messageId));
+    } catch (err) {
+      setError(`Failed to delete message: ${String(err)}`);
+    }
+  }, [messages]);
+
+  const handleForkMessage = useCallback(async (messageId: string) => {
+    const msg = messages.find((m) => m.id === messageId);
+    if (!msg || msg.dbId === undefined) return;
+
+    const newSessionId = crypto.randomUUID();
+    try {
+      await forkSession(sessionId, newSessionId, msg.dbId);
+      // Reload history panel will pick up the new session on next open
+      // Switch to the new session
+      const forkedMessages = messages
+        .filter((m) => m.dbId !== undefined && m.dbId <= msg.dbId!)
+        .map((m) => ({ ...m, id: crypto.randomUUID() }));
+      setMessages(forkedMessages);
+      setSessionId(newSessionId);
+      setPendingRetryMessageId(null);
+      setError(null);
+    } catch (err) {
+      setError(`Failed to fork session: ${String(err)}`);
+    }
+  }, [messages, sessionId]);
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (profileExporting) {
@@ -1155,6 +1204,9 @@ export default function App() {
                 message={m}
                 showRetry={m.role === "user" && m.id === pendingRetryMessageId && !streaming}
                 onRetry={retryPendingUserMessage}
+                onDelete={handleDeleteMessage}
+                onFork={handleForkMessage}
+                dbId={m.dbId}
               />
             )
           )}

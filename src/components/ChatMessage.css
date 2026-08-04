@@ -402,6 +402,56 @@
   box-shadow: 0 2px 4px rgba(255, 59, 48, 0.20);
 }
 
+/* ─── Message action buttons (delete / fork) ─────────────────────────────── */
+.message-action-buttons {
+  display: flex;
+  gap: 6px;
+  padding: 0 4px;
+}
+
+.chat-message-shell.user .message-action-buttons {
+  justify-content: flex-end;
+}
+
+.chat-message-shell.assistant .message-action-buttons {
+  justify-content: flex-start;
+}
+
+.message-action-btn {
+  border: 0.5px solid var(--c-border-i);
+  background: var(--c-surface);
+  color: var(--c-muted);
+  border-radius: var(--r-pill);
+  padding: 4px 10px;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease, transform 0.18s ease, box-shadow 0.2s;
+  box-shadow: var(--shadow-sm);
+}
+
+.message-action-btn:hover {
+  background: var(--c-hover);
+  color: var(--c-text);
+  transform: translateY(-1px);
+}
+
+.message-action-btn:active {
+  transform: translateY(0);
+}
+
+.message-action-btn.delete:hover {
+  background: var(--c-danger);
+  color: #FFFFFF;
+  border-color: var(--c-danger);
+}
+
+.message-action-btn.fork:hover {
+  background: var(--c-accent);
+  color: #FFFFFF;
+  border-color: var(--c-accent);
+}
+
 @keyframes blink {
   50% {
     opacity: 0;

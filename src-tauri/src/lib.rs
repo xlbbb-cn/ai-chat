@@ -891,6 +891,8 @@ pub fn run() {
             db::save_history,
             db::load_history,
             db::delete_history,
+            db::delete_message,
+            db::fork_session,
             db::list_api_requests,
             db::get_api_request,
             db::delete_api_request,

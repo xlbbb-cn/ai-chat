@@ -131,7 +131,7 @@ export async function chatCompletion(
   return cleanup;
 }
 
-export async function saveHistory(sessionId: string, role: string, content: string, toolCalls?: string): Promise<void> {
+export async function saveHistory(sessionId: string, role: string, content: string, toolCalls?: string): Promise<number> {
   return invoke("save_history", { sessionId, role, content, toolCalls: toolCalls ?? null });
 }
 
@@ -150,6 +150,18 @@ export async function loadHistory(): Promise<HistoryRecord[]> {
 
 export async function deleteHistory(sessionId: string): Promise<void> {
   return invoke("delete_history", { sessionId });
+}
+
+export async function deleteMessage(messageId: number): Promise<void> {
+  return invoke("delete_message", { messageId });
+}
+
+export async function forkSession(
+  sourceSessionId: string,
+  newSessionId: string,
+  upToMessageId: number
+): Promise<number> {
+  return invoke("fork_session", { sourceSessionId, newSessionId, upToMessageId });
 }
 
 export async function listMcpServers(): Promise<McpServer[]> {

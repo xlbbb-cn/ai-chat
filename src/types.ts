@@ -14,6 +14,8 @@ export interface Message {
   reasoning_content?: string;
   streaming?: boolean;
   tool_calls?: ToolCallEntry[];
+  /** Database row id from history table (only for persisted messages). */
+  dbId?: number;
 }
 
 export type ConfirmKind = "dangerous" | "sudo" | "elevation" | "external_path";
@@ -62,26 +64,26 @@ export interface Skill {
 export type McpTransport = "stdio" | "sse";
 
 export interface McpServer {
-    id: string;
-    name: string;
-    transport: McpTransport;
-    /** stdio only */
-    command: string;
-    args: string[];
-    env: Record<string, string>;
-    /** sse only */
-    url: string;
-    auth_token: string;
-    enabled: boolean;
+  id: string;
+  name: string;
+  transport: McpTransport;
+  /** stdio only */
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  /** sse only */
+  url: string;
+  auth_token: string;
+  enabled: boolean;
 }
 
 export type McpLogLevel = "info" | "warn" | "error";
 
 export interface McpLogEntry {
-    /** Milliseconds since UNIX epoch. */
-    ts: number;
-    level: McpLogLevel;
-    message: string;
+  /** Milliseconds since UNIX epoch. */
+  ts: number;
+  level: McpLogLevel;
+  message: string;
 }
 
 export interface SubAgent {

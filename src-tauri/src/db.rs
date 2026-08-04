@@ -18,14 +18,15 @@ pub fn save_history(
     content: String,
     tool_calls: Option<String>,
     state: tauri::State<'_, crate::AppState>,
-) -> Result<(), String> {
+) -> Result<i64, String> {
     let db = state.db.lock().unwrap();
     db.execute(
         "INSERT INTO history (session_id, role, content, tool_calls) VALUES (?1, ?2, ?3, ?4)",
         rusqlite::params![session_id, role, content, tool_calls],
     )
     .map_err(|e| e.to_string())?;
-    Ok(())
+    let id = db.last_insert_rowid();
+    Ok(id)
 }
 
 #[tauri::command]
@@ -70,6 +71,70 @@ pub fn delete_history(
     .map_err(|e| e.to_string())?;
     delete_session_summary(&db, &session_id)?;
     Ok(())
+}
+
+/// Delete a single message by its database id.
+#[tauri::command]
+pub fn delete_message(
+    message_id: i64,
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<(), String> {
+    let db = state.db.lock().unwrap();
+    db.execute(
+        "DELETE FROM history WHERE id = ?1",
+        rusqlite::params![message_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Fork a session: copy all messages up to and including `up_to_message_id`
+/// from `source_session_id` into a new session `new_session_id`.
+/// Returns the number of messages copied.
+#[tauri::command]
+pub fn fork_session(
+    source_session_id: String,
+    new_session_id: String,
+    up_to_message_id: i64,
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<i64, String> {
+    let db = state.db.lock().unwrap();
+
+    // Find the position (id) of the cutoff message in the source session
+    let cutoff_id: i64 = db
+        .query_row(
+            "SELECT id FROM history WHERE id = ?1 AND session_id = ?2",
+            rusqlite::params![up_to_message_id, source_session_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+
+    // Copy all messages from the source session up to and including the cutoff
+    let mut stmt = db
+        .prepare(
+            "SELECT role, content, tool_calls FROM history \
+             WHERE session_id = ?1 AND id <= ?2 ORDER BY id ASC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let messages: Vec<(String, String, Option<String>)> = stmt
+        .query_map(rusqlite::params![source_session_id, cutoff_id], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(Result::ok)
+        .collect();
+
+    let count = messages.len() as i64;
+    for (role, content, tool_calls) in messages {
+        db.execute(
+            "INSERT INTO history (session_id, role, content, tool_calls) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![new_session_id, role, content, tool_calls],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    Ok(count)
 }
 
 pub fn get_session_summary(db: &Connection, session_id: &str) -> Result<Option<String>, String> {

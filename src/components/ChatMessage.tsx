@@ -185,6 +185,9 @@ interface Props {
   message: Message;
   showRetry?: boolean;
   onRetry?: () => void;
+  onDelete?: (messageId: string) => void;
+  onFork?: (messageId: string) => void;
+  dbId?: number;
 }
 
 function extractAttachmentNames(content: string): string[] {
@@ -224,9 +227,10 @@ function extractEmbeddedThoughtProcess(content: string): {
   return { reasoningContent, mainContent };
 }
 
-export function ChatMessage({ message, showRetry = false, onRetry }: Props) {
+export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onFork, dbId }: Props) {
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
+  const [showActions, setShowActions] = useState(false);
   const attachmentNames = isUser ? extractAttachmentNames(message.content) : [];
   const displayContent = isUser
     ? message.content.replace(/<details><summary>Attached File:[^<]*<\/summary>[\s\S]*?<\/details>/g, "").trim()
@@ -283,7 +287,11 @@ export function ChatMessage({ message, showRetry = false, onRetry }: Props) {
   }, []);
 
   return (
-    <div className={`chat-message-shell ${isUser ? "user" : "assistant"}`}>
+    <div
+      className={`chat-message-shell ${isUser ? "user" : "assistant"}`}
+      onMouseEnter={() => setShowActions(true)}
+      onMouseLeave={() => setShowActions(false)}
+    >
       <div className={`chat-message ${isUser ? "user" : "assistant"}`}>
         {/* <div className="message-role">{isUser ? "You" : "Assistant"}</div> */}
 
@@ -356,17 +364,40 @@ export function ChatMessage({ message, showRetry = false, onRetry }: Props) {
         )}
       </div>
 
-      {isAssistant && (
-        <div className="message-export-actions">
-          <button
-            type="button"
-            className="message-export-btn"
-            onClick={() => exportAssistantMessagePdf(renderedMainContent, message.id)}
-            disabled={!mainContent.trim()}
-            title="Export this reply to PDF"
-          >
-            Export PDF
-          </button>
+      {/* Message action buttons (delete / fork / export) */}
+      {showActions && !message.streaming && (
+        <div className="message-action-buttons">
+          {isAssistant && (
+            <button
+              type="button"
+              className="message-action-btn export"
+              onClick={() => exportAssistantMessagePdf(renderedMainContent, message.id)}
+              disabled={!mainContent.trim()}
+              title="Export this reply to PDF"
+            >
+              ⤓
+            </button>
+          )}
+          {onDelete && dbId !== undefined && (
+            <button
+              type="button"
+              className="message-action-btn delete"
+              onClick={() => onDelete(message.id)}
+              title="Delete this message"
+            >
+              🗑️
+            </button>
+          )}
+          {onFork && dbId !== undefined && (
+            <button
+              type="button"
+              className="message-action-btn fork"
+              onClick={() => onFork(message.id)}
+              title="Fork conversation from this message"
+            >
+              ⑂
+            </button>
+          )}
         </div>
       )}
     </div>
