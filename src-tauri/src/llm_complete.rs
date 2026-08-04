@@ -117,7 +117,6 @@ pub(crate) fn build_http_client() -> Result<Client, String> {
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {e}"))
 }
-
 /// Apply output token limits to the request body.
 ///
 /// OpenAI-compatible APIs accept two related but distinct parameters:
@@ -138,7 +137,6 @@ pub(crate) fn apply_completion_token_limit(
         req_body["max_tokens"] = json!(v);
     }
 }
-
 fn process_stream_chunk(
     app: &AppHandle,
     parsed: &Value,
@@ -1135,13 +1133,12 @@ pub async fn chat_completion(
         if !config.model_settings.reasoning_effort.is_empty() {
             req_body["reasoning_effort"] = json!(config.model_settings.reasoning_effort);
         }
-        if let Some(max_tokens) = config.model_settings.max_tokens {
-            apply_completion_token_limit(
-                &mut req_body,
-                Some(max_tokens),
-                Some(LLM_DEFAULT_MAX_TOKENS),
-            );
-        }
+
+        apply_completion_token_limit(
+            &mut req_body,
+            config.model_settings.max_tokens,
+            Some(LLM_DEFAULT_MAX_TOKENS),
+        );
 
         let started_at = std::time::Instant::now();
         let request_snapshot = req_body.clone();
