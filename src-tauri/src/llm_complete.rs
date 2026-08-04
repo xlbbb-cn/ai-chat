@@ -67,7 +67,7 @@ const CONTEXT_SUMMARY_MAX_LINES: usize = 120;
 const DEFAULT_MODEL_MAX_TOKENS: u32 = 131_072;
 const STREAM_MAX_RETRIES: usize = 3;
 const STREAM_RETRY_BACKOFF_MS: [u64; 2] = [300, 900];
-const LLM_DEFAULT_MAX_TOKENS: u32 = 524_288;
+pub const LLM_DEFAULT_MAX_TOKENS: u32 = 262144;
 
 fn retry_backoff_ms(attempt: usize) -> u64 {
     STREAM_RETRY_BACKOFF_MS

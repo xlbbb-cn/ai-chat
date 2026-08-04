@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::{
     llm_complete::{
         apply_completion_token_limit, extract_upstream_error_message, sanitize_tool_pairs,
-        stream_llm_request, StreamOptions,
+        stream_llm_request, StreamOptions, LLM_DEFAULT_MAX_TOKENS,
     },
     tools, AppConfig, AppState,
 };
@@ -833,7 +833,7 @@ async fn call_llm_once(
         "model": model,
         "messages": messages,
     });
-    apply_completion_token_limit(&mut body, Some(max_tokens), Some(max_tokens));
+    apply_completion_token_limit(&mut body, Some(max_tokens), Some(LLM_DEFAULT_MAX_TOKENS));
     let res = client
         .post(url)
         .bearer_auth(api_key)
@@ -1522,7 +1522,11 @@ pub async fn run_sub_agent(
             "stream": true,
             "stream_options": { "include_usage": true },
         });
-        apply_completion_token_limit(&mut req_body, Some(max_tokens), Some(max_tokens));
+        apply_completion_token_limit(
+            &mut req_body,
+            Some(max_tokens),
+            Some(LLM_DEFAULT_MAX_TOKENS),
+        );
         if let Some(temp) = agent.temperature {
             req_body["temperature"] = json!(temp);
         }
@@ -1825,7 +1829,7 @@ async fn aggregate_results(
         "stream": true,
         "stream_options": { "include_usage": true },
     });
-    apply_completion_token_limit(&mut req_body, Some(4096), Some(4096));
+    apply_completion_token_limit(&mut req_body, Some(4096), Some(LLM_DEFAULT_MAX_TOKENS));
 
     let cancelled = AtomicBool::new(false);
     let sr = stream_llm_request(
