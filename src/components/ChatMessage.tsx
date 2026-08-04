@@ -344,7 +344,7 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
             }
           }}
         />
-        {message.streaming && <span className="cursor">|</span>}
+        {message.streaming && <span className="cursor">_</span>}
         {attachmentNames.length > 0 && (
           <div className="message-attachments">
             <span>Attached Files:</span>

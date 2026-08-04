@@ -69,7 +69,7 @@ export interface StreamCallbacks {
 }
 
 export async function chatCompletion(
-  messages: Pick<Message, "role" | "content">[],
+  messages: Pick<Message, "role" | "content" | "reasoning_content">[],
   skillIds: string[],
   sessionId: string,
   modelOverride: string | undefined,
@@ -118,7 +118,7 @@ export async function chatCompletion(
   unlisteners.push(unToken, unReasoning, unDone, unError, unTaskStart, unTaskDone, unTaskError, unPlanStart, unAggStart);
 
   invoke("chat_completion", {
-    messages: messages.map((m) => ({ role: m.role, content: m.content })),
+    messages: messages.map((m) => ({ role: m.role, content: m.content, reasoning_content: m.reasoning_content })),
     skillIds,
     sessionId,
     modelOverride,
@@ -131,8 +131,8 @@ export async function chatCompletion(
   return cleanup;
 }
 
-export async function saveHistory(sessionId: string, role: string, content: string, toolCalls?: string): Promise<number> {
-  return invoke("save_history", { sessionId, role, content, toolCalls: toolCalls ?? null });
+export async function saveHistory(sessionId: string, role: string, content: string, toolCalls?: string, reasoningContent?: string): Promise<number> {
+  return invoke("save_history", { sessionId, role, content, toolCalls: toolCalls ?? null, reasoningContent: reasoningContent ?? null });
 }
 
 export interface HistoryRecord {
@@ -142,6 +142,7 @@ export interface HistoryRecord {
   content: string;
   timestamp: string;
   tool_calls?: string;
+  reasoning_content?: string;
 }
 
 export async function loadHistory(): Promise<HistoryRecord[]> {

@@ -262,6 +262,8 @@ pub struct ModelSettings {
     pub reasoning_effort: String,
     #[serde(default)]
     pub max_tokens: Option<u32>,
+    #[serde(default)]
+    pub max_complete_tokens: Option<u32>,
 }
 
 impl Default for ModelSettings {
@@ -271,6 +273,7 @@ impl Default for ModelSettings {
             top_p: None,
             reasoning_effort: String::new(),
             max_tokens: None,
+            max_complete_tokens: None,
         }
     }
 }
@@ -748,6 +751,8 @@ pub fn run() {
             let db = Connection::open(&db_path).unwrap();
             db.execute("CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)", []).unwrap();
             let _ = db.execute("ALTER TABLE history ADD COLUMN tool_calls TEXT", []);
+            let _ = db.execute("ALTER TABLE history ADD COLUMN reasoning_content TEXT", []);
+            let _ = db.execute("ALTER TABLE api_requests ADD COLUMN reasoning_content TEXT", []);
             db.execute(
                 "CREATE TABLE IF NOT EXISTS session_summaries (\
                     session_id TEXT PRIMARY KEY, \

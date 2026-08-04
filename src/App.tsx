@@ -520,7 +520,7 @@ export default function App() {
 
     const history = [...messages, userMsg]
       .filter((m) => !m.streaming && !m.id.startsWith("agent-progress-") && m.role !== "tool_group")
-      .map((m) => ({ role: m.role, content: m.content }));
+      .map((m) => ({ role: m.role, content: m.content, reasoning_content: m.reasoning_content }));
 
     saveHistory(sessionId, "user", text).then((dbId) => {
       setMessages((prev) =>
@@ -563,11 +563,7 @@ export default function App() {
         );
       },
       onDone() {
-        const finalContentToSave = accumulatedReasoning
-          ? `<details><summary>Thought Process</summary>\n\n${accumulatedReasoning}\n</details>\n\n${accumulatedContent}`
-          : accumulatedContent;
-
-        saveHistory(sessionId, "assistant", finalContentToSave, currentToolCallsRef.current.length > 0 ? JSON.stringify(currentToolCallsRef.current) : undefined)
+        saveHistory(sessionId, "assistant", accumulatedContent, currentToolCallsRef.current.length > 0 ? JSON.stringify(currentToolCallsRef.current) : undefined, accumulatedReasoning || undefined)
           .then((dbId) => {
             setMessages((prev) =>
               prev.map((m) => (m.id === assistantId ? { ...m, dbId } : m))
@@ -631,7 +627,7 @@ export default function App() {
 
     const history = [...messages]
       .filter((m) => !m.streaming && !m.id.startsWith("agent-progress-") && m.role !== "tool_group")
-      .map((m) => ({ role: m.role, content: m.content }));
+      .map((m) => ({ role: m.role, content: m.content, reasoning_content: m.reasoning_content }));
 
     let accumulatedContent = "";
     let accumulatedReasoning = "";
@@ -668,11 +664,7 @@ export default function App() {
         );
       },
       onDone() {
-        const finalContentToSave = accumulatedReasoning
-          ? `<details><summary>Thought Process</summary>\n\n${accumulatedReasoning}\n</details>\n\n${accumulatedContent}`
-          : accumulatedContent;
-
-        saveHistory(sessionId, "assistant", finalContentToSave, currentToolCallsRef.current.length > 0 ? JSON.stringify(currentToolCallsRef.current) : undefined)
+        saveHistory(sessionId, "assistant", accumulatedContent, currentToolCallsRef.current.length > 0 ? JSON.stringify(currentToolCallsRef.current) : undefined, accumulatedReasoning || undefined)
           .then((dbId) => {
             setMessages((prev) =>
               prev.map((m) => (m.id === assistantId ? { ...m, dbId } : m))

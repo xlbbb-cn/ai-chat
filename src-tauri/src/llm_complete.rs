@@ -33,12 +33,15 @@ fn merge_allowed_commands(allowed_commands: &mut Vec<String>, incoming: &[String
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
 }
 
 pub struct StreamResult {
     pub finish_reason: String,
     pub tool_calls: Vec<(String, String, String)>,
     pub content: String,
+    pub reasoning_content: String,
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
 }
@@ -144,6 +147,7 @@ fn process_stream_chunk(
     finish_reason: &mut String,
     tool_calls: &mut Vec<(String, String, String)>,
     content: &mut String,
+    reasoning_content: &mut String,
     prompt_tokens: &mut u32,
     completion_tokens: &mut u32,
     got_tool_calls: &mut bool,
@@ -197,6 +201,7 @@ fn process_stream_chunk(
 
     if opts.emit_reasoning {
         if let Some(reasoning) = delta.get("reasoning_content").and_then(|v| v.as_str()) {
+            reasoning_content.push_str(reasoning);
             let _ = app.emit("chat-reasoning-token", reasoning.to_string());
         }
     }
@@ -566,6 +571,7 @@ pub async fn stream_llm_request(
         let mut finish_reason = String::new();
         let mut tool_calls: Vec<(String, String, String)> = Vec::new();
         let mut content = String::new();
+        let mut reasoning_content = String::new();
         let mut prompt_tokens: u32 = 0;
         let mut completion_tokens: u32 = 0;
         let mut got_tool_calls = false;
@@ -580,6 +586,7 @@ pub async fn stream_llm_request(
                     finish_reason: "cancelled".into(),
                     tool_calls: vec![],
                     content,
+                    reasoning_content,
                     prompt_tokens,
                     completion_tokens,
                 });
@@ -610,6 +617,7 @@ pub async fn stream_llm_request(
                         finish_reason: "cancelled".into(),
                         tool_calls: vec![],
                         content,
+                        reasoning_content,
                         prompt_tokens,
                         completion_tokens,
                     });
@@ -634,6 +642,7 @@ pub async fn stream_llm_request(
                     &mut finish_reason,
                     &mut tool_calls,
                     &mut content,
+                    &mut reasoning_content,
                     &mut prompt_tokens,
                     &mut completion_tokens,
                     &mut got_tool_calls,
@@ -652,6 +661,7 @@ pub async fn stream_llm_request(
                         &mut finish_reason,
                         &mut tool_calls,
                         &mut content,
+                        &mut reasoning_content,
                         &mut prompt_tokens,
                         &mut completion_tokens,
                         &mut got_tool_calls,
@@ -675,6 +685,7 @@ pub async fn stream_llm_request(
             finish_reason,
             tool_calls,
             content,
+            reasoning_content,
             prompt_tokens,
             completion_tokens,
         });
@@ -957,7 +968,13 @@ pub async fn chat_completion(
         _ => (&messages[..], None),
     };
     for m in history {
-        all_messages.push(json!({ "role": m.role, "content": m.content }));
+        let mut msg = json!({ "role": m.role, "content": m.content });
+        if let Some(rc) = &m.reasoning_content {
+            if !rc.is_empty() {
+                msg["reasoning_content"] = json!(rc);
+            }
+        }
+        all_messages.push(msg);
     }
 
     // ── Dynamic blocks (change between turns → placed near the tail) ────────
@@ -1136,8 +1153,8 @@ pub async fn chat_completion(
 
         apply_completion_token_limit(
             &mut req_body,
+            config.model_settings.max_complete_tokens,
             config.model_settings.max_tokens,
-            Some(LLM_DEFAULT_MAX_TOKENS),
         );
 
         let started_at = std::time::Instant::now();
@@ -1176,13 +1193,14 @@ pub async fn chat_completion(
                 };
                 let db = state.db.lock().unwrap();
                 let _ = db.execute(
-                    "INSERT INTO api_requests (session_id, model, request_body, response_content, tool_calls, finish_reason, prompt_tokens, completion_tokens, duration_ms) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    "INSERT INTO api_requests (session_id, model, request_body, response_content, reasoning_content, tool_calls, finish_reason, prompt_tokens, completion_tokens, duration_ms) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                     rusqlite::params![
                         session_id,
                         active_model.as_str(),
                         request_snapshot.to_string(),
                         sr.content,
+                        sr.reasoning_content,
                         tool_calls_json,
                         sr.finish_reason,
                         sr.prompt_tokens,
@@ -1292,10 +1310,14 @@ pub async fn chat_completion(
         // context.
         if compressed_this_turn && (sr.finish_reason != "tool_calls" || sr.tool_calls.is_empty()) {
             if !sr.content.is_empty() {
-                all_messages.push(json!({
+                let mut assistant_msg = json!({
                     "role": "assistant",
                     "content": sr.content,
-                }));
+                });
+                if !sr.reasoning_content.is_empty() {
+                    assistant_msg["reasoning_content"] = json!(sr.reasoning_content);
+                }
+                all_messages.push(assistant_msg);
             }
             all_messages.push(json!({
                 "role": "system",
@@ -1327,11 +1349,15 @@ pub async fn chat_completion(
                 })
             })
             .collect();
-        all_messages.push(json!({
+        let mut assistant_msg = json!({
             "role": "assistant",
             "content": null,
             "tool_calls": assistant_tcs
-        }));
+        });
+        if !sr.reasoning_content.is_empty() {
+            assistant_msg["reasoning_content"] = json!(sr.reasoning_content);
+        }
+        all_messages.push(assistant_msg);
 
         let mut pending_skill_context_messages: Vec<Value> = vec![];
 

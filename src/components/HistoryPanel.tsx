@@ -86,6 +86,7 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
         role: r.role as "user" | "assistant",
         content: r.content,
         tool_calls: toolCalls,
+        ...(r.reasoning_content ? { reasoning_content: r.reasoning_content } : {}),
         dbId: r.id,
       });
     }

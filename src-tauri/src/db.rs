@@ -9,6 +9,7 @@ pub struct HistoryRecord {
     pub content: String,
     pub timestamp: String,
     pub tool_calls: Option<String>,
+    pub reasoning_content: Option<String>,
 }
 
 #[tauri::command]
@@ -17,12 +18,13 @@ pub fn save_history(
     role: String,
     content: String,
     tool_calls: Option<String>,
+    reasoning_content: Option<String>,
     state: tauri::State<'_, crate::AppState>,
 ) -> Result<i64, String> {
     let db = state.db.lock().unwrap();
     db.execute(
-        "INSERT INTO history (session_id, role, content, tool_calls) VALUES (?1, ?2, ?3, ?4)",
-        rusqlite::params![session_id, role, content, tool_calls],
+        "INSERT INTO history (session_id, role, content, tool_calls, reasoning_content) VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![session_id, role, content, tool_calls, reasoning_content],
     )
     .map_err(|e| e.to_string())?;
     let id = db.last_insert_rowid();
@@ -36,7 +38,7 @@ pub fn load_history(
     let db = state.db.lock().unwrap();
     let mut stmt = db
         .prepare(
-            "SELECT id, session_id, role, content, COALESCE(timestamp, ''), tool_calls \
+            "SELECT id, session_id, role, content, COALESCE(timestamp, ''), tool_calls, reasoning_content \
              FROM history ORDER BY id ASC LIMIT 500",
         )
         .map_err(|e| e.to_string())?;
@@ -49,6 +51,7 @@ pub fn load_history(
                 content: row.get(3)?,
                 timestamp: row.get(4)?,
                 tool_calls: row.get(5)?,
+                reasoning_content: row.get(6)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -112,24 +115,24 @@ pub fn fork_session(
     // Copy all messages from the source session up to and including the cutoff
     let mut stmt = db
         .prepare(
-            "SELECT role, content, tool_calls FROM history \
+            "SELECT role, content, tool_calls, reasoning_content FROM history \
              WHERE session_id = ?1 AND id <= ?2 ORDER BY id ASC",
         )
         .map_err(|e| e.to_string())?;
 
-    let messages: Vec<(String, String, Option<String>)> = stmt
+    let messages: Vec<(String, String, Option<String>, Option<String>)> = stmt
         .query_map(rusqlite::params![source_session_id, cutoff_id], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
         })
         .map_err(|e| e.to_string())?
         .filter_map(Result::ok)
         .collect();
 
     let count = messages.len() as i64;
-    for (role, content, tool_calls) in messages {
+    for (role, content, tool_calls, reasoning_content) in messages {
         db.execute(
-            "INSERT INTO history (session_id, role, content, tool_calls) VALUES (?1, ?2, ?3, ?4)",
-            rusqlite::params![new_session_id, role, content, tool_calls],
+            "INSERT INTO history (session_id, role, content, tool_calls, reasoning_content) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![new_session_id, role, content, tool_calls, reasoning_content],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -285,6 +288,7 @@ pub struct ApiRequestDetail {
     pub model: String,
     pub request_body: String,
     pub response_content: String,
+    pub reasoning_content: String,
     pub tool_calls: String,
     pub finish_reason: String,
     pub prompt_tokens: i64,
@@ -340,7 +344,7 @@ pub fn get_api_request(
     let mut stmt = db
         .prepare(
             "SELECT id, COALESCE(session_id,''), COALESCE(timestamp,''), COALESCE(model,''), \
-             COALESCE(request_body,''), COALESCE(response_content,''), COALESCE(tool_calls,''), \
+             COALESCE(request_body,''), COALESCE(response_content,''), COALESCE(reasoning_content,''), COALESCE(tool_calls,''), \
              COALESCE(finish_reason,''), COALESCE(prompt_tokens,0), COALESCE(completion_tokens,0), \
              COALESCE(duration_ms,0), COALESCE(error,'') \
              FROM api_requests WHERE id = ?1",
@@ -355,12 +359,13 @@ pub fn get_api_request(
             model: row.get(3)?,
             request_body: row.get(4)?,
             response_content: row.get(5)?,
-            tool_calls: row.get(6)?,
-            finish_reason: row.get(7)?,
-            prompt_tokens: row.get(8)?,
-            completion_tokens: row.get(9)?,
-            duration_ms: row.get(10)?,
-            error: row.get(11)?,
+            reasoning_content: row.get(6)?,
+            tool_calls: row.get(7)?,
+            finish_reason: row.get(8)?,
+            prompt_tokens: row.get(9)?,
+            completion_tokens: row.get(10)?,
+            duration_ms: row.get(11)?,
+            error: row.get(12)?,
         })
     })
     .map_err(|e| e.to_string())
