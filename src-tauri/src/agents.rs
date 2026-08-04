@@ -833,7 +833,7 @@ async fn call_llm_once(
         "model": model,
         "messages": messages,
     });
-    apply_completion_token_limit(&mut body, max_tokens);
+    apply_completion_token_limit(&mut body, Some(max_tokens), Some(max_tokens));
     let res = client
         .post(url)
         .bearer_auth(api_key)
@@ -1522,7 +1522,7 @@ pub async fn run_sub_agent(
             "stream": true,
             "stream_options": { "include_usage": true },
         });
-        apply_completion_token_limit(&mut req_body, max_tokens);
+        apply_completion_token_limit(&mut req_body, Some(max_tokens), Some(max_tokens));
         if let Some(temp) = agent.temperature {
             req_body["temperature"] = json!(temp);
         }
@@ -1825,7 +1825,7 @@ async fn aggregate_results(
         "stream": true,
         "stream_options": { "include_usage": true },
     });
-    apply_completion_token_limit(&mut req_body, 4096);
+    apply_completion_token_limit(&mut req_body, Some(4096), Some(4096));
 
     let cancelled = AtomicBool::new(false);
     let sr = stream_llm_request(

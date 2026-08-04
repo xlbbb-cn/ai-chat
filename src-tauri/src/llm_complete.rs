@@ -55,7 +55,7 @@ pub struct StreamOptions<'a> {
     pub emit_reasoning: bool,
     /// Emit `chat-usage` and populate prompt/completion token counts.
     pub emit_usage: bool,
-    /// Optional max token ceiling used for usage ratio reporting.
+    /// Optional —— token ceiling used for usage ratio reporting.
     pub usage_max_tokens: Option<u32>,
 }
 
@@ -67,6 +67,7 @@ const CONTEXT_SUMMARY_MAX_LINES: usize = 120;
 const DEFAULT_MODEL_MAX_TOKENS: u32 = 131_072;
 const STREAM_MAX_RETRIES: usize = 3;
 const STREAM_RETRY_BACKOFF_MS: [u64; 2] = [300, 900];
+const LLM_DEFAULT_MAX_TOKENS: u32 = 524_288;
 
 fn retry_backoff_ms(attempt: usize) -> u64 {
     STREAM_RETRY_BACKOFF_MS
@@ -117,9 +118,25 @@ pub(crate) fn build_http_client() -> Result<Client, String> {
         .map_err(|e| format!("Failed to build HTTP client: {e}"))
 }
 
-pub(crate) fn apply_completion_token_limit(req_body: &mut Value, max_tokens: u32) {
-    req_body["max_completion_tokens"] = json!(max_tokens);
-    req_body["max_tokens"] = json!(max_tokens);
+/// Apply output token limits to the request body.
+///
+/// OpenAI-compatible APIs accept two related but distinct parameters:
+/// - `max_completion_tokens` (used by newer models such as the o1 family) — default 128K.
+/// - `max_tokens` (legacy field) — default 512K.
+///
+/// Each is set independently. Passing `None` for either leaves it unset, so
+/// the upstream API falls back to its own default for that field.
+pub(crate) fn apply_completion_token_limit(
+    req_body: &mut Value,
+    max_completion_tokens: Option<u32>,
+    max_tokens: Option<u32>,
+) {
+    if let Some(v) = max_completion_tokens {
+        req_body["max_completion_tokens"] = json!(v);
+    }
+    if let Some(v) = max_tokens {
+        req_body["max_tokens"] = json!(v);
+    }
 }
 
 fn process_stream_chunk(
@@ -808,7 +825,7 @@ pub async fn chat_completion(
         "\n\n\
         Explicit invocation: {tool:<name>}, {mcp:<server>.<tool>}, {skill:<name>}. \
         Treat these as direct requests — call the tool or load the skill before answering, \
-        without asking for confirmation."
+        without asking for confirmation.",
     ); //Add system info & explicit invocation syntax to system prompt
 
     for skill_name in &skill_ids {
@@ -1119,7 +1136,11 @@ pub async fn chat_completion(
             req_body["reasoning_effort"] = json!(config.model_settings.reasoning_effort);
         }
         if let Some(max_tokens) = config.model_settings.max_tokens {
-            apply_completion_token_limit(&mut req_body, max_tokens);
+            apply_completion_token_limit(
+                &mut req_body,
+                Some(max_tokens),
+                Some(LLM_DEFAULT_MAX_TOKENS),
+            );
         }
 
         let started_at = std::time::Instant::now();
@@ -1239,6 +1260,7 @@ pub async fn chat_completion(
 
         let total_tokens = sr.prompt_tokens.saturating_add(sr.completion_tokens);
         let ratio = total_tokens as f32 / effective_max_tokens as f32;
+        let mut compressed_this_turn = false;
         if ratio >= CONTEXT_COMPRESSION_THRESHOLD {
             if let Some(merged_summary) = compress_session_context(&mut all_messages) {
                 if let Ok(db_guard) = state.db.lock() {
@@ -1252,12 +1274,45 @@ pub async fn chat_completion(
                         session_id, total_tokens, effective_max_tokens, ratio
                     ),
                 );
-                let _ = app.emit("chat-token", "\n\n[System] Context compressed (tool-call traces discarded) and persisted for next turns.\n\n");
+                let _ = app.emit(
+                    "chat-token",
+                    "\n\n[System] Context compressed (tool-call traces discarded) and persisted for next turns.\n\n",
+                );
+                compressed_this_turn = true;
             }
         }
 
         if sr.finish_reason == "cancelled" {
             break;
+        }
+
+        // After compression, the previous response was generated against the
+        // full (uncompressed) context. If that response was a final answer
+        // (no tool calls), the task is *not* yet finished — re-enter the loop
+        // so the LLM can re-evaluate against the compressed context and
+        // continue. When the response carries tool calls, fall through to
+        // execute them; the next iteration will naturally use the compressed
+        // context.
+        if compressed_this_turn && (sr.finish_reason != "tool_calls" || sr.tool_calls.is_empty()) {
+            if !sr.content.is_empty() {
+                all_messages.push(json!({
+                    "role": "assistant",
+                    "content": sr.content,
+                }));
+            }
+            all_messages.push(json!({
+                "role": "system",
+                "content": "Context was just compressed to free up space. Review the session summary and your previous response, then continue the task if it is not yet complete; otherwise provide your final answer.",
+            }));
+            log_event(
+                &state,
+                "INFO",
+                format!(
+                    "context compressed — re-calling LLM to continue task: session_id={}",
+                    session_id
+                ),
+            );
+            continue;
         }
 
         if sr.finish_reason != "tool_calls" || sr.tool_calls.is_empty() {
@@ -1350,7 +1405,10 @@ pub async fn chat_completion(
                             "tool-call",
                             format!("🧠 *Loading skill: {}*\n\n", skill_name),
                         );
-                        format!("Skill '{}' loaded. Follow its instructions to fulfill the request.", skill_name)
+                        format!(
+                            "Skill '{}' loaded. Follow its instructions to fulfill the request.",
+                            skill_name
+                        )
                     } else {
                         format!("Skill '{}' already loaded.", skill_name)
                     }
