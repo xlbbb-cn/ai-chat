@@ -352,13 +352,17 @@ pub fn sanitize_fn_name(s: &str) -> String {
 /// don't read stderr (i.e. would block on a noisy server) should pass
 /// `false` and let stderr go to `/dev/null`.
 fn build_stdio_cmd(server: &McpServer, pipe_stderr: bool) -> tokio::process::Command {
+    use std::path::Path;
     use std::process::Stdio;
 
-    let normalized = server.command.trim().to_lowercase();
-    let is_known_stdio_runtime = matches!(
-        normalized.as_str(),
-        "uvx" | "ux" | "python" | "python3" | "py" | "node"
-    );
+    let cmd_path = Path::new(server.command.trim());
+
+    // 提取文件名，例如 "python.exe" -> "python"
+    let file_stem = cmd_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(server.command.trim())
+        .to_lowercase();
 
     let stderr_cfg = if pipe_stderr {
         Stdio::piped()
@@ -368,14 +372,28 @@ fn build_stdio_cmd(server: &McpServer, pipe_stderr: bool) -> tokio::process::Com
 
     #[cfg(windows)]
     {
-        // Check if the command looks like an absolute path (contains \ or /)
-        let is_absolute = server.command.contains('\\')
-            || server.command.contains('/')
-            || std::path::Path::new(&server.command).is_absolute();
+        let is_absolute =
+            cmd_path.is_absolute() || server.command.contains('\\') || server.command.contains('/');
 
-        if !is_absolute || is_known_stdio_runtime {
-            // Wrap in PowerShell so that PATH is inherited from the Windows shell
-            // and the console uses UTF-8 for stdin/stdout.
+        // 判断是否是脚本命令（通常需要 Shell 才能运行）
+        let is_batch_script = cmd_path
+            .extension()
+            .and_then(|s| s.to_str())
+            .map(|s| s.eq_ignore_ascii_case("cmd") || s.eq_ignore_ascii_case("bat"))
+            .unwrap_or(false);
+
+        // 这些通常是 .cmd 封装（在 Windows 上），需要 Shell 帮忙解析 PATH 或执行
+        let is_shell_dependent_tool = matches!(
+            file_stem.as_str(),
+            "npx" | "npm" | "pnpm" | "yarn" | "uvx" | "ux" | "conda"
+        );
+
+        let needs_shell_wrap = (!is_absolute && is_shell_dependent_tool) || is_batch_script;
+        
+        if needs_shell_wrap {
+            // ==========================================
+            // 进入 PowerShell 包装逻辑 (保留你原本的代码)
+            // ==========================================
             let mut args_str = shell_escape_powershell(&server.command);
             for arg in &server.args {
                 args_str.push(' ');
@@ -399,7 +417,6 @@ fn build_stdio_cmd(server: &McpServer, pipe_stderr: bool) -> tokio::process::Com
             for (k, v) in &server.env {
                 cmd.env(k, v);
             }
-            // Prevent a console window from flashing on Windows
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             cmd.creation_flags(CREATE_NO_WINDOW);
             return cmd;
@@ -456,7 +473,6 @@ fn build_stdio_cmd(server: &McpServer, pipe_stderr: bool) -> tokio::process::Com
         }
     }
 
-    // Absolute path — spawn directly
     let mut cmd = tokio::process::Command::new(&server.command);
     cmd.args(&server.args)
         .stdin(Stdio::piped())
@@ -1033,10 +1049,7 @@ async fn test_stdio_server(state: &AppState, server: &McpServer) -> Result<Strin
             }
             // Non-JSON line (startup banner, logging output, …) — log and keep reading.
             let preview: String = trimmed.chars().take(200).collect();
-            log(
-                McpLogLevel::Info,
-                format!("Skipping non-JSON line (banner?): {preview}"),
-            );
+            log(McpLogLevel::Info, format!("{preview}"));
         }
     })
     .await;
