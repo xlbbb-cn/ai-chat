@@ -365,7 +365,7 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
       </div>
 
       {/* Message action buttons (delete / fork / export) */}
-      {showActions && !message.streaming && (
+      {isAssistant && showActions && !message.streaming && (
         <div className="message-action-buttons">
           {isAssistant && (
             <button

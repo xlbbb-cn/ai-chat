@@ -426,9 +426,13 @@ fn build_stdio_cmd(server: &McpServer, pipe_stderr: bool) -> tokio::process::Com
             // explicitly when the shell is zsh or bash.
             let shell = std::env::var("SHELL").unwrap_or_else(|_| {
                 #[cfg(target_os = "macos")]
-                { "/bin/zsh".to_string() }
+                {
+                    "/bin/zsh".to_string()
+                }
                 #[cfg(not(target_os = "macos"))]
-                { "/bin/sh".to_string() }
+                {
+                    "/bin/sh".to_string()
+                }
             });
             let shell_name = std::path::Path::new(&shell)
                 .file_stem()
@@ -998,10 +1002,42 @@ async fn test_stdio_server(state: &AppState, server: &McpServer) -> Result<Strin
         "⏳ Phase: waiting for response — may take a while if installing packages...".to_string(),
     );
 
+    // Read lines until a valid JSON-RPC initialize response arrives.
+    // Some servers print a startup banner (non-JSON lines) before the
+    // real JSON-RPC response — those are skipped and logged instead of
+    // failing the test.
     let read_result = timeout(Duration::from_secs(120), async {
         let mut reader = tokio::io::BufReader::new(&mut stdout);
         let mut line = String::new();
-        reader.read_line(&mut line).await.map(|_| line)
+        loop {
+            line.clear();
+            let n = reader
+                .read_line(&mut line)
+                .await
+                .map_err(|e| format!("Read error: {e}"))?;
+            if n == 0 {
+                // EOF: server closed stdout without a response.
+                return Err("Server closed connection without response".to_string());
+            }
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            // A valid JSON-RPC response carries "jsonrpc" plus "result"/"error".
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                if parsed.get("jsonrpc").is_some()
+                    && (parsed.get("result").is_some() || parsed.get("error").is_some())
+                {
+                    return Ok(line);
+                }
+            }
+            // Non-JSON line (startup banner, logging output, …) — log and keep reading.
+            let preview: String = trimmed.chars().take(200).collect();
+            log(
+                McpLogLevel::Info,
+                format!("Skipping non-JSON line (banner?): {preview}"),
+            );
+        }
     })
     .await;
 
@@ -1013,32 +1049,17 @@ async fn test_stdio_server(state: &AppState, server: &McpServer) -> Result<Strin
     }
 
     let result = match read_result {
-        Ok(Ok(line)) if !line.trim().is_empty() => {
+        Ok(Ok(line)) => {
             log(
                 McpLogLevel::Info,
                 format!("Received {} bytes from server", line.len()),
             );
-            if line.contains("\"result\"") || line.contains("jsonrpc") {
-                Ok(format!(
-                    "✅ Connected successfully (received {} bytes)",
-                    line.len()
-                ))
-            } else {
-                let preview: String = line.chars().take(200).collect();
-                log(
-                    McpLogLevel::Warn,
-                    format!("Response did not look like JSON-RPC: {preview}"),
-                );
-                Err(format!("Unexpected response: {preview}"))
-            }
+            Ok(format!(
+                "✅ Connected successfully (received {} bytes)",
+                line.len()
+            ))
         }
-        Ok(Ok(_)) => {
-            let msg = "Server closed connection without response".to_string();
-            log(McpLogLevel::Error, msg.clone());
-            Err(msg)
-        }
-        Ok(Err(e)) => {
-            let msg = format!("Read error: {e}");
+        Ok(Err(msg)) => {
             log(McpLogLevel::Error, msg.clone());
             Err(msg)
         }
