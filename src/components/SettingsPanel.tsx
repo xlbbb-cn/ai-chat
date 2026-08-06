@@ -509,13 +509,13 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
                   type="number"
                   min={1}
                   step={1}
-                  value={config.model_settings?.max_tokens ?? ""}
+                  value={config.model_settings?.max_complete_tokens ?? ""}
                   onChange={(e) => {
                     const v = e.target.value;
                     setConfig((prev) => ({
                       ...prev,
                       model_settings: updateModelSettings(prev.model_settings, {
-                        max_tokens: v === "" ? undefined : Math.max(1, Math.floor(Number(v))),
+                        max_complete_tokens: v === "" ? undefined : Math.max(1, Math.floor(Number(v))),
                       }),
                     }));
                   }}

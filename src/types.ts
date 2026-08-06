@@ -44,6 +44,7 @@ export interface ModelSettings {
   temperature?: number;
   top_p?: number;
   reasoning_effort?: string;
+  max_complete_tokens?: number;
   max_tokens?: number;
 }
 
@@ -93,6 +94,7 @@ export interface SubAgent {
   system_prompt: string;
   model?: string;
   max_tokens?: number;
+  max_complete_tokens?: number;
   temperature?: number;
   allowed_tools: string[];
   allowed_skills: string[];

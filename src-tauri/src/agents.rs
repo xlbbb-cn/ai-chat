@@ -7,10 +7,13 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tiktoken_rs::cl100k_base;
 use uuid::Uuid;
 
+const LLM_DEFAULT_MAX_TOKENS: u32 = 131_072;
+const LLM_DEFAULT_MAX_COMLETE_TOKENS: u32 = 4_096;
+
 use crate::{
     llm_complete::{
         apply_completion_token_limit, extract_upstream_error_message, sanitize_tool_pairs,
-        stream_llm_request, StreamOptions, LLM_DEFAULT_MAX_TOKENS,
+        stream_llm_request, StreamOptions,
     },
     tools, AppConfig, AppState,
 };
@@ -26,6 +29,8 @@ pub struct SubAgent {
     pub system_prompt: String,
     #[serde(default)]
     pub model: Option<String>,
+    #[serde(default)]
+    pub max_complete_tokens: Option<u32>,
     #[serde(default)]
     pub max_tokens: Option<u32>,
     #[serde(default)]
@@ -826,14 +831,18 @@ async fn call_llm_once(
     api_key: &str,
     mut messages: Vec<Value>,
     model: &str,
-    max_tokens: u32,
+    max_complete_tokens: u32,
 ) -> Result<String, String> {
     sanitize_tool_pairs(&mut messages);
     let mut body = json!({
         "model": model,
         "messages": messages,
     });
-    apply_completion_token_limit(&mut body, Some(max_tokens), Some(LLM_DEFAULT_MAX_TOKENS));
+    apply_completion_token_limit(
+        &mut body,
+        Some(max_complete_tokens),
+        Some(LLM_DEFAULT_MAX_TOKENS),
+    );
     let res = client
         .post(url)
         .bearer_auth(api_key)
@@ -1322,7 +1331,9 @@ pub async fn run_sub_agent(
     );
 
     let model = agent.model.as_deref().unwrap_or(&config.model);
-    let max_tokens = agent.max_tokens.unwrap_or(8192);
+    let max_complete_tokens = agent
+        .max_complete_tokens
+        .unwrap_or(LLM_DEFAULT_MAX_COMLETE_TOKENS);
     let mut tools_list = tools::get_all_tools(&agent.allowed_tools);
     tools_list.extend(tools::get_agent_task_tools());
     let cancelled = AtomicBool::new(false);
@@ -1331,7 +1342,7 @@ pub async fn run_sub_agent(
     let mission_id = mission_id_for_task(task).to_string();
     let context_budget = config
         .model_settings
-        .max_tokens
+        .max_complete_tokens
         .filter(|limit| *limit > 0)
         .map(|limit| limit as usize)
         .unwrap_or(AGENT_DEFAULT_CONTEXT_WINDOW);
@@ -1524,7 +1535,7 @@ pub async fn run_sub_agent(
         });
         apply_completion_token_limit(
             &mut req_body,
-            Some(max_tokens),
+            Some(max_complete_tokens),
             Some(LLM_DEFAULT_MAX_TOKENS),
         );
         if let Some(temp) = agent.temperature {
