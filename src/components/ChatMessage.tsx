@@ -230,7 +230,7 @@ function extractEmbeddedThoughtProcess(content: string): {
 export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onFork, dbId }: Props) {
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
-  const [showActions, setShowActions] = useState(false);
+  const [showActions, setShowActions] = useState(true);
   const attachmentNames = isUser ? extractAttachmentNames(message.content) : [];
   const displayContent = isUser
     ? message.content.replace(/<details><summary>Attached File:[^<]*<\/summary>[\s\S]*?<\/details>/g, "").trim()
@@ -289,8 +289,8 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
   return (
     <div
       className={`chat-message-shell ${isUser ? "user" : "assistant"}`}
-      onMouseEnter={() => setShowActions(true)}
-      onMouseLeave={() => setShowActions(false)}
+    // onMouseEnter={() => setShowActions(true)}
+    // onMouseLeave={() => setShowActions(false)}
     >
       <div className={`chat-message ${isUser ? "user" : "assistant"}`}>
         {/* <div className="message-role">{isUser ? "You" : "Assistant"}</div> */}
