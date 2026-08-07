@@ -21,38 +21,38 @@ enum OutputDecodeHint {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RiskLevel {
     /// L0 — System risk: could modify OS files, boot config, kernel, or system services.
-    /// 85 ≤ score ≤ 100: 毁坏系统底层文件导致宕机的行为
+    /// 85 ≤ score ≤ 100: behavior that destroys underlying system files and causes downtime
     L0 = 0,
     /// L1 — System config risk: modify system config files and system software.
-    /// 70 ≤ score < 85: 改变系统配置文件和系统软件的行为
+    /// 70 ≤ score < 85: behavior that modifies system config files and system software
     L1 = 1,
     /// L2 — User software risk: install/uninstall/modify user applications.
-    /// 55 ≤ score < 70: 改变用户软件和配置行为
+    /// 55 ≤ score < 70: behavior that modifies user software and configuration
     L2 = 2,
     /// L3 — User data risk: modify/delete user data files.
-    /// 40 ≤ score < 55: 改变用户数据的行为
+    /// 40 ≤ score < 55: behavior that modifies user data
     L3 = 3,
     /// L4 — Sensitive read: read system/user configs, keys, logs.
-    /// 25 ≤ score < 40: 读取敏感信息的行为
+    /// 25 ≤ score < 40: behavior that reads sensitive information
     L4 = 4,
     /// L5 — General query: no side effects status/info queries.
-    /// 10 ≤ score < 25: 一般查询行为
+    /// 10 ≤ score < 25: general query behavior
     L5 = 5,
     /// L6 — Safe: read-only, informational, or purely non-destructive.
-    /// 0 ≤ score < 10: 只读行为
+    /// 0 ≤ score < 10: read-only behavior
     L6 = 6,
 }
 
 impl RiskLevel {
     pub fn description(self) -> &'static str {
         match self {
-            RiskLevel::L0 => "L0 system risk — may affect OS integrity (毁坏系统底层文件)",
-            RiskLevel::L1 => "L1 system config risk — may modify system config/software (改变系统配置)",
-            RiskLevel::L2 => "L2 user software risk — may modify user applications (改变用户软件)",
-            RiskLevel::L3 => "L3 user data risk — may modify or delete user files (改变用户数据)",
-            RiskLevel::L4 => "L4 sensitive read — may read sensitive info (读取敏感信息)",
-            RiskLevel::L5 => "L5 general query — read-only status/info (一般查询)",
-            RiskLevel::L6 => "L6 safe — read-only or non-destructive (只读行为)",
+            RiskLevel::L0 => "L0 system risk — may affect OS integrity (destroy underlying system files)",
+            RiskLevel::L1 => "L1 system config risk — may modify system config/software (modify system configuration)",
+            RiskLevel::L2 => "L2 user software risk — may modify user applications (modify user software)",
+            RiskLevel::L3 => "L3 user data risk — may modify or delete user files (modify or delete user data)",
+            RiskLevel::L4 => "L4 sensitive read — may read sensitive info (read sensitive information)",
+            RiskLevel::L5 => "L5 general query — read-only status/info (general query)",
+            RiskLevel::L6 => "L6 safe — read-only or non-destructive (read-only behavior)",
         }
     }
 
@@ -70,16 +70,16 @@ impl RiskLevel {
     }
 
     /// Get disposition suggestion per patent requirements.
-    /// L0/L1: 人力审核, L2/L3: LLM警告+确认, L4: 放行+审计, L5: 放行, L6: 直接放行
+    /// L0/L1: manual review, L2/L3: LLM warning + confirmation, L4: allow + audit, L5: allow, L6: allow directly
     pub fn disposition(self) -> &'static str {
         match self {
-            RiskLevel::L0 => "人力审核（评分 ≥ 90 时强制拒绝建议）",
-            RiskLevel::L1 => "人力审核",
-            RiskLevel::L2 => "LLM 警告并确认执行",
-            RiskLevel::L3 => "LLM 警告并确认执行",
-            RiskLevel::L4 => "建议放行并记录审计",
-            RiskLevel::L5 => "建议放行",
-            RiskLevel::L6 => "建议直接放行",
+            RiskLevel::L0 => "Manual review (force reject if score ≥ 90)",
+            RiskLevel::L1 => "Manual review",
+            RiskLevel::L2 => "LLM warning and confirm execution",
+            RiskLevel::L3 => "LLM warning and confirm execution",
+            RiskLevel::L4 => "Recommend to allow and log audit",
+            RiskLevel::L5 => "Recommend to allow",
+            RiskLevel::L6 => "Recommend to allow directly",
         }
     }
 
@@ -320,7 +320,7 @@ fn l0_regex_set() -> &'static regex::RegexSet {
     })
 }
 
-// ─── Syntax Gate (语法门禁) ─────────────────────────────────────────────────
+// ─── Syntax Gate ─────────────────────────────────────────────────
 
 /// Check if script has syntax errors using simple heuristic analysis.
 /// Returns SyntaxCheckResult with error details if syntax is invalid.
@@ -676,7 +676,7 @@ pub fn generate_risk_report(cmd_type: &str, code: &str, request_id: &str) -> Ris
             request_id: request_id.to_string(),
             risk_level: "REJECTED".to_string(),
             risk_score: 0,
-            disposition: "语法非法，拒绝评级".to_string(),
+            disposition: "Invalid syntax, refuse to rate".to_string(),
             dimension_scores: DimensionScores {
                 blacklist_severity: 0.0,
                 whitelist_coverage: 0.0,
@@ -691,7 +691,7 @@ pub fn generate_risk_report(cmd_type: &str, code: &str, request_id: &str) -> Ris
                 ratio: 0.0,
             },
             semantic_anomalies: vec![],
-            recommendation: "修复语法错误后重新提交".to_string(),
+            recommendation: "Fix syntax errors and resubmit".to_string(),
             syntax_check,
             timestamp: chrono::Utc::now().to_rfc3339(),
         };
@@ -705,20 +705,20 @@ pub fn generate_risk_report(cmd_type: &str, code: &str, request_id: &str) -> Ris
     
     // Step 4: Generate disposition
     let disposition = if score >= REJECT_THRESHOLD {
-        "强制拒绝建议（评分超过拒绝阈值）".to_string()
+        "Force reject suggestion (score exceeds rejection threshold)".to_string()
     } else {
         risk_level.disposition().to_string()
     };
     
     // Step 5: Generate recommendation
     let recommendation = if score >= REJECT_THRESHOLD {
-        format!("拒绝执行：评分 {} ≥ 拒绝阈值 {}", score, REJECT_THRESHOLD)
+        format!("Reject execution: score {} ≥ reject threshold {}", score, REJECT_THRESHOLD)
     } else if risk_level.requires_human_review() {
-        format!("转人工审批流：{}", risk_level.description())
+        format!("Route to manual approval flow: {}", risk_level.description())
     } else if risk_level.requires_llm_confirmation() {
-        format!("LLM 警告并确认执行：{}", risk_level.description())
+        format!("LLM warning and confirm execution: {}", risk_level.description())
     } else {
-        format!("建议放行：{}", risk_level.description())
+        format!("Recommend to allow: {}", risk_level.description())
     };
     
     let whitelist_ratio = calculate_whitelist_coverage(cmd_type, code);
@@ -2300,30 +2300,30 @@ mod tests {
     fn test_risk_level_dispositions() {
         use super::RiskLevel;
 
-        // L0/L1: 人力审核
+        // L0/L1: manual review
         assert!(RiskLevel::L0.requires_human_review());
         assert!(RiskLevel::L1.requires_human_review());
         assert!(!RiskLevel::L2.requires_human_review());
 
-        // L2/L3: LLM 确认
+        // L2/L3: LLM confirmation
         assert!(RiskLevel::L2.requires_llm_confirmation());
         assert!(RiskLevel::L3.requires_llm_confirmation());
         assert!(!RiskLevel::L1.requires_llm_confirmation());
 
-        // L4-L6: 自动放行
+        // L4-L6: auto-approved
         assert!(RiskLevel::L4.is_auto_approvable());
         assert!(RiskLevel::L5.is_auto_approvable());
         assert!(RiskLevel::L6.is_auto_approvable());
         assert!(!RiskLevel::L3.is_auto_approvable());
 
         // Disposition strings
-        assert!(RiskLevel::L0.disposition().contains("人力审核"));
-        assert!(RiskLevel::L1.disposition().contains("人力审核"));
+        assert!(RiskLevel::L0.disposition().contains("Manual review"));
+        assert!(RiskLevel::L1.disposition().contains("Manual review"));
         assert!(RiskLevel::L2.disposition().contains("LLM"));
         assert!(RiskLevel::L3.disposition().contains("LLM"));
-        assert!(RiskLevel::L4.disposition().contains("放行"));
-        assert!(RiskLevel::L5.disposition().contains("放行"));
-        assert!(RiskLevel::L6.disposition().contains("放行"));
+        assert!(RiskLevel::L4.disposition().contains("allow"));
+        assert!(RiskLevel::L5.disposition().contains("allow"));
+        assert!(RiskLevel::L6.disposition().contains("allow"));
     }
 
     #[test]
@@ -2390,7 +2390,7 @@ mod tests {
         let report = generate_risk_report("direct", "rm -rf /", "test-002");
         assert!(report.risk_score >= 85);
         assert!(report.risk_level.contains("L0"));
-        assert!(report.disposition.contains("强制拒绝") || report.disposition.contains("人力审核"));
+        assert!(report.disposition.contains("Force reject") || report.disposition.contains("Manual review"));
 
         // Test report with syntax error
         let report = generate_risk_report("bash", "echo 'unclosed", "test-003");
@@ -3281,13 +3281,13 @@ pub async fn execute_tool(
             let request_id = format!("req-{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("unknown"));
             let report = generate_risk_report("direct", &command, &request_id);
             
-            // ── Syntax Gate: 语法错误拒绝执行并返回给大模型 ───────────────────
+            // ── Syntax Gate: reject invalid scripts before execution ─────────
             if report.syntax_check.status == "failed" {
                 let error_details: Vec<String> = report.syntax_check.syntax_errors
                     .iter()
                     .map(|e| format!("  - Line {}:{}: {} ({})", e.line, e.column, e.message, e.error_type))
                     .collect();
-                
+
                 // Emit syntax error event for frontend
                 let _ = app.emit(
                     "syntax-error",
@@ -3299,12 +3299,12 @@ pub async fn execute_tool(
                         "report": report,
                     }),
                 );
-                
+
                 return format!(
-                    "⛔ 语法门禁拦截：脚本语法非法，拒绝执行\n\n\
-                    错误详情：\n{}\n\n\
-                    修复建议：\n{}\n\n\
-                    结构化报告：\n```json\n{}\n```",
+                    "⛔ Syntax gate blocked: the script is syntactically invalid and will not run\n\n\
+                    Error details:\n{}\n\n\
+                    Fix suggestions:\n{}\n\n\
+                    Structured report:\n```json\n{}\n```",
                     error_details.join("\n"),
                     report.syntax_check.syntax_errors
                         .iter()
@@ -3335,12 +3335,12 @@ pub async fn execute_tool(
                 }),
             );
             
-            // ── L5/L6: 直接执行（无需确认）────────────────────────────────────
+            // ── L5/L6: run directly (no confirmation) ────────────────────────
             if risk_level.is_auto_approvable() {
                 let _ = app.emit(
                     "tool-call",
                     format!(
-                        "✅ *风险评估通过：{} (评分: {}) - 直接执行*\n\n```\n{}\n```\n\n",
+                        "✅ *Risk assessment passed: {} (score: {}) - running directly*\n\n```\n{}\n```\n\n",
                         report.risk_level, report.risk_score, command
                     ),
                 );
@@ -3359,11 +3359,11 @@ pub async fn execute_tool(
                 .unwrap_or_else(|e| format!("Error: {}", e));
             }
             
-            // ── L0-L4: 需要前端确认 ───────────────────────────────────────────
+            // ── L0-L4: require frontend confirmation ─────────────────────────
             let confirm = request_tool_confirmation(
                 app,
                 format!(
-                    "风险评估: {} (评分: {})\n处置建议: {}\n\n命中规则:\n{}\n\n惩罚项:\n{}",
+                    "Risk assessment: {} (score: {})\nDisposition: {}\n\nMatched rules:\n{}\n\nPenalty items:\n{}",
                     report.risk_level,
                     report.risk_score,
                     report.disposition,
@@ -3385,23 +3385,23 @@ pub async fn execute_tool(
 
             if !confirm.confirmed {
                 return format!(
-                    "⛔ 用户拒绝执行\n\n\
-                    风险等级：{}\n\
-                    风险评分：{}\n\
-                    处置建议：{}\n\n\
-                    结构化报告：\n```json\n{}\n```",
+                    "⛔ Execution rejected by user\n\n\
+                    Risk level: {}\n\
+                    Risk score: {}\n\
+                    Disposition: {}\n\n\
+                    Structured report:\n```json\n{}\n```",
                     report.risk_level,
                     report.risk_score,
                     report.disposition,
                     serde_json::to_string_pretty(&report).unwrap_or_default()
                 );
             }
-            
-            // ── 用户确认后执行 ────────────────────────────────────────────────
+
+            // ── Execute after user confirmation ───────────────────────────────
             let _ = app.emit(
                 "tool-call",
                 format!(
-                    "⚠️ *用户确认执行：{} (评分: {})*\n\n```\n{}\n```\n\n",
+                    "⚠️ *User confirmed execution: {} (score: {})*\n\n```\n{}\n```\n\n",
                     report.risk_level, report.risk_score, command
                 ),
             );
@@ -3434,13 +3434,13 @@ pub async fn execute_tool(
             let request_id = format!("req-{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("unknown"));
             let report = generate_risk_report(&shell_type, &code, &request_id);
             
-            // ── Syntax Gate: 语法错误拒绝执行并返回给大模型 ───────────────────
+            // ── Syntax Gate: reject invalid scripts before execution ─────────
             if report.syntax_check.status == "failed" {
                 let error_details: Vec<String> = report.syntax_check.syntax_errors
                     .iter()
                     .map(|e| format!("  - Line {}:{}: {} ({})", e.line, e.column, e.message, e.error_type))
                     .collect();
-                
+
                 // Emit syntax error event for frontend
                 let _ = app.emit(
                     "syntax-error",
@@ -3452,12 +3452,12 @@ pub async fn execute_tool(
                         "report": report,
                     }),
                 );
-                
+
                 return format!(
-                    "⛔ 语法门禁拦截：脚本语法非法，拒绝执行\n\n\
-                    错误详情：\n{}\n\n\
-                    修复建议：\n{}\n\n\
-                    结构化报告：\n```json\n{}\n```",
+                    "⛔ Syntax gate blocked: the script is syntactically invalid and will not run\n\n\
+                    Error details:\n{}\n\n\
+                    Fix suggestions:\n{}\n\n\
+                    Structured report:\n```json\n{}\n```",
                     error_details.join("\n"),
                     report.syntax_check.syntax_errors
                         .iter()
@@ -3489,12 +3489,12 @@ pub async fn execute_tool(
                 }),
             );
             
-            // ── L5/L6: 直接执行（无需确认）────────────────────────────────────
+            // ── L5/L6: run directly (no confirmation) ────────────────────────
             if risk_level.is_auto_approvable() {
                 let _ = app.emit(
                     "tool-call",
                     format!(
-                        "✅ *风险评估通过：{} (评分: {}) - 直接执行*\n\n```{}\n{}\n```\n\n",
+                        "✅ *Risk assessment passed: {} (score: {}) - running directly*\n\n```{}\n{}\n```\n\n",
                         report.risk_level, report.risk_score, shell_type, code
                     ),
                 );
@@ -3513,11 +3513,11 @@ pub async fn execute_tool(
                 .unwrap_or_else(|e| format!("Error: {}", e));
             }
             
-            // ── L0-L4: 需要前端确认 ───────────────────────────────────────────
+            // ── L0-L4: require frontend confirmation ─────────────────────────
             let confirm = request_tool_confirmation(
                 app,
                 format!(
-                    "风险评估: {} (评分: {})\n处置建议: {}\n\n命中规则:\n{}\n\n惩罚项:\n{}",
+                    "Risk assessment: {} (score: {})\nDisposition: {}\n\nMatched rules:\n{}\n\nPenalty items:\n{}",
                     report.risk_level,
                     report.risk_score,
                     report.disposition,
@@ -3539,23 +3539,23 @@ pub async fn execute_tool(
 
             if !confirm.confirmed {
                 return format!(
-                    "⛔ 用户拒绝执行\n\n\
-                    风险等级：{}\n\
-                    风险评分：{}\n\
-                    处置建议：{}\n\n\
-                    结构化报告：\n```json\n{}\n```",
+                    "⛔ Execution rejected by user\n\n\
+                    Risk level: {}\n\
+                    Risk score: {}\n\
+                    Disposition: {}\n\n\
+                    Structured report:\n```json\n{}\n```",
                     report.risk_level,
                     report.risk_score,
                     report.disposition,
                     serde_json::to_string_pretty(&report).unwrap_or_default()
                 );
             }
-            
-            // ── 用户确认后执行 ────────────────────────────────────────────────
+
+            // ── Execute after user confirmation ───────────────────────────────
             let _ = app.emit(
                 "tool-call",
                 format!(
-                    "⚠️ *用户确认执行：{} (评分: {})*\n\n```{}\n{}\n```\n\n",
+                    "⚠️ *User confirmed execution: {} (score: {})*\n\n```{}\n{}\n```\n\n",
                     report.risk_level, report.risk_score, shell_type, code
                 ),
             );

@@ -164,7 +164,7 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                 <button className="close-btn" onClick={onClose}>✕</button>
             </div>
             <div className="tools-description">
-                这是内置工具集
+                Built-In Tool Set
             </div>
             <div className="tools-list">
                 {AVAILABLE_TOOLS.map(tool => (

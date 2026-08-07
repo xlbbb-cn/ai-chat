@@ -638,7 +638,7 @@ body {
 }
 
 .toggle-switch input:checked+.toggle-switch-slider {
-  background: var(--c-success);
+  background: var(--c-accent);
 }
 
 .toggle-switch input:checked+.toggle-switch-slider::after {

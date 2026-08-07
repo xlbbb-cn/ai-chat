@@ -63,6 +63,7 @@
   overflow-y: auto;
   overflow-x: hidden;
   background: var(--c-bg);
+  margin-top: 10px;
 }
 
 .settings-body label {
