@@ -305,6 +305,8 @@ pub struct AppConfig {
     pub logger_output: LoggerOutput,
     #[serde(default)]
     pub auto_accept_confirm_kinds: Vec<String>,
+    #[serde(default)]
+    pub theme: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -326,6 +328,7 @@ impl Default for AppConfig {
             workspace_dir: None,
             logger_output: LoggerOutput::default(),
             auto_accept_confirm_kinds: vec![],
+            theme: None,
         }
     }
 }
