@@ -190,11 +190,28 @@ export default function App() {
     reason: string;
     cmd_type: string;
     code: string;
-    confirm_kind?: "dangerous" | "sudo" | "elevation" | "external_path";
+    confirm_kind?: "dangerous" | "sudo" | "elevation" | "external_path" | "system_config" | "user_software" | "user_data" | "sensitive_read" | "general_query";
     requires_auth?: "none" | "sudo" | "elevation";
+    risk_level?: string;
+    risk_score?: number;
+    disposition?: string;
+    blacklist_hits?: Array<{ rule_id: string; severity: string; matched: string; contribution: number }>;
+    penalty_items?: Array<{ name: string; points: number }>;
   } | null>(null);
   const [confirmUsername, setConfirmUsername] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [riskAssessment, setRiskAssessment] = useState<{
+    request_id?: string;
+    cmd_type?: string;
+    code?: string;
+    risk_level?: string;
+    risk_score?: number;
+    disposition?: string;
+    recommendation?: string;
+    blacklist_hits?: Array<{ rule_id: string; severity: string; matched: string; contribution: number }>;
+    penalty_items?: Array<{ name: string; points: number }>;
+    requires_confirmation?: boolean;
+  } | null>(null);
   const [profileExporting, setProfileExporting] = useState(false);
   const [profileExportMessage, setProfileExportMessage] = useState("Exporting and compressing profile...");
   const [pendingRetryMessageId, setPendingRetryMessageId] = useState<string | null>(null);
@@ -386,18 +403,39 @@ export default function App() {
 
   // Dangerous-command confirmation dialog
   useEffect(() => {
+    // Risk assessment event (emitted before confirmation for L0-L4 commands)
+    const unlistenRisk = listen<{
+      request_id?: string;
+      cmd_type?: string;
+      code?: string;
+      risk_level?: string;
+      risk_score?: number;
+      disposition?: string;
+      recommendation?: string;
+      blacklist_hits?: Array<{ rule_id: string; severity: string; matched: string; contribution: number }>;
+      penalty_items?: Array<{ name: string; points: number }>;
+      requires_confirmation?: boolean;
+    }>("risk-assessment", (e) => {
+      setRiskAssessment(e.payload);
+    });
+
     const unlisten = listen<{
       reason: string;
       cmd_type: string;
       code: string;
-      confirm_kind?: "dangerous" | "sudo" | "elevation" | "external_path";
+      confirm_kind?: "dangerous" | "sudo" | "elevation" | "external_path" | "system_config" | "user_software" | "user_data" | "sensitive_read" | "general_query";
       requires_auth?: "none" | "sudo" | "elevation";
+      risk_level?: string;
+      risk_score?: number;
+      disposition?: string;
+      blacklist_hits?: Array<{ rule_id: string; severity: string; matched: string; contribution: number }>;
+      penalty_items?: Array<{ name: string; points: number }>;
     }>(
       "confirm-required",
       (e) => {
-        const { reason, cmd_type, code, confirm_kind, requires_auth } = e.payload;
+        const { reason, cmd_type, code, confirm_kind, requires_auth, risk_level, risk_score, disposition, blacklist_hits, penalty_items } = e.payload;
         setConfirmDialog((current) =>
-          current ?? { reason, cmd_type, code, confirm_kind, requires_auth }
+          current ?? { reason, cmd_type, code, confirm_kind, requires_auth, risk_level, risk_score, disposition, blacklist_hits, penalty_items }
         );
         setConfirmUsername("");
         setConfirmPassword("");
@@ -405,6 +443,7 @@ export default function App() {
     );
     return () => {
       unlisten.then((fn) => fn());
+      unlistenRisk.then((fn) => fn());
     };
   }, []);
 
@@ -414,6 +453,7 @@ export default function App() {
     setConfirmDialog(null);
     setConfirmUsername("");
     setConfirmPassword("");
+    setRiskAssessment(null);
   }, [confirmDialog, confirmUsername, confirmPassword]);
 
   useEffect(() => {
@@ -952,20 +992,33 @@ export default function App() {
     const requiresSudo = confirmDialog.requires_auth === "sudo";
     const requiresElevation = confirmDialog.requires_auth === "elevation";
     const isExternalPath = confirmDialog.confirm_kind === "external_path";
+    // Prefer structured risk data from the risk-assessment event, falling back
+    // to fields carried on the confirm-required payload itself.
+    const riskLevel = riskAssessment?.risk_level ?? confirmDialog.risk_level;
+    const riskScore = riskAssessment?.risk_score ?? confirmDialog.risk_score;
+    const disposition = riskAssessment?.disposition ?? confirmDialog.disposition;
+    const blacklistHits = riskAssessment?.blacklist_hits ?? confirmDialog.blacklist_hits;
+    const penaltyItems = riskAssessment?.penalty_items ?? confirmDialog.penalty_items;
+    const hasRisk = riskLevel !== undefined && riskScore !== undefined;
+
     const title = requiresSudo
       ? "⚠️ Privileged operation (sudo)"
       : requiresElevation
         ? "⚠️ Privileged operation (administrator)"
         : isExternalPath
           ? "⚠️ External file access request"
-          : "⚠️ Dangerous command detected";
+          : hasRisk
+            ? `⚠️ Risk Level ${riskLevel} — confirm execution`
+            : "⚠️ Dangerous command detected";
     const badge = requiresSudo
       ? "SUDO"
       : requiresElevation
         ? "ADMIN"
         : isExternalPath
           ? "PATH"
-          : "DANGEROUS";
+          : hasRisk
+            ? riskLevel ?? "RISK"
+            : "DANGEROUS";
     const preview =
       confirmDialog.code.length > 400
         ? confirmDialog.code.slice(0, 400) + "…"
@@ -983,6 +1036,39 @@ export default function App() {
           <p>
             <strong>Type:</strong> {confirmDialog.cmd_type}
           </p>
+          {hasRisk && (
+            <div className="confirm-dialog-risk">
+              <div className="confirm-risk-header">
+                <span className={`confirm-risk-level confirm-risk-level-${String(riskLevel).toLowerCase()}`}>
+                  {riskLevel}
+                </span>
+                <span className="confirm-risk-score">Score: {riskScore}/100</span>
+                <span className="confirm-risk-disposition">{disposition}</span>
+              </div>
+              {blacklistHits && blacklistHits.length > 0 && (
+                <div className="confirm-risk-section">
+                  <strong>命中规则 (Blacklist hits):</strong>
+                  <ul>
+                    {blacklistHits.map((hit, i) => (
+                      <li key={i}>
+                        [{hit.rule_id}] ({hit.severity}) {hit.matched} — +{hit.contribution}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {penaltyItems && penaltyItems.length > 0 && (
+                <div className="confirm-risk-section">
+                  <strong>惩罚项 (Penalty items):</strong>
+                  <ul>
+                    {penaltyItems.map((item, i) => (
+                      <li key={i}>{item.name} — +{item.points}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
           {requiresSudo && (
             <div className="confirm-dialog-credentials">
               <label>
