@@ -752,6 +752,11 @@ pub fn run() {
             db.execute("CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)", []).unwrap();
             let _ = db.execute("ALTER TABLE history ADD COLUMN tool_calls TEXT", []);
             let _ = db.execute("ALTER TABLE history ADD COLUMN reasoning_content TEXT", []);
+            // Attachments column: JSON-serialized `Attachment[]` for user
+            // messages. The column is added lazily via ALTER TABLE so older
+            // databases (without the column) upgrade in place; new rows
+            // always include it.
+            let _ = db.execute("ALTER TABLE history ADD COLUMN attachments TEXT", []);
             let _ = db.execute("ALTER TABLE api_requests ADD COLUMN reasoning_content TEXT", []);
             db.execute(
                 "CREATE TABLE IF NOT EXISTS session_summaries (\

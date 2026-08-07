@@ -10,6 +10,11 @@ pub struct HistoryRecord {
     pub timestamp: String,
     pub tool_calls: Option<String>,
     pub reasoning_content: Option<String>,
+    /// JSON-serialized `Attachment[]` for user messages — stores display
+    /// metadata (name, kind, mime, data URL) for the files the user
+    /// attached, so the chat history can re-render thumbnails/pills
+    /// without re-reading the binary content from `content`.
+    pub attachments: Option<String>,
 }
 
 #[tauri::command]
@@ -19,12 +24,13 @@ pub fn save_history(
     content: String,
     tool_calls: Option<String>,
     reasoning_content: Option<String>,
+    attachments: Option<String>,
     state: tauri::State<'_, crate::AppState>,
 ) -> Result<i64, String> {
     let db = state.db.lock().unwrap();
     db.execute(
-        "INSERT INTO history (session_id, role, content, tool_calls, reasoning_content) VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![session_id, role, content, tool_calls, reasoning_content],
+        "INSERT INTO history (session_id, role, content, tool_calls, reasoning_content, attachments) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![session_id, role, content, tool_calls, reasoning_content, attachments],
     )
     .map_err(|e| e.to_string())?;
     let id = db.last_insert_rowid();
@@ -38,7 +44,7 @@ pub fn load_history(
     let db = state.db.lock().unwrap();
     let mut stmt = db
         .prepare(
-            "SELECT id, session_id, role, content, COALESCE(timestamp, ''), tool_calls, reasoning_content \
+            "SELECT id, session_id, role, content, COALESCE(timestamp, ''), tool_calls, reasoning_content, attachments \
              FROM history ORDER BY id ASC LIMIT 500",
         )
         .map_err(|e| e.to_string())?;
@@ -52,6 +58,7 @@ pub fn load_history(
                 timestamp: row.get(4)?,
                 tool_calls: row.get(5)?,
                 reasoning_content: row.get(6)?,
+                attachments: row.get(7)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -115,24 +122,30 @@ pub fn fork_session(
     // Copy all messages from the source session up to and including the cutoff
     let mut stmt = db
         .prepare(
-            "SELECT role, content, tool_calls, reasoning_content FROM history \
+            "SELECT role, content, tool_calls, reasoning_content, attachments FROM history \
              WHERE session_id = ?1 AND id <= ?2 ORDER BY id ASC",
         )
         .map_err(|e| e.to_string())?;
 
-    let messages: Vec<(String, String, Option<String>, Option<String>)> = stmt
+    let messages: Vec<(String, String, Option<String>, Option<String>, Option<String>)> = stmt
         .query_map(rusqlite::params![source_session_id, cutoff_id], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+            ))
         })
         .map_err(|e| e.to_string())?
         .filter_map(Result::ok)
         .collect();
 
     let count = messages.len() as i64;
-    for (role, content, tool_calls, reasoning_content) in messages {
+    for (role, content, tool_calls, reasoning_content, attachments) in messages {
         db.execute(
-            "INSERT INTO history (session_id, role, content, tool_calls, reasoning_content) VALUES (?1, ?2, ?3, ?4, ?5)",
-            rusqlite::params![new_session_id, role, content, tool_calls, reasoning_content],
+            "INSERT INTO history (session_id, role, content, tool_calls, reasoning_content, attachments) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![new_session_id, role, content, tool_calls, reasoning_content, attachments],
         )
         .map_err(|e| e.to_string())?;
     }

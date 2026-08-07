@@ -7,13 +7,58 @@ export interface ToolCallEntry {
   error?: string;
 }
 
+/**
+ * One part of a multimodal `Message.content`. Mirrors the OpenAI Chat
+ * Completions `messages[].content` array element shape.
+ *
+ * - `text`      — plain text segment
+ * - `image_url` — image, either a remote URL or a `data:` URL produced by
+ *                 reading an attached file via `FileReader.readAsDataURL`
+ * - `file`      — generic file (e.g. PDF) using the newer
+ *                 `{ type: "file", file: { filename, file_data } }` shape
+ */
+export type ContentPart =
+  | { type: "text"; text: string }
+  | {
+    type: "image_url";
+    image_url: { url: string; detail?: "auto" | "low" | "high" };
+  }
+  | {
+    type: "file";
+    file: { filename: string; file_data: string };
+  };
+
+/**
+ * `messages[].content` payload. A plain string is equivalent to a one-part
+ * `[{ type: "text", text: <content> }]` array — the API accepts both.
+ */
+export type MessageContent = string | ContentPart[];
+
+/**
+ * Display-only metadata for a file the user attached to a user message.
+ * Used to render pills/thumbnails and to keep file names visible after the
+ * multimodal content is rendered.
+ */
+export interface Attachment {
+  name: string;
+  kind: "text" | "image" | "file";
+  /** MIME type when known (e.g. `image/png`, `application/pdf`). */
+  mime?: string;
+  /** `data:` URL for binary attachments (image / file). */
+  data_url?: string;
+  /** Original text for text attachments (also preserved in `content` parts). */
+  text_content?: string;
+}
+
 export interface Message {
   id: string;
   role: "user" | "assistant" | "system" | "tool_group";
-  content: string;
+  content: MessageContent;
   reasoning_content?: string;
   streaming?: boolean;
   tool_calls?: ToolCallEntry[];
+  /** Display metadata for files attached to a user message. */
+  attachments?: Attachment[];
   /** Database row id from history table (only for persisted messages). */
   dbId?: number;
 }

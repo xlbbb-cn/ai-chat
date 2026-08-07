@@ -312,27 +312,97 @@
   flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 4px;
+  align-items: center;
 }
 
-.message-attachments span:first-child {
+.message-attachments>span:first-child {
   font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  margin-right: 4px;
+  /* Default: user-message context (blue background) → light label */
+  color: rgba(255, 255, 255, 0.90);
+}
+
+.chat-message.assistant .message-attachments>span:first-child {
   color: var(--c-muted);
-  margin-right: 8px;
 }
 
 .message-attachment-pill {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  border-radius: var(--r-sm);
-  background: var(--c-hover);
-  color: var(--c-muted);
+  border-radius: var(--r-pill);
   font-size: 0.78em;
-  max-width: 200px;
+  max-width: 220px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  padding: 2px 8px;
+  padding: 3px 10px;
+  /* Default: user-message context (blue background) → translucent white chip */
+  background: rgba(255, 255, 255, 0.18);
+  color: #FFFFFF;
+  border: 0.5px solid rgba(255, 255, 255, 0.35);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.chat-message.assistant .message-attachment-pill {
+  background: var(--c-accent-soft);
+  color: var(--c-accent);
+  border: 0.5px solid transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.message-attachment-thumb {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: stretch;
+  text-decoration: none;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--c-surface);
+  /* Default: user-message context → visible white frame around image */
+  border: 1.5px solid rgba(255, 255, 255, 0.55);
+  box-shadow: var(--shadow-sm);
+  max-width: 180px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.chat-message.assistant .message-attachment-thumb {
+  border-color: var(--c-border-i);
+}
+
+.message-attachment-thumb:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.message-attachment-thumb img {
+  display: block;
+  max-width: 180px;
+  max-height: 20px;
+  object-fit: cover;
+}
+
+.message-attachment-name {
+  display: block;
+  font-size: 11px;
+  padding: 3px 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  /* Default: user-message context → dark caption strip on the chip */
+  background: rgba(0, 0, 0, 0.55);
+  color: #FFFFFF;
+}
+
+.chat-message.assistant .message-attachment-name {
+  background: var(--c-surface-2);
+  color: var(--c-text);
+  border-top: 0.5px solid var(--c-border);
 }
 
 .cursor {

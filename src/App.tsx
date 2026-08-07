@@ -13,7 +13,14 @@ import { AgentsPanel } from "./components/AgentsPanel";
 import { AgentMissionPanel } from "./components/AgentMissionPanel";
 import { MarkdownPreview } from "./components/MarkdownPreview";
 import { Portal } from "./components/Portal";
-import type { Message, AgentTaskEvent, ToolCallEntry } from "./types";
+import type {
+  Message,
+  AgentTaskEvent,
+  ToolCallEntry,
+  Attachment,
+  ContentPart,
+  MessageContent,
+} from "./types";
 import "./App.css";
 
 type Sidebar = "settings" | "skills" | "history" | "tools" | "mcp" | "agents" | "monitor" | null;
@@ -22,6 +29,122 @@ function applyTheme(theme: "auto" | "light" | "dark" | undefined) {
   const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
   const resolved = theme === "dark" || (theme !== "light" && prefersDark) ? "dark" : "light";
   document.documentElement.setAttribute("data-theme", resolved);
+}
+
+// ─── Attachment handling ─────────────────────────────────────────────────────
+
+const IMAGE_MIME_PREFIXES = ["image/"];
+const TEXT_MIME_PREFIXES = ["text/"];
+const TEXT_FALLBACK_EXTS = new Set([
+  "txt", "md", "markdown", "csv", "tsv", "json", "jsonl",
+  "yaml", "yml", "xml", "html", "htm", "css", "js", "ts", "jsx", "tsx",
+  "py", "rs", "go", "java", "c", "cpp", "h", "hpp", "cs", "rb", "php",
+  "sh", "bat", "ps1", "sql", "log", "ini", "cfg", "toml", "env",
+  "diff", "patch", "tex", "rst", "adoc", "org", "r", "m", "scala",
+  "swift", "kt", "dart", "lua", "pl", "ex", "exs", "clj", "hs", "ml",
+  "fs", "erl", "vim", "conf", "v",
+]);
+
+const FILE_TYPE_EXT_OVERRIDES: Record<string, string> = {
+  pdf: "application/pdf",
+};
+
+function extensionOf(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
+}
+
+function classifyFile(file: File): "text" | "image" | "file" {
+  const mime = file.type.toLowerCase();
+  if (mime && IMAGE_MIME_PREFIXES.some((p) => mime.startsWith(p))) return "image";
+  if (mime && TEXT_MIME_PREFIXES.some((p) => mime.startsWith(p))) return "text";
+  if (mime && mime !== "application/octet-stream") return "file";
+  const ext = extensionOf(file.name);
+  if (!ext) return "file";
+  if (["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "heic", "heif", "ico", "tif", "tiff"].includes(ext)) {
+    return "image";
+  }
+  if (TEXT_FALLBACK_EXTS.has(ext)) return "text";
+  return "file";
+}
+
+function mimeFor(file: File): string {
+  const mime = file.type.toLowerCase();
+  if (mime && mime !== "application/octet-stream") return mime;
+  const ext = extensionOf(file.name);
+  if (!ext) return "application/octet-stream";
+  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+  if (FILE_TYPE_EXT_OVERRIDES[ext]) return FILE_TYPE_EXT_OVERRIDES[ext];
+  return `application/${ext}`;
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"));
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result === "string") resolve(result);
+      else reject(new Error("Unexpected reader result type"));
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function readAttachment(file: File): Promise<Attachment> {
+  const kind = classifyFile(file);
+  const mime = mimeFor(file);
+  if (kind === "text") {
+    const text_content = await file.text();
+    return { name: file.name, kind, mime, text_content };
+  }
+  const data_url = await readFileAsDataUrl(file);
+  return { name: file.name, kind, mime, data_url };
+}
+
+/** Render a user message's attachments into a structured `content` payload. */
+function buildMessageContent(
+  text: string,
+  attachments: Attachment[],
+): { content: MessageContent } {
+  if (attachments.length === 0) {
+    return { content: text };
+  }
+
+  const parts: ContentPart[] = [];
+  const trimmedText = text.trim();
+  if (trimmedText.length > 0) {
+    parts.push({ type: "text", text: trimmedText });
+  }
+
+  for (const att of attachments) {
+    if (att.kind === "image" && att.data_url) {
+      parts.push({
+        type: "image_url",
+        image_url: { url: att.data_url },
+      });
+    } else if (att.kind === "file" && att.data_url) {
+      parts.push({
+        type: "file",
+        file: { filename: att.name, file_data: att.data_url },
+      });
+    } else if (att.kind === "text" && att.text_content !== undefined) {
+      const ext = extensionOf(att.name);
+      const lang = ext || "";
+      parts.push({
+        type: "text",
+        text: `\n<details><summary>Attached File: ${att.name}</summary>\n\n\`\`\`${lang}\n${att.text_content}\n\`\`\`\n</details>`,
+      });
+    }
+  }
+
+  return { content: parts };
+}
+
+/** Persist a multimodal content payload as a single text column. */
+function serializeContentForDb(content: MessageContent): string {
+  if (typeof content === "string") return content;
+  return JSON.stringify(content);
 }
 
 interface AgentStatus {
@@ -40,7 +163,7 @@ interface MarkdownEditPayload {
 export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
-  const [attachments, setAttachments] = useState<{ name: string; content: string }[]>([]);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
   const [sidebar, setSidebar] = useState<Sidebar>(null);
@@ -495,17 +618,24 @@ export default function App() {
   const sendMessage = useCallback(async () => {
     if (profileExporting) return;
 
-    let text = input.trim();
-    if ((!text && attachments.length === 0) || streaming) return;
+    const rawText = input.trim();
+    if ((!rawText && attachments.length === 0) || streaming) return;
 
-    for (const file of attachments) {
-      const ext = file.name.split('.').pop() || '';
-      text += `\n\n<details><summary>Attached File: ${file.name}</summary>\n\n\`\`\`${ext}\n${file.content}\n\`\`\`\n</details>`;
-    }
-    text = text.trim();
+    const { content: apiContent } = buildMessageContent(rawText, attachments);
+    const userAttachments = attachments.length > 0 ? attachments : undefined;
     setPendingRetryMessageId(null);
 
-    const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: text };
+    const userMsg: Message = {
+      id: crypto.randomUUID(),
+      role: "user",
+      // Send the structured multimodal content (text + image_url + file parts)
+      // so the LLM request includes the attachments. `ChatMessage.tsx` reads
+      // the text portion via `contentToText` and renders attachment chips
+      // from `message.attachments`, so no separate "display content" is
+      // needed here.
+      content: apiContent,
+      ...(userAttachments ? { attachments: userAttachments } : {}),
+    };
     const assistantId = crypto.randomUUID();
     const assistantMsg: Message = { id: assistantId, role: "assistant", content: "", streaming: true };
     currentAssistantMessageIdRef.current = assistantId;
@@ -522,7 +652,14 @@ export default function App() {
       .filter((m) => !m.streaming && !m.id.startsWith("agent-progress-") && m.role !== "tool_group")
       .map((m) => ({ role: m.role, content: m.content, reasoning_content: m.reasoning_content }));
 
-    saveHistory(sessionId, "user", text).then((dbId) => {
+    saveHistory(
+      sessionId,
+      "user",
+      serializeContentForDb(apiContent),
+      undefined,
+      undefined,
+      userAttachments,
+    ).then((dbId) => {
       setMessages((prev) =>
         prev.map((m) => (m.id === userMsg.id ? { ...m, dbId } : m))
       );
@@ -921,6 +1058,12 @@ export default function App() {
       prev.map((m) => {
         if (!m.streaming) return m;
         const stopSuffix = "\n\n[Generation stopped]";
+        // `content` may be a string OR a multimodal array — only mutate
+        // string content (assistant streamed text). Leave other shapes
+        // untouched.
+        if (typeof m.content !== "string") {
+          return { ...m, streaming: false };
+        }
         const content = m.content.includes("[Generation stopped]")
           ? m.content
           : (m.content || "") + stopSuffix;
@@ -1218,7 +1361,21 @@ export default function App() {
           {attachments.length > 0 && (
             <div className="attachments-bar">
               {attachments.map((file, i) => (
-                <div key={i} className="attachment-pill">
+                <div key={i} className={`attachment-pill attachment-kind-${file.kind}`}>
+                  {file.kind === "image" && file.data_url && (
+                    <img
+                      className="attachment-thumb"
+                      src={file.data_url}
+                      alt={file.name}
+                      title={file.name}
+                    />
+                  )}
+                  {file.kind === "file" && (
+                    <span className="attachment-icon" aria-hidden="true">📄</span>
+                  )}
+                  {file.kind === "text" && (
+                    <span className="attachment-icon" aria-hidden="true">📝</span>
+                  )}
                   <span className="attachment-name" title={file.name}>{file.name}</span>
                   <button className="attachment-remove" onClick={() => {
                     setAttachments(prev => prev.filter((_, idx) => idx !== i));
@@ -1239,17 +1396,16 @@ export default function App() {
             <input
               type="file"
               multiple
-              accept=".txt,.md,.markdown,.csv,.tsv,.json,.jsonl,.yaml,.yml,.xml,.html,.htm,.css,.js,.ts,.jsx,.tsx,.py,.rs,.go,.java,.c,.cpp,.h,.hpp,.cs,.rb,.php,.sh,.bat,.ps1,.sql,.log,.ini,.cfg,.toml,.env,.diff,.patch,.tex,.rst,.adoc,.org,.r,.m,.scala,.swift,.kt,.dart,.lua,.pl,.ex,.exs,.clj,.hs,.ml,.fs,.erl,.vim,.conf,.cfg,.v"
+              accept=".txt,.md,.markdown,.csv,.tsv,.json,.jsonl,.yaml,.yml,.xml,.html,.htm,.css,.js,.ts,.jsx,.tsx,.py,.rs,.go,.java,.c,.cpp,.h,.hpp,.cs,.rb,.php,.sh,.bat,.ps1,.sql,.log,.ini,.cfg,.toml,.env,.diff,.patch,.tex,.rst,.adoc,.org,.r,.m,.scala,.swift,.kt,.dart,.lua,.pl,.ex,.exs,.clj,.hs,.ml,.fs,.erl,.vim,.conf,.cfg,.v,.jpg,.jpeg,.png,.gif,.webp,.bmp,.svg,.heic,.heif,.ico,.tif,.tiff,.pdf"
               ref={fileInputRef}
               style={{ display: 'none' }}
               onChange={async (e) => {
                 const files = e.target.files;
                 if (files && files.length > 0) {
-                  const newAttachments: { name: string; content: string }[] = [];
+                  const newAttachments: Attachment[] = [];
                   for (const f of Array.from(files)) {
                     try {
-                      const content = await f.text();
-                      newAttachments.push({ name: f.name, content });
+                      newAttachments.push(await readAttachment(f));
                     } catch (err) {
                       console.error("Failed to read file", f.name, err);
                     }

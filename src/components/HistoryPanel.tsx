@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { loadHistory, deleteHistory } from "../api";
 import type { HistoryRecord } from "../api";
-import type { Message, ToolCallEntry } from "../types";
+import type { Attachment, Message, MessageContent, ToolCallEntry } from "../types";
 import "./HistoryPanel.css";
 
 interface Props {
@@ -39,6 +39,38 @@ function getSessionCreatedAt(sessionRecords: HistoryRecord[]): string {
   return createdAt;
 }
 
+/**
+ * Restore a multimodal `MessageContent` from its DB-stored string form.
+ * Falls back to the raw string for plain text or malformed rows.
+ */
+function parseStoredContent(raw: string): MessageContent {
+  if (!raw) return "";
+  const trimmed = raw.trimStart();
+  if (trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed as MessageContent;
+    } catch { /* fall through to plain text */ }
+  }
+  return raw;
+}
+
+/**
+ * Restore the `Attachment[]` array from its DB-stored JSON form.
+ * Returns `undefined` for missing/malformed rows so the message falls
+ * back to the legacy `<details>` regex in `ChatMessage`.
+ */
+function parseStoredAttachments(raw: string | undefined): Attachment[] | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed as Attachment[];
+    }
+  } catch { /* fall through */ }
+  return undefined;
+}
+
 export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = false, onClose }: Props) {
   const [records, setRecords] = useState<HistoryRecord[]>([]);
   const [searchKeyword, setSearchKeyword] = useState("");
@@ -62,7 +94,15 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
 
     return sessions.filter(([sid, recs]) => {
       if (sid.toLowerCase().includes(keyword)) return true;
-      return recs.some((rec) => rec.content.toLowerCase().includes(keyword));
+      return recs.some((rec) => {
+        const parsed = parseStoredContent(rec.content);
+        if (typeof parsed === "string") {
+          return parsed.toLowerCase().includes(keyword);
+        }
+        return parsed.some(
+          (p) => p.type === "text" && p.text.toLowerCase().includes(keyword),
+        );
+      });
     });
   }, [searchKeyword, sessions]);
 
@@ -81,10 +121,12 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
           if (parsed.length > 0) toolCalls = parsed;
         } catch { /* ignore malformed */ }
       }
+      const attachments = parseStoredAttachments(r.attachments);
       messages.push({
         id: crypto.randomUUID(),
         role: r.role as "user" | "assistant",
-        content: r.content,
+        content: parseStoredContent(r.content),
+        ...(attachments ? { attachments } : {}),
         tool_calls: toolCalls,
         ...(r.reasoning_content ? { reasoning_content: r.reasoning_content } : {}),
         dbId: r.id,
@@ -145,7 +187,14 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
           <p className="history-empty">No sessions matched "{searchKeyword}".</p>
         ) : (
           filteredSessions.map(([sid, recs]) => {
-            const preview = recs.find((r) => r.role === "user")?.content ?? "(empty)";
+            const preview = (() => {
+              const userRec = recs.find((r) => r.role === "user");
+              if (!userRec) return "(empty)";
+              const parsed = parseStoredContent(userRec.content);
+              if (typeof parsed === "string") return parsed;
+              const textPart = parsed.find((p) => p.type === "text");
+              return textPart?.text ?? "(attachment)";
+            })();
             const isCurrent = sid === currentSessionId;
             const createdAt = formatHistoryTimestamp(getSessionCreatedAt(recs));
             return (

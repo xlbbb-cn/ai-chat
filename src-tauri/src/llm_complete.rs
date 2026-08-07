@@ -32,9 +32,72 @@ fn merge_allowed_commands(allowed_commands: &mut Vec<String>, incoming: &[String
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: String,
-    pub content: String,
+    /// `content` is either a plain string or a multimodal array of parts
+    /// (`text` / `image_url` / `file`) following the OpenAI Chat Completions
+    /// `messages[].content` schema. We keep it as a generic `Value` so the
+    /// struct can be deserialized from either form without losing fidelity.
+    pub content: Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_content: Option<String>,
+}
+
+/// Extract the textual portion of a `messages[].content` value.
+/// - `String` content is returned verbatim.
+/// - Array content concatenates all `{"type":"text","text":...}` parts.
+/// - Anything else (e.g. malformed payloads) returns an empty string.
+pub(crate) fn content_to_text(value: &Value) -> String {
+    match value {
+        Value::String(s) => s.clone(),
+        Value::Array(parts) => {
+            let mut out = String::new();
+            for part in parts {
+                if part.get("type").and_then(|v| v.as_str()) == Some("text") {
+                    if let Some(text) = part.get("text").and_then(|v| v.as_str()) {
+                        out.push_str(text);
+                    }
+                }
+            }
+            out
+        }
+        _ => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn content_to_text_passthrough_for_string() {
+        let v = json!("hello world");
+        assert_eq!(content_to_text(&v), "hello world");
+    }
+
+    #[test]
+    fn content_to_text_concatenates_text_parts() {
+        let v = json!([
+            { "type": "text", "text": "describe this: " },
+            { "type": "image_url", "image_url": { "url": "data:image/png;base64,XXX" } },
+            { "type": "text", "text": "thanks" },
+        ]);
+        assert_eq!(content_to_text(&v), "describe this: thanks");
+    }
+
+    #[test]
+    fn content_to_text_returns_empty_for_non_text_array() {
+        let v = json!([
+            { "type": "image_url", "image_url": { "url": "data:image/png;base64,XXX" } },
+            { "type": "file", "file": { "filename": "x.pdf", "file_data": "data:application/pdf;base64,XXX" } },
+        ]);
+        assert_eq!(content_to_text(&v), "");
+    }
+
+    #[test]
+    fn content_to_text_handles_null_and_other_types() {
+        assert_eq!(content_to_text(&json!(null)), "");
+        assert_eq!(content_to_text(&json!(42)), "");
+        assert_eq!(content_to_text(&json!({})), "");
+    }
 }
 
 pub struct StreamResult {
@@ -260,8 +323,8 @@ fn summarize_message_for_context(msg: &Value) -> Option<String> {
 
     let content = msg
         .get("content")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
+        .map(content_to_text)
+        .unwrap_or_default()
         .trim()
         .replace('\n', " ");
 
@@ -277,7 +340,7 @@ fn is_pinned_context_message(msg: &Value) -> bool {
         return true;
     }
     msg.get("content")
-        .and_then(|v| v.as_str())
+        .map(content_to_text)
         .map(|content| {
             content.starts_with("INTERNAL CONTEXT - ACTIVE SKILLS")
                 || content.starts_with("INTERNAL CONTEXT - DYNAMICALLY LOADED SKILL")
@@ -432,8 +495,8 @@ fn compress_session_context(all_messages: &mut Vec<Value>) -> Option<String> {
     for msg in all_messages.drain(..) {
         let existing_summary = msg
             .get("content")
-            .and_then(|v| v.as_str())
-            .and_then(extract_summary_body);
+            .map(content_to_text)
+            .and_then(|s| extract_summary_body(&s));
         if let Some(summary_body) = existing_summary {
             existing_summary_body = Some(summary_body);
             continue;
@@ -444,7 +507,7 @@ fn compress_session_context(all_messages: &mut Vec<Value>) -> Option<String> {
         // head or folding it into the summary.
         let is_todo_block = msg
             .get("content")
-            .and_then(|v| v.as_str())
+            .map(content_to_text)
             .map(|content| content.starts_with(CONTEXT_TODO_MARKER))
             .unwrap_or(false);
         if is_todo_block {
@@ -797,14 +860,15 @@ pub async fn chat_completion(
     let mut activated_skills: std::collections::HashSet<String> = std::collections::HashSet::new();
     for m in &messages {
         if m.role == "assistant" {
+            // `content` may now be a string OR a multimodal array — reduce
+            // to its text portion before scanning.
+            let text = content_to_text(&m.content);
             let marker = "🧠 *Loading skill: ";
             let mut start_idx = 0;
-            while let Some(idx) = m.content[start_idx..].find(marker) {
+            while let Some(idx) = text[start_idx..].find(marker) {
                 let actual_start = start_idx + idx + marker.len();
-                if let Some(end) = m.content[actual_start..].find('*') {
-                    let skill_name = m.content[actual_start..actual_start + end]
-                        .trim()
-                        .to_string();
+                if let Some(end) = text[actual_start..].find('*') {
+                    let skill_name = text[actual_start..actual_start + end].trim().to_string();
                     activated_skills.insert(skill_name);
                 }
                 start_idx = actual_start;
@@ -1377,19 +1441,11 @@ pub async fn chat_completion(
                     let static_marker = format!("--- Skill: {} ---", skill.name);
 
                     let already_loaded = all_messages.iter().any(|msg| {
-                        msg["content"]
-                            .as_str()
-                            .map(|content| {
-                                content.contains(&dyn_marker) || content.contains(&static_marker)
-                            })
-                            .unwrap_or(false)
+                        let text = content_to_text(&msg["content"]);
+                        text.contains(&dyn_marker) || text.contains(&static_marker)
                     }) || pending_skill_context_messages.iter().any(|msg| {
-                        msg["content"]
-                            .as_str()
-                            .map(|content| {
-                                content.contains(&dyn_marker) || content.contains(&static_marker)
-                            })
-                            .unwrap_or(false)
+                        let text = content_to_text(&msg["content"]);
+                        text.contains(&dyn_marker) || text.contains(&static_marker)
                     });
 
                     if !already_loaded {

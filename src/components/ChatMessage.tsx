@@ -1,4 +1,4 @@
-import type { Message } from "../types";
+import type { Message, MessageContent } from "../types";
 import { useEffect, useRef, useState } from "react";
 import { ToolCallGroup } from "./ToolCallGroup";
 import { TodoList } from "./TodoList";
@@ -200,6 +200,18 @@ function extractAttachmentNames(content: string): string[] {
   return names;
 }
 
+/** Extract the textual portion of a multimodal `MessageContent`. */
+function contentToText(content: MessageContent): string {
+  if (typeof content === "string") return content;
+  const parts: string[] = [];
+  for (const part of content) {
+    if (part.type === "text") {
+      parts.push(part.text);
+    }
+  }
+  return parts.join("");
+}
+
 function extractEmbeddedThoughtProcess(content: string): {
   reasoningContent: string;
   mainContent: string;
@@ -231,10 +243,18 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
   const [showActions, setShowActions] = useState(true);
-  const attachmentNames = isUser ? extractAttachmentNames(message.content) : [];
+
+  // Display text: collapse multimodal parts to their textual portion.
+  const textContent = contentToText(message.content);
+  const attachmentNames =
+    isUser && message.attachments
+      ? message.attachments.map((a) => a.name)
+      : isUser
+        ? extractAttachmentNames(textContent)
+        : [];
   const displayContent = isUser
-    ? message.content.replace(/<details><summary>Attached File:[^<]*<\/summary>[\s\S]*?<\/details>/g, "").trim()
-    : message.content;
+    ? textContent.replace(/<details><summary>Attached File:[^<]*<\/summary>[\s\S]*?<\/details>/g, "").trim()
+    : textContent;
   const embeddedThought = extractEmbeddedThoughtProcess(displayContent);
   const reasoningContent = message.reasoning_content ?? embeddedThought.reasoningContent;
   const mainContent = message.reasoning_content
@@ -289,7 +309,7 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
   return (
     <div
       className={`chat-message-shell ${isUser ? "user" : "assistant"}`}
-    // onMouseEnter={() => setShowActions(true)}
+      onMouseEnter={() => setShowActions(true)}
     // onMouseLeave={() => setShowActions(false)}
     >
       <div className={`chat-message ${isUser ? "user" : "assistant"}`}>
@@ -348,9 +368,30 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
         {attachmentNames.length > 0 && (
           <div className="message-attachments">
             <span>Attached Files:</span>
-            {attachmentNames.map((name, i) => (
-              <span key={i} className="message-attachment-pill">📎 {name}</span>
-            ))}
+            {attachmentNames.map((name, i) => {
+              const att = message.attachments?.find((a) => a.name === name);
+              if (att?.kind === "image" && att.data_url) {
+                return (
+                  <a
+                    key={i}
+                    className="message-attachment-thumb"
+                    href={att.data_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={att.name}
+                  >
+                    <img src={att.data_url} alt={att.name} />
+                    <span className="message-attachment-name">{att.name}</span>
+                  </a>
+                );
+              }
+              const icon = att?.kind === "file" ? "📄" : "📎";
+              return (
+                <span key={i} className="message-attachment-pill">
+                  {icon} {name}
+                </span>
+              );
+            })}
           </div>
         )}
         {isAssistant && <ToolCallGroup message={message} />}

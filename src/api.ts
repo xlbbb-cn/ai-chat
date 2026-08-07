@@ -2,7 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AppConfig,
+  Attachment,
   Message,
+  MessageContent,
   Skill,
   McpServer,
   McpLogEntry,
@@ -69,7 +71,7 @@ export interface StreamCallbacks {
 }
 
 export async function chatCompletion(
-  messages: Pick<Message, "role" | "content" | "reasoning_content">[],
+  messages: { role: Message["role"]; content: MessageContent; reasoning_content?: string }[],
   skillIds: string[],
   sessionId: string,
   modelOverride: string | undefined,
@@ -131,8 +133,28 @@ export async function chatCompletion(
   return cleanup;
 }
 
-export async function saveHistory(sessionId: string, role: string, content: string, toolCalls?: string, reasoningContent?: string): Promise<number> {
-  return invoke("save_history", { sessionId, role, content, toolCalls: toolCalls ?? null, reasoningContent: reasoningContent ?? null });
+export async function saveHistory(
+  sessionId: string,
+  role: string,
+  content: string,
+  toolCalls?: string,
+  reasoningContent?: string,
+  attachments?: Attachment[],
+): Promise<number> {
+  // Serialise the attachments array as JSON so it can be stored in a
+  // single TEXT column. Pass `null` (not `undefined`) when absent so the
+  // Tauri command receives an explicit `None` and writes NULL.
+  const attachmentsJson = attachments && attachments.length > 0
+    ? JSON.stringify(attachments)
+    : null;
+  return invoke("save_history", {
+    sessionId,
+    role,
+    content,
+    toolCalls: toolCalls ?? null,
+    reasoningContent: reasoningContent ?? null,
+    attachments: attachmentsJson,
+  });
 }
 
 export interface HistoryRecord {
@@ -143,6 +165,8 @@ export interface HistoryRecord {
   timestamp: string;
   tool_calls?: string;
   reasoning_content?: string;
+  /** JSON-serialized `Attachment[]` for user messages. */
+  attachments?: string;
 }
 
 export async function loadHistory(): Promise<HistoryRecord[]> {

@@ -465,12 +465,45 @@ body {
   align-items: center;
   gap: 6px;
   background: var(--c-surface);
-  border-radius: var(--r-pill);
+  /* border-radius: var(--r-pill); */
   padding: 4px 10px;
   font-size: 12px;
   color: var(--c-text);
   border: 0.5px solid var(--c-border-i);
   box-shadow: var(--shadow-sm);
+}
+
+/* Tighter padding + image accent for image attachments so the thumb
+   sits flush inside the pill and is clearly framed. */
+.attachment-pill.attachment-kind-image {
+  padding: 2px 10px 2px 2px;
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 1px var(--c-accent-soft), var(--shadow-sm);
+}
+
+.attachment-pill.attachment-kind-file {
+  border-color: var(--c-warning);
+  background: var(--c-surface);
+}
+
+.attachment-thumb {
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border-radius: var(--r-sm);
+  flex-shrink: 0;
+  background: var(--c-hover);
+}
+
+.attachment-icon {
+  font-size: 14px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
 }
 
 .toggle-switch {

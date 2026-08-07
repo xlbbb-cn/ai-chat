@@ -12,8 +12,8 @@ const LLM_DEFAULT_MAX_COMLETE_TOKENS: u32 = 4_096;
 
 use crate::{
     llm_complete::{
-        apply_completion_token_limit, extract_upstream_error_message, sanitize_tool_pairs,
-        stream_llm_request, StreamOptions,
+        apply_completion_token_limit, content_to_text, extract_upstream_error_message,
+        sanitize_tool_pairs, stream_llm_request, StreamOptions,
     },
     tools, AppConfig, AppState,
 };
@@ -488,8 +488,8 @@ fn summarize_message_for_memory(message: &Value) -> Option<String> {
 
     let content = message
         .get("content")
-        .and_then(|value| value.as_str())
-        .map(|value| truncate_for_summary(value, 400))
+        .map(content_to_text)
+        .map(|value| truncate_for_summary(&value, 400))
         .unwrap_or_default();
 
     if content.is_empty() {
@@ -980,7 +980,10 @@ async fn auto_configure_agents(
         .collect::<Vec<_>>()
         .join("\n");
 
-    let user_query = messages.last().map(|m| m.content.as_str()).unwrap_or("");
+    let user_query = messages
+        .last()
+        .map(|m| content_to_text(&m.content))
+        .unwrap_or_default();
     let system = format!(
         "You are an AI orchestrator. Based on the user request, decide which agents to use.\n\
         Existing agents:\n{existing_desc}\n\n\
@@ -1075,12 +1078,13 @@ async fn plan_tasks(
         .take(3)
         .rev()
         .map(|m| {
-            let limit = m.content.len().min(600);
+            let text = content_to_text(&m.content);
+            let limit = text.len().min(600);
             let mut end = limit;
-            while end > 0 && !m.content.is_char_boundary(end) {
+            while end > 0 && !text.is_char_boundary(end) {
                 end -= 1;
             }
-            let preview = &m.content[..end];
+            let preview = &text[..end];
             format!("[{}]: {}", m.role, preview)
         })
         .collect::<Vec<_>>()
@@ -1815,8 +1819,9 @@ async fn aggregate_results(
 
     let user_query = original_messages
         .last()
-        .map(|m| m.content.as_str())
-        .unwrap_or("the user request");
+        .map(|m| content_to_text(&m.content))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "the user request".to_string());
 
     let agg_messages = vec![
         json!({
