@@ -5,6 +5,10 @@ import { TodoList } from "./TodoList";
 import MarkdownIt from "markdown-it";
 import hljs from "highlight.js";
 import "highlight.js/styles/github.css";
+import "katex/dist/katex.min.css";
+import katexCssUrl from "katex/dist/katex.min.css?url";
+import razerF5FontUrl from "../assets/Web Fonts/9b77a61b70b873a0f298ad6fbc801666.woff2?url";
+import { katexMathPlugin } from "../utils/markdownMath";
 import "./ChatMessage.css";
 
 import { writeText as tauriWriteText } from "@tauri-apps/plugin-clipboard-manager";
@@ -50,6 +54,9 @@ md.disable(["link", "autolink"]);
 md.renderer.rules.link_open = () => "<span>";
 md.renderer.rules.link_close = () => "</span>";
 
+// Render `$...$` / `$$...$$` formulas with KaTeX.
+md.use(katexMathPlugin);
+
 function buildPrintableMessageHtml(contentHtml: string, exportedAt: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -57,10 +64,18 @@ function buildPrintableMessageHtml(contentHtml: string, exportedAt: string): str
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>${escapeHtml(exportedAt)}</title>
+    <link rel="stylesheet" href="${escapeHtml(katexCssUrl)}" data-katex-css />
     <style>
+      @font-face {
+        font-family: "RazerF5";
+        src: url("${razerF5FontUrl}") format("woff2");
+        font-weight: 400;
+        font-style: normal;
+      }
+
       :root {
         color-scheme: light;
-        font-family: "SourceHanSansSC", "Segoe UI", "Microsoft YaHei", sans-serif;
+        font-family: "RazerF5", "Segoe UI", "Microsoft YaHei", sans-serif;
       }
 
       * {
@@ -172,10 +187,25 @@ function exportAssistantMessagePdf(contentHtml: string, messageId: string) {
     };
 
     frameWindow.addEventListener("afterprint", handleAfterPrint);
-    window.setTimeout(() => {
+
+    // Wait for the KaTeX stylesheet before printing so formulas are laid out.
+    let printed = false;
+    const doPrint = () => {
+      if (printed) return;
+      printed = true;
       frameWindow.focus();
       frameWindow.print();
-    }, 50);
+    };
+
+    const katexLink = frameDocument.querySelector<HTMLLinkElement>("link[data-katex-css]");
+    if (katexLink) {
+      katexLink.addEventListener("load", doPrint, { once: true });
+      katexLink.addEventListener("error", doPrint, { once: true });
+      // Fallback in case neither event fires (e.g. served from cache).
+      window.setTimeout(doPrint, 400);
+    } else {
+      window.setTimeout(doPrint, 50);
+    }
   }, { once: true });
 
   document.body.appendChild(iframe);

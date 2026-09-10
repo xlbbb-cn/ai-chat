@@ -7,15 +7,18 @@
 }
 
 @font-face {
-  font-family: "SourceHanSansSC";
-  src: url("./assets/SourceHanSansSC-Regular-2.otf") format("opentype");
+  font-family: "RazerF5";
+  src: url("./assets/Web Fonts/9b77a61b70b873a0f298ad6fbc801666.woff2") format("woff2"),
+    url("./assets/Web Fonts/9b77a61b70b873a0f298ad6fbc801666.woff") format("woff"),
+    url("./assets/Web Fonts/9b77a61b70b873a0f298ad6fbc801666.ttf") format("truetype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
 }
 
 :root {
-  font-family: "SourceHanSansSC", -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  font-family: "RazerF5", -apple-system, BlinkMacSystemFont, "Segoe UI", Arial,
+    "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
   font-size: 14px;
   color-scheme: light;
 

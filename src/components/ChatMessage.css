@@ -67,8 +67,8 @@
   font-size: 13px;
   margin-bottom: 4px;
   letter-spacing: 0;
-  font-family: "Inter", "SF Pro Text", "Segoe UI", "Helvetica Neue",
-    Arial, "SourceHanSansSC", "Microsoft YaHei", "PingFang SC",
+  font-family: "RazerF5", "Inter", "SF Pro Text", "Segoe UI", "Helvetica Neue",
+    Arial, "Microsoft YaHei", "PingFang SC",
     "Noto Sans CJK SC", sans-serif;
 }
 
@@ -115,8 +115,8 @@
   overflow-wrap: anywhere;
   word-break: break-word;
   letter-spacing: 0;
-  font-family: "Inter", "SF Pro Text", "Segoe UI", "Helvetica Neue",
-    Arial, "SourceHanSansSC", "Microsoft YaHei", "PingFang SC",
+  font-family: "RazerF5", "Inter", "SF Pro Text", "Segoe UI", "Helvetica Neue",
+    Arial, "Microsoft YaHei", "PingFang SC",
     "Noto Sans CJK SC", sans-serif;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -164,12 +164,11 @@
   line-height: 1.65;
   min-width: 0;
   letter-spacing: 0;
-  /* Two-family stack: latin glyphs first, then CJK fallback.  The browser
-     picks per-character, so Chinese renders with SourceHanSansSC while
-     ASCII letters / digits use the system UI font — fixing the "mixed
-     OpenType + jagged letters" look. */
-  font-family: "Inter", "SF Pro Text", "Segoe UI", "Helvetica Neue",
-    Arial, "SourceHanSansSC", "Microsoft YaHei", "PingFang SC",
+  /* Bundled web font first, then system UI fonts, then CJK fallback.  The
+     browser picks per-character, so latin glyphs / digits render with
+     RazerF5 while Chinese falls back to the system CJK fonts. */
+  font-family: "RazerF5", "Inter", "SF Pro Text", "Segoe UI", "Helvetica Neue",
+    Arial, "Microsoft YaHei", "PingFang SC",
     "Noto Sans CJK SC", sans-serif;
   font-feature-settings: "kern" 1, "liga" 1, "calt" 1, "tnum" 0;
   font-variant-numeric: proportional-nums;
@@ -181,7 +180,7 @@
 .message-content :lang(zh),
 .message-content :lang(ja),
 .message-content :lang(ko) {
-  font-family: "SourceHanSansSC", "Microsoft YaHei", "PingFang SC",
+  font-family: "Microsoft YaHei", "PingFang SC",
     "Noto Sans CJK SC", sans-serif;
 }
 
@@ -207,6 +206,20 @@
 
 .message-content li>p {
   margin-bottom: 0;
+}
+
+/* KaTeX formulas ($...$ inline, $$...$$ display) */
+.message-content .katex-display,
+.message-reasoning-content .katex-display {
+  margin: 0.6em 0;
+  padding: 2px 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.message-content .katex-display .katex {
+  font-size: 1.1em;
 }
 
 .message-content pre.hljs {
