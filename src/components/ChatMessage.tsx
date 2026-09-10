@@ -121,7 +121,7 @@ function buildPrintableMessageHtml(contentHtml: string, exportedAt: string): str
       }
 
       code {
-        font-family: "Cascadia Code", "Consolas", monospace;
+        font-family: "RazerF5", "Cascadia Code", "Consolas", "Microsoft YaHei", monospace;
       }
 
       table {

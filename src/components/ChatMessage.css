@@ -158,6 +158,15 @@
   border: 0.5px solid var(--c-border-s);
 }
 
+/* Markdown code blocks (fenced + inline) use the bundled RazerF5 web font,
+   falling back to system monospace / CJK fonts for missing glyphs. */
+.message-content pre.hljs,
+.message-reasoning-content pre.hljs,
+.message-content code,
+.message-reasoning-content code {
+  font-family: "RazerF5", "Cascadia Code", Consolas, "Microsoft YaHei", monospace;
+}
+
 .message-content {
   /* margin-bottom: 20px; */
   font-size: 14px;
