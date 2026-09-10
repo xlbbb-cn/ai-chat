@@ -99,7 +99,7 @@ src-tauri/
   src/llm_complete.rs      # chat_completion (SSE streaming)
   src/skills.rs            # SKILL.md frontmatter parser, list/save/delete
   src/tools.rs             # run_cmd/run_shell/file_actions/kg/web_search
-  src/mcp.rs               # MCP stdio/SSE servers, warmup, test
+  src/mcp.rs               # MCP stdio/SSE/HTTP/Streamable-HTTP, warmup, test
   src/agents.rs            # sub-agents, orchestration, missions
   src/todos.rs             # todo lists (also has unit tests)
   src/db.rs                # SQLite: history, API monitor, interaction log

@@ -30,6 +30,13 @@ function emptyServer(): McpServer {
     };
 }
 
+function transportLabel(s: McpServer): string {
+    if (s.transport === "stdio") {
+        return `stdio: ${s.command}${s.args.length ? " " + s.args.join(" ") : ""}`;
+    }
+    return `${s.transport}: ${s.url}`;
+}
+
 function formatLogTime(ts: number): string {
     const d = new Date(ts);
     const hh = String(d.getHours()).padStart(2, "0");
@@ -241,7 +248,9 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                         onChange={(e) => setEditing({ ...editing, transport: e.target.value as McpTransport })}
                     >
                         <option value="stdio">stdio (subprocess)</option>
-                        <option value="sse">SSE / HTTP</option>
+                        <option value="sse">SSE (HTTP + Server-Sent Events)</option>
+                        <option value="http">HTTP (plain JSON-RPC)</option>
+                        <option value="stream-http">Streamable HTTP (recommended)</option>
                     </select>
 
                     {editing.transport === "stdio" ? (
@@ -278,7 +287,11 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                                 className="mcp-input"
                                 value={editing.url}
                                 onChange={(e) => setEditing({ ...editing, url: e.target.value })}
-                                placeholder="http://localhost:8080/sse"
+                                placeholder={
+                                    editing.transport === "sse"
+                                        ? "http://localhost:8000/sse"
+                                        : "http://localhost:8000/mcp"
+                                }
                             />
 
                             <label>Auth Token <span className="mcp-hint">(optional, Bearer)</span></label>
@@ -348,9 +361,7 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                                     )}
                                 </span>
                                 <span className="mcp-server-transport">
-                                    {s.transport === "stdio"
-                                        ? `stdio: ${s.command}${s.args.length ? " " + s.args.join(" ") : ""}`
-                                        : `sse: ${s.url}`}
+                                    {transportLabel(s)}
                                 </span>
                             </div>
                             <div className="mcp-server-actions">
@@ -407,9 +418,7 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                                     Logs: {logServer.name || "(unnamed)"}
                                 </span>
                                 <span className="mcp-log-modal-title-sub">
-                                    {logServer.transport === "stdio"
-                                        ? `stdio: ${logServer.command}${logServer.args.length ? " " + logServer.args.join(" ") : ""}`
-                                        : `sse: ${logServer.url}`}
+                                    {transportLabel(logServer)}
                                 </span>
                             </div>
                             <div className="mcp-log-modal-actions">

@@ -107,7 +107,7 @@ export interface Skill {
   author?: string;
 }
 
-export type McpTransport = "stdio" | "sse";
+export type McpTransport = "stdio" | "sse" | "http" | "stream-http";
 
 export interface McpServer {
   id: string;
@@ -117,7 +117,7 @@ export interface McpServer {
   command: string;
   args: string[];
   env: Record<string, string>;
-  /** sse only */
+  /** sse / http / stream-http only */
   url: string;
   auth_token: string;
   enabled: boolean;
