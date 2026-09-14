@@ -378,12 +378,7 @@ fn build_stdio_cmd(server: &McpServer, pipe_stderr: bool) -> tokio::process::Com
 
     let cmd_path = Path::new(server.command.trim());
 
-    // 提取文件名，例如 "python.exe" -> "python"
-    let file_stem = cmd_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or(server.command.trim())
-        .to_lowercase();
+
 
     let stderr_cfg = if pipe_stderr {
         Stdio::piped()
@@ -393,6 +388,12 @@ fn build_stdio_cmd(server: &McpServer, pipe_stderr: bool) -> tokio::process::Com
 
     #[cfg(windows)]
     {
+        // 提取文件名，例如 "python.exe" -> "python"
+        let file_stem = cmd_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(server.command.trim())
+            .to_lowercase();
         let is_absolute =
             cmd_path.is_absolute() || server.command.contains('\\') || server.command.contains('/');
 
