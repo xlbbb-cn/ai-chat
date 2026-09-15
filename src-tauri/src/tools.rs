@@ -1497,7 +1497,7 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
                         },
                         "patch": {
                             "type": "string",
-                            "description": "Unified diff patch to apply to the file (only for 'patch'). Must be a valid unified diff (--- / +++ header optional)."
+                            "description": "Unified diff patch to apply to the file (only for 'patch'). Must be a valid unified diff (--- / +++ header optional). Use LF line endings; CRLF files are handled automatically."
                         }
                     },
                     "required": ["action", "path"]
@@ -2409,6 +2409,119 @@ mod tests {
         assert_eq!(score_to_risk_level(90), RiskLevel::L0);
         assert_eq!(score_to_risk_level(95), RiskLevel::L0);
     }
+
+    // ─── Unified Patch Application Tests ───────────────────────────────────
+
+    #[test]
+    fn applies_lf_patch_to_lf_file() {
+        use super::apply_unified_patch;
+
+        let original = "line1\nline2\nline3\n";
+        let patch = "\
+--- a/file
++++ b/file
+@@ -1,3 +1,3 @@
+ line1
+-line2
++line2 changed
+ line3
+";
+        let result = apply_unified_patch(original, patch).unwrap();
+        assert_eq!(result, "line1\nline2 changed\nline3\n");
+    }
+
+    #[test]
+    fn applies_lf_patch_to_crlf_file() {
+        use super::apply_unified_patch;
+
+        // CRLF file + LF patch (the common LLM-generated case) must apply and
+        // preserve CRLF line endings.
+        let original = "line1\r\nline2\r\nline3\r\n";
+        let patch = "\
+--- a/file
++++ b/file
+@@ -1,3 +1,3 @@
+ line1
+-line2
++line2 changed
+ line3
+";
+        let result = apply_unified_patch(original, patch).unwrap();
+        assert_eq!(result, "line1\r\nline2 changed\r\nline3\r\n");
+    }
+
+    #[test]
+    fn applies_crlf_patch_to_crlf_file() {
+        use super::apply_unified_patch;
+
+        let original = "line1\r\nline2\r\nline3\r\n";
+        let patch = "\
+--- a/file
++++ b/file
+@@ -1,3 +1,3 @@
+ line1
+-line2
++line2 changed
+ line3
+"
+        .replace('\n', "\r\n");
+        let result = apply_unified_patch(original, &patch).unwrap();
+        assert_eq!(result, "line1\r\nline2 changed\r\nline3\r\n");
+    }
+
+    #[test]
+    fn applies_patch_to_file_without_trailing_newline() {
+        use super::apply_unified_patch;
+
+        // File without a trailing newline + patch touching the last line.
+        let original = "line1\nline2\nline3";
+        let patch = "\
+--- a/file
++++ b/file
+@@ -1,3 +1,3 @@
+ line1
+-line2
++line2 changed
+ line3
+";
+        let result = apply_unified_patch(original, patch).unwrap();
+        assert_eq!(result, "line1\nline2 changed\nline3");
+    }
+
+    #[test]
+    fn applies_patch_appending_line_to_file_without_trailing_newline() {
+        use super::apply_unified_patch;
+
+        // Patch appends a new line at EOF; the appended line keeps its newline.
+        let original = "line1\nline2";
+        let patch = "\
+--- a/file
++++ b/file
+@@ -1,2 +1,3 @@
+ line1
+ line2
++line3
+";
+        let result = apply_unified_patch(original, patch).unwrap();
+        assert_eq!(result, "line1\nline2\nline3\n");
+    }
+
+    #[test]
+    fn rejects_patch_with_mismatched_context() {
+        use super::apply_unified_patch;
+
+        let original = "line1\nline2\nline3\n";
+        let patch = "\
+--- a/file
++++ b/file
+@@ -1,3 +1,3 @@
+ line1
+-lineX
++line2 changed
+ line3
+";
+        assert!(apply_unified_patch(original, patch).is_err());
+    }
 }
 
 fn is_path_protected(path: &Path, protected_roots: &[PathBuf]) -> bool {
@@ -2462,6 +2575,62 @@ fn backup_protected_file(
         )
     })?;
     Ok(Some(backup_path))
+}
+
+/// Does the patch's last hunk end with an insert line (i.e. it appends a new
+/// line at the end of the file)? Used to decide whether to restore a missing
+/// trailing newline after applying.
+fn patch_appends_trailing_line(patch: &diffy::Patch<'_, str>) -> bool {
+    patch
+        .hunks()
+        .last()
+        .and_then(|hunk| hunk.lines().last())
+        .map_or(false, |line| matches!(line, diffy::Line::Insert(_)))
+}
+
+/// Apply a unified diff patch to file content, tolerating line-ending
+/// differences (CRLF vs LF) and missing trailing newlines.
+///
+/// `diffy::apply` is strict: a patch generated with LF endings fails against a
+/// CRLF file (and vice versa), and a file without a trailing newline can cause
+/// spurious mismatches. We normalize both sides to LF, apply, then restore the
+/// original line-ending style and trailing-newline state.
+fn apply_unified_patch(original: &str, patch_str: &str) -> Result<String, String> {
+    let uses_crlf = original.contains("\r\n");
+    let had_trailing_newline = original.ends_with('\n');
+
+    // Normalize both sides to LF so context lines match.
+    let normalized_original = original.replace("\r\n", "\n");
+    let normalized_patch = patch_str.replace("\r\n", "\n");
+
+    // Ensure the original ends with a newline so the last line is a normal
+    // context line (diffy can otherwise reject patches touching the last line).
+    let original_for_apply = if normalized_original.ends_with('\n') {
+        normalized_original
+    } else {
+        format!("{}\n", normalized_original)
+    };
+
+    let patch = diffy::Patch::from_str(&normalized_patch)
+        .map_err(|e| format!("Error parsing patch: {}", e))?;
+
+    let appends_trailing = patch_appends_trailing_line(&patch);
+
+    let mut patched = diffy::apply(&original_for_apply, &patch)
+        .map_err(|e| format!("Error applying patch: {}", e))?;
+
+    // Restore the original trailing-newline state, unless the patch explicitly
+    // appends a new line at the end of the file.
+    if !had_trailing_newline && !appends_trailing && patched.ends_with('\n') {
+        patched.pop();
+    }
+
+    // Restore the original line-ending style.
+    if uses_crlf {
+        patched = patched.replace('\n', "\r\n");
+    }
+
+    Ok(patched)
 }
 
 pub async fn execute_tool(
@@ -3858,25 +4027,27 @@ pub async fn execute_tool(
                                 Err(e) => return format!("Error: {}", e),
                             };
                             match fs::read_to_string(&p) {
-                                Ok(original) => match diffy::Patch::from_str(patch_str) {
-                                    Ok(patch) => match diffy::apply(&original, &patch) {
-                                        Ok(patched) => match fs::write(&p, &patched) {
-                                            Ok(_) => {
-                                                if let Some(backup) = backup {
-                                                    format!(
-                                                        "Successfully backed up to {} and patched {}",
-                                                        backup.display(),
-                                                        path_str
-                                                    )
-                                                } else {
-                                                    format!("Successfully patched {}", path_str)
-                                                }
+                                Ok(original) => match apply_unified_patch(&original, patch_str) {
+                                    Ok(patched) => match fs::write(&p, &patched) {
+                                        Ok(_) => {
+                                            if let Some(backup) = backup {
+                                                format!(
+                                                    "Successfully backed up to {} and patched {}",
+                                                    backup.display(),
+                                                    path_str
+                                                )
+                                            } else {
+                                                format!("Successfully patched {}", path_str)
                                             }
-                                            Err(e) => format!("Error writing file: {}", e),
-                                        },
-                                        Err(e) => format!("Error applying patch: {}", e),
+                                        }
+                                        Err(e) => format!("Error writing file: {}", e),
                                     },
-                                    Err(e) => format!("Error parsing patch: {}", e),
+                                    Err(e) => format!(
+                                        "Error applying patch: {}\n\nHint: the patch context lines must match the file's exact current content. \
+                                         If the file uses CRLF line endings, generate the patch with LF line endings (handled automatically). \
+                                         Re-read the file and regenerate the patch against its exact current content.",
+                                        e
+                                    ),
                                 },
                                 Err(e) => format!("Error reading file: {}", e),
                             }
