@@ -20,10 +20,12 @@ export async function getConfig(): Promise<AppConfig> {
 }
 
 export async function confirmCommand(
+  requestId: string,
   confirmed: boolean,
   opts?: { username?: string; password?: string },
 ): Promise<void> {
   return invoke("confirm_command", {
+    requestId,
     confirmed,
     username: opts?.username,
     password: opts?.password,

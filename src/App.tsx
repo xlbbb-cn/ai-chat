@@ -188,6 +188,7 @@ export default function App() {
   const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
   const [skillsLoadedFromConfig, setSkillsLoadedFromConfig] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<{
+    request_id: string;
     reason: string;
     cmd_type: string;
     code: string;
@@ -472,6 +473,7 @@ export default function App() {
     });
 
     const unlisten = listen<{
+      request_id: string;
       reason: string;
       cmd_type: string;
       code: string;
@@ -485,9 +487,9 @@ export default function App() {
     }>(
       "confirm-required",
       (e) => {
-        const { reason, cmd_type, code, confirm_kind, requires_auth, risk_level, risk_score, disposition, blacklist_hits, penalty_items } = e.payload;
+        const { request_id, reason, cmd_type, code, confirm_kind, requires_auth, risk_level, risk_score, disposition, blacklist_hits, penalty_items } = e.payload;
         setConfirmDialog((current) =>
-          current ?? { reason, cmd_type, code, confirm_kind, requires_auth, risk_level, risk_score, disposition, blacklist_hits, penalty_items }
+          current ?? { request_id, reason, cmd_type, code, confirm_kind, requires_auth, risk_level, risk_score, disposition, blacklist_hits, penalty_items }
         );
         setConfirmUsername("");
         setConfirmPassword("");
@@ -501,7 +503,7 @@ export default function App() {
 
   const respondToConfirm = useCallback((confirmed: boolean) => {
     const requiresSudo = confirmDialog?.requires_auth === "sudo";
-    confirmCommand(confirmed, requiresSudo ? { username: confirmUsername, password: confirmPassword } : undefined).catch(console.error);
+    confirmCommand(confirmDialog?.request_id ?? "", confirmed, requiresSudo ? { username: confirmUsername, password: confirmPassword } : undefined).catch(console.error);
     setConfirmDialog(null);
     setConfirmUsername("");
     setConfirmPassword("");

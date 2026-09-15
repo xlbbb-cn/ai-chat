@@ -360,8 +360,9 @@ pub struct AppState {
     pub logger: Mutex<AppLogger>,
     pub chat_cancelled: AtomicBool,
     /// One-shot channel sender used to relay the user's confirm/deny response
-    /// back to a waiting `execute_tool` call.
-    pub confirm_sender: Mutex<Option<tokio::sync::oneshot::Sender<ToolConfirmation>>>,
+    /// back to a waiting `execute_tool` call. Stores the request_id alongside
+    /// the sender so a stale confirmation can never approve the wrong command.
+    pub confirm_sender: Mutex<Option<(String, tokio::sync::oneshot::Sender<ToolConfirmation>)>>,
     /// Per-server diagnostic log buffer (in-memory ring buffer, last
     /// `MAX_MCP_LOG_ENTRIES` entries per server). Populated by mcp.rs at
     /// every save / test / tool call so the UI can show what happened.
@@ -456,20 +457,25 @@ fn stop_chat_completion(state: State<'_, AppState>) {
 }
 
 /// Called by the frontend to confirm or deny a pending dangerous-command execution.
+/// `request_id` must match the currently pending request; stale confirmations
+/// from an earlier dialog are ignored so they cannot approve the wrong command.
 #[tauri::command]
 fn confirm_command(
     state: State<'_, AppState>,
+    request_id: String,
     confirmed: bool,
     username: Option<String>,
     password: Option<String>,
 ) {
     let mut guard = state.confirm_sender.lock().unwrap();
-    if let Some(tx) = guard.take() {
-        let _ = tx.send(ToolConfirmation {
-            confirmed,
-            username,
-            password,
-        });
+    if let Some((pending_id, tx)) = guard.take() {
+        if pending_id == request_id {
+            let _ = tx.send(ToolConfirmation {
+                confirmed,
+                username,
+                password,
+            });
+        }
     }
 }
 
