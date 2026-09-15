@@ -3,7 +3,8 @@ use os_info;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
@@ -810,6 +811,133 @@ fn log_interaction(
     );
 }
 
+// ─── Automatic conclusion memory recording ───────────────────────────────────
+
+/// Heuristic: is this final answer a substantive conclusion worth persisting?
+/// Keeps the automatic fallback conservative so we don't spam memory with
+/// greetings or trivial acknowledgments.
+fn should_record_conclusion(content: &str) -> bool {
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let char_count = trimmed.chars().count();
+    // Too short to be a meaningful conclusion.
+    if char_count < 60 {
+        return false;
+    }
+    // Skip pure acknowledgment / follow-up prompts.
+    let lower = trimmed.to_lowercase();
+    const ACK: &[&str] = &[
+        "you're welcome",
+        "no problem",
+        "glad to help",
+        "happy to help",
+        "let me know if",
+        "is there anything else",
+        "feel free to ask",
+        "anything else",
+    ];
+    if char_count < 200 && ACK.iter().any(|p| lower.contains(p)) {
+        return false;
+    }
+    true
+}
+
+/// Detect explicit conclusion markers (EN + ZH) in the final answer.
+fn looks_like_conclusion(content: &str) -> bool {
+    let lower = content.to_lowercase();
+    const MARKERS: &[&str] = &[
+        // English
+        "conclusion",
+        "in summary",
+        "to summarize",
+        "to sum up",
+        "in short",
+        "in conclusion",
+        "therefore",
+        "hence",
+        "thus",
+        "root cause",
+        "the fix is",
+        "the answer is",
+        "we decided",
+        "decision",
+        "the solution is",
+        "as a result",
+        "in the end",
+        "ultimately",
+        // Chinese
+        "结论",
+        "总结",
+        "因此",
+        "所以",
+        "答案是",
+        "根本原因",
+        "解决方案",
+        "决定",
+        "最终",
+        "综上所述",
+        "总而言之",
+    ];
+    MARKERS.iter().any(|m| lower.contains(m))
+}
+
+/// Persist a conclusion to repo-scoped memory (workspace_dir/memory/repo/).
+/// Mirrors the `memory` tool's `repo` scope file layout so entries are
+/// discoverable by the same search/list paths.
+fn record_conclusion_to_memory(
+    state: &State<'_, AppState>,
+    app: &AppHandle,
+    workspace_dir: &Path,
+    session_id: &str,
+    content: &str,
+) {
+    let memory_root = workspace_dir.join("memory").join("repo");
+    if let Err(e) = fs::create_dir_all(&memory_root) {
+        log_event(state, "ERROR", format!("failed to create memory dir: {e}"));
+        return;
+    }
+
+    // Key: conclusion-<session>-<timestamp> — unique, no collisions with
+    // LLM-authored entries that use descriptive keys.
+    let ts = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+    let key = format!("conclusion-{}-{}", session_id, ts);
+    let safe_key: String = key
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let file_path = memory_root.join(format!("{safe_key}.md"));
+    let file_content = format!("# {key}\n\n{content}\n");
+
+    match fs::write(&file_path, &file_content) {
+        Ok(_) => {
+            log_event(
+                state,
+                "INFO",
+                format!("conclusion recorded to repo memory: {key}"),
+            );
+            let _ = app.emit(
+                "tool-call",
+                format!("🧠 *Conclusion recorded to repo memory: {}*\n", key),
+            );
+        }
+        Err(e) => {
+            log_event(
+                state,
+                "ERROR",
+                format!("failed to write conclusion memory: {e}"),
+            );
+        }
+    }
+}
+
 // ─── Chat command ─────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -984,13 +1112,18 @@ pub async fn chat_completion(
     }
 
     // ── Memory guidance ─────────────────────────────────────────────────────
-    // Short reminder only — the full scope/usage details live in the `memory`
-    // tool description, which is sent whenever the tool is enabled anyway.
+    // Explicit instructions so conclusions are reliably persisted via the
+    // `memory` tool (the tool description carries the full scope/usage details).
     if config.selected_tools.iter().any(|t| t == "memory") {
         let memory_guidance = "\
         MEMORY: You have a `memory` tool (scopes: `session`, `user`, `repo`). \
-        Search memory before answering; at the end of the turn, save key decisions, \
-        user preferences, and repo facts. See the tool description for details.";
+        Search memory before answering to reuse prior conclusions. \
+        When you reach a definitive, accurate conclusion — a resolved question, \
+        confirmed root cause, decided approach, or verified fact — you MUST call \
+        `memory add` to persist it before ending your turn. \
+        Scope guidance: `repo` for project/codebase facts and decisions, `user` for \
+        user preferences and general insights, `session` for task-specific in-progress \
+        notes. Use a short descriptive `key` and put the conclusion in `content`.";
         if !system_content.is_empty() {
             system_content.push_str("\n\n");
         }
@@ -1182,6 +1315,11 @@ pub async fn chat_completion(
             }
         }));
     }
+
+    // Track the final answer and whether the LLM already persisted memory via
+    // the `memory` tool, so the automatic fallback doesn't duplicate it.
+    let mut final_answer: Option<String> = None;
+    let mut memory_tool_called = false;
 
     loop {
         // Sanitize tool call pairs before each request to prevent the API error:
@@ -1398,6 +1536,7 @@ pub async fn chat_completion(
         }
 
         if sr.finish_reason != "tool_calls" || sr.tool_calls.is_empty() {
+            final_answer = Some(sr.content.clone());
             break;
         }
 
@@ -1427,6 +1566,9 @@ pub async fn chat_completion(
         for (id, name, args) in &sr.tool_calls {
             if state.chat_cancelled.load(Ordering::SeqCst) {
                 break;
+            }
+            if name == "memory" {
+                memory_tool_called = true;
             }
             let result = if name == "use_skill" {
                 let args_json: Value = serde_json::from_str(args).unwrap_or_default();
@@ -1644,6 +1786,22 @@ pub async fn chat_completion(
         }
 
         all_messages.extend(pending_skill_context_messages);
+    }
+
+    // ── Automatic conclusion recording ──────────────────────────────────────
+    // If the turn ended with a substantive final answer that reads like a
+    // conclusion, and the LLM did not already persist it via the `memory`
+    // tool, record it to repo memory so it survives across sessions.
+    if let Some(answer) = final_answer {
+        let memory_enabled = config.selected_tools.iter().any(|t| t == "memory");
+        if memory_enabled
+            && !memory_tool_called
+            && should_record_conclusion(&answer)
+            && looks_like_conclusion(&answer)
+        {
+            let workspace_dir = state.workspace_dir.lock().unwrap().clone();
+            record_conclusion_to_memory(&state, &app, &workspace_dir, &session_id, &answer);
+        }
     }
 
     state.chat_cancelled.store(false, Ordering::SeqCst);
