@@ -1842,9 +1842,26 @@ fn resolve_safe_path(root_dir: &Path, rel_path: &str) -> Result<PathBuf, String>
             }
             Ok(canonical)
         }
-        // File does not exist yet (e.g. write to a new file) — fall back to the unresolved path
-        // after confirming it still starts with root_dir lexically
+        // File does not exist yet (e.g. write to a new file). A lexical
+        // `starts_with` check alone is unsafe: a symlinked parent (e.g.
+        // `./link/newfile` where `link -> /etc`) would pass lexically while
+        // actually resolving outside the workspace. Canonicalize the parent
+        // directory (which exists) to resolve any symlinks, verify it is still
+        // inside root_dir, then rebuild the path from the canonical parent.
         Err(_) => {
+            if let Some(parent) = resolved.parent() {
+                if let Ok(canonical_parent) = parent.canonicalize() {
+                    let canonical_root = root_dir
+                        .canonicalize()
+                        .unwrap_or_else(|_| root_dir.to_path_buf());
+                    if !canonical_parent.starts_with(&canonical_root) {
+                        return Err("Path escapes workspace directory".to_string());
+                    }
+                    if let Some(file_name) = resolved.file_name() {
+                        return Ok(canonical_parent.join(file_name));
+                    }
+                }
+            }
             if !resolved.starts_with(root_dir) {
                 return Err("Path escapes workspace directory".to_string());
             }
@@ -1880,6 +1897,30 @@ fn ensure_mutation_target_allowed(
     workspace_dir: &Path,
     writable_skill_roots: &[PathBuf],
 ) -> Result<(), String> {
+    // Never allow mutating the workspace root itself (e.g. `delete` on `.` or
+    // `./` would otherwise wipe the entire workspace via remove_dir_all).
+    let canonical_workspace = workspace_dir
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_dir.to_path_buf());
+    let canonical_path = path
+        .canonicalize()
+        .unwrap_or_else(|_| path.to_path_buf());
+    if canonical_path == canonical_workspace {
+        return Err(
+            "The workspace root itself cannot be modified or deleted.".to_string(),
+        );
+    }
+
+    // The persistent memory directory is managed by the memory tool; direct
+    // mutation would wipe user/repo memories.
+    let memory_root = workspace_dir.join("memory");
+    if path_is_within(path, &memory_root) || path.starts_with(&memory_root) {
+        return Err(
+            "The memory directory is managed by the memory tool and cannot be modified directly."
+                .to_string(),
+        );
+    }
+
     let workspace_skills = workspace_skills_root(workspace_dir);
     if path_is_within(path, &workspace_skills)
         && !path_is_within_any_root(path, writable_skill_roots)
@@ -2522,6 +2563,84 @@ mod tests {
 ";
         assert!(apply_unified_patch(original, patch).is_err());
     }
+
+    // ─── Path Safety Tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn ensure_mutation_target_allowed_rejects_workspace_root() {
+        use super::ensure_mutation_target_allowed;
+
+        let workspace_root = make_temp_dir("mutation-root");
+        let err = ensure_mutation_target_allowed(&workspace_root, &workspace_root, &[])
+            .unwrap_err();
+        assert!(err.contains("workspace root"));
+
+        let _ = fs::remove_dir_all(&workspace_root);
+    }
+
+    #[test]
+    fn ensure_mutation_target_allowed_rejects_memory_dir() {
+        use super::ensure_mutation_target_allowed;
+
+        let workspace_root = make_temp_dir("mutation-memory");
+        let memory_file = workspace_root.join("memory").join("repo").join("note.md");
+        fs::create_dir_all(memory_file.parent().unwrap()).unwrap();
+
+        let err = ensure_mutation_target_allowed(&memory_file, &workspace_root, &[])
+            .unwrap_err();
+        assert!(err.contains("memory directory"));
+
+        let _ = fs::remove_dir_all(&workspace_root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_safe_path_rejects_symlink_escape_for_new_file() {
+        use std::os::unix::fs::symlink;
+
+        let workspace_root = make_temp_dir("resolve-safe-symlink");
+        let external_root = make_temp_dir("resolve-safe-symlink-ext");
+        let link = workspace_root.join("link");
+        symlink(&external_root, &link).unwrap();
+
+        // Absolute path through a symlinked parent to a non-existent file.
+        let target = link.join("newfile.txt");
+        let err = super::resolve_safe_path(&workspace_root, &target.display().to_string())
+            .unwrap_err();
+        assert!(err.contains("escapes workspace"));
+
+        // Relative path through a symlinked parent to a non-existent file.
+        let err = super::resolve_safe_path(&workspace_root, "./link/newfile.txt").unwrap_err();
+        assert!(err.contains("escapes workspace"));
+
+        let _ = fs::remove_dir_all(&workspace_root);
+        let _ = fs::remove_dir_all(&external_root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_safe_path_allows_new_file_inside_workspace() {
+        use std::os::unix::fs::symlink;
+
+        let workspace_root = make_temp_dir("resolve-safe-newfile");
+        let subdir = workspace_root.join("sub");
+        fs::create_dir_all(&subdir).unwrap();
+
+        // New file in a normal subdirectory resolves to the canonical parent.
+        let resolved = super::resolve_safe_path(&workspace_root, "./sub/newfile.txt").unwrap();
+        assert!(resolved.starts_with(&workspace_root));
+        assert_eq!(resolved.file_name().unwrap(), "newfile.txt");
+
+        // New file through a symlink that stays inside the workspace is allowed.
+        let inner = workspace_root.join("inner");
+        fs::create_dir_all(&inner).unwrap();
+        let link = workspace_root.join("link");
+        symlink(&inner, &link).unwrap();
+        let resolved = super::resolve_safe_path(&workspace_root, "./link/newfile.txt").unwrap();
+        assert!(resolved.starts_with(&workspace_root));
+
+        let _ = fs::remove_dir_all(&workspace_root);
+    }
 }
 
 fn is_path_protected(path: &Path, protected_roots: &[PathBuf]) -> bool {
@@ -2631,6 +2750,47 @@ fn apply_unified_patch(original: &str, patch_str: &str) -> Result<String, String
     }
 
     Ok(patched)
+}
+
+/// Recursively copy a directory tree from `src` to `dst`.
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
+    fs::create_dir_all(dst)
+        .map_err(|e| format!("Failed to create '{}': {}", dst.display(), e))?;
+    for entry in fs::read_dir(src)
+        .map_err(|e| format!("Failed to read '{}': {}", src.display(), e))?
+    {
+        let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if entry
+            .file_type()
+            .map_err(|e| format!("Failed to get file type for '{}': {}", from.display(), e))?
+            .is_dir()
+        {
+            copy_dir_recursive(&from, &to)?;
+        } else {
+            fs::copy(&from, &to)
+                .map_err(|e| format!("Failed to copy '{}': {}", from.display(), e))?;
+        }
+    }
+    Ok(())
+}
+
+/// Move `src` to `dst`, falling back to copy + delete when `fs::rename` fails
+/// (e.g. cross-device `EXDEV` when src and dst are on different filesystems).
+fn move_path(src: &Path, dst: &Path) -> Result<(), String> {
+    match fs::rename(src, dst) {
+        Ok(_) => Ok(()),
+        Err(_) => {
+            if src.is_dir() {
+                copy_dir_recursive(src, dst)?;
+                fs::remove_dir_all(src).map_err(|e| e.to_string())
+            } else {
+                fs::copy(src, dst).map_err(|e| e.to_string())?;
+                fs::remove_file(src).map_err(|e| e.to_string())
+            }
+        }
+    }
 }
 
 pub async fn execute_tool(
@@ -3826,7 +3986,13 @@ pub async fn execute_tool(
                                 Err(e) => return format!("Error: {}", e),
                             };
                             if let Some(parent) = p.parent() {
-                                let _ = fs::create_dir_all(parent);
+                                if let Err(e) = fs::create_dir_all(parent) {
+                                    return format!(
+                                        "Error creating parent directory '{}': {}",
+                                        parent.display(),
+                                        e
+                                    );
+                                }
                             }
                             match fs::write(&p, content_str) {
                                 Ok(_) => {
@@ -3979,6 +4145,13 @@ pub async fn execute_tool(
                                             Ok(backup) => backup,
                                             Err(e) => return format!("Error: {}", e),
                                         };
+                                    // If the destination already exists and is a
+                                    // protected file, back it up before overwriting.
+                                    let dst_backup =
+                                        match backup_protected_file(&dst, protected_skill_roots) {
+                                            Ok(backup) => backup,
+                                            Err(e) => return format!("Error: {}", e),
+                                        };
                                     if let Some(parent) = dst.parent() {
                                         if let Err(e) = fs::create_dir_all(parent) {
                                             return format!(
@@ -3987,23 +4160,28 @@ pub async fn execute_tool(
                                             );
                                         }
                                     }
-                                    match fs::rename(&src, &dst) {
+                                    match move_path(&src, &dst) {
                                         Ok(_) => {
-                                            if let Some(backup) = backup {
-                                                format!(
-                                                "Successfully backed up to {} and moved {} to {}",
-                                                backup.display(),
-                                                path_str,
-                                                new_path
+                                            let backup_note = match (backup, dst_backup) {
+                                                (Some(b), _) => format!(
+                                                    " (source backed up to {})",
+                                                    b.display()
+                                                ),
+                                                (None, Some(b)) => format!(
+                                                    " (destination backed up to {})",
+                                                    b.display()
+                                                ),
+                                                (None, None) => String::new(),
+                                            };
+                                            format!(
+                                                "Successfully moved {} to {}{}",
+                                                path_str, new_path, backup_note
                                             )
-                                            } else {
-                                                format!(
-                                                    "Successfully moved {} to {}",
-                                                    path_str, new_path
-                                                )
-                                            }
                                         }
-                                        Err(e) => format!("Error moving file: {}", e),
+                                        Err(e) => format!(
+                                            "Error moving {} to {}: {}",
+                                            path_str, new_path, e
+                                        ),
                                     }
                                 }
                                 Err(e) => format_file_action_error(e),
