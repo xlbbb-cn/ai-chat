@@ -218,3 +218,25 @@ pub fn delete_skill(state: State<'_, AppState>, name: String) -> Result<(), Stri
     let skill_dir = state.skills_dir.join(&name);
     fs::remove_dir_all(skill_dir).map_err(|e| e.to_string())
 }
+
+/// Return the subset of `names` that currently resolve to a loadable skill.
+///
+/// `selected_skills` is persisted in the config, so it can reference skills
+/// that no longer exist — for example after the workspace directory changes or
+/// a different profile is applied. Resolution mirrors what the chat runtime
+/// actually does (`resolve_skill_by_name`), so anything kept here is guaranteed
+/// to load on the next request.
+#[tauri::command]
+pub fn filter_existing_skills(state: State<'_, AppState>, names: Vec<String>) -> Vec<String> {
+    if names.is_empty() {
+        return names;
+    }
+
+    let workspace_dir = state.workspace_dir.lock().unwrap().clone();
+    let ws_skills_dir = workspace_dir.join("skills");
+
+    names
+        .into_iter()
+        .filter(|name| resolve_skill_by_name(&ws_skills_dir, &state.skills_dir, name).is_ok())
+        .collect()
+}

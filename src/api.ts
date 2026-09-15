@@ -54,6 +54,14 @@ export async function deleteSkill(name: string): Promise<void> {
   return invoke("delete_skill", { name });
 }
 
+/**
+ * Return the subset of `names` that still resolve to a loadable skill.
+ * Used to prune `selected_skills` after a workspace switch or profile load.
+ */
+export async function filterExistingSkills(names: string[]): Promise<string[]> {
+  return invoke("filter_existing_skills", { names });
+}
+
 export async function stopChatCompletion(): Promise<void> {
   return invoke("stop_chat_completion");
 }

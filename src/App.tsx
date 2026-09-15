@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { chatCompletion, getConfig, getAgentOrchestration, listMcpServers, listSubAgents, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession } from "./api";
+import { chatCompletion, getConfig, getAgentOrchestration, listMcpServers, listSubAgents, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills } from "./api";
 
 import { ChatMessage } from "./components/ChatMessage";
 import { ToolCallGroup } from "./components/ToolCallGroup";
@@ -14,6 +14,7 @@ import { AgentMissionPanel } from "./components/AgentMissionPanel";
 import { MarkdownPreview } from "./components/MarkdownPreview";
 import { Portal } from "./components/Portal";
 import type {
+  AppConfig,
   Message,
   AgentTaskEvent,
   ToolCallEntry,
@@ -229,6 +230,41 @@ export default function App() {
   const hasRunningToolCallRef = useRef(false);
   const currentToolCallsRef = useRef<ToolCallEntry[]>([]);
 
+  /**
+   * Drop `selected_skills` entries that no longer resolve to a real skill.
+   *
+   * `selected_skills` is persisted in the config, so it goes stale whenever the
+   * workspace directory changes or a different profile is applied — the skill a
+   * name referred to may live in the previous workspace and no longer exist.
+   */
+  const reconcileActiveSkills = useCallback(async (ids: string[]): Promise<string[]> => {
+    if (ids.length === 0) return ids;
+    try {
+      const existing = await filterExistingSkills(ids);
+      if (existing.length === ids.length) return ids;
+      const existingSet = new Set(existing);
+      // Preserve the original selection order.
+      return ids.filter((id) => existingSet.has(id));
+    } catch (err) {
+      // If validation itself fails (IPC error), keep the selection rather than
+      // silently discarding the user's active skills.
+      console.error("Failed to validate active skills", err);
+      return ids;
+    }
+  }, []);
+
+  /** Reload persisted config into the UI, pruning skills that no longer exist. */
+  const applyConfigToUi = useCallback(async (): Promise<AppConfig> => {
+    const cfg = await getConfig();
+    const catalog = Array.from(new Set([...(cfg.model_catalog ?? []), cfg.model].filter(Boolean)));
+    setAvailableModels(catalog.length > 0 ? catalog : ["gpt-4o-mini"]);
+    setSelectedModel(cfg.model || "gpt-4o-mini");
+    setMaxTokens(cfg.model_settings?.max_tokens ?? null);
+    setActiveSkillIds(await reconcileActiveSkills(cfg.selected_skills ?? []));
+    setActiveToolCount((cfg.selected_tools ?? []).length);
+    return cfg;
+  }, [reconcileActiveSkills]);
+
   const updateActiveAssistantToolCalls = useCallback((toolCalls: ToolCallEntry[]) => {
     const assistantId = currentAssistantMessageIdRef.current;
     if (!assistantId) return;
@@ -383,6 +419,22 @@ export default function App() {
     };
   }, []);
 
+  // Switching workspaces changes which skills resolve. Reload the config and
+  // re-validate `selected_skills` so stale names (e.g. skills that only existed
+  // in the previous workspace) are dropped instead of being sent to the model.
+  useEffect(() => {
+    const unlisten = listen<string>("workspace-changed", async () => {
+      try {
+        await applyConfigToUi();
+      } catch (err) {
+        console.error(err);
+      }
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [applyConfigToUi]);
+
   useEffect(() => {
     const unlisteners: Promise<() => void>[] = [];
     unlisteners.push(
@@ -457,20 +509,16 @@ export default function App() {
   }, [confirmDialog, confirmUsername, confirmPassword]);
 
   useEffect(() => {
-    getConfig()
+    applyConfigToUi()
       .then((cfg) => {
-        const catalog = Array.from(new Set([...(cfg.model_catalog ?? []), cfg.model].filter(Boolean)));
-        setAvailableModels(catalog.length > 0 ? catalog : ["gpt-4o-mini"]);
-        setSelectedModel(cfg.model || "gpt-4o-mini");
-        setMaxTokens(cfg.model_settings?.max_tokens ?? null);
-        setActiveSkillIds(cfg.selected_skills ?? []);
-        setActiveToolCount((cfg.selected_tools ?? []).length);
+        // Only start persisting `selected_skills` once the restored list has
+        // been validated against the skills that actually exist.
         setSkillsLoadedFromConfig(true);
         themeRef.current = cfg.theme ?? "auto";
         applyTheme(cfg.theme);
       })
       .catch(console.error);
-  }, []);
+  }, [applyConfigToUi]);
 
   useEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
@@ -497,13 +545,9 @@ export default function App() {
   useEffect(() => {
     const unlisten = listen("profile-restored", async () => {
       try {
-        const [cfg, servers] = await Promise.all([getConfig(), listMcpServers()]);
-        const catalog = Array.from(new Set([...(cfg.model_catalog ?? []), cfg.model].filter(Boolean)));
-        setAvailableModels(catalog.length > 0 ? catalog : ["gpt-4o-mini"]);
-        setSelectedModel(cfg.model || "gpt-4o-mini");
-        setMaxTokens(cfg.model_settings?.max_tokens ?? null);
-        setActiveSkillIds(cfg.selected_skills ?? []);
-        setActiveToolCount((cfg.selected_tools ?? []).length);
+        // A restored profile can reference skills that are absent from the
+        // current workspace, so re-validate before activating them.
+        const [, servers] = await Promise.all([applyConfigToUi(), listMcpServers()]);
         setActiveMcpCount(servers.filter((s) => s.enabled).length);
       } catch (err) {
         console.error(err);
@@ -512,7 +556,7 @@ export default function App() {
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, []);
+  }, [applyConfigToUi]);
 
   useEffect(() => {
     const unlisteners: Promise<() => void>[] = [];

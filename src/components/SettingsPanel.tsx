@@ -131,9 +131,16 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
   async function handleSave() {
     setSaving(true);
     try {
+      // `selected_skills` / `selected_tools` are owned by the skills and tools
+      // panels, not by this form. Re-read them before saving so that changing
+      // the workspace (or any other setting) doesn't roll back skill/tool
+      // toggles made while this panel was open.
+      const persisted = await getConfig();
       const normalized: AppConfig = {
         ...config,
         model_catalog: modelCatalog,
+        selected_skills: persisted.selected_skills ?? [],
+        selected_tools: persisted.selected_tools ?? [],
       };
       await saveConfig(normalized);
       setSaved(true);

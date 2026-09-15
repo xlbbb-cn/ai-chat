@@ -37,6 +37,7 @@ const PROFILE_EXPORT_DONE_EVENT: &str = "profile-export-done";
 const PROFILE_EXPORT_ERROR_EVENT: &str = "profile-export-error";
 const MARKDOWN_EDIT_OPEN_EVENT: &str = "markdown-edit-open";
 const MARKDOWN_EDIT_ERROR_EVENT: &str = "markdown-edit-error";
+const WORKSPACE_CHANGED_EVENT: &str = "workspace-changed";
 
 #[derive(Debug, Clone, Serialize)]
 struct MarkdownEditPayload {
@@ -114,7 +115,18 @@ fn apply_config(app: &AppHandle, state: &AppState, config: AppConfig) -> Result<
     fs::create_dir_all(&new_workspace_path).ok();
     // Note: workspace/skills is NOT created eagerly. Skills are discovered by
     // scanning; when the folder is absent only the app-managed skills root is used.
-    *state.workspace_dir.lock().unwrap() = new_workspace_path.clone();
+    let previous_workspace_path =
+        std::mem::replace(&mut *state.workspace_dir.lock().unwrap(), new_workspace_path.clone());
+
+    // The active skill list is workspace-scoped: skills that came from the old
+    // workspace may not exist in the new one. Notify the UI so it can re-validate
+    // `selected_skills` against the skills that actually resolve now.
+    if previous_workspace_path != new_workspace_path {
+        let _ = app.emit(
+            WORKSPACE_CHANGED_EVENT,
+            new_workspace_path.to_string_lossy().to_string(),
+        );
+    }
 
     if let Some(win) = app.get_webview_window("main") {
         let title = format!("AI Chat — {}", new_workspace_path.display());
@@ -903,6 +915,7 @@ pub fn run() {
             skills::list_skills,
             skills::save_skill,
             skills::delete_skill,
+            skills::filter_existing_skills,
             db::save_history,
             db::load_history,
             db::delete_history,
