@@ -58,7 +58,7 @@ Config and DB live in the OS app data dir (`name` from `tauri.conf.json` identif
 - Linux: `~/.local/share/ai-chat/`
 - Windows: `%APPDATA%/../Local/ai-chat/`
 
-Contents: `config.json`, `chat.db`, `mcp_servers.json`, `agents.json`, `app.log`, `profiles/`, and a `workspace/` dir (default — overridable via `workspace_dir` in config). `workspace/skills/` is created on first launch.
+Contents: `config.json`, `chat.db`, `mcp_servers.json`, `agents.json`, `app.log`, `profiles/`, and a `workspace/` dir (default — overridable via `workspace_dir` in config). `workspace/skills/` is **not** created automatically: skill listing scans it when present and otherwise only reads the app-data `skills/` root.
 
 ## Skills — path isolation rule
 

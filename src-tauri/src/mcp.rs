@@ -373,10 +373,10 @@ pub fn sanitize_fn_name(s: &str) -> String {
 /// don't read stderr (i.e. would block on a noisy server) should pass
 /// `false` and let stderr go to `/dev/null`.
 fn build_stdio_cmd(server: &McpServer, pipe_stderr: bool) -> tokio::process::Command {
-    use std::path::Path;
+
     use std::process::Stdio;
 
-    let cmd_path = Path::new(server.command.trim());
+    
 
 
 
@@ -388,7 +388,9 @@ fn build_stdio_cmd(server: &McpServer, pipe_stderr: bool) -> tokio::process::Com
 
     #[cfg(windows)]
     {
+        use std::path::Path;
         // 提取文件名，例如 "python.exe" -> "python"
+        let cmd_path = Path::new(server.command.trim());
         let file_stem = cmd_path
             .file_stem()
             .and_then(|s| s.to_str())

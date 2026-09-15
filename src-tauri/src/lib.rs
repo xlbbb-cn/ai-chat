@@ -112,7 +112,8 @@ fn apply_config(app: &AppHandle, state: &AppState, config: AppConfig) -> Result<
 
     let new_workspace_path = resolve_workspace_path(app, config.workspace_dir.as_deref())?;
     fs::create_dir_all(&new_workspace_path).ok();
-    fs::create_dir_all(new_workspace_path.join("skills")).ok();
+    // Note: workspace/skills is NOT created eagerly. Skills are discovered by
+    // scanning; when the folder is absent only the app-managed skills root is used.
     *state.workspace_dir.lock().unwrap() = new_workspace_path.clone();
 
     if let Some(win) = app.get_webview_window("main") {
@@ -861,7 +862,8 @@ pub fn run() {
                 None => data_dir.join("workspace"),
             };
             fs::create_dir_all(&workspace_dir).ok();
-            fs::create_dir_all(workspace_dir.join("skills")).ok();
+            // workspace/skills is created on demand (e.g. by self-evolution or the
+            // user); skill listing tolerates its absence.
 
             app.manage(AppState {
                 config: Mutex::new(config),

@@ -128,6 +128,14 @@ pub fn resolve_skill_by_name(
         })
     }
 
+    // A missing workspace skills dir simply means the skill is not overridden
+    // locally — fall straight through to the app-managed root.
+    if !workspace_skills_dir.is_dir() {
+        return load_from_root(managed_skills_dir, name).map_err(|managed_err| {
+            format!("failed to load skill '{name}' from app-managed root ({managed_err})")
+        });
+    }
+
     load_from_root(workspace_skills_dir, name).or_else(|workspace_err| {
         load_from_root(managed_skills_dir, name).map_err(|managed_err| {
             format!(
@@ -161,6 +169,12 @@ pub fn list_skills(state: State<'_, AppState>) -> Vec<Skill> {
     let mut skills = Vec::new();
 
     let read_dir_skills = |dir: &PathBuf| -> Vec<Skill> {
+        // The workspace skills dir is not created eagerly, so a missing dir is
+        // expected and simply yields no skills from this root.
+        if !dir.is_dir() {
+            return Vec::new();
+        }
+
         fs::read_dir(dir)
             .map(|entries| {
                 entries
