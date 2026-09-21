@@ -1285,24 +1285,33 @@ export default function App() {
           </div>
         </Portal>
       )}
+      {/* Settings — fullscreen page layered above the chat */}
+      {sidebar === "settings" && (
+        <Portal>
+          <div className="settings-overlay">
+            <SettingsPanel
+              sessionId={sessionId}
+              onClose={closeSidebar}
+              onThemePreview={(theme) => {
+                themeRef.current = theme ?? "auto";
+                applyTheme(theme);
+              }}
+              onConfigSaved={(cfg) => {
+                const catalog = Array.from(new Set([...(cfg.model_catalog ?? []), cfg.model].filter(Boolean)));
+                setAvailableModels(catalog.length > 0 ? catalog : ["gpt-4o-mini"]);
+                setSelectedModel(cfg.model || "gpt-4o-mini");
+                setMaxTokens(cfg.model_settings?.max_tokens ?? null);
+                themeRef.current = cfg.theme ?? "auto";
+                applyTheme(cfg.theme);
+              }}
+            />
+          </div>
+        </Portal>
+      )}
       {/* Sidebar */}
       {sidebar && (
         <aside className={`sidebar ${sidebar === "monitor" ? "sidebar-wide" : ""} ${sidebarMotion === "opening" ? "sidebar-opening" : ""} ${sidebarMotion === "closing" ? "sidebar-closing" : ""}`}>
           <div className={`sidebar-shell ${sidebar === "settings" ? "panel-settings" : ""} ${sidebar === "skills" ? "panel-skills" : ""} ${sidebar === "history" ? "panel-history" : ""} ${sidebar === "tools" ? "panel-tools" : ""} ${sidebar === "mcp" ? "panel-mcp" : ""} ${sidebar === "agents" ? "panel-agents" : ""} ${sidebar === "monitor" ? "panel-monitor" : ""}`} key={sidebar}>
-            {sidebar === "settings" && (
-              <SettingsPanel
-                sessionId={sessionId}
-                onClose={closeSidebar}
-                onConfigSaved={(cfg) => {
-                  const catalog = Array.from(new Set([...(cfg.model_catalog ?? []), cfg.model].filter(Boolean)));
-                  setAvailableModels(catalog.length > 0 ? catalog : ["gpt-4o-mini"]);
-                  setSelectedModel(cfg.model || "gpt-4o-mini");
-                  setMaxTokens(cfg.model_settings?.max_tokens ?? null);
-                  themeRef.current = cfg.theme ?? "auto";
-                  applyTheme(cfg.theme);
-                }}
-              />
-            )}
             {sidebar === "skills" && (
               <SkillsPanel
                 activeSkillIds={activeSkillIds}
@@ -1376,7 +1385,14 @@ export default function App() {
       <div className="chat-area" onClick={handleChatAreaClick}>
         {/* Toolbar */}
         <header className="toolbar">
-          <span className="app-title">Chat</span>
+          <span className="app-title">                      <button
+            className="toolbar-btn"
+            onClick={clearChat}
+            title="New chat"
+          >
+            ↻ New Chat
+          </button></span>
+
           <div className="toolbar-actions">
             <button
               className={`toolbar-btn ${sidebar === "agents" ? "active" : ""}`}
@@ -1419,13 +1435,6 @@ export default function App() {
               )}
             </button>
             <button
-              className={`toolbar-btn ${sidebar === "settings" ? "active" : ""}`}
-              onClick={() => toggleSidebar("settings")}
-              title="Settings"
-            >
-              ⚙ Settings
-            </button>
-            <button
               className={`toolbar-btn ${sidebar === "history" ? "active" : ""}`}
               onClick={() => toggleSidebar("history")}
               title="History"
@@ -1433,12 +1442,14 @@ export default function App() {
               🕒 History
             </button>
             <button
-              className="toolbar-btn"
-              onClick={clearChat}
-              title="New chat"
+              className={`toolbar-btn ${sidebar === "settings" ? "active" : ""}`}
+              onClick={() => toggleSidebar("settings")}
+              title="Settings"
             >
-              ↻ New Chat
+              ⚙ Settings
             </button>
+
+
           </div>
         </header>
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { fetchModels, getConfig, getWorkspaceDir, saveConfig, listProfiles, saveProfile, deleteProfile, applyProfile, listMcpServers, listSubAgents, getAgentOrchestration } from "../api";
 import type { AppConfig, ModelSettings, Profile } from "../types";
@@ -10,6 +10,7 @@ import "./SettingsPanel.css";
 interface Props {
   onClose: () => void;
   onConfigSaved?: (config: AppConfig) => void;
+  onThemePreview?: (theme: "auto" | "light" | "dark" | undefined) => void;
   sessionId?: string;
 }
 
@@ -38,7 +39,16 @@ function updateModelSettings(
   return { ...(settings ?? {}), ...patch };
 }
 
-export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
+const SETTINGS_SECTIONS = [
+  { id: "appearance", label: "Appearance" },
+  { id: "workspace", label: "Workspace & Profiles" },
+  { id: "api", label: "API & Model" },
+  { id: "system", label: "System Message" },
+  { id: "advanced", label: "Advanced" },
+  { id: "runtime", label: "Runtime & Debug" },
+] as const;
+
+export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionId }: Props) {
   const [config, setConfig] = useState<AppConfig>(defaultConfig);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -56,6 +66,26 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
   const [newProfileName, setNewProfileName] = useState("");
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileApplying, setProfileApplying] = useState<string | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const [activeSection, setActiveSection] = useState<string>(SETTINGS_SECTIONS[0].id);
+
+  function handleSectionScroll() {
+    const container = contentRef.current;
+    if (!container) return;
+    const top = container.scrollTop + 140;
+    let current: string = SETTINGS_SECTIONS[0].id;
+    for (const section of SETTINGS_SECTIONS) {
+      const el = document.getElementById(`settings-section-${section.id}`);
+      if (el && el.offsetTop <= top) current = section.id;
+    }
+    setActiveSection(current);
+  }
+
+  function scrollToSection(id: string) {
+    const container = contentRef.current;
+    const el = document.getElementById(`settings-section-${id}`);
+    if (container && el) container.scrollTo({ top: el.offsetTop - 28, behavior: "smooth" });
+  }
 
   useEffect(() => {
     getWorkspaceDir().then(setWorkspaceDirActual).catch(console.error);
@@ -221,6 +251,7 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
       const cfg = await getConfig();
       const modelCatalog = mergeModels(cfg.model_catalog, [cfg.model]);
       setConfig({ ...cfg, model_catalog: modelCatalog, model_settings: cfg.model_settings ?? {} });
+      onThemePreview?.(cfg.theme);
       onConfigSaved?.(cfg);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -242,319 +273,398 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
   }
 
   return (
-    <div className="settings-panel">
-      <div className="settings-header">
-        <h2>Settings</h2>
-        <button className="close-btn" onClick={onClose}>✕</button>
-      </div>
+    <div className="settings-page" role="dialog" aria-modal="true" aria-label="Settings">
+      <header className="settings-page-header">
+        <div className="settings-page-heading">
+          <h2>Settings</h2>
+          <p>Manage appearance, workspace, API and runtime options.</p>
+        </div>
+        <div className="settings-page-actions">
+          <button type="button" className="settings-btn" onClick={onClose}>
+            Close
+          </button>
+          <button type="button" className="settings-btn settings-btn-primary" onClick={handleSave} disabled={saving}>
+            {saving ? "Saving…" : saved ? "Saved ✓" : "Save Changes"}
+          </button>
+        </div>
+      </header>
 
-      <div className="settings-body">
-        <section className="settings-group">
-          <div className="settings-group-title">Appearance</div>
-          <label className="settings-field">
-            Color Mode
-          </label>
-          <div className="theme-segmented">
-            {(["auto", "light", "dark"] as const).map((t) => (
-              <button
-                key={t}
-                type="button"
-                className={`theme-seg-btn${(config.theme ?? "auto") === t ? " active" : ""}`}
-                onClick={() => setConfig((prev) => ({ ...prev, theme: t }))}
-              >
-                {t === "auto" ? "Auto" : t === "light" ? "Light" : "Dark"}
-              </button>
-            ))}
-          </div>
-        </section>
+      <div className="settings-layout">
+        <nav className="settings-nav" aria-label="Settings sections">
+          {SETTINGS_SECTIONS.map((section) => (
+            <button
+              key={section.id}
+              type="button"
+              className={`settings-nav-item${activeSection === section.id ? " active" : ""}`}
+              onClick={() => scrollToSection(section.id)}
+            >
+              {section.label}
+            </button>
+          ))}
+        </nav>
 
-        <section className="settings-group">
-          <div className="settings-group-title">Workspace</div>
-          <label className="settings-field">
-            Workspace Directory
-            <div className="workspace-dir-row">
-              <input
-                type="text"
-                readOnly
-                value={config.workspace_dir ?? ""}
-                placeholder={workspaceDirActual || "Default workspace directory"}
-                title={config.workspace_dir || workspaceDirActual || "Default workspace directory"}
-                onClick={handlePickWorkspace}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    handlePickWorkspace();
+        <div className="settings-content" ref={contentRef} onScroll={handleSectionScroll}>
+          <section id="settings-section-appearance" className="settings-section">
+            <div className="settings-section-head">
+              <h3>Appearance</h3>
+              <p>Pick how the interface follows your system theme.</p>
+            </div>
+            <div className="settings-section-body">
+              <div className="settings-field-row">
+                <span className="settings-field-label">Color mode</span>
+                <div className="theme-segmented">
+                  {(["auto", "light", "dark"] as const).map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      className={`theme-seg-btn${(config.theme ?? "auto") === t ? " active" : ""}`}
+                      onClick={() => {
+                        setConfig((prev) => ({ ...prev, theme: t }));
+                        // Apply immediately so the switch is visible in real time.
+                        onThemePreview?.(t);
+                      }}
+                    >
+                      {t === "auto" ? "Auto" : t === "light" ? "Light" : "Dark"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section id="settings-section-workspace" className="settings-section">
+            <div className="settings-section-head">
+              <h3>Workspace & Profiles</h3>
+              <p>Directory for skills, tools and files, plus saved configuration profiles.</p>
+            </div>
+            <div className="settings-section-body">
+              <div className="settings-field-row settings-field-row-stacked">
+                <span className="settings-field-label">Workspace directory</span>
+                <div className="workspace-dir-row">
+                  <input
+                    type="text"
+                    readOnly
+                    value={config.workspace_dir ?? ""}
+                    placeholder={workspaceDirActual || "Default workspace directory"}
+                    title={config.workspace_dir || workspaceDirActual || "Default workspace directory"}
+                    onClick={handlePickWorkspace}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        handlePickWorkspace();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="settings-btn"
+                    onClick={handlePickWorkspace}
+                    disabled={pickingWorkspace}
+                    title="Browse for a folder"
+                  >
+                    {pickingWorkspace ? "Picking…" : "Browse…"}
+                  </button>
+                  {config.workspace_dir && (
+                    <button
+                      type="button"
+                      className="settings-btn workspace-dir-clear"
+                      onClick={handleClearWorkspace}
+                      title="Use the default workspace directory"
+                      aria-label="Reset workspace directory to default"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <label className="settings-checkbox">
+                <input
+                  type="checkbox"
+                  checked={config.self_evolution_mode ?? false}
+                  onChange={(e) =>
+                    setConfig((prev) => ({
+                      ...prev,
+                      self_evolution_mode: e.target.checked,
+                    }))
                   }
-                }}
-              />
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={handlePickWorkspace}
-                disabled={pickingWorkspace}
-                title="Browse for a folder"
-              >
-                {pickingWorkspace ? "Picking…" : "Browse…"}
-              </button>
-              {config.workspace_dir && (
-                <button
-                  type="button"
-                  className="btn-secondary workspace-dir-clear"
-                  onClick={handleClearWorkspace}
-                  title="Use the default workspace directory"
-                  aria-label="Reset workspace directory to default"
-                >
-                  Reset
-                </button>
-              )}
-            </div>
-          </label>
+                />
+                <div className="settings-checkbox-copy">
+                  <span>Enable Self-Evolution Mode</span>
+                  <small>Let the assistant evolve its own skills and tools inside the workspace.</small>
+                </div>
+              </label>
 
-          <label className="settings-checkbox">
-            <input
-              type="checkbox"
-              checked={config.self_evolution_mode ?? false}
-              onChange={(e) =>
-                setConfig((prev) => ({
-                  ...prev,
-                  self_evolution_mode: e.target.checked,
-                }))
-              }
-            />
-            <div className="settings-checkbox-copy">
-              <span>Enable Self-Evolution Mode</span>
-            </div>
-          </label>
+              <div className="settings-divider" />
 
-          <div className="profile-section">
-            <div className="profile-section-title">Configuration Profiles</div>
-            <div className="profile-create-row">
-              <input
-                type="text"
-                value={newProfileName}
-                onChange={(e) => setNewProfileName(e.target.value)}
-                placeholder="Profile name"
-                onKeyDown={(e) => e.key === "Enter" && handleSaveProfile()}
-              />
-              <button
-                className="btn-secondary"
-                onClick={handleSaveProfile}
-                disabled={!newProfileName.trim() || profileSaving}
-              >
-                {profileSaving ? "Saving..." : "Save Current"}
-              </button>
-            </div>
-            {profiles.length > 0 && (
-              <div className="profile-list">
-                {profiles.map((profile) => (
-                  <div key={profile.name} className="profile-item">
-                    <div className="profile-item-info">
-                      <span className="profile-item-name">{profile.name}</span>
-                      <span className="profile-item-meta">
-                        {profile.selected_skills.length} skills · {profile.selected_tools.length} tools · {profile.agents.length} agents
-                      </span>
-                    </div>
-                    <div className="profile-item-actions">
-                      <button
-                        className="btn-secondary btn-sm"
-                        onClick={() => handleApplyProfile(profile.name)}
-                        disabled={profileApplying !== null}
-                      >
-                        {profileApplying === profile.name ? "Applying..." : "Apply"}
-                      </button>
-                      <button
-                        className="btn-danger btn-sm"
-                        onClick={() => handleDeleteProfile(profile.name)}
-                      >
-                        ✕
-                      </button>
-                    </div>
+              <div className="profile-section">
+                <div className="profile-section-title">Configuration Profiles</div>
+                <div className="profile-create-row">
+                  <input
+                    type="text"
+                    value={newProfileName}
+                    onChange={(e) => setNewProfileName(e.target.value)}
+                    placeholder="Profile name"
+                    onKeyDown={(e) => e.key === "Enter" && handleSaveProfile()}
+                  />
+                  <button
+                    type="button"
+                    className="settings-btn"
+                    onClick={handleSaveProfile}
+                    disabled={!newProfileName.trim() || profileSaving}
+                  >
+                    {profileSaving ? "Saving..." : "Save Current"}
+                  </button>
+                </div>
+                {profiles.length > 0 && (
+                  <div className="profile-list">
+                    {profiles.map((profile) => (
+                      <div key={profile.name} className="profile-item">
+                        <div className="profile-item-info">
+                          <span className="profile-item-name">{profile.name}</span>
+                          <span className="profile-item-meta">
+                            {profile.selected_skills.length} skills · {profile.selected_tools.length} tools · {profile.agents.length} agents
+                          </span>
+                        </div>
+                        <div className="profile-item-actions">
+                          <button
+                            type="button"
+                            className="settings-btn"
+                            onClick={() => handleApplyProfile(profile.name)}
+                            disabled={profileApplying !== null}
+                          >
+                            {profileApplying === profile.name ? "Applying..." : "Apply"}
+                          </button>
+                          <button
+                            type="button"
+                            className="settings-btn settings-btn-danger"
+                            onClick={() => handleDeleteProfile(profile.name)}
+                            aria-label={`Delete profile ${profile.name}`}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                )}
+              </div>
+            </div>
+          </section>
+
+          <section id="settings-section-api" className="settings-section">
+            <div className="settings-section-head">
+              <h3>API & Model</h3>
+              <p>Connect any OpenAI-compatible endpoint and pick a model.</p>
+            </div>
+            <div className="settings-section-body">
+              <label className="settings-field-row settings-field-row-stacked">
+                <span className="settings-field-label">Base URL</span>
+                <input
+                  type="text"
+                  value={config.api_base_url}
+                  onChange={(e) => setConfig({ ...config, api_base_url: e.target.value })}
+                  placeholder="https://api.openai.com/v1"
+                />
+              </label>
+
+              <div className="settings-field-grid">
+                <label className="settings-field-row settings-field-row-stacked">
+                  <span className="settings-field-label">API Key</span>
+                  <input
+                    type="password"
+                    value={config.api_key}
+                    onChange={(e) => setConfig({ ...config, api_key: e.target.value })}
+                    placeholder="sk-..."
+                  />
+                </label>
+
+                <label className="settings-field-row settings-field-row-stacked">
+                  <span className="settings-field-label">Model</span>
+                  <select
+                    value={config.model}
+                    onChange={(e) => setConfig({ ...config, model: e.target.value })}
+                  >
+                    {modelCatalog.map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <div className="settings-field-grid">
+                <div className="settings-field-row settings-field-row-stacked">
+                  <span className="settings-field-label">Model catalog</span>
+                  <button type="button" className="settings-btn" onClick={handleFetchModels} disabled={loadingModels}>
+                    {loadingModels ? "Loading models…" : "Fetch Models From API"}
+                  </button>
+                  {modelsError && <div className="settings-error">{modelsError}</div>}
+                </div>
+
+                <div className="settings-field-row settings-field-row-stacked">
+                  <span className="settings-field-label">Add model manually</span>
+                  <div className="settings-inline-row">
+                    <input
+                      type="text"
+                      value={manualModel}
+                      onChange={(e) => setManualModel(e.target.value)}
+                      placeholder="gpt-4.1-mini"
+                    />
+                    <button className="settings-btn" onClick={handleAddManualModel} type="button">
+                      Add
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section id="settings-section-system" className="settings-section">
+            <div className="settings-section-head">
+              <h3>System Message</h3>
+              <p>Instructions sent to the model at the start of every conversation.</p>
+            </div>
+            <div className="settings-section-body">
+              <div className="settings-field-row settings-field-row-stacked">
+                <div className="field-title-row">
+                  <span className="settings-field-label">Content</span>
+                  <button type="button" className="inline-edit-btn" onClick={openMessageEditor}>
+                    Edit
+                  </button>
+                </div>
+                <textarea
+                  rows={4}
+                  value={config.system_message ?? ""}
+                  onChange={(e) => setConfig({ ...config, system_message: e.target.value })}
+                  placeholder="You are a helpful assistant…"
+                />
+              </div>
+            </div>
+          </section>
+
+          <section id="settings-section-advanced" className="settings-section">
+            <div
+              className="settings-section-head settings-section-head-toggle"
+              onClick={() => setAdvancedOpen((prev) => !prev)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setAdvancedOpen((prev) => !prev);
+                }
+              }}
+            >
+              <div>
+                <h3>Model Advanced Settings</h3>
+                <p>Sampling parameters — leave empty to use API defaults.</p>
+              </div>
+              <span className={`settings-toggle-icon ${advancedOpen ? "open" : ""}`}>
+                ▼
+              </span>
+            </div>
+
+            {advancedOpen && (
+              <div className="settings-section-body">
+                <div className="settings-field-grid settings-field-grid-3">
+                  <label className="settings-field-row settings-field-row-stacked">
+                    <span className="settings-field-label">Temperature</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={2}
+                      step={0.05}
+                      value={config.model_settings?.temperature ?? ""}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setConfig((prev) => ({
+                          ...prev,
+                          model_settings: updateModelSettings(prev.model_settings, {
+                            temperature: v === "" ? undefined : parseFloat(v),
+                          }),
+                        }));
+                      }}
+                      placeholder="default"
+                    />
+                  </label>
+
+                  <label className="settings-field-row settings-field-row-stacked">
+                    <span className="settings-field-label">Top P</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={config.model_settings?.top_p ?? ""}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setConfig((prev) => ({
+                          ...prev,
+                          model_settings: updateModelSettings(prev.model_settings, {
+                            top_p: v === "" ? undefined : parseFloat(v),
+                          }),
+                        }));
+                      }}
+                      placeholder="default"
+                    />
+                  </label>
+
+                  <label className="settings-field-row settings-field-row-stacked">
+                    <span className="settings-field-label">Max Completion Tokens</span>
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={config.model_settings?.max_complete_tokens ?? ""}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setConfig((prev) => ({
+                          ...prev,
+                          model_settings: updateModelSettings(prev.model_settings, {
+                            max_complete_tokens: v === "" ? undefined : Math.max(1, Math.floor(Number(v))),
+                          }),
+                        }));
+                      }}
+                      placeholder="default limit"
+                    />
+                  </label>
+                </div>
               </div>
             )}
-          </div>
-        </section>
+          </section>
 
-        <section className="settings-group">
-          <div className="settings-group-title">API</div>
-          <label className="settings-field">
-            Base URL
-            <input
-              type="text"
-              value={config.api_base_url}
-              onChange={(e) => setConfig({ ...config, api_base_url: e.target.value })}
-              placeholder="https://api.openai.com/v1"
-            />
-          </label>
-
-          <label className="settings-field">
-            API Key
-            <input
-              type="password"
-              value={config.api_key}
-              onChange={(e) => setConfig({ ...config, api_key: e.target.value })}
-              placeholder="sk-..."
-            />
-          </label>
-
-          <label className="settings-field">
-            Model
-            <select
-              value={config.model}
-              onChange={(e) => setConfig({ ...config, model: e.target.value })}
-            >
-              {modelCatalog.map((name) => (
-                <option key={name} value={name}>{name}</option>
-              ))}
-            </select>
-          </label>
-
-          <div className="settings-toolbar">
-            <button className="btn-secondary" onClick={handleFetchModels} disabled={loadingModels}>
-              {loadingModels ? "Loading models…" : "Fetch Models From API"}
-            </button>
-            {modelsError && <div className="settings-error">{modelsError}</div>}
-          </div>
-
-          <label className="settings-field">
-            Add model manually
-            <div className="settings-inline-row">
-              <input
-                type="text"
-                value={manualModel}
-                onChange={(e) => setManualModel(e.target.value)}
-                placeholder="gpt-4.1-mini"
-              />
-              <button className="btn-secondary" onClick={handleAddManualModel} type="button">
-                Add
-              </button>
+          <section id="settings-section-runtime" className="settings-section">
+            <div className="settings-section-head">
+              <h3>Runtime & Debug</h3>
+              <p>Where logs are written and how requests are monitored.</p>
             </div>
-          </label>
-        </section>
-
-        <section className="settings-group">
-          <div className="settings-group-title">System Message</div>
-          <label className="settings-field">
-            <div className="field-title-row">
-              <span>Content</span>
-              <button type="button" className="inline-edit-btn" onClick={openMessageEditor}>
-                Edit
-              </button>
-            </div>
-            <textarea
-              rows={4}
-              value={config.system_message ?? ""}
-              onChange={(e) => setConfig({ ...config, system_message: e.target.value })}
-              placeholder="You are a helpful assistant…"
-            />
-          </label>
-        </section>
-
-
-
-        <section className="settings-group">
-          <div
-            className="settings-group-title settings-section-toggle"
-            onClick={() => setAdvancedOpen((prev) => !prev)}
-            role="button"
-            tabIndex={0}
-          >
-            <span>Model Advanced Settings</span>
-            <span className={`settings-toggle-icon ${advancedOpen ? "open" : ""}`}>
-              ▼
-            </span>
-          </div>
-
-          {advancedOpen && (
-            <div className="settings-advanced-grid">
-              <label className="settings-field">
-                Temperature
-                <input
-                  type="number"
-                  min={0}
-                  max={2}
-                  step={0.05}
-                  value={config.model_settings?.temperature ?? ""}
-                  onChange={(e) => {
-                    const v = e.target.value;
+            <div className="settings-section-body">
+              <label className="settings-field-row settings-field-row-stacked">
+                <span className="settings-field-label">Logger Output (debug build only)</span>
+                <select
+                  value={config.logger_output ?? "file"}
+                  onChange={(e) =>
                     setConfig((prev) => ({
                       ...prev,
-                      model_settings: updateModelSettings(prev.model_settings, {
-                        temperature: v === "" ? undefined : parseFloat(v),
-                      }),
-                    }));
-                  }}
-                  placeholder="default (leave empty)"
-                />
+                      logger_output: e.target.value as "file" | "println",
+                    }))
+                  }
+                >
+                  <option value="file">Write to app.log</option>
+                  <option value="println">Print to terminal (println)</option>
+                </select>
               </label>
-
-              <label className="settings-field">
-                Top P
-                <input
-                  type="number"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={config.model_settings?.top_p ?? ""}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setConfig((prev) => ({
-                      ...prev,
-                      model_settings: updateModelSettings(prev.model_settings, {
-                        top_p: v === "" ? undefined : parseFloat(v),
-                      }),
-                    }));
-                  }}
-                  placeholder="default (leave empty)"
-                />
-              </label>
-
-              <label className="settings-field">
-                Max Completion Tokens
-                <input
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={config.model_settings?.max_complete_tokens ?? ""}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setConfig((prev) => ({
-                      ...prev,
-                      model_settings: updateModelSettings(prev.model_settings, {
-                        max_complete_tokens: v === "" ? undefined : Math.max(1, Math.floor(Number(v))),
-                      }),
-                    }));
-                  }}
-                  placeholder="default completion limit (leave empty)"
-                />
-              </label>
+              {sessionId && (
+                <div className="settings-field-row">
+                  <span className="settings-field-label">API request monitor</span>
+                  <button type="button" className="settings-btn" onClick={() => setShowMonitor(true)}>
+                    Launch Monitor
+                  </button>
+                </div>
+              )}
             </div>
-          )}
-        </section>
-        <section className="settings-group">
-          <div className="settings-group-title">Runtime & DEBUG</div>
-          <label className="settings-field">
-            Logger Output (debug build only)
-            <select
-              value={config.logger_output ?? "file"}
-              onChange={(e) =>
-                setConfig((prev) => ({
-                  ...prev,
-                  logger_output: e.target.value as "file" | "println",
-                }))
-              }
-            >
-              <option value="file">Write to app.log</option>
-              <option value="println">Print to terminal (println)</option>
-            </select>
-            {sessionId && (
-              <button className="btn-secondary" onClick={() => setShowMonitor(true)}>
-                🔍 Launch Monitor
-              </button>
-            )}
-          </label>
-        </section>
+          </section>
+        </div>
       </div>
 
       {isMessageEditorOpen && (
@@ -564,10 +674,10 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
               <div className="prompt-editor-header">
                 <h3>System Message Editor</h3>
                 <div className="prompt-editor-actions">
-                  <button type="button" className="btn-secondary" onClick={closeMessageEditor} disabled={messageSaving}>
+                  <button type="button" className="settings-btn" onClick={closeMessageEditor} disabled={messageSaving}>
                     Cancel
                   </button>
-                  <button type="button" className="btn-primary" onClick={applyMessageEditor} disabled={messageSaving}>
+                  <button type="button" className="settings-btn settings-btn-primary" onClick={applyMessageEditor} disabled={messageSaving}>
                     {messageSaving ? "Saving…" : "Done"}
                   </button>
                 </div>
@@ -599,13 +709,6 @@ export function SettingsPanel({ onClose, onConfigSaved, sessionId }: Props) {
           </div>
         </Portal>
       )}
-
-      <div className="settings-footer">
-        <button className="btn-primary" onClick={handleSave} disabled={saving}>
-          {saving ? "Saving…" : saved ? "Saved ✓" : "Save"}
-        </button>
-
-      </div>
 
       {showMonitor && (
         <Portal>
