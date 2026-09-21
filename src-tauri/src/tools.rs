@@ -1668,7 +1668,10 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
         }));
     }
 
-    if selected_tools.iter().any(|t| t == "todo_list") {
+    if selected_tools
+        .iter()
+        .any(|t| t == "todo_list" || t == "todo")
+    {
         tools.push(json!({
             "type": "function",
             "function": {

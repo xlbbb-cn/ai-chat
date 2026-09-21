@@ -324,7 +324,7 @@
 
 .agent-tool-checkboxes {
     display: flex;
-    flex-wrap: wrap;
+    flex-direction: column;
     gap: 6px;
     margin-top: 4px;
 }
@@ -332,13 +332,13 @@
 .agent-tool-checkbox {
     display: flex !important;
     flex-direction: row !important;
-    align-items: center;
-    gap: 6px;
+    align-items: flex-start;
+    gap: 8px;
     font-size: 12px;
     cursor: pointer;
-    padding: 4px 10px;
+    padding: 8px 10px;
     border: 0.5px solid var(--c-border-i);
-    border-radius: var(--r-pill);
+    border-radius: var(--r-sm);
     transition: background-color 0.2s, border-color 0.2s, color 0.2s;
     background: var(--c-surface);
     color: var(--c-text);
@@ -347,14 +347,48 @@
 .agent-tool-checkbox:has(input:checked) {
     background: var(--c-accent-soft);
     border-color: var(--c-accent);
-    color: var(--c-accent);
 }
 
 .agent-tool-checkbox input {
     width: auto;
     padding: 0;
+    margin-top: 2px;
     border: none;
     accent-color: var(--c-accent);
+}
+
+.agent-tool-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.agent-tool-name {
+    font-weight: 500;
+}
+
+.agent-tool-checkbox:has(input:checked) .agent-tool-name {
+    color: var(--c-accent);
+}
+
+.agent-tool-hint {
+    color: var(--c-muted);
+    font-size: 11px;
+    line-height: 1.35;
+}
+
+.agent-tool-quick {
+    display: flex;
+    gap: 6px;
+}
+
+.agent-editor-section-title {
+    font-size: 12px;
+    color: var(--c-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-top: 4px;
 }
 
 .editor-actions {

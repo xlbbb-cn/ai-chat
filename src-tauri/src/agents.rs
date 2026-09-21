@@ -410,6 +410,22 @@ pub fn mark_mission_accomplished(
     Ok(())
 }
 
+/// Closes a mission that ended without `mark_mission_accomplished` (max
+/// iterations reached, user cancellation, hard error, …) so the mission
+/// monitor never keeps showing a stale "running" status.
+fn close_mission(app: &AppHandle, mission_id: &str, status: &str) {
+    let state = app.state::<AppState>();
+    let db = match state.db.lock() {
+        Ok(db) => db,
+        Err(_) => return,
+    };
+    let _ = db.execute(
+        "UPDATE agent_missions SET status = ?2, updated_at = CURRENT_TIMESTAMP \
+         WHERE mission_id = ?1 AND mission_accomplished = 0 AND status = 'running'",
+        rusqlite::params![mission_id, status],
+    );
+}
+
 fn load_mission_state(
     db: &rusqlite::Connection,
     mission_id: &str,
@@ -945,18 +961,12 @@ pub async fn orchestrate(
     )
     .await;
 
-    // Step 4: Aggregate
+    // Step 4: Hand the mission record to the caller. Sub-agents are execution
+    // workers — they never write the user-facing answer: the main agent (full
+    // chat context, skills and tools) defines the final result, so
+    // llm_complete injects this report and runs its normal completion flow.
     let _ = app.emit("agent-aggregate-start", ());
-    aggregate_results(
-        app,
-        &client,
-        &url,
-        &config.api_key,
-        &model,
-        messages,
-        results,
-    )
-    .await
+    Ok(build_mission_results_block(&results))
 }
 
 // ─── Auto-configure ───────────────────────────────────────────────────────────
@@ -993,6 +1003,7 @@ async fn auto_configure_agents(
           {{\"id\":\"tmp-1\",\"name\":\"...\",\"description\":\"...\",\"system_prompt\":\"...\",\
             \"allowed_tools\":[\"file_actions\"],\"max_iterations\":5,\"enabled\":true}}\
         ]}}\n\
+        allowed_tools values must be a subset of: [\"file_actions\",\"run_cmd\",\"run_shell\",\"knowledge_graph\",\"memory\",\"todo_list\"] — todo_list grants the todo_* tools.\n\
         Return ONLY the JSON object, no markdown, no extra text.",
     );
 
@@ -1279,9 +1290,8 @@ async fn execute_parallel(
                         // A panicked or aborted job must not take down the rest of
                         // the batch: report it as an error result and mark it as
                         // finished so dependent tasks can still run.
-                        let (task_id, agent_id, agent_name) = spawned_jobs
-                            .remove(&err.id())
-                            .unwrap_or_else(|| {
+                        let (task_id, agent_id, agent_name) =
+                            spawned_jobs.remove(&err.id()).unwrap_or_else(|| {
                                 (
                                     "unknown-task".to_string(),
                                     "unknown-agent".to_string(),
@@ -1302,6 +1312,9 @@ async fn execute_parallel(
                             tool_calls_count: 0,
                             tokens_used: 0,
                         };
+                        // task_id == mission_id: never leave a panicked mission
+                        // behind in the "running" state.
+                        close_mission(app, &result.task_id, "failed");
                         let _ = app.emit(
                             "agent-task-error",
                             json!({
@@ -1362,6 +1375,49 @@ async fn execute_sequential(
 // ─── Sub-agent loop ───────────────────────────────────────────────────────────
 
 pub async fn run_sub_agent(
+    app: &AppHandle,
+    client: &Client,
+    url: &str,
+    config: &AppConfig,
+    session_id: &str,
+    agent: &SubAgent,
+    task: &Task,
+    workspace_dir: PathBuf,
+    skill_access_roots: Vec<PathBuf>,
+) -> TaskResult {
+    let mission_id = mission_id_for_task(task).to_string();
+    let result = run_sub_agent_inner(
+        app,
+        client,
+        url,
+        config,
+        session_id,
+        agent,
+        task,
+        workspace_dir,
+        skill_access_roots,
+    )
+    .await;
+
+    // Close the mission unless the sub-agent completed it explicitly: without
+    // this, a stopped, failed or cancelled mission keeps reporting "running"
+    // in the mission monitor forever.
+    if result.status != "success" {
+        close_mission(
+            app,
+            &mission_id,
+            if result.status == "error" {
+                "failed"
+            } else {
+                "stopped"
+            },
+        );
+    }
+
+    result
+}
+
+async fn run_sub_agent_inner(
     app: &AppHandle,
     client: &Client,
     url: &str,
@@ -1852,79 +1908,35 @@ pub async fn run_sub_agent(
     }
 }
 
-// ─── Aggregation ──────────────────────────────────────────────────────────────
+// ─── Final result hand-off ──────────────────────────────────────────────────
 
-async fn aggregate_results(
-    app: &AppHandle,
-    client: &Client,
-    url: &str,
-    api_key: &str,
-    model: &str,
-    original_messages: &[crate::llm_complete::ChatMessage],
-    results: Vec<TaskResult>,
-) -> Result<String, String> {
+/// Renders the finished mission for injection into the main agent's context.
+/// The main agent — not a separate synthesizer prompt — defines the final
+/// user-facing answer from these reports.
+fn build_mission_results_block(results: &[TaskResult]) -> String {
+    let mut body = String::from(
+        "All sub-agent tasks have finished. Sub-agents are execution workers and do not \
+         write the user-facing answer: define and deliver the final result yourself. \
+         Verify the reports below, reconcile conflicting findings, flag anything that \
+         failed or looks incomplete, and answer the original request completely.\n\n",
+    );
+
     if results.is_empty() {
-        return Ok("No results returned from sub-agents.".to_string());
+        body.push_str("No task results were produced.");
+        return body;
     }
 
-    let results_text = results
-        .iter()
-        .map(|r| {
-            format!(
-                "### {} (Agent: {}, Status: {}, Tools used: {}, Tokens: {})\n\n{}",
-                r.task_id, r.agent_name, r.status, r.tool_calls_count, r.tokens_used, r.content
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n---\n\n");
+    for result in results {
+        body.push_str(&format!(
+            "### {} (agent: {}, status: {}, tool calls: {}, tokens: {})\n\n{}\n\n",
+            result.task_id,
+            result.agent_name,
+            result.status,
+            result.tool_calls_count,
+            result.tokens_used,
+            result.content
+        ));
+    }
 
-    let user_query = original_messages
-        .last()
-        .map(|m| content_to_text(&m.content))
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "the user request".to_string());
-
-    let agg_messages = vec![
-        json!({
-            "role": "system",
-            "content": "You are a results synthesizer. Multiple specialized agents have completed their tasks. \
-                Synthesize their outputs into one coherent, well-structured final response. \
-                Avoid redundancy. Present insights clearly."
-        }),
-        json!({
-            "role": "user",
-            "content": format!(
-                "Original request: {user_query}\n\nSub-agent results:\n\n{results_text}\n\n\
-                Please synthesize these into a comprehensive final answer."
-            )
-        }),
-    ];
-
-    let mut req_body = json!({
-        "model": model,
-        "messages": agg_messages,
-        "stream": true,
-        "stream_options": { "include_usage": true },
-    });
-    apply_completion_token_limit(&mut req_body, Some(4096), Some(LLM_DEFAULT_MAX_TOKENS));
-
-    let cancelled = AtomicBool::new(false);
-    let sr = stream_llm_request(
-        app,
-        client,
-        url,
-        api_key,
-        req_body,
-        &cancelled,
-        StreamOptions {
-            token_event: "chat-token",
-            task_id: None,
-            emit_reasoning: false,
-            emit_usage: false,
-            usage_max_tokens: None,
-        },
-    )
-    .await?;
-
-    Ok(sr.content)
+    body
 }

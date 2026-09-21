@@ -130,6 +130,7 @@ const CONTEXT_COMPRESSION_THRESHOLD: f32 = 0.8;
 const CONTEXT_KEEP_RECENT_MESSAGES: usize = 12;
 const CONTEXT_SUMMARY_MARKER: &str = "INTERNAL CONTEXT - SESSION SUMMARY";
 const CONTEXT_TODO_MARKER: &str = "INTERNAL CONTEXT - ACTIVE TODO LIST";
+const CONTEXT_MISSION_MARKER: &str = "INTERNAL CONTEXT - MULTI-AGENT MISSION RESULTS";
 const CONTEXT_SUMMARY_MAX_LINES: usize = 120;
 const DEFAULT_MODEL_MAX_TOKENS: u32 = 524_288;
 const STREAM_MAX_RETRIES: usize = 3;
@@ -963,19 +964,28 @@ pub async fn chat_completion(
     );
 
     // ── Agent orchestration path ──────────────────────────────────────────────
+    // Sub-agent missions run first. Their reports are injected into the main
+    // agent's context below and the NORMAL completion flow answers the user:
+    // the main agent defines the final result, sub-agents never write it.
+    let mut mission_results: Option<String> = None;
     if multi_agent_enabled {
         let agents_cfg = agents::load_agents_config(&state.agents_config_path);
         let has_enabled = agents_cfg.agents.iter().any(|a| a.enabled);
         if has_enabled {
-            let result = agents::orchestrate(&app, &state, &config, &messages, &session_id).await;
+            match agents::orchestrate(&app, &state, &config, &messages, &session_id).await {
+                Ok(report) => mission_results = Some(report),
+                Err(err) => log_event(
+                    &state,
+                    "WARN",
+                    format!("agent orchestration skipped, answering directly: {err}"),
+                ),
+            }
             state.chat_cancelled.store(false, Ordering::SeqCst);
             log_event(
                 &state,
                 "INFO",
                 format!("agent orchestration finished: session_id={}", session_id),
             );
-            let _ = app.emit("chat-done", ());
-            return result.map(|_| ());
         }
     }
 
@@ -1196,6 +1206,15 @@ pub async fn chat_completion(
                 "content": format!("{CONTEXT_TODO_MARKER}\n{}", todo_block)
             }));
         }
+    }
+
+    // Inject the finished multi-agent mission report so the main agent can
+    // define the final answer with its full context and tools.
+    if let Some(report) = &mission_results {
+        all_messages.push(json!({
+            "role": "system",
+            "content": format!("{CONTEXT_MISSION_MARKER}\n{report}")
+        }));
     }
 
     if let Some(m) = last_user_msg {

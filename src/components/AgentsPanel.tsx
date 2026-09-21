@@ -8,7 +8,44 @@ import { MarkdownPreview } from "./MarkdownPreview";
 import { Portal } from "./Portal";
 import "./AgentsPanel.css";
 
-const KNOWN_TOOLS = ["file_actions", "run_cmd", "run_shell", "knowledge_graph"];
+interface ToolOption {
+  id: string;
+  label: string;
+  hint: string;
+}
+
+const KNOWN_TOOLS: ToolOption[] = [
+  {
+    id: "file_actions",
+    label: "file_actions",
+    hint: "Read, write, patch and search files inside the workspace",
+  },
+  {
+    id: "run_cmd",
+    label: "run_cmd",
+    hint: "Execute a single command with risk assessment",
+  },
+  {
+    id: "run_shell",
+    label: "run_shell",
+    hint: "Run PowerShell / bash scripts",
+  },
+  {
+    id: "knowledge_graph",
+    label: "knowledge_graph",
+    hint: "Neo4j-backed knowledge graph queries",
+  },
+  {
+    id: "todo_list",
+    label: "todo_* — todo tools",
+    hint: "todo_add / todo_update_status / todo_list / todo_clear_completed / todo_archive. The plan is shared with the chat session and every parallel agent.",
+  },
+  {
+    id: "memory",
+    label: "memory",
+    hint: "Session / user / repo memory store",
+  },
+];
 
 interface AgentStatus {
   status: "idle" | "running" | "done" | "error";
@@ -176,6 +213,7 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
               placeholder="You are an expert in... focused on..."
             />
           </label>
+          <div className="agent-editor-section-title">Model & limits</div>
           <label>
             Model (optional, overrides main config)
             <input
@@ -229,17 +267,52 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
               <small>0 means no iteration limit; mission completion is controlled by external task state.</small>
             </label>
           </div>
+          <div className="agent-editor-section-title">Capabilities</div>
           <label>
-            Allowed tools
+            <div className="field-title-row">
+              <span>Allowed tools</span>
+              <span className="agent-tool-quick">
+                <button
+                  type="button"
+                  className="inline-edit-btn"
+                  onClick={() =>
+                    setEditing((prev) =>
+                      prev
+                        ? {
+                          ...prev,
+                          allowed_tools: Array.from(
+                            new Set([...prev.allowed_tools, ...KNOWN_TOOLS.map((t) => t.id)])
+                          ),
+                        }
+                        : prev
+                    )
+                  }
+                >
+                  All
+                </button>
+                <button
+                  type="button"
+                  className="inline-edit-btn"
+                  onClick={() =>
+                    setEditing((prev) => (prev ? { ...prev, allowed_tools: [] } : prev))
+                  }
+                >
+                  None
+                </button>
+              </span>
+            </div>
             <div className="agent-tool-checkboxes">
               {KNOWN_TOOLS.map((tool) => (
-                <label key={tool} className="agent-tool-checkbox">
+                <label key={tool.id} className="agent-tool-checkbox">
                   <input
                     type="checkbox"
-                    checked={editing.allowed_tools.includes(tool)}
-                    onChange={() => toggleAllowedTool(tool)}
+                    checked={editing.allowed_tools.includes(tool.id)}
+                    onChange={() => toggleAllowedTool(tool.id)}
                   />
-                  {tool}
+                  <span className="agent-tool-text">
+                    <span className="agent-tool-name">{tool.label}</span>
+                    <span className="agent-tool-hint">{tool.hint}</span>
+                  </span>
                 </label>
               ))}
             </div>
