@@ -56,6 +56,36 @@
   color: var(--c-placeholder);
 }
 
+.history-tabs {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.history-tab {
+  flex: 1;
+  border: 0.5px solid var(--c-border-i);
+  background: transparent;
+  color: var(--c-muted);
+  font-size: 12px;
+  padding: 5px 8px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+  white-space: nowrap;
+}
+
+.history-tab:hover {
+  background: var(--c-hover);
+  color: var(--c-text);
+}
+
+.history-tab.active {
+  background: var(--c-accent-soft);
+  border-color: var(--c-accent);
+  color: var(--c-accent);
+}
+
 .close-btn {
   background: transparent;
   border: none;
@@ -158,6 +188,78 @@
 .history-item.disabled .history-delete-btn {
   opacity: 0;
   pointer-events: none;
+}
+
+.history-item.archived .history-preview {
+  color: var(--c-muted);
+  font-style: italic;
+}
+
+.history-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.history-action-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  opacity: 0;
+  transition: opacity 0.2s, transform 0.2s, color 0.2s;
+  padding: 4px;
+  color: var(--c-muted);
+  border-radius: var(--r-sm);
+  line-height: 1;
+}
+
+.history-action-btn:hover {
+  transform: scale(1.05);
+  color: var(--c-text);
+  background: var(--c-hover);
+}
+
+.history-action-btn.fav {
+  color: #eab308;
+  opacity: 0.9;
+}
+
+.history-action-btn.on {
+  opacity: 0.9;
+}
+
+.history-action-btn.delete:hover {
+  color: var(--c-danger);
+}
+
+.history-item:hover .history-action-btn {
+  opacity: 0.7;
+}
+
+.history-action-btn:hover,
+.history-action-btn.fav,
+.history-action-btn.on {
+  opacity: 1 !important;
+}
+
+.history-item.disabled .history-action-btn {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.history-rename-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 0.5px solid var(--c-accent);
+  border-radius: var(--r-sm);
+  padding: 3px 7px;
+  font-size: 13px;
+  color: var(--c-text);
+  background: var(--c-surface);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--c-accent-soft);
 }
 
 .history-item.active {

@@ -187,6 +187,29 @@ export async function deleteHistory(sessionId: string): Promise<void> {
   return invoke("delete_history", { sessionId });
 }
 
+export interface SessionMeta {
+  session_id: string;
+  title?: string;
+  favorite: boolean;
+  archived: boolean;
+}
+
+export async function listSessionMeta(): Promise<SessionMeta[]> {
+  return invoke("list_session_meta");
+}
+
+export async function updateSessionMeta(
+  sessionId: string,
+  fields: { title?: string; favorite?: boolean; archived?: boolean }
+): Promise<void> {
+  return invoke("update_session_meta", {
+    sessionId,
+    title: fields.title ?? null,
+    favorite: fields.favorite ?? null,
+    archived: fields.archived ?? null,
+  });
+}
+
 export async function deleteMessage(messageId: number): Promise<void> {
   return invoke("delete_message", { messageId });
 }

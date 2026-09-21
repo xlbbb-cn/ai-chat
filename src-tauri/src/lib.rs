@@ -115,8 +115,10 @@ fn apply_config(app: &AppHandle, state: &AppState, config: AppConfig) -> Result<
     fs::create_dir_all(&new_workspace_path).ok();
     // Note: workspace/skills is NOT created eagerly. Skills are discovered by
     // scanning; when the folder is absent only the app-managed skills root is used.
-    let previous_workspace_path =
-        std::mem::replace(&mut *state.workspace_dir.lock().unwrap(), new_workspace_path.clone());
+    let previous_workspace_path = std::mem::replace(
+        &mut *state.workspace_dir.lock().unwrap(),
+        new_workspace_path.clone(),
+    );
 
     // The active skill list is workspace-scoped: skills that came from the old
     // workspace may not exist in the new one. Notify the UI so it can re-validate
@@ -780,6 +782,17 @@ pub fn run() {
             // always include it.
             let _ = db.execute("ALTER TABLE history ADD COLUMN attachments TEXT", []);
             let _ = db.execute("ALTER TABLE api_requests ADD COLUMN reasoning_content TEXT", []);
+            // Session meta: per-session title / favorite / archived flags.
+            // Kept in a separate table so history rows stay append-only.
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS session_meta (\
+                    session_id TEXT PRIMARY KEY, \
+                    title TEXT, \
+                    favorite INTEGER NOT NULL DEFAULT 0, \
+                    archived INTEGER NOT NULL DEFAULT 0\
+                )",
+                [],
+            ).unwrap();
             db.execute(
                 "CREATE TABLE IF NOT EXISTS session_summaries (\
                     session_id TEXT PRIMARY KEY, \
@@ -927,6 +940,9 @@ pub fn run() {
             db::delete_history,
             db::delete_message,
             db::fork_session,
+            db::list_session_meta,
+            db::update_session_meta,
+            db::delete_session_meta,
             db::list_api_requests,
             db::get_api_request,
             db::delete_api_request,

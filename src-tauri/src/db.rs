@@ -80,6 +80,12 @@ pub fn delete_history(
     )
     .map_err(|e| e.to_string())?;
     delete_session_summary(&db, &session_id)?;
+    // Also drop the session's title/favorite/archived meta row.
+    db.execute(
+        "DELETE FROM session_meta WHERE session_id = ?1",
+        rusqlite::params![session_id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -127,7 +133,13 @@ pub fn fork_session(
         )
         .map_err(|e| e.to_string())?;
 
-    let messages: Vec<(String, String, Option<String>, Option<String>, Option<String>)> = stmt
+    let messages: Vec<(
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    )> = stmt
         .query_map(rusqlite::params![source_session_id, cutoff_id], |row| {
             Ok((
                 row.get(0)?,
@@ -151,6 +163,99 @@ pub fn fork_session(
     }
 
     Ok(count)
+}
+
+// ─── Session Meta (title / favorite / archived) ─────────────────────────────
+
+#[derive(Serialize)]
+pub struct SessionMeta {
+    pub session_id: String,
+    pub title: Option<String>,
+    pub favorite: bool,
+    pub archived: bool,
+}
+
+/// List all session meta rows. Sessions without a meta row are simply absent
+/// from the result (the frontend treats missing meta as defaults).
+#[tauri::command]
+pub fn list_session_meta(
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<Vec<SessionMeta>, String> {
+    let db = state.db.lock().unwrap();
+    let mut stmt = db
+        .prepare("SELECT session_id, title, favorite, archived FROM session_meta")
+        .map_err(|e| e.to_string())?;
+    let metas = stmt
+        .query_map([], |row| {
+            Ok(SessionMeta {
+                session_id: row.get(0)?,
+                title: row.get(1)?,
+                favorite: row.get::<_, i64>(2)? != 0,
+                archived: row.get::<_, i64>(3)? != 0,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(Result::ok)
+        .collect();
+    Ok(metas)
+}
+
+/// Upsert session meta fields. `None` leaves the field unchanged, so the
+/// frontend can update title / favorite / archived independently.
+#[tauri::command]
+pub fn update_session_meta(
+    session_id: String,
+    title: Option<String>,
+    favorite: Option<bool>,
+    archived: Option<bool>,
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<(), String> {
+    let db = state.db.lock().unwrap();
+
+    // Ensure the row exists first (INSERT OR IGNORE keeps existing values).
+    db.execute(
+        "INSERT OR IGNORE INTO session_meta (session_id) VALUES (?1)",
+        rusqlite::params![session_id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    if let Some(t) = title {
+        db.execute(
+            "UPDATE session_meta SET title = ?2 WHERE session_id = ?1",
+            rusqlite::params![session_id, t],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    if let Some(f) = favorite {
+        db.execute(
+            "UPDATE session_meta SET favorite = ?2 WHERE session_id = ?1",
+            rusqlite::params![session_id, f as i64],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    if let Some(a) = archived {
+        db.execute(
+            "UPDATE session_meta SET archived = ?2 WHERE session_id = ?1",
+            rusqlite::params![session_id, a as i64],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Delete the meta row for a session (called when the session is deleted).
+#[tauri::command]
+pub fn delete_session_meta(
+    session_id: String,
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<(), String> {
+    let db = state.db.lock().unwrap();
+    db.execute(
+        "DELETE FROM session_meta WHERE session_id = ?1",
+        rusqlite::params![session_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 pub fn get_session_summary(db: &Connection, session_id: &str) -> Result<Option<String>, String> {
