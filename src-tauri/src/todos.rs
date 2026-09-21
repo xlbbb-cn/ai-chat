@@ -81,15 +81,18 @@ const DEFAULT_LIST_DESCRIPTION: &str =
 // ─── Per-session locking ─────────────────────────────────────────────────────
 //
 // Every read-modify-write cycle on a session's todo files is wrapped in a
-// per-session mutex to prevent clobbering concurrent updates. The registry
-// is a process-wide OnceLock; lock objects are reference-counted so unused
-// sessions are reclaimed when the last Arc is dropped.
+// per-session mutex to prevent clobbering concurrent updates — parallel
+// sub-agents all share the parent chat session, so this is the hot path.
+// The registry is a process-wide OnceLock holding one lock per session id
+// for the lifetime of the process. Poisoned locks are recovered instead of
+// panicking, so a single failed tool call cannot disable todo access for
+// every agent in the session.
 
 static SESSION_LOCKS: OnceLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
 
 fn session_lock(session_id: &str) -> Arc<Mutex<()>> {
     let map = SESSION_LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut guard = map.lock().expect("session lock registry poisoned");
+    let mut guard = map.lock().unwrap_or_else(|e| e.into_inner());
     guard
         .entry(session_id.to_string())
         .or_insert_with(|| Arc::new(Mutex::new(())))
@@ -98,7 +101,7 @@ fn session_lock(session_id: &str) -> Arc<Mutex<()>> {
 
 fn lock_session<T>(session_id: &str, f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
     let lock = session_lock(session_id);
-    let _guard = lock.lock().expect("session todo lock poisoned");
+    let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
     f()
 }
 
@@ -223,6 +226,40 @@ fn find_list_by_id(workspace: &Path, list_id: &str) -> Result<Option<TodoListSum
     Ok(None)
 }
 
+fn find_list_containing_todo_in_session(
+    workspace: &Path,
+    session_id: &str,
+    todo_id: &str,
+) -> Result<Option<TodoListSummary>, String> {
+    let lists_dir = session_lists_dir(workspace, session_id);
+    if !lists_dir.exists() {
+        return Ok(None);
+    }
+    for list_file in fs::read_dir(&lists_dir)
+        .map_err(|e| e.to_string())?
+        .flatten()
+    {
+        let path = list_file.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        let text = match fs::read_to_string(&path) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        let list: TodoListSummary = match serde_json::from_str(&text) {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+        if list.todos.iter().any(|t| t.id == todo_id) {
+            return Ok(Some(list));
+        }
+    }
+    Ok(None)
+}
+
+// Legacy helper: scans every session's lists. Only used by Tauri commands
+// that receive a bare todo id; tool calls use the session-scoped lookup.
 fn find_list_containing_todo(
     workspace: &Path,
     todo_id: &str,
@@ -236,29 +273,8 @@ fn find_list_containing_todo(
         if session_id.starts_with('.') {
             continue;
         }
-        let lists_dir = session_lists_dir(workspace, &session_id);
-        if !lists_dir.exists() {
-            continue;
-        }
-        for list_file in fs::read_dir(&lists_dir)
-            .map_err(|e| e.to_string())?
-            .flatten()
-        {
-            let path = list_file.path();
-            if path.extension().and_then(|s| s.to_str()) != Some("json") {
-                continue;
-            }
-            let text = match fs::read_to_string(&path) {
-                Ok(t) => t,
-                Err(_) => continue,
-            };
-            let list: TodoListSummary = match serde_json::from_str(&text) {
-                Ok(l) => l,
-                Err(_) => continue,
-            };
-            if list.todos.iter().any(|t| t.id == todo_id) {
-                return Ok(Some(list));
-            }
+        if let Some(list) = find_list_containing_todo_in_session(workspace, &session_id, todo_id)? {
+            return Ok(Some(list));
         }
     }
     Ok(None)
@@ -388,7 +404,57 @@ pub fn add_todo(
     })
 }
 
+// Must be called while holding the session lock. Reads the latest snapshot
+// from disk (single scoped lookup) before mutating, so concurrent writers in
+// the same session cannot lose updates.
+fn update_todo_status_locked(
+    workspace: &Path,
+    session_id: &str,
+    todo_id: &str,
+    new_status: TodoStatus,
+) -> Result<TodoRecord, String> {
+    let mut list = find_list_containing_todo_in_session(workspace, session_id, todo_id)?
+        .ok_or_else(|| format!("Todo '{todo_id}' not found."))?;
+    let idx = list
+        .todos
+        .iter()
+        .position(|t| t.id == todo_id)
+        .ok_or_else(|| format!("Todo '{todo_id}' not found."))?;
+    let now = now_iso();
+    {
+        let todo = &mut list.todos[idx];
+        todo.status = new_status.as_str().to_string();
+        todo.updated_at = now.clone();
+        todo.completed_at = if new_status == TodoStatus::Completed {
+            Some(now.clone())
+        } else {
+            None
+        };
+    }
+    list.updated_at = now;
+    let updated_record = list.todos[idx].clone();
+    let list = apply_counts(list);
+    save_list(workspace, &list)?;
+    Ok(updated_record)
+}
+
+/// Update a todo in the caller's session only (single scoped lookup).
 pub fn update_todo_status(
+    app: &AppHandle,
+    session_id: &str,
+    todo_id: &str,
+    status: &str,
+) -> Result<TodoRecord, String> {
+    let new_status = TodoStatus::parse(status)?;
+    let workspace = workspace_path(app)?;
+    lock_session(session_id, || {
+        update_todo_status_locked(&workspace, session_id, todo_id, new_status)
+    })
+}
+
+/// Legacy variant for id-only callers (Tauri commands): locates the owning
+/// session first, then runs the same scoped update under the session lock.
+pub fn update_todo_status_global(
     app: &AppHandle,
     todo_id: &str,
     status: &str,
@@ -398,34 +464,47 @@ pub fn update_todo_status(
     let list = find_list_containing_todo(&workspace, todo_id)?
         .ok_or_else(|| format!("Todo '{todo_id}' not found."))?;
     lock_session(&list.session_id, || {
-        // Re-read inside the lock so we operate on the latest snapshot.
-        let mut list = find_list_containing_todo(&workspace, todo_id)?
-            .ok_or_else(|| format!("Todo '{todo_id}' not found."))?;
-        let idx = list
-            .todos
-            .iter()
-            .position(|t| t.id == todo_id)
-            .ok_or_else(|| format!("Todo '{todo_id}' not found."))?;
-        let now = now_iso();
-        {
-            let todo = &mut list.todos[idx];
-            todo.status = new_status.as_str().to_string();
-            todo.updated_at = now.clone();
-            todo.completed_at = if new_status == TodoStatus::Completed {
-                Some(now.clone())
-            } else {
-                None
-            };
-        }
-        list.updated_at = now;
-        let updated_record = list.todos[idx].clone();
-        let list = apply_counts(list);
-        save_list(&workspace, &list)?;
-        Ok(updated_record)
+        update_todo_status_locked(&workspace, &list.session_id, todo_id, new_status)
     })
 }
 
-pub fn update_todo_text(
+// Must be called while holding the session lock (see update_todo_status_locked).
+fn update_todo_text_locked(
+    workspace: &Path,
+    session_id: &str,
+    todo_id: &str,
+    title: Option<&str>,
+    description: Option<&str>,
+) -> Result<TodoRecord, String> {
+    let mut list = find_list_containing_todo_in_session(workspace, session_id, todo_id)?
+        .ok_or_else(|| format!("Todo '{todo_id}' not found."))?;
+    let idx = list
+        .todos
+        .iter()
+        .position(|t| t.id == todo_id)
+        .ok_or_else(|| format!("Todo '{todo_id}' not found."))?;
+    if let Some(t) = title {
+        let trimmed = t.trim();
+        if trimmed.is_empty() {
+            return Err("Todo title cannot be empty.".to_string());
+        }
+        list.todos[idx].title = trimmed.to_string();
+    }
+    if let Some(d) = description {
+        list.todos[idx].description = d.trim().to_string();
+    }
+    let now = now_iso();
+    list.todos[idx].updated_at = now.clone();
+    list.updated_at = now;
+    let updated_record = list.todos[idx].clone();
+    let list = apply_counts(list);
+    save_list(workspace, &list)?;
+    Ok(updated_record)
+}
+
+/// Legacy variant for id-only callers (Tauri commands): locates the owning
+/// session first, then runs the same scoped update under the session lock.
+pub fn update_todo_text_global(
     app: &AppHandle,
     todo_id: &str,
     title: Option<&str>,
@@ -438,49 +517,32 @@ pub fn update_todo_text(
     let list = find_list_containing_todo(&workspace, todo_id)?
         .ok_or_else(|| format!("Todo '{todo_id}' not found."))?;
     lock_session(&list.session_id, || {
-        let mut list = find_list_containing_todo(&workspace, todo_id)?
-            .ok_or_else(|| format!("Todo '{todo_id}' not found."))?;
-        let idx = list
-            .todos
-            .iter()
-            .position(|t| t.id == todo_id)
-            .ok_or_else(|| format!("Todo '{todo_id}' not found."))?;
-        if let Some(t) = title {
-            let trimmed = t.trim();
-            if trimmed.is_empty() {
-                return Err("Todo title cannot be empty.".to_string());
-            }
-            list.todos[idx].title = trimmed.to_string();
-        }
-        if let Some(d) = description {
-            list.todos[idx].description = d.trim().to_string();
-        }
-        let now = now_iso();
-        list.todos[idx].updated_at = now.clone();
-        list.updated_at = now;
-        let updated_record = list.todos[idx].clone();
-        let list = apply_counts(list);
-        save_list(&workspace, &list)?;
-        Ok(updated_record)
+        update_todo_text_locked(&workspace, &list.session_id, todo_id, title, description)
     })
 }
 
-pub fn delete_todo(app: &AppHandle, todo_id: &str) -> Result<(), String> {
+// Must be called while holding the session lock (see update_todo_status_locked).
+fn delete_todo_locked(workspace: &Path, session_id: &str, todo_id: &str) -> Result<(), String> {
+    let mut list = find_list_containing_todo_in_session(workspace, session_id, todo_id)?
+        .ok_or_else(|| format!("Todo '{todo_id}' not found."))?;
+    let initial_len = list.todos.len();
+    list.todos.retain(|t| t.id != todo_id);
+    if list.todos.len() == initial_len {
+        return Err(format!("Todo '{todo_id}' not found."));
+    }
+    list.updated_at = now_iso();
+    let list = apply_counts(list);
+    save_list(workspace, &list)?;
+    Ok(())
+}
+
+/// Legacy variant for id-only callers (Tauri commands).
+pub fn delete_todo_global(app: &AppHandle, todo_id: &str) -> Result<(), String> {
     let workspace = workspace_path(app)?;
     let list = find_list_containing_todo(&workspace, todo_id)?
         .ok_or_else(|| format!("Todo '{todo_id}' not found."))?;
     lock_session(&list.session_id, || {
-        let mut list = find_list_containing_todo(&workspace, todo_id)?
-            .ok_or_else(|| format!("Todo '{todo_id}' not found."))?;
-        let initial_len = list.todos.len();
-        list.todos.retain(|t| t.id != todo_id);
-        if list.todos.len() == initial_len {
-            return Err(format!("Todo '{todo_id}' not found."));
-        }
-        list.updated_at = now_iso();
-        let list = apply_counts(list);
-        save_list(&workspace, &list)?;
-        Ok(())
+        delete_todo_locked(&workspace, &list.session_id, todo_id)
     })
 }
 
@@ -511,6 +573,40 @@ pub fn archive_list(app: &AppHandle, list_id: &str) -> Result<(), String> {
     })
 }
 
+// Creates a fresh list and installs it as the session's active list. Must
+// be called while holding the session lock; the marker swap is the only
+// activation step, so a previous list simply stops being active.
+fn create_and_activate_list(
+    workspace: &Path,
+    session_id: &str,
+    title: Option<&str>,
+    description: Option<&str>,
+) -> Result<TodoListSummary, String> {
+    ensure_session_dirs(workspace, session_id)?;
+    let now = now_iso();
+    let list = TodoListSummary {
+        list_id: Uuid::new_v4().to_string(),
+        session_id: session_id.to_string(),
+        title: title
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(DEFAULT_LIST_TITLE)
+            .to_string(),
+        description: description.map(str::trim).unwrap_or("").to_string(),
+        total: 0,
+        pending: 0,
+        in_progress: 0,
+        completed: 0,
+        cancelled: 0,
+        created_at: now.clone(),
+        updated_at: now,
+        todos: Vec::new(),
+    };
+    save_list(workspace, &list)?;
+    set_active_list_id(workspace, session_id, &list.list_id)?;
+    Ok(list)
+}
+
 pub fn new_list(
     app: &AppHandle,
     session_id: &str,
@@ -519,29 +615,30 @@ pub fn new_list(
 ) -> Result<TodoListSummary, String> {
     let workspace = workspace_path(app)?;
     lock_session(session_id, || {
-        ensure_session_dirs(&workspace, session_id)?;
-        let now = now_iso();
-        let list = TodoListSummary {
-            list_id: Uuid::new_v4().to_string(),
-            session_id: session_id.to_string(),
-            title: title
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .unwrap_or(DEFAULT_LIST_TITLE)
-                .to_string(),
-            description: description.map(str::trim).unwrap_or("").to_string(),
-            total: 0,
-            pending: 0,
-            in_progress: 0,
-            completed: 0,
-            cancelled: 0,
-            created_at: now.clone(),
-            updated_at: now,
-            todos: Vec::new(),
-        };
-        save_list(&workspace, &list)?;
-        set_active_list_id(&workspace, session_id, &list.list_id)?;
-        Ok(list)
+        create_and_activate_list(&workspace, session_id, title, description)
+    })
+}
+
+fn rotate_active_list_locked(
+    workspace: &Path,
+    session_id: &str,
+    title: Option<&str>,
+) -> Result<TodoListSummary, String> {
+    create_and_activate_list(workspace, session_id, title, None)
+}
+
+/// Archive (deactivate) the current list and start a fresh active one in a
+/// single critical section. Used by the `todo_archive` tool so a concurrent
+/// `todo_add` from another agent can never land in a list that is created and
+/// then immediately orphaned by the marker swap.
+pub fn rotate_active_list(
+    app: &AppHandle,
+    session_id: &str,
+    title: Option<&str>,
+) -> Result<TodoListSummary, String> {
+    let workspace = workspace_path(app)?;
+    lock_session(session_id, || {
+        rotate_active_list_locked(&workspace, session_id, title)
     })
 }
 
@@ -620,7 +717,7 @@ pub fn update_todo_status_cmd(
     status: String,
     app: AppHandle,
 ) -> Result<TodoRecord, String> {
-    update_todo_status(&app, &todo_id, &status)
+    update_todo_status_global(&app, &todo_id, &status)
 }
 
 #[tauri::command]
@@ -630,12 +727,12 @@ pub fn update_todo_text_cmd(
     description: Option<String>,
     app: AppHandle,
 ) -> Result<TodoRecord, String> {
-    update_todo_text(&app, &todo_id, title.as_deref(), description.as_deref())
+    update_todo_text_global(&app, &todo_id, title.as_deref(), description.as_deref())
 }
 
 #[tauri::command]
 pub fn delete_todo_cmd(todo_id: String, app: AppHandle) -> Result<(), String> {
-    delete_todo(&app, &todo_id)
+    delete_todo_global(&app, &todo_id)
 }
 
 #[tauri::command]
@@ -897,5 +994,145 @@ mod tests {
         // 1 initial + 4 appended = 5, proving all writes were observed.
         assert_eq!(final_list.todos.len(), 5);
         let _ = fs::remove_dir_all(workspace.as_ref());
+    }
+
+    #[test]
+    fn find_list_containing_todo_in_session_is_scoped() {
+        let workspace = make_temp_workspace("scoped-find");
+        let list_a = sample_list(
+            "list-A",
+            "sess-A",
+            vec![sample_record("list-A", "sess-A", "pending")],
+        );
+        let list_b = sample_list(
+            "list-B",
+            "sess-B",
+            vec![sample_record("list-B", "sess-B", "pending")],
+        );
+        save_list(&workspace, &list_a).unwrap();
+        save_list(&workspace, &list_b).unwrap();
+
+        let todo_a = list_a.todos[0].id.clone();
+        // A todo owned by session A must not be found from session B.
+        assert!(
+            find_list_containing_todo_in_session(&workspace, "sess-B", &todo_a)
+                .unwrap()
+                .is_none()
+        );
+        let found = find_list_containing_todo_in_session(&workspace, "sess-A", &todo_a)
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.list_id, "list-A");
+        // Unknown sessions are simply empty.
+        assert!(
+            find_list_containing_todo_in_session(&workspace, "missing", &todo_a)
+                .unwrap()
+                .is_none()
+        );
+        // The legacy global lookup still spans every session.
+        assert!(find_list_containing_todo(&workspace, &todo_a).unwrap().is_some());
+        let _ = fs::remove_dir_all(&workspace);
+    }
+
+    #[test]
+    fn update_todo_status_locked_updates_only_its_own_session() {
+        let workspace = make_temp_workspace("scoped-update");
+        let session = "sess-update";
+        let list = sample_list(
+            "L",
+            session,
+            vec![
+                sample_record("L", session, "pending"),
+                sample_record("L", session, "pending"),
+            ],
+        );
+        save_list(&workspace, &list).unwrap();
+        let target = list.todos[0].id.clone();
+
+        let updated =
+            update_todo_status_locked(&workspace, session, &target, TodoStatus::Completed).unwrap();
+        assert_eq!(updated.status, "completed");
+        assert!(updated.completed_at.is_some());
+
+        let reloaded = load_list(&workspace, session, "L").unwrap();
+        assert_eq!(reloaded.completed, 1);
+        assert_eq!(reloaded.pending, 1);
+        assert_eq!(reloaded.total, 2);
+
+        // Unknown ids are rejected instead of silently succeeding.
+        assert!(
+            update_todo_status_locked(&workspace, session, "does-not-exist", TodoStatus::Completed)
+                .is_err()
+        );
+        // A todo from another session cannot be updated through this session.
+        assert!(
+            update_todo_status_locked(&workspace, "other-session", &target, TodoStatus::Completed)
+                .is_err()
+        );
+
+        // Status can be reverted; completion timestamp is cleared again.
+        let reverted = update_todo_status_locked(&workspace, session, &target, TodoStatus::Pending)
+            .unwrap();
+        assert!(reverted.completed_at.is_none());
+        let _ = fs::remove_dir_all(&workspace);
+    }
+
+    #[test]
+    fn delete_todo_locked_removes_only_target_item() {
+        let workspace = make_temp_workspace("scoped-delete");
+        let session = "sess-delete";
+        let list = sample_list(
+            "L",
+            session,
+            vec![
+                sample_record("L", session, "pending"),
+                sample_record("L", session, "pending"),
+            ],
+        );
+        save_list(&workspace, &list).unwrap();
+        let target = list.todos[0].id.clone();
+
+        delete_todo_locked(&workspace, session, &target).unwrap();
+        let reloaded = load_list(&workspace, session, "L").unwrap();
+        assert_eq!(reloaded.total, 1);
+        assert!(reloaded.todos.iter().all(|t| t.id != target));
+        // Deleting the same id twice fails cleanly.
+        assert!(delete_todo_locked(&workspace, session, &target).is_err());
+        let _ = fs::remove_dir_all(&workspace);
+    }
+
+    #[test]
+    fn rotate_active_list_switches_marker_and_keeps_old_list() {
+        let workspace = make_temp_workspace("rotate");
+        let session = "sess-rotate";
+        let old = sample_list(
+            "old-list",
+            session,
+            vec![sample_record("old-list", session, "pending")],
+        );
+        save_list(&workspace, &old).unwrap();
+        set_active_list_id(&workspace, session, "old-list").unwrap();
+
+        let fresh = rotate_active_list_locked(&workspace, session, Some("Round 2")).unwrap();
+        assert_eq!(fresh.title, "Round 2");
+        assert!(fresh.todos.is_empty());
+        assert_ne!(fresh.list_id, "old-list");
+        assert_eq!(
+            find_active_list_id(&workspace, session).unwrap(),
+            Some(fresh.list_id.clone())
+        );
+
+        // The previous list stays on disk (archived) with its items intact.
+        let archived = load_list(&workspace, session, "old-list").unwrap();
+        assert_eq!(archived.todos.len(), 1);
+
+        // Rotating a session with no active list simply creates one.
+        let another = rotate_active_list_locked(&workspace, "fresh-session", None).unwrap();
+        assert_eq!(another.title, DEFAULT_LIST_TITLE);
+        assert_eq!(
+            find_active_list_id(&workspace, "fresh-session").unwrap(),
+            Some(another.list_id.clone())
+        );
+        let _ = fs::remove_dir_all(&workspace);
     }
 }

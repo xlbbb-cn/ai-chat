@@ -1219,6 +1219,10 @@ async fn execute_parallel(
             }
 
             let mut join_set: JoinSet<TaskResult> = JoinSet::new();
+            // Maps each spawned job to its task so an aborted or panicked job can
+            // be attributed and reported instead of silently dropping its result.
+            let mut spawned_jobs: HashMap<tokio::task::Id, (String, String, String)> =
+                HashMap::new();
 
             for task in batch {
                 let agent = match agents.iter().find(|a| a.id == task.agent_id) {
@@ -1235,8 +1239,9 @@ async fn execute_parallel(
                 let wd_c = workspace_dir.clone();
                 let skill_roots_c = skill_access_roots.clone();
                 let is_cancelled = cancelled.load(Ordering::SeqCst);
+                let job_meta = (task.id.clone(), agent.id.clone(), agent.name.clone());
 
-                join_set.spawn(async move {
+                let handle = join_set.spawn(async move {
                     if is_cancelled {
                         return TaskResult {
                             task_id: task_c.id,
@@ -1261,11 +1266,54 @@ async fn execute_parallel(
                     )
                     .await
                 });
+                spawned_jobs.insert(handle.id(), job_meta);
             }
 
-            while let Some(Ok(res)) = join_set.join_next().await {
-                completed.insert(res.task_id.clone(), ());
-                results.push(res);
+            while let Some(joined) = join_set.join_next().await {
+                match joined {
+                    Ok(res) => {
+                        completed.insert(res.task_id.clone(), ());
+                        results.push(res);
+                    }
+                    Err(err) => {
+                        // A panicked or aborted job must not take down the rest of
+                        // the batch: report it as an error result and mark it as
+                        // finished so dependent tasks can still run.
+                        let (task_id, agent_id, agent_name) = spawned_jobs
+                            .remove(&err.id())
+                            .unwrap_or_else(|| {
+                                (
+                                    "unknown-task".to_string(),
+                                    "unknown-agent".to_string(),
+                                    "unknown-agent".to_string(),
+                                )
+                            });
+                        let reason = if err.is_panic() {
+                            "panicked"
+                        } else {
+                            "was aborted"
+                        };
+                        let result = TaskResult {
+                            task_id,
+                            agent_id,
+                            agent_name,
+                            status: "error".to_string(),
+                            content: format!("Sub-agent task {reason}: {err}"),
+                            tool_calls_count: 0,
+                            tokens_used: 0,
+                        };
+                        let _ = app.emit(
+                            "agent-task-error",
+                            json!({
+                                "task_id": &result.task_id,
+                                "agent_id": &result.agent_id,
+                                "error": &result.content,
+                            }),
+                        );
+                        completed.insert(result.task_id.clone(), ());
+                        results.push(result);
+                    }
+                }
             }
         }
     }

@@ -3580,20 +3580,22 @@ pub async fn execute_tool(
             }
         }
         "todo_update_status" => {
+            let Some(session_id) = session_id else {
+                return "Error: todo_update_status requires an active chat session.".to_string();
+            };
             let todo_id = args["todo_id"].as_str().unwrap_or("");
             let status = args["status"].as_str().unwrap_or("");
             if todo_id.is_empty() {
                 return "Error: todo_id is required.".to_string();
             }
+            // Truncate on char boundaries only: the model may pass multi-byte
+            // utf-8 ids, and byte slicing would panic on non-boundary offsets.
+            let id_preview: String = todo_id.chars().take(8).collect();
             let _ = app.emit(
                 "tool-call",
-                format!(
-                    "🔄 *Updating todo status: {} → {}*\n",
-                    &todo_id[..8.min(todo_id.len())],
-                    status
-                ),
+                format!("🔄 *Updating todo status: {} → {}*\n", id_preview, status),
             );
-            match crate::todos::update_todo_status(app, todo_id, status) {
+            match crate::todos::update_todo_status(app, session_id, todo_id, status) {
                 Ok(record) => {
                     let _ = app.emit(
                         "todo-state",
@@ -3653,11 +3655,10 @@ pub async fn execute_tool(
                     new_title.unwrap_or("Working plan")
                 ),
             );
-            // Archive the current list (if any) and start a new active one.
-            if let Ok(Some(current)) = crate::todos::get_active_list(app, session_id) {
-                let _ = crate::todos::archive_list(app, &current.list_id);
-            }
-            match crate::todos::new_list(app, session_id, new_title, None) {
+            // Rotate in a single critical section: a concurrent `todo_add` from
+            // another agent can no longer create a list that is immediately
+            // orphaned by the marker swap.
+            match crate::todos::rotate_active_list(app, session_id, new_title) {
                 Ok(summary) => {
                     let _ = app.emit(
                         "todo-state",
