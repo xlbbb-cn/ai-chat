@@ -12,6 +12,31 @@
     background: var(--ts-ash, var(--c-reason));
 }
 
+/* Flowing shimmer across the title while a tool is executing. */
+.tool-call-group--running .tool-call-group-label {
+    background: linear-gradient(90deg,
+            var(--ts-carbon, var(--c-text)) 0%,
+            var(--ts-carbon, var(--c-text)) 30%,
+            var(--ts-blue, var(--c-accent)) 50%,
+            var(--ts-carbon, var(--c-text)) 70%,
+            var(--ts-carbon, var(--c-text)) 100%);
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: title-shimmer-flow 1.8s linear infinite;
+}
+
+@keyframes title-shimmer-flow {
+    from {
+        background-position: 200% 50%;
+    }
+
+    to {
+        background-position: 0% 50%;
+    }
+}
+
 .tool-call-group-details {
     width: 100%;
 }

@@ -370,14 +370,12 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
               <span className="message-reasoning-title">Thought Process</span>
               {!reasoningOpen && reasoningPreview.current && (
                 <span className="reasoning-preview" aria-hidden="true">
-                  {reasoningPreview.previous && (
-                    <span
-                      key={`p-${reasoningPreview.current}`}
-                      className="reasoning-preview-line reasoning-preview-prev"
-                    >
-                      {reasoningPreview.previous}
-                    </span>
-                  )}
+                  <span
+                    key={`p-${reasoningPreview.current}`}
+                    className="reasoning-preview-line reasoning-preview-prev"
+                  >
+                    {reasoningPreview.previous || "\u00A0"}
+                  </span>
                   <span
                     key={`c-${reasoningPreview.current}`}
                     className="reasoning-preview-line reasoning-preview-cur"

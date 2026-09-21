@@ -1,12 +1,10 @@
 .todo-list-container {
   align-self: flex-start;
-  max-width: 80%;
+  width: 100%;
   min-width: 200px;
-  border: 0.5px solid var(--c-border);
-  border-radius: var(--r-md);
-  background: var(--c-surface);
+  border-radius: 4px;
+  background: var(--ts-ash, var(--c-reason));
   overflow: hidden;
-  box-shadow: var(--shadow-sm);
   margin-top: 8px;
 }
 
@@ -14,17 +12,17 @@
   width: 100%;
 }
 
+/* Collapsed layout: 3 stacked rows —
+   1. title (icon + list title + stats),
+   2–3. the in-progress todo (title line + dimmed description line). */
 .todo-list-summary {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 3px;
   padding: 8px 12px;
   cursor: pointer;
   user-select: none;
-  font-size: 13px;
-  color: var(--c-muted);
   list-style: none;
-  transition: background-color 0.2s;
 }
 
 .todo-list-summary:hover {
@@ -36,7 +34,17 @@
 }
 
 .todo-list-details[open] .todo-list-summary {
-  border-bottom: 0.5px solid var(--c-border);
+  border-bottom: 1px solid var(--ts-cloud, var(--c-border));
+}
+
+/* Row 1 — title row. */
+/* Row 1 — title row. Fixed height to avoid metric-driven jitter. */
+.todo-list-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 22px;
+  line-height: 22px;
 }
 
 .todo-list-icon {
@@ -50,33 +58,73 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--c-text);
+  color: var(--ts-carbon, var(--c-text));
+  font-size: 14px;
   font-weight: 500;
 }
 
 .todo-list-stats {
   flex-shrink: 0;
   font-size: 11px;
-  color: var(--c-muted);
-  background: var(--c-hover);
-  border-radius: var(--r-pill);
+  color: var(--ts-pewter, var(--c-muted));
+  background: transparent;
+  border: 1px solid var(--ts-cloud, var(--c-border));
+  border-radius: 4px;
   padding: 2px 8px;
 }
 
-.todo-list-summary::before {
-  content: "›";
+.todo-list-chevron {
   flex-shrink: 0;
   font-size: 14px;
   line-height: 1;
-  color: var(--c-muted);
-  transition: transform 0.2s ease;
-  transform: rotate(0deg);
-  margin-left: auto;
-  order: 99;
+  color: var(--ts-pewter, var(--c-muted));
+  transition: transform 0.33s var(--ts-ease, ease);
 }
 
-.todo-list-details[open] .todo-list-summary::before {
+.todo-list-details[open] .todo-list-chevron {
   transform: rotate(90deg);
+}
+
+/* Rows 2–3 — in-progress todo preview. */
+.todo-list-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  height: 38px;
+  /* 2 × 18px rows + 2px gap — never reflows */
+  pointer-events: none;
+}
+
+.todo-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 18px;
+  line-height: 18px;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--ts-pewter, var(--c-muted));
+  white-space: nowrap;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, #000 75%, transparent 100%);
+  mask-image: linear-gradient(90deg, #000 75%, transparent 100%);
+}
+
+.todo-preview-icon {
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.todo-preview-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.todo-preview-sub {
+  color: var(--ts-silver, var(--c-muted));
+  opacity: 0.55;
 }
 
 .todo-list-items {
@@ -133,7 +181,32 @@
 
 /* Status-specific styles */
 .todo-pending .todo-item-icon {
-  color: var(--c-muted);
+  color: var(--ts-pewter, var(--c-muted));
+}
+
+/* Flowing shimmer on the collapsed title while a todo is in progress. */
+.todo-list-summary--active .todo-list-title {
+  background: linear-gradient(90deg,
+      var(--ts-carbon, var(--c-text)) 0%,
+      var(--ts-carbon, var(--c-text)) 30%,
+      var(--ts-blue, var(--c-accent)) 50%,
+      var(--ts-carbon, var(--c-text)) 70%,
+      var(--ts-carbon, var(--c-text)) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: title-shimmer-flow 1.8s linear infinite;
+}
+
+@keyframes title-shimmer-flow {
+  from {
+    background-position: 200% 50%;
+  }
+
+  to {
+    background-position: 0% 50%;
+  }
 }
 
 .todo-in-progress .todo-item-icon {

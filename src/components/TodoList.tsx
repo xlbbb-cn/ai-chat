@@ -70,6 +70,7 @@ function statusClass(status: string): string {
 
 export function TodoList() {
     const [todoList, setTodoList] = useState<TodoListSummary | null>(null);
+    const [open, setOpen] = useState(false);
 
     useEffect(() => {
         const unlisten = listen<TodoStateEvent>("todo-state", (e) => {
@@ -138,16 +139,37 @@ export function TodoList() {
     }
 
     const sortedTodos = [...todoList.todos].sort((a, b) => a.position - b.position);
+    const activeTodo = sortedTodos.find((t) => t.status === "in_progress");
 
     return (
         <div className="todo-list-container">
-            <details className="todo-list-details">
-                <summary className="todo-list-summary">
-                    <span className="todo-list-icon">📋</span>
-                    <span className="todo-list-title">{todoList.title}</span>
-                    <span className="todo-list-stats">
-                        {todoList.completed}/{todoList.total}
+            <details
+                className="todo-list-details"
+                open={open}
+                onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}
+            >
+                <summary
+                    className={`todo-list-summary${activeTodo ? " todo-list-summary--active" : ""}`}
+                >
+                    <span className="todo-list-head">
+                        <span className="todo-list-icon">📋</span>
+                        <span className="todo-list-title">{todoList.title}</span>
+                        <span className="todo-list-stats">
+                            {todoList.completed}/{todoList.total}
+                        </span>
+                        <span className="todo-list-chevron">›</span>
                     </span>
+                    {!open && activeTodo && (
+                        <span className="todo-list-preview" aria-hidden="true">
+                            <span className="todo-preview-row todo-preview-main">
+                                <span className="todo-preview-icon">{statusIcon(activeTodo.status)}</span>
+                                <span className="todo-preview-title">{activeTodo.title}</span>
+                            </span>
+                            <span className="todo-preview-row todo-preview-sub">
+                                {activeTodo.description || "\u00A0"}
+                            </span>
+                        </span>
+                    )}
                 </summary>
                 <ul className="todo-list-items">
                     {sortedTodos.map((todo) => (

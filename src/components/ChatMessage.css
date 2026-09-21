@@ -39,8 +39,7 @@
   width: 100%;
 }
 
-.chat-message-shell.assistant .message-reasoning,
-.chat-message-shell.assistant .tool-call-group {
+.chat-message-shell.assistant .message-reasoning {
   width: 100%;
 }
 
@@ -109,27 +108,60 @@
   gap: 3px;
 }
 
-/* Row 1 — dynamic title with streaming pulse indicator. */
+/* Row 1 — dynamic title with streaming pulse indicator.
+   Fixed height: streaming text alternates between Latin (RazerF5) and CJK
+   fallback glyphs whose font metrics differ — without a pinned height the
+   line box (and the whole card) would jitter while tokens arrive. */
 .message-reasoning-title {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+  height: 22px;
+  line-height: 22px;
 }
 
+/* Brain icon after the title — muted monochrome at rest, full color and
+   pulsing while reasoning streams. Occupies space even when idle so the
+   row height stays fixed. */
 .message-reasoning-title::after {
-  content: "";
-  width: 32px;
-  height: 2px;
-  border-radius: 2px;
-  background: var(--ts-blue);
-  opacity: 0;
-  transition: opacity 0.33s var(--ts-ease);
+  content: "🧠";
+  font-size: 14px;
+  line-height: 22px;
+  filter: grayscale(1);
+  opacity: 0.35;
+  transition: opacity 0.33s var(--ts-ease), filter 0.33s var(--ts-ease);
 }
 
 .message-reasoning-summary.reasoning-flow-active .message-reasoning-title::after {
+  filter: none;
   opacity: 1;
   animation: reasoning-blue-pulse 1.2s ease-in-out infinite;
+}
+
+/* Flowing shimmer across the title text while reasoning streams. */
+.message-reasoning-summary.reasoning-flow-active .message-reasoning-title {
+  background: linear-gradient(90deg,
+      var(--ts-carbon) 0%,
+      var(--ts-carbon) 30%,
+      var(--ts-blue) 50%,
+      var(--ts-carbon) 70%,
+      var(--ts-carbon) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: title-shimmer-flow 1.8s linear infinite;
+}
+
+@keyframes title-shimmer-flow {
+  from {
+    background-position: 200% 50%;
+  }
+
+  to {
+    background-position: 0% 50%;
+  }
 }
 
 /* Rows 2–3 — collapsed live preview: faded previous line above the
@@ -139,10 +171,14 @@
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+  height: 38px;
+  /* 2 × 18px rows + 2px gap — never reflows */
   pointer-events: none;
 }
 
 .reasoning-preview-line {
+  height: 18px;
+  line-height: 18px;
   font-size: 13px;
   font-weight: 400;
   color: var(--ts-pewter);
