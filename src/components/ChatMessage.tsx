@@ -391,7 +391,8 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
             />
           </details>
         )}
-
+        {isAssistant && <ToolCallGroup message={message} />}
+        {isAssistant && <TodoList />}
         <div
           className="message-content"
           dangerouslySetInnerHTML={{ __html: renderedMainContent }}
@@ -459,8 +460,7 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
             })}
           </div>
         )}
-        {isAssistant && <ToolCallGroup message={message} />}
-        {isAssistant && <TodoList />}
+
         {isUser && showRetry && (
           <div className="message-actions">
             <button className="message-retry-btn" onClick={onRetry} title="Retry this unfinished user message">
