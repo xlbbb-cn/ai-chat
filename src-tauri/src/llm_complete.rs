@@ -1326,10 +1326,16 @@ pub async fn chat_completion(
         // "Messages with role 'tool' must be a response to a preceding message with 'tool_calls'"
         sanitize_tool_pairs(&mut all_messages);
 
+        // Context window used for the usage gauge (`Tokens: X / Y`).
+        // Resolution order: per-model context window (auto-detected from the
+        // provider's `/models` response or entered manually in Settings) →
+        // legacy `max_tokens` override → conservative global default.
         let effective_max_tokens = config
-            .model_settings
-            .max_tokens
+            .model_context_lengths
+            .get(active_model.as_str())
+            .copied()
             .filter(|max| *max > 0)
+            .or_else(|| config.model_settings.max_tokens.filter(|max| *max > 0))
             .unwrap_or(DEFAULT_MODEL_MAX_TOKENS);
 
         let mut req_body = json!({

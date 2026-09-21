@@ -260,7 +260,7 @@ export default function App() {
     const catalog = Array.from(new Set([...(cfg.model_catalog ?? []), cfg.model].filter(Boolean)));
     setAvailableModels(catalog.length > 0 ? catalog : ["gpt-4o-mini"]);
     setSelectedModel(cfg.model || "gpt-4o-mini");
-    setMaxTokens(cfg.model_settings?.max_tokens ?? null);
+    setMaxTokens(cfg.model_context_lengths?.[cfg.model] ?? cfg.model_settings?.max_tokens ?? null);
     setActiveSkillIds(await reconcileActiveSkills(cfg.selected_skills ?? []));
     setActiveToolCount((cfg.selected_tools ?? []).length);
     return cfg;
@@ -1300,7 +1300,7 @@ export default function App() {
                 const catalog = Array.from(new Set([...(cfg.model_catalog ?? []), cfg.model].filter(Boolean)));
                 setAvailableModels(catalog.length > 0 ? catalog : ["gpt-4o-mini"]);
                 setSelectedModel(cfg.model || "gpt-4o-mini");
-                setMaxTokens(cfg.model_settings?.max_tokens ?? null);
+                setMaxTokens(cfg.model_context_lengths?.[cfg.model] ?? cfg.model_settings?.max_tokens ?? null);
                 themeRef.current = cfg.theme ?? "auto";
                 applyTheme(cfg.theme);
               }}
