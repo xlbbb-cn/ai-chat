@@ -70,6 +70,12 @@ export interface AppConfig {
   api_key: string;
   model: string;
   model_catalog?: string[];
+  /**
+   * Per-model context window (tokens). Auto-filled from `/models` when the
+   * provider reports it (OpenRouter / Groq / vLLM…); otherwise set manually
+   * in Settings as a fallback. Used for agent context budgeting.
+   */
+  model_context_lengths?: Record<string, number>;
   model_settings?: ModelSettings;
   system_message?: string;
   selected_tools?: string[];

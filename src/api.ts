@@ -40,7 +40,18 @@ export async function saveConfig(config: AppConfig): Promise<void> {
   return invoke("save_config", { config });
 }
 
-export async function fetchModels(): Promise<string[]> {
+/**
+ * One entry of the remote `/models` listing.
+ * `context_length` is only present when the provider reports a context
+ * window (OpenRouter, Groq, vLLM, LM Studio…); OpenAI's own endpoint
+ * does not — set it manually in Settings in that case.
+ */
+export interface RemoteModel {
+  id: string;
+  context_length?: number;
+}
+
+export async function fetchModels(): Promise<RemoteModel[]> {
   return invoke("fetch_models");
 }
 

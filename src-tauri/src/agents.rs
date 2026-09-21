@@ -1344,11 +1344,24 @@ pub async fn run_sub_agent(
     let mut total_tokens: u32 = 0;
     let mut tool_calls_count: u32 = 0;
     let mission_id = mission_id_for_task(task).to_string();
+    // Context budget resolution order:
+    // 1. Per-model context window from config (auto-detected from the
+    //    provider's `/models` response or entered manually in Settings).
+    // 2. `max_complete_tokens` (legacy approximation).
+    // 3. Conservative global default.
     let context_budget = config
-        .model_settings
-        .max_complete_tokens
+        .model_context_lengths
+        .get(model)
+        .copied()
         .filter(|limit| *limit > 0)
         .map(|limit| limit as usize)
+        .or_else(|| {
+            config
+                .model_settings
+                .max_complete_tokens
+                .filter(|limit| *limit > 0)
+                .map(|limit| limit as usize)
+        })
         .unwrap_or(AGENT_DEFAULT_CONTEXT_WINDOW);
 
     let self_evolution_context = if skill_access_roots.is_empty() {

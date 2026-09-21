@@ -406,6 +406,14 @@
   font-size: 13px;
 }
 
+/* ---- Field hint (e.g. context-window fallback explanation) ---- */
+
+.settings-field-hint {
+  color: var(--t-muted, var(--t-text-secondary, #888));
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 /* ---- Field title row (e.g. "Content" + "Edit" button) ---- */
 
 .field-title-row {

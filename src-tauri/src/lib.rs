@@ -1,5 +1,6 @@
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -302,6 +303,10 @@ pub struct AppConfig {
     pub model_catalog: Vec<String>,
     #[serde(default)]
     pub model_settings: ModelSettings,
+    /// Per-model context window (tokens). Auto-filled from `/models` when the
+    /// provider reports one; otherwise set manually in Settings as a fallback.
+    #[serde(default)]
+    pub model_context_lengths: HashMap<String, u32>,
     #[serde(default)]
     pub system_message: String,
     #[serde(default)]
@@ -332,6 +337,7 @@ impl Default for AppConfig {
             model: "gpt-4o-mini".into(),
             model_catalog: vec!["gpt-4o-mini".to_string()],
             model_settings: ModelSettings::default(),
+            model_context_lengths: HashMap::new(),
             system_message: String::new(),
             selected_tools: vec![],
             selected_skills: vec![],
@@ -403,7 +409,7 @@ fn save_config(
 }
 
 #[tauri::command]
-async fn fetch_models(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+async fn fetch_models(state: State<'_, AppState>) -> Result<Vec<RemoteModel>, String> {
     let config = state.config.lock().unwrap().clone();
     let url = format!("{}/models", config.api_base_url.trim_end_matches('/'));
 
@@ -437,18 +443,58 @@ async fn fetch_models(state: State<'_, AppState>) -> Result<Vec<String>, String>
         .and_then(|v| v.as_array())
         .ok_or_else(|| "Invalid models response: missing data array".to_string())?;
 
-    let mut names: Vec<String> = models
+    let mut models_out: Vec<RemoteModel> = models
         .iter()
         .filter_map(|m| {
-            m.get("id")
-                .and_then(|id| id.as_str())
-                .map(|s| s.to_string())
+            let id = m.get("id").and_then(|id| id.as_str())?.to_string();
+            Some(RemoteModel {
+                id,
+                context_length: extract_context_length(m),
+            })
         })
         .collect();
 
-    names.sort();
-    names.dedup();
-    Ok(names)
+    models_out.sort_by(|a, b| a.id.cmp(&b.id));
+    models_out.dedup_by(|a, b| a.id == b.id);
+    Ok(models_out)
+}
+
+/// One entry of the remote `/models` listing.
+#[derive(Debug, Clone, Serialize)]
+pub struct RemoteModel {
+    pub id: String,
+    /// Context window in tokens, when the provider reports one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_length: Option<u64>,
+}
+
+/// Best-effort extraction of a context window from a `/models` entry.
+///
+/// There is no universal OpenAI-compatible field for this, but several
+/// providers expose it under well-known names:
+/// - OpenRouter: `context_length` or nested `top_provider.context_length`
+/// - Groq: `context_window`
+/// - vLLM / SGLang / LM Studio: `max_model_len`
+fn extract_context_length(model: &serde_json::Value) -> Option<u64> {
+    const KEYS: [&str; 4] = [
+        "context_length",
+        "context_window",
+        "max_model_len",
+        "max_context_length",
+    ];
+    let parse = |v: &serde_json::Value| -> Option<u64> {
+        let n = v.as_u64().or_else(|| v.as_str()?.parse().ok())?;
+        (n > 0).then_some(n)
+    };
+    for key in KEYS {
+        if let Some(v) = model.get(key).and_then(parse) {
+            return Some(v);
+        }
+    }
+    model
+        .get("top_provider")
+        .and_then(|tp| tp.get("context_length"))
+        .and_then(parse)
 }
 
 #[tauri::command]

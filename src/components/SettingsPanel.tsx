@@ -19,6 +19,7 @@ const defaultConfig: AppConfig = {
   api_key: "",
   model: "gpt-4o-mini",
   model_catalog: ["gpt-4o-mini"],
+  model_context_lengths: {},
   model_settings: {},
   system_message: "",
   logger_output: "file",
@@ -136,13 +137,23 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
     setModelsError(null);
     try {
       const remoteModels = await fetchModels();
-      //const merged = Array.from(new Set([...(config.model_catalog ?? []), ...remoteModels])));
-      const merged = mergeModels([], remoteModels);
-      setConfig((prev) => ({
-        ...prev,
-        model_catalog: merged,
-        model: merged.includes(prev.model) ? prev.model : (merged[0] ?? prev.model),
-      }));
+      const merged = mergeModels([], remoteModels.map((m) => m.id));
+      // Keep context windows the provider reported (OpenRouter, Groq, vLLM…);
+      // models without one fall back to the manual value in Settings.
+      setConfig((prev) => {
+        const learned = { ...(prev.model_context_lengths ?? {}) };
+        for (const m of remoteModels) {
+          if (m.context_length && m.context_length > 0) {
+            learned[m.id] = m.context_length;
+          }
+        }
+        return {
+          ...prev,
+          model_catalog: merged,
+          model: merged.includes(prev.model) ? prev.model : (merged[0] ?? prev.model),
+          model_context_lengths: learned,
+        };
+      });
     } catch (err) {
       setModelsError(String(err));
     } finally {
@@ -515,6 +526,37 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
                     </button>
                   </div>
                 </div>
+              </div>
+
+              <div className="settings-field-row settings-field-row-stacked">
+                <span className="settings-field-label">
+                  Context window for “{config.model}” (tokens)
+                </span>
+                <input
+                  type="number"
+                  min={1}
+                  step={1024}
+                  value={config.model_context_lengths?.[config.model] ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setConfig((prev) => {
+                      const lengths = { ...(prev.model_context_lengths ?? {}) };
+                      if (v === "") {
+                        delete lengths[prev.model];
+                      } else {
+                        const n = Math.max(1, Math.floor(Number(v)));
+                        if (Number.isFinite(n)) lengths[prev.model] = n;
+                      }
+                      return { ...prev, model_context_lengths: lengths };
+                    });
+                  }}
+                  placeholder="auto (provider-reported or default)"
+                />
+                <small className="settings-field-hint">
+                  Auto-filled when the API reports a context window (OpenRouter, Groq, vLLM…).
+                  OpenAI-compatible endpoints that don't expose one can be configured manually
+                  here — the value is used for agent context budgeting.
+                </small>
               </div>
             </div>
           </section>
