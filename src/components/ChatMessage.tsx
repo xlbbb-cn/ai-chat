@@ -1,5 +1,5 @@
 import type { Message, MessageContent } from "../types";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ToolCallGroup } from "./ToolCallGroup";
 import { TodoList } from "./TodoList";
 import MarkdownIt from "markdown-it";
@@ -293,6 +293,21 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
   const renderedReasoningContent = reasoningContent ? md.render(reasoningContent) : "";
   const renderedMainContent = md.render(mainContent);
   const [reasoningFlowActive, setReasoningFlowActive] = useState(false);
+  const [reasoningOpen, setReasoningOpen] = useState(false);
+
+  // Collapsed-state live preview: last (current) line of the reasoning stream,
+  // plus the line before it which fades out as a new line arrives.
+  const reasoningPreview = useMemo(() => {
+    const lines = reasoningContent
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+    return {
+      current: lines[lines.length - 1] ?? "",
+      previous: lines[lines.length - 2] ?? "",
+    };
+  }, [reasoningContent]);
+
   const reasoningUpdateTimerRef = useRef<number | null>(null);
   const lastReasoningRef = useRef(reasoningContent);
 
@@ -346,9 +361,31 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
         {/* <div className="message-role">{isUser ? "You" : "Assistant"}</div> */}
 
         {reasoningContent && (
-          <details className="message-reasoning">
+          <details
+            className="message-reasoning"
+            open={reasoningOpen}
+            onToggle={(e) => setReasoningOpen((e.target as HTMLDetailsElement).open)}
+          >
             <summary className={`message-reasoning-summary ${reasoningFlowActive ? "reasoning-flow-active" : ""}`}>
-              Thought Process
+              <span className="message-reasoning-title">Thought Process</span>
+              {!reasoningOpen && reasoningPreview.current && (
+                <span className="reasoning-preview" aria-hidden="true">
+                  {reasoningPreview.previous && (
+                    <span
+                      key={`p-${reasoningPreview.current}`}
+                      className="reasoning-preview-line reasoning-preview-prev"
+                    >
+                      {reasoningPreview.previous}
+                    </span>
+                  )}
+                  <span
+                    key={`c-${reasoningPreview.current}`}
+                    className="reasoning-preview-line reasoning-preview-cur"
+                  >
+                    {reasoningPreview.current}
+                  </span>
+                </span>
+              )}
             </summary>
             <div
               className="message-reasoning-content"

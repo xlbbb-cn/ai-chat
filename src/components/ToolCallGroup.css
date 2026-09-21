@@ -1,48 +1,32 @@
 .tool-call-group {
     align-self: flex-start;
-    max-width: 80%;
+    width: 100%;
     min-width: 200px;
-    border: 0.5px solid var(--c-border);
-    border-radius: var(--r-md);
-    background: var(--c-surface);
-    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+    border-radius: 4px;
+    background: var(--ts-ash, var(--c-reason));
+    transition: background-color 0.33s var(--ts-ease, ease);
     overflow: hidden;
-    box-shadow: var(--shadow-sm);
 }
 
 .tool-call-group--running {
-    border-color: var(--c-success);
-    box-shadow: 0 0 0 3px rgba(52, 199, 89, 0.18), 0 0 12px rgba(52, 199, 89, 0.12);
-    animation: tool-group-pulse 1.8s ease-in-out infinite;
-}
-
-@keyframes tool-group-pulse {
-
-    0%,
-    100% {
-        box-shadow: 0 0 0 3px rgba(52, 199, 89, 0.18), 0 0 12px rgba(52, 199, 89, 0.12);
-    }
-
-    50% {
-        box-shadow: 0 0 0 4px rgba(52, 199, 89, 0.30), 0 0 20px rgba(52, 199, 89, 0.22);
-    }
+    background: var(--ts-ash, var(--c-reason));
 }
 
 .tool-call-group-details {
     width: 100%;
 }
 
+/* Collapsed layout: 3 stacked rows —
+   1. title (indicator + completion label + count),
+   2–3. the currently running tool (main line + dimmed summary line). */
 .tool-call-group-summary {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    flex-direction: column;
+    gap: 3px;
     padding: 8px 12px;
     cursor: pointer;
     user-select: none;
-    font-size: 13px;
-    color: var(--c-muted);
     list-style: none;
-    transition: background-color 0.2s;
 }
 
 .tool-call-group-summary:hover {
@@ -54,7 +38,14 @@
 }
 
 .tool-call-group-details[open] .tool-call-group-summary {
-    border-bottom: 0.5px solid var(--c-border);
+    border-bottom: 1px solid var(--ts-cloud, var(--c-border));
+}
+
+/* Row 1 — title row. */
+.tool-call-group-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 .tool-call-group-indicator {
@@ -62,22 +53,20 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: var(--c-muted);
+    background: var(--ts-pewter, var(--c-muted));
     opacity: 0.5;
-    transition: background 0.3s ease, opacity 0.3s ease;
+    transition: background 0.33s var(--ts-ease, ease), opacity 0.33s var(--ts-ease, ease);
 }
 
 .tool-call-group-indicator.running {
-    background: var(--c-success);
-    opacity: 1;
-    animation: tool-dot-spin 1s linear infinite;
-    border-radius: 50%;
-    border: 2px solid transparent;
-    border-top-color: var(--c-success);
-    background: transparent;
-    box-shadow: 0 0 0 1.5px rgba(52, 199, 89, 0.3);
     width: 10px;
     height: 10px;
+    background: transparent;
+    border: 2px solid transparent;
+    border-top-color: var(--ts-blue, var(--c-accent));
+    opacity: 1;
+    box-shadow: 0 0 0 1.5px var(--ts-cloud, transparent);
+    animation: tool-dot-spin 1s linear infinite;
 }
 
 @keyframes tool-dot-spin {
@@ -93,36 +82,87 @@
 .tool-call-group-label {
     flex: 1;
     min-width: 0;
+    font-size: 14px;
+    font-weight: 500;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    color: var(--c-text);
-    letter-spacing: -0.005em;
+    color: var(--ts-carbon, var(--c-text));
+    letter-spacing: 0;
 }
 
 .tool-call-group-count {
     flex-shrink: 0;
     font-size: 11px;
-    color: var(--c-muted);
-    background: var(--c-hover);
-    border-radius: var(--r-pill);
+    color: var(--ts-pewter, var(--c-muted));
+    background: transparent;
+    border: 1px solid var(--ts-cloud, var(--c-border));
+    border-radius: 4px;
     padding: 2px 8px;
 }
 
-.tool-call-group-summary::before {
-    content: "›";
+.tool-call-group-chevron {
     flex-shrink: 0;
     font-size: 14px;
     line-height: 1;
-    color: var(--c-muted);
-    transition: transform 0.2s ease;
-    transform: rotate(0deg);
-    margin-left: auto;
-    order: 99;
+    color: var(--ts-pewter, var(--c-muted));
+    transition: transform 0.33s var(--ts-ease, ease);
 }
 
-.tool-call-group-details[open] .tool-call-group-summary::before {
+.tool-call-group-details[open] .tool-call-group-chevron {
     transform: rotate(90deg);
+}
+
+/* Rows 2–3 — running tool preview. */
+.tool-call-group-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    pointer-events: none;
+}
+
+.tool-call-preview-row {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--ts-pewter, var(--c-muted));
+    white-space: nowrap;
+    overflow: hidden;
+    -webkit-mask-image: linear-gradient(90deg, #000 75%, transparent 100%);
+    mask-image: linear-gradient(90deg, #000 75%, transparent 100%);
+}
+
+.tool-call-preview-icon {
+    flex-shrink: 0;
+    font-size: 12px;
+}
+
+.tool-call-preview-icon--running {
+    color: var(--ts-blue, var(--c-accent));
+    animation: spin-icon 1s linear infinite;
+    display: inline-block;
+}
+
+.tool-call-preview-icon--error {
+    color: var(--c-danger);
+}
+
+.tool-call-preview-name {
+    flex-shrink: 0;
+}
+
+.tool-call-preview-desc {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tool-call-preview-sub {
+    color: var(--ts-silver, var(--c-muted));
+    opacity: 0.55;
 }
 
 .tool-call-group-list {
@@ -144,7 +184,7 @@
 }
 
 .tool-call-entry+.tool-call-entry {
-    border-top: 0.5px solid var(--c-border);
+    border-top: 1px solid var(--ts-cloud, var(--c-border));
 }
 
 .tool-call-entry-icon {
