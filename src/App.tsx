@@ -1229,9 +1229,6 @@ export default function App() {
     ? (usage.usage_ratio ?? (usageMax > 0 ? usageTotal / usageMax : 0))
     : 0;
   const usagePercent = Math.max(0, Math.min(100, Math.round(usageRatio * 100)));
-  const usageBarWidth = 16;
-  const usageBarFilled = Math.max(0, Math.min(usageBarWidth, Math.round((usagePercent / 100) * usageBarWidth)));
-  const usageBarText = `[${"x".repeat(usageBarFilled)}${"-".repeat(usageBarWidth - usageBarFilled)} ]`;
 
   return (
     <div className="app-layout">
@@ -1495,10 +1492,16 @@ export default function App() {
         {/* Input */}
         <div className="input-area" style={{ position: "relative", flexDirection: "column", alignItems: "stretch" }}>
           {usage && (
-            <div className="usage-panel">
-              <div className="usage-line" role="status" aria-live="polite">
-                Tokens: {usage.prompt_tokens} prompt / {usage.completion_tokens} completion   {usageBarText} {usageTotal} / {usageMax} ({usagePercent}%)
-              </div>
+            <div
+              className="usage-panel"
+              role="status"
+              aria-live="polite"
+              aria-label={`Context usage: ${usagePercent}%`}
+            >
+              <div
+                className={`usage-panel-fill${usagePercent >= 90 ? " danger" : ""}`}
+                style={{ width: `${usagePercent}%` }}
+              />
             </div>
           )}
           {attachments.length > 0 && (
