@@ -3635,6 +3635,10 @@ pub async fn execute_tool(
                         json!({
                             "type": "todo_cleared",
                             "list_id": summary.list_id,
+                            // Ship the authoritative snapshot so the UI never has
+                            // to prune locally: parallel agents may write between
+                            // the clear and the event being handled.
+                            "summary": &summary,
                         }),
                     );
                     serde_json::to_string_pretty(&summary)
@@ -3665,6 +3669,7 @@ pub async fn execute_tool(
                         json!({
                             "type": "todo_list_changed",
                             "list_id": summary.list_id,
+                            "summary": &summary,
                         }),
                     );
                     serde_json::to_string_pretty(&summary)

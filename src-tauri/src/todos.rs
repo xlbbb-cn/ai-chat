@@ -665,11 +665,9 @@ pub fn render_active_list_for_context(workspace: &Path, session_id: &str) -> Opt
     ));
     body.push_str("Items (id | status | title):\n");
     for todo in &summary.todos {
-        let short_id = if todo.id.len() >= 8 {
-            &todo.id[..8]
-        } else {
-            &todo.id
-        };
+        // Char-boundary safe: ids are UUIDs today, but a manually edited list
+        // file must not be able to panic this render path.
+        let short_id: String = todo.id.chars().take(8).collect();
         body.push_str(&format!(
             "  - [{}] {} | {}\n",
             short_id, todo.status, todo.title

@@ -68,63 +68,79 @@ function statusClass(status: string): string {
     }
 }
 
+function withTodos(list: TodoListSummary, todos: TodoRecord[]): TodoListSummary {
+    const count = (status: string) => todos.filter(t => t.status === status).length;
+    return {
+        ...list,
+        todos,
+        total: todos.length,
+        pending: count("pending"),
+        in_progress: count("in_progress"),
+        completed: count("completed"),
+        cancelled: count("cancelled"),
+    };
+}
+
+function applyTodoUpdate(
+    prev: TodoListSummary | null,
+    incoming: TodoRecord
+): TodoListSummary | null {
+    // Without a snapshot we cannot merge a single record — wait for the next
+    // full state. Ignore updates belonging to another (older/newer) list.
+    if (!prev) return prev;
+    if (prev.list_id !== incoming.list_id) return prev;
+    // Append when the item was never seen: these panels mount per message, so
+    // they can miss the `todo_state` that introduced a parallel agent's item.
+    const known = prev.todos.some(t => t.id === incoming.id);
+    const todos = known
+        ? prev.todos.map(t => (t.id === incoming.id ? incoming : t))
+        : [...prev.todos, incoming];
+    return withTodos(prev, todos);
+}
+
+function dropCompleted(prev: TodoListSummary): TodoListSummary {
+    return withTodos(prev, prev.todos.filter(t => t.status !== "completed"));
+}
+
 export function TodoList() {
     const [todoList, setTodoList] = useState<TodoListSummary | null>(null);
     const [open, setOpen] = useState(false);
 
     useEffect(() => {
+        // Subscribe exactly once: re-registering per state change opens a
+        // window where events are dropped (unlisten resolves asynchronously).
+        // All handlers use functional updates, so no stale closure is read.
         const unlisten = listen<TodoStateEvent>("todo-state", (e) => {
             const event = e.payload;
 
             switch (event.type) {
                 case "todo_state":
-                    // Full list state update
+                    // Full snapshot — authoritative, may be null.
                     if (event.summary) {
                         setTodoList(event.summary);
                     }
                     break;
 
                 case "todo_updated":
-                    // Single todo updated - recalculate counts
                     if (event.todo) {
-                        setTodoList(prev => {
-                            if (!prev) return prev;
-                            const updatedTodos = prev.todos.map(t =>
-                                t.id === event.todo!.id ? event.todo! : t
-                            );
-                            const completed = updatedTodos.filter(t => t.status === "completed").length;
-                            const total = updatedTodos.length;
-                            return {
-                                ...prev,
-                                todos: updatedTodos,
-                                completed,
-                                total,
-                            };
-                        });
+                        const incoming = event.todo;
+                        setTodoList(prev => applyTodoUpdate(prev, incoming));
                     }
                     break;
 
                 case "todo_cleared":
-                    // Completed todos cleared - refresh list
-                    if (event.list_id && todoList?.list_id === event.list_id) {
-                        // The backend will send a full state update after clearing
-                        // For now, just mark completed items as removed
-                        setTodoList(prev => {
-                            if (!prev) return prev;
-                            const remainingTodos = prev.todos.filter(t => t.status !== "completed");
-                            return {
-                                ...prev,
-                                todos: remainingTodos,
-                                total: remainingTodos.length,
-                                completed: 0,
-                            };
-                        });
-                    }
+                    // Prefer the snapshot shipped with the event; fall back to
+                    // dropping completed items from the current list.
+                    setTodoList(prev => {
+                        if (event.summary) return event.summary;
+                        if (!prev || prev.list_id !== event.list_id) return prev;
+                        return dropCompleted(prev);
+                    });
                     break;
 
                 case "todo_list_changed":
-                    // New list created - clear current list
-                    setTodoList(null);
+                    // The active list was rotated (summary = the fresh list).
+                    setTodoList(event.summary ?? null);
                     break;
             }
         });
@@ -132,7 +148,7 @@ export function TodoList() {
         return () => {
             unlisten.then(fn => fn());
         };
-    }, [todoList]);
+    }, []);
 
     if (!todoList || todoList.todos.length === 0) {
         return null;
