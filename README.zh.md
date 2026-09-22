@@ -198,6 +198,27 @@ npm run tauri build
 
 > Windows 上如果遇到 GNU linker 与 WebView2 相关问题，建议切换到 MSVC 工具链构建。
 
+### D. 用 GitHub Actions 发布（打 Tag）
+
+推送 `v*` 标签后会触发 `.github/workflows/release.yml`，并行构建 Linux / macOS / Windows 安装包，
+并上传到该标签对应的 GitHub Release（默认先创建为**草稿**）。
+
+```bash
+git tag v1.1.4
+git push origin v1.1.4
+```
+
+| 平台 | 产物 |
+| --- | --- |
+| Windows | `.msi`、`-setup.exe`（NSIS） |
+| macOS | `.dmg`（Apple Silicon `aarch64` 与 Intel `x86_64` 各一份） |
+| Linux | `.AppImage`、`.deb`、`.rpm` |
+
+- 版本号取自最新的 git tag（`npm run build` 内部会执行 `sync-version:git-tag`），因此本次推送的 tag 必须是最新 tag，否则流程会直接失败提示。
+- Release 先以草稿创建：在 Releases 页面确认产物无误后再点发布。
+- macOS 产物为 ad-hoc 签名（暂无 Apple 开发者证书），首次打开需要在「系统设置 → 隐私与安全性」选择「仍要打开」，或右键 App → 打开。
+- 也可在 `Actions → Release → Run workflow` 手动触发，只构建不创建 Release（用于验证流程）。
+
 ---
 
 ## 配置说明

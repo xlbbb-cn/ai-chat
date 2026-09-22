@@ -199,6 +199,27 @@ Build artifacts are located in:
 
 > On Windows, if you encounter GNU linker or WebView2 issues, switch to the MSVC toolchain.
 
+### D. Release via GitHub Actions (Tag)
+
+Pushing a `v*` tag triggers `.github/workflows/release.yml`, which builds the Linux / macOS / Windows
+installers in parallel and uploads them to the GitHub Release of that tag (created as a **draft**).
+
+```bash
+git tag v1.1.4
+git push origin v1.1.4
+```
+
+| Platform | Bundles |
+| --- | --- |
+| Windows | `.msi`, `-setup.exe` (NSIS) |
+| macOS | `.dmg` for Apple Silicon (`aarch64`) and Intel (`x86_64`) |
+| Linux | `.AppImage`, `.deb`, `.rpm` |
+
+- The app version comes from the newest git tag (`sync-version:git-tag` runs inside `npm run build`), so the pushed tag must be the newest one — otherwise the workflow fails fast.
+- The release is created as a draft: check the uploaded bundles on the Releases page and publish it.
+- macOS builds are ad-hoc signed (no Apple Developer certificate yet), so the first launch needs "Right click → Open" or System Settings → Privacy & Security → "Open Anyway".
+- `Actions → Release → Run workflow` runs the same build without creating a release (smoke test).
+
 ---
 
 ## Configuration

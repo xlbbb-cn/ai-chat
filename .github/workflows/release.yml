@@ -1,0 +1,146 @@
+# 打 tag（如 v1.1.4）时，为 Linux / macOS / Windows 同时构建安装包，
+# 并把产物上传到该 tag 对应的 GitHub Release（默认先创建草稿，确认后手动发布）。
+#
+# 也可手动触发（Actions → Release → Run workflow）：只构建并保留 Actions 产物，不创建 Release。
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+run-name: Release ${{ github.ref_name }}
+
+# 同一个 tag 的发布串行执行，避免多个 job 并发写同一个 Release
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.platform }}
+    permissions:
+      contents: write # tauri-action 创建 Release / 上传安装包需要
+      actions: write # 上传 Actions 产物（uploadWorkflowArtifacts）需要
+    strategy:
+      fail-fast: false # 某个平台失败不影响其它平台产出
+      matrix:
+        include:
+          - name: macOS (Apple Silicon)
+            platform: macos-latest
+            slug: macos-aarch64
+            rustTargets: aarch64-apple-darwin
+            args: '--target aarch64-apple-darwin'
+          - name: macOS (Intel)
+            platform: macos-latest
+            slug: macos-x86_64
+            rustTargets: x86_64-apple-darwin
+            args: '--target x86_64-apple-darwin'
+          - name: Linux (x86_64)
+            platform: ubuntu-22.04
+            slug: linux-x86_64
+            rustTargets: ''
+            args: ''
+          - name: Windows (x86_64)
+            platform: windows-latest
+            slug: windows-x86_64
+            rustTargets: ''
+            # 默认同时产出 .msi 与 NSIS -setup.exe；若 Runner 上 MSI（light.exe / VBSCRIPT）不可用，
+            # 把 args 改成 '--bundles nsis' 只产出 NSIS 安装包即可。
+            args: ''
+          # 公开仓库可以再加一条 ARM64 Linux 构建（ubuntu-22.04-arm 目前仅公开仓库可用）：
+          # - name: Linux (arm64)
+          #   platform: ubuntu-22.04-arm
+          #   slug: linux-arm64
+          #   rustTargets: ''
+          #   args: ''
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # build 时执行的 sync-version:git-tag 依赖完整的 tag 列表来推导版本号
+          fetch-depth: 0
+          fetch-tags: true
+
+      # 版本号来自「最新的 tag」，所以本次发布的 tag 必须就是最新 tag，
+      # 否则会在构建过程中被同步成别的版本号，这里直接失败提示。
+      - name: Verify tag drives the version
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          latest="$(git tag --sort=-creatordate | head -n 1)"
+          echo "本次 tag: ${GITHUB_REF_NAME}；最新 tag: ${latest}"
+          if [ "${latest}" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::构建会用最新 tag（${latest}）同步版本号，与本次发布的 ${GITHUB_REF_NAME} 不一致。请先删除更新的 tag，或用最新 tag 重新发布。"
+            exit 1
+          fi
+
+      # 仓库里的 .cargo/config.toml 把 crates-io 指向 rsproxy.cn（国内加速），
+      # GitHub Runner 上没必要走该镜像，删掉以使用官方 crates.io。
+      - name: Use official crates.io
+        shell: bash
+        run: rm -f .cargo/config.toml
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rustTargets }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: ${{ matrix.slug }}
+
+      - name: Install Linux system dependencies
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential curl wget file \
+            libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev patchelf xdg-utils
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # tauri build 会走 tauri.conf.json 的 beforeBuildCommand（npm run build），
+      # 其中 sync-version:git-tag 把 package.json / Cargo.toml / tauri.conf.json 的版本对齐到 tag。
+      - name: Build installers
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 暂无 Apple 证书时用 ad-hoc 签名，避免 Apple Silicon 上提示「应用已损坏」。
+          # 之后接入真实证书时，改为在 secrets 里提供 APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD
+          # （公证再加 APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID），并删掉这一行。
+          APPLE_SIGNING_IDENTITY: ${{ matrix.platform == 'macos-latest' && '-' || '' }}
+        with:
+          # 只有 tag 触发的运行才创建 / 更新 Release；手动触发只产出 Actions 产物
+          tagName: ${{ github.event_name == 'push' && github.ref_name || '' }}
+          releaseName: ${{ github.event_name == 'push' && 'AI Chat v__VERSION__' || '' }}
+          releaseBody: |
+            `AI Chat v__VERSION__` 由 GitHub Actions 自动构建。
+
+            - Windows：`.msi` / `-setup.exe`
+            - macOS：`.dmg`（Apple Silicon `aarch64` / Intel `x86_64`）
+            - Linux：`.AppImage` / `.deb` / `.rpm`
+
+            首次打开若被系统拦截：Windows 选「仍要运行」；macOS 在「系统设置 → 隐私与安全性」中
+            选择「仍要打开」，或右键 App → 打开。
+          # 先发草稿 Release，确认产物无误后在 Releases 页面点 Publish；想直接发布改成 false。
+          # 注意：如果已手动发布过，重跑本流程时需要把这里改回 false。
+          releaseDraft: true
+          prerelease: false
+          uploadUpdaterJson: false # 未配置 updater，无需生成 latest.json
+          uploadWorkflowArtifacts: true # 同时保留 Actions 运行产物，未发布也能下载
+          args: ${{ matrix.args }}

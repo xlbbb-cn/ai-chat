@@ -39,6 +39,18 @@ cargo check --manifest-path src-tauri/Cargo.toml \
   --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'
 ```
 
+## Releases (CI)
+
+`.github/workflows/release.yml` (trigger: `v*` tag push, or manual `workflow_dispatch`) builds via
+`tauri-apps/tauri-action@v1` on 4 runners — `macos-latest` ×2 (`aarch64-apple-darwin`, `x86_64-apple-darwin`),
+`ubuntu-22.04`, `windows-latest` — and uploads `.dmg` / `.AppImage` + `.deb` + `.rpm` / `.msi` + NSIS `.exe`
+to a **draft** GitHub Release for the tag (also kept as workflow artifacts).
+
+- **The tag drives the version.** `tauri build` runs `beforeBuildCommand` → `npm run build` → `sync-version:git-tag`, which reads the newest tag; a workflow step fails fast when the pushed tag is not the newest one.
+- CI runs `rm -f .cargo/config.toml` so the committed rsproxy.cn mirror is not used on GitHub runners.
+- macOS uses `APPLE_SIGNING_IDENTITY='-'` (ad-hoc) — replace with real signing/notarization secrets when available.
+- `releaseDraft: true` must be flipped to `false` in the workflow if you re-run it after publishing a release manually.
+
 ## Architecture
 
 - **Entry points**: `src/main.tsx` → `src/App.tsx`; Rust `src-tauri/src/main.rs` → `src-tauri/src/lib.rs` (command registration, state, app setup).
