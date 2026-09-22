@@ -1,0 +1,357 @@
+/* ===================================================================
+   UpdatePanel — compact dialog over the chat.
+   Same design language as SettingsPanel: hairline separators, no
+   shadows, Electric Blue reserved for the primary CTA.
+   =================================================================== */
+
+.update-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 950;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(23, 26, 32, 0.4);
+    animation: update-fade-in 0.16s ease;
+}
+
+@keyframes update-fade-in {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+.update-panel {
+    /* Tesla palette (mirrors SettingsPanel) */
+    --t-bg: #FFFFFF;
+    --t-bg-soft: #F4F4F4;
+    --t-text: #171A20;
+    --t-body: #393C41;
+    --t-muted: #5C5E62;
+    --t-border: #EEEEEE;
+    --t-border-i: #D0D1D2;
+    --t-accent: #3E6AE1;
+    --t-accent-hover: #3358C7;
+    --t-accent-soft: rgba(62, 106, 225, 0.10);
+    --t-danger: #C0392B;
+    --t-success: #1F8A3B;
+
+    display: flex;
+    flex-direction: column;
+    width: min(720px, 100%);
+    max-height: min(660px, 100%);
+    background: var(--t-bg);
+    color: var(--t-text);
+    border-radius: 12px;
+    overflow: hidden;
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+[data-theme="dark"] .update-panel {
+    --t-bg: #171A20;
+    --t-bg-soft: #22262D;
+    --t-text: #F4F4F4;
+    --t-body: #D0D1D2;
+    --t-muted: #8E8E93;
+    --t-border: #2A2E35;
+    --t-border-i: #3A3F47;
+    --t-accent: #5A7FF0;
+    --t-accent-hover: #6C8DF3;
+    --t-accent-soft: rgba(90, 127, 240, 0.16);
+    --t-danger: #E0655A;
+    --t-success: #3BB55C;
+}
+
+.update-panel-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px 20px;
+    border-bottom: 1px solid var(--t-border);
+}
+
+.update-panel-heading h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--t-text);
+}
+
+.update-panel-heading p {
+    margin: 4px 0 0;
+    font-size: 12px;
+    color: var(--t-muted);
+}
+
+.update-panel-actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.update-panel-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px 20px 20px;
+    overflow-y: auto;
+    color: var(--t-body);
+}
+
+/* ---- buttons ---- */
+
+.update-btn {
+    padding: 6px 12px;
+    border: 1px solid var(--t-border-i);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--t-text);
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.update-btn:hover:not(:disabled) {
+    background: var(--t-bg-soft);
+}
+
+.update-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.update-btn-primary {
+    background: var(--t-accent);
+    border-color: var(--t-accent);
+    color: #FFFFFF;
+}
+
+.update-btn-primary:hover:not(:disabled) {
+    background: var(--t-accent-hover);
+    border-color: var(--t-accent-hover);
+}
+
+/* ---- status rows ---- */
+
+.update-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+}
+
+.update-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--t-muted);
+    flex-shrink: 0;
+}
+
+.update-status-ok .update-dot {
+    background: var(--t-success);
+}
+
+.update-status-new {
+    color: var(--t-text);
+    font-weight: 600;
+}
+
+.update-status-new .update-dot {
+    background: var(--t-accent);
+}
+
+.update-muted {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--t-muted);
+}
+
+.update-badge {
+    margin-left: 8px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: var(--t-accent-soft);
+    color: var(--t-accent);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.update-hint {
+    padding: 10px 12px;
+    border: 1px solid var(--t-border);
+    border-radius: 8px;
+    background: var(--t-bg-soft);
+    color: var(--t-muted);
+    font-size: 12px;
+}
+
+.update-hint code {
+    font-size: 11px;
+}
+
+.update-error {
+    padding: 10px 12px;
+    border: 1px solid var(--t-danger);
+    border-radius: 8px;
+    color: var(--t-danger);
+    font-size: 12px;
+    word-break: break-word;
+}
+
+/* ---- asset list ---- */
+
+.update-assets {
+    margin: 0;
+    padding: 0;
+    border-top: 1px solid var(--t-border);
+    list-style: none;
+}
+
+.update-asset {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--t-border);
+}
+
+.update-asset.empty {
+    justify-content: flex-start;
+    color: var(--t-muted);
+    font-size: 12px;
+}
+
+.update-asset-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.update-asset-name {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    color: var(--t-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.update-asset-meta {
+    font-size: 11px;
+    color: var(--t-muted);
+}
+
+/* ---- progress ---- */
+
+.update-progress {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.update-progress-track {
+    height: 4px;
+    border-radius: 999px;
+    background: var(--t-bg-soft);
+    overflow: hidden;
+}
+
+.update-progress-fill {
+    height: 100%;
+    background: var(--t-accent);
+    transition: width 0.2s ease;
+}
+
+.update-progress-label {
+    font-size: 11px;
+    color: var(--t-muted);
+}
+
+/* ---- downloaded file ---- */
+
+.update-saved {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--t-border-i);
+    border-radius: 8px;
+}
+
+.update-saved-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.update-saved-name {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    color: var(--t-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.update-saved-dir {
+    font-size: 11px;
+    color: var(--t-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.update-saved-actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+/* ---- release notes ---- */
+
+.update-notes {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.update-notes-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--t-text);
+}
+
+.update-notes-body {
+    max-height: 220px;
+    padding: 10px 12px;
+    border: 1px solid var(--t-border);
+    border-radius: 8px;
+    font-size: 12px;
+    overflow-y: auto;
+}
+
+.update-notes-empty {
+    margin: 0;
+    color: var(--t-muted);
+}
+
+.update-footer {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding-top: 4px;
+}

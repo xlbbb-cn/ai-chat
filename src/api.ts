@@ -13,6 +13,8 @@ import type {
   AgentTaskEvent,
   AgentMissionSnapshot,
   Profile,
+  UpdateInfo,
+  UpdateDownloadProgress,
 } from "./types";
 
 export async function getConfig(): Promise<AppConfig> {
@@ -73,6 +75,45 @@ export async function deleteSkill(name: string): Promise<void> {
  */
 export async function filterExistingSkills(names: string[]): Promise<string[]> {
   return invoke("filter_existing_skills", { names });
+}
+
+// ─── Update check (GitHub Releases) ──────────────────────────────────────────
+
+/** Fetch the newest published GitHub release and compare it with this build. */
+export async function checkUpdate(includePrerelease?: boolean): Promise<UpdateInfo> {
+  return invoke("check_update", { includePrerelease });
+}
+
+/** Download a release asset; resolves with the path it was saved to. */
+export async function downloadUpdate(assetName: string, downloadUrl: string): Promise<string> {
+  return invoke("download_update", { assetName, downloadUrl });
+}
+
+/** Open the downloaded installer with the OS default handler. */
+export async function openUpdateFile(path: string): Promise<void> {
+  return invoke("open_update_file", { path });
+}
+
+/** Reveal the downloaded installer in the file manager. */
+export async function revealUpdateFile(path: string): Promise<void> {
+  return invoke("reveal_update_file", { path });
+}
+
+/** Open the release page in the default browser. */
+export async function openReleasePage(url: string): Promise<void> {
+  return invoke("open_release_page", { url });
+}
+
+/** Version of the running app bundle. */
+export async function getAppVersion(): Promise<string> {
+  return invoke("get_app_version");
+}
+
+/** Subscribe to update download progress events. */
+export async function onUpdateDownloadProgress(
+  cb: (progress: UpdateDownloadProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<UpdateDownloadProgress>("update-download-progress", (e) => cb(e.payload));
 }
 
 export async function stopChatCompletion(): Promise<void> {

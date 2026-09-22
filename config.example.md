@@ -27,7 +27,9 @@ Typical locations:
   "kg_engine": "neo4j",
   "neo4j_uri": "bolt://localhost:7687",
   "neo4j_user": "neo4j",
-  "neo4j_password": "your_password"
+  "neo4j_password": "your_password",
+  "check_updates_on_startup": true,
+  "include_prerelease_updates": false
 }
 ```
 
@@ -45,6 +47,8 @@ Typical locations:
 - neo4j_uri: Neo4j Bolt endpoint, for example bolt://localhost:7687.
 - neo4j_user: Neo4j username.
 - neo4j_password: Neo4j password.
+- check_updates_on_startup: Check the GitHub Releases API for a newer published release when the app starts (default true).
+- include_prerelease_updates: Also consider releases flagged as pre-release; draft releases are never visible to the public API.
 
 ## Security
 

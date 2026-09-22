@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { fetchModels, getConfig, getWorkspaceDir, saveConfig, listProfiles, saveProfile, deleteProfile, applyProfile, listMcpServers, listSubAgents, getAgentOrchestration } from "../api";
+import { fetchModels, getAppVersion, getConfig, getWorkspaceDir, saveConfig, listProfiles, saveProfile, deleteProfile, applyProfile, listMcpServers, listSubAgents, getAgentOrchestration } from "../api";
 import type { AppConfig, ModelSettings, Profile } from "../types";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { MonitorPanel } from "./MonitorPanel";
 import { Portal } from "./Portal";
+import { UpdatePanel } from "./UpdatePanel";
 import "./SettingsPanel.css";
 
 interface Props {
@@ -47,6 +48,7 @@ const SETTINGS_SECTIONS = [
   { id: "system", label: "System Message" },
   { id: "advanced", label: "Advanced" },
   { id: "runtime", label: "Runtime & Debug" },
+  { id: "about", label: "About & Updates" },
 ] as const;
 
 export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionId }: Props) {
@@ -63,6 +65,8 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
   const [messageDraft, setMessageDraft] = useState("");
   const [messageSaving, setMessageSaving] = useState(false);
   const [showMonitor, setShowMonitor] = useState(false);
+  const [showUpdatePanel, setShowUpdatePanel] = useState(false);
+  const [appVersion, setAppVersion] = useState("");
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [newProfileName, setNewProfileName] = useState("");
   const [profileSaving, setProfileSaving] = useState(false);
@@ -91,6 +95,7 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
   useEffect(() => {
     getWorkspaceDir().then(setWorkspaceDirActual).catch(console.error);
     listProfiles().then(setProfiles).catch(console.error);
+    getAppVersion().then(setAppVersion).catch(console.error);
   }, []);
 
   useEffect(() => {
@@ -706,6 +711,62 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
               )}
             </div>
           </section>
+
+          <section id="settings-section-about" className="settings-section">
+            <div className="settings-section-head">
+              <h3>About & Updates</h3>
+              <p>Running version, plus update checks against this repository's GitHub releases.</p>
+            </div>
+            <div className="settings-section-body">
+              <div className="settings-field-row">
+                <span className="settings-field-label">Current version</span>
+                <div className="settings-inline-row">
+                  <code>{appVersion || "—"}</code>
+                </div>
+              </div>
+
+              <label className="settings-checkbox">
+                <input
+                  type="checkbox"
+                  checked={config.check_updates_on_startup ?? true}
+                  onChange={(e) =>
+                    setConfig((prev) => ({
+                      ...prev,
+                      check_updates_on_startup: e.target.checked,
+                    }))
+                  }
+                />
+                <div className="settings-checkbox-copy">
+                  <span>Check for updates on startup</span>
+                  <small>Queries the GitHub Releases API once per launch and shows a banner when a newer version exists.</small>
+                </div>
+              </label>
+
+              <label className="settings-checkbox">
+                <input
+                  type="checkbox"
+                  checked={config.include_prerelease_updates ?? false}
+                  onChange={(e) =>
+                    setConfig((prev) => ({
+                      ...prev,
+                      include_prerelease_updates: e.target.checked,
+                    }))
+                  }
+                />
+                <div className="settings-checkbox-copy">
+                  <span>Include pre-releases</span>
+                  <small>Also consider releases flagged as pre-release. Draft releases are never visible to the API.</small>
+                </div>
+              </label>
+
+              <div className="settings-field-row">
+                <span className="settings-field-label">Updates</span>
+                <button type="button" className="settings-btn" onClick={() => setShowUpdatePanel(true)}>
+                  Check for updates…
+                </button>
+              </div>
+            </div>
+          </section>
         </div>
       </div>
 
@@ -755,6 +816,12 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
       {showMonitor && (
         <Portal>
           <MonitorPanel sessionId={sessionId!} onClose={() => setShowMonitor(false)} />
+        </Portal>
+      )}
+
+      {showUpdatePanel && (
+        <Portal>
+          <UpdatePanel onClose={() => setShowUpdatePanel(false)} />
         </Portal>
       )}
     </div>

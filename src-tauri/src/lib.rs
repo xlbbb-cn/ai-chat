@@ -22,6 +22,7 @@ pub mod neo4j_db;
 mod skills;
 mod todos;
 mod tools;
+mod update;
 
 use logger::{AppLogger, LoggerOutput};
 
@@ -154,6 +155,12 @@ pub struct AppConfig {
     pub auto_accept_confirm_kinds: Vec<String>,
     #[serde(default)]
     pub theme: Option<String>,
+    /// Check the GitHub Releases API for a newer version when the app starts.
+    #[serde(default = "update::default_true")]
+    pub check_updates_on_startup: bool,
+    /// Also consider releases flagged as pre-release in the update check.
+    #[serde(default)]
+    pub include_prerelease_updates: bool,
 }
 
 impl Default for AppConfig {
@@ -177,6 +184,8 @@ impl Default for AppConfig {
             logger_output: LoggerOutput::default(),
             auto_accept_confirm_kinds: vec![],
             theme: None,
+            check_updates_on_startup: true,
+            include_prerelease_updates: false,
         }
     }
 }
@@ -849,6 +858,12 @@ pub fn run() {
             save_profile_config,
             delete_profile_config,
             apply_profile_config,
+            update::check_update,
+            update::download_update,
+            update::open_update_file,
+            update::reveal_update_file,
+            update::open_release_page,
+            update::get_app_version,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

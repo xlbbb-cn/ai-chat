@@ -95,6 +95,40 @@ export interface AppConfig {
   logger_output?: "file" | "println";
   theme?: "auto" | "light" | "dark";
   auto_accept_confirm_kinds?: ConfirmKind[];
+  check_updates_on_startup?: boolean;
+  include_prerelease_updates?: boolean;
+}
+
+/** A bundle attached to a GitHub release. */
+export interface UpdateAsset {
+  name: string;
+  download_url: string;
+  size: number;
+  kind: string;
+  recommended: boolean;
+}
+
+/** Result of a GitHub release update check. */
+export interface UpdateInfo {
+  current_version: string;
+  latest_version: string;
+  has_update: boolean;
+  release_name: string;
+  release_notes: string;
+  release_url: string;
+  published_at?: string;
+  prerelease: boolean;
+  assets: UpdateAsset[];
+  has_platform_asset: boolean;
+  platform: string;
+}
+
+/** Payload of the `update-download-progress` event. */
+export interface UpdateDownloadProgress {
+  asset_name: string;
+  downloaded: number;
+  total: number;
+  done: boolean;
 }
 
 export interface ModelSettings {

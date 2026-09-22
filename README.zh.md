@@ -218,6 +218,7 @@ git push origin v1.1.4
 - Release 先以草稿创建：在 Releases 页面确认产物无误后再点发布。
 - macOS 产物为 ad-hoc 签名（暂无 Apple 开发者证书），首次打开需要在「系统设置 → 隐私与安全性」选择「仍要打开」，或右键 App → 打开。
 - 也可在 `Actions → Release → Run workflow` 手动触发，只构建不创建 Release（用于验证流程）。
+- 已安装的旧版本会在启动时检查最新**已发布**的 Release，并在应用内提示新版本、展示更新说明、直接下载匹配当前系统的安装包（可在「设置 → About & Updates」关闭）。草稿状态的 Release 不会被检查到。
 
 ---
 

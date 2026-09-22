@@ -219,6 +219,7 @@ git push origin v1.1.4
 - The release is created as a draft: check the uploaded bundles on the Releases page and publish it.
 - macOS builds are ad-hoc signed (no Apple Developer certificate yet), so the first launch needs "Right click → Open" or System Settings → Privacy & Security → "Open Anyway".
 - `Actions → Release → Run workflow` runs the same build without creating a release (smoke test).
+- Installed builds check the newest **published** release on startup and show an in-app banner with release notes and a direct download for the matching bundle (toggle it under Settings → About & Updates). Draft releases are never visible to the update check.
 
 ---
 

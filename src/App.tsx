@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { chatCompletion, getConfig, getAgentOrchestration, listMcpServers, listSubAgents, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills } from "./api";
+import { chatCompletion, checkUpdate, getConfig, getAgentOrchestration, listMcpServers, listSubAgents, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills } from "./api";
 
 import { ChatMessage } from "./components/ChatMessage";
 import { ToolCallGroup } from "./components/ToolCallGroup";
@@ -13,6 +13,7 @@ import { AgentsPanel } from "./components/AgentsPanel";
 import { AgentMissionPanel } from "./components/AgentMissionPanel";
 import { MarkdownPreview } from "./components/MarkdownPreview";
 import { Portal } from "./components/Portal";
+import { UpdatePanel } from "./components/UpdatePanel";
 import type {
   AppConfig,
   Message,
@@ -21,6 +22,7 @@ import type {
   Attachment,
   ContentPart,
   MessageContent,
+  UpdateInfo,
 } from "./types";
 import "./App.css";
 
@@ -185,6 +187,10 @@ export default function App() {
   const [sidebarMotion, setSidebarMotion] = useState<"opening" | "closing" | null>(null);
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // Newest published release; shared by the startup banner and the update dialog.
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [updatePanelOpen, setUpdatePanelOpen] = useState(false);
+  const [updateBannerDismissed, setUpdateBannerDismissed] = useState(false);
   const [usage, setUsage] = useState<{
     prompt_tokens: number;
     completion_tokens: number;
@@ -279,6 +285,25 @@ export default function App() {
     setActiveToolCount((cfg.selected_tools ?? []).length);
     return cfg;
   }, [reconcileActiveSkills]);
+
+  // Silent update probe on startup: it never blocks the chat and never surfaces
+  // errors — Settings has an explicit "Check for updates" action instead.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const cfg = await getConfig();
+        if (cfg.check_updates_on_startup === false) return;
+        const info = await checkUpdate();
+        if (!cancelled && info.has_update) setUpdateInfo(info);
+      } catch (err) {
+        console.error("Update check failed", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const updateActiveAssistantToolCalls = useCallback((toolCalls: ToolCallEntry[]) => {
     const assistantId = currentAssistantMessageIdRef.current;
@@ -1327,6 +1352,16 @@ export default function App() {
           </div>
         </Portal>
       )}
+      {/* Update dialog — layered above the chat so a sidebar can stay open */}
+      {updatePanelOpen && (
+        <Portal>
+          <UpdatePanel
+            initialInfo={updateInfo}
+            onInfo={setUpdateInfo}
+            onClose={() => setUpdatePanelOpen(false)}
+          />
+        </Portal>
+      )}
       {/* Settings — fullscreen page layered above the chat */}
       {sidebar === "settings" && (
         <Portal>
@@ -1501,6 +1536,27 @@ export default function App() {
             <div className="profile-export-progress-hint">Chat is locked during export and sending is disabled.</div>
             <div className="profile-export-progress-track">
               <div className="profile-export-progress-fill" />
+            </div>
+          </div>
+        )}
+
+        {updateInfo?.has_update && !updateBannerDismissed && (
+          <div className="update-banner" role="status">
+            <span className="update-banner-text">
+              New version <strong>{updateInfo.latest_version}</strong> is available — you are on{" "}
+              {updateInfo.current_version}.
+            </span>
+            <div className="update-banner-actions">
+              <button type="button" className="toolbar-btn" onClick={() => setUpdatePanelOpen(true)}>
+                View update
+              </button>
+              <button
+                type="button"
+                className="toolbar-btn"
+                onClick={() => setUpdateBannerDismissed(true)}
+              >
+                Dismiss
+              </button>
             </div>
           </div>
         )}
