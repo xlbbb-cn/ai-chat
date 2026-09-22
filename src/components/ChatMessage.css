@@ -108,39 +108,66 @@
   gap: 3px;
 }
 
-/* Row 1 — dynamic title with streaming pulse indicator.
-   Fixed height: streaming text alternates between Latin (RazerF5) and CJK
-   fallback glyphs whose font metrics differ — without a pinned height the
-   line box (and the whole card) would jitter while tokens arrive. */
-.message-reasoning-title {
+/* Row 1 — title + brain indicator. Fixed height: streaming text alternates
+   between Latin (RazerF5) and CJK fallback glyphs whose font metrics differ —
+   without a pinned height the line box (and the whole card) would jitter
+   while tokens arrive. */
+.message-reasoning-head {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  height: 22px;
+}
+
+.message-reasoning-title {
   flex-shrink: 0;
   height: 22px;
   line-height: 22px;
 }
 
-/* Brain icon after the title — muted monochrome at rest, full color and
-   pulsing while reasoning streams. Occupies space even when idle so the
-   row height stays fixed. */
-.message-reasoning-title::after {
-  content: "🧠";
+/* Brain icon — muted monochrome at rest, full colour while the model is
+   thinking. It is re-mounted on every new reasoning line, which replays the
+   spark animation below so the icon blinks as the thinking content grows. */
+.message-reasoning-brain {
+  flex-shrink: 0;
   font-size: 14px;
   line-height: 22px;
+  transform-origin: center;
   filter: grayscale(1);
   opacity: 0.35;
   transition: opacity 0.33s var(--ts-ease), filter 0.33s var(--ts-ease);
 }
 
-.message-reasoning-summary.reasoning-flow-active .message-reasoning-title::after {
+.message-reasoning-summary.reasoning-streaming .message-reasoning-brain {
   filter: none;
   opacity: 1;
-  animation: reasoning-blue-pulse 1.2s ease-in-out infinite;
+  animation: reasoning-brain-spark 0.62s var(--ts-ease);
 }
 
-/* Flowing shimmer across the title text while reasoning streams. */
-.message-reasoning-summary.reasoning-flow-active .message-reasoning-title {
+/* One blink per reasoning update: dim → bright pop → tiny bounce → still. */
+@keyframes reasoning-brain-spark {
+  0% {
+    opacity: 0.25;
+    transform: scale(1.35);
+  }
+
+  45% {
+    opacity: 1;
+    transform: scale(0.96);
+  }
+
+  70% {
+    transform: scale(1.06);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Flowing shimmer across the title text while the model is thinking. */
+.message-reasoning-summary.reasoning-streaming .message-reasoning-title {
   background: linear-gradient(90deg,
       var(--ts-carbon) 0%,
       var(--ts-carbon) 30%,
@@ -276,17 +303,16 @@
   .reasoning-preview-live .reasoning-preview-line {
     animation: none;
   }
-}
 
-@keyframes reasoning-blue-pulse {
-
-  0%,
-  100% {
-    opacity: 1;
+  .message-reasoning-summary.reasoning-streaming .message-reasoning-brain {
+    animation: none;
   }
 
-  50% {
-    opacity: 0.35;
+  /* Keep the label readable instead of a frozen gradient slice. */
+  .message-reasoning-summary.reasoning-streaming .message-reasoning-title {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: currentColor;
   }
 }
 

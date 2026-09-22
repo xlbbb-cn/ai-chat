@@ -1,5 +1,5 @@
 import type { Message, MessageContent } from "../types";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { ToolCallGroup } from "./ToolCallGroup";
 import { TodoList } from "./TodoList";
 import MarkdownIt from "markdown-it";
@@ -292,8 +292,15 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
     : embeddedThought.mainContent;
   const renderedReasoningContent = reasoningContent ? md.render(reasoningContent) : "";
   const renderedMainContent = md.render(mainContent);
-  const [reasoningFlowActive, setReasoningFlowActive] = useState(false);
   const [reasoningOpen, setReasoningOpen] = useState(false);
+
+  // Live thinking: the reply is still streaming, reasoning text has arrived
+  // and the answer body has not started yet. Mirrors the tool-call group,
+  // which shimmers for the whole run — so the title keeps its flowing light
+  // for as long as the model is thinking instead of flickering on and off
+  // between token chunks.
+  const reasoningStreaming =
+    message.streaming && reasoningContent.length > 0 && mainContent.trim().length === 0;
 
   // Collapsed-state live preview: the last three reasoning lines are rendered
   // into a 2-row viewport over a 3-row track. When a new line arrives the
@@ -313,49 +320,6 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
     };
   }, [reasoningContent]);
 
-  const reasoningUpdateTimerRef = useRef<number | null>(null);
-  const lastReasoningRef = useRef(reasoningContent);
-
-  useEffect(() => {
-    if (!message.streaming) {
-      if (reasoningUpdateTimerRef.current !== null) {
-        window.clearTimeout(reasoningUpdateTimerRef.current);
-        reasoningUpdateTimerRef.current = null;
-      }
-      setReasoningFlowActive(false);
-      lastReasoningRef.current = reasoningContent;
-      return;
-    }
-
-    if (!reasoningContent) {
-      setReasoningFlowActive(false);
-      return;
-    }
-
-    if (reasoningContent !== lastReasoningRef.current) {
-      lastReasoningRef.current = reasoningContent;
-      setReasoningFlowActive(true);
-
-      if (reasoningUpdateTimerRef.current !== null) {
-        window.clearTimeout(reasoningUpdateTimerRef.current);
-      }
-
-      // Keep the effect visible only while updates keep arriving.
-      reasoningUpdateTimerRef.current = window.setTimeout(() => {
-        setReasoningFlowActive(false);
-        reasoningUpdateTimerRef.current = null;
-      }, 700);
-    }
-  }, [message.streaming, reasoningContent]);
-
-  useEffect(() => {
-    return () => {
-      if (reasoningUpdateTimerRef.current !== null) {
-        window.clearTimeout(reasoningUpdateTimerRef.current);
-      }
-    };
-  }, []);
-
   return (
     <div
       className={`chat-message-shell ${isUser ? "user" : "assistant"}`}
@@ -371,8 +335,19 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
             open={reasoningOpen}
             onToggle={(e) => setReasoningOpen((e.target as HTMLDetailsElement).open)}
           >
-            <summary className={`message-reasoning-summary ${reasoningFlowActive ? "reasoning-flow-active" : ""}`}>
-              <span className="message-reasoning-title">Thought Process</span>
+            <summary className={`message-reasoning-summary${reasoningStreaming ? " reasoning-streaming" : ""}`}>
+              <span className="message-reasoning-head">
+                <span className="message-reasoning-title">Thought Process</span>
+                {/* Re-keyed on each new reasoning line, so the remount replays
+                    the spark animation and the brain blinks as thinking grows. */}
+                <span
+                  className="message-reasoning-brain"
+                  key={reasoningPreview.lineCount}
+                  aria-hidden="true"
+                >
+                  🧠
+                </span>
+              </span>
               {!reasoningOpen && reasoningPreview.current && (
                 <span
                   className={`reasoning-preview ${message.streaming ? "reasoning-preview-live" : ""}`}
