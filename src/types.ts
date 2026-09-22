@@ -5,6 +5,12 @@ export interface ToolCallEntry {
   status: "running" | "done" | "error";
   summary?: string;
   error?: string;
+  /**
+   * Set when this entry records a `use_skill` load. Persisted with the entry
+   * (DB `tool_calls` column) and sent back to the backend as `loaded_skills`,
+   * so a skill is loaded at most once per session.
+   */
+  skill_name?: string;
 }
 
 /**

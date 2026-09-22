@@ -148,6 +148,20 @@ function serializeContentForDb(content: MessageContent): string {
   return JSON.stringify(content);
 }
 
+/**
+ * Skills loaded earlier in the session, derived from the per-message
+ * tool-call entries. Sent to the backend as explicit `loaded_skills` state,
+ * so a skill is loaded at most once per session (and the backend never has
+ * to inspect message text).
+ */
+function loadedSkillsOfMessage(m: Message): string[] | undefined {
+  const names = (m.tool_calls ?? [])
+    .map((tc) => tc.skill_name)
+    .filter((n): n is string => typeof n === "string" && n.length > 0);
+  if (names.length === 0) return undefined;
+  return Array.from(new Set(names));
+}
+
 interface AgentStatus {
   status: "idle" | "running" | "done" | "error";
   description?: string;
@@ -695,6 +709,27 @@ export default function App() {
         updateActiveAssistantToolCalls(currentToolCallsRef.current);
         hasRunningToolCallRef.current = true;
       }),
+      listen<string>("skill-loaded", (e) => {
+        // Structured skill-load event. The entry carries `skill_name`, which
+        // is what later turns send back as `loaded_skills`.
+        const skillName = e.payload;
+        if (!skillName) return;
+        const entry: ToolCallEntry = {
+          task_id: crypto.randomUUID(),
+          agent_name: "Tool",
+          description: `🧠 Loading skill: ${skillName}`,
+          status: "running",
+          skill_name: skillName,
+        };
+        currentToolCallsRef.current = [
+          ...currentToolCallsRef.current.map((tc) =>
+            tc.status === "running" ? { ...tc, status: "done" as const } : tc
+          ),
+          entry,
+        ];
+        updateActiveAssistantToolCalls(currentToolCallsRef.current);
+        hasRunningToolCallRef.current = true;
+      }),
     );
     return () => {
       unlisteners.forEach((p) => p.then((fn) => fn()));
@@ -736,7 +771,12 @@ export default function App() {
 
     const history = [...messages, userMsg]
       .filter((m) => !m.streaming && !m.id.startsWith("agent-progress-") && m.role !== "tool_group")
-      .map((m) => ({ role: m.role, content: m.content, reasoning_content: m.reasoning_content }));
+      .map((m) => ({
+        role: m.role,
+        content: m.content,
+        reasoning_content: m.reasoning_content,
+        loaded_skills: loadedSkillsOfMessage(m),
+      }));
 
     saveHistory(
       sessionId,
@@ -850,7 +890,12 @@ export default function App() {
 
     const history = [...messages]
       .filter((m) => !m.streaming && !m.id.startsWith("agent-progress-") && m.role !== "tool_group")
-      .map((m) => ({ role: m.role, content: m.content, reasoning_content: m.reasoning_content }));
+      .map((m) => ({
+        role: m.role,
+        content: m.content,
+        reasoning_content: m.reasoning_content,
+        loaded_skills: loadedSkillsOfMessage(m),
+      }));
 
     let accumulatedContent = "";
     let accumulatedReasoning = "";

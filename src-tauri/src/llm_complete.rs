@@ -28,6 +28,53 @@ fn merge_allowed_commands(allowed_commands: &mut Vec<String>, incoming: &[String
     }
 }
 
+/// Union of the `loaded_skills` recorded across the conversation history, in
+/// first-seen order (deterministic, so the injected prompt prefix stays stable
+/// across turns). The UI records these names explicitly per message; nothing
+/// is inferred from message text.
+fn collect_loaded_skills(messages: &[ChatMessage]) -> Vec<String> {
+    let mut loaded: Vec<String> = Vec::new();
+    for m in messages {
+        let Some(names) = &m.loaded_skills else {
+            continue;
+        };
+        for name in names {
+            let name = name.trim();
+            if !name.is_empty() && !loaded.iter().any(|existing| existing == name) {
+                loaded.push(name.to_string());
+            }
+        }
+    }
+    loaded
+}
+
+/// Append the re-injected full-instructions block for a skill that is active
+/// in the session. The `--- Skill: <name> ---` framing is kept stable to avoid
+/// invalidating cached prompt prefixes.
+fn push_loaded_skill_block(
+    out: &mut String,
+    skill: &skills::Skill,
+    skill_dir: &Path,
+    skill_file: &Path,
+) {
+    let cmd_constraint = if skill.allowed_commands.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n[Allowed commands for this skill: {}]\n",
+            skill.allowed_commands.join(", ")
+        )
+    };
+    out.push_str(&format!(
+        "\n\n--- Skill: {} ---\n[Skill root: {}]\n[Skill file: {}]\n{}{}",
+        skill.name,
+        skill_dir.display(),
+        skill_file.display(),
+        cmd_constraint,
+        skill.system_prompt
+    ));
+}
+
 // ─── Chat ────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,6 +87,12 @@ pub struct ChatMessage {
     pub content: Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_content: Option<String>,
+    /// Names of the skills that were loaded (via `use_skill`) during this
+    /// message's turn, recorded explicitly by the UI. This is the durable
+    /// "already loaded" state across turns — the backend must not infer it
+    /// from message text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loaded_skills: Option<Vec<String>>,
 }
 
 /// Extract the textual portion of a `messages[].content` value.
@@ -98,6 +151,49 @@ mod tests {
         assert_eq!(content_to_text(&json!(null)), "");
         assert_eq!(content_to_text(&json!(42)), "");
         assert_eq!(content_to_text(&json!({})), "");
+    }
+
+    #[test]
+    fn collect_loaded_skills_unions_messages_in_first_seen_order() {
+        let messages = vec![
+            ChatMessage {
+                role: "user".into(),
+                content: json!("hi"),
+                reasoning_content: None,
+                loaded_skills: None,
+            },
+            ChatMessage {
+                role: "assistant".into(),
+                content: json!("loading"),
+                reasoning_content: None,
+                loaded_skills: Some(vec!["alpha".into(), "beta".into()]),
+            },
+            ChatMessage {
+                role: "assistant".into(),
+                content: json!("again"),
+                reasoning_content: None,
+                loaded_skills: Some(vec!["beta".into(), " gamma ".into(), String::new()]),
+            },
+        ];
+
+        assert_eq!(
+            collect_loaded_skills(&messages),
+            vec!["alpha", "beta", "gamma"]
+        );
+    }
+
+    #[test]
+    fn collect_loaded_skills_ignores_legacy_marker_text() {
+        // Text markers must no longer be treated as state: the old
+        // "🧠 *Loading skill: …*" scanning is exactly what broke dedup.
+        let messages = vec![ChatMessage {
+            role: "assistant".into(),
+            content: json!("🧠 *Loading skill: alpha*\n\nlegacy marker only"),
+            reasoning_content: None,
+            loaded_skills: None,
+        }];
+
+        assert!(collect_loaded_skills(&messages).is_empty());
     }
 }
 
@@ -993,26 +1089,11 @@ pub async fn chat_completion(
     let mut skill_allowed_commands: Vec<String> = Vec::new();
     let workspace_dir_for_roots = state.workspace_dir.lock().unwrap().clone();
 
-    // 1. Determine which skills have already been loaded in this session
-    // We scan the assistant messages for "🧠 *Loading skill: xxx*"
-    let mut activated_skills: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for m in &messages {
-        if m.role == "assistant" {
-            // `content` may now be a string OR a multimodal array — reduce
-            // to its text portion before scanning.
-            let text = content_to_text(&m.content);
-            let marker = "🧠 *Loading skill: ";
-            let mut start_idx = 0;
-            while let Some(idx) = text[start_idx..].find(marker) {
-                let actual_start = start_idx + idx + marker.len();
-                if let Some(end) = text[actual_start..].find('*') {
-                    let skill_name = text[actual_start..actual_start + end].trim().to_string();
-                    activated_skills.insert(skill_name);
-                }
-                start_idx = actual_start;
-            }
-        }
-    }
+    // 1. Skills already loaded earlier in this session. The UI records the
+    // names explicitly on each message (`loaded_skills`) — explicit state
+    // instead of scanning message text, which broke silently whenever the UI
+    // event plumbing changed.
+    let activated_skills = collect_loaded_skills(&messages);
 
     let mut system_content = config.system_message.clone(); //top-level system instructions from config
     let mut loaded_skills_content = String::new();
@@ -1038,8 +1119,9 @@ pub async fn chat_completion(
         without asking for confirmation.",
     ); //Add system info & explicit invocation syntax to system prompt
 
+    let ws_skills_dir = workspace_dir_for_roots.join("skills");
+
     for skill_name in &skill_ids {
-        let ws_skills_dir = workspace_dir_for_roots.join("skills");
         if let Ok(resolved_skill) =
             skills::resolve_skill_by_name(&ws_skills_dir, &state.skills_dir, skill_name)
         {
@@ -1059,23 +1141,38 @@ pub async fn chat_completion(
                 skill.name, skill.description
             ));
             if activated_skills.contains(&skill.name) {
-                let cmd_constraint = if skill.allowed_commands.is_empty() {
-                    String::new()
-                } else {
-                    format!(
-                        "\n[Allowed commands for this skill: {}]\n",
-                        skill.allowed_commands.join(", ")
-                    )
-                };
-                loaded_skills_content.push_str(&format!(
-                    "\n\n--- Skill: {} ---\n[Skill root: {}]\n[Skill file: {}]\n{}{}",
-                    skill.name,
-                    resolved_skill.skill_dir.display(),
-                    resolved_skill.skill_file.display(),
-                    cmd_constraint,
-                    skill.system_prompt
-                ));
+                push_loaded_skill_block(
+                    &mut loaded_skills_content,
+                    &skill,
+                    &resolved_skill.skill_dir,
+                    &resolved_skill.skill_file,
+                );
             }
+        }
+    }
+
+    // Skills loaded earlier in this session but no longer among the selected
+    // `skill_ids` (e.g. loaded dynamically, or deselected afterwards) keep
+    // their instructions pinned, so `use_skill` can report them as loaded
+    // without their content silently disappearing from the context.
+    for skill_name in &activated_skills {
+        if skill_ids.iter().any(|id| id == skill_name) {
+            continue;
+        }
+        if let Ok(resolved_skill) =
+            skills::resolve_skill_by_name(&ws_skills_dir, &state.skills_dir, skill_name)
+        {
+            let skill = resolved_skill.skill;
+            merge_allowed_commands(&mut skill_allowed_commands, &skill.allowed_commands);
+            if !active_skill_dirs.iter().any(|(n, _)| n == &skill.name) {
+                active_skill_dirs.push((skill.name.clone(), resolved_skill.skill_dir.clone()));
+            }
+            push_loaded_skill_block(
+                &mut loaded_skills_content,
+                &skill,
+                &resolved_skill.skill_dir,
+                &resolved_skill.skill_file,
+            );
         }
     }
 
@@ -1339,6 +1436,10 @@ pub async fn chat_completion(
     // the `memory` tool, so the automatic fallback doesn't duplicate it.
     let mut final_answer: Option<String> = None;
     let mut memory_tool_called = false;
+
+    // Skills loaded dynamically during this turn (the model can request the
+    // same skill again in a later tool-call round of the same turn).
+    let mut loaded_this_turn: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     loop {
         // Sanitize tool call pairs before each request to prevent the API error:
@@ -1605,17 +1706,15 @@ pub async fn chat_completion(
                 {
                     let skill = resolved_skill.skill;
                     let dyn_marker = format!("--- Skill (Dynamically Loaded): {} ---", skill.name);
-                    let static_marker = format!("--- Skill: {} ---", skill.name);
 
-                    let already_loaded = all_messages.iter().any(|msg| {
-                        let text = content_to_text(&msg["content"]);
-                        text.contains(&dyn_marker) || text.contains(&static_marker)
-                    }) || pending_skill_context_messages.iter().any(|msg| {
-                        let text = content_to_text(&msg["content"]);
-                        text.contains(&dyn_marker) || text.contains(&static_marker)
-                    });
+                    // Explicit "already loaded" state: recorded by earlier turns
+                    // (`loaded_skills` on the message history) or loaded earlier
+                    // in this same turn.
+                    let already_loaded = activated_skills.contains(&skill.name)
+                        || loaded_this_turn.contains(&skill.name);
 
                     if !already_loaded {
+                        loaded_this_turn.insert(skill.name.clone());
                         merge_allowed_commands(
                             &mut skill_allowed_commands,
                             &skill.allowed_commands,
@@ -1646,10 +1745,11 @@ pub async fn chat_completion(
                             "role": "user",
                             "content": skill_context
                         }));
-                        let _ = app.emit(
-                            "tool-call",
-                            format!("🧠 *Loading skill: {}*\n\n", skill_name),
-                        );
+                        // Structured state event: the UI records this on the
+                        // assistant message and sends it back as
+                        // `loaded_skills` on the next turn, so a skill is
+                        // loaded at most once per session.
+                        let _ = app.emit("skill-loaded", skill.name.clone());
                         format!(
                             "Skill '{}' loaded. Follow its instructions to fulfill the request.",
                             skill_name

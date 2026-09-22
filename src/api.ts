@@ -92,7 +92,13 @@ export interface StreamCallbacks {
 }
 
 export async function chatCompletion(
-  messages: { role: Message["role"]; content: MessageContent; reasoning_content?: string }[],
+  messages: {
+    role: Message["role"];
+    content: MessageContent;
+    reasoning_content?: string;
+    /** Skills loaded earlier in the session (assistant messages only). */
+    loaded_skills?: string[];
+  }[],
   skillIds: string[],
   sessionId: string,
   modelOverride: string | undefined,
@@ -141,7 +147,12 @@ export async function chatCompletion(
   unlisteners.push(unToken, unReasoning, unDone, unError, unTaskStart, unTaskDone, unTaskError, unPlanStart, unAggStart);
 
   invoke("chat_completion", {
-    messages: messages.map((m) => ({ role: m.role, content: m.content, reasoning_content: m.reasoning_content })),
+    messages: messages.map((m) => ({
+      role: m.role,
+      content: m.content,
+      reasoning_content: m.reasoning_content,
+      loaded_skills: m.loaded_skills,
+    })),
     skillIds,
     sessionId,
     modelOverride,
