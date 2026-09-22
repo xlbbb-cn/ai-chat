@@ -45,7 +45,7 @@ cargo check --manifest-path src-tauri/Cargo.toml \
 - **Streaming chat**: `chat_completion` command opens an SSE connection (`reqwest` + `futures-util`) and emits to the frontend:
   `chat-token`, `chat-reasoning-token`, `chat-done`, `chat-error`, `chat-usage`.
 - **Agent orchestration** (toggle via `use_agents` in config): `agent-plan-start`, `agent-task-start`, `agent-task-token`, `agent-task-done`, `agent-task-error`, `agent-aggregate-start`.
-- **Profiles**: `save_profile_config` / `apply_profile_config` / `delete_profile_config` zip skills + config for export/import. Triggered from the app menu (`save-profile` / `restore-profile`).
+- **Profiles / backup**: `src-tauri/src/backup.rs` owns profile export/import (app menu `save-profile` / `restore-profile`). The zip holds `config.json`, `profiles.json`, `mcp_servers.json`, `sub_agents.json`, `skills/`, `workspace/memory/`, `workspace/todos/` and a `chat.db` snapshot; import restores the workspace folders into the (possibly switched) active workspace. Named profiles inside the app (`save_profile_config` / `apply_profile_config` / `delete_profile_config`) are separate and stay in `lib.rs`.
 - **MCP warmup**: enabled servers in `mcp_servers.json` are spawned at app startup (`mcp::spawn_warmup`).
 - **API layer**: `src/api.ts` wraps `invoke` + `listen`. `src/types.ts` is the canonical TS shape for `AppConfig`, `Skill`, `McpServer`, `SubAgent`, `AgentOrchestration`, `Profile`, `AgentMissionSnapshot`.
 - **Persistence**: SQLite (`chat.db`) for history, API request monitor, interaction logs, and agent missions. `app.log` is written next to the DB.

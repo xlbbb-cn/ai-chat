@@ -2,8 +2,7 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 use tauri::{
@@ -12,10 +11,9 @@ use tauri::{
 };
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 use tauri_plugin_opener::OpenerExt;
-use uuid::Uuid;
-use zip::{write::FileOptions, ZipArchive, ZipWriter};
 
 pub mod agents;
+mod backup;
 mod db;
 mod llm_complete;
 mod logger;
@@ -32,10 +30,6 @@ const SAVE_PROFILE_MENU_ID: &str = "save-profile";
 const RESTORE_PROFILE_MENU_ID: &str = "restore-profile";
 const MARKDOWN_EDIT_MENU_ID: &str = "markdown-edit";
 const ABOUT_MENU_ID: &str = "about";
-const PROFILE_EXPORT_START_EVENT: &str = "profile-export-start";
-const PROFILE_EXPORT_STATUS_EVENT: &str = "profile-export-status";
-const PROFILE_EXPORT_DONE_EVENT: &str = "profile-export-done";
-const PROFILE_EXPORT_ERROR_EVENT: &str = "profile-export-error";
 const MARKDOWN_EDIT_OPEN_EVENT: &str = "markdown-edit-open";
 const MARKDOWN_EDIT_ERROR_EVENT: &str = "markdown-edit-error";
 const WORKSPACE_CHANGED_EVENT: &str = "workspace-changed";
@@ -57,58 +51,11 @@ fn resolve_workspace_path(app: &AppHandle, workspace_dir: Option<&str>) -> Resul
     })
 }
 
-fn add_path_to_zip(
-    zip: &mut ZipWriter<fs::File>,
-    base_dir: &Path,
-    path: &Path,
+pub(crate) fn apply_config(
+    app: &AppHandle,
+    state: &AppState,
+    config: AppConfig,
 ) -> Result<(), String> {
-    if path.is_dir() {
-        for entry in fs::read_dir(path).map_err(|e| e.to_string())? {
-            let entry = entry.map_err(|e| e.to_string())?;
-            add_path_to_zip(zip, base_dir, &entry.path())?;
-        }
-        return Ok(());
-    }
-
-    if path.is_file() {
-        let relative_path = path.strip_prefix(base_dir).map_err(|e| e.to_string())?;
-        let entry_name = format!(
-            "skills/{}",
-            relative_path.to_string_lossy().replace('\\', "/")
-        );
-        let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-        zip.start_file(entry_name, options)
-            .map_err(|e| e.to_string())?;
-
-        let mut file = fs::File::open(path).map_err(|e| e.to_string())?;
-        std::io::copy(&mut file, zip).map_err(|e| e.to_string())?;
-    }
-
-    Ok(())
-}
-
-fn emit_profile_export_status(app: &AppHandle, status: &str) {
-    let _ = app.emit(PROFILE_EXPORT_STATUS_EVENT, status.to_string());
-}
-
-fn escape_sql_string(value: &str) -> String {
-    value.replace('\'', "''")
-}
-
-fn backup_chat_db(state: &AppState) -> Result<PathBuf, String> {
-    let backup_path = state
-        .db_path
-        .with_file_name(format!("chat-export-{}.db", Uuid::new_v4()));
-    let escaped_path = escape_sql_string(&backup_path.to_string_lossy());
-
-    let db = state.db.lock().unwrap();
-    db.execute_batch(&format!("VACUUM INTO '{}';", escaped_path))
-        .map_err(|e| e.to_string())?;
-
-    Ok(backup_path)
-}
-
-fn apply_config(app: &AppHandle, state: &AppState, config: AppConfig) -> Result<(), String> {
     let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
     fs::write(&state.config_path, json).map_err(|e| e.to_string())?;
 
@@ -143,126 +90,6 @@ fn apply_config(app: &AppHandle, state: &AppState, config: AppConfig) -> Result<
     logger.set_output(logger_output);
     logger.log("INFO", "Configuration updated");
 
-    Ok(())
-}
-
-fn export_profile(app: &AppHandle, profile_path: &PathBuf) -> Result<(), String> {
-    let state = app.state::<AppState>();
-    if let Some(parent) = profile_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-
-    let file = fs::File::create(profile_path).map_err(|e| e.to_string())?;
-    let mut zip = ZipWriter::new(file);
-    let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-
-    emit_profile_export_status(app, "Writing config.json");
-    let config_json = serde_json::to_string_pretty(&state.config.lock().unwrap().clone())
-        .map_err(|e| e.to_string())?;
-    zip.start_file("config.json", options)
-        .map_err(|e| e.to_string())?;
-    zip.write_all(config_json.as_bytes())
-        .map_err(|e| e.to_string())?;
-
-    emit_profile_export_status(app, "Writing profiles.json");
-    let config_json = serde_json::to_string_pretty(&state.config.lock().unwrap().clone())
-        .map_err(|e| e.to_string())?;
-    zip.start_file("profiles.json", options)
-        .map_err(|e| e.to_string())?;
-    zip.write_all(config_json.as_bytes())
-        .map_err(|e| e.to_string())?;
-
-    emit_profile_export_status(app, "Writing mcp_servers.json");
-    let mcp_json = serde_json::json!({ "servers": mcp::load_servers(&state.mcp_servers_path) });
-    let mcp_json = serde_json::to_string_pretty(&mcp_json).map_err(|e| e.to_string())?;
-    zip.start_file("mcp_servers.json", options)
-        .map_err(|e| e.to_string())?;
-    zip.write_all(mcp_json.as_bytes())
-        .map_err(|e| e.to_string())?;
-
-    emit_profile_export_status(app, "Writing sub_agents.json");
-    let sub_agents_json = if state.agents_config_path.exists() {
-        fs::read_to_string(&state.agents_config_path).map_err(|e| e.to_string())?
-    } else {
-        serde_json::to_string_pretty(&agents::AgentsConfig::default()).map_err(|e| e.to_string())?
-    };
-    zip.start_file("sub_agents.json", options)
-        .map_err(|e| e.to_string())?;
-    zip.write_all(sub_agents_json.as_bytes())
-        .map_err(|e| e.to_string())?;
-
-    emit_profile_export_status(app, "Packing skills directory");
-    zip.add_directory("skills/", options)
-        .map_err(|e| e.to_string())?;
-    add_path_to_zip(&mut zip, &state.skills_dir, &state.skills_dir)?;
-
-    emit_profile_export_status(app, "Exporting chat.db (sending disabled during export)");
-    let chat_db_backup = backup_chat_db(&state)?;
-    let db_result = (|| -> Result<(), String> {
-        zip.start_file("chat.db", options)
-            .map_err(|e| e.to_string())?;
-        let mut db_file = fs::File::open(&chat_db_backup).map_err(|e| e.to_string())?;
-        std::io::copy(&mut db_file, &mut zip).map_err(|e| e.to_string())?;
-        Ok(())
-    })();
-    let _ = fs::remove_file(&chat_db_backup);
-    db_result?;
-
-    zip.finish().map_err(|e| e.to_string())?;
-    state.logger.lock().unwrap().log(
-        "INFO",
-        &format!("Profile saved to {}", profile_path.display()),
-    );
-    Ok(())
-}
-
-fn spawn_profile_export(app: AppHandle, profile_path: PathBuf) {
-    std::thread::spawn(move || {
-        let _ = app.emit(PROFILE_EXPORT_START_EVENT, ());
-        emit_profile_export_status(&app, "Preparing to export profile...");
-
-        match export_profile(&app, &profile_path) {
-            Ok(()) => {
-                let _ = app.emit(PROFILE_EXPORT_DONE_EVENT, ());
-            }
-            Err(err) => {
-                let _ = app.emit(PROFILE_EXPORT_ERROR_EVENT, err);
-            }
-        }
-    });
-}
-
-fn import_profile(app: &AppHandle, profile_path: &PathBuf) -> Result<(), String> {
-    let state = app.state::<AppState>();
-    let file = fs::File::open(profile_path).map_err(|e| e.to_string())?;
-    let mut archive = ZipArchive::new(file).map_err(|e| e.to_string())?;
-
-    let config: AppConfig = {
-        let mut config_file = archive
-            .by_name("config.json")
-            .map_err(|_| "missing config.json in profile archive".to_string())?;
-        let mut config_json = String::new();
-        config_file
-            .read_to_string(&mut config_json)
-            .map_err(|e| e.to_string())?;
-        serde_json::from_str(&config_json).map_err(|e| e.to_string())?
-    };
-
-    apply_config(app, &state, config)?;
-
-    if let Ok(mut agents_file) = archive.by_name("sub_agents.json") {
-        let mut sub_agents_json = String::new();
-        agents_file
-            .read_to_string(&mut sub_agents_json)
-            .map_err(|e| e.to_string())?;
-        fs::write(&state.agents_config_path, sub_agents_json).map_err(|e| e.to_string())?;
-    }
-
-    let _ = app.emit("profile-restored", ());
-    state.logger.lock().unwrap().log(
-        "INFO",
-        &format!("Profile restored from {}", profile_path.display()),
-    );
     Ok(())
 }
 
@@ -647,7 +474,7 @@ fn apply_profile_config(
     let mcp_json = serde_json::to_string_pretty(&mcp_file).map_err(|e| e.to_string())?;
     fs::write(&state.mcp_servers_path, mcp_json).map_err(|e| e.to_string())?;
 
-    let _ = app.emit("profile-restored", ());
+    let _ = app.emit(backup::PROFILE_RESTORED_EVENT, ());
     Ok(())
 }
 
@@ -674,7 +501,7 @@ pub fn run() {
                 {
                     let profile_path = path.into_path().map_err(|_| "unsupported save path").ok();
                     if let Some(profile_path) = profile_path {
-                        spawn_profile_export(app.clone(), profile_path);
+                        backup::spawn_profile_export(app.clone(), profile_path);
                     }
                 }
             } else if event.id() == RESTORE_PROFILE_MENU_ID {
@@ -686,7 +513,7 @@ pub fn run() {
                 {
                     let profile_path = path.into_path().map_err(|_| "unsupported profile path").ok();
                     if let Some(profile_path) = profile_path {
-                        if let Err(err) = import_profile(app, &profile_path) {
+                        if let Err(err) = backup::import_profile(app, &profile_path) {
                             app.state::<AppState>()
                                 .logger
                                 .lock()
