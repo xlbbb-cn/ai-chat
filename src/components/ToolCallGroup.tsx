@@ -1,5 +1,5 @@
 import type { Message, ToolCallEntry } from "../types";
-import { useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import "./ToolCallGroup.css";
 
 interface Props {
@@ -12,6 +12,46 @@ function statusIcon(status: ToolCallEntry["status"]): string {
   return "✕";
 }
 
+interface FlipRowProps {
+  /** Identity of the content currently shown; changing it triggers the flip. */
+  flipKey: string;
+  className?: string;
+  children: ReactNode;
+}
+
+/**
+ * Preview row (rows 2–3). A content swap plays a card flip: the outgoing
+ * render is parked on the hidden back face and the card is animated from
+ * edge-on, so the first frame still matches what was on screen before the
+ * swap and the new content never hard-cuts into place.
+ */
+function FlipRow({ flipKey, className, children }: FlipRowProps) {
+  // Previous render, kept around so it can rotate out as the back face.
+  const lastRenderRef = useRef<{ key: string; node: ReactNode }>({ key: flipKey, node: children });
+  const [outgoing, setOutgoing] = useState<ReactNode>(null);
+
+  if (lastRenderRef.current.key !== flipKey) {
+    // Render-phase adjustment: park the outgoing render on the back face and
+    // re-render immediately with the flip armed.
+    setOutgoing(lastRenderRef.current.node);
+  }
+  lastRenderRef.current = { key: flipKey, node: children };
+
+  return (
+    <span className={className}>
+      <span
+        className={`tool-call-flip${outgoing !== null ? " tool-call-flip--live" : ""}`}
+        onAnimationEnd={(e) => {
+          if (e.animationName === "tool-flip-in") setOutgoing(null);
+        }}
+      >
+        <span className="tool-call-flip-face">{children}</span>
+        <span className="tool-call-flip-face tool-call-flip-face--back">{outgoing}</span>
+      </span>
+    </span>
+  );
+}
+
 export function ToolCallGroup({ message }: Props) {
   const entries = message.tool_calls ?? [];
   const [open, setOpen] = useState(false);
@@ -20,6 +60,16 @@ export function ToolCallGroup({ message }: Props) {
   const isRunning = runningEntry !== undefined;
   const doneCount = entries.filter((e) => e.status === "done").length;
   const errorCount = entries.filter((e) => e.status === "error").length;
+
+  // Rows 2–3 preview the running tool call; once nothing is running the last
+  // entry stays put, so the next call gives the flip something to swap with.
+  // Row 3 only exists while the entry has a result — an empty row collapses
+  // instead of holding a blank line, so the card is 2 rows tall meanwhile.
+  const previewEntry = runningEntry ?? entries[entries.length - 1];
+  const previewSub = (previewEntry.summary ?? previewEntry.error ?? "").trim();
+  const previewSubClass = previewSub
+    ? "tool-call-preview-row tool-call-preview-sub"
+    : "tool-call-preview-row tool-call-preview-sub tool-call-preview-sub--empty";
 
   // Row 1 of the collapsed state: completion title.
   const titleLabel =
@@ -41,20 +91,26 @@ export function ToolCallGroup({ message }: Props) {
             <span className="tool-call-group-count">{entries.length} steps</span>
             <span className="tool-call-group-chevron">›</span>
           </span>
-          {!open && runningEntry && (
+          {!open && (
             <span className="tool-call-group-preview" aria-hidden="true">
-              <span className="tool-call-preview-row tool-call-preview-main">
+              <FlipRow
+                className="tool-call-preview-row tool-call-preview-main"
+                flipKey={previewEntry.task_id}
+              >
                 <span
-                  className={`tool-call-preview-icon tool-call-preview-icon--${runningEntry.status}`}
+                  className={`tool-call-preview-icon tool-call-preview-icon--${previewEntry.status}`}
                 >
-                  {statusIcon(runningEntry.status)}
+                  {statusIcon(previewEntry.status)}
                 </span>
-                <span className="tool-call-preview-name">[{runningEntry.agent_name}]</span>
-                <span className="tool-call-preview-desc">{runningEntry.description}</span>
-              </span>
-              <span className="tool-call-preview-row tool-call-preview-sub">
-                {runningEntry.summary ?? runningEntry.error ?? "\u00A0"}
-              </span>
+                <span className="tool-call-preview-name">[{previewEntry.agent_name}]</span>
+                <span className="tool-call-preview-desc">{previewEntry.description}</span>
+              </FlipRow>
+              <FlipRow
+                className={previewSubClass}
+                flipKey={`${previewEntry.task_id}|${previewSub}`}
+              >
+                {previewSub}
+              </FlipRow>
             </span>
           )}
         </summary>

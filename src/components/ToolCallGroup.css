@@ -156,6 +156,8 @@
     color: var(--ts-pewter, var(--c-muted));
     white-space: nowrap;
     overflow: hidden;
+    /* 3D scene for the flip card inside. */
+    perspective: 320px;
     -webkit-mask-image: linear-gradient(90deg, #000 75%, transparent 100%);
     mask-image: linear-gradient(90deg, #000 75%, transparent 100%);
 }
@@ -188,6 +190,83 @@
 .tool-call-preview-sub {
     color: var(--ts-silver, var(--c-muted));
     opacity: 0.55;
+}
+
+/* Row 3 exists only while the entry has a result: while it is empty the row
+   is taken out of flow, so the card keeps a 2-row height and the flex gap
+   does not reserve space either. The flip row stays mounted, which lets the
+   result text still flip in when it arrives. */
+.tool-call-preview-sub--empty {
+    display: none;
+}
+
+/* Rows 2–3 — flip card. Both faces share one grid cell so the row keeps a
+   single-line height; the card rotates flat onto the new content. */
+.tool-call-flip {
+    flex: 1;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    transform-style: preserve-3d;
+}
+
+/* Armed on content replacement: starts edge-on showing the outgoing face
+   (i.e. the frame that was on screen before the swap) and settles flat. */
+.tool-call-flip--live {
+    animation: tool-flip-in 0.4s cubic-bezier(0.5, 0, 0.2, 1.1);
+}
+
+@keyframes tool-flip-in {
+    from {
+        transform: rotateX(180deg);
+    }
+
+    to {
+        transform: rotateX(0deg);
+    }
+}
+
+.tool-call-flip-face {
+    grid-area: 1 / 1;
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+}
+
+.tool-call-flip-face--back {
+    transform: rotateX(180deg);
+}
+
+/* Flowing light across the concrete command that is executing. */
+.tool-call-group--running .tool-call-preview-desc {
+    background: linear-gradient(90deg,
+            var(--ts-pewter, var(--c-muted)) 0%,
+            var(--ts-pewter, var(--c-muted)) 35%,
+            var(--ts-blue, var(--c-accent)) 50%,
+            var(--ts-pewter, var(--c-muted)) 65%,
+            var(--ts-pewter, var(--c-muted)) 100%);
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: title-shimmer-flow 1.6s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    /* No flip and no sweeping highlight — the preview just swaps content. */
+    .tool-call-flip--live,
+    .tool-call-group--running .tool-call-preview-desc {
+        animation: none;
+    }
+
+    .tool-call-group--running .tool-call-preview-desc {
+        background: none;
+        -webkit-text-fill-color: currentColor;
+    }
 }
 
 .tool-call-group-list {
