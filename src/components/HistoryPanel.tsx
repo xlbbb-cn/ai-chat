@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
-import { loadHistory, deleteHistory, listSessionMeta, updateSessionMeta } from "../api";
-import type { HistoryRecord, SessionMeta } from "../api";
+import { listHistorySessions, loadSessionMessages, deleteHistory, listSessionMeta, updateSessionMeta } from "../api";
+import type { HistoryRecord, HistorySessionSummary, SessionMeta } from "../api";
 import type { Attachment, Message, MessageContent, ToolCallEntry } from "../types";
 import "./HistoryPanel.css";
 
@@ -24,21 +24,6 @@ function formatHistoryTimestamp(timestamp: string): string {
     hour: "2-digit",
     minute: "2-digit",
   }).format(parsed);
-}
-
-function getSessionCreatedAt(sessionRecords: HistoryRecord[]): string {
-  let earliest = Number.POSITIVE_INFINITY;
-  let createdAt = sessionRecords[0]?.timestamp ?? "";
-
-  for (const record of sessionRecords) {
-    const parsed = Date.parse(record.timestamp);
-    if (!Number.isNaN(parsed) && parsed < earliest) {
-      earliest = parsed;
-      createdAt = record.timestamp;
-    }
-  }
-
-  return createdAt;
 }
 
 /**
@@ -73,65 +58,114 @@ function parseStoredAttachments(raw: string | undefined): Attachment[] | undefin
   return undefined;
 }
 
+/**
+ * Convert the DB rows of one session into renderable chat messages. All
+ * columns (tool calls, reasoning, attachments) are restored so the loaded
+ * conversation renders exactly like the live one.
+ */
+function recordsToMessages(sessionRecords: HistoryRecord[]): Message[] {
+  const messages: Message[] = [];
+  for (const r of sessionRecords) {
+    let toolCalls: ToolCallEntry[] | undefined;
+    if (r.tool_calls) {
+      try {
+        const parsed = (JSON.parse(r.tool_calls) as ToolCallEntry[]).map((e) => ({
+          ...e,
+          status: "done" as const,
+        }));
+        if (parsed.length > 0) toolCalls = parsed;
+      } catch { /* ignore malformed */ }
+    }
+    const attachments = parseStoredAttachments(r.attachments);
+    messages.push({
+      id: crypto.randomUUID(),
+      role: r.role as "user" | "assistant",
+      content: parseStoredContent(r.content),
+      ...(attachments ? { attachments } : {}),
+      tool_calls: toolCalls,
+      ...(r.reasoning_content ? { reasoning_content: r.reasoning_content } : {}),
+      dbId: r.id,
+    });
+  }
+  return messages;
+}
+
 export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = false, onClose }: Props) {
-  const [records, setRecords] = useState<HistoryRecord[]>([]);
+  const [summaries, setSummaries] = useState<HistorySessionSummary[]>([]);
   const [searchKeyword, setSearchKeyword] = useState("");
+  // Content-search hits, tagged with the keyword they answer so a slow query
+  // can never filter a newer keyword's results.
+  const [contentMatches, setContentMatches] = useState<{ keyword: string; ids: Set<string> } | null>(null);
   const [activeTab, setActiveTab] = useState<HistoryTab>("all");
   const [metaMap, setMetaMap] = useState<Map<string, SessionMeta>>(new Map());
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
+  const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
 
   useEffect(() => {
-    loadHistory().then(setRecords).catch(console.error);
+    listHistorySessions().then(setSummaries).catch(console.error);
     listSessionMeta()
       .then((metas) => setMetaMap(new Map(metas.map((m) => [m.session_id, m]))))
       .catch(console.error);
   }, []);
 
-  const sessions = useMemo(() => {
-    const map = new Map<string, HistoryRecord[]>();
-    for (const rec of records) {
-      if (!map.has(rec.session_id)) map.set(rec.session_id, []);
-      map.get(rec.session_id)!.push(rec);
+  // Message-content search runs in SQLite — the panel only holds session
+  // summaries, so the full history never has to fit in the webview. The
+  // keyword is debounced to keep typing from firing a query per keystroke.
+  useEffect(() => {
+    const keyword = searchKeyword.trim();
+    if (!keyword) {
+      setContentMatches(null);
+      return;
     }
-    return Array.from(map.entries()).reverse();
-  }, [records]);
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      listHistorySessions(keyword)
+        .then((matches) => {
+          if (!cancelled) {
+            setContentMatches({ keyword, ids: new Set(matches.map((m) => m.session_id)) });
+          }
+        })
+        .catch((err) => console.error("History search failed:", err));
+    }, 180);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [searchKeyword]);
 
   const tabFilteredSessions = useMemo(() => {
-    if (activeTab === "all") return sessions;
-    return sessions.filter(([sid]) => {
-      const meta = metaMap.get(sid);
+    if (activeTab === "all") return summaries;
+    return summaries.filter((summary) => {
+      const meta = metaMap.get(summary.session_id);
       return activeTab === "favorites" ? !!meta?.favorite : !!meta?.archived;
     });
-  }, [activeTab, sessions, metaMap]);
+  }, [activeTab, summaries, metaMap]);
 
   const filteredSessions = useMemo(() => {
     const keyword = searchKeyword.trim().toLowerCase();
     if (!keyword) return tabFilteredSessions;
 
-    return tabFilteredSessions.filter(([sid, recs]) => {
+    const matchIds = contentMatches?.keyword === keyword.trim() ? contentMatches.ids : null;
+
+    return tabFilteredSessions.filter(({ session_id: sid }) => {
       const meta = metaMap.get(sid);
       if (meta?.title?.toLowerCase().includes(keyword)) return true;
       if (sid.toLowerCase().includes(keyword)) return true;
-      return recs.some((rec) => {
-        const parsed = parseStoredContent(rec.content);
-        if (typeof parsed === "string") {
-          return parsed.toLowerCase().includes(keyword);
-        }
-        return parsed.some(
-          (p) => p.type === "text" && p.text.toLowerCase().includes(keyword),
-        );
-      });
+      // Message-content hits arrive from the backend (debounced above).
+      return matchIds?.has(sid) ?? false;
     });
-  }, [searchKeyword, tabFilteredSessions, metaMap]);
+  }, [searchKeyword, tabFilteredSessions, metaMap, contentMatches]);
 
-  function getSessionTitle(sid: string, recs: HistoryRecord[]): string {
-    const meta = metaMap.get(sid);
+  function getSessionTitle(summary: HistorySessionSummary): string {
+    const meta = metaMap.get(summary.session_id);
     if (meta?.title && meta.title.trim()) return meta.title;
-    const userRec = recs.find((r) => r.role === "user");
-    if (!userRec) return "(empty)";
-    const parsed = parseStoredContent(userRec.content);
-    if (typeof parsed === "string") return parsed;
+    // The backend sends the first user message's text only (extracted from
+    // multimodal content and clamped), so the list stays lightweight.
+    const parsed = parseStoredContent(summary.first_user_content);
+    if (typeof parsed === "string") return parsed.trim() || "(empty)";
     const textPart = parsed.find((p) => p.type === "text");
     return textPart?.text ?? "(attachment)";
   }
@@ -155,9 +189,9 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
     }
   }
 
-  function startRename(sid: string, recs: HistoryRecord[]) {
-    setRenamingSessionId(sid);
-    setRenameDraft(getSessionTitle(sid, recs));
+  function startRename(summary: HistorySessionSummary) {
+    setRenamingSessionId(summary.session_id);
+    setRenameDraft(getSessionTitle(summary));
   }
 
   function commitRename(sid: string) {
@@ -167,47 +201,32 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
     setRenameDraft("");
   }
 
-  function handleLoad(sessionId: string, sessionRecords: HistoryRecord[]) {
-    if (disableSessionSwitch) return;
+  /** Fetch one session's complete message list and hand it to the app. */
+  async function handleLoad(sessionId: string) {
+    if (disableSessionSwitch || loadingSessionId) return;
 
-    const messages: Message[] = [];
-    for (const r of sessionRecords) {
-      let toolCalls: ToolCallEntry[] | undefined;
-      if (r.tool_calls) {
-        try {
-          const parsed = (JSON.parse(r.tool_calls) as ToolCallEntry[]).map((e) => ({
-            ...e,
-            status: "done" as const,
-          }));
-          if (parsed.length > 0) toolCalls = parsed;
-        } catch { /* ignore malformed */ }
-      }
-      const attachments = parseStoredAttachments(r.attachments);
-      messages.push({
-        id: crypto.randomUUID(),
-        role: r.role as "user" | "assistant",
-        content: parseStoredContent(r.content),
-        ...(attachments ? { attachments } : {}),
-        tool_calls: toolCalls,
-        ...(r.reasoning_content ? { reasoning_content: r.reasoning_content } : {}),
-        dbId: r.id,
-      });
+    setLoadingSessionId(sessionId);
+    try {
+      const sessionRecords = await loadSessionMessages(sessionId);
+      onLoad(sessionId, recordsToMessages(sessionRecords));
+    } catch (err) {
+      console.error("Failed to load session messages:", err);
+    } finally {
+      setLoadingSessionId(null);
     }
-
-    onLoad(sessionId, messages);
   }
 
   async function handleDelete(e: React.MouseEvent, sessionId: string) {
     e.stopPropagation();
     if (disableSessionSwitch) return;
 
-    const currentSessions = tabFilteredSessions;
-    const deletedIndex = currentSessions.findIndex(([sid]) => sid === sessionId);
-    const remainingSessions = currentSessions.filter(([sid]) => sid !== sessionId);
+    const currentSessions = filteredSessions;
+    const deletedIndex = currentSessions.findIndex((s) => s.session_id === sessionId);
+    const remainingSessions = currentSessions.filter((s) => s.session_id !== sessionId);
 
     try {
       await deleteHistory(sessionId);
-      setRecords((prev) => prev.filter((r) => r.session_id !== sessionId));
+      setSummaries((prev) => prev.filter((s) => s.session_id !== sessionId));
       setMetaMap((prev) => {
         const next = new Map(prev);
         next.delete(sessionId);
@@ -217,8 +236,7 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
       if (remainingSessions.length > 0) {
         const targetIndex = deletedIndex > 0 ? deletedIndex - 1 : 0;
         const safeIndex = Math.min(targetIndex, remainingSessions.length - 1);
-        const [nextSessionId, nextSessionRecords] = remainingSessions[safeIndex];
-        handleLoad(nextSessionId, nextSessionRecords);
+        await handleLoad(remainingSessions[safeIndex].session_id);
       }
     } catch (err) {
       console.error("Failed to delete history:", err);
@@ -264,7 +282,7 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
       </div>
 
       <div className="history-list">
-        {sessions.length === 0 ? (
+        {summaries.length === 0 ? (
           <p className="history-empty">No history yet.</p>
         ) : filteredSessions.length === 0 ? (
           <p className="history-empty">
@@ -275,19 +293,21 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
                 : "No archived sessions."}
           </p>
         ) : (
-          filteredSessions.map(([sid, recs]) => {
+          filteredSessions.map((summary) => {
+            const sid = summary.session_id;
             const meta = metaMap.get(sid);
             const isFavorite = !!meta?.favorite;
             const isArchived = !!meta?.archived;
             const isCurrent = sid === currentSessionId;
-            const createdAt = formatHistoryTimestamp(getSessionCreatedAt(recs));
+            const isLoading = loadingSessionId === sid;
+            const createdAt = formatHistoryTimestamp(summary.created_at);
             const isRenaming = renamingSessionId === sid;
-            const title = getSessionTitle(sid, recs);
+            const title = getSessionTitle(summary);
             return (
               <div
                 key={sid}
-                className={`history-item ${isCurrent ? "active" : ""} ${disableSessionSwitch ? "disabled" : ""} ${isArchived ? "archived" : ""}`}
-                onClick={() => handleLoad(sid, recs)}
+                className={`history-item ${isCurrent ? "active" : ""} ${disableSessionSwitch ? "disabled" : ""} ${isArchived ? "archived" : ""} ${isLoading ? "loading" : ""}`}
+                onClick={() => void handleLoad(sid)}
               >
                 <div className="history-content">
                   {isRenaming ? (
@@ -313,7 +333,8 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
                   )}
                   <div className="history-footer">
                     <span className="history-meta">
-                      {recs.length} messages{isCurrent ? " · current" : ""}{isArchived ? " · archived" : ""}
+                      {isLoading ? "Loading…" : `${summary.message_count} messages`}
+                      {isCurrent ? " · current" : ""}{isArchived ? " · archived" : ""}
                     </span>
                     <span className="history-created">Created {createdAt}</span>
                   </div>
@@ -333,7 +354,7 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
                     className="history-action-btn"
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (!isRenaming) startRename(sid, recs);
+                      if (!isRenaming) startRename(summary);
                     }}
                     title="Rename session"
                   >

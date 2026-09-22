@@ -185,6 +185,34 @@
   background: transparent;
 }
 
+/* Session messages are fetched on click; dim the row until they arrive. */
+.history-item.loading {
+  opacity: 0.6;
+}
+
+.history-item.loading .history-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-style: italic;
+}
+
+.history-item.loading .history-meta::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border: 2px solid transparent;
+  border-top-color: var(--c-accent);
+  border-radius: 50%;
+  animation: history-spin 0.8s linear infinite;
+}
+
+@keyframes history-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .history-item.disabled .history-delete-btn {
   opacity: 0;
   pointer-events: none;

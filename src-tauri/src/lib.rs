@@ -663,6 +663,12 @@ pub fn run() {
             // databases (without the column) upgrade in place; new rows
             // always include it.
             let _ = db.execute("ALTER TABLE history ADD COLUMN attachments TEXT", []);
+            // The sidebar lists sessions and loads one session at a time, both
+            // filtered by `session_id`.
+            db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_history_session_id ON history (session_id, id)",
+                [],
+            ).unwrap();
             let _ = db.execute("ALTER TABLE api_requests ADD COLUMN reasoning_content TEXT", []);
             // Session meta: per-session title / favorite / archived flags.
             // Kept in a separate table so history rows stay append-only.
@@ -818,7 +824,8 @@ pub fn run() {
             skills::delete_skill,
             skills::filter_existing_skills,
             db::save_history,
-            db::load_history,
+            db::list_history_sessions,
+            db::load_session_messages,
             db::delete_history,
             db::delete_message,
             db::fork_session,

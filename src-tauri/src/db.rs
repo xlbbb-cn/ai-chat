@@ -37,19 +37,115 @@ pub fn save_history(
     Ok(id)
 }
 
-#[tauri::command]
-pub fn load_history(
-    state: tauri::State<'_, crate::AppState>,
-) -> Result<Vec<HistoryRecord>, String> {
-    let db = state.db.lock().unwrap();
-    let mut stmt = db
-        .prepare(
-            "SELECT id, session_id, role, content, COALESCE(timestamp, ''), tool_calls, reasoning_content, attachments \
-             FROM history ORDER BY id ASC LIMIT 500",
-        )
-        .map_err(|e| e.to_string())?;
-    let history = stmt
-        .query_map([], |row| {
+/// One row of the history sidebar: everything the session list needs, without
+/// the (potentially huge) message bodies. Message content is fetched per
+/// session via [`load_session_messages`] when the user opens it.
+#[derive(Serialize)]
+pub struct HistorySessionSummary {
+    pub session_id: String,
+    pub message_count: i64,
+    /// Timestamp of the session's first message.
+    pub created_at: String,
+    /// Text of the session's first user message, clamped — used as the
+    /// default session title when no custom title is set.
+    pub first_user_content: String,
+}
+
+/// Longest title snippet stored per session. Only ever used to render a
+/// truncated one-line label, so the full message body is never needed.
+const SESSION_TITLE_SNIPPET_CHARS: usize = 512;
+
+/// Escape `%`, `_` and the escape character itself so a keyword is matched
+/// literally (a user typing `%` must not turn the search into a wildcard).
+pub(crate) fn escape_like(keyword: &str) -> String {
+    let mut escaped = String::with_capacity(keyword.len());
+    for ch in keyword.chars() {
+        if matches!(ch, '\\' | '%' | '_') {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped
+}
+
+/// List every session with its message count and title snippet.
+///
+/// The keyword filter selects whole sessions (never individual rows), so a
+/// match inside one message still reports the session's true message count
+/// and never cuts a session in half. Passing `None` returns every session —
+/// this query has no row cap, which is what keeps older conversations
+/// reachable from the sidebar.
+pub(crate) fn query_history_sessions(
+    conn: &Connection,
+    keyword: Option<&str>,
+) -> rusqlite::Result<Vec<HistorySessionSummary>> {
+    let pattern = keyword
+        .map(str::trim)
+        .filter(|k| !k.is_empty())
+        .map(|k| format!("%{}%", escape_like(k)));
+
+    // The title snippet resolves to plain text even for multimodal rows:
+    // their `content` is a JSON array, so the first `text` part is extracted
+    // before clamping. `->>` / `json_each` need SQLite's JSON1 (built into
+    // the bundled SQLite).
+    let mut stmt = conn.prepare(
+        "SELECT h.session_id, \
+                COUNT(*), \
+                COALESCE(MIN(h.timestamp), ''), \
+                COALESCE(( \
+                    SELECT substr( \
+                        CASE WHEN json_valid(u.content) AND json_type(u.content) = 'array' \
+                             THEN COALESCE(( \
+                                 SELECT je.value ->> 'text' FROM json_each(u.content) je \
+                                 WHERE je.value ->> 'type' = 'text' LIMIT 1 \
+                             ), '') \
+                             ELSE u.content END, 1, ?2) \
+                    FROM history u \
+                    WHERE u.session_id = h.session_id AND u.role = 'user' \
+                    ORDER BY u.id ASC LIMIT 1 \
+                ), '') \
+         FROM history h \
+         WHERE ?1 IS NULL \
+            OR h.session_id LIKE ?1 ESCAPE '\\' \
+            OR EXISTS ( \
+                   SELECT 1 FROM history m \
+                   WHERE m.session_id = h.session_id AND m.content LIKE ?1 ESCAPE '\\' \
+               ) \
+         GROUP BY h.session_id \
+         ORDER BY MAX(h.id) DESC",
+    )?;
+
+    let sessions = stmt
+        .query_map(
+            rusqlite::params![pattern, SESSION_TITLE_SNIPPET_CHARS as i64],
+            |row| {
+                Ok(HistorySessionSummary {
+                    session_id: row.get(0)?,
+                    message_count: row.get(1)?,
+                    created_at: row.get(2)?,
+                    first_user_content: row.get(3)?,
+                })
+            },
+        )?
+        .filter_map(Result::ok)
+        .collect();
+
+    Ok(sessions)
+}
+
+/// Load every message of one session, oldest first. Crucially this has no
+/// row cap: opening a conversation must show it in full.
+pub(crate) fn query_session_messages(
+    conn: &Connection,
+    session_id: &str,
+) -> rusqlite::Result<Vec<HistoryRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, session_id, role, content, COALESCE(timestamp, ''), tool_calls, reasoning_content, attachments \
+         FROM history WHERE session_id = ?1 ORDER BY id ASC",
+    )?;
+
+    let messages = stmt
+        .query_map(rusqlite::params![session_id], |row| {
             Ok(HistoryRecord {
                 id: row.get(0)?,
                 session_id: row.get(1)?,
@@ -60,12 +156,32 @@ pub fn load_history(
                 reasoning_content: row.get(6)?,
                 attachments: row.get(7)?,
             })
-        })
-        .map_err(|e| e.to_string())?
+        })?
         .filter_map(Result::ok)
         .collect();
 
-    Ok(history)
+    Ok(messages)
+}
+
+/// Lightweight session list for the history sidebar. `keyword` filters by
+/// session id, message content or the first user message.
+#[tauri::command]
+pub fn list_history_sessions(
+    keyword: Option<String>,
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<Vec<HistorySessionSummary>, String> {
+    let db = state.db.lock().unwrap();
+    query_history_sessions(&db, keyword.as_deref()).map_err(|e| e.to_string())
+}
+
+/// Load all messages of one session (no truncation).
+#[tauri::command]
+pub fn load_session_messages(
+    session_id: String,
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<Vec<HistoryRecord>, String> {
+    let db = state.db.lock().unwrap();
+    query_session_messages(&db, &session_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -662,4 +778,172 @@ pub fn clear_interactions(
     )
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE history (\
+                id INTEGER PRIMARY KEY, \
+                session_id TEXT, \
+                role TEXT, \
+                content TEXT, \
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, \
+                tool_calls TEXT, \
+                reasoning_content TEXT, \
+                attachments TEXT\
+            )",
+            [],
+        )
+        .unwrap();
+        conn
+    }
+
+    fn insert(conn: &Connection, session_id: &str, role: &str, content: &str) {
+        conn.execute(
+            "INSERT INTO history (session_id, role, content) VALUES (?1, ?2, ?3)",
+            rusqlite::params![session_id, role, content],
+        )
+        .unwrap();
+    }
+
+    /// Regression: the sidebar must list sessions that start past any fixed
+    /// row offset (the old `ORDER BY id ASC LIMIT 500` dropped them).
+    #[test]
+    fn session_list_is_not_capped_by_row_offset() {
+        let conn = test_conn();
+        for session in 0..60 {
+            for message in 0..12 {
+                insert(
+                    &conn,
+                    &format!("session-{session:02}"),
+                    "user",
+                    &format!("m{message}"),
+                );
+            }
+        }
+
+        let sessions = query_history_sessions(&conn, None).unwrap();
+        assert_eq!(sessions.len(), 60, "every session must be listed");
+        assert!(sessions.iter().all(|s| s.message_count == 12));
+        assert!(sessions.iter().any(|s| s.session_id == "session-00"));
+        assert!(sessions.iter().any(|s| s.session_id == "session-59"));
+    }
+
+    /// Sessions are ordered by most recent activity, so a resumed
+    /// conversation moves back to the top.
+    #[test]
+    fn session_list_orders_by_last_activity() {
+        let conn = test_conn();
+        insert(&conn, "old", "user", "old first");
+        insert(&conn, "new", "user", "new first");
+        insert(&conn, "old", "assistant", "old resumed");
+
+        let sessions = query_history_sessions(&conn, None).unwrap();
+        assert_eq!(
+            sessions
+                .iter()
+                .map(|s| s.session_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["old", "new"]
+        );
+    }
+
+    /// A keyword hit in one message must not shrink the session's count nor
+    /// hide the other messages of that session.
+    #[test]
+    fn keyword_filter_returns_whole_session() {
+        let conn = test_conn();
+        insert(&conn, "hit", "user", "first message");
+        insert(&conn, "hit", "assistant", "buried needle here");
+        insert(&conn, "hit", "user", "last message");
+        insert(&conn, "miss", "user", "unrelated");
+
+        let sessions = query_history_sessions(&conn, Some("needle")).unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, "hit");
+        assert_eq!(
+            sessions[0].message_count, 3,
+            "count covers the whole session"
+        );
+
+        let messages = query_session_messages(&conn, "hit").unwrap();
+        assert_eq!(messages.len(), 3, "opening the session shows every message");
+    }
+
+    /// `%` and `_` typed by the user are literal, not wildcards.
+    #[test]
+    fn keyword_wildcards_are_literal() {
+        let conn = test_conn();
+        insert(&conn, "literal", "user", "100% done");
+        insert(&conn, "other", "user", "nothing to see");
+
+        let sessions = query_history_sessions(&conn, Some("%")).unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, "literal");
+    }
+
+    /// The list payload carries a title snippet only — never the full row.
+    #[test]
+    fn session_list_extracts_title_text_from_multimodal_content() {
+        let conn = test_conn();
+        let multimodal = r#"[{"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA"}},{"type":"text","text":"describe this chart"}]"#;
+        insert(&conn, "multi", "user", multimodal);
+        insert(&conn, "multi", "assistant", "a chart");
+        insert(&conn, "plain", "user", "plain title");
+
+        let sessions = query_history_sessions(&conn, None).unwrap();
+        let multi = sessions.iter().find(|s| s.session_id == "multi").unwrap();
+        assert_eq!(multi.first_user_content, "describe this chart");
+        assert!(
+            !multi.first_user_content.contains("base64"),
+            "base64 payloads must not leak into the sidebar payload"
+        );
+
+        let plain = sessions.iter().find(|s| s.session_id == "plain").unwrap();
+        assert_eq!(plain.first_user_content, "plain title");
+    }
+
+    /// The title snippet is clamped so a huge first message cannot bloat the
+    /// session list.
+    #[test]
+    fn session_list_clamps_title_snippet() {
+        let conn = test_conn();
+        insert(&conn, "long", "user", &"x".repeat(5_000));
+
+        let sessions = query_history_sessions(&conn, None).unwrap();
+        assert_eq!(
+            sessions[0].first_user_content.chars().count(),
+            SESSION_TITLE_SNIPPET_CHARS
+        );
+    }
+
+    /// Regression: opening a session must load all of its messages, even when
+    /// the session alone exceeds the old global 500-row window.
+    #[test]
+    fn session_messages_load_completely_beyond_500_rows() {
+        let conn = test_conn();
+        for i in 0..550 {
+            insert(&conn, "big", "user", &format!("message {i}"));
+        }
+        for i in 0..40 {
+            insert(&conn, "small", "user", &format!("other {i}"));
+        }
+
+        let messages = query_session_messages(&conn, "big").unwrap();
+        assert_eq!(messages.len(), 550);
+        assert_eq!(messages.first().unwrap().content, "message 0");
+        assert_eq!(messages.last().unwrap().content, "message 549");
+    }
+
+    #[test]
+    fn escape_like_escapes_wildcards_and_backslash() {
+        assert_eq!(escape_like("100%"), "100\\%");
+        assert_eq!(escape_like("a_b"), "a\\_b");
+        assert_eq!(escape_like("c\\d"), "c\\\\d");
+    }
 }

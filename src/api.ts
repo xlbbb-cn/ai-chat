@@ -242,8 +242,27 @@ export interface HistoryRecord {
   attachments?: string;
 }
 
-export async function loadHistory(): Promise<HistoryRecord[]> {
-  return invoke("load_history");
+/** One row of the history sidebar — no message bodies. */
+export interface HistorySessionSummary {
+  session_id: string;
+  message_count: number;
+  created_at: string;
+  /** First user message text (clamped), used as the default title. */
+  first_user_content: string;
+}
+
+/**
+ * List history sessions (newest activity first). `keyword` filters by session
+ * id, message content or the first user message; omit it to list everything.
+ * The payload never contains full message bodies.
+ */
+export async function listHistorySessions(keyword?: string): Promise<HistorySessionSummary[]> {
+  return invoke("list_history_sessions", { keyword: keyword?.trim() ? keyword : null });
+}
+
+/** Load every message of one session, oldest first (no truncation). */
+export async function loadSessionMessages(sessionId: string): Promise<HistoryRecord[]> {
+  return invoke("load_session_messages", { sessionId });
 }
 
 export async function deleteHistory(sessionId: string): Promise<void> {
