@@ -9,6 +9,7 @@ import {
     clearMcpLogs,
 } from "../api";
 import type { McpServer, McpTransport, McpLogEntry } from "../types";
+import { useI18n } from "../i18n";
 import "./McpPanel.css";
 
 interface Props {
@@ -47,6 +48,7 @@ function formatLogTime(ts: number): string {
 }
 
 export function McpPanel({ onClose, onServersChange }: Props) {
+    const { t } = useI18n();
     const [servers, setServers] = useState<McpServer[]>([]);
     const [editing, setEditing] = useState<McpServer | null>(null);
     const [testStatus, setTestStatus] = useState<Record<string, { ok: boolean; msg: string }>>({});
@@ -228,50 +230,50 @@ export function McpPanel({ onClose, onServersChange }: Props) {
         return (
             <div className="mcp-panel">
                 <div className="mcp-header">
-                    <h2>{servers.some((s) => s.id === editing.id) ? "Edit" : "Add"} MCP Server</h2>
+                    <h2>{servers.some((s) => s.id === editing.id) ? t("mcp.editTitle") : t("mcp.addTitle")}</h2>
                     <button className="close-btn" onClick={() => setEditing(null)}>✕</button>
                 </div>
 
                 <div className="mcp-form">
-                    <label>Name</label>
+                    <label>{t("mcp.name")}</label>
                     <input
                         className="mcp-input"
                         value={editing.name}
                         onChange={(e) => setEditing({ ...editing, name: e.target.value })}
-                        placeholder="My MCP Server"
+                        placeholder={t("mcp.namePlaceholder")}
                     />
 
-                    <label>Transport</label>
+                    <label>{t("mcp.transport")}</label>
                     <select
                         className="mcp-select"
                         value={editing.transport}
                         onChange={(e) => setEditing({ ...editing, transport: e.target.value as McpTransport })}
                     >
-                        <option value="stdio">stdio (subprocess)</option>
-                        <option value="sse">SSE (HTTP + Server-Sent Events)</option>
-                        <option value="http">HTTP (plain JSON-RPC)</option>
-                        <option value="stream-http">Streamable HTTP (recommended)</option>
+                        <option value="stdio">{t("mcp.transportStdio")}</option>
+                        <option value="sse">{t("mcp.transportSse")}</option>
+                        <option value="http">{t("mcp.transportHttp")}</option>
+                        <option value="stream-http">{t("mcp.transportStreamHttp")}</option>
                     </select>
 
                     {editing.transport === "stdio" ? (
                         <>
-                            <label>Command</label>
+                            <label>{t("mcp.command")}</label>
                             <input
                                 className="mcp-input"
                                 value={editing.command}
                                 onChange={(e) => setEditing({ ...editing, command: e.target.value })}
-                                placeholder="npx / python / ./server"
+                                placeholder={t("mcp.commandPlaceholder")}
                             />
 
-                            <label>Arguments <span className="mcp-hint">(space-separated)</span></label>
+                            <label>{t("mcp.arguments")} <span className="mcp-hint">{t("mcp.argumentsHint")}</span></label>
                             <input
                                 className="mcp-input"
                                 value={argsInput}
                                 onChange={(e) => setArgsInput(e.target.value)}
-                                placeholder="-m my_mcp_server --port 8080"
+                                placeholder={t("mcp.argumentsPlaceholder")}
                             />
 
-                            <label>Environment Variables <span className="mcp-hint">(KEY=value, one per line)</span></label>
+                            <label>{t("mcp.envVars")} <span className="mcp-hint">{t("mcp.envVarsHint")}</span></label>
                             <textarea
                                 className="mcp-textarea"
                                 rows={4}
@@ -282,7 +284,7 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                         </>
                     ) : (
                         <>
-                            <label>URL</label>
+                            <label>{t("mcp.url")}</label>
                             <input
                                 className="mcp-input"
                                 value={editing.url}
@@ -294,7 +296,7 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                                 }
                             />
 
-                            <label>Auth Token <span className="mcp-hint">(optional, Bearer)</span></label>
+                            <label>{t("mcp.authToken")} <span className="mcp-hint">{t("mcp.authTokenHint")}</span></label>
                             <input
                                 className="mcp-input"
                                 type="password"
@@ -307,13 +309,13 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                 </div>
 
                 <div className="mcp-form-actions">
-                    <button className="btn-secondary" onClick={() => setEditing(null)}>Cancel</button>
+                    <button className="btn-secondary" onClick={() => setEditing(null)}>{t("common.cancel")}</button>
                     <button
                         className="btn-primary"
                         onClick={() => void saveEditing()}
                         disabled={!editing.name.trim()}
                     >
-                        Save
+                        {t("common.save")}
                     </button>
                 </div>
             </div>
@@ -323,22 +325,22 @@ export function McpPanel({ onClose, onServersChange }: Props) {
     return (
         <div className="mcp-panel">
             <div className="mcp-header">
-                <h2>MCP Servers</h2>
+                <h2>{t("mcp.title")}</h2>
                 <button className="close-btn" onClick={onClose}>✕</button>
             </div>
 
             <div className="mcp-desc">
-                Model Context Protocol (MCP) servers extend the AI with external tools and data sources.
+                {t("mcp.description")}
             </div>
 
             <div className="mcp-list">
                 {servers.length === 0 && (
-                    <div className="mcp-empty">No servers configured yet.</div>
+                    <div className="mcp-empty">{t("mcp.empty")}</div>
                 )}
                 {servers.map((s) => (
                     <div key={s.id} className={`mcp-server-item ${s.enabled ? "enabled" : "disabled"}`}>
                         <div className="mcp-server-row">
-                            <label className="mcp-toggle" title={s.enabled ? "Disable" : "Enable"}>
+                            <label className="mcp-toggle" title={s.enabled ? t("common.disable") : t("common.enable")}>
                                 <input
                                     type="checkbox"
                                     checked={s.enabled}
@@ -349,14 +351,17 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                             <div className="mcp-server-info">
                                 <span
                                     className={`mcp-server-name ${s.enabled ? "active" : ""}`}
-                                    title={`Click to ${s.enabled ? "disable" : "enable"} ${s.name}`}
+                                    title={t("mcp.toggleTitle", {
+                                        action: s.enabled ? t("common.disable") : t("common.enable"),
+                                        name: s.name,
+                                    })}
                                     onClick={() => void toggleEnabled(s)}
                                 >
-                                    {s.name || "(unnamed)"}
+                                    {s.name || t("common.unnamed")}
                                     {testing === s.id && (
-                                        <span className="mcp-testing-badge" title="Testing connection…">
+                                        <span className="mcp-testing-badge" title={t("mcp.testingTitle")}>
                                             <span className="mcp-testing-spinner" />
-                                            testing…
+                                            {t("mcp.testing")}
                                         </span>
                                     )}
                                 </span>
@@ -367,7 +372,7 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                             <div className="mcp-server-actions">
                                 <button
                                     className="mcp-action-btn"
-                                    title="Test connection"
+                                    title={t("mcp.testConnection")}
                                     onClick={() => void runTest(s)}
                                     disabled={testing === s.id}
                                 >
@@ -375,21 +380,21 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                                 </button>
                                 <button
                                     className="mcp-action-btn"
-                                    title="View diagnostic logs"
+                                    title={t("mcp.viewLogs")}
                                     onClick={() => openLogs(s)}
                                 >
                                     🗒
                                 </button>
                                 <button
                                     className="mcp-action-btn"
-                                    title="Edit"
+                                    title={t("common.edit")}
                                     onClick={() => startEdit(s)}
                                 >
                                     ✎
                                 </button>
                                 <button
                                     className="mcp-action-btn danger"
-                                    title="Delete"
+                                    title={t("common.delete")}
                                     onClick={() => void remove(s.id)}
                                 >
                                     ✕
@@ -406,7 +411,7 @@ export function McpPanel({ onClose, onServersChange }: Props) {
             </div>
 
             <div className="mcp-footer">
-                <button className="btn-primary" onClick={startAdd}>+ Add Server</button>
+                <button className="btn-primary" onClick={startAdd}>{t("mcp.addServer")}</button>
             </div>
 
             {logServer && (
@@ -415,7 +420,7 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                         <div className="mcp-log-modal-header">
                             <div className="mcp-log-modal-title">
                                 <span className="mcp-log-modal-title-main">
-                                    Logs: {logServer.name || "(unnamed)"}
+                                    {t("mcp.logsTitle", { name: logServer.name || t("common.unnamed") })}
                                 </span>
                                 <span className="mcp-log-modal-title-sub">
                                     {transportLabel(logServer)}
@@ -427,7 +432,7 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                                         className="mcp-log-btn danger"
                                         onClick={() => void cancelTest(logServer)}
                                     >
-                                        ⏹ Cancel Test
+                                        {t("mcp.cancelTest")}
                                     </button>
                                 )}
                                 <button
@@ -435,13 +440,13 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                                     onClick={() => void refreshLogs()}
                                     disabled={logLoading}
                                 >
-                                    Refresh
+                                    {t("common.refresh")}
                                 </button>
                                 <button
                                     className="mcp-log-btn"
                                     onClick={() => void clearLogs()}
                                 >
-                                    Clear
+                                    {t("common.delete")}
                                 </button>
                                 <button className="mcp-log-btn" onClick={closeLogs}>✕</button>
                             </div>
@@ -449,12 +454,12 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                         <div className="mcp-log-modal-meta">
                             {testing === logServer.id ? (
                                 <span className="mcp-log-modal-testing">
-                                    <span className="mcp-testing-spinner" /> Test in progress — logs auto-refresh every 1.5s
+                                    <span className="mcp-testing-spinner" /> {t("mcp.testInProgress")}
                                 </span>
                             ) : logEntries.length === 0 ? (
-                                "No log entries yet. Run a test (⚡) to populate."
+                                t("mcp.noLogs")
                             ) : (
-                                `${logEntries.length} entries (auto-refresh every 1.5s)`
+                                t("mcp.logCount", { count: logEntries.length })
                             )}
                         </div>
                         <div
@@ -469,7 +474,7 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                         >
                             {logEntries.length === 0 ? (
                                 <div className="mcp-log-modal-empty">
-                                    Diagnostic info will appear here once you run a test.
+                                    {t("mcp.logPlaceholder")}
                                 </div>
                             ) : (
                                 logEntries.map((entry, i) => (

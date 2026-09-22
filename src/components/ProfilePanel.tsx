@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { listProfiles, saveProfile, deleteProfile, applyProfile, getConfig, listMcpServers, listSubAgents, getAgentOrchestration } from "../api";
 import type { Profile } from "../types";
+import { useI18n } from "../i18n";
 import "./ProfilePanel.css";
 
 interface Props {
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export function ProfilePanel({ onClose, onProfileApplied }: Props) {
+    const { t, locale } = useI18n();
     const [profiles, setProfiles] = useState<Profile[]>([]);
     const [newProfileName, setNewProfileName] = useState("");
     const [saving, setSaving] = useState(false);
@@ -74,7 +76,7 @@ export function ProfilePanel({ onClose, onProfileApplied }: Props) {
     }
 
     async function handleDeleteProfile(name: string) {
-        if (!confirm(`Delete profile "${name}"?`)) return;
+        if (!confirm(t("profile.deleteConfirm", { name }))) return;
 
         try {
             await deleteProfile(name);
@@ -87,7 +89,7 @@ export function ProfilePanel({ onClose, onProfileApplied }: Props) {
     return (
         <div className="profile-panel">
             <div className="profile-header">
-                <h2>Profiles</h2>
+                <h2>{t("profile.title")}</h2>
                 <button className="close-btn" onClick={onClose}>✕</button>
             </div>
 
@@ -97,7 +99,7 @@ export function ProfilePanel({ onClose, onProfileApplied }: Props) {
                         type="text"
                         value={newProfileName}
                         onChange={(e) => setNewProfileName(e.target.value)}
-                        placeholder="New profile name"
+                        placeholder={t("profile.newPlaceholder")}
                         onKeyDown={(e) => e.key === "Enter" && handleSaveProfile()}
                     />
                     <button
@@ -105,26 +107,26 @@ export function ProfilePanel({ onClose, onProfileApplied }: Props) {
                         onClick={handleSaveProfile}
                         disabled={!newProfileName.trim() || saving}
                     >
-                        {saving ? "Saving..." : "Save Current Config"}
+                        {saving ? t("common.saving") : t("profile.saveCurrent")}
                     </button>
                 </div>
 
                 <div className="profile-list">
                     {profiles.length === 0 ? (
-                        <div className="profile-empty">No profiles saved</div>
+                        <div className="profile-empty">{t("profile.empty")}</div>
                     ) : (
                         profiles.map((profile) => (
                             <div key={profile.name} className="profile-item">
                                 <div className="profile-info">
                                     <div className="profile-name">{profile.name}</div>
                                     <div className="profile-meta">
-                                        <span>{profile.selected_skills.length} skills</span>
-                                        <span>{profile.selected_tools.length} tools</span>
-                                        <span>{profile.agents.length} agents</span>
-                                        <span>{profile.mcp_servers.length} MCP servers</span>
+                                        <span>{t("profile.metaSkills", { count: profile.selected_skills.length })}</span>
+                                        <span>{t("profile.metaTools", { count: profile.selected_tools.length })}</span>
+                                        <span>{t("profile.metaAgents", { count: profile.agents.length })}</span>
+                                        <span>{t("profile.metaMcp", { count: profile.mcp_servers.length })}</span>
                                     </div>
                                     <div className="profile-date">
-                                        Updated: {new Date(profile.updated_at).toLocaleString()}
+                                        {t("profile.updated", { date: new Date(profile.updated_at).toLocaleString(locale) })}
                                     </div>
                                 </div>
                                 <div className="profile-actions">
@@ -133,13 +135,13 @@ export function ProfilePanel({ onClose, onProfileApplied }: Props) {
                                         onClick={() => handleApplyProfile(profile.name)}
                                         disabled={applying !== null}
                                     >
-                                        {applying === profile.name ? "Applying..." : "Apply"}
+                                        {applying === profile.name ? t("common.applying") : t("common.apply")}
                                     </button>
                                     <button
                                         className="btn-danger"
                                         onClick={() => handleDeleteProfile(profile.name)}
                                     >
-                                        Delete
+                                        {t("common.delete")}
                                     </button>
                                 </div>
                             </div>

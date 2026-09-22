@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { getConfig, saveConfig } from "../api";
 import type { AppConfig, ConfirmKind } from "../types";
+import { useI18n, type MessageKey } from "../i18n";
 import "./ToolsPanel.css";
 
 interface Props {
@@ -8,48 +9,37 @@ interface Props {
     onToolsChange: (tools: string[]) => void;
 }
 
-const AVAILABLE_TOOLS = [
+/** Tool ids with the message keys for their label / description. */
+const AVAILABLE_TOOLS: { id: string; nameKey: MessageKey; descriptionKey: MessageKey }[] = [
     {
         id: "file_actions",
-        name: "File Actions",
-        description: [
-            "Read, write, list, search, patch, rename, move, create, and delete files only inside the current workspace root.",
-            "Use `./...` paths such as `./src/App.tsx`, `./skills/demo/skill.md`, or `.` for the workspace root.",
-            "Paths such as `workspace/...` and `../...` are rejected. Absolute paths outside the workspace require an explicit approval dialog before access is allowed.",
-        ].join("\n"),
+        nameKey: "tools.items.fileActions.name",
+        descriptionKey: "tools.items.fileActions.description",
     },
     {
         id: "run_cmd",
-        name: "Run Command",
-        description: "Run an executable program directly (without a shell). The process starts in the workspace root. Preferred for simple commands like curl, git, or wget. Privileged operations and dangerous commands require explicit confirmation.",
+        nameKey: "tools.items.runCmd.name",
+        descriptionKey: "tools.items.runCmd.description",
     },
     {
         id: "run_shell",
-        name: "Run Shell",
-        description: "Execute a script in a shell (PowerShell or Bash). The shell starts in the workspace root, and directory changes must stay inside that workspace. Supports pipes, loops, variables, and other shell features. Privileged operations and dangerous commands require explicit confirmation.",
+        nameKey: "tools.items.runShell.name",
+        descriptionKey: "tools.items.runShell.description",
     },
     {
         id: "memory",
-        name: "Memory",
-        description: [
-            "Persistent memory system with three scopes for storing notes and information across conversations.",
-            "",
-            "**session** — Short-term, in-memory only. Survives for the current chat session. Use for task-specific context and in-progress notes.",
-            "**user** — Long-term, file-backed. Cross-session persistent. Use for user preferences, patterns, and general insights.",
-            "**repo** — Long-term, file-backed. Repository-scoped. Use for codebase conventions, build commands, and project facts.",
-            "",
-            "Supports add, get, list, search, and delete operations.",
-        ].join("\n"),
+        nameKey: "tools.items.memory.name",
+        descriptionKey: "tools.items.memory.description",
     },
     {
         id: "todo_list",
-        name: "Todo List",
-        description: "Track complex multi-step work with a session-scoped todo list. The assistant can add items, update statuses, check progress, clear completed items, and archive finished lists.",
+        nameKey: "tools.items.todoList.name",
+        descriptionKey: "tools.items.todoList.description",
     },
     {
         id: "knowledge_graph",
-        name: "Knowledge Graph",
-        description: "Connect to a knowledge graph and perform queries",
+        nameKey: "tools.items.knowledgeGraph.name",
+        descriptionKey: "tools.items.knowledgeGraph.description",
     }
 ];
 
@@ -61,34 +51,35 @@ const KG_ENGINES = [
 
 const AUTO_ACCEPT_OPTIONS: Array<{
     kind: ConfirmKind;
-    label: string;
-    description: string;
+    labelKey: MessageKey;
+    descriptionKey: MessageKey;
 }> = [
         {
             kind: "dangerous",
-            label: "Dangerous commands",
-            description: "Skip the approval prompt for dangerous run_cmd or run_shell requests.",
+            labelKey: "tools.autoAcceptItems.dangerous.label",
+            descriptionKey: "tools.autoAcceptItems.dangerous.description",
         },
         {
             kind: "sudo",
-            label: "sudo requests",
-            description: "Auto-confirms the approval step for sudo. It does not provide a password automatically.",
+            labelKey: "tools.autoAcceptItems.sudo.label",
+            descriptionKey: "tools.autoAcceptItems.sudo.description",
         },
         {
             kind: "elevation",
-            label: "Administrator elevation",
-            description: "Skip the approval prompt before PowerShell elevation (UAC) requests.",
+            labelKey: "tools.autoAcceptItems.elevation.label",
+            descriptionKey: "tools.autoAcceptItems.elevation.description",
         },
         {
             kind: "external_path",
-            label: "External absolute paths",
-            description: "Allow file_actions to access absolute paths outside the workspace without prompting.",
+            labelKey: "tools.autoAcceptItems.externalPath.label",
+            descriptionKey: "tools.autoAcceptItems.externalPath.description",
         },
     ];
 
 const AUTO_ACCEPT_KIND_SET = new Set<ConfirmKind>(AUTO_ACCEPT_OPTIONS.map((option) => option.kind));
 
 export function ToolsPanel({ onClose, onToolsChange }: Props) {
+    const { t } = useI18n();
     const [config, setConfig] = useState<AppConfig | null>(null);
     const [expandedTool, setExpandedTool] = useState<string | null>(null);
     const [autoAcceptExpanded, setAutoAcceptExpanded] = useState(true);
@@ -147,7 +138,7 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
     }
 
     if (!config) {
-        return <div className="tools-panel">Loading...</div>;
+        return <div className="tools-panel">{t("common.loading")}</div>;
     }
 
     const selectedTools = config.selected_tools ?? [];
@@ -160,11 +151,11 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
     return (
         <div className="tools-panel">
             <div className="tools-header">
-                <h2>Tools</h2>
+                <h2>{t("tools.title")}</h2>
                 <button className="close-btn" onClick={onClose}>✕</button>
             </div>
             <div className="tools-description">
-                Built-In Tool Set
+                {t("tools.builtIn")}
             </div>
             <div className="tools-list">
                 {AVAILABLE_TOOLS.map(tool => (
@@ -173,7 +164,7 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                         className={`tool-item ${!selectedTools.includes(tool.id) ? "disabled" : ""}`}
                     >
                         <div className="tool-row">
-                            <label className="tool-toggle" title={selectedTools.includes(tool.id) ? "Disable" : "Enable"}>
+                            <label className="tool-toggle" title={selectedTools.includes(tool.id) ? t("common.disable") : t("common.enable")}>
                                 <input
                                     type="checkbox"
                                     checked={selectedTools.includes(tool.id)}
@@ -186,10 +177,10 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                                     className={`tool-name ${selectedTools.includes(tool.id) ? "active" : ""}`}
                                     onClick={() => toggleTool(tool.id)}
                                 >
-                                    {tool.name}
+                                    {t(tool.nameKey)}
                                 </span>
                                 <span className="tool-transport">
-                                    {tool.description.split('\n')[0]}
+                                    {t(tool.descriptionKey).split("\n")[0]}
                                 </span>
                             </div>
                             <div className="tool-actions">
@@ -206,7 +197,7 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                         </div>
                         {expandedTool === tool.id && (
                             <div className="tool-desc-expanded">
-                                {tool.description}
+                                {t(tool.descriptionKey)}
                             </div>
                         )}
                     </div>
@@ -215,7 +206,7 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
 
             <div className="search-engine-section">
                 <label className="search-engine-label" htmlFor="kg-engine-select">
-                    Knowledge Graph Engine
+                    {t("tools.kgEngine")}
                 </label>
                 <select
                     id="kg-engine-select"
@@ -223,7 +214,7 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                     value={kgEngine}
                     onChange={(e) => void updateKgEngine(e.target.value)}
                     disabled={!kgEnabled}
-                    title={kgEnabled ? "Default engine for knowledge graph" : "Enable Knowledge Graph tool first"}
+                    title={kgEnabled ? t("tools.kgEngineTitle") : t("tools.kgEngineDisabled")}
                 >
                     {KG_ENGINES.map(engine => (
                         <option key={engine.value} value={engine.value}>
@@ -240,7 +231,7 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                     onClick={() => setAutoAcceptExpanded((expanded) => !expanded)}
                     aria-expanded={autoAcceptExpanded}
                 >
-                    <span className="tools-footer-title">AutoAccept Mode</span>
+                    <span className="tools-footer-title">{t("tools.autoAccept")}</span>
                     <span className="auto-accept-chevron">{autoAcceptExpanded ? "▲" : "▼"}</span>
                 </button>
 
@@ -257,8 +248,8 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                                         onChange={() => void toggleAutoAccept(option.kind)}
                                     />
                                     <div className="auto-accept-option-body">
-                                        <span className="auto-accept-name">{option.label}</span>
-                                        <span className="auto-accept-desc">{option.description}</span>
+                                        <span className="auto-accept-name">{t(option.labelKey)}</span>
+                                        <span className="auto-accept-desc">{t(option.descriptionKey)}</span>
                                     </div>
                                 </label>
                             );

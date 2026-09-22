@@ -9,6 +9,9 @@ import "katex/dist/katex.min.css";
 import katexCssUrl from "katex/dist/katex.min.css?url";
 import razerF5FontUrl from "../assets/Web Fonts/9b77a61b70b873a0f298ad6fbc801666.woff2?url";
 import { katexMathPlugin } from "../utils/markdownMath";
+// `t` (module-level) is used by the markdown-it renderer rules, which run
+// outside the React tree; the hook keeps the component re-rendering on change.
+import { t as text, useI18n } from "../i18n";
 import "./ChatMessage.css";
 
 import { writeText as tauriWriteText } from "@tauri-apps/plugin-clipboard-manager";
@@ -42,7 +45,7 @@ md.renderer.rules.fence = (tokens, idx) => {
   return `
     <div class="code-block-wrapper">
       <div class="code-block-toolbar">
-        <button type="button" class="code-copy-btn">Copy</button>
+        <button type="button" class="code-copy-btn">${escapeHtml(text("common.copy"))}</button>
       </div>
       <pre class="hljs"><code class="${className}">${highlighted}</code></pre>
     </div>
@@ -270,6 +273,7 @@ function extractEmbeddedThoughtProcess(content: string): {
 }
 
 export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onFork, dbId }: Props) {
+  const { t } = useI18n();
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
   const [showActions, setShowActions] = useState(true);
@@ -337,7 +341,7 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
           >
             <summary className={`message-reasoning-summary${reasoningStreaming ? " reasoning-streaming" : ""}`}>
               <span className="message-reasoning-head">
-                <span className="message-reasoning-title">Thought Process</span>
+                <span className="message-reasoning-title">{t("chat.thoughtProcess")}</span>
                 {/* Re-keyed on each new reasoning line, so the remount replays
                     the spark animation and the brain blinks as thinking grows. */}
                 <span
@@ -402,7 +406,7 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
                   });
                 });
                 const originalText = copyButton.textContent;
-                copyButton.textContent = "Copied!";
+                copyButton.textContent = t("common.copied");
                 window.setTimeout(() => {
                   copyButton.textContent = originalText;
                 }, 1200);
@@ -418,7 +422,7 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
         {message.streaming && <span className="cursor">_</span>}
         {attachmentNames.length > 0 && (
           <div className="message-attachments">
-            <span>Attached Files:</span>
+            <span>{t("chat.attachedFiles")}</span>
             {attachmentNames.map((name, i) => {
               const att = message.attachments?.find((a) => a.name === name);
               if (att?.kind === "image" && att.data_url) {
@@ -448,8 +452,8 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
 
         {isUser && showRetry && (
           <div className="message-actions">
-            <button className="message-retry-btn" onClick={onRetry} title="Retry this unfinished user message">
-              Retry
+            <button className="message-retry-btn" onClick={onRetry} title={t("chat.retryTitle")}>
+              {t("common.retry")}
             </button>
           </div>
         )}
@@ -464,7 +468,7 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
               className="message-action-btn export"
               onClick={() => exportAssistantMessagePdf(renderedMainContent, message.id)}
               disabled={!mainContent.trim()}
-              title="Export this reply to PDF"
+              title={t("chat.exportTitle")}
             >
               ⤓
             </button>
@@ -474,7 +478,7 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
               type="button"
               className="message-action-btn delete"
               onClick={() => onDelete(message.id)}
-              title="Delete this message"
+              title={t("chat.deleteTitle")}
             >
               🗑️
             </button>
@@ -484,7 +488,7 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
               type="button"
               className="message-action-btn fork"
               onClick={() => onFork(message.id)}
-              title="Fork conversation from this message"
+              title={t("chat.forkTitle")}
             >
               ⑂
             </button>

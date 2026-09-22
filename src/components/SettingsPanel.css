@@ -29,8 +29,9 @@
   }
 }
 
-.settings-page {
-  /* Tesla palette */
+
+.settings-page,
+.prompt-editor-overlay {
   --t-bg: #FFFFFF;
   --t-bg-soft: #F4F4F4;
   --t-text: #171A20;
@@ -43,7 +44,9 @@
   --t-accent-hover: #3358C7;
   --t-danger: #C0392B;
   --t-ease: cubic-bezier(0.5, 0, 0, 0.75);
+}
 
+.settings-page {
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -53,7 +56,8 @@
   overflow: hidden;
 }
 
-[data-theme="dark"] .settings-page {
+[data-theme="dark"] .settings-page,
+[data-theme="dark"] .prompt-editor-overlay {
   --t-bg: #171A20;
   --t-bg-soft: #23262D;
   --t-text: #F4F4F4;

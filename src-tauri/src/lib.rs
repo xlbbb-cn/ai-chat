@@ -155,6 +155,10 @@ pub struct AppConfig {
     pub auto_accept_confirm_kinds: Vec<String>,
     #[serde(default)]
     pub theme: Option<String>,
+    /// UI language (`en`, `zh-CN`, `zh-TW`). Persisted so the frontend restores
+    /// it on startup; the backend never interprets the value.
+    #[serde(default)]
+    pub language: Option<String>,
     /// Check the GitHub Releases API for a newer version when the app starts.
     #[serde(default = "update::default_true")]
     pub check_updates_on_startup: bool,
@@ -190,6 +194,7 @@ impl Default for AppConfig {
             logger_output: LoggerOutput::default(),
             auto_accept_confirm_kinds: vec![],
             theme: None,
+            language: None,
             check_updates_on_startup: true,
             include_prerelease_updates: false,
             log_retention_days: db::default_log_retention_days(),

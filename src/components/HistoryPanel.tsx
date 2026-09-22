@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { listHistorySessions, loadSessionMessages, deleteHistory, listSessionMeta, updateSessionMeta } from "../api";
 import type { HistoryRecord, HistorySessionSummary, SessionMeta } from "../api";
 import type { Attachment, Message, MessageContent, ToolCallEntry } from "../types";
+import { useI18n, type Locale } from "../i18n";
 import "./HistoryPanel.css";
 
 interface Props {
@@ -13,11 +14,11 @@ interface Props {
 
 type HistoryTab = "all" | "favorites" | "archived";
 
-function formatHistoryTimestamp(timestamp: string): string {
+function formatHistoryTimestamp(timestamp: string, locale: Locale): string {
   const parsed = Date.parse(timestamp);
   if (Number.isNaN(parsed)) return timestamp;
 
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(locale, {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -91,6 +92,7 @@ function recordsToMessages(sessionRecords: HistoryRecord[]): Message[] {
 }
 
 export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = false, onClose }: Props) {
+  const { t, locale } = useI18n();
   const [summaries, setSummaries] = useState<HistorySessionSummary[]>([]);
   const [searchKeyword, setSearchKeyword] = useState("");
   // Content-search hits, tagged with the keyword they answer so a slow query
@@ -165,9 +167,9 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
     // The backend sends the first user message's text only (extracted from
     // multimodal content and clamped), so the list stays lightweight.
     const parsed = parseStoredContent(summary.first_user_content);
-    if (typeof parsed === "string") return parsed.trim() || "(empty)";
+    if (typeof parsed === "string") return parsed.trim() || t("history.titleEmpty");
     const textPart = parsed.find((p) => p.type === "text");
-    return textPart?.text ?? "(attachment)";
+    return textPart?.text ?? t("history.titleAttachment");
   }
 
   async function patchMeta(sid: string, fields: { title?: string; favorite?: boolean; archived?: boolean }) {
@@ -246,7 +248,7 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
   return (
     <div className="history-panel">
       <div className="history-header">
-        <h2>History</h2>
+        <h2>{t("history.title")}</h2>
         <button className="close-btn" onClick={onClose}>✕</button>
       </div>
 
@@ -256,17 +258,17 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
           type="text"
           value={searchKeyword}
           onChange={(e) => setSearchKeyword(e.target.value)}
-          placeholder="Search sessions by keyword"
-          aria-label="Search history sessions"
+          placeholder={t("history.searchPlaceholder")}
+          aria-label={t("history.searchAria")}
         />
         {disableSessionSwitch && (
-          <p className="history-switch-hint">A reply is being generated, switching sessions is temporarily unavailable</p>
+          <p className="history-switch-hint">{t("history.switchHint")}</p>
         )}
         <div className="history-tabs" role="tablist">
           {([
-            ["all", "All"],
-            ["favorites", "★ Favorites"],
-            ["archived", "🗄 Archived"],
+            ["all", t("history.tabAll")],
+            ["favorites", t("history.tabFavorites")],
+            ["archived", t("history.tabArchived")],
           ] as [HistoryTab, string][]).map(([tab, label]) => (
             <button
               key={tab}
@@ -283,14 +285,14 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
 
       <div className="history-list">
         {summaries.length === 0 ? (
-          <p className="history-empty">No history yet.</p>
+          <p className="history-empty">{t("history.empty")}</p>
         ) : filteredSessions.length === 0 ? (
           <p className="history-empty">
             {searchKeyword
-              ? `No sessions matched "${searchKeyword}".`
+              ? t("history.noMatch", { keyword: searchKeyword })
               : activeTab === "favorites"
-                ? "No favorite sessions yet."
-                : "No archived sessions."}
+                ? t("history.noFavorites")
+                : t("history.noArchived")}
           </p>
         ) : (
           filteredSessions.map((summary) => {
@@ -300,7 +302,7 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
             const isArchived = !!meta?.archived;
             const isCurrent = sid === currentSessionId;
             const isLoading = loadingSessionId === sid;
-            const createdAt = formatHistoryTimestamp(summary.created_at);
+            const createdAt = formatHistoryTimestamp(summary.created_at, locale);
             const isRenaming = renamingSessionId === sid;
             const title = getSessionTitle(summary);
             return (
@@ -323,7 +325,7 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
                         if (e.key === "Escape") setRenamingSessionId(null);
                       }}
                       onBlur={() => commitRename(sid)}
-                      aria-label="Rename session"
+                      aria-label={t("history.renameAria")}
                     />
                   ) : (
                     <span className="history-preview" title={title}>
@@ -333,10 +335,10 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
                   )}
                   <div className="history-footer">
                     <span className="history-meta">
-                      {isLoading ? "Loading…" : `${summary.message_count} messages`}
-                      {isCurrent ? " · current" : ""}{isArchived ? " · archived" : ""}
+                      {isLoading ? t("history.loading") : t("history.messageCount", { count: summary.message_count })}
+                      {isCurrent ? t("history.current") : ""}{isArchived ? t("history.archived") : ""}
                     </span>
-                    <span className="history-created">Created {createdAt}</span>
+                    <span className="history-created">{t("history.created", { date: createdAt })}</span>
                   </div>
                 </div>
                 <div className="history-actions">
@@ -346,7 +348,7 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
                       e.stopPropagation();
                       void patchMeta(sid, { favorite: !isFavorite });
                     }}
-                    title={isFavorite ? "Remove from favorites" : "Add to favorites"}
+                    title={isFavorite ? t("history.removeFavorite") : t("history.addFavorite")}
                   >
                     {isFavorite ? "★" : "☆"}
                   </button>
@@ -356,7 +358,7 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
                       e.stopPropagation();
                       if (!isRenaming) startRename(summary);
                     }}
-                    title="Rename session"
+                    title={t("history.rename")}
                   >
                     ✏️
                   </button>
@@ -366,14 +368,14 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
                       e.stopPropagation();
                       void patchMeta(sid, { archived: !isArchived });
                     }}
-                    title={isArchived ? "Unarchive session" : "Archive session"}
+                    title={isArchived ? t("history.unarchive") : t("history.archive")}
                   >
                     {isArchived ? "📤" : "🗄"}
                   </button>
                   <button
                     className="history-action-btn delete"
                     onClick={(e) => handleDelete(e, sid)}
-                    title="Delete session"
+                    title={t("history.delete")}
                   >
                     🗑️
                   </button>

@@ -71,6 +71,9 @@ export interface Message {
 
 export type ConfirmKind = "dangerous" | "sudo" | "elevation" | "external_path";
 
+/** UI languages bundled with the frontend (see `src/i18n`). */
+export type Language = "en" | "zh-CN" | "zh-TW";
+
 export interface AppConfig {
   api_base_url: string;
   api_key: string;
@@ -94,6 +97,12 @@ export interface AppConfig {
   workspace_dir?: string;
   logger_output?: "file" | "println";
   theme?: "auto" | "light" | "dark";
+  /**
+   * UI language. Kept in the config so it survives restarts and travels with
+   * exported profiles; the frontend also caches it in `localStorage` so the
+   * very first paint does not flash the wrong language.
+   */
+  language?: Language;
   auto_accept_confirm_kinds?: ConfirmKind[];
   check_updates_on_startup?: boolean;
   include_prerelease_updates?: boolean;

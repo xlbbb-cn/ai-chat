@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { listSkills, saveSkill, deleteSkill } from "../api";
 import type { Skill } from "../types";
+import { useI18n } from "../i18n";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { Portal } from "./Portal";
 import "./SkillsPanel.css";
@@ -19,6 +20,7 @@ const emptySkill = (): Skill => ({
 });
 
 export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
+  const { t } = useI18n();
   const [skills, setSkills] = useState<Skill[]>([]);
   const [editing, setEditing] = useState<Skill | null>(null);
   const [originalName, setOriginalName] = useState<string | null>(null);
@@ -89,54 +91,54 @@ export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
   return (
     <div className="skills-panel">
       <div className="skills-header">
-        <h2>Skills</h2>
+        <h2>{t("skills.title")}</h2>
         <button className="close-btn" onClick={onClose}>✕</button>
       </div>
 
       {editing ? (
         <div className="skill-editor">
           <label>
-            Name
+            {t("skills.name")}
             <input
               value={editing.name}
               onChange={(e) => setEditing({ ...editing, name: e.target.value })}
-              placeholder="e.g. code-reviewer"
+              placeholder={t("skills.namePlaceholder")}
             />
           </label>
           <label>
-            Description
+            {t("skills.description")}
             <input
               value={editing.description}
               onChange={(e) => setEditing({ ...editing, description: e.target.value })}
-              placeholder="Short description and trigger condition"
+              placeholder={t("skills.descriptionPlaceholder")}
             />
           </label>
           <label>
             <div className="field-title-row">
-              <span>System Prompt</span>
+              <span>{t("skills.systemPrompt")}</span>
               <button type="button" className="inline-edit-btn" onClick={openPromptEditor}>
-                Edit
+                {t("common.edit")}
               </button>
             </div>
             <textarea
               rows={8}
               value={editing.system_prompt}
               onChange={(e) => setEditing({ ...editing, system_prompt: e.target.value })}
-              placeholder="You are a helpful assistant that…"
+              placeholder={t("skills.systemPromptPlaceholder")}
             />
           </label>
           <label>
-            Version
+            {t("skills.version")}
             <input
               value={editing.version ?? ""}
               onChange={(e) =>
                 setEditing({ ...editing, version: e.target.value || undefined })
               }
-              placeholder="e.g. 1.0.0 (optional)"
+              placeholder={t("skills.versionPlaceholder")}
             />
           </label>
           <label>
-            Allowed Commands
+            {t("skills.allowedCommands")}
             <input
               value={(editing.allowed_commands ?? []).join(", ")}
               onChange={(e) => {
@@ -146,55 +148,55 @@ export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
                   .filter(Boolean);
                 setEditing({ ...editing, allowed_commands: cmds });
               }}
-              placeholder="e.g. curl, wget, git  (empty = unrestricted)"
+              placeholder={t("skills.allowedCommandsPlaceholder")}
             />
             <span style={{ fontSize: "0.78rem", opacity: 0.65 }}>
-              Comma-separated executable names. Leave empty to allow all.
+              {t("skills.allowedCommandsHint")}
             </span>
           </label>
           <div className="editor-actions">
             <button className="btn-primary" onClick={handleSave} disabled={!editing.name.trim()}>
-              Save
+              {t("common.save")}
             </button>
             <button className="btn-secondary" onClick={() => { setEditing(null); setOriginalName(null); setIsPromptEditorOpen(false); }}>
-              Cancel
+              {t("common.cancel")}
             </button>
           </div>
 
           {isPromptEditorOpen && (
             <Portal>
-              <div className="prompt-editor-overlay" role="dialog" aria-modal="true" aria-label="Edit system prompt">
+              <div className="prompt-editor-overlay" role="dialog" aria-modal="true" aria-label={t("skills.promptEditor.aria")}>
                 <div className="prompt-editor-shell">
                   <div className="prompt-editor-header">
-                    <h3>System Prompt Editor</h3>
+                    <h3>{t("skills.promptEditor.title")}</h3>
                     <div className="prompt-editor-actions">
                       <button type="button" className="btn-secondary" onClick={closePromptEditor}>
-                        Cancel
+                        {t("common.cancel")}
                       </button>
                       <button type="button" className="btn-primary" onClick={applyPromptEditor}>
-                        Done
+                        {t("common.done")}
                       </button>
                     </div>
                   </div>
 
                   <div className="prompt-editor-body">
                     <div className="prompt-column">
-                      <span>Markdown</span>
+                      <span>{t("app.markdownColumn")}</span>
                       <textarea
                         className="prompt-editor-textarea"
                         value={promptDraft}
                         onChange={(e) => setPromptDraft(e.target.value)}
-                        placeholder="Write your system prompt in Markdown..."
+                        placeholder={t("skills.promptEditor.placeholder")}
                       />
                     </div>
 
                     <div className="prompt-column">
-                      <span>Preview</span>
+                      <span>{t("app.previewColumn")}</span>
                       <div className="prompt-preview">
                         {promptDraft.trim() ? (
                           <MarkdownPreview content={promptDraft} />
                         ) : (
-                          <p className="prompt-preview-empty">Markdown preview will appear here.</p>
+                          <p className="prompt-preview-empty">{t("app.markdownPreviewEmpty")}</p>
                         )}
                       </div>
                     </div>
@@ -215,7 +217,7 @@ export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
                   className={`skill-item ${!isActive ? "disabled" : ""}`}
                 >
                   <div className="skill-row">
-                    <label className="skill-toggle" title={isActive ? "Disable" : "Enable"}>
+                    <label className="skill-toggle" title={isActive ? t("common.disable") : t("common.enable")}>
                       <input
                         type="checkbox"
                         checked={isActive}
@@ -233,10 +235,10 @@ export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
                       <span className="skill-transport">{skill.description}</span>
                     </div>
                     <div className="skill-actions">
-                      <button className="skill-action-btn" onClick={() => startEdit(skill)} title="Edit">
+                      <button className="skill-action-btn" onClick={() => startEdit(skill)} title={t("common.edit")}>
                         ✎
                       </button>
-                      <button className="skill-action-btn danger" onClick={() => handleDelete(skill.name)} title="Delete">
+                      <button className="skill-action-btn danger" onClick={() => handleDelete(skill.name)} title={t("common.delete")}>
                         ✕
                       </button>
                     </div>
@@ -247,7 +249,7 @@ export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
           </div>
           <div className="skills-footer">
             <button className="btn-primary" onClick={() => { setEditing(emptySkill()); setOriginalName(null); }}>
-              + New Skill
+              {t("skills.newSkill")}
             </button>
           </div>
         </>

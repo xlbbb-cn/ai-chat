@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { listInteractions, getInteraction, clearLogs, compactDatabase } from "../api";
 import type { InteractionLogRecord, InteractionLogDetail } from "../api";
+import { useI18n } from "../i18n";
 import "./MonitorPanel.css";
 
 interface Props {
@@ -15,6 +16,7 @@ function formatBytes(bytes: number): string {
 }
 
 export function MonitorPanel({ sessionId, onClose }: Props) {
+    const { t, locale } = useI18n();
     const [interactions, setInteractions] = useState<InteractionLogRecord[]>([]);
     const [selectedInteraction, setSelectedInteraction] = useState<InteractionLogDetail | null>(null);
     const [loading, setLoading] = useState(false);
@@ -79,7 +81,7 @@ export function MonitorPanel({ sessionId, onClose }: Props) {
     const formatDate = (dateStr: string): string => {
         try {
             const date = new Date(dateStr);
-            return date.toLocaleTimeString();
+            return date.toLocaleTimeString(locale);
         } catch {
             return dateStr;
         }
@@ -97,17 +99,17 @@ export function MonitorPanel({ sessionId, onClose }: Props) {
 
     /** Delete all log rows (requests + interactions). History is untouched. */
     const handleClearLogs = async () => {
-        if (!window.confirm("Delete all request and interaction logs? Chat history is not affected.")) return;
+        if (!window.confirm(t("monitor.clearConfirm"))) return;
         setMaintenance("clearing");
         setStatus("");
         try {
             const removed = await clearLogs();
             setSelectedInteraction(null);
             setInteractions([]);
-            setStatus(`Removed ${removed.toLocaleString()} log rows — compact to free the space`);
+            setStatus(t("monitor.removed", { count: removed }));
         } catch (err) {
             console.error("Failed to clear logs:", err);
-            setStatus(`Clear failed: ${String(err)}`);
+            setStatus(t("monitor.clearFailed", { error: String(err) }));
         } finally {
             setMaintenance("idle");
         }
@@ -115,34 +117,37 @@ export function MonitorPanel({ sessionId, onClose }: Props) {
 
     /** Apply the retention window, then VACUUM to return space to the disk. */
     const handleCompact = async () => {
-        if (!window.confirm("Compact the database? Logs older than the retention window (Settings → Runtime & Debug) are deleted and the file is rewritten to reclaim space. Chat history is kept.")) return;
+        if (!window.confirm(t("monitor.compactConfirm"))) return;
         setMaintenance("compacting");
-        setStatus("Compacting… this can take a few seconds");
+        setStatus(t("monitor.compacting2"));
         try {
             const result = await compactDatabase();
             const freed = result.bytes_before - result.bytes_after;
             const window = result.retention_days > 0
-                ? ` · window ${result.retention_days}d`
-                : " · retention disabled";
+                ? t("monitor.window", { days: result.retention_days })
+                : t("monitor.retentionDisabled");
             setStatus(
-                `Compacted: ${formatBytes(result.bytes_before)} → ${formatBytes(result.bytes_after)}` +
-                (freed > 0 ? ` (freed ${formatBytes(freed)})` : "") +
-                (result.rows_pruned > 0 ? ` · pruned ${result.rows_pruned.toLocaleString()} expired rows` : "") +
+                t("monitor.compacted", {
+                    before: formatBytes(result.bytes_before),
+                    after: formatBytes(result.bytes_after),
+                }) +
+                (freed > 0 ? t("monitor.freed", { bytes: formatBytes(freed) }) : "") +
+                (result.rows_pruned > 0 ? t("monitor.pruned", { count: result.rows_pruned.toLocaleString() }) : "") +
                 window
             );
         } catch (err) {
             console.error("Failed to compact database:", err);
-            setStatus(`Compact failed: ${String(err)}`);
+            setStatus(t("monitor.compactFailed", { error: String(err) }));
         } finally {
             setMaintenance("idle");
         }
     };
 
     return (
-        <div className="monitor-overlay" role="dialog" aria-modal="true" aria-label="Interaction Monitor">
+        <div className="monitor-overlay" role="dialog" aria-modal="true" aria-label={t("monitor.aria")}>
             <div className="monitor-shell">
                 <div className="monitor-header">
-                    <h2>Interaction Monitor</h2>
+                    <h2>{t("monitor.title")}</h2>
                     <div className="monitor-controls">
                         {status && <span className="monitor-status">{status}</span>}
                         <label className="monitor-checkbox">
@@ -151,25 +156,25 @@ export function MonitorPanel({ sessionId, onClose }: Props) {
                                 checked={autoRefresh}
                                 onChange={(e) => setAutoRefresh(e.target.checked)}
                             />
-                            <span>Auto Refresh</span>
+                            <span>{t("monitor.autoRefresh")}</span>
                         </label>
                         <button
                             type="button"
                             className="monitor-action-btn"
                             onClick={handleClearLogs}
                             disabled={maintenance !== "idle"}
-                            title="Delete all request and interaction logs (chat history is kept)"
+                            title={t("monitor.clearTitle")}
                         >
-                            {maintenance === "clearing" ? "Clearing…" : "Clear logs"}
+                            {maintenance === "clearing" ? t("monitor.clearing") : t("monitor.clearLogs")}
                         </button>
                         <button
                             type="button"
                             className="monitor-action-btn"
                             onClick={handleCompact}
                             disabled={maintenance !== "idle"}
-                            title="Delete logs older than 90 days and reclaim disk space"
+                            title={t("monitor.compactTitle")}
                         >
-                            {maintenance === "compacting" ? "Compacting…" : "Compact DB"}
+                            {maintenance === "compacting" ? t("monitor.compacting") : t("monitor.compact")}
                         </button>
                         <button type="button" className="close-btn" onClick={onClose}>
                             ✕
@@ -181,12 +186,12 @@ export function MonitorPanel({ sessionId, onClose }: Props) {
                     {/* Left Panel: Interaction List */}
                     <div className="monitor-list-panel">
                         <div className="monitor-list-header">
-                            <h3>Interactions ({interactions.length})</h3>
+                            <h3>{t("monitor.interactions", { count: interactions.length })}</h3>
                             {loading && <span className="loading-spinner">⟳</span>}
                         </div>
                         <div className="monitor-list">
                             {interactions.length === 0 ? (
-                                <div className="monitor-empty">No interactions recorded</div>
+                                <div className="monitor-empty">{t("monitor.noInteractions")}</div>
                             ) : (
                                 interactions.map((interaction) => (
                                     <div
@@ -223,65 +228,65 @@ export function MonitorPanel({ sessionId, onClose }: Props) {
                         {selectedInteraction ? (
                             <>
                                 <div className="monitor-detail-header">
-                                    <h3>Details</h3>
+                                    <h3>{t("monitor.details")}</h3>
                                     <span className="monitor-detail-id">#{selectedInteraction.id}</span>
                                 </div>
 
                                 <div className="monitor-detail-content">
                                     <div className="detail-section">
-                                        <label className="detail-label">Type</label>
+                                        <label className="detail-label">{t("monitor.type")}</label>
                                         <div className="detail-value" style={{ color: getTypeColor(selectedInteraction.interaction_type) }}>
                                             {selectedInteraction.interaction_type}
                                         </div>
                                     </div>
 
                                     <div className="detail-section">
-                                        <label className="detail-label">Actor</label>
+                                        <label className="detail-label">{t("monitor.actor")}</label>
                                         <div className="detail-value">{selectedInteraction.actor}</div>
                                     </div>
 
                                     <div className="detail-section">
-                                        <label className="detail-label">Action</label>
+                                        <label className="detail-label">{t("monitor.action")}</label>
                                         <div className="detail-value">{selectedInteraction.action_name}</div>
                                     </div>
 
                                     <div className="detail-section">
-                                        <label className="detail-label">Timestamp</label>
+                                        <label className="detail-label">{t("monitor.timestamp")}</label>
                                         <div className="detail-value">{selectedInteraction.timestamp}</div>
                                     </div>
 
                                     <div className="detail-section">
-                                        <label className="detail-label">Duration</label>
+                                        <label className="detail-label">{t("monitor.duration")}</label>
                                         <div className="detail-value">{selectedInteraction.duration_ms}ms</div>
                                     </div>
 
                                     {selectedInteraction.error_message && (
                                         <div className="detail-section error-section">
-                                            <label className="detail-label">Error</label>
+                                            <label className="detail-label">{t("monitor.error")}</label>
                                             <div className="detail-value error-text">{selectedInteraction.error_message}</div>
                                         </div>
                                     )}
 
                                     <div className="detail-section">
-                                        <label className="detail-label">Input</label>
+                                        <label className="detail-label">{t("monitor.input")}</label>
                                         <pre className="detail-code">{tryParseJson(selectedInteraction.input_data)}</pre>
                                     </div>
 
                                     <div className="detail-section">
-                                        <label className="detail-label">Output</label>
+                                        <label className="detail-label">{t("monitor.output")}</label>
                                         <pre className="detail-code">{tryParseJson(selectedInteraction.output_data)}</pre>
                                     </div>
 
                                     {selectedInteraction.metadata && selectedInteraction.metadata !== "{}" && (
                                         <div className="detail-section">
-                                            <label className="detail-label">Metadata</label>
+                                            <label className="detail-label">{t("monitor.metadata")}</label>
                                             <pre className="detail-code">{tryParseJson(selectedInteraction.metadata)}</pre>
                                         </div>
                                     )}
                                 </div>
                             </>
                         ) : (
-                            <div className="monitor-empty">Select an interaction to view details</div>
+                            <div className="monitor-empty">{t("monitor.selectPrompt")}</div>
                         )}
                     </div>
                 </div>

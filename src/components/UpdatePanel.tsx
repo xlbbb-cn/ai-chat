@@ -8,6 +8,7 @@ import {
     revealUpdateFile,
 } from "../api";
 import type { UpdateAsset, UpdateInfo } from "../types";
+import { useI18n, type Locale } from "../i18n";
 import { MarkdownPreview } from "./MarkdownPreview";
 import "./UpdatePanel.css";
 
@@ -31,10 +32,10 @@ function formatBytes(bytes: number): string {
     return `${value >= 10 || unit === 0 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
 }
 
-function formatDate(iso?: string): string {
+function formatDate(iso: string | undefined, locale: Locale): string {
     if (!iso) return "";
     const date = new Date(iso);
-    return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString();
+    return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString(locale);
 }
 
 /** Split a path so a long folder name cannot push the file name out of view. */
@@ -46,6 +47,7 @@ function splitPath(path: string): { dir: string; file: string } {
 }
 
 export function UpdatePanel({ initialInfo, onClose, onInfo }: Props) {
+    const { t, locale } = useI18n();
     const [info, setInfo] = useState<UpdateInfo | null>(initialInfo ?? null);
     const [checking, setChecking] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -127,24 +129,24 @@ export function UpdatePanel({ initialInfo, onClose, onInfo }: Props) {
     const busy = checking || downloading !== null;
 
     return (
-        <div className="update-overlay" role="dialog" aria-modal="true" aria-label="Software update">
+        <div className="update-overlay" role="dialog" aria-modal="true" aria-label={t("update.aria")}>
             <div className="update-panel">
                 <header className="update-panel-head">
                     <div className="update-panel-heading">
-                        <h3>Software Update</h3>
+                        <h3>{t("update.title")}</h3>
                         <p>
                             {info
-                                ? `Installed v${info.current_version} · ${info.platform}`
-                                : "Checks the newest published GitHub release for this repository."}
+                                ? t("update.subtitleInstalled", { version: info.current_version, platform: info.platform })
+                                : t("update.subtitleUnknown")}
                         </p>
                     </div>
                     <div className="update-panel-actions">
                         <button type="button" className="update-btn" onClick={runCheck} disabled={busy}>
-                            {checking ? "Checking…" : "Check again"}
+                            {checking ? t("update.checking") : t("update.checkAgain")}
                         </button>
                         {/* Closing stays possible: the download runs in the backend either way. */}
                         <button type="button" className="update-btn" onClick={onClose}>
-                            Close
+                            {t("common.close")}
                         </button>
                     </div>
                 </header>
@@ -152,14 +154,18 @@ export function UpdatePanel({ initialInfo, onClose, onInfo }: Props) {
                 <div className="update-panel-body">
                     {error && <div className="update-error">{error}</div>}
 
-                    {!info && checking && <div className="update-status">Checking for updates…</div>}
+                    {!info && checking && <div className="update-status">{t("update.statusChecking")}</div>}
 
                     {info && !info.has_update && (
                         <div className="update-status update-status-ok">
                             <span className="update-dot" />
                             <span>
-                                You are on the latest published version (v{info.latest_version})
-                                {info.published_at ? `, released ${formatDate(info.published_at)}` : ""}.
+                                {info.published_at
+                                    ? t("update.latestWithDate", {
+                                        version: info.latest_version,
+                                        date: formatDate(info.published_at, locale),
+                                    })
+                                    : t("update.latest", { version: info.latest_version })}
                             </span>
                         </div>
                     )}
@@ -168,14 +174,14 @@ export function UpdatePanel({ initialInfo, onClose, onInfo }: Props) {
                         <>
                             <div className="update-status update-status-new">
                                 <span className="update-dot" />
-                                <span>Version {info.latest_version} is available</span>
-                                {info.published_at && <span className="update-muted">· {formatDate(info.published_at)}</span>}
-                                {info.prerelease && <span className="update-badge">pre-release</span>}
+                                <span>{t("update.available", { version: info.latest_version })}</span>
+                                {info.published_at && <span className="update-muted">· {formatDate(info.published_at, locale)}</span>}
+                                {info.prerelease && <span className="update-badge">{t("update.prerelease")}</span>}
                             </div>
 
                             {!info.has_platform_asset && (
                                 <div className="update-hint">
-                                    This release has no bundle for <code>{info.platform}</code>. Choose a file below or open the release page.
+                                    {t("update.noPlatformAsset", { platform: info.platform })}
                                 </div>
                             )}
 
@@ -189,7 +195,7 @@ export function UpdatePanel({ initialInfo, onClose, onInfo }: Props) {
                                             <span className="update-asset-meta">
                                                 {asset.kind}
                                                 {asset.size ? ` · ${formatBytes(asset.size)}` : ""}
-                                                {asset.recommended && <span className="update-badge">recommended</span>}
+                                                {asset.recommended && <span className="update-badge">{t("update.recommended")}</span>}
                                             </span>
                                         </div>
                                         <button
@@ -198,12 +204,12 @@ export function UpdatePanel({ initialInfo, onClose, onInfo }: Props) {
                                             onClick={() => handleDownload(asset)}
                                             disabled={busy}
                                         >
-                                            {downloading === asset.name ? "Downloading…" : "Download"}
+                                            {downloading === asset.name ? t("update.downloading") : t("update.download")}
                                         </button>
                                     </li>
                                 ))}
                                 {info.assets.length === 0 && (
-                                    <li className="update-asset empty">No downloadable files attached to this release.</li>
+                                    <li className="update-asset empty">{t("update.noAssets")}</li>
                                 )}
                             </ul>
 
@@ -241,26 +247,26 @@ export function UpdatePanel({ initialInfo, onClose, onInfo }: Props) {
                                             className="update-btn update-btn-primary"
                                             onClick={() => handleOpen(() => openUpdateFile(savedPath))}
                                         >
-                                            Run installer
+                                            {t("update.runInstaller")}
                                         </button>
                                         <button
                                             type="button"
                                             className="update-btn"
                                             onClick={() => handleOpen(() => revealUpdateFile(savedPath))}
                                         >
-                                            Show in folder
+                                            {t("update.showInFolder")}
                                         </button>
                                     </div>
                                 </div>
                             )}
 
                             <div className="update-notes">
-                                <div className="update-notes-title">Release notes</div>
+                                <div className="update-notes-title">{t("update.releaseNotes")}</div>
                                 <div className="update-notes-body">
                                     {info.release_notes.trim() ? (
                                         <MarkdownPreview content={info.release_notes} />
                                     ) : (
-                                        <p className="update-notes-empty">This release has no notes.</p>
+                                        <p className="update-notes-empty">{t("update.noNotes")}</p>
                                     )}
                                 </div>
                             </div>
@@ -274,9 +280,9 @@ export function UpdatePanel({ initialInfo, onClose, onInfo }: Props) {
                                 className="update-btn"
                                 onClick={() => handleOpen(() => openReleasePage(info.release_url))}
                             >
-                                Open release page
+                                {t("update.openReleasePage")}
                             </button>
-                            <span className="update-muted">Draft releases are not published and are skipped.</span>
+                            <span className="update-muted">{t("update.draftsSkipped")}</span>
                         </div>
                     )}
                 </div>

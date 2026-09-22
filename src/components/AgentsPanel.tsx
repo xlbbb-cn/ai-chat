@@ -4,46 +4,48 @@ import {
   getAgentOrchestration, saveAgentOrchestration,
 } from "../api";
 import type { SubAgent, AgentOrchestration } from "../types";
+import { useI18n, type MessageKey } from "../i18n";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { Portal } from "./Portal";
 import "./AgentsPanel.css";
 
 interface ToolOption {
   id: string;
+  /** Tool id as sent to the model — technical, never translated. */
   label: string;
-  hint: string;
+  hintKey: MessageKey;
 }
 
 const KNOWN_TOOLS: ToolOption[] = [
   {
     id: "file_actions",
     label: "file_actions",
-    hint: "Read, write, patch and search files inside the workspace",
+    hintKey: "agents.toolHints.fileActions",
   },
   {
     id: "run_cmd",
     label: "run_cmd",
-    hint: "Execute a single command with risk assessment",
+    hintKey: "agents.toolHints.runCmd",
   },
   {
     id: "run_shell",
     label: "run_shell",
-    hint: "Run PowerShell / bash scripts",
+    hintKey: "agents.toolHints.runShell",
   },
   {
     id: "knowledge_graph",
     label: "knowledge_graph",
-    hint: "Neo4j-backed knowledge graph queries",
+    hintKey: "agents.toolHints.knowledgeGraph",
   },
   {
     id: "todo_list",
-    label: "todo_* — todo tools",
-    hint: "todo_add / todo_update_status / todo_list / todo_clear_completed / todo_archive. The plan is shared with the chat session and every parallel agent.",
+    label: "todo_*",
+    hintKey: "agents.toolHints.todos",
   },
   {
     id: "memory",
     label: "memory",
-    hint: "Session / user / repo memory store",
+    hintKey: "agents.toolHints.memory",
   },
 ];
 
@@ -78,6 +80,7 @@ const emptyAgent = (): SubAgent => ({
 });
 
 export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggleUseAgents, agentStatuses }: Props) {
+  const { t } = useI18n();
   const [agents, setAgents] = useState<SubAgent[]>([]);
   const [orchestration, setOrchestration] = useState<AgentOrchestration>({
     use_agents: false,
@@ -161,16 +164,16 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
   const statusIcon = (agentId: string) => {
     const s = agentStatuses[agentId];
     if (!s || s.status === "idle") return null;
-    if (s.status === "running") return <span className="agent-status-badge running">⚙ Running</span>;
-    if (s.status === "done") return <span className="agent-status-badge done">✓ Done</span>;
-    if (s.status === "error") return <span className="agent-status-badge error">✕ Error</span>;
+    if (s.status === "running") return <span className="agent-status-badge running">{t("agents.statusRunning")}</span>;
+    if (s.status === "done") return <span className="agent-status-badge done">{t("agents.statusDone")}</span>;
+    if (s.status === "error") return <span className="agent-status-badge error">{t("agents.statusError")}</span>;
     return null;
   };
 
   return (
     <div className="agents-panel">
       <div className="agents-header">
-        <h2>Sub Agents</h2>
+        <h2>{t("agents.title")}</h2>
         <div className="agents-header-actions">
           <button className="close-btn" onClick={onClose}>✕</button>
         </div>
@@ -180,47 +183,47 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
         /* ── Agent Editor ── */
         <div className="agent-editor">
           <label>
-            Name
+            {t("agents.name")}
             <input
               value={editing.name}
               onChange={(e) => setEditing({ ...editing, name: e.target.value })}
-              placeholder="e.g. code-analyzer"
+              placeholder={t("agents.namePlaceholder")}
             />
           </label>
           <label>
-            Description
+            {t("agents.description")}
             <input
               value={editing.description}
               onChange={(e) => setEditing({ ...editing, description: e.target.value })}
-              placeholder="Briefly describe this agent's role"
+              placeholder={t("agents.descriptionPlaceholder")}
             />
           </label>
           <label>
             <div className="field-title-row">
-              <span>System prompt</span>
+              <span>{t("agents.systemPrompt")}</span>
               <button type="button" className="inline-edit-btn" onClick={openPromptEditor}>
-                Edit
+                {t("common.edit")}
               </button>
             </div>
             <textarea
               rows={6}
               value={editing.system_prompt}
               onChange={(e) => setEditing({ ...editing, system_prompt: e.target.value })}
-              placeholder="You are an expert in... focused on..."
+              placeholder={t("agents.systemPromptPlaceholder")}
             />
           </label>
-          <div className="agent-editor-section-title">Model & limits</div>
+          <div className="agent-editor-section-title">{t("agents.modelLimits")}</div>
           <label>
-            Model (optional, overrides main config)
+            {t("agents.model")}
             <input
               value={editing.model ?? ""}
               onChange={(e) => setEditing({ ...editing, model: e.target.value || undefined })}
-              placeholder="Leave empty to inherit the main model"
+              placeholder={t("agents.modelPlaceholder")}
             />
           </label>
           <div className="agent-editor-row">
             <label style={{ flex: 1 }}>
-              Max completion tokens
+              {t("agents.maxTokens")}
               <input
                 type="number"
                 min={512}
@@ -229,11 +232,11 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
                 onChange={(e) =>
                   setEditing({ ...editing, max_tokens: e.target.value ? Number(e.target.value) : undefined })
                 }
-                placeholder="Default completion limit 8192"
+                placeholder={t("agents.maxTokensPlaceholder")}
               />
             </label>
             <label style={{ flex: 1 }}>
-              Temperature
+              {t("agents.temperature")}
               <input
                 type="number"
                 min={0}
@@ -243,11 +246,11 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
                 onChange={(e) =>
                   setEditing({ ...editing, temperature: e.target.value ? Number(e.target.value) : undefined })
                 }
-                placeholder="Inherit default"
+                placeholder={t("agents.temperaturePlaceholder")}
               />
             </label>
             <label style={{ flex: 1 }}>
-              Max iter
+              {t("agents.maxIterations")}
               <input
                 type="number"
                 min={0}
@@ -260,13 +263,13 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
                   })
                 }
               />
-              <small>0 means no iteration limit; mission completion is controlled by external task state.</small>
+              <small>{t("agents.maxIterationsHint")}</small>
             </label>
           </div>
-          <div className="agent-editor-section-title">Capabilities</div>
+          <div className="agent-editor-section-title">{t("agents.capabilities")}</div>
           <label>
             <div className="field-title-row">
-              <span>Allowed tools</span>
+              <span>{t("agents.allowedTools")}</span>
               <span className="agent-tool-quick">
                 <button
                   type="button"
@@ -284,7 +287,7 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
                     )
                   }
                 >
-                  All
+                  {t("common.all")}
                 </button>
                 <button
                   type="button"
@@ -293,7 +296,7 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
                     setEditing((prev) => (prev ? { ...prev, allowed_tools: [] } : prev))
                   }
                 >
-                  None
+                  {t("common.none")}
                 </button>
               </span>
             </div>
@@ -307,7 +310,7 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
                   />
                   <span className="agent-tool-text">
                     <span className="agent-tool-name">{tool.label}</span>
-                    <span className="agent-tool-hint">{tool.hint}</span>
+                    <span className="agent-tool-hint">{t(tool.hintKey)}</span>
                   </span>
                 </label>
               ))}
@@ -319,47 +322,47 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
               onClick={handleSaveAgent}
               disabled={!editing.name.trim() || saving}
             >
-              {saving ? "Saving..." : "Save"}
+              {saving ? t("common.saving") : t("common.save")}
             </button>
             <button className="btn-secondary" onClick={() => setEditing(null)}>
-              Cancel
+              {t("common.cancel")}
             </button>
           </div>
 
           {isPromptEditorOpen && (
             <Portal>
-              <div className="prompt-editor-overlay" role="dialog" aria-modal="true" aria-label="Edit system prompt">
+              <div className="prompt-editor-overlay" role="dialog" aria-modal="true" aria-label={t("agents.promptEditor.aria")}>
                 <div className="prompt-editor-shell">
                   <div className="prompt-editor-header">
-                    <h3>System Prompt Editor</h3>
+                    <h3>{t("agents.promptEditor.title")}</h3>
                     <div className="prompt-editor-actions">
                       <button type="button" className="btn-secondary" onClick={closePromptEditor}>
-                        Cancel
+                        {t("common.cancel")}
                       </button>
                       <button type="button" className="btn-primary" onClick={applyPromptEditor}>
-                        Done
+                        {t("common.done")}
                       </button>
                     </div>
                   </div>
 
                   <div className="prompt-editor-body">
                     <div className="prompt-column">
-                      <span>Markdown</span>
+                      <span>{t("app.markdownColumn")}</span>
                       <textarea
                         className="prompt-editor-textarea"
                         value={promptDraft}
                         onChange={(e) => setPromptDraft(e.target.value)}
-                        placeholder="Write your system prompt in Markdown..."
+                        placeholder={t("agents.promptEditor.placeholder")}
                       />
                     </div>
 
                     <div className="prompt-column">
-                      <span>Preview</span>
+                      <span>{t("app.previewColumn")}</span>
                       <div className="prompt-preview">
                         {promptDraft.trim() ? (
                           <MarkdownPreview content={promptDraft} />
                         ) : (
-                          <p className="prompt-preview-empty">Markdown preview will appear here.</p>
+                          <p className="prompt-preview-empty">{t("app.markdownPreviewEmpty")}</p>
                         )}
                       </div>
                     </div>
@@ -373,10 +376,10 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
         <>
           {/* ── Orchestration Settings ── */}
           <div className="orchestration-settings">
-            <div className="orch-title">Orchestration settings</div>
+            <div className="orch-title">{t("agents.orchestration")}</div>
 
             <div className="orch-row">
-              <span>Enable sub-agent mode</span>
+              <span>{t("agents.enableMode")}</span>
               <label className="toggle-switch">
                 <input
                   type="checkbox"
@@ -392,7 +395,7 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
             </div>
 
             <div className="orch-row">
-              <span>Auto-configure mode</span>
+              <span>{t("agents.autoConfigure")}</span>
               <label className="toggle-switch">
                 <input
                   type="checkbox"
@@ -406,7 +409,7 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
             </div>
 
             <div className="orch-row">
-              <span>Execution mode</span>
+              <span>{t("agents.executionMode")}</span>
               <select
                 className="orch-select"
                 value={orchestration.mode}
@@ -414,13 +417,13 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
                   handleSaveOrchestration({ ...orchestration, mode: e.target.value as "parallel" | "sequential" })
                 }
               >
-                <option value="parallel">Parallel</option>
-                <option value="sequential">Sequential</option>
+                <option value="parallel">{t("agents.modeParallel")}</option>
+                <option value="sequential">{t("agents.modeSequential")}</option>
               </select>
             </div>
 
             <div className="orch-row">
-              <span>Max concurrency</span>
+              <span>{t("agents.maxConcurrency")}</span>
               <input
                 className="orch-number"
                 type="number"
@@ -437,7 +440,7 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
           {/* ── Agent List ── */}
           <div className="agents-list">
             {agents.length === 0 && (
-              <div className="agents-empty">No sub-agents yet. Click the button below to create one.</div>
+              <div className="agents-empty">{t("agents.empty")}</div>
             )}
             {agents.map((agent) => {
               const st = agentStatuses[agent.id];
@@ -462,14 +465,14 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
                       <div className="skill-actions" onClick={(e) => e.stopPropagation()}>
                         <button
                           className="mcp-action-btn"
-                          title="Edit"
+                          title={t("common.edit")}
                           onClick={() => setEditing({ ...agent })}
                         >
                           ✎
                         </button>
                         <button
                           className="mcp-action-btn danger"
-                          title="Delete"
+                          title={t("common.delete")}
                           onClick={() => handleDeleteAgent(agent.id)}
                         >
                           ✕
@@ -505,7 +508,7 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
               className="btn-primary"
               onClick={() => setEditing(emptyAgent())}
             >
-              + New Agent
+              {t("agents.newAgent")}
             </button>
           </div>
         </>

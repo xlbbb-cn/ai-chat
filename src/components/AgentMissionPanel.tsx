@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { listAgentMissions } from "../api";
 import type { AgentMissionSnapshot } from "../types";
+import { useI18n, type Locale, type MessageKey, type TranslateVars } from "../i18n";
 import "./AgentMissionPanel.css";
 
 interface Props {
@@ -9,21 +10,33 @@ interface Props {
     onClose: () => void;
 }
 
-function formatTimestamp(value: string): string {
+function formatTimestamp(value: string, locale: Locale): string {
     if (!value) return "-";
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) {
         return value;
     }
-    return date.toLocaleString();
+    return date.toLocaleString(locale);
 }
 
-function statusLabel(mission: AgentMissionSnapshot): string {
+/**
+ * Raw status string. Also used as the CSS class suffix, so it must stay
+ * language-independent — only `statusLabel` localizes it for display.
+ */
+function rawStatus(mission: AgentMissionSnapshot): string {
     if (mission.mission_accomplished) return "completed";
     return mission.status || "running";
 }
 
+function statusLabel(mission: AgentMissionSnapshot, t: (key: MessageKey, vars?: TranslateVars) => string): string {
+    const status = rawStatus(mission);
+    if (status === "completed") return t("mission.statusCompleted");
+    if (status === "running") return t("mission.statusRunning");
+    return status;
+}
+
 export function AgentMissionPanel({ sessionId, onClose }: Props) {
+    const { t, locale } = useI18n();
     const [missions, setMissions] = useState<AgentMissionSnapshot[]>([]);
     const [selectedMissionId, setSelectedMissionId] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
@@ -88,8 +101,8 @@ export function AgentMissionPanel({ sessionId, onClose }: Props) {
         <div className="mission-monitor-shell">
             <div className="mission-monitor-header">
                 <div>
-                    <h2>Mission Monitor</h2>
-                    <p>Track external mission state, active tasks, and episodic summaries for this chat session.</p>
+                    <h2>{t("mission.title")}</h2>
+                    <p>{t("mission.subtitle")}</p>
                 </div>
                 <div className="mission-monitor-controls">
                     <label className="mission-monitor-checkbox">
@@ -98,10 +111,10 @@ export function AgentMissionPanel({ sessionId, onClose }: Props) {
                             checked={autoRefresh}
                             onChange={(event) => setAutoRefresh(event.target.checked)}
                         />
-                        <span>Auto refresh</span>
+                        <span>{t("mission.autoRefresh")}</span>
                     </label>
                     <button type="button" className="mission-monitor-refresh" onClick={() => void loadMissions()}>
-                        Refresh
+                        {t("mission.refresh")}
                     </button>
                     <button type="button" className="close-btn" onClick={onClose}>
                         ✕
@@ -112,12 +125,12 @@ export function AgentMissionPanel({ sessionId, onClose }: Props) {
             <div className="mission-monitor-body">
                 <div className="mission-monitor-list-panel">
                     <div className="mission-monitor-list-header">
-                        <h3>Missions ({missions.length})</h3>
+                        <h3>{t("mission.missions", { count: missions.length })}</h3>
                         {loading && <span className="mission-monitor-loading">⟳</span>}
                     </div>
                     <div className="mission-monitor-list">
                         {missions.length === 0 ? (
-                            <div className="mission-monitor-empty">No mission state recorded for this session yet.</div>
+                            <div className="mission-monitor-empty">{t("mission.empty")}</div>
                         ) : (
                             missions.map((mission) => (
                                 <button
@@ -127,15 +140,15 @@ export function AgentMissionPanel({ sessionId, onClose }: Props) {
                                     onClick={() => setSelectedMissionId(mission.mission_id)}
                                 >
                                     <div className="mission-monitor-item-header">
-                                        <span className={`mission-monitor-status mission-${statusLabel(mission)}`}>
-                                            {statusLabel(mission)}
+                                        <span className={`mission-monitor-status mission-${rawStatus(mission)}`}>
+                                            {statusLabel(mission, t)}
                                         </span>
                                         <span className="mission-monitor-agent">{mission.agent_name}</span>
                                     </div>
                                     <div className="mission-monitor-title">{mission.root_task_description}</div>
                                     <div className="mission-monitor-meta">
-                                        <span>{mission.active_task_count} active tasks</span>
-                                        <span>{formatTimestamp(mission.updated_at)}</span>
+                                        <span>{t("mission.activeTasks", { count: mission.active_task_count })}</span>
+                                        <span>{formatTimestamp(mission.updated_at, locale)}</span>
                                     </div>
                                 </button>
                             ))
@@ -147,41 +160,41 @@ export function AgentMissionPanel({ sessionId, onClose }: Props) {
                     {selectedMission ? (
                         <div className="mission-monitor-detail-content">
                             <div className="mission-monitor-section">
-                                <label>Mission</label>
+                                <label>{t("mission.mission")}</label>
                                 <div className="mission-monitor-value">{selectedMission.root_task_description}</div>
                             </div>
 
                             <div className="mission-monitor-section two-column">
                                 <div>
-                                    <label>Agent</label>
+                                    <label>{t("mission.agent")}</label>
                                     <div className="mission-monitor-value">{selectedMission.agent_name}</div>
                                 </div>
                                 <div>
-                                    <label>Status</label>
-                                    <div className="mission-monitor-value">{statusLabel(selectedMission)}</div>
+                                    <label>{t("mission.status")}</label>
+                                    <div className="mission-monitor-value">{statusLabel(selectedMission, t)}</div>
                                 </div>
                             </div>
 
                             <div className="mission-monitor-section two-column">
                                 <div>
-                                    <label>Created</label>
-                                    <div className="mission-monitor-value">{formatTimestamp(selectedMission.created_at)}</div>
+                                    <label>{t("mission.created")}</label>
+                                    <div className="mission-monitor-value">{formatTimestamp(selectedMission.created_at, locale)}</div>
                                 </div>
                                 <div>
-                                    <label>Updated</label>
-                                    <div className="mission-monitor-value">{formatTimestamp(selectedMission.updated_at)}</div>
+                                    <label>{t("mission.updated")}</label>
+                                    <div className="mission-monitor-value">{formatTimestamp(selectedMission.updated_at, locale)}</div>
                                 </div>
                             </div>
 
                             <div className="mission-monitor-section">
-                                <label>Context</label>
-                                <pre className="mission-monitor-code">{selectedMission.root_task_context || "(empty)"}</pre>
+                                <label>{t("mission.context")}</label>
+                                <pre className="mission-monitor-code">{selectedMission.root_task_context || t("common.empty")}</pre>
                             </div>
 
                             <div className="mission-monitor-section">
-                                <label>Active Tasks</label>
+                                <label>{t("mission.activeTasksLabel")}</label>
                                 {selectedMission.active_tasks.length === 0 ? (
-                                    <div className="mission-monitor-value">No active tasks.</div>
+                                    <div className="mission-monitor-value">{t("mission.noActiveTasks")}</div>
                                 ) : (
                                     <div className="mission-task-list">
                                         {selectedMission.active_tasks.map((task) => (
@@ -199,17 +212,17 @@ export function AgentMissionPanel({ sessionId, onClose }: Props) {
                             </div>
 
                             <div className="mission-monitor-section">
-                                <label>Episodic Summary</label>
-                                <pre className="mission-monitor-code">{selectedMission.episodic_summary || "(empty)"}</pre>
+                                <label>{t("mission.episodicSummary")}</label>
+                                <pre className="mission-monitor-code">{selectedMission.episodic_summary || t("common.empty")}</pre>
                             </div>
 
                             <div className="mission-monitor-section">
-                                <label>Final Report</label>
-                                <pre className="mission-monitor-code">{selectedMission.final_report || "(empty)"}</pre>
+                                <label>{t("mission.finalReport")}</label>
+                                <pre className="mission-monitor-code">{selectedMission.final_report || t("common.empty")}</pre>
                             </div>
                         </div>
                     ) : (
-                        <div className="mission-monitor-empty detail">Select a mission to inspect its external state.</div>
+                        <div className="mission-monitor-empty detail">{t("mission.selectPrompt")}</div>
                     )}
                 </div>
             </div>

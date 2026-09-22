@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { fetchModels, getAppVersion, getConfig, getWorkspaceDir, saveConfig, listProfiles, saveProfile, deleteProfile, applyProfile, listMcpServers, listSubAgents, getAgentOrchestration } from "../api";
 import type { AppConfig, ModelSettings, Profile } from "../types";
+import { LOCALE_LABELS, LOCALES, useI18n, type Locale, type MessageKey } from "../i18n";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { MonitorPanel } from "./MonitorPanel";
 import { AgentMissionPanel } from "./AgentMissionPanel";
@@ -42,17 +43,18 @@ function updateModelSettings(
   return { ...(settings ?? {}), ...patch };
 }
 
-const SETTINGS_SECTIONS = [
-  { id: "appearance", label: "Appearance" },
-  { id: "workspace", label: "Workspace & Profiles" },
-  { id: "api", label: "API & Model" },
-  { id: "system", label: "System Message" },
-  { id: "advanced", label: "Advanced" },
-  { id: "runtime", label: "Runtime & Debug" },
-  { id: "about", label: "About & Updates" },
-] as const;
+const SETTINGS_SECTIONS: { id: string; labelKey: MessageKey }[] = [
+  { id: "appearance", labelKey: "settings.sections.appearance" },
+  { id: "workspace", labelKey: "settings.sections.workspace" },
+  { id: "api", labelKey: "settings.sections.api" },
+  { id: "system", labelKey: "settings.sections.system" },
+  { id: "advanced", labelKey: "settings.sections.advanced" },
+  { id: "runtime", labelKey: "settings.sections.runtime" },
+  { id: "about", labelKey: "settings.sections.about" },
+];
 
 export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionId }: Props) {
+  const { t, locale, setLocale } = useI18n();
   const [config, setConfig] = useState<AppConfig>(defaultConfig);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -118,7 +120,7 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
       const selected = await openDialog({
         directory: true,
         multiple: false,
-        title: "Select workspace directory",
+        title: t("settings.workspace.dirLabel"),
         defaultPath: config.workspace_dir || workspaceDirActual || undefined,
       });
       if (typeof selected === "string" && selected) {
@@ -206,6 +208,34 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
     setIsMessageEditorOpen(true);
   }
 
+  /**
+   * Switch the interface language and persist it right away: the picker is a
+   * preference, not a form field, so it must not depend on “Save Changes”.
+   * The switch itself never waits for IPC — a failed write only means the
+   * choice is not remembered for the next launch.
+   */
+  async function handleLanguageChange(next: Locale) {
+    setLocale(next);
+    setConfig((prev) => ({ ...prev, language: next }));
+    try {
+      const persisted = await getConfig();
+      const normalized: AppConfig = {
+        ...config,
+        language: next,
+        // Owned by the skills / tools panels — never roll those back.
+        selected_skills: persisted.selected_skills ?? [],
+        selected_tools: persisted.selected_tools ?? [],
+      };
+      await saveConfig(normalized);
+      setConfig(normalized);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+      onConfigSaved?.(normalized);
+    } catch (e) {
+      console.error("Failed to persist the language preference", e);
+    }
+  }
+
   function closeMessageEditor() {
     setIsMessageEditorOpen(false);
   }
@@ -291,24 +321,24 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
   }
 
   return (
-    <div className="settings-page" role="dialog" aria-modal="true" aria-label="Settings">
+    <div className="settings-page" role="dialog" aria-modal="true" aria-label={t("settings.aria")}>
       <header className="settings-page-header">
         <div className="settings-page-heading">
-          <h2>Settings</h2>
-          <p>Manage appearance, workspace, API and runtime options.</p>
+          <h2>{t("settings.title")}</h2>
+          <p>{t("settings.subtitle")}</p>
         </div>
         <div className="settings-page-actions">
           <button type="button" className="settings-btn" onClick={onClose}>
-            Close
+            {t("common.close")}
           </button>
           <button type="button" className="settings-btn settings-btn-primary" onClick={handleSave} disabled={saving}>
-            {saving ? "Saving…" : saved ? "Saved ✓" : "Save Changes"}
+            {saving ? t("common.saving") : saved ? t("common.saved") : t("common.saveChanges")}
           </button>
         </div>
       </header>
 
       <div className="settings-layout">
-        <nav className="settings-nav" aria-label="Settings sections">
+        <nav className="settings-nav" aria-label={t("settings.navAria")}>
           {SETTINGS_SECTIONS.map((section) => (
             <button
               key={section.id}
@@ -316,7 +346,7 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
               className={`settings-nav-item${activeSection === section.id ? " active" : ""}`}
               onClick={() => scrollToSection(section.id)}
             >
-              {section.label}
+              {t(section.labelKey)}
             </button>
           ))}
         </nav>
@@ -324,47 +354,68 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
         <div className="settings-content" ref={contentRef} onScroll={handleSectionScroll}>
           <section id="settings-section-appearance" className="settings-section">
             <div className="settings-section-head">
-              <h3>Appearance</h3>
-              <p>Pick how the interface follows your system theme.</p>
+              <h3>{t("settings.appearance.title")}</h3>
+              <p>{t("settings.appearance.subtitle")}</p>
             </div>
             <div className="settings-section-body">
               <div className="settings-field-row">
-                <span className="settings-field-label">Color mode</span>
+                <span className="settings-field-label">{t("settings.appearance.colorMode")}</span>
                 <div className="theme-segmented">
-                  {(["auto", "light", "dark"] as const).map((t) => (
+                  {(["auto", "light", "dark"] as const).map((theme) => (
                     <button
-                      key={t}
+                      key={theme}
                       type="button"
-                      className={`theme-seg-btn${(config.theme ?? "auto") === t ? " active" : ""}`}
+                      className={`theme-seg-btn${(config.theme ?? "auto") === theme ? " active" : ""}`}
                       onClick={() => {
-                        setConfig((prev) => ({ ...prev, theme: t }));
+                        setConfig((prev) => ({ ...prev, theme }));
                         // Apply immediately so the switch is visible in real time.
-                        onThemePreview?.(t);
+                        onThemePreview?.(theme);
                       }}
                     >
-                      {t === "auto" ? "Auto" : t === "light" ? "Light" : "Dark"}
+                      {theme === "auto"
+                        ? t("settings.appearance.themeAuto")
+                        : theme === "light"
+                          ? t("settings.appearance.themeLight")
+                          : t("settings.appearance.themeDark")}
                     </button>
                   ))}
                 </div>
+              </div>
+
+              <div className="settings-field-row settings-field-row-stacked">
+                <span className="settings-field-label">{t("settings.appearance.language")}</span>
+                <div className="theme-segmented">
+                  {LOCALES.map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      className={`theme-seg-btn${(config.language ?? locale) === value ? " active" : ""}`}
+                      onClick={() => void handleLanguageChange(value)}
+                    >
+                      {LOCALE_LABELS[value]}
+                    </button>
+                  ))}
+                </div>
+                <small className="settings-field-hint">{t("settings.appearance.languageHint")}</small>
               </div>
             </div>
           </section>
 
           <section id="settings-section-workspace" className="settings-section">
             <div className="settings-section-head">
-              <h3>Workspace & Profiles</h3>
-              <p>Directory for skills, tools and files, plus saved configuration profiles.</p>
+              <h3>{t("settings.workspace.title")}</h3>
+              <p>{t("settings.workspace.subtitle")}</p>
             </div>
             <div className="settings-section-body">
               <div className="settings-field-row settings-field-row-stacked">
-                <span className="settings-field-label">Workspace directory</span>
+                <span className="settings-field-label">{t("settings.workspace.dirLabel")}</span>
                 <div className="workspace-dir-row">
                   <input
                     type="text"
                     readOnly
                     value={config.workspace_dir ?? ""}
-                    placeholder={workspaceDirActual || "Default workspace directory"}
-                    title={config.workspace_dir || workspaceDirActual || "Default workspace directory"}
+                    placeholder={workspaceDirActual || t("settings.workspace.defaultDir")}
+                    title={config.workspace_dir || workspaceDirActual || t("settings.workspace.defaultDir")}
                     onClick={handlePickWorkspace}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.key === " ") {
@@ -378,19 +429,19 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
                     className="settings-btn"
                     onClick={handlePickWorkspace}
                     disabled={pickingWorkspace}
-                    title="Browse for a folder"
+                    title={t("settings.workspace.browseTitle")}
                   >
-                    {pickingWorkspace ? "Picking…" : "Browse…"}
+                    {pickingWorkspace ? t("common.picking") : t("common.browse")}
                   </button>
                   {config.workspace_dir && (
                     <button
                       type="button"
                       className="settings-btn workspace-dir-clear"
                       onClick={handleClearWorkspace}
-                      title="Use the default workspace directory"
-                      aria-label="Reset workspace directory to default"
+                      title={t("settings.workspace.resetTitle")}
+                      aria-label={t("settings.workspace.resetAria")}
                     >
-                      Reset
+                      {t("settings.workspace.reset")}
                     </button>
                   )}
                 </div>
@@ -408,21 +459,21 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
                   }
                 />
                 <div className="settings-checkbox-copy">
-                  <span>Enable Self-Evolution Mode</span>
-                  <small>Let the assistant evolve its own skills and tools inside the workspace.</small>
+                  <span>{t("settings.workspace.selfEvolution")}</span>
+                  <small>{t("settings.workspace.selfEvolutionHint")}</small>
                 </div>
               </label>
 
               <div className="settings-divider" />
 
               <div className="profile-section">
-                <div className="profile-section-title">Configuration Profiles</div>
+                <div className="profile-section-title">{t("settings.workspace.profilesTitle")}</div>
                 <div className="profile-create-row">
                   <input
                     type="text"
                     value={newProfileName}
                     onChange={(e) => setNewProfileName(e.target.value)}
-                    placeholder="Profile name"
+                    placeholder={t("settings.workspace.profileNamePlaceholder")}
                     onKeyDown={(e) => e.key === "Enter" && handleSaveProfile()}
                   />
                   <button
@@ -431,7 +482,7 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
                     onClick={handleSaveProfile}
                     disabled={!newProfileName.trim() || profileSaving}
                   >
-                    {profileSaving ? "Saving..." : "Save Current"}
+                    {profileSaving ? t("common.saving") : t("settings.workspace.saveCurrent")}
                   </button>
                 </div>
                 {profiles.length > 0 && (
@@ -441,7 +492,11 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
                         <div className="profile-item-info">
                           <span className="profile-item-name">{profile.name}</span>
                           <span className="profile-item-meta">
-                            {profile.selected_skills.length} skills · {profile.selected_tools.length} tools · {profile.agents.length} agents
+                            {t("settings.workspace.profileMeta", {
+                              skills: profile.selected_skills.length,
+                              tools: profile.selected_tools.length,
+                              agents: profile.agents.length,
+                            })}
                           </span>
                         </div>
                         <div className="profile-item-actions">
@@ -450,14 +505,15 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
                             className="settings-btn"
                             onClick={() => handleApplyProfile(profile.name)}
                             disabled={profileApplying !== null}
+                            title={t("settings.workspace.applyTitle")}
                           >
-                            {profileApplying === profile.name ? "Applying..." : "Apply"}
+                            {profileApplying === profile.name ? t("common.applying") : t("common.apply")}
                           </button>
                           <button
                             type="button"
                             className="settings-btn settings-btn-danger"
                             onClick={() => handleDeleteProfile(profile.name)}
-                            aria-label={`Delete profile ${profile.name}`}
+                            aria-label={t("settings.workspace.deleteAria", { name: profile.name })}
                           >
                             ✕
                           </button>
@@ -472,12 +528,12 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
 
           <section id="settings-section-api" className="settings-section">
             <div className="settings-section-head">
-              <h3>API & Model</h3>
-              <p>Connect any OpenAI-compatible endpoint and pick a model.</p>
+              <h3>{t("settings.api.title")}</h3>
+              <p>{t("settings.api.subtitle")}</p>
             </div>
             <div className="settings-section-body">
               <label className="settings-field-row settings-field-row-stacked">
-                <span className="settings-field-label">Base URL</span>
+                <span className="settings-field-label">{t("settings.api.baseUrl")}</span>
                 <input
                   type="text"
                   value={config.api_base_url}
@@ -488,7 +544,7 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
 
               <div className="settings-field-grid">
                 <label className="settings-field-row settings-field-row-stacked">
-                  <span className="settings-field-label">API Key</span>
+                  <span className="settings-field-label">{t("settings.api.apiKey")}</span>
                   <input
                     type="password"
                     value={config.api_key}
@@ -498,7 +554,7 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
                 </label>
 
                 <label className="settings-field-row settings-field-row-stacked">
-                  <span className="settings-field-label">Model</span>
+                  <span className="settings-field-label">{t("settings.api.model")}</span>
                   <select
                     value={config.model}
                     onChange={(e) => setConfig({ ...config, model: e.target.value })}
@@ -512,24 +568,29 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
 
               <div className="settings-field-grid">
                 <div className="settings-field-row settings-field-row-stacked">
-                  <span className="settings-field-label">Model catalog</span>
+                  <span className="settings-field-label">{t("settings.api.modelCatalog")}</span>
                   <button type="button" className="settings-btn" onClick={handleFetchModels} disabled={loadingModels}>
-                    {loadingModels ? "Loading models…" : "Fetch Models From API"}
+                    {loadingModels ? t("settings.api.loadingModels") : t("settings.api.fetchModels")}
                   </button>
                   {modelsError && <div className="settings-error">{modelsError}</div>}
                 </div>
 
                 <div className="settings-field-row settings-field-row-stacked">
-                  <span className="settings-field-label">Add model manually</span>
+                  <span className="settings-field-label">{t("settings.api.addModelManually")}</span>
                   <div className="settings-inline-row">
                     <input
                       type="text"
                       value={manualModel}
                       onChange={(e) => setManualModel(e.target.value)}
-                      placeholder="gpt-4.1-mini"
+                      placeholder={t("settings.api.addModelPlaceholder")}
                     />
-                    <button className="settings-btn" onClick={handleAddManualModel} type="button">
-                      Add
+                    <button
+                      className="settings-btn"
+                      onClick={handleAddManualModel}
+                      type="button"
+                      title={t("settings.api.addModelTitle")}
+                    >
+                      {t("common.add")}
                     </button>
                   </div>
                 </div>
@@ -537,7 +598,7 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
 
               <div className="settings-field-row settings-field-row-stacked">
                 <span className="settings-field-label">
-                  Context window for “{config.model}” (tokens)
+                  {t("settings.api.contextWindow", { model: config.model })}
                 </span>
                 <input
                   type="number"
@@ -557,12 +618,10 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
                       return { ...prev, model_context_lengths: lengths };
                     });
                   }}
-                  placeholder="auto (provider-reported or default)"
+                  placeholder={t("settings.api.contextPlaceholder")}
                 />
                 <small className="settings-field-hint">
-                  Auto-filled when the API reports a context window (OpenRouter, Groq, vLLM…).
-                  OpenAI-compatible endpoints that don't expose one can be configured manually
-                  here — the value is used for agent context budgeting.
+                  {t("settings.api.contextHint")}
                 </small>
               </div>
             </div>
@@ -570,22 +629,22 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
 
           <section id="settings-section-system" className="settings-section">
             <div className="settings-section-head">
-              <h3>System Message</h3>
-              <p>Instructions sent to the model at the start of every conversation.</p>
+              <h3>{t("settings.system.title")}</h3>
+              <p>{t("settings.system.subtitle")}</p>
             </div>
             <div className="settings-section-body">
               <div className="settings-field-row settings-field-row-stacked">
                 <div className="field-title-row">
-                  <span className="settings-field-label">Content</span>
+                  <span className="settings-field-label">{t("settings.system.content")}</span>
                   <button type="button" className="inline-edit-btn" onClick={openMessageEditor}>
-                    Edit
+                    {t("common.edit")}
                   </button>
                 </div>
                 <textarea
                   rows={4}
                   value={config.system_message ?? ""}
                   onChange={(e) => setConfig({ ...config, system_message: e.target.value })}
-                  placeholder="You are a helpful assistant…"
+                  placeholder={t("settings.system.placeholder")}
                 />
               </div>
             </div>
@@ -605,8 +664,8 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
               }}
             >
               <div>
-                <h3>Model Advanced Settings</h3>
-                <p>Sampling parameters — leave empty to use API defaults.</p>
+                <h3>{t("settings.advanced.title")}</h3>
+                <p>{t("settings.advanced.subtitle")}</p>
               </div>
               <span className={`settings-toggle-icon ${advancedOpen ? "open" : ""}`}>
                 ▼
@@ -617,7 +676,7 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
               <div className="settings-section-body">
                 <div className="settings-field-grid settings-field-grid-3">
                   <label className="settings-field-row settings-field-row-stacked">
-                    <span className="settings-field-label">Temperature</span>
+                    <span className="settings-field-label">{t("settings.advanced.temperature")}</span>
                     <input
                       type="number"
                       min={0}
@@ -633,12 +692,12 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
                           }),
                         }));
                       }}
-                      placeholder="default"
+                      placeholder={t("settings.advanced.placeholderDefault")}
                     />
                   </label>
 
                   <label className="settings-field-row settings-field-row-stacked">
-                    <span className="settings-field-label">Top P</span>
+                    <span className="settings-field-label">{t("settings.advanced.topP")}</span>
                     <input
                       type="number"
                       min={0}
@@ -654,12 +713,12 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
                           }),
                         }));
                       }}
-                      placeholder="default"
+                      placeholder={t("settings.advanced.placeholderDefault")}
                     />
                   </label>
 
                   <label className="settings-field-row settings-field-row-stacked">
-                    <span className="settings-field-label">Max Completion Tokens</span>
+                    <span className="settings-field-label">{t("settings.advanced.maxCompletionTokens")}</span>
                     <input
                       type="number"
                       min={1}
@@ -674,7 +733,7 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
                           }),
                         }));
                       }}
-                      placeholder="default limit"
+                      placeholder={t("settings.advanced.placeholderDefaultLimit")}
                     />
                   </label>
                 </div>
@@ -684,12 +743,12 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
 
           <section id="settings-section-runtime" className="settings-section">
             <div className="settings-section-head">
-              <h3>Runtime & Debug</h3>
-              <p>Where logs are written, how long they are kept, and how requests are monitored.</p>
+              <h3>{t("settings.runtime.title")}</h3>
+              <p>{t("settings.runtime.subtitle")}</p>
             </div>
             <div className="settings-section-body">
               <label className="settings-field-row settings-field-row-stacked">
-                <span className="settings-field-label">Logger Output (debug build only)</span>
+                <span className="settings-field-label">{t("settings.runtime.loggerOutput")}</span>
                 <select
                   value={config.logger_output ?? "file"}
                   onChange={(e) =>
@@ -699,12 +758,12 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
                     }))
                   }
                 >
-                  <option value="file">Write to app.log</option>
-                  <option value="println">Print to terminal (println)</option>
+                  <option value="file">{t("settings.runtime.loggerFile")}</option>
+                  <option value="println">{t("settings.runtime.loggerPrintln")}</option>
                 </select>
               </label>
               <label className="settings-field-row settings-field-row-stacked">
-                <span className="settings-field-label">Log retention (days)</span>
+                <span className="settings-field-label">{t("settings.runtime.retention")}</span>
                 <input
                   type="number"
                   min={0}
@@ -720,23 +779,21 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
                   }}
                 />
                 <small className="settings-field-hint">
-                  Request and interaction logs older than this are deleted at startup and by the
-                  Interaction Monitor's “Compact DB”. 0 keeps logs forever. Chat history is never
-                  pruned. Change it and press Save to apply.
+                  {t("settings.runtime.retentionHint")}
                 </small>
               </label>
               {sessionId && (
                 <>
                   <div className="settings-field-row">
-                    <span className="settings-field-label">Interaction monitor</span>
+                    <span className="settings-field-label">{t("settings.runtime.interactionMonitor")}</span>
                     <button type="button" className="settings-btn" onClick={() => setShowMonitor(true)}>
-                      Launch Monitor
+                      {t("settings.runtime.launchMonitor")}
                     </button>
                   </div>
                   <div className="settings-field-row">
-                    <span className="settings-field-label">Agent missions monitor</span>
+                    <span className="settings-field-label">{t("settings.runtime.agentMissions")}</span>
                     <button type="button" className="settings-btn" onClick={() => setShowAgentMonitor(true)}>
-                      Launch Monitor
+                      {t("settings.runtime.launchMonitor")}
                     </button>
                   </div>
                 </>
@@ -746,12 +803,12 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
 
           <section id="settings-section-about" className="settings-section">
             <div className="settings-section-head">
-              <h3>About & Updates</h3>
-              <p>Running version, plus update checks against this repository's GitHub releases.</p>
+              <h3>{t("settings.about.title")}</h3>
+              <p>{t("settings.about.subtitle")}</p>
             </div>
             <div className="settings-section-body">
               <div className="settings-field-row">
-                <span className="settings-field-label">Current version</span>
+                <span className="settings-field-label">{t("settings.about.currentVersion")}</span>
                 <div className="settings-inline-row">
                   <code>{appVersion || "—"}</code>
                 </div>
@@ -769,8 +826,8 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
                   }
                 />
                 <div className="settings-checkbox-copy">
-                  <span>Check for updates on startup</span>
-                  <small>Queries the GitHub Releases API once per launch and shows a banner when a newer version exists.</small>
+                  <span>{t("settings.about.checkOnStartup")}</span>
+                  <small>{t("settings.about.checkOnStartupHint")}</small>
                 </div>
               </label>
 
@@ -786,15 +843,15 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
                   }
                 />
                 <div className="settings-checkbox-copy">
-                  <span>Include pre-releases</span>
-                  <small>Also consider releases flagged as pre-release. Draft releases are never visible to the API.</small>
+                  <span>{t("settings.about.prerelease")}</span>
+                  <small>{t("settings.about.prereleaseHint")}</small>
                 </div>
               </label>
 
               <div className="settings-field-row">
-                <span className="settings-field-label">Updates</span>
+                <span className="settings-field-label">{t("settings.about.updates")}</span>
                 <button type="button" className="settings-btn" onClick={() => setShowUpdatePanel(true)}>
-                  Check for updates…
+                  {t("settings.about.checkNow")}
                 </button>
               </div>
             </div>
@@ -804,38 +861,38 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
 
       {isMessageEditorOpen && (
         <Portal>
-          <div className="prompt-editor-overlay" role="dialog" aria-modal="true" aria-label="Edit system message">
+          <div className="prompt-editor-overlay" role="dialog" aria-modal="true" aria-label={t("settings.messageEditor.aria")}>
             <div className="prompt-editor-shell">
               <div className="prompt-editor-header">
-                <h3>System Message Editor</h3>
+                <h3>{t("settings.messageEditor.title")}</h3>
                 <div className="prompt-editor-actions">
                   <button type="button" className="settings-btn" onClick={closeMessageEditor} disabled={messageSaving}>
-                    Cancel
+                    {t("common.cancel")}
                   </button>
                   <button type="button" className="settings-btn settings-btn-primary" onClick={applyMessageEditor} disabled={messageSaving}>
-                    {messageSaving ? "Saving…" : "Done"}
+                    {messageSaving ? t("common.saving") : t("common.done")}
                   </button>
                 </div>
               </div>
 
               <div className="prompt-editor-body">
                 <div className="prompt-column">
-                  <span>Markdown</span>
+                  <span>{t("app.markdownColumn")}</span>
                   <textarea
                     className="prompt-editor-textarea"
                     value={messageDraft}
                     onChange={(e) => setMessageDraft(e.target.value)}
-                    placeholder="Write your system message in Markdown..."
+                    placeholder={t("settings.messageEditor.placeholder")}
                   />
                 </div>
 
                 <div className="prompt-column">
-                  <span>Preview</span>
+                  <span>{t("app.previewColumn")}</span>
                   <div className="prompt-preview">
                     {messageDraft.trim() ? (
                       <MarkdownPreview content={messageDraft} />
                     ) : (
-                      <p className="prompt-preview-empty">Markdown preview will appear here.</p>
+                      <p className="prompt-preview-empty">{t("app.markdownPreviewEmpty")}</p>
                     )}
                   </div>
                 </div>
@@ -853,7 +910,7 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
 
       {showAgentMonitor && (
         <Portal>
-          <div className="mission-monitor-overlay" role="dialog" aria-modal="true" aria-label="Agent missions monitor">
+          <div className="mission-monitor-overlay" role="dialog" aria-modal="true" aria-label={t("settings.agentMissionsMonitorAria")}>
             <div className="mission-monitor-modal">
               <AgentMissionPanel sessionId={sessionId!} onClose={() => setShowAgentMonitor(false)} />
             </div>

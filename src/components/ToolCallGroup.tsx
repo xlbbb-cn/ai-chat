@@ -1,5 +1,6 @@
 import type { Message, ToolCallEntry } from "../types";
 import { useRef, useState, type ReactNode } from "react";
+import { useI18n } from "../i18n";
 import "./ToolCallGroup.css";
 
 interface Props {
@@ -53,6 +54,7 @@ function FlipRow({ flipKey, className, children }: FlipRowProps) {
 }
 
 export function ToolCallGroup({ message }: Props) {
+  const { t } = useI18n();
   const entries = message.tool_calls ?? [];
   const [open, setOpen] = useState(false);
   if (entries.length === 0) return null;
@@ -74,8 +76,8 @@ export function ToolCallGroup({ message }: Props) {
   // Row 1 of the collapsed state: completion title.
   const titleLabel =
     errorCount > 0
-      ? `${doneCount} tool calls completed — ${errorCount} failed`
-      : `${doneCount} tool calls completed`;
+      ? t("toolGroup.completedWithErrors", { count: entries.length, done: doneCount, errors: errorCount })
+      : t("toolGroup.completed", { count: doneCount });
 
   return (
     <div className={`tool-call-group${isRunning ? " tool-call-group--running" : ""}`}>
@@ -88,7 +90,7 @@ export function ToolCallGroup({ message }: Props) {
           <span className="tool-call-group-head">
             <span className={`tool-call-group-indicator${isRunning ? " running" : ""}`} />
             <span className="tool-call-group-label">{titleLabel}</span>
-            <span className="tool-call-group-count">{entries.length} steps</span>
+            <span className="tool-call-group-count">{t("toolGroup.steps", { count: entries.length })}</span>
             <span className="tool-call-group-chevron">›</span>
           </span>
           {!open && (

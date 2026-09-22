@@ -23,6 +23,7 @@ import type {
   MessageContent,
   UpdateInfo,
 } from "./types";
+import { isGenerationStopped, isLocale, useI18n } from "./i18n";
 import "./App.css";
 
 type Sidebar = "settings" | "skills" | "history" | "tools" | "mcp" | "agents" | null;
@@ -177,6 +178,7 @@ interface MarkdownEditPayload {
 }
 
 export default function App() {
+  const { t, setLocale } = useI18n();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -234,7 +236,8 @@ export default function App() {
     requires_confirmation?: boolean;
   } | null>(null);
   const [profileExporting, setProfileExporting] = useState(false);
-  const [profileExportMessage, setProfileExportMessage] = useState("Exporting and compressing profile...");
+  const [profileExportPhase, setProfileExportPhase] = useState<"idle" | "preparing" | "status">("idle");
+  const [profileExportStatus, setProfileExportStatus] = useState("");
   const [pendingRetryMessageId, setPendingRetryMessageId] = useState<string | null>(null);
   const [markdownEditorOpen, setMarkdownEditorOpen] = useState(false);
   const [markdownPath, setMarkdownPath] = useState("");
@@ -282,8 +285,11 @@ export default function App() {
     setMaxTokens(cfg.model_context_lengths?.[cfg.model] ?? cfg.model_settings?.max_tokens ?? null);
     setActiveSkillIds(await reconcileActiveSkills(cfg.selected_skills ?? []));
     setActiveToolCount((cfg.selected_tools ?? []).length);
+    // The config is the source of truth for the UI language (localStorage is
+    // only a first-paint cache), so a profile import can switch it too.
+    if (isLocale(cfg.language)) setLocale(cfg.language);
     return cfg;
-  }, [reconcileActiveSkills]);
+  }, [reconcileActiveSkills, setLocale]);
 
   // Silent update probe on startup: it never blocks the chat and never surfaces
   // errors — Settings has an explicit "Check for updates" action instead.
@@ -603,26 +609,29 @@ export default function App() {
     unlisteners.push(
       listen("profile-export-start", () => {
         setProfileExporting(true);
-        setProfileExportMessage("Preparing profile export...");
+        setProfileExportPhase("preparing");
       }),
       listen<string>("profile-export-status", (e) => {
-        setProfileExportMessage(e.payload);
+        setProfileExportPhase("status");
+        setProfileExportStatus(e.payload);
       }),
       listen("profile-export-done", () => {
         setProfileExporting(false);
-        setProfileExportMessage("Exporting and compressing profile...");
+        setProfileExportPhase("idle");
+        setProfileExportStatus("");
       }),
       listen<string>("profile-export-error", (e) => {
         setProfileExporting(false);
-        setProfileExportMessage("Exporting and compressing profile...");
-        setError(`Profile export failed: ${e.payload}`);
+        setProfileExportPhase("idle");
+        setProfileExportStatus("");
+        setError(t("app.profileExportFailed", { error: e.payload }));
       })
     );
 
     return () => {
       unlisteners.forEach((p) => p.then((fn) => fn()));
     };
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (!skillsLoadedFromConfig) return;
@@ -681,8 +690,8 @@ export default function App() {
         if (e.payload.task_count > 0) {
           const entry: ToolCallEntry = {
             task_id: `plan-${Date.now()}`,
-            agent_name: "Planner",
-            description: `Plan completed — ${e.payload.task_count} tasks total`,
+            agent_name: t("app.agents.planner"),
+            description: t("app.agents.planDone", { count: e.payload.task_count }),
             status: "done",
           };
           currentToolCallsRef.current = [...currentToolCallsRef.current, entry];
@@ -692,8 +701,8 @@ export default function App() {
       listen("agent-aggregate-start", () => {
         const entry: ToolCallEntry = {
           task_id: `aggregate-${Date.now()}`,
-          agent_name: "Aggregator",
-          description: "Aggregating all subtask results...",
+          agent_name: t("app.agents.aggregator"),
+          description: t("app.agents.aggregating"),
           status: "running",
         };
         currentToolCallsRef.current = [...currentToolCallsRef.current, entry];
@@ -718,7 +727,7 @@ export default function App() {
 
         const entry: ToolCallEntry = {
           task_id: crypto.randomUUID(),
-          agent_name: "Tool",
+          agent_name: t("app.agents.tool"),
           description: label,
           status: "running",
           summary: detail,
@@ -740,8 +749,8 @@ export default function App() {
         if (!skillName) return;
         const entry: ToolCallEntry = {
           task_id: crypto.randomUUID(),
-          agent_name: "Tool",
-          description: `🧠 Loading skill: ${skillName}`,
+          agent_name: t("app.agents.tool"),
+          description: t("app.agents.loadingSkill", { name: skillName }),
           status: "running",
           skill_name: skillName,
         };
@@ -758,7 +767,7 @@ export default function App() {
     return () => {
       unlisteners.forEach((p) => p.then((fn) => fn()));
     };
-  }, [updateActiveAssistantToolCalls]);
+  }, [updateActiveAssistantToolCalls, t]);
 
   const sendMessage = useCallback(async () => {
     if (profileExporting) return;
@@ -882,7 +891,7 @@ export default function App() {
             .filter((m) => !m.id.startsWith("agent-progress-"))
             .map((m) =>
               m.id === assistantId
-                ? { ...m, content: m.content || "Error: " + err, streaming: false }
+                ? { ...m, content: m.content || t("app.errorPrefix") + err, streaming: false }
                 : m
             )
         );
@@ -897,7 +906,7 @@ export default function App() {
     }, useAgentsEnabled);
 
     cleanupRef.current = cleanup;
-  }, [input, messages, streaming, profileExporting, activeSkillIds, sessionId, attachments, selectedModel, useAgentsEnabled]);
+  }, [input, messages, streaming, profileExporting, activeSkillIds, sessionId, attachments, selectedModel, useAgentsEnabled, t]);
 
   const retryPendingUserMessage = useCallback(async () => {
     if (streaming || !pendingRetryMessageId) return;
@@ -988,7 +997,7 @@ export default function App() {
             .filter((m) => !m.id.startsWith("agent-progress-"))
             .map((m) =>
               m.id === assistantId
-                ? { ...m, content: m.content || "Error: " + err, streaming: false }
+                ? { ...m, content: m.content || t("app.errorPrefix") + err, streaming: false }
                 : m
             )
         );
@@ -1002,7 +1011,7 @@ export default function App() {
     }, useAgentsEnabled);
 
     cleanupRef.current = cleanup;
-  }, [messages, streaming, pendingRetryMessageId, activeSkillIds, sessionId, selectedModel, useAgentsEnabled]);
+  }, [messages, streaming, pendingRetryMessageId, activeSkillIds, sessionId, selectedModel, useAgentsEnabled, t]);
 
   const handleDeleteMessage = useCallback(async (messageId: string) => {
     const msg = messages.find((m) => m.id === messageId);
@@ -1012,9 +1021,9 @@ export default function App() {
       await deleteMessage(msg.dbId);
       setMessages((prev) => prev.filter((m) => m.id !== messageId));
     } catch (err) {
-      setError(`Failed to delete message: ${String(err)}`);
+      setError(t("app.deleteFailed", { error: String(err) }));
     }
-  }, [messages]);
+  }, [messages, t]);
 
   const handleForkMessage = useCallback(async (messageId: string) => {
     const msg = messages.find((m) => m.id === messageId);
@@ -1033,9 +1042,9 @@ export default function App() {
       setPendingRetryMessageId(null);
       setError(null);
     } catch (err) {
-      setError(`Failed to fork session: ${String(err)}`);
+      setError(t("app.forkFailed", { error: String(err) }));
     }
-  }, [messages, sessionId]);
+  }, [messages, sessionId, t]);
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (profileExporting) {
@@ -1117,23 +1126,23 @@ export default function App() {
     const hasRisk = riskLevel !== undefined && riskScore !== undefined;
 
     const title = requiresSudo
-      ? "⚠️ Privileged operation (sudo)"
+      ? t("app.confirm.titleSudo")
       : requiresElevation
-        ? "⚠️ Privileged operation (administrator)"
+        ? t("app.confirm.titleElevation")
         : isExternalPath
-          ? "⚠️ External file access request"
+          ? t("app.confirm.titleExternalPath")
           : hasRisk
-            ? `⚠️ Risk Level ${riskLevel} — confirm execution`
-            : "⚠️ Dangerous command detected";
+            ? t("app.confirm.titleRisk", { level: riskLevel ?? "" })
+            : t("app.confirm.titleDangerous");
     const badge = requiresSudo
-      ? "SUDO"
+      ? t("app.confirm.badgeSudo")
       : requiresElevation
-        ? "ADMIN"
+        ? t("app.confirm.badgeAdmin")
         : isExternalPath
-          ? "PATH"
+          ? t("app.confirm.badgePath")
           : hasRisk
-            ? riskLevel ?? "RISK"
-            : "DANGEROUS";
+            ? riskLevel ?? t("app.confirm.badgeRisk")
+            : t("app.confirm.badgeDangerous");
     const preview =
       confirmDialog.code.length > 400
         ? confirmDialog.code.slice(0, 400) + "…"
@@ -1146,10 +1155,10 @@ export default function App() {
             {title} <span className="confirm-dialog-badge">{badge}</span>
           </h2>
           <p>
-            <strong>Reason:</strong> {confirmDialog.reason}
+            <strong>{t("app.confirm.reason")}</strong> {confirmDialog.reason}
           </p>
           <p>
-            <strong>Type:</strong> {confirmDialog.cmd_type}
+            <strong>{t("app.confirm.type")}</strong> {confirmDialog.cmd_type}
           </p>
           {hasRisk && (
             <div className="confirm-dialog-risk">
@@ -1157,12 +1166,12 @@ export default function App() {
                 <span className={`confirm-risk-level confirm-risk-level-${String(riskLevel).toLowerCase()}`}>
                   {riskLevel}
                 </span>
-                <span className="confirm-risk-score">Score: {riskScore}/100</span>
+                <span className="confirm-risk-score">{t("app.confirm.score", { score: riskScore ?? 0 })}</span>
                 <span className="confirm-risk-disposition">{disposition}</span>
               </div>
               {blacklistHits && blacklistHits.length > 0 && (
                 <div className="confirm-risk-section">
-                  <strong>命中规则 (Blacklist hits):</strong>
+                  <strong>{t("app.confirm.blacklistHits")}:</strong>
                   <ul>
                     {blacklistHits.map((hit, i) => (
                       <li key={i}>
@@ -1174,7 +1183,7 @@ export default function App() {
               )}
               {penaltyItems && penaltyItems.length > 0 && (
                 <div className="confirm-risk-section">
-                  <strong>惩罚项 (Penalty items):</strong>
+                  <strong>{t("app.confirm.penaltyItems")}:</strong>
                   <ul>
                     {penaltyItems.map((item, i) => (
                       <li key={i}>{item.name} — +{item.points}</li>
@@ -1187,37 +1196,36 @@ export default function App() {
           {requiresSudo && (
             <div className="confirm-dialog-credentials">
               <label>
-                Username (optional)
+                {t("app.confirm.username")}
                 <input
                   value={confirmUsername}
                   onChange={(e) => setConfirmUsername(e.target.value)}
-                  placeholder="leave blank for current user"
+                  placeholder={t("app.confirm.usernamePlaceholder")}
                 />
               </label>
               <label>
-                Password
+                {t("app.confirm.password")}
                 <input
                   type="password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="required"
+                  placeholder={t("app.confirm.passwordPlaceholder")}
                   autoFocus
                 />
               </label>
               <p className="confirm-dialog-hint">
-                This will run with elevated privileges and may modify your system.
+                {t("app.confirm.sudoHint")}
               </p>
             </div>
           )}
           {requiresElevation && (
             <p className="confirm-dialog-hint">
-              This will request administrator elevation (UAC) and may modify system settings.
+              {t("app.confirm.elevationHint")}
             </p>
           )}
           {isExternalPath && (
             <p className="confirm-dialog-hint">
-              This file action wants to access an absolute path outside the current workspace root.
-              Allow it only if that external location is intentional.
+              {t("app.confirm.externalPathHint")}
             </p>
           )}
           <div className="confirm-dialog-preview">
@@ -1228,14 +1236,14 @@ export default function App() {
               className="confirm-dialog-button cancel"
               onClick={() => respondToConfirm(false)}
             >
-              Deny
+              {t("app.confirm.deny")}
             </button>
             <button
               className="confirm-dialog-button confirm"
               onClick={() => respondToConfirm(true)}
               disabled={requiresSudo && confirmPassword.trim().length === 0}
             >
-              Allow
+              {t("app.confirm.allow")}
             </button>
           </div>
         </div>
@@ -1258,14 +1266,14 @@ export default function App() {
     setMessages((prev) =>
       prev.map((m) => {
         if (!m.streaming) return m;
-        const stopSuffix = "\n\n[Generation stopped]";
+        const stopSuffix = "\n\n" + t("app.generationStopped");
         // `content` may be a string OR a multimodal array — only mutate
         // string content (assistant streamed text). Leave other shapes
         // untouched.
         if (typeof m.content !== "string") {
           return { ...m, streaming: false };
         }
-        const content = m.content.includes("[Generation stopped]")
+        const content = isGenerationStopped(m.content)
           ? m.content
           : (m.content || "") + stopSuffix;
         return { ...m, content, streaming: false };
@@ -1276,7 +1284,7 @@ export default function App() {
 
   async function handleSaveMarkdownEditor() {
     if (!markdownPath.trim()) {
-      setError("Markdown file path is empty.");
+      setError(t("app.markdownPathEmpty"));
       return;
     }
 
@@ -1285,7 +1293,7 @@ export default function App() {
       await saveMarkdownFile(markdownPath, markdownDraft);
       setMarkdownEditorOpen(false);
     } catch (err) {
-      setError(`Failed to save markdown file: ${String(err)}`);
+      setError(t("app.markdownSaveFailed", { error: String(err) }));
     } finally {
       setMarkdownSaving(false);
     }
@@ -1304,10 +1312,10 @@ export default function App() {
       {renderConfirmDialog()}
       {markdownEditorOpen && (
         <Portal>
-          <div className="markdown-editor-overlay" role="dialog" aria-modal="true" aria-label="Markdown editor">
+          <div className="markdown-editor-overlay" role="dialog" aria-modal="true" aria-label={t("app.markdownEditorAria")}>
             <div className="markdown-editor-shell">
               <div className="markdown-editor-header">
-                <h3>Markdown Edit</h3>
+                <h3>{t("app.markdownEditorTitle")}</h3>
                 <div className="markdown-editor-file" title={markdownPath}>{markdownPath}</div>
                 <div className="markdown-editor-actions">
                   <button
@@ -1316,7 +1324,7 @@ export default function App() {
                     onClick={() => setMarkdownEditorOpen(false)}
                     disabled={markdownSaving}
                   >
-                    Cancel
+                    {t("common.cancel")}
                   </button>
                   <button
                     type="button"
@@ -1324,26 +1332,26 @@ export default function App() {
                     onClick={handleSaveMarkdownEditor}
                     disabled={markdownSaving}
                   >
-                    {markdownSaving ? "Saving..." : "Save"}
+                    {markdownSaving ? t("common.saving") : t("common.save")}
                   </button>
                 </div>
               </div>
               <div className="markdown-editor-body">
                 <div className="markdown-editor-column">
-                  <span>Markdown</span>
+                  <span>{t("app.markdownColumn")}</span>
                   <textarea
                     className="markdown-editor-textarea"
                     value={markdownDraft}
                     onChange={(e) => setMarkdownDraft(e.target.value)}
-                    placeholder="Write markdown here..."
+                    placeholder={t("app.markdownPlaceholder")}
                   />
                 </div>
                 <div className="markdown-editor-column">
-                  <span>Preview</span>
+                  <span>{t("app.previewColumn")}</span>
                   <div className="markdown-editor-preview">
                     {markdownDraft.trim()
                       ? <MarkdownPreview content={markdownDraft} />
-                      : <p className="markdown-editor-preview-empty">Markdown preview will appear here.</p>}
+                      : <p className="markdown-editor-preview-empty">{t("app.markdownPreviewEmpty")}</p>}
                   </div>
                 </div>
               </div>
@@ -1379,6 +1387,7 @@ export default function App() {
                 setMaxTokens(cfg.model_context_lengths?.[cfg.model] ?? cfg.model_settings?.max_tokens ?? null);
                 themeRef.current = cfg.theme ?? "auto";
                 applyTheme(cfg.theme);
+                if (isLocale(cfg.language)) setLocale(cfg.language);
               }}
             />
           </div>
@@ -1419,7 +1428,7 @@ export default function App() {
                 disableSessionSwitch={streaming}
                 onLoad={(sid, msgs) => {
                   if (streaming) {
-                    setError("A reply is currently being generated. Please stop it before switching history sessions.");
+                    setError(t("app.sessionSwitchBlocked"));
                     return;
                   }
                   if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null; }
@@ -1457,18 +1466,18 @@ export default function App() {
           <span className="app-title">                      <button
             className="toolbar-btn"
             onClick={clearChat}
-            title="New chat"
+            title={t("app.newChatTitle")}
           >
-            ↻ New Chat
+            ↻ {t("app.newChat")}
           </button></span>
 
           <div className="toolbar-actions">
             <button
               className={`toolbar-btn ${sidebar === "agents" ? "active" : ""}`}
               onClick={() => toggleSidebar("agents")}
-              title={`Sub Agents${useAgentsEnabled ? " (Enabled)" : ""}`}
+              title={useAgentsEnabled ? t("app.toolbarAgentsTitleEnabled") : t("app.toolbarAgentsTitle")}
             >
-              🤖 Agents
+              🤖 {t("app.toolbarAgents")}
               {activeAgentCount > 0 && useAgentsEnabled && (
                 <span className="toolbar-btn-count">{activeAgentCount}</span>
               )}
@@ -1476,9 +1485,9 @@ export default function App() {
             <button
               className={`toolbar-btn ${sidebar === "skills" ? "active" : ""}`}
               onClick={() => toggleSidebar("skills")}
-              title="Skills"
+              title={t("app.toolbarSkills")}
             >
-              ✦ Skills
+              ✦ {t("app.toolbarSkills")}
               {activeSkillIds.length > 0 && (
                 <span className="toolbar-btn-count">{activeSkillIds.length}</span>
               )}
@@ -1486,9 +1495,9 @@ export default function App() {
             <button
               className={`toolbar-btn ${sidebar === "mcp" ? "active" : ""}`}
               onClick={() => toggleSidebar("mcp")}
-              title="MCP Servers"
+              title={t("app.toolbarMcpTitle")}
             >
-              ⬡ MCP
+              ⬡ {t("app.toolbarMcp")}
               {activeMcpCount > 0 && (
                 <span className="toolbar-btn-count">{activeMcpCount}</span>
               )}
@@ -1496,9 +1505,9 @@ export default function App() {
             <button
               className={`toolbar-btn ${sidebar === "tools" ? "active" : ""}`}
               onClick={() => toggleSidebar("tools")}
-              title="Tools"
+              title={t("app.toolbarTools")}
             >
-              🛠 Tools
+              🛠 {t("app.toolbarTools")}
               {activeToolCount > 0 && (
                 <span className="toolbar-btn-count">{activeToolCount}</span>
               )}
@@ -1506,16 +1515,16 @@ export default function App() {
             <button
               className={`toolbar-btn ${sidebar === "history" ? "active" : ""}`}
               onClick={() => toggleSidebar("history")}
-              title="History"
+              title={t("app.toolbarHistory")}
             >
-              🕒 History
+              🕒 {t("app.toolbarHistory")}
             </button>
             <button
               className={`toolbar-btn ${sidebar === "settings" ? "active" : ""}`}
               onClick={() => toggleSidebar("settings")}
-              title="Settings"
+              title={t("app.toolbarSettings")}
             >
-              ⚙ Settings
+              ⚙ {t("app.toolbarSettings")}
             </button>
 
 
@@ -1524,8 +1533,14 @@ export default function App() {
 
         {profileExporting && (
           <div className="profile-export-progress" role="progressbar" aria-busy="true" aria-live="polite">
-            <div className="profile-export-progress-label">{profileExportMessage}</div>
-            <div className="profile-export-progress-hint">Chat is locked during export and sending is disabled.</div>
+            <div className="profile-export-progress-label">
+              {profileExportPhase === "preparing"
+                ? t("app.profileExportPreparing")
+                : profileExportPhase === "status"
+                  ? profileExportStatus
+                  : t("app.profileExportLabel")}
+            </div>
+            <div className="profile-export-progress-hint">{t("app.profileExportHint")}</div>
             <div className="profile-export-progress-track">
               <div className="profile-export-progress-fill" />
             </div>
@@ -1535,19 +1550,21 @@ export default function App() {
         {updateInfo?.has_update && !updateBannerDismissed && (
           <div className="update-banner" role="status">
             <span className="update-banner-text">
-              New version <strong>{updateInfo.latest_version}</strong> is available — you are on{" "}
-              {updateInfo.current_version}.
+              {t("app.updateAvailable", {
+                version: updateInfo.latest_version,
+                current: updateInfo.current_version,
+              })}
             </span>
             <div className="update-banner-actions">
               <button type="button" className="toolbar-btn" onClick={() => setUpdatePanelOpen(true)}>
-                View update
+                {t("app.viewUpdate")}
               </button>
               <button
                 type="button"
                 className="toolbar-btn"
                 onClick={() => setUpdateBannerDismissed(true)}
               >
-                Dismiss
+                {t("app.dismiss")}
               </button>
             </div>
           </div>
@@ -1557,9 +1574,12 @@ export default function App() {
         <div className="messages">
           {messages.length === 0 && (
             <div className="empty-state">
-              <p>Start a conversation</p>
+              <p>{t("app.emptyStart")}</p>
               <p className="empty-hint">
-                Use <strong>Skills</strong> to set a system prompt, or configure the API in <strong>Settings</strong>.
+                {t("app.emptyHint", {
+                  skills: t("app.toolbarSkills"),
+                  settings: t("app.toolbarSettings"),
+                })}
               </p>
             </div>
           )}
@@ -1589,7 +1609,7 @@ export default function App() {
               className="usage-panel"
               role="status"
               aria-live="polite"
-              aria-label={`Context usage: ${usagePercent}%`}
+              aria-label={t("app.contextUsage", { percent: usagePercent })}
             >
               <div
                 className={`usage-panel-fill${usagePercent >= 90 ? " danger" : ""}`}
@@ -1626,7 +1646,7 @@ export default function App() {
           <div className="input-row">
             <button
               className="attach-btn"
-              title="Attach files"
+              title={t("app.attachFiles")}
               onClick={() => fileInputRef.current?.click()}
               disabled={streaming || profileExporting}
             >
@@ -1661,12 +1681,12 @@ export default function App() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Type a message… (Enter to send, Shift+Enter for newline)"
+              placeholder={t("app.inputPlaceholder")}
               disabled={streaming || profileExporting}
             />
             <select
               className="model-select"
-              title="Select model"
+              title={t("app.selectModel")}
               value={selectedModel}
               onChange={(e) => setSelectedModel(e.target.value)}
               disabled={streaming || profileExporting}
@@ -1680,7 +1700,7 @@ export default function App() {
               onClick={streaming ? stopStreaming : sendMessage}
               disabled={profileExporting || (!streaming && !input.trim() && attachments.length === 0)}
             >
-              {streaming ? "Stop" : "Send"}
+              {streaming ? t("app.stop") : t("app.send")}
             </button>
           </div>
         </div>
