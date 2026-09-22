@@ -69,7 +69,30 @@ export interface Message {
   dbId?: number;
 }
 
-export type ConfirmKind = "dangerous" | "sudo" | "elevation" | "external_path";
+/**
+ * Confirmation kinds the backend can send with `confirm-required` — and the only
+ * values `auto_accept_confirm_kinds` can meaningfully hold.
+ *
+ * The command kinds mirror `RiskLevel::confirm_kind()` in
+ * `src-tauri/src/tools.rs`: L0 (`dangerous`), L1 (`system_config`),
+ * L2 (`user_software`) and L3 (`user_data`) require approval, while L4-L6 never
+ * prompt at all. `external_path` covers `file_actions` targeting an absolute
+ * path outside the workspace. Keep this union in sync with the Rust side.
+ */
+export type ConfirmKind =
+  | "dangerous"
+  | "system_config"
+  | "user_software"
+  | "user_data"
+  | "external_path";
+
+/**
+ * Values persisted in `auto_accept_confirm_kinds`. `"*"` is the
+ * "auto-approve everything" wildcard: the backend matches it against every
+ * confirmation kind — including kinds added in a later version — so the Tools
+ * panel's one-click toggle keeps working after an upgrade.
+ */
+export type AutoAcceptKind = ConfirmKind | "*";
 
 /** UI languages bundled with the frontend (see `src/i18n`). */
 export type Language = "en" | "zh-CN" | "zh-TW";
@@ -109,7 +132,7 @@ export interface AppConfig {
    * very first paint does not flash the wrong language.
    */
   language?: Language;
-  auto_accept_confirm_kinds?: ConfirmKind[];
+  auto_accept_confirm_kinds?: AutoAcceptKind[];
   check_updates_on_startup?: boolean;
   include_prerelease_updates?: boolean;
   /**

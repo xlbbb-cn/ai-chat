@@ -321,17 +321,25 @@ const zhCN: Messages = {
             },
         },
         autoAcceptItems: {
+            all: {
+                label: "全部自动获批",
+                description: "一键跳过所有确认弹窗，包括后续版本新增的确认类型。",
+            },
             dangerous: {
-                label: "危险命令",
-                description: "对危险的 run_cmd 或 run_shell 请求跳过确认提示。",
+                label: "危险命令（L0）",
+                description: "对 L0 系统级风险的 run_cmd / run_shell 请求（风险分 ≥ 85）跳过确认提示。",
             },
-            sudo: {
-                label: "sudo 请求",
-                description: "自动确认 sudo 的审批步骤，但不会自动提供密码。",
+            systemConfig: {
+                label: "系统配置修改（L1）",
+                description: "对修改系统配置或系统软件的 L1 请求（风险分 70–84）跳过确认提示。",
             },
-            elevation: {
-                label: "管理员提权",
-                description: "在 PowerShell 提权（UAC）请求之前跳过确认提示。",
+            userSoftware: {
+                label: "用户软件变更（L2）",
+                description: "对安装、卸载或修改用户应用的 L2 请求（风险分 55–69）跳过确认提示。",
+            },
+            userData: {
+                label: "用户数据变更（L3）",
+                description: "对修改或删除用户数据文件的 L3 请求（风险分 40–54）跳过确认提示。",
             },
             externalPath: {
                 label: "外部绝对路径",

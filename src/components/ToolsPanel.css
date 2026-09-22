@@ -4,6 +4,9 @@
     height: 100%;
     background: var(--c-bg);
     color: var(--c-body);
+    /* Last-resort net: on very short viewports the fixed header / footer may
+       exceed the panel, so let the panel itself scroll instead of clipping. */
+    overflow-y: auto;
 }
 
 .tools-header {
@@ -311,21 +314,37 @@
 .auto-accept-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
     padding-top: 4px;
+    /* Compact rows; also cap the height so a long list scrolls inside the
+       section instead of squeezing the tool list away on short screens. */
+    max-height: min(45vh, 340px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+/* Master "auto-approve everything" switch — emphasised over the per-kind rows. */
+.auto-accept-option-all {
+    border-color: var(--c-accent);
+}
+
+.auto-accept-option-all .auto-accept-name {
+    font-weight: 600;
+    color: var(--c-accent);
 }
 
 .auto-accept-option {
     border: 0.5px solid var(--c-border-i);
     border-radius: var(--r-md);
-    padding: 12px 14px;
+    padding: 8px 12px;
     background: var(--c-surface);
     cursor: pointer;
     transition: border-color 0.2s, background-color 0.2s, box-shadow 0.2s;
     display: flex;
-    align-items: flex-start;
-    gap: 10px;
+    align-items: center;
+    gap: 8px;
     box-shadow: var(--shadow-sm);
+    flex-shrink: 0;
 }
 
 .auto-accept-option:hover {
@@ -339,13 +358,9 @@
     margin: 0;
     accent-color: var(--c-accent);
     flex-shrink: 0;
-    margin-top: 2px;
 }
 
 .auto-accept-option-body {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
     min-width: 0;
     flex: 1;
 }
@@ -354,10 +369,4 @@
     font-size: 13px;
     color: var(--c-text);
     letter-spacing: -0.005em;
-}
-
-.auto-accept-desc {
-    font-size: 12px;
-    line-height: 1.5;
-    color: var(--c-muted);
 }

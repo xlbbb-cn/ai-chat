@@ -321,17 +321,25 @@ const zhTW: Messages = {
             },
         },
         autoAcceptItems: {
+            all: {
+                label: "全部自動獲批",
+                description: "一鍵略過所有確認視窗，包括後續版本新增的確認類型。",
+            },
             dangerous: {
-                label: "危險命令",
-                description: "對危險的 run_cmd 或 run_shell 請求略過確認提示。",
+                label: "危險命令（L0）",
+                description: "對 L0 系統級風險的 run_cmd / run_shell 請求（風險分 ≥ 85）略過確認提示。",
             },
-            sudo: {
-                label: "sudo 請求",
-                description: "自動確認 sudo 的核准步驟，但不會自動提供密碼。",
+            systemConfig: {
+                label: "系統設定修改（L1）",
+                description: "對修改系統設定或系統軟體的 L1 請求（風險分 70–84）略過確認提示。",
             },
-            elevation: {
-                label: "系統管理員提高權限",
-                description: "在 PowerShell 提高權限（UAC）請求之前略過確認提示。",
+            userSoftware: {
+                label: "使用者軟體變更（L2）",
+                description: "對安裝、解除安裝或修改使用者應用程式的 L2 請求（風險分 55–69）略過確認提示。",
+            },
+            userData: {
+                label: "使用者資料變更（L3）",
+                description: "對修改或刪除使用者資料檔案的 L3 請求（風險分 40–54）略過確認提示。",
             },
             externalPath: {
                 label: "外部絕對路徑",

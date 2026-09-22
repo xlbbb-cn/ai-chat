@@ -338,18 +338,30 @@ const en = {
             },
         },
         autoAcceptItems: {
-            dangerous: {
-                label: "Dangerous commands",
-                description: "Skip the approval prompt for dangerous run_cmd or run_shell requests.",
-            },
-            sudo: {
-                label: "sudo requests",
+            all: {
+                label: "Auto-approve everything",
                 description:
-                    "Auto-confirms the approval step for sudo. It does not provide a password automatically.",
+                    "One click: skip every approval dialog, including confirmation kinds added in future versions.",
             },
-            elevation: {
-                label: "Administrator elevation",
-                description: "Skip the approval prompt before PowerShell elevation (UAC) requests.",
+            dangerous: {
+                label: "Dangerous commands (L0)",
+                description:
+                    "Skip the approval prompt for L0 system-risk run_cmd / run_shell requests (risk score ≥ 85).",
+            },
+            systemConfig: {
+                label: "System configuration changes (L1)",
+                description:
+                    "Skip the approval prompt for L1 requests that modify system configuration or system software (score 70–84).",
+            },
+            userSoftware: {
+                label: "User software changes (L2)",
+                description:
+                    "Skip the approval prompt for L2 requests that install, uninstall, or modify user applications (score 55–69).",
+            },
+            userData: {
+                label: "User data changes (L3)",
+                description:
+                    "Skip the approval prompt for L3 requests that modify or delete user data files (score 40–54).",
             },
             externalPath: {
                 label: "External absolute paths",

@@ -83,7 +83,7 @@ This is enforced by the skills/tools layer. Don't add code that lets a skill esc
 
 - Tools: `run_cmd`, `run_shell`, `file_actions`, `knowledge_graph` (Neo4j backend), plus `web_search` / `fetch_web` in `tools.rs`.
 - Some command patterns raise a frontend confirmation dialog. The Rust side blocks on `confirm_command` until the user replies. **If a tool call appears to hang, check the React tree for a pending `ConfirmDialog` / dangerous-command prompt before debugging the Rust side.**
-- `ConfirmKind` values: `dangerous`, `sudo`, `elevation`, `external_path`. Users can auto-accept some kinds via `auto_accept_confirm_kinds` in config.
+- `ConfirmKind` values: `dangerous` (L0), `system_config` (L1), `user_software` (L2), `user_data` (L3), `external_path` — these mirror `RiskLevel::confirm_kind()` in `tools.rs` (L4-L6 never prompt). Users can auto-accept kinds via `auto_accept_confirm_kinds` in config; the Tools panel only offers kinds the backend can actually emit, plus a one-click master switch that stores the `"*"` wildcard (matches every kind, including future ones).
 
 ## Tauri 2 specifics for this repo
 
