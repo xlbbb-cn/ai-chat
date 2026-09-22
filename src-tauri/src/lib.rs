@@ -131,6 +131,11 @@ pub struct AppConfig {
     pub model_catalog: Vec<String>,
     #[serde(default)]
     pub model_settings: ModelSettings,
+    /// DS-Format (DeepSeek format): pass `reasoning_content` back on assistant
+    /// messages as DeepSeek-family thinking models require. Off by default —
+    /// other providers receive plain messages.
+    #[serde(default)]
+    pub ds_format: bool,
     /// Per-model context window (tokens). Auto-filled from `/models` when the
     /// provider reports one; otherwise set manually in Settings as a fallback.
     #[serde(default)]
@@ -181,6 +186,7 @@ impl Default for AppConfig {
             model: "gpt-4o-mini".into(),
             model_catalog: vec!["gpt-4o-mini".to_string()],
             model_settings: ModelSettings::default(),
+            ds_format: false,
             model_context_lengths: HashMap::new(),
             system_message: String::new(),
             selected_tools: vec![],

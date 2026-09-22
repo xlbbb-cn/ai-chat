@@ -854,6 +854,8 @@ async fn call_llm_once(
         "model": model,
         "messages": messages,
     });
+    // No DS-Format normalization needed here: these prompts only ever carry
+    // system/user messages, never replayed assistant turns.
     apply_completion_token_limit(
         &mut body,
         Some(max_complete_tokens),
@@ -1680,12 +1682,14 @@ async fn run_sub_agent_inner(
                 emit_reasoning: false,
                 emit_usage: false,
                 usage_max_tokens: None,
+                ds_format: config.ds_format,
             },
         )
         .await
         .map(|sr| {
             (
                 sr.content,
+                sr.reasoning_content,
                 sr.tool_calls,
                 sr.prompt_tokens + sr.completion_tokens,
             )
@@ -1707,13 +1711,19 @@ async fn run_sub_agent_inner(
                     tokens_used: total_tokens,
                 };
             }
-            Ok((content, agent_tool_calls, tokens)) => {
+            Ok((content, reasoning_content, agent_tool_calls, tokens)) => {
                 total_tokens += tokens;
 
                 if agent_tool_calls.is_empty() {
                     if !content.trim().is_empty() {
-                        working_memory
-                            .push(json!({ "role": "assistant", "content": content.clone() }));
+                        // Keep the round's reasoning trace: thinking-mode APIs
+                        // require it on replayed assistant messages.
+                        let mut assistant_msg =
+                            json!({ "role": "assistant", "content": content.clone() });
+                        if !reasoning_content.is_empty() {
+                            assistant_msg["reasoning_content"] = json!(reasoning_content.as_str());
+                        }
+                        working_memory.push(assistant_msg);
                     }
 
                     let mission_snapshot = {
@@ -1815,9 +1825,17 @@ async fn run_sub_agent_inner(
                 } else {
                     Value::String(content.clone())
                 };
-                working_memory.push(
-                    json!({ "role": "assistant", "content": assistant_content, "tool_calls": assistant_tcs }),
-                );
+                // Thinking-mode APIs require the round's `reasoning_content` to
+                // ride along with tool-call turns, unmodified.
+                let mut assistant_msg = json!({
+                    "role": "assistant",
+                    "content": assistant_content,
+                    "tool_calls": assistant_tcs,
+                });
+                if !reasoning_content.is_empty() {
+                    assistant_msg["reasoning_content"] = json!(reasoning_content.as_str());
+                }
+                working_memory.push(assistant_msg);
 
                 // Execute each tool call
                 for (id, name, args) in &agent_tool_calls {

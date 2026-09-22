@@ -195,6 +195,54 @@ mod tests {
 
         assert!(collect_loaded_skills(&messages).is_empty());
     }
+
+    #[test]
+    fn ds_format_fills_missing_assistant_reasoning_and_preserves_originals() {
+        // DS-Format on: assistant messages without a reasoning trace (tool-call
+        // continuation rounds, legacy history) get an empty-string fallback;
+        // original traces stay untouched; non-assistant messages are skipped.
+        let mut body = json!({
+            "model": "deepseek-v4-flash",
+            "messages": [
+                { "role": "user", "content": "hi" },
+                { "role": "assistant", "content": null, "reasoning_content": "thinking...",
+                  "tool_calls": [{ "id": "1", "type": "function", "function": { "name": "x", "arguments": "{}" } }] },
+                { "role": "tool", "tool_call_id": "1", "content": "ok" },
+                { "role": "assistant", "content": "round 2 without reasoning" },
+            ]
+        });
+        ensure_reasoning_passthrough(&mut body, true);
+        let msgs = body["messages"].as_array().unwrap();
+        assert_eq!(msgs[1]["reasoning_content"], json!("thinking..."));
+        assert_eq!(msgs[3]["reasoning_content"], json!(""));
+        assert!(msgs[0].get("reasoning_content").is_none());
+        assert!(msgs[2].get("reasoning_content").is_none());
+    }
+
+    #[test]
+    fn ds_format_fills_null_reasoning_content() {
+        let mut body = json!({
+            "model": "deepseek-v4-flash",
+            "messages": [
+                { "role": "assistant", "content": "hello", "reasoning_content": null },
+            ]
+        });
+        ensure_reasoning_passthrough(&mut body, true);
+        assert_eq!(body["messages"][0]["reasoning_content"], json!(""));
+    }
+
+    #[test]
+    fn ds_format_disabled_leaves_messages_untouched() {
+        let mut body = json!({
+            "model": "deepseek-v4-flash",
+            "messages": [
+                { "role": "user", "content": "hi" },
+                { "role": "assistant", "content": "hello" },
+            ]
+        });
+        ensure_reasoning_passthrough(&mut body, false);
+        assert!(body["messages"][1].get("reasoning_content").is_none());
+    }
 }
 
 pub struct StreamResult {
@@ -220,6 +268,10 @@ pub struct StreamOptions<'a> {
     pub emit_usage: bool,
     /// Optional —— token ceiling used for usage ratio reporting.
     pub usage_max_tokens: Option<u32>,
+    /// DS-Format (`config.ds_format`): normalize the request so assistant
+    /// messages carry `reasoning_content` back, as DeepSeek-family thinking
+    /// models require.
+    pub ds_format: bool,
 }
 
 const CONTEXT_COMPRESSION_THRESHOLD: f32 = 0.8;
@@ -359,9 +411,17 @@ fn process_stream_chunk(
         }
     }
 
-    if opts.emit_reasoning {
-        if let Some(reasoning) = delta.get("reasoning_content").and_then(|v| v.as_str()) {
-            reasoning_content.push_str(reasoning);
+    // Always accumulate the reasoning trace (both field spellings used by
+    // providers/relays) — thinking-mode APIs require the original
+    // `reasoning_content` to be passed back on assistant messages later in the
+    // turn. Only the UI event emission is optional.
+    if let Some(reasoning) = delta
+        .get("reasoning_content")
+        .or_else(|| delta.get("reasoning"))
+        .and_then(|v| v.as_str())
+    {
+        reasoning_content.push_str(reasoning);
+        if opts.emit_reasoning {
             let _ = app.emit("chat-reasoning-token", reasoning.to_string());
         }
     }
@@ -678,6 +738,41 @@ fn compress_session_context(all_messages: &mut Vec<Value>) -> Option<String> {
     Some(merged_summary)
 }
 
+// ─── Thinking-mode `reasoning_content` pass-through ──────────────────────────
+
+fn message_has_reasoning(msg: &Value) -> bool {
+    msg.get("reasoning_content")
+        .and_then(|v| v.as_str())
+        .map(|s| !s.is_empty())
+        .unwrap_or(false)
+}
+
+/// DeepSeek-format ("DS-Format") request normalization, toggled via
+/// `ds_format` in Settings. Thinking-mode DeepSeek-family APIs reject
+/// assistant messages that come back without their `reasoning_content`:
+/// `400 invalid_request_error: The "reasoning_content" in the thinking mode
+/// must be passed back to the API` — typically on tool-call continuation
+/// rounds where the model produced no new reasoning, or when history is
+/// replayed without the trace. When enabled, every assistant message is
+/// guaranteed to carry the field (empty string when the original trace is
+/// unavailable); existing traces are always preserved unmodified. When
+/// disabled, request messages are sent untouched.
+pub(crate) fn ensure_reasoning_passthrough(req_body: &mut Value, ds_format: bool) {
+    if !ds_format {
+        return;
+    }
+    let Some(messages) = req_body.get_mut("messages").and_then(|m| m.as_array_mut()) else {
+        return;
+    };
+    for msg in messages {
+        if msg.get("role").and_then(|v| v.as_str()) == Some("assistant")
+            && !message_has_reasoning(msg)
+        {
+            msg["reasoning_content"] = json!("");
+        }
+    }
+}
+
 // ─── Unified streaming helper ─────────────────────────────────────────────────
 
 /// Stream one completion request according to `opts`.
@@ -687,10 +782,13 @@ pub async fn stream_llm_request(
     client: &Client,
     url: &str,
     api_key: &str,
-    req_body: Value,
+    mut req_body: Value,
     cancelled: &AtomicBool,
     opts: StreamOptions<'_>,
 ) -> Result<StreamResult, String> {
+    // Single choke point for every streaming request (main agent + sub-agents):
+    // DS-Format guard, see `ensure_reasoning_passthrough`.
+    ensure_reasoning_passthrough(&mut req_body, opts.ds_format);
     let mut last_err: Option<String> = None;
 
     for attempt in 1..=STREAM_MAX_RETRIES {
@@ -863,6 +961,7 @@ async fn stream_request(
     req_body: Value,
     cancelled: &AtomicBool,
     usage_max_tokens: Option<u32>,
+    ds_format: bool,
 ) -> Result<StreamResult, String> {
     stream_llm_request(
         app,
@@ -877,6 +976,7 @@ async fn stream_request(
             emit_reasoning: true,
             emit_usage: true,
             usage_max_tokens,
+            ds_format,
         },
     )
     .await
@@ -1495,6 +1595,7 @@ pub async fn chat_completion(
             req_body,
             &state.chat_cancelled,
             Some(effective_max_tokens),
+            config.ds_format,
         )
         .await;
 

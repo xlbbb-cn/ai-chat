@@ -737,6 +737,23 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
                     />
                   </label>
                 </div>
+
+                <label className="settings-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={config.ds_format ?? false}
+                    onChange={(e) =>
+                      setConfig((prev) => ({
+                        ...prev,
+                        ds_format: e.target.checked,
+                      }))
+                    }
+                  />
+                  <div className="settings-checkbox-copy">
+                    <span>{t("settings.advanced.dsFormat")}</span>
+                    <small>{t("settings.advanced.dsFormatHint")}</small>
+                  </div>
+                </label>
               </div>
             )}
           </section>

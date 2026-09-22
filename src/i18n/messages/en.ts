@@ -226,6 +226,8 @@ const en = {
             maxCompletionTokens: "Max Completion Tokens",
             placeholderDefault: "default",
             placeholderDefaultLimit: "default limit",
+            dsFormat: "DS-Format (DeepSeek)",
+            dsFormatHint: "Pass reasoning_content back on assistant messages as DeepSeek-family thinking models require. Enable only for such models; leave off for other providers.",
         },
 
         runtime: {

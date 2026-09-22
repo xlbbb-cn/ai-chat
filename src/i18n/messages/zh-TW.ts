@@ -211,6 +211,8 @@ const zhTW: Messages = {
             maxCompletionTokens: "最大補完 tokens",
             placeholderDefault: "預設",
             placeholderDefaultLimit: "預設上限",
+            dsFormat: "DS-Format（DeepSeek 格式）",
+            dsFormatHint: "按 DeepSeek 系思考模式模型的要求，在回傳 assistant 訊息時攜帶 reasoning_content。僅在使用此類模型時開啟，其他供應商請保持關閉。",
         },
 
         runtime: {
