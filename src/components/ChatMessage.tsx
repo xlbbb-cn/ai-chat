@@ -295,16 +295,21 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
   const [reasoningFlowActive, setReasoningFlowActive] = useState(false);
   const [reasoningOpen, setReasoningOpen] = useState(false);
 
-  // Collapsed-state live preview: last (current) line of the reasoning stream,
-  // plus the line before it which fades out as a new line arrives.
+  // Collapsed-state live preview: the last three reasoning lines are rendered
+  // into a 2-row viewport over a 3-row track. When a new line arrives the
+  // track re-mounts (keyed by line count) and replays the scroll-up tick:
+  // the oldest line scrolls out of the viewport while fading away, the other
+  // two step up one row.
   const reasoningPreview = useMemo(() => {
     const lines = reasoningContent
       .split(/\r?\n/)
       .map((l) => l.trim())
       .filter((l) => l.length > 0);
     return {
-      current: lines[lines.length - 1] ?? "",
+      older: lines[lines.length - 3] ?? "",
       previous: lines[lines.length - 2] ?? "",
+      current: lines[lines.length - 1] ?? "",
+      lineCount: lines.length,
     };
   }, [reasoningContent]);
 
@@ -369,18 +374,23 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
             <summary className={`message-reasoning-summary ${reasoningFlowActive ? "reasoning-flow-active" : ""}`}>
               <span className="message-reasoning-title">Thought Process</span>
               {!reasoningOpen && reasoningPreview.current && (
-                <span className="reasoning-preview" aria-hidden="true">
+                <span
+                  className={`reasoning-preview ${message.streaming ? "reasoning-preview-live" : ""}`}
+                  aria-hidden="true"
+                >
                   <span
-                    key={`p-${reasoningPreview.current}`}
-                    className="reasoning-preview-line reasoning-preview-prev"
+                    className="reasoning-preview-track"
+                    key={reasoningPreview.lineCount}
                   >
-                    {reasoningPreview.previous || "\u00A0"}
-                  </span>
-                  <span
-                    key={`c-${reasoningPreview.current}`}
-                    className="reasoning-preview-line reasoning-preview-cur"
-                  >
-                    {reasoningPreview.current}
+                    <span className="reasoning-preview-line reasoning-preview-old">
+                      {reasoningPreview.older || "\u00A0"}
+                    </span>
+                    <span className="reasoning-preview-line reasoning-preview-prev">
+                      {reasoningPreview.previous || "\u00A0"}
+                    </span>
+                    <span className="reasoning-preview-line reasoning-preview-cur">
+                      {reasoningPreview.current}
+                    </span>
                   </span>
                 </span>
               )}

@@ -164,19 +164,31 @@
   }
 }
 
-/* Rows 2–3 — collapsed live preview: faded previous line above the
-   current reasoning line. */
+/* Rows 2–4 — collapsed live preview: a two-row viewport over a three-row
+   track. The track is pulled 20px up so the oldest row sits clipped above
+   the viewport; each new reasoning line re-mounts the track (keyed by line
+   count) and replays one scroll-up tick. */
 .reasoning-preview {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
+  position: relative;
+  display: block;
   height: 38px;
   /* 2 × 18px rows + 2px gap — never reflows */
+  overflow: hidden;
+  min-width: 0;
   pointer-events: none;
 }
 
+.reasoning-preview-track {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* Hides the third row above the viewport edge. */
+  transform: translateY(-20px);
+  will-change: transform;
+}
+
 .reasoning-preview-line {
+  flex: 0 0 18px;
   height: 18px;
   line-height: 18px;
   font-size: 13px;
@@ -189,35 +201,80 @@
   mask-image: linear-gradient(90deg, #000 75%, transparent 100%);
 }
 
-/* Row 2 — previous line, dimmed; eases down to its resting opacity
-   as a new line arrives. */
+/* Slot 1 — the outgoing line. Clipped at rest; only visible while the
+   scroll-up tick below carries it out through the top edge. */
+.reasoning-preview-old {
+  opacity: 0;
+}
+
+/* Slot 2 — previous line, dimmed at rest. */
 .reasoning-preview-prev {
   opacity: 0.4;
-  animation: reasoning-prev-fade 0.9s var(--ts-ease);
 }
 
-/* Row 3 — current thinking line. */
+/* Slot 3 — current thinking line. */
 .reasoning-preview-cur {
-  animation: reasoning-cur-in 0.35s var(--ts-ease);
+  opacity: 1;
 }
 
-@keyframes reasoning-prev-fade {
+/* Scroll-up tick: each row starts exactly one slot (20px) below its new
+   home — i.e. where it was rendered before the update — then slides up,
+   so the whole preview reads as one continuous upward scroll. */
+.reasoning-preview-live .reasoning-preview-old {
+  animation: reasoning-row-exit 0.32s var(--ts-ease);
+}
+
+.reasoning-preview-live .reasoning-preview-prev {
+  animation: reasoning-row-step 0.32s var(--ts-ease);
+}
+
+.reasoning-preview-live .reasoning-preview-cur {
+  animation: reasoning-row-in 0.32s var(--ts-ease);
+}
+
+/* Outgoing line: scrolls out through the top edge while fading away. */
+@keyframes reasoning-row-exit {
   from {
-    opacity: 0.9;
+    transform: translateY(20px);
+    opacity: 0.4;
   }
 
   to {
+    transform: translateY(0);
+    opacity: 0;
+  }
+}
+
+/* Line promoted from current → previous: steps up and dims to rest. */
+@keyframes reasoning-row-step {
+  from {
+    transform: translateY(20px);
+    opacity: 1;
+  }
+
+  to {
+    transform: translateY(0);
     opacity: 0.4;
   }
 }
 
-@keyframes reasoning-cur-in {
+/* Newly arrived line: rises from below the viewport edge while fading in. */
+@keyframes reasoning-row-in {
   from {
+    transform: translateY(20px);
     opacity: 0;
   }
 
   to {
+    transform: translateY(0);
     opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  .reasoning-preview-live .reasoning-preview-line {
+    animation: none;
   }
 }
 
