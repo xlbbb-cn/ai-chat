@@ -349,7 +349,7 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
                   key={reasoningPreview.lineCount}
                   aria-hidden="true"
                 >
-                  🧠
+                  ✨
                 </span>
               </span>
               {!reasoningOpen && reasoningPreview.current && (
