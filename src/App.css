@@ -188,10 +188,6 @@ body {
   }
 }
 
-.sidebar-wide {
-  width: 1200px;
-}
-
 /* Chat area */
 .chat-area {
   flex: 1;

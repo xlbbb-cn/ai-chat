@@ -380,6 +380,33 @@ export async function clearApiRequests(): Promise<void> {
   return invoke("clear_api_requests");
 }
 
+/** Result of a database compaction run. */
+export interface CompactDbResult {
+  /** Expired log rows dropped by the retention policy during this run. */
+  rows_pruned: number;
+  /** Retention window (days) that was applied; `0` = pruning disabled. */
+  retention_days: number;
+  bytes_before: number;
+  bytes_after: number;
+}
+
+/**
+ * Delete every request/interaction log row. Message history is untouched.
+ * Returns the number of removed rows; run `compactDatabase` to reclaim the
+ * space on disk.
+ */
+export async function clearLogs(): Promise<number> {
+  return invoke("clear_logs");
+}
+
+/**
+ * Apply the configured log retention window (Settings → Runtime & Debug) and
+ * `VACUUM` the database file so deleted rows actually free disk space.
+ */
+export async function compactDatabase(): Promise<CompactDbResult> {
+  return invoke("compact_database");
+}
+
 // ─── Sub-Agent Management ─────────────────────────────────────────────────────
 
 export async function listSubAgents(): Promise<SubAgent[]> {

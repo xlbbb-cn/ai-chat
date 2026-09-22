@@ -629,21 +629,3 @@
     align-items: center;
     gap: 8px;
 }
-
-.agents-monitor-btn {
-    min-height: 28px;
-    padding: 0 12px;
-    border: 0.5px solid var(--c-border-i);
-    border-radius: var(--r-pill);
-    background: var(--c-surface);
-    color: var(--c-text);
-    font-size: 12px;
-    font-family: inherit;
-    cursor: pointer;
-    transition: background-color 0.2s, border-color 0.2s;
-}
-
-.agents-monitor-btn:hover {
-    background: var(--c-hover);
-    border-color: var(--c-border);
-}

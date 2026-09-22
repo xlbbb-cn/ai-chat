@@ -29,7 +29,8 @@ Typical locations:
   "neo4j_user": "neo4j",
   "neo4j_password": "your_password",
   "check_updates_on_startup": true,
-  "include_prerelease_updates": false
+  "include_prerelease_updates": false,
+  "log_retention_days": 90
 }
 ```
 
@@ -49,6 +50,7 @@ Typical locations:
 - neo4j_password: Neo4j password.
 - check_updates_on_startup: Check the GitHub Releases API for a newer published release when the app starts (default true).
 - include_prerelease_updates: Also consider releases flagged as pre-release; draft releases are never visible to the public API.
+- log_retention_days: Retention window (days, default 90) for the request/interaction log tables (`api_requests`, `interaction_log`). Older rows are deleted at startup and when the Interaction Monitor compacts the database; 0 keeps logs forever. Chat history is never pruned. Each request stores its full prompt body, so this is the main driver of `chat.db` growth.
 
 ## Security
 

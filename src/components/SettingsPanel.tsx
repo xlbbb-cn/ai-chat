@@ -4,6 +4,7 @@ import { fetchModels, getAppVersion, getConfig, getWorkspaceDir, saveConfig, lis
 import type { AppConfig, ModelSettings, Profile } from "../types";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { MonitorPanel } from "./MonitorPanel";
+import { AgentMissionPanel } from "./AgentMissionPanel";
 import { Portal } from "./Portal";
 import { UpdatePanel } from "./UpdatePanel";
 import "./SettingsPanel.css";
@@ -65,6 +66,7 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
   const [messageDraft, setMessageDraft] = useState("");
   const [messageSaving, setMessageSaving] = useState(false);
   const [showMonitor, setShowMonitor] = useState(false);
+  const [showAgentMonitor, setShowAgentMonitor] = useState(false);
   const [showUpdatePanel, setShowUpdatePanel] = useState(false);
   const [appVersion, setAppVersion] = useState("");
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -683,7 +685,7 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
           <section id="settings-section-runtime" className="settings-section">
             <div className="settings-section-head">
               <h3>Runtime & Debug</h3>
-              <p>Where logs are written and how requests are monitored.</p>
+              <p>Where logs are written, how long they are kept, and how requests are monitored.</p>
             </div>
             <div className="settings-section-body">
               <label className="settings-field-row settings-field-row-stacked">
@@ -701,13 +703,43 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
                   <option value="println">Print to terminal (println)</option>
                 </select>
               </label>
+              <label className="settings-field-row settings-field-row-stacked">
+                <span className="settings-field-label">Log retention (days)</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={3650}
+                  step={1}
+                  value={config.log_retention_days ?? 90}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setConfig((prev) => ({
+                      ...prev,
+                      log_retention_days: v === "" ? 90 : Math.max(0, Math.floor(Number(v)) || 0),
+                    }));
+                  }}
+                />
+                <small className="settings-field-hint">
+                  Request and interaction logs older than this are deleted at startup and by the
+                  Interaction Monitor's “Compact DB”. 0 keeps logs forever. Chat history is never
+                  pruned. Change it and press Save to apply.
+                </small>
+              </label>
               {sessionId && (
-                <div className="settings-field-row">
-                  <span className="settings-field-label">API request monitor</span>
-                  <button type="button" className="settings-btn" onClick={() => setShowMonitor(true)}>
-                    Launch Monitor
-                  </button>
-                </div>
+                <>
+                  <div className="settings-field-row">
+                    <span className="settings-field-label">Interaction monitor</span>
+                    <button type="button" className="settings-btn" onClick={() => setShowMonitor(true)}>
+                      Launch Monitor
+                    </button>
+                  </div>
+                  <div className="settings-field-row">
+                    <span className="settings-field-label">Agent missions monitor</span>
+                    <button type="button" className="settings-btn" onClick={() => setShowAgentMonitor(true)}>
+                      Launch Monitor
+                    </button>
+                  </div>
+                </>
               )}
             </div>
           </section>
@@ -816,6 +848,16 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
       {showMonitor && (
         <Portal>
           <MonitorPanel sessionId={sessionId!} onClose={() => setShowMonitor(false)} />
+        </Portal>
+      )}
+
+      {showAgentMonitor && (
+        <Portal>
+          <div className="mission-monitor-overlay" role="dialog" aria-modal="true" aria-label="Agent missions monitor">
+            <div className="mission-monitor-modal">
+              <AgentMissionPanel sessionId={sessionId!} onClose={() => setShowAgentMonitor(false)} />
+            </div>
+          </div>
         </Portal>
       )}
 

@@ -158,6 +158,12 @@ pub struct AppConfig {
     /// Check the GitHub Releases API for a newer version when the app starts.
     #[serde(default = "update::default_true")]
     pub check_updates_on_startup: bool,
+    /// Log retention window in days for the request / interaction log tables
+    /// (`api_requests`, `interaction_log`). Older rows are dropped at startup
+    /// and when the monitor compacts the database. `0` keeps logs forever.
+    /// Chat history is never pruned.
+    #[serde(default = "db::default_log_retention_days")]
+    pub log_retention_days: u32,
     /// Also consider releases flagged as pre-release in the update check.
     #[serde(default)]
     pub include_prerelease_updates: bool,
@@ -186,6 +192,7 @@ impl Default for AppConfig {
             theme: None,
             check_updates_on_startup: true,
             include_prerelease_updates: false,
+            log_retention_days: db::default_log_retention_days(),
         }
     }
 }
@@ -775,6 +782,21 @@ pub fn run() {
             );
             app_logger.log("INFO", "Logger initialized");
 
+            // Log retention: request/interaction rows are debugging data, so
+            // drop anything past the retention window (Settings → Runtime &
+            // Debug) on startup. Conversations in `history` are never touched.
+            match db::prune_old_logs(&db, config.log_retention_days as i64) {
+                Ok(0) => {}
+                Ok(removed) => app_logger.log(
+                    "INFO",
+                    &format!(
+                        "Log retention: removed {removed} rows older than {} days",
+                        config.log_retention_days
+                    ),
+                ),
+                Err(err) => app_logger.log("WARN", &format!("Log retention failed: {err}")),
+            }
+
             // Resolve workspace_dir from config, or fall back to default
             let workspace_dir = match config.workspace_dir.as_deref().filter(|s| !s.is_empty()) {
                 Some(dir) => PathBuf::from(dir),
@@ -836,6 +858,8 @@ pub fn run() {
             db::get_api_request,
             db::delete_api_request,
             db::clear_api_requests,
+            db::clear_logs,
+            db::compact_database,
             db::list_interactions,
             db::get_interaction,
             db::clear_interactions,

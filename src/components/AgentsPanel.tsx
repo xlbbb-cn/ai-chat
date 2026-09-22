@@ -61,7 +61,6 @@ interface Props {
   useAgentsEnabled: boolean;
   onToggleUseAgents: (enabled: boolean) => void;
   agentStatuses: Record<string, AgentStatus>;
-  onOpenMonitor: () => void;
 }
 
 const emptyAgent = (): SubAgent => ({
@@ -78,7 +77,7 @@ const emptyAgent = (): SubAgent => ({
   enabled: true,
 });
 
-export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggleUseAgents, agentStatuses, onOpenMonitor }: Props) {
+export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggleUseAgents, agentStatuses }: Props) {
   const [agents, setAgents] = useState<SubAgent[]>([]);
   const [orchestration, setOrchestration] = useState<AgentOrchestration>({
     use_agents: false,
@@ -173,9 +172,6 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
       <div className="agents-header">
         <h2>Sub Agents</h2>
         <div className="agents-header-actions">
-          <button className="agents-monitor-btn" type="button" onClick={onOpenMonitor}>
-            ◎ Monitor
-          </button>
           <button className="close-btn" onClick={onClose}>✕</button>
         </div>
       </div>

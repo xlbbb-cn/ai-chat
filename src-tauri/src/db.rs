@@ -624,6 +624,116 @@ pub fn clear_api_requests(state: tauri::State<'_, crate::AppState>) -> Result<()
     Ok(())
 }
 
+// ─── Log retention / database compaction ─────────────────────────────────────
+
+/// Default log retention window. The effective value comes from
+/// `AppConfig::log_retention_days`; this is only the fallback for configs
+/// written before the setting existed. Each request stores its full prompt
+/// body, so unbounded growth here is what inflates `chat.db` (a heavy agent
+/// day can add ~80 MB).
+pub const DEFAULT_LOG_RETENTION_DAYS: i64 = 90;
+
+/// Serde default for `AppConfig::log_retention_days`.
+pub fn default_log_retention_days() -> u32 {
+    DEFAULT_LOG_RETENTION_DAYS as u32
+}
+
+/// Delete log rows older than `days`. Returns the number of removed rows.
+pub fn prune_old_logs(db: &rusqlite::Connection, days: i64) -> Result<usize, String> {
+    if days <= 0 {
+        return Ok(0);
+    }
+
+    let cutoff = format!("-{days} days");
+    let mut removed = 0usize;
+    for table in ["api_requests", "interaction_log"] {
+        removed += db
+            .execute(
+                &format!(
+                    "DELETE FROM {table} WHERE timestamp IS NOT NULL AND timestamp < datetime('now', ?1)"
+                ),
+                rusqlite::params![cutoff],
+            )
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(removed)
+}
+
+/// Logical database size (page count × page size). After `VACUUM` this equals
+/// the on-disk file size.
+fn db_size_bytes(db: &rusqlite::Connection) -> i64 {
+    db.query_row(
+        "SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()",
+        [],
+        |row| row.get(0),
+    )
+    .unwrap_or(0)
+}
+
+#[derive(Serialize)]
+pub struct CompactResult {
+    /// Log rows dropped by the retention policy during this run.
+    pub rows_pruned: usize,
+    /// Retention window that was applied (`0` = pruning disabled).
+    pub retention_days: i64,
+    pub bytes_before: i64,
+    pub bytes_after: i64,
+}
+
+/// Apply the retention policy, then `VACUUM` so the freed space actually
+/// returns to the filesystem (deleting rows alone leaves the file size
+/// unchanged). Runs on its own connection in a blocking thread because a
+/// 1 GB+ `VACUUM` takes seconds and must not freeze the UI; the app's own
+/// connection is left untouched.
+pub fn compact_logs_at(path: &std::path::Path, days: i64) -> Result<CompactResult, String> {
+    let conn = Connection::open(path).map_err(|e| e.to_string())?;
+    // Wait for the app's connection instead of failing with SQLITE_BUSY.
+    conn.busy_timeout(std::time::Duration::from_secs(30))
+        .map_err(|e| e.to_string())?;
+
+    let rows_pruned = prune_old_logs(&conn, days)?;
+    let bytes_before = db_size_bytes(&conn);
+    conn.execute("VACUUM", []).map_err(|e| e.to_string())?;
+    let bytes_after = db_size_bytes(&conn);
+
+    Ok(CompactResult {
+        rows_pruned,
+        retention_days: days,
+        bytes_before,
+        bytes_after,
+    })
+}
+
+/// Delete every log row. The space is only reclaimed by a later `VACUUM`
+/// ([`compact_database`]).
+#[tauri::command]
+pub fn clear_logs(state: tauri::State<'_, crate::AppState>) -> Result<usize, String> {
+    let db = state.db.lock().unwrap();
+    let mut removed = 0usize;
+    for table in ["api_requests", "interaction_log"] {
+        removed += db
+            .execute(&format!("DELETE FROM {table}"), [])
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(removed)
+}
+
+/// Prune expired logs and compact the database file. The retention window
+/// comes from the user's settings (`log_retention_days`).
+#[tauri::command]
+pub async fn compact_database(
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<CompactResult, String> {
+    let db_path = state.db_path.clone();
+    let days = {
+        let config = state.config.lock().unwrap();
+        config.log_retention_days as i64
+    };
+    tauri::async_runtime::spawn_blocking(move || compact_logs_at(&db_path, days))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 // ─── Interaction Log Monitor ──────────────────────────────────────────────────
 
 #[derive(Serialize)]
@@ -945,5 +1055,81 @@ mod tests {
         assert_eq!(escape_like("100%"), "100\\%");
         assert_eq!(escape_like("a_b"), "a\\_b");
         assert_eq!(escape_like("c\\d"), "c\\\\d");
+    }
+
+    #[test]
+    fn prune_old_logs_drops_expired_rows_and_keeps_history() {
+        let conn = test_conn();
+        conn.execute(
+            "CREATE TABLE api_requests (id INTEGER PRIMARY KEY, timestamp DATETIME)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "CREATE TABLE interaction_log (id INTEGER PRIMARY KEY, timestamp DATETIME)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO api_requests (timestamp) VALUES (datetime('now', '-100 days'))",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO api_requests (timestamp) VALUES (datetime('now', '-10 days'))",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO interaction_log (timestamp) VALUES (datetime('now', '-200 days'))",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO interaction_log (timestamp) VALUES (datetime('now'))",
+            [],
+        )
+        .unwrap();
+        insert(&conn, "keep", "user", "conversation must survive");
+
+        let removed = prune_old_logs(&conn, 90).unwrap();
+        assert_eq!(removed, 2, "one expired row per log table");
+
+        let count = |table: &str| {
+            conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .unwrap()
+        };
+        assert_eq!(count("api_requests"), 1);
+        assert_eq!(count("interaction_log"), 1);
+        assert_eq!(
+            query_session_messages(&conn, "keep").unwrap().len(),
+            1,
+            "history must never be pruned by the log retention"
+        );
+    }
+
+    #[test]
+    fn prune_old_logs_is_a_no_op_for_nonpositive_window() {
+        let conn = test_conn();
+        conn.execute(
+            "CREATE TABLE api_requests (id INTEGER PRIMARY KEY, timestamp DATETIME)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO api_requests (timestamp) VALUES (datetime('now', '-999 days'))",
+            [],
+        )
+        .unwrap();
+
+        assert_eq!(prune_old_logs(&conn, 0).unwrap(), 0);
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM api_requests", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
     }
 }

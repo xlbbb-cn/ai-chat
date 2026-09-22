@@ -1519,13 +1519,16 @@ pub async fn chat_completion(
                     .unwrap_or_default()
                 };
                 let db = state.db.lock().unwrap();
+                // `request_body` is deliberately not written: the full prompt is
+                // already recorded once in `interaction_log.input_data`, and
+                // storing a second copy doubled the database size
+                // (~92 KiB per request). This table keeps the metrics.
                 let _ = db.execute(
-                    "INSERT INTO api_requests (session_id, model, request_body, response_content, reasoning_content, tool_calls, finish_reason, prompt_tokens, completion_tokens, duration_ms) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                    "INSERT INTO api_requests (session_id, model, response_content, reasoning_content, tool_calls, finish_reason, prompt_tokens, completion_tokens, duration_ms) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                     rusqlite::params![
                         session_id,
                         active_model.as_str(),
-                        request_snapshot.to_string(),
                         sr.content,
                         sr.reasoning_content,
                         tool_calls_json,
@@ -1560,15 +1563,15 @@ pub async fn chat_completion(
                 );
             }
             Err(err) => {
-                // Log failed request
+                // Log failed request (metrics only — see the success branch for
+                // why the prompt body is not duplicated here).
                 let db = state.db.lock().unwrap();
                 let _ = db.execute(
-                    "INSERT INTO api_requests (session_id, model, request_body, finish_reason, duration_ms, error) \
-                     VALUES (?1, ?2, ?3, 'error', ?4, ?5)",
+                    "INSERT INTO api_requests (session_id, model, finish_reason, duration_ms, error) \
+                     VALUES (?1, ?2, 'error', ?3, ?4)",
                     rusqlite::params![
                         session_id,
                         active_model.as_str(),
-                        request_snapshot.to_string(),
                         duration_ms,
                         err,
                     ],

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { listInteractions, getInteraction } from "../api";
+import { listInteractions, getInteraction, clearLogs, compactDatabase } from "../api";
 import type { InteractionLogRecord, InteractionLogDetail } from "../api";
 import "./MonitorPanel.css";
 
@@ -8,11 +8,19 @@ interface Props {
     onClose: () => void;
 }
 
+function formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export function MonitorPanel({ sessionId, onClose }: Props) {
     const [interactions, setInteractions] = useState<InteractionLogRecord[]>([]);
     const [selectedInteraction, setSelectedInteraction] = useState<InteractionLogDetail | null>(null);
     const [loading, setLoading] = useState(false);
     const [autoRefresh, setAutoRefresh] = useState(true);
+    const [maintenance, setMaintenance] = useState<"idle" | "clearing" | "compacting">("idle");
+    const [status, setStatus] = useState("");
 
     // Load interactions
     useEffect(() => {
@@ -87,12 +95,56 @@ export function MonitorPanel({ sessionId, onClose }: Props) {
         }
     };
 
+    /** Delete all log rows (requests + interactions). History is untouched. */
+    const handleClearLogs = async () => {
+        if (!window.confirm("Delete all request and interaction logs? Chat history is not affected.")) return;
+        setMaintenance("clearing");
+        setStatus("");
+        try {
+            const removed = await clearLogs();
+            setSelectedInteraction(null);
+            setInteractions([]);
+            setStatus(`Removed ${removed.toLocaleString()} log rows — compact to free the space`);
+        } catch (err) {
+            console.error("Failed to clear logs:", err);
+            setStatus(`Clear failed: ${String(err)}`);
+        } finally {
+            setMaintenance("idle");
+        }
+    };
+
+    /** Apply the retention window, then VACUUM to return space to the disk. */
+    const handleCompact = async () => {
+        if (!window.confirm("Compact the database? Logs older than the retention window (Settings → Runtime & Debug) are deleted and the file is rewritten to reclaim space. Chat history is kept.")) return;
+        setMaintenance("compacting");
+        setStatus("Compacting… this can take a few seconds");
+        try {
+            const result = await compactDatabase();
+            const freed = result.bytes_before - result.bytes_after;
+            const window = result.retention_days > 0
+                ? ` · window ${result.retention_days}d`
+                : " · retention disabled";
+            setStatus(
+                `Compacted: ${formatBytes(result.bytes_before)} → ${formatBytes(result.bytes_after)}` +
+                (freed > 0 ? ` (freed ${formatBytes(freed)})` : "") +
+                (result.rows_pruned > 0 ? ` · pruned ${result.rows_pruned.toLocaleString()} expired rows` : "") +
+                window
+            );
+        } catch (err) {
+            console.error("Failed to compact database:", err);
+            setStatus(`Compact failed: ${String(err)}`);
+        } finally {
+            setMaintenance("idle");
+        }
+    };
+
     return (
         <div className="monitor-overlay" role="dialog" aria-modal="true" aria-label="Interaction Monitor">
             <div className="monitor-shell">
                 <div className="monitor-header">
                     <h2>Interaction Monitor</h2>
                     <div className="monitor-controls">
+                        {status && <span className="monitor-status">{status}</span>}
                         <label className="monitor-checkbox">
                             <input
                                 type="checkbox"
@@ -101,6 +153,24 @@ export function MonitorPanel({ sessionId, onClose }: Props) {
                             />
                             <span>Auto Refresh</span>
                         </label>
+                        <button
+                            type="button"
+                            className="monitor-action-btn"
+                            onClick={handleClearLogs}
+                            disabled={maintenance !== "idle"}
+                            title="Delete all request and interaction logs (chat history is kept)"
+                        >
+                            {maintenance === "clearing" ? "Clearing…" : "Clear logs"}
+                        </button>
+                        <button
+                            type="button"
+                            className="monitor-action-btn"
+                            onClick={handleCompact}
+                            disabled={maintenance !== "idle"}
+                            title="Delete logs older than 90 days and reclaim disk space"
+                        >
+                            {maintenance === "compacting" ? "Compacting…" : "Compact DB"}
+                        </button>
                         <button type="button" className="close-btn" onClick={onClose}>
                             ✕
                         </button>

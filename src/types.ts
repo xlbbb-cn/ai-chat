@@ -97,6 +97,12 @@ export interface AppConfig {
   auto_accept_confirm_kinds?: ConfirmKind[];
   check_updates_on_startup?: boolean;
   include_prerelease_updates?: boolean;
+  /**
+   * Retention window (days) for the request / interaction log tables. Older
+   * rows are dropped at startup and when the monitor compacts the database.
+   * 0 keeps logs forever; chat history is never pruned.
+   */
+  log_retention_days?: number;
 }
 
 /** A bundle attached to a GitHub release. */

@@ -81,6 +81,38 @@
     transition: background-color 0.2s, color 0.2s, transform 0.1s;
 }
 
+/* Maintenance actions (clear logs / compact database) + their result text. */
+.monitor-status {
+    max-width: 320px;
+    font-size: 11px;
+    color: #9fd39f;
+    text-align: right;
+    line-height: 1.3;
+}
+
+.monitor-action-btn {
+    background: rgba(255, 255, 255, 0.06);
+    border: 0.5px solid rgba(255, 255, 255, 0.14);
+    color: #d5d5d5;
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.monitor-action-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.25);
+}
+
+.monitor-action-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
 .close-btn:hover {
     color: #fff;
     background: rgba(255, 255, 255, 0.08);
