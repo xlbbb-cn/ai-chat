@@ -115,6 +115,13 @@ export interface AppConfig {
    * catalogue entry it was matched to. Informational only — never sent upstream.
    */
   model_metadata?: Record<string, ModelMetadata>;
+  /**
+   * Per-model "thinking depth", picked next to the model selector in the chat
+   * toolbar and sent as `reasoning_effort` (`minimal` | `low` | `medium` |
+   * `high`). Keyed by model id; absent = let the provider decide. Falls back to
+   * `model_settings.reasoning_effort`.
+   */
+  model_reasoning_effort?: Record<string, string>;
   model_settings?: ModelSettings;
   /**
    * DS-Format (DeepSeek format): pass `reasoning_content` back on assistant

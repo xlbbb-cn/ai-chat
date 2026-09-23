@@ -121,6 +121,46 @@ pub(crate) fn content_to_text(value: &Value) -> String {
 mod tests {
     use super::*;
 
+    /// Config with empty per-model/global effort values, for the resolver tests.
+    fn config_with_efforts(per_model: &[(&str, &str)], global: &str) -> crate::AppConfig {
+        let mut config = crate::AppConfig::default();
+        config.model_reasoning_effort = per_model
+            .iter()
+            .map(|(model, effort)| (model.to_string(), effort.to_string()))
+            .collect();
+        config.model_settings.reasoning_effort = global.to_string();
+        config
+    }
+
+    #[test]
+    fn reasoning_effort_prefers_the_per_model_value() {
+        let config = config_with_efforts(&[("gpt-5", "high")], "low");
+        assert_eq!(resolve_reasoning_effort(&config, "gpt-5"), Some("high"));
+        // Models without an override fall back to the global setting.
+        assert_eq!(resolve_reasoning_effort(&config, "gpt-4o"), Some("low"));
+    }
+
+    #[test]
+    fn reasoning_effort_is_omitted_when_unset() {
+        let config = config_with_efforts(&[], "");
+        assert_eq!(resolve_reasoning_effort(&config, "gpt-4o"), None);
+
+        // Blank per-model entries must not shadow the global fallback.
+        let config = config_with_efforts(&[("gpt-5", "   ")], "medium");
+        assert_eq!(resolve_reasoning_effort(&config, "gpt-5"), Some("medium"));
+    }
+
+    #[test]
+    fn reasoning_effort_drops_unknown_values() {
+        // A typo must never reach the provider — strict endpoints answer 400.
+        let config = config_with_efforts(&[("gpt-5", "extreme")], "");
+        assert_eq!(resolve_reasoning_effort(&config, "gpt-5"), None);
+
+        // Known values are normalised (case-insensitive).
+        let config = config_with_efforts(&[("gpt-5", "HIGH")], "");
+        assert_eq!(resolve_reasoning_effort(&config, "gpt-5"), Some("high"));
+    }
+
     #[test]
     fn content_to_text_passthrough_for_string() {
         let v = json!("hello world");
@@ -351,6 +391,38 @@ pub(crate) fn apply_completion_token_limit(
     if let Some(v) = max_tokens {
         req_body["max_tokens"] = json!(v);
     }
+}
+
+/// Reasoning effort values forwarded to the provider as `reasoning_effort`.
+/// Anything else (typo, provider-specific string) is dropped instead of being
+/// sent upstream, where strict OpenAI-compatible endpoints reject it with 400.
+const REASONING_EFFORTS: [&str; 4] = ["minimal", "low", "medium", "high"];
+
+/// Resolve the reasoning effort ("thinking depth") for one model.
+///
+/// Resolution order:
+/// 1. the per-model value chosen in the chat toolbar (`model_reasoning_effort`,
+///    stored keyed by model id);
+/// 2. the legacy global `model_settings.reasoning_effort`;
+/// 3. `None` — the field is omitted so the provider applies its own default.
+pub(crate) fn resolve_reasoning_effort(
+    config: &crate::AppConfig,
+    model: &str,
+) -> Option<&'static str> {
+    let candidate = config
+        .model_reasoning_effort
+        .get(model)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            let global = config.model_settings.reasoning_effort.trim();
+            (!global.is_empty()).then_some(global)
+        })?;
+
+    REASONING_EFFORTS
+        .iter()
+        .find(|effort| effort.eq_ignore_ascii_case(candidate))
+        .copied()
 }
 fn process_stream_chunk(
     app: &AppHandle,
@@ -1574,8 +1646,8 @@ pub async fn chat_completion(
         if let Some(top_p) = config.model_settings.top_p {
             req_body["top_p"] = json!(top_p);
         }
-        if !config.model_settings.reasoning_effort.is_empty() {
-            req_body["reasoning_effort"] = json!(config.model_settings.reasoning_effort);
+        if let Some(effort) = resolve_reasoning_effort(&config, &active_model) {
+            req_body["reasoning_effort"] = json!(effort);
         }
 
         apply_completion_token_limit(

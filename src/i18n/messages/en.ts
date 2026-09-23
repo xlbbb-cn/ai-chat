@@ -68,6 +68,13 @@ const en = {
         attachFiles: "Attach files",
         inputPlaceholder: "Type a message… (Enter to send, Shift+Enter for newline)",
         selectModel: "Select model",
+        reasoningDepth: "Thinking depth",
+        reasoningDepthTitle:
+            "How much the model should think before answering — sent as reasoning_effort.",
+        reasoningDefault: "Default",
+        reasoningLow: "Low",
+        reasoningMedium: "Medium",
+        reasoningHigh: "High",
         send: "Send",
         stop: "Stop",
         contextUsage: "Context usage: {percent}%",

@@ -746,10 +746,15 @@ body {
   opacity: 0.6;
 }
 
-.model-select {
+/* The model picker itself (trigger + badge-carrying options) lives in
+   components/ModelSelect.css. */
+
+/* ---- Thinking depth (reasoning_effort) selector ---- */
+
+.reasoning-select {
   min-height: 42px;
-  max-width: 220px;
-  padding: 0 12px;
+  max-width: 140px;
+  padding: 0 28px 0 12px;
   border: 0.5px solid var(--c-border-i);
   border-radius: var(--r-md);
   background: var(--c-surface);
@@ -764,15 +769,14 @@ body {
   background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3e%3cpath d='M1 1l4 4 4-4' stroke='%238E8E93' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3e%3c/svg%3e");
   background-repeat: no-repeat;
   background-position: right 10px center;
-  padding-right: 28px;
 }
 
-.model-select:focus {
+.reasoning-select:focus {
   border-color: var(--c-accent);
   box-shadow: 0 0 0 3px var(--c-accent-soft);
 }
 
-.model-select:disabled {
+.reasoning-select:disabled {
   opacity: 0.6;
 }
 

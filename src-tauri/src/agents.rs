@@ -13,7 +13,7 @@ const LLM_DEFAULT_MAX_COMLETE_TOKENS: u32 = 4_096;
 use crate::{
     llm_complete::{
         apply_completion_token_limit, content_to_text, extract_upstream_error_message,
-        sanitize_tool_pairs, stream_llm_request, StreamOptions,
+        resolve_reasoning_effort, sanitize_tool_pairs, stream_llm_request, StreamOptions,
     },
     tools, AppConfig, AppState,
 };
@@ -1663,6 +1663,11 @@ async fn run_sub_agent_inner(
         );
         if let Some(temp) = agent.temperature {
             req_body["temperature"] = json!(temp);
+        }
+        // Same thinking depth as the chat toolbar / config, resolved for the
+        // model this agent runs on.
+        if let Some(effort) = resolve_reasoning_effort(config, model) {
+            req_body["reasoning_effort"] = json!(effort);
         }
         if !tools_list.is_empty() {
             req_body["tools"] = json!(tools_list);

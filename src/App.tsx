@@ -5,6 +5,7 @@ import { chatCompletion, checkUpdate, getConfig, getAgentOrchestration, listMcpS
 import { ChatMessage } from "./components/ChatMessage";
 import { ToolCallGroup } from "./components/ToolCallGroup";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { ModelSelect } from "./components/ModelSelect";
 import { SkillsPanel } from "./components/SkillsPanel";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { ToolsPanel } from "./components/ToolsPanel";
@@ -21,6 +22,7 @@ import type {
   Attachment,
   ContentPart,
   MessageContent,
+  ModelMetadata,
   UpdateInfo,
 } from "./types";
 import { isGenerationStopped, isLocale, useI18n } from "./i18n";
@@ -202,6 +204,10 @@ export default function App() {
   const [maxTokens, setMaxTokens] = useState<number | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>(["gpt-4o-mini"]);
   const [selectedModel, setSelectedModel] = useState("gpt-4o-mini");
+  /** Capabilities per model, learned from the llm-metadata catalogue. */
+  const [modelMetadata, setModelMetadata] = useState<Record<string, ModelMetadata>>({});
+  /** Thinking depth per model (`reasoning_effort`); absent = provider default. */
+  const [reasoningEfforts, setReasoningEfforts] = useState<Record<string, string>>({});
   const [activeToolCount, setActiveToolCount] = useState(0);
   const [activeMcpCount, setActiveMcpCount] = useState(0);
   const [activeAgentCount, setActiveAgentCount] = useState(0);
@@ -283,6 +289,8 @@ export default function App() {
     setAvailableModels(catalog.length > 0 ? catalog : ["gpt-4o-mini"]);
     setSelectedModel(cfg.model || "gpt-4o-mini");
     setMaxTokens(cfg.model_context_lengths?.[cfg.model] ?? cfg.model_settings?.max_tokens ?? null);
+    setModelMetadata(cfg.model_metadata ?? {});
+    setReasoningEfforts(cfg.model_reasoning_effort ?? {});
     setActiveSkillIds(await reconcileActiveSkills(cfg.selected_skills ?? []));
     setActiveToolCount((cfg.selected_tools ?? []).length);
     // The config is the source of truth for the UI language (localStorage is
@@ -1058,6 +1066,36 @@ export default function App() {
     }
   }
 
+  /**
+   * Store the thinking depth of the selected model and persist it right away:
+   * it is a per-model preference that must apply to the very next request, so
+   * it must not wait for "Save Changes" in Settings.
+   *
+   * The config is re-read before writing because the skills / tools panels own
+   * other parts of it and must not be rolled back by this change.
+   */
+  const handleReasoningEffortChange = useCallback(
+    async (effort: string) => {
+      setReasoningEfforts((prev) => {
+        const next = { ...prev };
+        if (effort) next[selectedModel] = effort;
+        else delete next[selectedModel];
+        return next;
+      });
+
+      try {
+        const cfg = await getConfig();
+        const next = { ...(cfg.model_reasoning_effort ?? {}) };
+        if (effort) next[selectedModel] = effort;
+        else delete next[selectedModel];
+        await saveConfig({ ...cfg, model_reasoning_effort: next });
+      } catch (err) {
+        console.error("Failed to persist the reasoning effort", err);
+      }
+    },
+    [selectedModel],
+  );
+
   function toggleSidebar(panel: Sidebar) {
     if (sidebar === panel) {
       closeSidebar();
@@ -1299,6 +1337,14 @@ export default function App() {
     }
   }
 
+  /** Capabilities of the model currently selected in the toolbar. */
+  const selectedMetadata = modelMetadata[selectedModel];
+  /** The thinking-depth control only makes sense for reasoning-capable models. */
+  const reasoningEffort = reasoningEfforts[selectedModel] ?? "";
+  // Shown for catalogue-matched reasoning models, and kept for any model that
+  // already has a depth configured (e.g. an unmatched model set by hand).
+  const reasoningSupported = selectedMetadata?.supports_reasoning === true || reasoningEffort !== "";
+
   const usageTotal = usage ? (usage.total_tokens ?? usage.prompt_tokens + usage.completion_tokens) : 0;
   const fallbackMaxTokens = 131072; // 128k tokens as a hard upper bound for usage ratio calculations when no explicit max is provided
   const usageMax = usage?.max_tokens ?? maxTokens ?? fallbackMaxTokens;
@@ -1385,6 +1431,10 @@ export default function App() {
                 setAvailableModels(catalog.length > 0 ? catalog : ["gpt-4o-mini"]);
                 setSelectedModel(cfg.model || "gpt-4o-mini");
                 setMaxTokens(cfg.model_context_lengths?.[cfg.model] ?? cfg.model_settings?.max_tokens ?? null);
+                // A "Fetch Models From API" in Settings refreshes the capability
+                // metadata (and with it the badges in the input row).
+                setModelMetadata(cfg.model_metadata ?? {});
+                setReasoningEfforts(cfg.model_reasoning_effort ?? {});
                 themeRef.current = cfg.theme ?? "auto";
                 applyTheme(cfg.theme);
                 if (isLocale(cfg.language)) setLocale(cfg.language);
@@ -1684,17 +1734,28 @@ export default function App() {
               placeholder={t("app.inputPlaceholder")}
               disabled={streaming || profileExporting}
             />
-            <select
-              className="model-select"
-              title={t("app.selectModel")}
+            <ModelSelect
+              models={availableModels}
               value={selectedModel}
-              onChange={(e) => setSelectedModel(e.target.value)}
+              metadata={modelMetadata}
               disabled={streaming || profileExporting}
-            >
-              {availableModels.map((model) => (
-                <option key={model} value={model}>{model}</option>
-              ))}
-            </select>
+              onChange={setSelectedModel}
+            />
+            {reasoningSupported && (
+              <select
+                className="reasoning-select"
+                title={t("app.reasoningDepthTitle")}
+                aria-label={t("app.reasoningDepth")}
+                value={reasoningEffort}
+                onChange={(e) => void handleReasoningEffortChange(e.target.value)}
+                disabled={streaming || profileExporting}
+              >
+                <option value="">{`🧠 ${t("app.reasoningDefault")}`}</option>
+                <option value="low">{`🧠 ${t("app.reasoningLow")}`}</option>
+                <option value="medium">{`🧠 ${t("app.reasoningMedium")}`}</option>
+                <option value="high">{`🧠 ${t("app.reasoningHigh")}`}</option>
+              </select>
+            )}
             <button
               className="send-btn"
               onClick={streaming ? stopStreaming : sendMessage}

@@ -148,6 +148,13 @@ pub struct AppConfig {
     /// sent upstream.
     #[serde(default)]
     pub model_metadata: HashMap<String, model_metadata::ModelMetadata>,
+    /// Per-model reasoning effort ("thinking depth") picked in the chat
+    /// toolbar. Keyed by the model id the request is sent with; the value is
+    /// forwarded as `reasoning_effort` and must be one of `minimal`, `low`,
+    /// `medium`, `high`. Absent/empty = let the provider decide; falls back to
+    /// `model_settings.reasoning_effort`.
+    #[serde(default)]
+    pub model_reasoning_effort: HashMap<String, String>,
     #[serde(default)]
     pub system_message: String,
     #[serde(default)]
@@ -197,6 +204,7 @@ impl Default for AppConfig {
             ds_format: false,
             model_context_lengths: HashMap::new(),
             model_metadata: HashMap::new(),
+            model_reasoning_effort: HashMap::new(),
             system_message: String::new(),
             selected_tools: vec![],
             selected_skills: vec![],

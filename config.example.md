@@ -42,6 +42,7 @@ Typical locations:
 - model_catalog: Model options shown in the UI model selector.
 - model_context_lengths: Per-model context window in tokens. Filled from `/models` when the provider reports one (OpenRouter, Groq, vLLM…), otherwise from the matched llm-metadata catalogue entry; can be set manually in Settings.
 - model_metadata: Per-model capabilities (tools / reasoning / vision / files / audio, context window, vendor) learned from the public basellm/llm-metadata catalogue when the model list is refreshed in Settings. Keyed by remote model id; `model_name` inside the value is the catalogue entry the id was matched to and `match_score` how similar the names were (1 = identical). Informational only — never sent upstream.
+- model_reasoning_effort: Per-model "thinking depth" picked next to the model selector in the chat toolbar, forwarded as `reasoning_effort`. Keyed by model id; allowed values are `minimal`, `low`, `medium`, `high` (anything else is dropped so a typo can never be sent upstream). A missing/empty entry means "let the provider decide" and falls back to `model_settings.reasoning_effort`. Only sent for the model that was configured — reasoning models that reject the parameter can be left on Default.
 - model_settings: Advanced model parameters forwarded to chat completion.
 - system_message: Global system prompt appended to each conversation.
 - selected_tools: Enabled tools list. Supported values include web_search, execute_command, fetch_web, file_actions, knowledge_graph.
