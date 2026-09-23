@@ -261,6 +261,11 @@
 .settings-field-row-stacked {
   flex-direction: column;
   align-items: stretch;
+  /* `.settings-field-row` sets `justify-content: space-between` for its
+     horizontal layout; in a column that would push the label and the control
+     apart as soon as a taller grid neighbour stretches this cell (e.g. the
+     model-catalog row once the metadata summary appears). */
+  justify-content: flex-start;
   gap: 6px;
 }
 
@@ -273,6 +278,9 @@
 .settings-field-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* Cells keep their own height — a taller neighbour (the model-catalog row
+     once the capability summary appears) must not stretch the others. */
+  align-items: start;
   gap: 16px;
 }
 
