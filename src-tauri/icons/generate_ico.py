@@ -6,14 +6,18 @@
 icon.icns 由脚本按 ICNS 容器格式直接封装（PNG 压缩块，macOS 10.7+ 支持），
 因此在 Windows 上也能生成 macOS 图标，一次运行即可产出三平台所需的全部素材。
 
-用法示例：
+用法示例：ß
     python generate_ico.py                          # 自动挑源图，生成全部图标
     python generate_ico.py --source logo.png        # 指定源图
     python generate_ico.py --outdir build/icons     # 输出到其它目录（默认脚本所在目录）
     python generate_ico.py --no-round               # 保留直角（不裁圆角）
-    python generate_ico.py --trim --pad 0.08        # 先裁掉四周空白，再统一留 8% 透明边距
+    python generate_ico.py --trim                   # 先裁掉四周空白，再统一留 12% 透明边距
+    python generate_ico.py --pad 0                  # 不留白，图案贴满画布
     python generate_ico.py --sharpen                # 小尺寸下采样后轻微锐化
     python generate_ico.py --skip-web               # 不生成 public/favicon.*
+
+默认会留出 12% 的透明边距（≈ 画布 9.7%），与 macOS 系统图标网格一致，
+使 Dock / Finder 中本应用图标与其它应用一样大；需要贴满画布时用 --pad 0。
 
 生成产物：
     <src-tauri/icons>/  32x32.png  128x128.png  128x128@2x.png  icon.png (1024)
@@ -50,6 +54,10 @@ SOURCE_CANDIDATES = ("logo.png", "icon.png", "rounded_image.png", "XLBBB-LOGO.pn
 
 MASTER_SIZE = 1024          # 统一母版尺寸
 DEFAULT_RADIUS = 0.20       # 圆角半径占边长的比例（0 = 直角）
+# 四周透明留白比例，单位为“内容边长”的比例（0 = 贴满画布）。
+# Apple 的 macOS 图标网格：1024 画布内放置 824 的圆角方形，每边留白 100px（≈ 画布 9.77%）；
+# 换算成本脚本“相对内容边长”的口径约为 0.121，取 0.12 即与系统自带图标等大。
+DEFAULT_PAD = 0.12
 
 # 主图标 PNG：文件名 -> 像素尺寸
 PNG_TARGETS = {
@@ -232,7 +240,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--radius", type=float, default=DEFAULT_RADIUS, help="圆角半径比例，0 表示直角")
     parser.add_argument("--no-round", action="store_true", help="等价于 --radius 0")
     parser.add_argument("--trim", action="store_true", help="生成前先裁掉四周空白 / 透明边")
-    parser.add_argument("--pad", type=float, default=0.0, help="四周额外透明边距比例")
+    parser.add_argument(
+        "--pad",
+        type=float,
+        default=DEFAULT_PAD,
+        help="四周透明留白比例（相对内容边长），0 表示贴满画布",
+    )
     parser.add_argument("--sharpen", action="store_true", help="小尺寸下采样后轻微锐化")
     parser.add_argument("--skip-web", action="store_true", help="不生成 public/favicon.*")
     args = parser.parse_args(argv)
