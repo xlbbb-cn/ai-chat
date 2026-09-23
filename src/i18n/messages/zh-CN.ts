@@ -193,7 +193,20 @@ const zhCN: Messages = {
             contextWindow: "“{model}” 的上下文窗口（tokens）",
             contextPlaceholder: "自动（由服务端报告或使用默认值）",
             contextHint:
-                "当 API 报告上下文窗口时会自动填充（OpenRouter、Groq、vLLM 等）。未提供该信息的 OpenAI 兼容接口可在此手动配置 —— 该值用于智能体的上下文预算。",
+                "当 API 报告上下文窗口时会自动填充（OpenRouter、Groq、vLLM 等），否则使用匹配到的 llm-metadata 元数据。两者都没有的 OpenAI 兼容接口可在此手动配置 —— 该值用于智能体的上下文预算。",
+            capabilities: "模型能力",
+            capabilitiesEmpty: "暂无 “{model}” 的能力数据，请点击“从 API 获取模型”加载。",
+            capabilitiesMatched: "匹配到 “{name}” · 相似度 {percent}%",
+            capabilitiesSummary: "已为 {matched}/{total} 个模型匹配能力元数据。",
+            capabilitiesError: "能力元数据不可用：{error}",
+            capabilityTools: "工具",
+            capabilityReasoning: "思考",
+            capabilityVision: "视觉",
+            capabilityFiles: "文件",
+            capabilityAudio: "音频",
+            capabilityOpenWeights: "开源权重",
+            capabilityDeprecated: "已弃用",
+            capabilityContext: "{tokens} 上下文",
         },
 
         system: {

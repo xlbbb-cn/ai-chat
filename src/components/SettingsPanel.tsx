@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { fetchModels, getAppVersion, getConfig, getWorkspaceDir, saveConfig, listProfiles, saveProfile, deleteProfile, applyProfile, listMcpServers, listSubAgents, getAgentOrchestration } from "../api";
-import type { AppConfig, ModelSettings, Profile } from "../types";
+import { fetchModels, fetchModelMetadata, getAppVersion, getConfig, getWorkspaceDir, saveConfig, listProfiles, saveProfile, deleteProfile, applyProfile, listMcpServers, listSubAgents, getAgentOrchestration } from "../api";
+import type { AppConfig, ModelMetadata, ModelSettings, Profile } from "../types";
 import { LOCALE_LABELS, LOCALES, useI18n, type Locale, type MessageKey } from "../i18n";
+import { matchModelCatalog } from "../utils/modelMetadata";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { MonitorPanel } from "./MonitorPanel";
 import { AgentMissionPanel } from "./AgentMissionPanel";
@@ -53,6 +54,26 @@ const SETTINGS_SECTIONS: { id: string; labelKey: MessageKey }[] = [
   { id: "about", labelKey: "settings.sections.about" },
 ];
 
+/**
+ * Capability flags shown as badges for the selected model, in display order.
+ * The labels come from `config.model_metadata` (see `fetch_model_metadata`).
+ */
+const CAPABILITY_FLAGS: { flag: keyof ModelMetadata; labelKey: MessageKey }[] = [
+  { flag: "supports_tools", labelKey: "settings.api.capabilityTools" },
+  { flag: "supports_reasoning", labelKey: "settings.api.capabilityReasoning" },
+  { flag: "supports_vision", labelKey: "settings.api.capabilityVision" },
+  { flag: "supports_files", labelKey: "settings.api.capabilityFiles" },
+  { flag: "supports_audio", labelKey: "settings.api.capabilityAudio" },
+  { flag: "open_weights", labelKey: "settings.api.capabilityOpenWeights" },
+];
+
+/** Compact token count for capability badges: `128K`, `1M`, `512`. */
+function formatTokenCount(tokens: number): string {
+  if (tokens >= 1_000_000) return `${Math.round(tokens / 100_000) / 10}M`;
+  if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}K`;
+  return String(tokens);
+}
+
 export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionId }: Props) {
   const { t, locale, setLocale } = useI18n();
   const [config, setConfig] = useState<AppConfig>(defaultConfig);
@@ -60,6 +81,8 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
   const [saved, setSaved] = useState(false);
   const [loadingModels, setLoadingModels] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
+  const [metadataError, setMetadataError] = useState<string | null>(null);
+  const [metadataSummary, setMetadataSummary] = useState<{ matched: number; total: number } | null>(null);
   const [manualModel, setManualModel] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(true);
   const [workspaceDirActual, setWorkspaceDirActual] = useState("");
@@ -112,6 +135,17 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
   }, []);
 
   const modelCatalog = mergeModels(config.model_catalog, [config.model]);
+  /** Capability metadata of the selected model, when it was matched. */
+  const currentMetadata = config.model_metadata?.[config.model];
+  const capabilityBadges = currentMetadata
+    ? CAPABILITY_FLAGS.filter((capability) => currentMetadata[capability.flag]).map((capability) => ({
+      key: capability.flag as string,
+      label: t(capability.labelKey),
+    }))
+    : [];
+  if (currentMetadata?.deprecated) {
+    capabilityBadges.push({ key: "deprecated", label: t("settings.api.capabilityDeprecated") });
+  }
 
   async function handlePickWorkspace() {
     if (pickingWorkspace) return;
@@ -144,23 +178,50 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
   async function handleFetchModels() {
     setLoadingModels(true);
     setModelsError(null);
+    setMetadataError(null);
+    setMetadataSummary(null);
     try {
-      const remoteModels = await fetchModels();
+      // The capability catalogue is an independent public feed, so treat it as
+      // best-effort: an unreachable mirror must never block the model list.
+      const [remoteModels, metadataEntries] = await Promise.all([
+        fetchModels(),
+        fetchModelMetadata().catch((err) => {
+          setMetadataError(String(err));
+          return [] as ModelMetadata[];
+        }),
+      ]);
+
       const merged = mergeModels([], remoteModels.map((m) => m.id));
-      // Keep context windows the provider reported (OpenRouter, Groq, vLLM…);
-      // models without one fall back to the manual value in Settings.
+
+      // Names rarely line up exactly (gateway prefixes, date stamps, renames),
+      // so match each remote id against the closest catalogue entry.
+      const capabilities = matchModelCatalog(merged, metadataEntries);
+
+      // Context windows the provider reported (OpenRouter, Groq, vLLM…) win;
+      // the catalogue fills the gap for endpoints that report none.
+      const providerLengths: Record<string, number> = {};
+      for (const m of remoteModels) {
+        if (m.context_length && m.context_length > 0) {
+          providerLengths[m.id] = m.context_length;
+        }
+      }
+      if (metadataEntries.length > 0) {
+        setMetadataSummary({ matched: Object.keys(capabilities).length, total: merged.length });
+      }
+
       setConfig((prev) => {
         const learned = { ...(prev.model_context_lengths ?? {}) };
-        for (const m of remoteModels) {
-          if (m.context_length && m.context_length > 0) {
-            learned[m.id] = m.context_length;
-          }
+        for (const [id, meta] of Object.entries(capabilities)) {
+          if (meta.context_length && !learned[id]) learned[id] = meta.context_length;
         }
         return {
           ...prev,
           model_catalog: merged,
           model: merged.includes(prev.model) ? prev.model : (merged[0] ?? prev.model),
-          model_context_lengths: learned,
+          model_context_lengths: { ...learned, ...providerLengths },
+          // Keep previously learned capabilities when the catalogue was
+          // unreachable, otherwise replace them with this refresh.
+          model_metadata: Object.keys(capabilities).length ? capabilities : prev.model_metadata,
         };
       });
     } catch (err) {
@@ -573,6 +634,19 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
                     {loadingModels ? t("settings.api.loadingModels") : t("settings.api.fetchModels")}
                   </button>
                   {modelsError && <div className="settings-error">{modelsError}</div>}
+                  {metadataSummary && (
+                    <small className="settings-field-hint">
+                      {t("settings.api.capabilitiesSummary", {
+                        matched: metadataSummary.matched,
+                        total: metadataSummary.total,
+                      })}
+                    </small>
+                  )}
+                  {metadataError && (
+                    <small className="settings-field-hint settings-warning">
+                      {t("settings.api.capabilitiesError", { error: metadataError })}
+                    </small>
+                  )}
                 </div>
 
                 <div className="settings-field-row settings-field-row-stacked">
@@ -623,6 +697,48 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
                 <small className="settings-field-hint">
                   {t("settings.api.contextHint")}
                 </small>
+              </div>
+
+              <div className="settings-field-row settings-field-row-stacked">
+                <span className="settings-field-label">{t("settings.api.capabilities")}</span>
+                {currentMetadata ? (
+                  <div className="model-capabilities">
+                    <div className="model-capability-badges">
+                      {capabilityBadges.map((badge) => (
+                        <span
+                          key={badge.key}
+                          className={`model-capability-badge${badge.key === "deprecated" ? " danger" : ""}`}
+                        >
+                          {badge.label}
+                        </span>
+                      ))}
+                      {currentMetadata.context_length ? (
+                        <span className="model-capability-badge muted">
+                          {t("settings.api.capabilityContext", {
+                            tokens: formatTokenCount(currentMetadata.context_length),
+                          })}
+                        </span>
+                      ) : null}
+                      {capabilityBadges.length === 0 && !currentMetadata.context_length && (
+                        <span className="model-capability-badge muted">{t("common.none")}</span>
+                      )}
+                    </div>
+                    <small className="settings-field-hint">
+                      {t("settings.api.capabilitiesMatched", {
+                        name: currentMetadata.model_name,
+                        percent: Math.round((currentMetadata.match_score ?? 1) * 100),
+                      })}
+                      {currentMetadata.vendor ? ` · ${currentMetadata.vendor}` : ""}
+                    </small>
+                    {currentMetadata.description && (
+                      <small className="settings-field-hint">{currentMetadata.description}</small>
+                    )}
+                  </div>
+                ) : (
+                  <small className="settings-field-hint">
+                    {t("settings.api.capabilitiesEmpty", { model: config.model })}
+                  </small>
+                )}
               </div>
             </div>
           </section>

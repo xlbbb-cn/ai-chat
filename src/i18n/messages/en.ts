@@ -208,7 +208,21 @@ const en = {
             contextWindow: "Context window for “{model}” (tokens)",
             contextPlaceholder: "auto (provider-reported or default)",
             contextHint:
-                "Auto-filled when the API reports a context window (OpenRouter, Groq, vLLM…). OpenAI-compatible endpoints that don't expose one can be configured manually here — the value is used for agent context budgeting.",
+                "Auto-filled when the API reports a context window (OpenRouter, Groq, vLLM…), and otherwise from the matched llm-metadata catalogue entry. OpenAI-compatible endpoints that expose neither can be configured manually here — the value is used for agent context budgeting.",
+            capabilities: "Model capabilities",
+            capabilitiesEmpty:
+                "No capability data for “{model}” yet — use “Fetch Models From API” to load it.",
+            capabilitiesMatched: "matched “{name}” · {percent}% similar",
+            capabilitiesSummary: "Capability metadata matched for {matched}/{total} models.",
+            capabilitiesError: "Capability metadata unavailable: {error}",
+            capabilityTools: "Tools",
+            capabilityReasoning: "Thinking",
+            capabilityVision: "Vision",
+            capabilityFiles: "Files",
+            capabilityAudio: "Audio",
+            capabilityOpenWeights: "Open weights",
+            capabilityDeprecated: "Deprecated",
+            capabilityContext: "{tokens} context",
         },
 
         system: {

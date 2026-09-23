@@ -59,8 +59,9 @@ to a **draft** GitHub Release for the tag (also kept as workflow artifacts).
 - **Agent orchestration** (toggle via `use_agents` in config): `agent-plan-start`, `agent-task-start`, `agent-task-token`, `agent-task-done`, `agent-task-error`, `agent-aggregate-start`.
 - **Profiles / backup**: `src-tauri/src/backup.rs` owns profile export/import (app menu `save-profile` / `restore-profile`). The zip holds `config.json`, `profiles.json`, `mcp_servers.json`, `sub_agents.json`, `skills/`, `workspace/memory/`, `workspace/todos/` and a `chat.db` snapshot; import restores the workspace folders into the (possibly switched) active workspace. Named profiles inside the app (`save_profile_config` / `apply_profile_config` / `delete_profile_config`) are separate and stay in `lib.rs`.
 - **MCP warmup**: enabled servers in `mcp_servers.json` are spawned at app startup (`mcp::spawn_warmup`).
+- **Model metadata** (`src-tauri/src/model_metadata.rs`): `fetch_model_metadata` pulls the public basellm/llm-metadata catalogue (6 h in-memory cache) and expands its `tags` into capability flags. `src/utils/modelMetadata.ts` fuzzy-matches remote model ids against it (vendor prefixes, date stamps, modality guards); "Fetch Models From API" stores the matches per model in `config.model_metadata` and uses the catalogue context window when the provider reports none.
 - **Update check** (`src-tauri/src/update.rs`): `check_update` reads the releases of `xlbbb-cn/ai-chat` from the GitHub API, keeps the highest semver (drafts are always skipped, pre-releases behind `include_prerelease_updates`), ranks the attached bundles for the current OS/arch and flags the preferred one as `recommended`. `download_update` streams into the downloads folder while emitting `update-download-progress`; `open_update_file` / `reveal_update_file` / `open_release_page` hand off to the OS (URLs are restricted to this repository). UI: startup probe + banner in `App.tsx`, dialog in `components/UpdatePanel.tsx`, toggles under Settings → About & Updates.
-- **API layer**: `src/api.ts` wraps `invoke` + `listen`. `src/types.ts` is the canonical TS shape for `AppConfig`, `Skill`, `McpServer`, `SubAgent`, `AgentOrchestration`, `Profile`, `AgentMissionSnapshot`.
+- **API layer**: `src/api.ts` wraps `invoke` + `listen`. `src/types.ts` is the canonical TS shape for `AppConfig`, `Skill`, `McpServer`, `SubAgent`, `AgentOrchestration`, `Profile`, `AgentMissionSnapshot`, `ModelMetadata`.
 - **Persistence**: SQLite (`chat.db`) for history, API request monitor, interaction logs, and agent missions. `app.log` is written next to the DB.
 
 ## On-disk layout (runtime)
@@ -113,6 +114,7 @@ src-tauri/
   src/skills.rs            # SKILL.md frontmatter parser, list/save/delete
   src/tools.rs             # run_cmd/run_shell/file_actions/kg/web_search
   src/mcp.rs               # MCP stdio/SSE/HTTP/Streamable-HTTP, warmup, test
+  src/model_metadata.rs    # llm-metadata catalogue fetch (capabilities/context)
   src/agents.rs            # sub-agents, orchestration, missions
   src/todos.rs             # todo lists (also has unit tests)
   src/db.rs                # SQLite: history, API monitor, interaction log

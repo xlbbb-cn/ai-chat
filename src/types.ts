@@ -108,6 +108,13 @@ export interface AppConfig {
    * in Settings as a fallback. Used for agent context budgeting.
    */
   model_context_lengths?: Record<string, number>;
+  /**
+   * Per-model capabilities learned from the public `basellm/llm-metadata`
+   * catalogue when the model catalogue was refreshed ("Fetch Models From API").
+   * Keyed by the remote model id; `model_name` inside the value is the
+   * catalogue entry it was matched to. Informational only — never sent upstream.
+   */
+  model_metadata?: Record<string, ModelMetadata>;
   model_settings?: ModelSettings;
   /**
    * DS-Format (DeepSeek format): pass `reasoning_content` back on assistant
@@ -181,6 +188,37 @@ export interface ModelSettings {
   reasoning_effort?: string;
   max_complete_tokens?: number;
   max_tokens?: number;
+}
+
+/**
+ * Capability metadata for one model, published by the public
+ * [`basellm/llm-metadata`](https://github.com/basellm/llm-metadata) catalogue
+ * (`fetch_model_metadata`) and — once matched — persisted per remote model id in
+ * {@link AppConfig.model_metadata}.
+ *
+ * `model_name` is the catalogue entry the model was matched to, which is not
+ * necessarily identical to the remote model id; `match_score` records how close
+ * the two names were (1 = identical after normalisation). Mirrors the Rust
+ * `ModelMetadata` struct in `src-tauri/src/model_metadata.rs`.
+ */
+export interface ModelMetadata {
+  model_name: string;
+  vendor?: string;
+  description?: string;
+  /** Raw catalogue tags, e.g. `["Tools", "Reasoning", "1M"]`. */
+  tags?: string[];
+  /** Context window in tokens, parsed from the catalogue size tag. */
+  context_length?: number;
+  supports_tools?: boolean;
+  /** "Thinking" / chain-of-thought models. */
+  supports_reasoning?: boolean;
+  supports_vision?: boolean;
+  supports_files?: boolean;
+  supports_audio?: boolean;
+  open_weights?: boolean;
+  deprecated?: boolean;
+  /** 0–1 name similarity; only present on persisted (matched) entries. */
+  match_score?: number;
 }
 
 export interface Skill {

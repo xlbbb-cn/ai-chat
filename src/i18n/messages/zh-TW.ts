@@ -193,7 +193,20 @@ const zhTW: Messages = {
             contextWindow: "「{model}」的上下文視窗（tokens）",
             contextPlaceholder: "自動（由服務端回報或使用預設值）",
             contextHint:
-                "當 API 回報上下文視窗時會自動填入（OpenRouter、Groq、vLLM 等）。未提供此資訊的 OpenAI 相容端點可在此手動設定 —— 該值用於代理的上下文預算。",
+                "當 API 回報上下文視窗時會自動填入（OpenRouter、Groq、vLLM 等），否則使用符合到的 llm-metadata 中繼資料。兩者都沒有的 OpenAI 相容端點可在此手動設定 —— 該值用於代理的上下文預算。",
+            capabilities: "模型能力",
+            capabilitiesEmpty: "尚無「{model}」的能力資料，請點擊「從 API 取得模型」載入。",
+            capabilitiesMatched: "符合到「{name}」· 相似度 {percent}%",
+            capabilitiesSummary: "已為 {matched}/{total} 個模型符合能力中繼資料。",
+            capabilitiesError: "能力中繼資料無法取得：{error}",
+            capabilityTools: "工具",
+            capabilityReasoning: "思考",
+            capabilityVision: "視覺",
+            capabilityFiles: "檔案",
+            capabilityAudio: "音訊",
+            capabilityOpenWeights: "開源權重",
+            capabilityDeprecated: "已棄用",
+            capabilityContext: "{tokens} 上下文",
         },
 
         system: {

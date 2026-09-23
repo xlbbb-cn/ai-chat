@@ -18,6 +18,7 @@ mod db;
 mod llm_complete;
 mod logger;
 pub mod mcp;
+pub mod model_metadata;
 pub mod neo4j_db;
 mod skills;
 mod todos;
@@ -140,6 +141,13 @@ pub struct AppConfig {
     /// provider reports one; otherwise set manually in Settings as a fallback.
     #[serde(default)]
     pub model_context_lengths: HashMap<String, u32>,
+    /// Per-model capabilities (tools / reasoning / vision / files …) learned
+    /// from the public llm-metadata catalogue when the model list was
+    /// refreshed. Keyed by the remote model id; `model_name` inside the value
+    /// is the catalogue entry it was matched to. Informational only — never
+    /// sent upstream.
+    #[serde(default)]
+    pub model_metadata: HashMap<String, model_metadata::ModelMetadata>,
     #[serde(default)]
     pub system_message: String,
     #[serde(default)]
@@ -188,6 +196,7 @@ impl Default for AppConfig {
             model_settings: ModelSettings::default(),
             ds_format: false,
             model_context_lengths: HashMap::new(),
+            model_metadata: HashMap::new(),
             system_message: String::new(),
             selected_tools: vec![],
             selected_skills: vec![],
@@ -850,6 +859,7 @@ pub fn run() {
             get_config,
             save_config,
             fetch_models,
+            model_metadata::fetch_model_metadata,
             get_workspace_dir,
             save_markdown_file,
             skills::list_skills,

@@ -5,6 +5,7 @@ import type {
   Attachment,
   Message,
   MessageContent,
+  ModelMetadata,
   Skill,
   McpServer,
   McpLogEntry,
@@ -55,6 +56,18 @@ export interface RemoteModel {
 
 export async function fetchModels(): Promise<RemoteModel[]> {
   return invoke("fetch_models");
+}
+
+/**
+ * Model capability catalogue (tools / reasoning / vision / files, context
+ * windows …) from the public `basellm/llm-metadata` feed. Entries are returned
+ * unfiltered — match them against the remote model ids with
+ * `matchModelMetadata` from `utils/modelMetadata`.
+ *
+ * The backend serves a 6-hour memory cache; pass `force` to re-download.
+ */
+export async function fetchModelMetadata(force = false): Promise<ModelMetadata[]> {
+  return invoke("fetch_model_metadata", { force });
 }
 
 export async function listSkills(): Promise<Skill[]> {

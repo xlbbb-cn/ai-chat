@@ -418,6 +418,47 @@
   line-height: 1.5;
 }
 
+/* ---- Soft warning (e.g. capability metadata unavailable) ---- */
+
+.settings-warning {
+  color: var(--t-danger);
+  opacity: 0.85;
+}
+
+/* ---- Model capability badges (Settings → API) ---- */
+
+.model-capabilities {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.model-capability-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.model-capability-badge {
+  padding: 3px 9px;
+  border: 1px solid var(--t-border-i);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--t-body);
+  white-space: nowrap;
+}
+
+.model-capability-badge.muted {
+  color: var(--t-muted);
+}
+
+.model-capability-badge.danger {
+  border-color: var(--t-danger);
+  color: var(--t-danger);
+}
+
 /* ---- Field title row (e.g. "Content" + "Edit" button) ---- */
 
 .field-title-row {
