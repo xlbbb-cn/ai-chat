@@ -522,6 +522,11 @@ body {
   background: var(--c-surface);
 }
 
+.attachment-pill.attachment-kind-audio {
+  border-color: var(--c-success);
+  background: var(--c-surface);
+}
+
 .attachment-thumb {
   width: 28px;
   height: 28px;

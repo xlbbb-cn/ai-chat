@@ -57,6 +57,7 @@ const zhCN: Messages = {
         dismiss: "忽略",
 
         attachFiles: "添加附件",
+        attachmentUnsupported: "已跳过 {names}：“{model}” 无法读取该文件类型。",
         inputPlaceholder: "输入消息…（Enter 发送，Shift+Enter 换行）",
         selectModel: "选择模型",
         reasoningDepth: "思考深度",

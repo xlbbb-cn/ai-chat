@@ -66,6 +66,8 @@ const en = {
         dismiss: "Dismiss",
 
         attachFiles: "Attach files",
+        attachmentUnsupported:
+            "Skipped {names}: “{model}” cannot read that file type.",
         inputPlaceholder: "Type a message… (Enter to send, Shift+Enter for newline)",
         selectModel: "Select model",
         reasoningDepth: "Thinking depth",

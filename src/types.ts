@@ -22,6 +22,8 @@ export interface ToolCallEntry {
  *                 reading an attached file via `FileReader.readAsDataURL`
  * - `file`      — generic file (e.g. PDF) using the newer
  *                 `{ type: "file", file: { filename, file_data } }` shape
+ * - `input_audio` — audio clip as base64 (`wav` / `mp3`, per the OpenAI
+ *                 Chat Completions schema)
  */
 export type ContentPart =
   | { type: "text"; text: string }
@@ -32,6 +34,10 @@ export type ContentPart =
   | {
     type: "file";
     file: { filename: string; file_data: string };
+  }
+  | {
+    type: "input_audio";
+    input_audio: { data: string; format: "wav" | "mp3" };
   };
 
 /**
@@ -47,7 +53,13 @@ export type MessageContent = string | ContentPart[];
  */
 export interface Attachment {
   name: string;
-  kind: "text" | "image" | "file";
+  /**
+   * How the attachment reaches the model: `text` is inlined into the prompt,
+   * the others become a content part (`image_url` / `file` / `input_audio`) and
+   * therefore need the matching model capability — see
+   * `supportsAttachmentKind` in `App.tsx`.
+   */
+  kind: "text" | "image" | "file" | "audio";
   /** MIME type when known (e.g. `image/png`, `application/pdf`). */
   mime?: string;
   /** `data:` URL for binary attachments (image / file). */

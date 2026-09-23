@@ -38,9 +38,17 @@ function applyTheme(theme: "auto" | "light" | "dark" | undefined) {
 
 // ─── Attachment handling ─────────────────────────────────────────────────────
 
-const IMAGE_MIME_PREFIXES = ["image/"];
-const TEXT_MIME_PREFIXES = ["text/"];
-const TEXT_FALLBACK_EXTS = new Set([
+/**
+ * Which extensions the picker offers depends on the selected model's
+ * capabilities (see `acceptedFileTypes`):
+ * - text is always accepted — it is inlined into the prompt, not sent as a
+ *   content part, so any model can consume it;
+ * - images become `image_url` parts → need `supports_vision`;
+ * - documents become `file` parts → need `supports_files`;
+ * - audio becomes an `input_audio` part → needs `supports_audio`, and only the
+ *   two formats the Chat Completions schema allows (`wav`, `mp3`).
+ */
+const TEXT_EXTENSIONS = [
   "txt", "md", "markdown", "csv", "tsv", "json", "jsonl",
   "yaml", "yml", "xml", "html", "htm", "css", "js", "ts", "jsx", "tsx",
   "py", "rs", "go", "java", "c", "cpp", "h", "hpp", "cs", "rb", "php",
@@ -48,7 +56,16 @@ const TEXT_FALLBACK_EXTS = new Set([
   "diff", "patch", "tex", "rst", "adoc", "org", "r", "m", "scala",
   "swift", "kt", "dart", "lua", "pl", "ex", "exs", "clj", "hs", "ml",
   "fs", "erl", "vim", "conf", "v",
-]);
+];
+const IMAGE_EXTENSIONS = [
+  "jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "heic", "heif", "ico", "tif", "tiff",
+];
+const FILE_EXTENSIONS = ["pdf"];
+const AUDIO_EXTENSIONS = ["mp3", "wav"];
+
+const IMAGE_MIME_PREFIXES = ["image/"];
+const AUDIO_MIME_PREFIXES = ["audio/"];
+const TEXT_MIME_PREFIXES = ["text/"];
 
 const FILE_TYPE_EXT_OVERRIDES: Record<string, string> = {
   pdf: "application/pdf",
@@ -59,18 +76,51 @@ function extensionOf(name: string): string {
   return dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
 }
 
-function classifyFile(file: File): "text" | "image" | "file" {
+function classifyFile(file: File): Attachment["kind"] {
   const mime = file.type.toLowerCase();
   if (mime && IMAGE_MIME_PREFIXES.some((p) => mime.startsWith(p))) return "image";
+  if (mime && AUDIO_MIME_PREFIXES.some((p) => mime.startsWith(p))) return "audio";
   if (mime && TEXT_MIME_PREFIXES.some((p) => mime.startsWith(p))) return "text";
   if (mime && mime !== "application/octet-stream") return "file";
   const ext = extensionOf(file.name);
   if (!ext) return "file";
-  if (["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "heic", "heif", "ico", "tif", "tiff"].includes(ext)) {
-    return "image";
-  }
-  if (TEXT_FALLBACK_EXTS.has(ext)) return "text";
+  if (IMAGE_EXTENSIONS.includes(ext)) return "image";
+  if (AUDIO_EXTENSIONS.includes(ext)) return "audio";
+  if (TEXT_EXTENSIONS.includes(ext)) return "text";
   return "file";
+}
+
+/**
+ * Can the model behind `metadata` consume this kind of attachment?
+ *
+ * Unknown metadata (the catalogue was never fetched, or the id was not matched)
+ * stays permissive: blocking files a model might well accept is worse than
+ * letting the provider answer with its own error.
+ */
+function supportsAttachmentKind(metadata: ModelMetadata | undefined, kind: Attachment["kind"]): boolean {
+  if (!metadata) return true;
+  switch (kind) {
+    case "text":
+      return true;
+    case "image":
+      return metadata.supports_vision === true;
+    case "audio":
+      return metadata.supports_audio === true;
+    case "file":
+      return metadata.supports_files === true;
+  }
+}
+
+/** `accept` attribute for the file picker, narrowed to the model's abilities. */
+function acceptedFileTypes(metadata: ModelMetadata | undefined): string {
+  const extensions = new Set(TEXT_EXTENSIONS);
+  const allow = (kind: Attachment["kind"], list: string[]) => {
+    if (supportsAttachmentKind(metadata, kind)) list.forEach((ext) => extensions.add(ext));
+  };
+  allow("image", IMAGE_EXTENSIONS);
+  allow("file", FILE_EXTENSIONS);
+  allow("audio", AUDIO_EXTENSIONS);
+  return Array.from(extensions, (ext) => `.${ext}`).join(",");
 }
 
 function mimeFor(file: File): string {
@@ -81,6 +131,12 @@ function mimeFor(file: File): string {
   if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
   if (FILE_TYPE_EXT_OVERRIDES[ext]) return FILE_TYPE_EXT_OVERRIDES[ext];
   return `application/${ext}`;
+}
+
+/** Strip the `data:<mime>;base64,` prefix — `input_audio` wants the payload. */
+function dataUrlBase64(dataUrl: string): string {
+  const comma = dataUrl.indexOf(",");
+  return comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
 }
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -132,6 +188,15 @@ function buildMessageContent(
       parts.push({
         type: "file",
         file: { filename: att.name, file_data: att.data_url },
+      });
+    } else if (att.kind === "audio" && att.data_url) {
+      parts.push({
+        type: "input_audio",
+        input_audio: {
+          data: dataUrlBase64(att.data_url),
+          // The schema only accepts `wav` and `mp3` (enforced by the picker).
+          format: extensionOf(att.name) === "wav" ? "wav" : "mp3",
+        },
       });
     } else if (att.kind === "text" && att.text_content !== undefined) {
       const ext = extensionOf(att.name);
@@ -1345,6 +1410,19 @@ export default function App() {
   // already has a depth configured (e.g. an unmatched model set by hand).
   const reasoningSupported = selectedMetadata?.supports_reasoning === true || reasoningEffort !== "";
 
+  // Switching to a model that cannot consume an attached file type would only
+  // fail upstream, so drop those attachments and say which ones went away.
+  useEffect(() => {
+    const dropped = attachments.filter((a) => !supportsAttachmentKind(selectedMetadata, a.kind));
+    if (dropped.length === 0) return;
+
+    setAttachments((prev) => prev.filter((a) => supportsAttachmentKind(selectedMetadata, a.kind)));
+    setError(t("app.attachmentUnsupported", {
+      names: dropped.map((a) => a.name).join(", "),
+      model: selectedModel,
+    }));
+  }, [attachments, selectedMetadata, selectedModel, t]);
+
   const usageTotal = usage ? (usage.total_tokens ?? usage.prompt_tokens + usage.completion_tokens) : 0;
   const fallbackMaxTokens = 131072; // 128k tokens as a hard upper bound for usage ratio calculations when no explicit max is provided
   const usageMax = usage?.max_tokens ?? maxTokens ?? fallbackMaxTokens;
@@ -1682,6 +1760,9 @@ export default function App() {
                   {file.kind === "file" && (
                     <span className="attachment-icon" aria-hidden="true">📄</span>
                   )}
+                  {file.kind === "audio" && (
+                    <span className="attachment-icon" aria-hidden="true">🔊</span>
+                  )}
                   {file.kind === "text" && (
                     <span className="attachment-icon" aria-hidden="true">📝</span>
                   )}
@@ -1705,21 +1786,38 @@ export default function App() {
             <input
               type="file"
               multiple
-              accept=".txt,.md,.markdown,.csv,.tsv,.json,.jsonl,.yaml,.yml,.xml,.html,.htm,.css,.js,.ts,.jsx,.tsx,.py,.rs,.go,.java,.c,.cpp,.h,.hpp,.cs,.rb,.php,.sh,.bat,.ps1,.sql,.log,.ini,.cfg,.toml,.env,.diff,.patch,.tex,.rst,.adoc,.org,.r,.m,.scala,.swift,.kt,.dart,.lua,.pl,.ex,.exs,.clj,.hs,.ml,.fs,.erl,.vim,.conf,.cfg,.v,.jpg,.jpeg,.png,.gif,.webp,.bmp,.svg,.heic,.heif,.ico,.tif,.tiff,.pdf"
+              // Only offer what the selected model can actually consume.
+              accept={acceptedFileTypes(selectedMetadata)}
               ref={fileInputRef}
               style={{ display: 'none' }}
               onChange={async (e) => {
                 const files = e.target.files;
                 if (files && files.length > 0) {
                   const newAttachments: Attachment[] = [];
+                  const skipped: string[] = [];
                   for (const f of Array.from(files)) {
+                    // The picker is filtered already, but the OS dialog can be
+                    // talked into other files — never send one the model
+                    // cannot read.
+                    if (!supportsAttachmentKind(selectedMetadata, classifyFile(f))) {
+                      skipped.push(f.name);
+                      continue;
+                    }
                     try {
                       newAttachments.push(await readAttachment(f));
                     } catch (err) {
                       console.error("Failed to read file", f.name, err);
                     }
                   }
-                  setAttachments(prev => [...prev, ...newAttachments]);
+                  if (newAttachments.length > 0) {
+                    setAttachments(prev => [...prev, ...newAttachments]);
+                  }
+                  if (skipped.length > 0) {
+                    setError(t("app.attachmentUnsupported", {
+                      names: skipped.join(", "),
+                      model: selectedModel,
+                    }));
+                  }
                 }
                 e.target.value = '';
               }}

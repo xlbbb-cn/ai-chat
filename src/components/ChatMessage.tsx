@@ -440,7 +440,7 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
                   </a>
                 );
               }
-              const icon = att?.kind === "file" ? "📄" : "📎";
+              const icon = att?.kind === "file" ? "📄" : att?.kind === "audio" ? "🔊" : "📎";
               return (
                 <span key={i} className="message-attachment-pill">
                   {icon} {name}

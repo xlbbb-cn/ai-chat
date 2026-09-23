@@ -57,6 +57,7 @@ const zhTW: Messages = {
         dismiss: "略過",
 
         attachFiles: "附加檔案",
+        attachmentUnsupported: "已跳過 {names}：「{model}」無法讀取該檔案類型。",
         inputPlaceholder: "輸入訊息…（Enter 送出，Shift+Enter 換行）",
         selectModel: "選擇模型",
         reasoningDepth: "思考深度",
