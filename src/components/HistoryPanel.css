@@ -90,33 +90,6 @@
   color: var(--c-accent);
 }
 
-/* Hosts a Font Awesome glyph: flex centring keeps the SVG optically centred
-   instead of relying on the text baseline. */
-.close-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  color: var(--c-muted);
-  font-size: 14px;
-  cursor: pointer;
-  padding: 4px 6px;
-  border-radius: var(--r-sm);
-  transition: background-color 0.2s, transform 0.1s, color 0.2s;
-  line-height: 1;
-}
-
-.close-btn:hover {
-  background: var(--c-hover);
-  color: var(--c-text);
-}
-
-.close-btn:active {
-  transform: scale(0.92);
-  background: var(--c-active);
-}
-
 .history-list {
   flex: 1;
   overflow-y: auto;
@@ -306,7 +279,7 @@
   background: var(--c-surface);
   cursor: default;
   border: 0.5px solid var(--c-accent);
-  box-shadow: 0 0 0 3px var(--c-accent-soft), var(--shadow-sm);
+  box-shadow: 0 0 0 3px var(--c-accent-soft);
 }
 
 .history-preview {

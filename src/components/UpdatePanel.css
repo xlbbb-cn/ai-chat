@@ -27,7 +27,8 @@
 }
 
 .update-panel {
-    /* Tesla palette (mirrors SettingsPanel) */
+    /* Palette — a literal copy of the global tokens rather than aliases.
+       See DESIGN.md, "Known exception". */
     --t-bg: #FFFFFF;
     --t-bg-soft: #F4F4F4;
     --t-text: #171A20;

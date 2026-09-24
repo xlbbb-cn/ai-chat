@@ -13,75 +13,51 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 9px 12px;
-    border-bottom: 0.5px solid var(--c-border);
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--c-border);
     flex-shrink: 0;
 }
 
 .tools-header h2 {
     margin: 0;
     font-size: 15px;
+    font-weight: 500;
     color: var(--c-text);
-    letter-spacing: -0.01em;
-}
-
-/* Hosts a Font Awesome glyph: flex centring keeps the SVG optically centred
-   instead of relying on the text baseline. */
-.close-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background: transparent;
-    border: none;
-    color: var(--c-muted);
-    font-size: 14px;
-    cursor: pointer;
-    padding: 4px 6px;
-    border-radius: var(--r-sm);
-    transition: background-color 0.2s, transform 0.1s, color 0.2s;
-    line-height: 1;
-}
-
-.close-btn:hover {
-    background: var(--c-hover);
-    color: var(--c-text);
-}
-
-.close-btn:active {
-    transform: scale(0.92);
-    background: var(--c-active);
+    letter-spacing: normal;
 }
 
 .tools-description {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--c-muted);
-    padding: 9px 12px 0;
+    padding: 10px 12px 0;
     line-height: 1.5;
 }
 
 .tools-list {
     flex: 1;
     overflow-y: auto;
-    padding: 9px 12px;
+    padding: 10px 12px;
     display: flex;
     flex-direction: column;
     gap: 6px;
 }
 
+/* Flat row — a Pale Silver hairline is the only thing separating it from the
+   canvas. No shadow, no scale, and the hover only deepens the outline. */
 .tool-item {
-    border: 0.5px solid var(--c-border-i);
-    border-radius: var(--r-md);
-    padding: 9px 11px;
+    border: 1px solid var(--c-border-i);
+    border-radius: 4px;
+    padding: 10px 12px;
     display: flex;
     flex-direction: column;
     gap: 5px;
     background: var(--c-surface);
-    transition: opacity 0.2s, border-color 0.2s, box-shadow 0.2s;
-    box-shadow: var(--shadow-sm);
+    transition: opacity var(--t-dur) var(--t-ease),
+        border-color var(--t-dur) var(--t-ease);
 }
 
 .tool-item:hover {
-    border-color: var(--c-border);
+    border-color: var(--c-muted);
 }
 
 .tool-item.disabled {
@@ -102,14 +78,15 @@
 }
 
 .tool-name {
-    font-size: 13px;
+    font-size: 14px;
+    font-weight: 500;
     color: var(--c-text);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    letter-spacing: -0.005em;
+    letter-spacing: normal;
     cursor: pointer;
-    transition: color 0.2s;
+    transition: color var(--t-dur) var(--t-ease);
     display: flex;
     align-items: center;
     gap: 4px;
@@ -121,11 +98,10 @@
 
 .tool-name.active {
     color: var(--c-accent);
-    font-weight: 500;
 }
 
 .tool-transport {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--c-muted);
     white-space: nowrap;
     overflow: hidden;
@@ -133,7 +109,8 @@
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
-/* Toggle switch style (like MCP panel) */
+/* Square-cornered switch — a precision control, not a pill, so it belongs to
+   the same 4px system as every button and input in the app. */
 .tool-toggle {
     position: relative;
     width: 36px;
@@ -154,9 +131,9 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: var(--c-border);
-    transition: 0.2s;
-    border-radius: 20px;
+    background-color: var(--c-border-i);
+    transition: background-color var(--t-dur) var(--t-ease);
+    border-radius: 4px;
 }
 
 .tool-toggle-slider:before {
@@ -166,10 +143,9 @@
     width: 14px;
     left: 3px;
     bottom: 3px;
-    background-color: var(--c-bg);
-    transition: 0.2s;
-    border-radius: 50%;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    background-color: #FFFFFF;
+    transition: transform var(--t-dur) var(--t-ease);
+    border-radius: 2px;
 }
 
 .tool-toggle input:checked+.tool-toggle-slider {
@@ -201,9 +177,10 @@
     font-size: 13px;
     color: var(--c-muted);
     padding: 4px 6px;
-    border-radius: var(--r-sm);
+    border-radius: 4px;
     font-family: inherit;
-    transition: background-color 0.2s, color 0.2s;
+    transition: background-color var(--t-dur) var(--t-ease),
+        color var(--t-dur) var(--t-ease);
 }
 
 .tool-action-btn:hover {
@@ -222,20 +199,20 @@
 }
 
 .tool-desc-expanded {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--c-muted);
     padding: 8px 10px;
     margin-top: 6px;
     line-height: 1.5;
     white-space: pre-line;
-    background: var(--c-bg);
-    border-radius: var(--r-sm);
-    border: 0.5px solid var(--c-border-s);
+    background: var(--c-surface-2);
+    border-radius: 4px;
+    border: 1px solid var(--c-border-s);
 }
 
 .search-engine-section {
-    padding: 9px 12px;
-    border-top: 0.5px solid var(--c-border);
+    padding: 10px 12px;
+    border-top: 1px solid var(--c-border);
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -243,33 +220,32 @@
 }
 
 .search-engine-label {
-    font-size: 13px;
+    font-size: 14px;
     color: var(--c-text);
-    letter-spacing: -0.005em;
+    letter-spacing: normal;
 }
 
 .search-engine-select {
-    height: 32px;
-    border: 0.5px solid var(--c-border-i);
-    border-radius: var(--r-sm);
-    padding: 0 10px;
-    font-size: 13px;
+    height: 34px;
+    border: 1px solid var(--c-border-i);
+    border-radius: 4px;
+    padding: 0 11px;
+    font-size: 14px;
     color: var(--c-text);
     background: var(--c-surface);
     font-family: inherit;
     outline: none;
-    transition: border-color 0.2s, box-shadow 0.2s;
+    transition: border-color var(--t-dur) var(--t-ease);
     appearance: none;
     -webkit-appearance: none;
-    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3e%3cpath d='M1 1l4 4 4-4' stroke='%238E8E93' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3e%3c/svg%3e");
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3e%3cpath d='M1 1l4 4 4-4' stroke='%238E8E8E' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3e%3c/svg%3e");
     background-repeat: no-repeat;
-    background-position: right 10px center;
-    padding-right: 28px;
+    background-position: right 11px center;
+    padding-right: 30px;
 }
 
 .search-engine-select:focus {
     border-color: var(--c-accent);
-    box-shadow: 0 0 0 3px var(--c-accent-soft);
 }
 
 .search-engine-select:disabled {
@@ -278,8 +254,8 @@
 }
 
 .tools-footer-section {
-    padding: 9px 12px 12px;
-    border-top: 0.5px solid var(--c-border);
+    padding: 10px 12px 12px;
+    border-top: 1px solid var(--c-border);
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -308,9 +284,9 @@
 }
 
 .tools-footer-title {
-    font-size: 13px;
+    font-size: 14px;
     color: var(--c-text);
-    letter-spacing: -0.005em;
+    letter-spacing: normal;
 }
 
 .auto-accept-chevron {
@@ -344,22 +320,22 @@
 }
 
 .auto-accept-option {
-    border: 0.5px solid var(--c-border-i);
-    border-radius: var(--r-md);
-    padding: 8px 12px;
+    border: 1px solid var(--c-border-i);
+    border-radius: 4px;
+    padding: 9px 12px;
     background: var(--c-surface);
     cursor: pointer;
-    transition: border-color 0.2s, background-color 0.2s, box-shadow 0.2s;
+    transition: border-color var(--t-dur) var(--t-ease),
+        background-color var(--t-dur) var(--t-ease);
     display: flex;
     align-items: center;
     gap: 8px;
-    box-shadow: var(--shadow-sm);
     flex-shrink: 0;
 }
 
 .auto-accept-option:hover {
-    border-color: var(--c-border);
-    background: var(--c-hover);
+    border-color: var(--c-muted);
+    background: var(--c-surface-2);
 }
 
 .auto-accept-checkbox {
@@ -378,5 +354,5 @@
 .auto-accept-name {
     font-size: 13px;
     color: var(--c-text);
-    letter-spacing: -0.005em;
+    letter-spacing: normal;
 }

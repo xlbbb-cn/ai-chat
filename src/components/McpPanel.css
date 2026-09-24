@@ -10,82 +10,58 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 9px 12px;
-    border-bottom: 0.5px solid var(--c-border);
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--c-border);
     flex-shrink: 0;
 }
 
 .mcp-header h2 {
     margin: 0;
     font-size: 15px;
+    font-weight: 500;
     color: var(--c-text);
-    letter-spacing: -0.01em;
-}
-
-/* Hosts a Font Awesome glyph: flex centring keeps the SVG optically centred
-   instead of relying on the text baseline. */
-.close-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background: transparent;
-    border: none;
-    color: var(--c-muted);
-    font-size: 14px;
-    cursor: pointer;
-    padding: 4px 6px;
-    border-radius: var(--r-sm);
-    transition: background-color 0.2s, transform 0.1s, color 0.2s;
-    line-height: 1;
-}
-
-.close-btn:hover {
-    background: var(--c-hover);
-    color: var(--c-text);
-}
-
-.close-btn:active {
-    transform: scale(0.92);
-    background: var(--c-active);
+    letter-spacing: normal;
 }
 
 .mcp-desc {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--c-muted);
-    padding: 9px 12px 0;
+    padding: 10px 12px 0;
     line-height: 1.5;
 }
 
 .mcp-list {
     flex: 1;
     overflow-y: auto;
-    padding: 9px 12px;
+    padding: 10px 12px;
     display: flex;
     flex-direction: column;
     gap: 6px;
 }
 
 .mcp-empty {
-    font-size: 13px;
+    font-size: 14px;
     color: var(--c-placeholder);
     text-align: center;
-    padding: 18px 0;
+    padding: 20px 0;
 }
 
+/* Flat row — a Pale Silver hairline is the only thing separating it from the
+   canvas. No shadow, no scale, and the hover only deepens the outline. */
 .mcp-server-item {
-    border: 0.5px solid var(--c-border-i);
-    border-radius: var(--r-md);
-    padding: 9px 11px;
+    border: 1px solid var(--c-border-i);
+    border-radius: 4px;
+    padding: 10px 12px;
     display: flex;
     flex-direction: column;
     gap: 5px;
     background: var(--c-surface);
-    transition: opacity 0.2s, border-color 0.2s, box-shadow 0.2s;
-    box-shadow: var(--shadow-sm);
+    transition: opacity var(--t-dur) var(--t-ease),
+        border-color var(--t-dur) var(--t-ease);
 }
 
 .mcp-server-item:hover {
-    border-color: var(--c-border);
+    border-color: var(--c-muted);
 }
 
 .mcp-server-item.disabled {
@@ -106,14 +82,15 @@
 }
 
 .mcp-server-name {
-    font-size: 13px;
+    font-size: 14px;
+    font-weight: 500;
     color: var(--c-text);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    letter-spacing: -0.005em;
+    letter-spacing: normal;
     cursor: pointer;
-    transition: color 0.2s;
+    transition: color var(--t-dur) var(--t-ease);
     display: flex;
     align-items: center;
     gap: 4px;
@@ -125,11 +102,10 @@
 
 .mcp-server-name.active {
     color: var(--c-accent);
-    font-weight: 500;
 }
 
 .mcp-server-transport {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--c-muted);
     white-space: nowrap;
     overflow: hidden;
@@ -153,9 +129,10 @@
     font-size: 13px;
     color: var(--c-muted);
     padding: 4px 6px;
-    border-radius: var(--r-sm);
+    border-radius: 4px;
     font-family: inherit;
-    transition: background-color 0.2s, color 0.2s;
+    transition: background-color var(--t-dur) var(--t-ease),
+        color var(--t-dur) var(--t-ease);
 }
 
 .mcp-action-btn:hover {
@@ -179,7 +156,7 @@
     gap: 5px;
     font-size: 12px;
     padding: 4px 8px;
-    border-radius: var(--r-sm);
+    border-radius: 4px;
     line-height: 1.4;
 }
 
@@ -253,6 +230,8 @@
     border-color: var(--c-danger);
 }
 
+/* Square-cornered switch — a precision control, not a pill, so it belongs to
+   the same 4px system as every button and input in the app. */
 .mcp-toggle {
     position: relative;
     width: 36px;
@@ -273,9 +252,9 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: var(--c-border);
-    transition: 0.2s;
-    border-radius: 20px;
+    background-color: var(--c-border-i);
+    transition: background-color var(--t-dur) var(--t-ease);
+    border-radius: 4px;
 }
 
 .mcp-toggle-slider:before {
@@ -285,10 +264,9 @@
     width: 14px;
     left: 3px;
     bottom: 3px;
-    background-color: var(--c-bg);
-    transition: 0.2s;
-    border-radius: 50%;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    background-color: #FFFFFF;
+    transition: transform var(--t-dur) var(--t-ease);
+    border-radius: 2px;
 }
 
 .mcp-toggle input:checked+.mcp-toggle-slider {
@@ -305,8 +283,8 @@
 }
 
 .mcp-footer {
-    padding: 9px 12px;
-    border-top: 0.5px solid var(--c-border);
+    padding: 10px 12px;
+    border-top: 1px solid var(--c-border);
     flex-shrink: 0;
 }
 
@@ -316,14 +294,14 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
-    padding: 14px 14px 6px;
+    padding: 12px 12px 6px;
 }
 
 .mcp-form label {
-    font-size: 13px;
+    font-size: 14px;
     color: var(--c-text);
     margin-top: 8px;
-    letter-spacing: -0.005em;
+    letter-spacing: normal;
 }
 
 .mcp-hint {
@@ -334,39 +312,38 @@
 
 .mcp-input,
 .mcp-select {
-    height: 32px;
-    border: 0.5px solid var(--c-border-i);
-    border-radius: var(--r-sm);
-    padding: 0 10px;
-    font-size: 13px;
+    height: 34px;
+    border: 1px solid var(--c-border-i);
+    border-radius: 4px;
+    padding: 0 11px;
+    font-size: 14px;
     color: var(--c-text);
     background: var(--c-surface);
     width: 100%;
     box-sizing: border-box;
     outline: none;
-    transition: border-color 0.2s, box-shadow 0.2s;
+    transition: border-color var(--t-dur) var(--t-ease);
     font-family: inherit;
 }
 
 .mcp-input:focus,
 .mcp-select:focus {
     border-color: var(--c-accent);
-    box-shadow: 0 0 0 3px var(--c-accent-soft);
 }
 
 .mcp-select {
     appearance: none;
     -webkit-appearance: none;
-    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3e%3cpath d='M1 1l4 4 4-4' stroke='%238E8E93' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3e%3c/svg%3e");
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3e%3cpath d='M1 1l4 4 4-4' stroke='%238E8E8E' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3e%3c/svg%3e");
     background-repeat: no-repeat;
-    background-position: right 10px center;
-    padding-right: 28px;
+    background-position: right 11px center;
+    padding-right: 30px;
 }
 
 .mcp-textarea {
-    border: 0.5px solid var(--c-border-i);
-    border-radius: var(--r-sm);
-    padding: 8px 10px;
+    border: 1px solid var(--c-border-i);
+    border-radius: 4px;
+    padding: 8px 11px;
     font-size: 12px;
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     color: var(--c-text);
@@ -375,82 +352,21 @@
     width: 100%;
     box-sizing: border-box;
     outline: none;
-    transition: border-color 0.2s, box-shadow 0.2s;
+    transition: border-color var(--t-dur) var(--t-ease);
     line-height: 1.5;
 }
 
 .mcp-textarea:focus {
     border-color: var(--c-accent);
-    box-shadow: 0 0 0 3px var(--c-accent-soft);
 }
 
 .mcp-form-actions {
     display: flex;
     gap: 8px;
-    padding: 9px 12px;
-    border-top: 0.5px solid var(--c-border);
+    padding: 10px 12px;
+    border-top: 1px solid var(--c-border);
     justify-content: flex-end;
     flex-shrink: 0;
-}
-
-.btn-primary {
-    padding: 4px 16px;
-    min-height: 36px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--c-accent);
-    color: #FFFFFF;
-    border: none;
-    border-radius: var(--r-sm);
-    font-size: 13px;
-    font-family: inherit;
-    cursor: pointer;
-    letter-spacing: -0.005em;
-    box-shadow: 0 1px 3px rgba(0, 122, 255, 0.25);
-    transition: background-color 0.2s, box-shadow 0.2s, transform 0.1s;
-}
-
-.btn-primary:hover:not(:disabled) {
-    background: var(--c-accent-hover);
-    box-shadow: 0 2px 6px rgba(0, 122, 255, 0.32);
-}
-
-.btn-primary:active:not(:disabled) {
-    transform: scale(0.98);
-}
-
-.btn-primary:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    box-shadow: none;
-}
-
-.btn-secondary {
-    padding: 7px 14px;
-    min-height: 36px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--c-surface);
-    color: var(--c-text);
-    border: 0.5px solid var(--c-border-i);
-    border-radius: var(--r-sm);
-    font-size: 13px;
-    font-family: inherit;
-    cursor: pointer;
-    letter-spacing: -0.005em;
-    transition: background-color 0.2s, border-color 0.2s, transform 0.1s;
-}
-
-.btn-secondary:hover {
-    background: var(--c-hover);
-    border-color: var(--c-border);
-}
-
-.btn-secondary:active {
-    transform: scale(0.98);
-    background: var(--c-active);
 }
 
 /* ─── MCP Diagnostic Log Modal ────────────────────────────────────────────── */
@@ -458,7 +374,9 @@
 .mcp-log-modal-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.35);
+    background: rgba(128, 128, 128, 0.65);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
     z-index: 1000;
     display: flex;
     align-items: center;
@@ -467,16 +385,15 @@
 }
 
 .mcp-log-modal {
-    background: var(--c-bg);
+    background: var(--c-surface);
     color: var(--c-text);
-    border: 0.5px solid var(--c-border);
-    border-radius: var(--r-md);
+    border: 1px solid var(--c-border-i);
+    border-radius: 4px;
     width: 100%;
     max-width: 760px;
     max-height: 80vh;
     display: flex;
     flex-direction: column;
-    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.25);
     overflow: hidden;
 }
 
@@ -486,7 +403,7 @@
     justify-content: space-between;
     gap: 12px;
     padding: 10px 12px;
-    border-bottom: 0.5px solid var(--c-border);
+    border-bottom: 1px solid var(--c-border);
     flex-shrink: 0;
 }
 
@@ -525,19 +442,22 @@
     align-items: center;
     justify-content: center;
     background: var(--c-surface);
-    border: 0.5px solid var(--c-border-i);
-    color: var(--c-text);
+    border: 1px solid var(--c-border-i);
+    color: var(--c-body);
     font-size: 12px;
     font-family: inherit;
     padding: 4px 9px;
-    border-radius: var(--r-sm);
+    border-radius: 4px;
     cursor: pointer;
-    transition: background-color 0.2s, border-color 0.2s;
+    transition: background-color var(--t-dur) var(--t-ease),
+        border-color var(--t-dur) var(--t-ease),
+        color var(--t-dur) var(--t-ease);
 }
 
 .mcp-log-btn:hover:not(:disabled) {
-    background: var(--c-hover);
-    border-color: var(--c-border);
+    background: var(--c-surface-2);
+    border-color: var(--c-muted);
+    color: var(--c-text);
 }
 
 .mcp-log-btn:disabled {
@@ -549,7 +469,7 @@
     font-size: 11px;
     color: var(--c-muted);
     padding: 6px 18px 8px;
-    border-bottom: 0.5px solid var(--c-border-i);
+    border-bottom: 1px solid var(--c-border-s);
     flex-shrink: 0;
 }
 
@@ -606,12 +526,12 @@
 }
 
 .mcp-log-level-warn .mcp-log-modal-level {
-    color: #B07500;
-    background: rgba(255, 204, 0, 0.14);
+    color: var(--c-warning);
+    background: var(--c-warning-soft);
 }
 
 .mcp-log-level-warn .mcp-log-modal-message {
-    color: #8A6500;
+    color: var(--c-warning);
 }
 
 .mcp-log-level-error .mcp-log-modal-level {

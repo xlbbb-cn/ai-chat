@@ -2,6 +2,27 @@
 
 Desktop AI chat client (Tauri 2 + React 19 + TS + Vite, Rust backend) that talks to any OpenAI-compatible API and adds **Skills**, **Tools**, and **Sub-Agents**.
 
+## UI design — mandatory
+
+**Any change that affects the interface MUST follow [`DESIGN.md`](./DESIGN.md).** It is the single source of truth for colours, typography, spacing, components, motion and both themes. Do not invent visual language and do not copy a style from another project — if a value is not in the spec, add it to the spec first.
+
+Non-negotiables, repeated here so they are impossible to miss:
+
+- **Tokens only.** Colours, radii, shadows, durations and easings come from `src/App.css` (`:root` + `[data-theme="dark"]`). A literal hex outside those blocks is a bug.
+- **One accent colour.** Electric Blue (`--c-accent` = `#3E6AE1`) marks the primary action of a view — never decoration, never a second chromatic accent. Semantic `--c-danger` / `--c-success` / `--c-warning` are for status only.
+- **No elevation.** `--shadow-*` are `none`; layering is z-index, opacity and the frosted `--c-toolbar` surface. Never write `box-shadow: <literal>, var(--shadow-sm)` — the mixed declaration is invalid and is dropped silently.
+- **4px radius** on interactive elements. No pills, no large radii. Toggles/badges square off at 4px too.
+- **One motion curve:** `--t-dur` (`0.33s`) + `--t-ease`. Colour/border transitions only — no `scale`/`translate` on hover.
+- **Hairlines separate.** 1px `--c-border` for structure, 1px `--c-border-i` for interactive outlines. No gradient surfaces.
+- **Reuse the shared primitives.** `.close-btn`, `.btn-primary`, `.btn-secondary`, `.inline-edit-btn`, `.field-title-row` are defined once in `src/App.css` — never re-declare them in a component stylesheet (that is exactly how the Skills/MCP/Tools panels drifted apart).
+- **Compact zone = 34px controls** (chat input row, sidebar panels, Settings). Settings also uses 13px text. Do not introduce 40px inputs.
+- **Sentence case, weights 400/500 only, `letter-spacing: normal`.** No `text-transform: uppercase`, no negative tracking.
+- **Check light *and* dark** (`data-theme` is driven by `config.theme` via `applyTheme()` in `src/App.tsx`), plus `prefers-reduced-motion` for any animation.
+
+When a needed value has no token, **add a token** to `src/App.css` — do not hardcode it at the call site.
+
+Verify style work with `npx tsc --noEmit && npx vite build` (not `npm run build`, which requires a git tag).
+
 ## Commands
 
 ```sh

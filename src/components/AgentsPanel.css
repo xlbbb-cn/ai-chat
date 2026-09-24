@@ -22,33 +22,6 @@
     letter-spacing: -0.01em;
 }
 
-/* Hosts a Font Awesome glyph: flex centring keeps the SVG optically centred
-   instead of relying on the text baseline. */
-.close-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background: transparent;
-    border: none;
-    color: var(--c-muted);
-    font-size: 14px;
-    cursor: pointer;
-    padding: 4px 6px;
-    border-radius: var(--r-sm);
-    transition: background-color 0.2s, transform 0.1s, color 0.2s;
-    line-height: 1;
-}
-
-.close-btn:hover {
-    background: var(--c-hover);
-    color: var(--c-text);
-}
-
-.close-btn:active {
-    transform: scale(0.92);
-    background: var(--c-active);
-}
-
 .orchestration-settings {
     padding: 9px 12px;
     border-bottom: 0.5px solid var(--c-border);
@@ -156,7 +129,7 @@
 .agent-item.active {
     background: var(--c-surface);
     border-color: var(--c-accent);
-    box-shadow: 0 0 0 3px var(--c-accent-soft), var(--shadow-sm);
+    box-shadow: 0 0 0 3px var(--c-accent-soft);
 }
 
 .agent-content {
@@ -405,92 +378,6 @@
 .editor-actions {
     display: flex;
     gap: 8px;
-}
-
-.btn-primary {
-    flex: 1;
-    padding: 4px 16px;
-    min-height: 36px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--c-accent);
-    color: #FFFFFF;
-    border: none;
-    border-radius: var(--r-sm);
-    font-size: 13px;
-    font-family: inherit;
-    cursor: pointer;
-    letter-spacing: -0.005em;
-    box-shadow: 0 1px 3px rgba(0, 122, 255, 0.25);
-    transition: background-color 0.2s, box-shadow 0.2s, transform 0.1s;
-}
-
-.btn-primary:hover:not(:disabled) {
-    background: var(--c-accent-hover);
-    box-shadow: 0 2px 6px rgba(0, 122, 255, 0.32);
-}
-
-.btn-primary:active:not(:disabled) {
-    transform: scale(0.98);
-}
-
-.btn-primary:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    box-shadow: none;
-}
-
-.btn-secondary {
-    flex: 1;
-    padding: 7px 16px;
-    min-height: 36px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--c-surface);
-    color: var(--c-text);
-    border: 0.5px solid var(--c-border-i);
-    border-radius: var(--r-sm);
-    font-size: 13px;
-    font-family: inherit;
-    cursor: pointer;
-    letter-spacing: -0.005em;
-    transition: background-color 0.2s, border-color 0.2s, transform 0.1s;
-}
-
-.btn-secondary:hover {
-    background: var(--c-hover);
-    border-color: var(--c-border);
-}
-
-.btn-secondary:active {
-    transform: scale(0.98);
-    background: var(--c-active);
-}
-
-.field-title-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-}
-
-.inline-edit-btn {
-    border: 0.5px solid var(--c-border-i);
-    background: var(--c-surface);
-    color: var(--c-text);
-    border-radius: var(--r-sm);
-    padding: 4px 10px;
-    font-size: 12px;
-    font-family: inherit;
-    cursor: pointer;
-    transition: background-color 0.2s, border-color 0.2s;
-}
-
-.inline-edit-btn:hover {
-    background: var(--c-hover);
-    border-color: var(--c-border);
 }
 
 .prompt-editor-overlay {

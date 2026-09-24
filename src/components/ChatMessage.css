@@ -1,14 +1,18 @@
 .chat-message-shell {
-  /* ── Tesla design tokens ── */
-  --ts-blue: #3E6AE1;
-  --ts-blue-hover: #3457C4;
-  --ts-carbon: #171A20;
-  --ts-graphite: #393C41;
-  --ts-pewter: #5C5E62;
-  --ts-silver: #8E8E8E;
-  --ts-cloud: #EEEEEE;
-  --ts-ash: #F4F4F4;
-  --ts-ease: cubic-bezier(0.5, 0, 0, 0.75);
+  /* Aliases of the global tokens. The transcript used to carry its own copy of
+     the palette, which meant a change to the chat chrome could leave the
+     messages behind; routing them through the shared tokens keeps the whole
+     surface on one source of truth (dark mode included, since the global
+     tokens already switch). */
+  --ts-blue: var(--c-accent);
+  --ts-blue-hover: var(--c-accent-hover);
+  --ts-carbon: var(--c-text);
+  --ts-graphite: var(--c-body);
+  --ts-pewter: var(--c-muted);
+  --ts-silver: var(--c-placeholder);
+  --ts-cloud: var(--c-border);
+  --ts-ash: var(--c-surface-2);
+  --ts-ease: var(--t-ease);
 
   display: flex;
   flex-direction: column;
@@ -17,17 +21,6 @@
   max-width: 80%;
   min-width: 0;
   flex-shrink: 0;
-}
-
-[data-theme="dark"] .chat-message-shell {
-  --ts-blue: #5B7EE6;
-  --ts-blue-hover: #6F8FEA;
-  --ts-carbon: #F5F5F7;
-  --ts-graphite: #D1D1D6;
-  --ts-pewter: #8E8E93;
-  --ts-silver: #636366;
-  --ts-cloud: rgba(255, 255, 255, 0.12);
-  --ts-ash: rgba(255, 255, 255, 0.06);
 }
 
 .chat-message-shell.user {
@@ -43,11 +36,14 @@
   width: 100%;
 }
 
+/* The user turn is the only "card" in the transcript — a Light Ash block on
+   the white canvas. The assistant turn is deliberately not a container: its
+   copy sits directly on the canvas and is separated by whitespace, exactly
+   like the product copy on the site. */
 .chat-message {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding: 9px 12px;
+  gap: 6px;
   border-radius: 4px;
   max-width: 100%;
   word-break: break-word;
@@ -57,11 +53,13 @@
 .chat-message.user {
   background: var(--ts-ash);
   color: var(--ts-carbon);
+  padding: 10px 12px;
 }
 
 .chat-message.assistant {
-  background: var(--c-surface);
+  background: transparent;
   color: var(--ts-graphite);
+  padding: 0;
 }
 
 .message-role {
@@ -364,12 +362,12 @@
 .message-reasoning-content pre.hljs {
   margin: 0.5em 0;
   padding: 1em;
-  border-radius: var(--r-sm);
+  border-radius: 4px;
   overflow-x: auto;
   max-width: 100%;
   box-sizing: border-box;
   background: var(--c-code);
-  border: 0.5px solid var(--c-border-s);
+  border: 1px solid var(--c-border-s);
 }
 
 /* Markdown code blocks (fenced + inline) use the bundled RazerF5 web font,
@@ -448,12 +446,12 @@
 .message-content pre.hljs {
   margin: 0.5em 0;
   padding: 1em;
-  border-radius: var(--r-sm);
+  border-radius: 4px;
   overflow-x: auto;
   max-width: 100%;
   box-sizing: border-box;
   background: var(--c-code);
-  border: 0.5px solid var(--c-border-s);
+  border: 1px solid var(--c-border-s);
   font-size: 13px;
 }
 
@@ -506,8 +504,8 @@
   border-collapse: separate;
   border-spacing: 0;
   margin: 0.75em 0;
-  border: 0.5px solid var(--c-border-i);
-  border-radius: var(--r-sm);
+  border: 1px solid var(--c-border-i);
+  border-radius: 4px;
   overflow: hidden;
   font-size: 13px;
   background: var(--c-surface);
@@ -515,8 +513,8 @@
 
 .message-content th,
 .message-content td {
-  border-bottom: 0.5px solid var(--c-border-s);
-  border-right: 0.5px solid var(--c-border-s);
+  border-bottom: 1px solid var(--c-border-s);
+  border-right: 1px solid var(--c-border-s);
   padding: 8px 12px;
   text-align: left;
   vertical-align: top;
@@ -568,7 +566,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  border-radius: var(--r-pill);
+  border-radius: 4px;
   font-size: 0.78em;
   max-width: 220px;
   white-space: nowrap;

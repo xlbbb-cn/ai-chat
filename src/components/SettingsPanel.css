@@ -1,5 +1,5 @@
 /* ===================================================================
-   SettingsPanel — Fullscreen page (Tesla design language)
+   SettingsPanel — Fullscreen page, compact layout.
    Electric Blue (#3E6AE1) is reserved for the primary CTA; the canvas
    is white / Carbon Dark. No shadows, no gradients — separation comes
    from whitespace and hairlines only.
@@ -11,12 +11,8 @@
   position: fixed;
   inset: 0;
   z-index: 900;
-  background: #FFFFFF;
+  background: var(--c-bg);
   animation: settings-fade-in 0.2s ease;
-}
-
-[data-theme="dark"] .settings-overlay {
-  background: #171A20;
 }
 
 @keyframes settings-fade-in {
@@ -29,21 +25,23 @@
   }
 }
 
-
+/* The Settings page consumes the global tokens through local aliases so it can
+   never drift from the chat area or the sidebar panels. Note that --t-ease is
+   deliberately NOT redeclared here: it would be a self-reference and resolve
+   to nothing. */
 .settings-page,
 .prompt-editor-overlay {
-  --t-bg: #FFFFFF;
-  --t-bg-soft: #F4F4F4;
-  --t-text: #171A20;
-  --t-body: #393C41;
-  --t-muted: #5C5E62;
-  --t-placeholder: #8E8E8E;
-  --t-border: #EEEEEE;
-  --t-border-i: #D0D1D2;
-  --t-accent: #3E6AE1;
-  --t-accent-hover: #3358C7;
-  --t-danger: #C0392B;
-  --t-ease: cubic-bezier(0.5, 0, 0, 0.75);
+  --t-bg: var(--c-surface);
+  --t-bg-soft: var(--c-surface-2);
+  --t-text: var(--c-text);
+  --t-body: var(--c-body);
+  --t-muted: var(--c-muted);
+  --t-placeholder: var(--c-placeholder);
+  --t-border: var(--c-border);
+  --t-border-i: var(--c-border-i);
+  --t-accent: var(--c-accent);
+  --t-accent-hover: var(--c-accent-hover);
+  --t-danger: var(--c-danger);
 }
 
 .settings-page {
@@ -56,21 +54,6 @@
   overflow: hidden;
 }
 
-[data-theme="dark"] .settings-page,
-[data-theme="dark"] .prompt-editor-overlay {
-  --t-bg: #171A20;
-  --t-bg-soft: #23262D;
-  --t-text: #F4F4F4;
-  --t-body: #D0D1D2;
-  --t-muted: #8E8E93;
-  --t-placeholder: #6B6E73;
-  --t-border: rgba(255, 255, 255, 0.08);
-  --t-border-i: rgba(255, 255, 255, 0.16);
-  --t-accent: #5B7EF0;
-  --t-accent-hover: #6F8DF3;
-  --t-danger: #E5655C;
-}
-
 /* ---- Page header ---- */
 
 .settings-page-header {
@@ -78,27 +61,27 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 20px;
+  padding: 10px 16px;
   border-bottom: 1px solid var(--t-border);
   flex-shrink: 0;
 }
 
 .settings-page-heading h2 {
   margin: 0;
-  font-size: 19px;
+  font-size: 17px;
   font-weight: 500;
   color: var(--t-text);
 }
 
 .settings-page-heading p {
   margin: 2px 0 0;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--t-muted);
 }
 
 .settings-page-actions {
   display: flex;
-  gap: 8px;
+  gap: 6px;
 }
 
 /* ---- Layout: section nav + scrollable content ---- */
@@ -107,7 +90,7 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 216px minmax(0, 1fr);
+  grid-template-columns: 180px minmax(0, 1fr);
 }
 
 .settings-nav {
@@ -115,7 +98,7 @@
   flex-direction: column;
   align-items: stretch;
   gap: 2px;
-  padding: 14px 10px 14px 20px;
+  padding: 10px 8px 10px 12px;
   border-right: 1px solid var(--t-border);
   overflow-y: auto;
 }
@@ -126,14 +109,15 @@
   background: transparent;
   border: none;
   border-radius: 4px;
-  min-height: 30px;
-  padding: 6px 10px;
+  min-height: 28px;
+  padding: 5px 10px;
   font-family: inherit;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--t-muted);
   cursor: pointer;
-  transition: color 0.33s var(--t-ease), background-color 0.33s var(--t-ease);
+  transition: color var(--t-dur) var(--t-ease),
+    background-color var(--t-dur) var(--t-ease);
 }
 
 .settings-nav-item:hover {
@@ -151,10 +135,10 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 18px 24px 28px;
+  padding: 14px 16px 20px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 14px;
 }
 
 @media (max-width: 960px) {
@@ -165,7 +149,7 @@
   .settings-nav {
     flex-direction: row;
     overflow-x: auto;
-    padding: 10px 12px;
+    padding: 8px 12px;
     border-right: none;
     border-bottom: 1px solid var(--t-border);
   }
@@ -175,11 +159,11 @@
   }
 
   .settings-content {
-    padding: 14px 14px 24px;
+    padding: 12px 12px 18px;
   }
 
   .settings-page-header {
-    padding: 10px 14px;
+    padding: 9px 12px;
   }
 }
 
@@ -188,8 +172,8 @@
 .settings-section {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding-bottom: 18px;
+  gap: 10px;
+  padding-bottom: 14px;
   border-bottom: 1px solid var(--t-border);
 }
 
@@ -206,14 +190,14 @@
 
 .settings-section-head h3 {
   margin: 0;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 500;
   color: var(--t-text);
 }
 
 .settings-section-head p {
   margin: 0;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--t-muted);
 }
 
@@ -241,8 +225,8 @@
 .settings-section-body {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  max-width: 680px;
+  gap: 8px;
+  max-width: 760px;
 }
 
 .settings-divider {
@@ -256,8 +240,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  min-height: 34px;
+  gap: 10px;
+  min-height: 30px;
 }
 
 .settings-field-row-stacked {
@@ -272,7 +256,7 @@
 }
 
 .settings-field-label {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--t-text);
 }
@@ -283,7 +267,7 @@
   /* Cells keep their own height — a taller neighbour (the model-catalog row
      once the capability summary appears) must not stretch the others. */
   align-items: start;
-  gap: 12px;
+  gap: 8px;
 }
 
 .settings-field-grid-3 {
@@ -304,28 +288,30 @@
   }
 }
 
-/* ---- Form controls ---- */
+/* ---- Form controls ----
+   Sized to the main input row: 34px tall, 4px radius, hairline outline and a
+   border-only focus state. */
 
 .settings-page input,
 .settings-page textarea,
 .settings-page select {
   width: 100%;
   box-sizing: border-box;
-  height: 40px;
-  padding: 0 12px;
+  height: 34px;
+  padding: 0 11px;
   background: var(--t-bg);
   border: 1px solid var(--t-border-i);
   border-radius: 4px;
   color: var(--t-text);
-  font-size: 14px;
+  font-size: 13px;
   font-family: inherit;
   outline: none;
-  transition: border-color 0.33s var(--t-ease), color 0.33s var(--t-ease);
+  transition: border-color var(--t-dur) var(--t-ease);
 }
 
 .settings-page textarea {
   height: auto;
-  padding: 10px 12px;
+  padding: 8px 11px;
   resize: vertical;
   line-height: 1.5;
 }
@@ -347,8 +333,8 @@
   -webkit-appearance: none;
   background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3e%3cpath d='M1 1l4 4 4-4' stroke='%235C5E62' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3e%3c/svg%3e");
   background-repeat: no-repeat;
-  background-position: right 12px center;
-  padding-right: 32px;
+  background-position: right 11px center;
+  padding-right: 30px;
 }
 
 /* ---- Checkbox ---- */
@@ -357,7 +343,7 @@
   display: grid !important;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: start;
-  gap: 10px !important;
+  gap: 8px !important;
 }
 
 .settings-checkbox input[type="checkbox"] {
@@ -379,12 +365,12 @@
 }
 
 .settings-checkbox-copy span {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--t-text);
 }
 
 .settings-checkbox-copy small {
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.5;
   color: var(--t-muted);
 }
@@ -405,7 +391,7 @@
 .settings-inline-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
 }
 
@@ -423,7 +409,7 @@
 /* ---- Field hint (e.g. context-window fallback explanation) ---- */
 
 .settings-field-hint {
-  color: var(--t-muted, var(--t-text-secondary, #888));
+  color: var(--t-muted);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -450,9 +436,9 @@
 }
 
 .model-capability-badge {
-  padding: 3px 9px;
+  padding: 2px 8px;
   border: 1px solid var(--t-border-i);
-  border-radius: 999px;
+  border-radius: 4px;
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.02em;
@@ -467,15 +453,6 @@
 .model-capability-badge.danger {
   border-color: var(--t-danger);
   color: var(--t-danger);
-}
-
-/* ---- Field title row (e.g. "Content" + "Edit" button) ---- */
-
-.field-title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
 }
 
 /* ---- Workspace directory row ---- */
@@ -500,7 +477,7 @@
 
 .workspace-dir-row .settings-btn {
   flex: 0 0 auto;
-  min-height: 40px;
+  min-height: 34px;
 }
 
 .workspace-dir-clear {
@@ -508,8 +485,10 @@
 }
 
 /* ===================================================================
-   Buttons — Tesla style: 4px radius, 40px height, color-only
-   transitions at 0.33s. No shadows, no scale transforms.
+   Buttons — 4px radius, 34px height, colour-only transitions at
+   var(--t-dur). No shadows, no scale transforms. Rows that need a
+   smaller control override the min-height locally (28px in a profile
+   row, 32px in the prompt editor).
    =================================================================== */
 
 .settings-btn {
@@ -517,20 +496,20 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 40px;
-  padding: 4px 16px;
+  min-height: 34px;
+  padding: 4px 14px;
   border: 3px solid transparent;
   border-radius: 4px;
   background: var(--t-bg-soft);
   color: var(--t-body);
   font-family: inherit;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   transition:
-    background-color 0.33s var(--t-ease),
-    color 0.33s var(--t-ease),
-    border-color 0.33s var(--t-ease),
+    background-color var(--t-dur) var(--t-ease),
+    color var(--t-dur) var(--t-ease),
+    border-color var(--t-dur) var(--t-ease),
     box-shadow 0.25s var(--t-ease);
 }
 
@@ -547,7 +526,7 @@
 .settings-btn-primary {
   background: var(--t-accent);
   color: #FFFFFF;
-  min-width: 140px;
+  min-width: 110px;
 }
 
 .settings-btn-primary:hover:not(:disabled) {
@@ -564,31 +543,6 @@
   color: var(--t-danger);
 }
 
-/* ---- Inline edit button ---- */
-
-.inline-edit-btn {
-  appearance: none;
-  border: 1px solid var(--t-border-i);
-  background: var(--t-bg);
-  color: var(--t-body);
-  border-radius: 4px;
-  min-height: 32px;
-  padding: 4px 12px;
-  font-size: 13px;
-  font-weight: 500;
-  font-family: inherit;
-  cursor: pointer;
-  transition:
-    background-color 0.33s var(--t-ease),
-    color 0.33s var(--t-ease),
-    border-color 0.33s var(--t-ease);
-}
-
-.inline-edit-btn:hover {
-  background: var(--t-bg-soft);
-  color: var(--t-text);
-}
-
 /* ===================================================================
    Profile section — flat rows on Light Ash, no borders
    =================================================================== */
@@ -596,11 +550,11 @@
 .profile-section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 
 .profile-section-title {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--t-text);
 }
@@ -608,7 +562,7 @@
 .profile-create-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
 }
 
@@ -619,7 +573,7 @@
 .profile-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .profile-item {
@@ -627,7 +581,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 14px;
+  padding: 8px 12px;
   background: var(--t-bg-soft);
   border-radius: 4px;
 }
@@ -640,26 +594,26 @@
 }
 
 .profile-item-name {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--t-text);
 }
 
 .profile-item-meta {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--t-muted);
 }
 
 .profile-item-actions {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   flex-shrink: 0;
 }
 
 .profile-item-actions .settings-btn {
-  min-height: 32px;
-  padding: 4px 12px;
-  font-size: 13px;
+  min-height: 28px;
+  padding: 3px 10px;
+  font-size: 12px;
 }
 
 /* ===================================================================
@@ -672,19 +626,24 @@
   border: 1px solid var(--t-border-i);
   border-radius: 4px;
   overflow: hidden;
+  /* Sits in a stretched column row: keep it content-sized so the border hugs
+     the three segments instead of spanning the whole field width. */
+  align-self: flex-start;
+  width: fit-content;
 }
 
 .theme-seg-btn {
-  min-height: 40px;
-  padding: 4px 18px;
-  font-size: 14px;
+  min-height: 34px;
+  padding: 4px 14px;
+  font-size: 13px;
   font-weight: 500;
   font-family: inherit;
   background: var(--t-bg);
   color: var(--t-body);
   border: none;
   cursor: pointer;
-  transition: background-color 0.33s var(--t-ease), color 0.33s var(--t-ease);
+  transition: background-color var(--t-dur) var(--t-ease),
+    color var(--t-dur) var(--t-ease);
 }
 
 .theme-seg-btn+.theme-seg-btn {
@@ -712,16 +671,6 @@
   animation: settings-fade-in 0.2s ease;
 }
 
-@keyframes settings-fade-in {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
-  }
-}
-
 .prompt-editor-shell {
   height: 100vh;
   display: flex;
@@ -729,13 +678,13 @@
 }
 
 .prompt-editor-header {
-  padding: 9px 12px;
+  padding: 10px 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   background: var(--c-toolbar);
-  border-bottom: 0.5px solid var(--c-border);
+  border-bottom: 1px solid var(--c-border);
   -webkit-backdrop-filter: blur(20px);
   backdrop-filter: blur(20px);
 }
@@ -743,18 +692,19 @@
 .prompt-editor-header h3 {
   margin: 0;
   font-size: 15px;
+  font-weight: 500;
   color: var(--c-text);
-  letter-spacing: -0.01em;
+  letter-spacing: normal;
 }
 
 .prompt-editor-actions {
   display: flex;
-  gap: 8px;
-  min-width: 260px;
+  gap: 6px;
+  min-width: 220px;
 }
 
 .prompt-editor-actions .settings-btn {
-  min-height: 36px;
+  min-height: 32px;
   font-size: 13px;
 }
 
@@ -763,18 +713,19 @@
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 12px;
-  padding: 9px 12px 12px;
+  gap: 10px;
+  padding: 10px 12px 12px;
 }
 
+/* Column captions. Sentence case only — the system never shouts. */
 .prompt-column {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  gap: 8px;
+  gap: 6px;
   font-size: 12px;
   color: var(--c-muted);
-  letter-spacing: 0.04em;
+  letter-spacing: normal;
 }
 
 .prompt-editor-textarea {
@@ -782,8 +733,8 @@
   min-height: 0;
   width: 100%;
   resize: none;
-  border: 0.5px solid var(--c-border-i);
-  border-radius: var(--r-md);
+  border: 1px solid var(--c-border-i);
+  border-radius: 4px;
   padding: 10px;
   font-size: 13px;
   line-height: 1.6;
@@ -791,27 +742,24 @@
   color: var(--c-text);
   background: var(--c-surface);
   outline: none;
-  transition: border-color 0.2s, box-shadow 0.2s;
-  box-shadow: var(--shadow-sm);
+  transition: border-color var(--t-dur) var(--t-ease);
 }
 
 .prompt-editor-textarea:focus {
   border-color: var(--c-accent);
-  box-shadow: 0 0 0 3px var(--c-accent-soft);
 }
 
 .prompt-preview {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  border: 0.5px solid var(--c-border-i);
-  border-radius: var(--r-md);
+  border: 1px solid var(--c-border-i);
+  border-radius: 4px;
   padding: 10px;
   font-size: 13px;
   line-height: 1.6;
   color: var(--c-body);
   background: var(--c-surface);
-  box-shadow: var(--shadow-sm);
 }
 
 .prompt-preview-empty {

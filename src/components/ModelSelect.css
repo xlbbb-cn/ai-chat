@@ -35,7 +35,7 @@
 
 .model-select-trigger:focus-visible {
     border-color: var(--c-accent);
-    box-shadow: 0 0 0 3px var(--c-accent-soft), var(--shadow-sm);
+    box-shadow: 0 0 0 3px var(--c-accent-soft);
 }
 
 .model-select-trigger[aria-expanded="true"] {
