@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { chatCompletion, checkUpdate, getConfig, getAgentOrchestration, listMcpServers, listSubAgents, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills } from "./api";
+import { chatCompletion, checkUpdate, getConfig, getAgentOrchestration, listMcpServers, listSubAgents, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills, listTimers, cancelTimer } from "./api";
 
 import { ChatMessage } from "./components/ChatMessage";
 import { ToolCallGroup } from "./components/ToolCallGroup";
@@ -23,6 +23,7 @@ import type {
   ContentPart,
   MessageContent,
   ModelMetadata,
+  TimerEntry,
   UpdateInfo,
 } from "./types";
 import { isGenerationStopped, isLocale, useI18n } from "./i18n";
@@ -34,6 +35,35 @@ function applyTheme(theme: "auto" | "light" | "dark" | undefined) {
   const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
   const resolved = theme === "dark" || (theme !== "light" && prefersDark) ? "dark" : "light";
   document.documentElement.setAttribute("data-theme", resolved);
+}
+
+// ─── Delay timers ────────────────────────────────────────────────────────────
+
+/**
+ * Countdown label for the timer bar: `mm:ss`, or `h:mm:ss` past an hour.
+ * Clamped at zero; the row disappears as soon as the timer fires.
+ */
+function formatCountdown(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const seconds = total % 60;
+  const minutes = Math.floor(total / 60) % 60;
+  const hours = Math.floor(total / 3600);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return hours > 0
+    ? `${hours}:${pad(minutes)}:${pad(seconds)}`
+    : `${pad(minutes)}:${pad(seconds)}`;
+}
+
+/**
+ * The user turn a fired timer produces. The prefix makes an automatic resume
+ * recognisable in the transcript (and to the model) instead of looking like
+ * something the user typed.
+ */
+function timerPromptText(timer: TimerEntry): string {
+  const label = timer.label?.trim();
+  return label
+    ? `⏱️ [Timer fired: ${label}]\n${timer.message}`
+    : `⏱️ [Timer fired]\n${timer.message}`;
 }
 
 // ─── Attachment handling ─────────────────────────────────────────────────────
@@ -314,6 +344,12 @@ export default function App() {
   const [markdownPath, setMarkdownPath] = useState("");
   const [markdownDraft, setMarkdownDraft] = useState("");
   const [markdownSaving, setMarkdownSaving] = useState(false);
+  /** Pending delay timers created by the `timer_set` tool (soonest first). */
+  const [timers, setTimers] = useState<TimerEntry[]>([]);
+  /** 1 s heartbeat that drives the countdowns in the timer bar. */
+  const [timerTick, setTimerTick] = useState(() => Date.now());
+  /** Timer that fired for a session the user is not currently in. */
+  const [timerNotice, setTimerNotice] = useState<TimerEntry | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -323,6 +359,10 @@ export default function App() {
   const currentAssistantMessageIdRef = useRef<string | null>(null);
   const hasRunningToolCallRef = useRef(false);
   const currentToolCallsRef = useRef<ToolCallEntry[]>([]);
+  /** Resume prompts from fired timers, waiting for the chat to become idle. */
+  const [pendingTimerPrompts, setPendingTimerPrompts] = useState<string[]>([]);
+  /** Latest active session for the timer listener (registered once). */
+  const sessionIdRef = useRef(sessionId);
 
   /**
    * Drop `selected_skills` entries that no longer resolve to a real skill.
@@ -842,14 +882,69 @@ export default function App() {
     };
   }, [updateActiveAssistantToolCalls, t]);
 
-  const sendMessage = useCallback(async () => {
+  // The timer listener is registered once, so it reads the active session from
+  // a ref instead of re-subscribing whenever the user switches chats.
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+
+  // Delay timers: initial list, live updates, and the resume hook.
+  useEffect(() => {
+    listTimers()
+      .then(setTimers)
+      .catch((err) => console.error("Failed to load timers", err));
+
+    const unlisteners: Promise<() => void>[] = [];
+    unlisteners.push(
+      listen<TimerEntry[]>("timer-state", (e) => setTimers(e.payload ?? [])),
+      listen<TimerEntry>("timer-fired", (e) => {
+        const timer = e.payload;
+        if (!timer) return;
+        // A timer always resumes its own session. If the user moved on to
+        // another chat, hand the prompt over instead of hijacking it.
+        if (timer.session_id && timer.session_id !== sessionIdRef.current) {
+          setTimerNotice(timer);
+          return;
+        }
+        // Queue the resume prompt; the effect below sends it once the chat is
+        // idle. Queuing (instead of sending directly) means a timer that fires
+        // mid-reply still continues the task when the reply finishes.
+        setPendingTimerPrompts((prev) => [...prev, timerPromptText(timer)]);
+      }),
+    );
+    return () => {
+      unlisteners.forEach((p) => p.then((fn) => fn()));
+    };
+  }, []);
+
+  // Tick the countdowns — only while something is actually pending.
+  useEffect(() => {
+    if (timers.length === 0) return;
+    const id = window.setInterval(() => setTimerTick(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [timers.length]);
+
+  const handleCancelTimer = useCallback(async (id: string) => {
+    try {
+      await cancelTimer(id);
+      setTimers((prev) => prev.filter((timer) => timer.id !== id));
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
+  const sendMessage = useCallback(async (overrideText?: string) => {
     if (profileExporting) return;
 
-    const rawText = input.trim();
-    if ((!rawText && attachments.length === 0) || streaming) return;
+    // `overrideText` is the timer resume path: it bypasses the input box and
+    // never picks up the attachments the user is still composing.
+    const autoResume = overrideText !== undefined;
+    const activeAttachments = autoResume ? [] : attachments;
+    const rawText = (overrideText ?? input).trim();
+    if ((!rawText && activeAttachments.length === 0) || streaming) return;
 
-    const { content: apiContent } = buildMessageContent(rawText, attachments);
-    const userAttachments = attachments.length > 0 ? attachments : undefined;
+    const { content: apiContent } = buildMessageContent(rawText, activeAttachments);
+    const userAttachments = activeAttachments.length > 0 ? activeAttachments : undefined;
     setPendingRetryMessageId(null);
 
     const userMsg: Message = {
@@ -870,8 +965,12 @@ export default function App() {
     hasRunningToolCallRef.current = false;
 
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
-    setInput("");
-    setAttachments([]);
+    // An auto-resume must not discard a draft or attachments the user is
+    // still composing in the input box.
+    if (!autoResume) {
+      setInput("");
+      setAttachments([]);
+    }
     setStreaming(true);
     setError(null);
 
@@ -980,6 +1079,17 @@ export default function App() {
 
     cleanupRef.current = cleanup;
   }, [input, messages, streaming, profileExporting, activeSkillIds, sessionId, attachments, selectedModel, useAgentsEnabled, t]);
+
+  // Continue the conversation from a fired timer once the chat is idle. The
+  // prompt goes out as a new user turn, so the assistant resumes the task with
+  // the full history. Sending one prompt at a time keeps the turn order intact
+  // when several timers fire together.
+  useEffect(() => {
+    if (streaming || profileExporting || pendingTimerPrompts.length === 0) return;
+    const [next, ...rest] = pendingTimerPrompts;
+    setPendingTimerPrompts(rest);
+    void sendMessage(next);
+  }, [pendingTimerPrompts, streaming, profileExporting, sendMessage]);
 
   const retryPendingUserMessage = useCallback(async () => {
     if (streaming || !pendingRetryMessageId) return;
@@ -1698,6 +1808,39 @@ export default function App() {
           </div>
         )}
 
+        {/* A timer that fired while the user was in another chat session: offer
+            to move its prompt into the current input box instead of hijacking
+            the conversation. */}
+        {timerNotice && (
+          <div className="timer-notice" role="status">
+            <span className="timer-notice-text">
+              {t("app.timers.otherSession", {
+                label: timerNotice.label || t("app.timers.untitled"),
+              })}
+            </span>
+            <div className="timer-notice-actions">
+              <button
+                type="button"
+                className="toolbar-btn"
+                onClick={() => {
+                  setInput(timerPromptText(timerNotice));
+                  setTimerNotice(null);
+                  textareaRef.current?.focus();
+                }}
+              >
+                {t("app.timers.insert")}
+              </button>
+              <button
+                type="button"
+                className="toolbar-btn"
+                onClick={() => setTimerNotice(null)}
+              >
+                {t("app.timers.dismiss")}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Messages */}
         <div className="messages">
           {messages.length === 0 && (
@@ -1732,6 +1875,42 @@ export default function App() {
 
         {/* Input */}
         <div className="input-area" style={{ position: "relative", flexDirection: "column", alignItems: "stretch" }}>
+          {timers.length > 0 && (
+            <div className="timer-bar" role="status" aria-live="polite">
+              <span className="timer-bar-title">⏱️ {t("app.timers.title")}</span>
+              <div className="timer-bar-chips">
+                {timers.map((timer) => {
+                  const otherSession =
+                    Boolean(timer.session_id) && timer.session_id !== sessionId;
+                  return (
+                    <div
+                      key={timer.id}
+                      className={`timer-chip${otherSession ? " other-session" : ""}`}
+                      title={timer.message}
+                    >
+                      <span className="timer-chip-label">
+                        {timer.label || t("app.timers.untitled")}
+                      </span>
+                      <span className="timer-chip-countdown">
+                        {t("app.timers.firesIn", {
+                          time: formatCountdown(timer.fire_at - timerTick),
+                        })}
+                      </span>
+                      <button
+                        type="button"
+                        className="timer-chip-cancel"
+                        title={t("app.timers.cancel")}
+                        aria-label={t("app.timers.cancel")}
+                        onClick={() => void handleCancelTimer(timer.id)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           {usage && (
             <div
               className="usage-panel"
@@ -1856,7 +2035,7 @@ export default function App() {
             )}
             <button
               className="send-btn"
-              onClick={streaming ? stopStreaming : sendMessage}
+              onClick={() => (streaming ? void stopStreaming() : void sendMessage())}
               disabled={profileExporting || (!streaming && !input.trim() && attachments.length === 0)}
             >
               {streaming ? t("app.stop") : t("app.send")}

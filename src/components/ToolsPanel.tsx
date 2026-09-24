@@ -40,6 +40,11 @@ const AVAILABLE_TOOLS: { id: string; nameKey: MessageKey; descriptionKey: Messag
         id: "knowledge_graph",
         nameKey: "tools.items.knowledgeGraph.name",
         descriptionKey: "tools.items.knowledgeGraph.description",
+    },
+    {
+        id: "timer",
+        nameKey: "tools.items.timer.name",
+        descriptionKey: "tools.items.timer.description",
     }
 ];
 

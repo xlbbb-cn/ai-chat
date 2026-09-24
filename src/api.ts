@@ -14,6 +14,7 @@ import type {
   AgentTaskEvent,
   AgentMissionSnapshot,
   Profile,
+  TimerEntry,
   UpdateInfo,
   UpdateDownloadProgress,
 } from "./types";
@@ -131,6 +132,21 @@ export async function onUpdateDownloadProgress(
 
 export async function stopChatCompletion(): Promise<void> {
   return invoke("stop_chat_completion");
+}
+
+// ─── Delay timers ────────────────────────────────────────────────────────────
+
+/**
+ * Pending delay timers (soonest first). Used once on mount; afterwards the
+ * `timer-state` event keeps the list current.
+ */
+export async function listTimers(): Promise<TimerEntry[]> {
+  return invoke("list_timers");
+}
+
+/** Cancel a pending timer so it never resumes the conversation. */
+export async function cancelTimer(id: string): Promise<TimerEntry> {
+  return invoke("cancel_timer", { id });
 }
 
 export interface StreamCallbacks {

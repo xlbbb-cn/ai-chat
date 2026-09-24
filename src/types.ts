@@ -14,6 +14,27 @@ export interface ToolCallEntry {
 }
 
 /**
+ * A pending delay timer created by the assistant through the `timer_set` tool.
+ *
+ * When it fires, the backend emits `timer-fired` and the frontend injects
+ * `message` into the chat session identified by `session_id` as a new user turn,
+ * so the assistant resumes the task. Mirrors the Rust `TimerEntry` in
+ * `src-tauri/src/timer.rs`.
+ */
+export interface TimerEntry {
+  id: string;
+  session_id: string;
+  /** Short human-readable label for the timer bar, e.g. "collect logs". */
+  label: string;
+  /** Instruction injected into the chat when the timer fires. */
+  message: string;
+  /** Creation time, milliseconds since the UNIX epoch. */
+  created_at: number;
+  /** Fire time, milliseconds since the UNIX epoch. */
+  fire_at: number;
+}
+
+/**
  * One part of a multimodal `Message.content`. Mirrors the OpenAI Chat
  * Completions `messages[].content` array element shape.
  *

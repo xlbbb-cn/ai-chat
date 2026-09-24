@@ -56,6 +56,16 @@ const zhCN: Messages = {
         viewUpdate: "查看更新",
         dismiss: "忽略",
 
+        timers: {
+            title: "定时器",
+            untitled: "定时任务",
+            firesIn: "{time} 后触发",
+            cancel: "取消定时器",
+            otherSession: "定时器「{label}」在另一个会话中触发。可填入此处以继续该任务。",
+            insert: "填入输入框",
+            dismiss: "忽略",
+        },
+
         attachFiles: "添加附件",
         attachmentUnsupported: "已跳过 {names}：“{model}” 无法读取该文件类型。",
         inputPlaceholder: "输入消息…（Enter 发送，Shift+Enter 换行）",
@@ -338,6 +348,14 @@ const zhCN: Messages = {
             knowledgeGraph: {
                 name: "知识图谱",
                 description: "连接知识图谱并执行查询",
+            },
+            timer: {
+                name: "定时器",
+                description: [
+                    "设置一次性延时定时器，让助手稍后自动继续任务，而不是反复轮询。",
+                    "适用于需要等待较慢步骤的场景——例如 30 分钟的日志收集、耗时的构建或下载、外部任务等。",
+                    "计时结束后，定时器消息会作为新的用户输入注入同一会话，助手将携带完整历史继续任务。待触发的定时器会显示在输入框上方，包含倒计时与取消按钮。",
+                ].join("\n"),
             },
         },
         autoAcceptItems: {

@@ -65,6 +65,17 @@ const en = {
         viewUpdate: "View update",
         dismiss: "Dismiss",
 
+        timers: {
+            title: "Timers",
+            untitled: "timer",
+            firesIn: "in {time}",
+            cancel: "Cancel timer",
+            otherSession:
+                "Timer “{label}” fired in another chat session. Insert it here to continue that task.",
+            insert: "Insert into input",
+            dismiss: "Dismiss",
+        },
+
         attachFiles: "Attach files",
         attachmentUnsupported:
             "Skipped {names}: “{model}” cannot read that file type.",
@@ -358,6 +369,14 @@ const en = {
             knowledgeGraph: {
                 name: "Knowledge Graph",
                 description: "Connect to a knowledge graph and perform queries",
+            },
+            timer: {
+                name: "Timer",
+                description: [
+                    "Schedule a one-shot delay timer so the assistant resumes a task later instead of polling for it.",
+                    "Use it when a step must wait for something slow — a 30-minute log collection, a long build or download, an external job.",
+                    "When the timer fires, its message is injected into the same chat as a new user turn, so the assistant continues with the full conversation history. Pending timers show up above the input box with a countdown and a cancel button.",
+                ].join("\n"),
             },
         },
         autoAcceptItems: {

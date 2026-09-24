@@ -21,6 +21,7 @@ pub mod mcp;
 pub mod model_metadata;
 pub mod neo4j_db;
 mod skills;
+mod timer;
 mod todos;
 mod tools;
 mod update;
@@ -852,6 +853,11 @@ pub fn run() {
                 session_memories: Mutex::new(Default::default()),
             });
 
+            // Delayed "continue the task" timers, mirrored to timers.json so a
+            // pending wait survives an app restart.
+            app.manage(timer::TimerRegistry::load(data_dir.join("timers.json")));
+            timer::restore_on_startup(app.handle());
+
             // Set window title to show current workspace directory
             if let Some(win) = app.get_webview_window("main") {
                 let title = format!("AI Chat — {}", workspace_dir.display());
@@ -914,6 +920,8 @@ pub fn run() {
             todos::clear_completed_todos,
             todos::archive_todo_list,
             todos::create_todo_list,
+            timer::list_timers,
+            timer::cancel_timer,
             list_profiles,
             save_profile_config,
             delete_profile_config,

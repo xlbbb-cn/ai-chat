@@ -1760,6 +1760,64 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
         }));
     }
 
+    if selected_tools.iter().any(|t| t == "timer") {
+        tools.push(json!({
+            "type": "function",
+            "function": {
+                "name": "timer_set",
+                "description": "Schedule a one-shot delay timer that resumes this conversation later. Use it whenever a task must wait for something slow to finish — a 30-minute log collection, a long build or download, a rate-limit window, a deployment to settle. NEVER busy-wait, sleep in a shell command, or poll in a loop: start the long-running work, call timer_set with the delay and the instruction to run when it fires, tell the user, and END YOUR TURN. When the timer fires the app injects `message` into this chat as a new user turn, so you continue with the full conversation history.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "delay_seconds": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 2592000,
+                            "description": "How long to wait before resuming, in seconds (e.g. 1800 for 30 minutes, 600 for 10 minutes). Maximum 2592000 (30 days)."
+                        },
+                        "message": {
+                            "type": "string",
+                            "description": "The instruction to run when the timer fires. Write it as a self-contained prompt for the future turn, including what to check and where the output lives, e.g. 'The log collection started at 15:07 should be finished. Check ./logs/collect-2026-09-24.log, summarise the errors, and continue with the root-cause analysis.'"
+                        },
+                        "label": {
+                            "type": "string",
+                            "description": "Short human-readable label shown in the timer bar, e.g. 'collect logs'."
+                        }
+                    },
+                    "required": ["delay_seconds", "message"]
+                }
+            }
+        }));
+        tools.push(json!({
+            "type": "function",
+            "function": {
+                "name": "timer_list",
+                "description": "List the pending delay timers (id, label, fire time, remaining seconds, message). Call this to check whether a wait is already scheduled before setting a duplicate timer, or to find a timer id to cancel.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }
+        }));
+        tools.push(json!({
+            "type": "function",
+            "function": {
+                "name": "timer_cancel",
+                "description": "Cancel a pending delay timer so it never resumes the conversation. Use the timer_id returned by timer_set or timer_list.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "timer_id": {
+                            "type": "string",
+                            "description": "Id of the timer to cancel."
+                        }
+                    },
+                    "required": ["timer_id"]
+                }
+            }
+        }));
+    }
+
     tools
 }
 
@@ -3235,6 +3293,92 @@ pub async fn execute_tool(
                     });
                     let _ = app.emit("agent-task-state", payload.clone());
                     serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string())
+                }
+                Err(err) => format!("Error: {err}"),
+            }
+        }
+        "timer_set" => {
+            let Some(session_id) = session_id else {
+                return "Error: timer_set is only available in an interactive chat session."
+                    .to_string();
+            };
+            // Accept both a JSON number and a numeric string — some models send
+            // "1800" instead of 1800.
+            let delay_seconds = args["delay_seconds"]
+                .as_u64()
+                .or_else(|| {
+                    args["delay_seconds"]
+                        .as_str()
+                        .and_then(|raw| raw.trim().parse().ok())
+                })
+                .unwrap_or(0);
+            let message = args["message"].as_str().unwrap_or("");
+            let label = args["label"].as_str().unwrap_or("");
+
+            match crate::timer::schedule(app, session_id, delay_seconds, label, message) {
+                Ok(entry) => {
+                    let _ = app.emit(
+                        "tool-call",
+                        format!(
+                            "⏱️ *Timer set: {}*\n\n```\n{}\n```\n",
+                            crate::timer::format_delay(delay_seconds),
+                            entry.message
+                        ),
+                    );
+                    let payload = json!({
+                        "timer_id": entry.id,
+                        "delay_seconds": delay_seconds,
+                        "fires_at": crate::timer::format_fire_at(entry.fire_at),
+                        "label": entry.label,
+                        "message": entry.message,
+                        "instructions": "The timer is armed. Tell the user when it will fire, then END YOUR TURN. Do not wait, poll, or sleep. When the timer fires the app injects `message` into this session as a new user turn, so you resume with the full conversation history.",
+                    });
+                    serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string())
+                }
+                Err(err) => format!("Error: {err}"),
+            }
+        }
+        "timer_list" => {
+            let timers = app.state::<crate::timer::TimerRegistry>().list();
+            let pending: Vec<Value> = timers
+                .iter()
+                .map(|entry| {
+                    json!({
+                        "timer_id": entry.id,
+                        "label": entry.label,
+                        "session_id": entry.session_id,
+                        "fires_at": crate::timer::format_fire_at(entry.fire_at),
+                        "remaining_seconds": entry.remaining_ms() / 1000,
+                        "message": entry.message,
+                        "is_current_session": Some(entry.session_id.as_str()) == session_id,
+                    })
+                })
+                .collect();
+            if pending.is_empty() {
+                "No pending timers.".to_string()
+            } else {
+                serde_json::to_string_pretty(&json!({
+                    "pending_timers": pending,
+                    "count": pending.len(),
+                }))
+                .unwrap_or_else(|_| "[]".to_string())
+            }
+        }
+        "timer_cancel" => {
+            let timer_id = args["timer_id"].as_str().unwrap_or("").trim();
+            if timer_id.is_empty() {
+                return "Error: 'timer_id' is required for timer_cancel.".to_string();
+            }
+            match crate::timer::cancel(app, timer_id) {
+                Ok(entry) => {
+                    let _ = app.emit(
+                        "tool-call",
+                        format!("⏱️ *Timer cancelled: {}*\n", entry.label),
+                    );
+                    format!(
+                        "Timer '{}' ({}) cancelled — it will no longer resume the conversation.",
+                        entry.label, entry.id
+                    )
                 }
                 Err(err) => format!("Error: {err}"),
             }

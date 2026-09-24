@@ -1409,6 +1409,27 @@ pub async fn chat_completion(
         system_content.push_str(memory_guidance);
     }
 
+    // ── Timer guidance ──────────────────────────────────────────────────────
+    // The tool description carries the mechanics; this states the *policy* so
+    // the model waits asynchronously instead of burning a turn on polling.
+    if config.selected_tools.iter().any(|t| t == "timer") {
+        let timer_guidance = "\
+        TIMER: You have a `timer` tool (`timer_set`, `timer_list`, `timer_cancel`) for work that \
+        cannot finish within this turn. Whenever the next step depends on something slow — a log \
+        collection, a build, a download, a deployment, an external job, a rate-limit window — do \
+        not busy-wait, `sleep`, or poll in a loop. Instead: (1) start the slow work, (2) call \
+        `timer_set` with `delay_seconds` and a `message` that fully restates what to do when it \
+        fires (the future turn only sees the chat history plus that message), (3) tell the user when \
+        the timer will fire and END YOUR TURN. The app injects `message` into this session when the \
+        timer fires, so you resume with the full history. Use `timer_list` before setting a timer so \
+        you do not schedule duplicates, and `timer_cancel` when the user says the wait is no longer \
+        needed.";
+        if !system_content.is_empty() {
+            system_content.push_str("\n\n");
+        }
+        system_content.push_str(timer_guidance);
+    }
+
     // ── Message layout (prompt-cache conscious) ─────────────────────────────
     // Static prefix first (system prompt, skill context, conversation history),
     // dynamic blocks (session summary, todo list) last — right before the

@@ -1444,7 +1444,15 @@ async fn run_sub_agent_inner(
     let max_complete_tokens = agent
         .max_complete_tokens
         .unwrap_or(LLM_DEFAULT_MAX_COMLETE_TOKENS);
-    let mut tools_list = tools::get_all_tools(&agent.allowed_tools);
+    // `timer` is a chat-session tool (it resumes the conversation later), so it
+    // is never handed to a sub-agent even if an agent config lists it.
+    let agent_tool_ids: Vec<String> = agent
+        .allowed_tools
+        .iter()
+        .filter(|tool| tool.as_str() != "timer")
+        .cloned()
+        .collect();
+    let mut tools_list = tools::get_all_tools(&agent_tool_ids);
     tools_list.extend(tools::get_agent_task_tools());
     let cancelled = AtomicBool::new(false);
     let mut total_tokens: u32 = 0;

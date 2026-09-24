@@ -56,6 +56,16 @@ const zhTW: Messages = {
         viewUpdate: "查看更新",
         dismiss: "略過",
 
+        timers: {
+            title: "計時器",
+            untitled: "計時任務",
+            firesIn: "{time} 後觸發",
+            cancel: "取消計時器",
+            otherSession: "計時器「{label}」在另一個工作階段中觸發。可填入此處以繼續該任務。",
+            insert: "填入輸入框",
+            dismiss: "略過",
+        },
+
         attachFiles: "附加檔案",
         attachmentUnsupported: "已跳過 {names}：「{model}」無法讀取該檔案類型。",
         inputPlaceholder: "輸入訊息…（Enter 送出，Shift+Enter 換行）",
@@ -338,6 +348,14 @@ const zhTW: Messages = {
             knowledgeGraph: {
                 name: "知識圖譜",
                 description: "連線知識圖譜並執行查詢",
+            },
+            timer: {
+                name: "計時器",
+                description: [
+                    "設定一次性延遲計時器，讓助理稍後自動繼續任務，而不是反覆輪詢。",
+                    "適用於需要等待較慢步驟的情境——例如 30 分鐘的日誌收集、耗時的建置或下載、外部任務等。",
+                    "計時結束後，計時器訊息會以新的使用者輸入注入同一工作階段，助理將帶著完整歷史繼續任務。待觸發的計時器會顯示在輸入框上方，包含倒數與取消按鈕。",
+                ].join("\n"),
             },
         },
         autoAcceptItems: {
