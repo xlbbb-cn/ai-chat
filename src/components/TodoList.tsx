@@ -1,5 +1,14 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import {
+    FontAwesomeIcon,
+    faChevronRight,
+    faCircle,
+    faCircleCheck,
+    faCircleHalfStroke,
+    faCircleXmark,
+    faListCheck,
+} from "../icons";
 import "./TodoList.css";
 
 interface TodoRecord {
@@ -38,18 +47,18 @@ interface TodoStateEvent {
     todo?: TodoRecord;
 }
 
-function statusIcon(status: string): string {
+function statusIcon(status: string) {
     switch (status) {
         case "pending":
-            return "○";
+            return <FontAwesomeIcon icon={faCircle} />;
         case "in_progress":
-            return "◐";
+            return <FontAwesomeIcon icon={faCircleHalfStroke} />;
         case "completed":
-            return "✓";
+            return <FontAwesomeIcon icon={faCircleCheck} />;
         case "cancelled":
-            return "✕";
+            return <FontAwesomeIcon icon={faCircleXmark} />;
         default:
-            return "○";
+            return <FontAwesomeIcon icon={faCircle} />;
     }
 }
 
@@ -168,12 +177,16 @@ export function TodoList() {
                     className={`todo-list-summary${activeTodo ? " todo-list-summary--active" : ""}`}
                 >
                     <span className="todo-list-head">
-                        <span className="todo-list-icon">📋</span>
+                        <span className="todo-list-icon">
+                            <FontAwesomeIcon icon={faListCheck} />
+                        </span>
                         <span className="todo-list-title">{todoList.title}</span>
                         <span className="todo-list-stats">
                             {todoList.completed}/{todoList.total}
                         </span>
-                        <span className="todo-list-chevron">›</span>
+                        <span className="todo-list-chevron">
+                            <FontAwesomeIcon icon={faChevronRight} />
+                        </span>
                     </span>
                     {!open && activeTodo && (
                         <span className="todo-list-preview" aria-hidden="true">

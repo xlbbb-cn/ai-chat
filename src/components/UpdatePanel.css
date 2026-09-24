@@ -11,7 +11,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 24px;
+    padding: 16px;
     background: rgba(23, 26, 32, 0.4);
     animation: update-fade-in 0.16s ease;
 }
@@ -72,8 +72,8 @@
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 16px;
-    padding: 18px 20px;
+    gap: 12px;
+    padding: 12px 14px;
     border-bottom: 1px solid var(--t-border);
 }
 
@@ -99,8 +99,8 @@
 .update-panel-body {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    padding: 16px 20px 20px;
+    gap: 10px;
+    padding: 12px 14px 14px;
     overflow-y: auto;
     color: var(--t-body);
 }
@@ -187,7 +187,7 @@
 }
 
 .update-hint {
-    padding: 10px 12px;
+    padding: 8px 10px;
     border: 1px solid var(--t-border);
     border-radius: 8px;
     background: var(--t-bg-soft);
@@ -200,7 +200,7 @@
 }
 
 .update-error {
-    padding: 10px 12px;
+    padding: 8px 10px;
     border: 1px solid var(--t-danger);
     border-radius: 8px;
     color: var(--t-danger);
@@ -286,7 +286,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 10px 12px;
+    padding: 8px 10px;
     border: 1px solid var(--t-border-i);
     border-radius: 8px;
 }
@@ -337,7 +337,7 @@
 
 .update-notes-body {
     max-height: 220px;
-    padding: 10px 12px;
+    padding: 8px 10px;
     border: 1px solid var(--t-border);
     border-radius: 8px;
     font-size: 12px;

@@ -4,6 +4,7 @@ import { fetchModels, fetchModelMetadata, getAppVersion, getConfig, getWorkspace
 import type { AppConfig, ModelMetadata, ModelSettings, Profile } from "../types";
 import { LOCALE_LABELS, LOCALES, useI18n, type Locale, type MessageKey } from "../i18n";
 import { matchModelCatalog } from "../utils/modelMetadata";
+import { FontAwesomeIcon, faCaretDown, faXmark } from "../icons";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { MonitorPanel } from "./MonitorPanel";
 import { AgentMissionPanel } from "./AgentMissionPanel";
@@ -576,7 +577,7 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
                             onClick={() => handleDeleteProfile(profile.name)}
                             aria-label={t("settings.workspace.deleteAria", { name: profile.name })}
                           >
-                            ✕
+                            <FontAwesomeIcon icon={faXmark} />
                           </button>
                         </div>
                       </div>
@@ -784,7 +785,7 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
                 <p>{t("settings.advanced.subtitle")}</p>
               </div>
               <span className={`settings-toggle-icon ${advancedOpen ? "open" : ""}`}>
-                ▼
+                <FontAwesomeIcon icon={faCaretDown} />
               </span>
             </div>
 

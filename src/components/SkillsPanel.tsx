@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { listSkills, saveSkill, deleteSkill } from "../api";
 import type { Skill } from "../types";
 import { useI18n } from "../i18n";
+import { FontAwesomeIcon, faPen, faXmark } from "../icons";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { Portal } from "./Portal";
 import "./SkillsPanel.css";
@@ -92,7 +93,9 @@ export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
     <div className="skills-panel">
       <div className="skills-header">
         <h2>{t("skills.title")}</h2>
-        <button className="close-btn" onClick={onClose}>✕</button>
+        <button className="close-btn" onClick={onClose} aria-label={t("common.close")}>
+          <FontAwesomeIcon icon={faXmark} />
+        </button>
       </div>
 
       {editing ? (
@@ -236,10 +239,10 @@ export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
                     </div>
                     <div className="skill-actions">
                       <button className="skill-action-btn" onClick={() => startEdit(skill)} title={t("common.edit")}>
-                        ✎
+                        <FontAwesomeIcon icon={faPen} />
                       </button>
                       <button className="skill-action-btn danger" onClick={() => handleDelete(skill.name)} title={t("common.delete")}>
-                        ✕
+                        <FontAwesomeIcon icon={faXmark} />
                       </button>
                     </div>
                   </div>

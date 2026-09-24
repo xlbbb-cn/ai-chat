@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { listInteractions, getInteraction, clearLogs, compactDatabase } from "../api";
 import type { InteractionLogRecord, InteractionLogDetail } from "../api";
 import { useI18n } from "../i18n";
+import { FontAwesomeIcon, faSpinner, faXmark } from "../icons";
 import "./MonitorPanel.css";
 
 interface Props {
@@ -176,8 +177,8 @@ export function MonitorPanel({ sessionId, onClose }: Props) {
                         >
                             {maintenance === "compacting" ? t("monitor.compacting") : t("monitor.compact")}
                         </button>
-                        <button type="button" className="close-btn" onClick={onClose}>
-                            ✕
+                        <button type="button" className="close-btn" onClick={onClose} aria-label={t("common.close")}>
+                            <FontAwesomeIcon icon={faXmark} />
                         </button>
                     </div>
                 </div>
@@ -187,7 +188,11 @@ export function MonitorPanel({ sessionId, onClose }: Props) {
                     <div className="monitor-list-panel">
                         <div className="monitor-list-header">
                             <h3>{t("monitor.interactions", { count: interactions.length })}</h3>
-                            {loading && <span className="loading-spinner">⟳</span>}
+                            {loading && (
+                                <span className="loading-spinner">
+                                    <FontAwesomeIcon icon={faSpinner} spin />
+                                </span>
+                            )}
                         </div>
                         <div className="monitor-list">
                             {interactions.length === 0 ? (

@@ -5,7 +5,7 @@
   border-radius: 4px;
   background: var(--ts-ash, var(--c-reason));
   overflow: hidden;
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .todo-list-details {
@@ -19,7 +19,7 @@
   display: flex;
   flex-direction: column;
   gap: 3px;
-  padding: 8px 12px;
+  padding: 6px 10px;
   cursor: pointer;
   user-select: none;
   list-style: none;
@@ -42,14 +42,16 @@
 .todo-list-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   height: 22px;
   line-height: 22px;
 }
 
 .todo-list-icon {
+  display: inline-flex;
+  align-items: center;
   flex-shrink: 0;
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .todo-list-title {
@@ -74,8 +76,12 @@
 }
 
 .todo-list-chevron {
+  /* inline-flex so the 90° open-state rotation actually applies (transforms
+     are ignored on non-replaced inline boxes) and the SVG centres itself. */
+  display: inline-flex;
+  align-items: center;
   flex-shrink: 0;
-  font-size: 14px;
+  font-size: 11px;
   line-height: 1;
   color: var(--ts-pewter, var(--c-muted));
   transition: transform 0.33s var(--ts-ease, ease);
@@ -99,7 +105,7 @@
 .todo-preview-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   height: 18px;
   line-height: 18px;
   font-size: 13px;
@@ -112,6 +118,8 @@
 }
 
 .todo-preview-icon {
+  display: inline-flex;
+  align-items: center;
   flex-shrink: 0;
   font-size: 12px;
 }
@@ -130,7 +138,7 @@
 .todo-list-items {
   list-style: none;
   margin: 0;
-  padding: 6px 0;
+  padding: 4px 0;
   max-height: 300px;
   overflow-y: auto;
 }
@@ -138,8 +146,8 @@
 .todo-item {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  padding: 6px 12px;
+  gap: 6px;
+  padding: 4px 10px;
   font-size: 12px;
   line-height: 1.4;
   transition: background-color 0.15s;
@@ -154,9 +162,12 @@
 }
 
 .todo-item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
   width: 16px;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.4;
   text-align: center;
   margin-top: 1px;

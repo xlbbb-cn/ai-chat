@@ -10,6 +10,15 @@ import {
 } from "../api";
 import type { McpServer, McpTransport, McpLogEntry } from "../types";
 import { useI18n } from "../i18n";
+import {
+    FontAwesomeIcon,
+    faBolt,
+    faCircleCheck,
+    faCircleXmark,
+    faPen,
+    faScroll,
+    faXmark,
+} from "../icons";
 import "./McpPanel.css";
 
 interface Props {
@@ -231,7 +240,9 @@ export function McpPanel({ onClose, onServersChange }: Props) {
             <div className="mcp-panel">
                 <div className="mcp-header">
                     <h2>{servers.some((s) => s.id === editing.id) ? t("mcp.editTitle") : t("mcp.addTitle")}</h2>
-                    <button className="close-btn" onClick={() => setEditing(null)}>✕</button>
+                    <button className="close-btn" onClick={() => setEditing(null)} aria-label={t("common.close")}>
+                        <FontAwesomeIcon icon={faXmark} />
+                    </button>
                 </div>
 
                 <div className="mcp-form">
@@ -326,7 +337,9 @@ export function McpPanel({ onClose, onServersChange }: Props) {
         <div className="mcp-panel">
             <div className="mcp-header">
                 <h2>{t("mcp.title")}</h2>
-                <button className="close-btn" onClick={onClose}>✕</button>
+                <button className="close-btn" onClick={onClose} aria-label={t("common.close")}>
+                    <FontAwesomeIcon icon={faXmark} />
+                </button>
             </div>
 
             <div className="mcp-desc">
@@ -376,34 +389,35 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                                     onClick={() => void runTest(s)}
                                     disabled={testing === s.id}
                                 >
-                                    ⚡
+                                    <FontAwesomeIcon icon={faBolt} />
                                 </button>
                                 <button
                                     className="mcp-action-btn"
                                     title={t("mcp.viewLogs")}
                                     onClick={() => openLogs(s)}
                                 >
-                                    🗒
+                                    <FontAwesomeIcon icon={faScroll} />
                                 </button>
                                 <button
                                     className="mcp-action-btn"
                                     title={t("common.edit")}
                                     onClick={() => startEdit(s)}
                                 >
-                                    ✎
+                                    <FontAwesomeIcon icon={faPen} />
                                 </button>
                                 <button
                                     className="mcp-action-btn danger"
                                     title={t("common.delete")}
                                     onClick={() => void remove(s.id)}
                                 >
-                                    ✕
+                                    <FontAwesomeIcon icon={faXmark} />
                                 </button>
                             </div>
                         </div>
                         {testStatus[s.id] && (
                             <div className={`mcp-test-result ${testStatus[s.id].ok ? "ok" : "fail"}`}>
-                                {testStatus[s.id].ok ? "✓" : "✗"} {testStatus[s.id].msg}
+                                <FontAwesomeIcon icon={testStatus[s.id].ok ? faCircleCheck : faCircleXmark} />
+                                {testStatus[s.id].msg}
                             </div>
                         )}
                     </div>
@@ -448,7 +462,9 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                                 >
                                     {t("common.delete")}
                                 </button>
-                                <button className="mcp-log-btn" onClick={closeLogs}>✕</button>
+                                <button className="mcp-log-btn" onClick={closeLogs} aria-label={t("common.close")}>
+                                    <FontAwesomeIcon icon={faXmark} />
+                                </button>
                             </div>
                         </div>
                         <div className="mcp-log-modal-meta">

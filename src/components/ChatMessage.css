@@ -46,8 +46,8 @@
 .chat-message {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 14px 18px;
+  gap: 5px;
+  padding: 9px 12px;
   border-radius: 4px;
   max-width: 100%;
   word-break: break-word;
@@ -77,9 +77,9 @@
 }
 
 .message-reasoning {
-  margin-bottom: 4px;
+  margin-bottom: 3px;
   background-color: var(--ts-ash);
-  padding: 8px 12px;
+  padding: 6px 10px;
   border-radius: 4px;
 }
 
@@ -129,6 +129,10 @@
    thinking. It is re-mounted on every new reasoning line, which replays the
    spark animation below so the icon blinks as the thinking content grows. */
 .message-reasoning-brain {
+  /* Hosts a Font Awesome SVG, so it needs flex centring instead of a
+     font-driven baseline. */
+  display: inline-flex;
+  align-items: center;
   flex-shrink: 0;
   font-size: 14px;
   line-height: 22px;
@@ -460,8 +464,8 @@
 
 .code-block-toolbar {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: 6px;
+  right: 6px;
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -543,8 +547,8 @@
 .message-attachments {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 4px;
+  gap: 5px;
+  margin-bottom: 3px;
   align-items: center;
 }
 
@@ -563,14 +567,14 @@
 .message-attachment-pill {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   border-radius: var(--r-pill);
   font-size: 0.78em;
   max-width: 220px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  padding: 3px 10px;
+  padding: 3px 8px;
   background: var(--c-surface);
   color: var(--ts-graphite);
   border: 1px solid var(--ts-cloud);
@@ -635,7 +639,7 @@
 .message-actions {
   display: flex;
   justify-content: flex-end;
-  margin-top: 6px;
+  margin-top: 4px;
 }
 
 .message-export-actions {
@@ -697,8 +701,8 @@
 /* ─── Message action buttons (delete / fork) ─────────────────────────────── */
 .message-action-buttons {
   display: flex;
-  gap: 6px;
-  padding: 0 4px;
+  gap: 4px;
+  padding: 0 2px;
 }
 
 .chat-message-shell.user .message-action-buttons {
@@ -710,11 +714,17 @@
 }
 
 .message-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 26px;
+  min-height: 24px;
   border: 1px solid var(--ts-cloud);
   background: var(--c-surface);
   color: var(--ts-pewter);
   border-radius: 4px;
-  padding: 4px 10px;
+  padding: 3px 7px;
   font-size: 12px;
   line-height: 1;
   cursor: pointer;

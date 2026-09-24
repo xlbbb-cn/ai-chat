@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { listProfiles, saveProfile, deleteProfile, applyProfile, getConfig, listMcpServers, listSubAgents, getAgentOrchestration } from "../api";
 import type { Profile } from "../types";
 import { useI18n } from "../i18n";
+import { FontAwesomeIcon, faXmark } from "../icons";
 import "./ProfilePanel.css";
 
 interface Props {
@@ -90,7 +91,9 @@ export function ProfilePanel({ onClose, onProfileApplied }: Props) {
         <div className="profile-panel">
             <div className="profile-header">
                 <h2>{t("profile.title")}</h2>
-                <button className="close-btn" onClick={onClose}>✕</button>
+                <button className="close-btn" onClick={onClose} aria-label={t("common.close")}>
+                    <FontAwesomeIcon icon={faXmark} />
+                </button>
             </div>
 
             <div className="profile-body">

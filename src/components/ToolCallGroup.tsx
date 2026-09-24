@@ -1,16 +1,18 @@
 import type { Message, ToolCallEntry } from "../types";
 import { useRef, useState, type ReactNode } from "react";
 import { useI18n } from "../i18n";
+import { FontAwesomeIcon, faCheck, faChevronRight, faSpinner, faXmark } from "../icons";
 import "./ToolCallGroup.css";
 
 interface Props {
   message: Message;
 }
 
-function statusIcon(status: ToolCallEntry["status"]): string {
-  if (status === "running") return "⟳";
-  if (status === "done") return "✓";
-  return "✕";
+/** Per-status glyph; the running spinner is the only animated one. */
+function StatusIcon({ status }: { status: ToolCallEntry["status"] }) {
+  if (status === "running") return <FontAwesomeIcon icon={faSpinner} spin />;
+  if (status === "done") return <FontAwesomeIcon icon={faCheck} />;
+  return <FontAwesomeIcon icon={faXmark} />;
 }
 
 interface FlipRowProps {
@@ -91,7 +93,9 @@ export function ToolCallGroup({ message }: Props) {
             <span className={`tool-call-group-indicator${isRunning ? " running" : ""}`} />
             <span className="tool-call-group-label">{titleLabel}</span>
             <span className="tool-call-group-count">{t("toolGroup.steps", { count: entries.length })}</span>
-            <span className="tool-call-group-chevron">›</span>
+            <span className="tool-call-group-chevron">
+              <FontAwesomeIcon icon={faChevronRight} />
+            </span>
           </span>
           {!open && (
             <span className="tool-call-group-preview" aria-hidden="true">
@@ -102,7 +106,7 @@ export function ToolCallGroup({ message }: Props) {
                 <span
                   className={`tool-call-preview-icon tool-call-preview-icon--${previewEntry.status}`}
                 >
-                  {statusIcon(previewEntry.status)}
+                  <StatusIcon status={previewEntry.status} />
                 </span>
                 <span className="tool-call-preview-name">[{previewEntry.agent_name}]</span>
                 <span className="tool-call-preview-desc">{previewEntry.description}</span>
@@ -122,7 +126,7 @@ export function ToolCallGroup({ message }: Props) {
               key={entry.task_id}
               className={`tool-call-entry tool-call-entry--${entry.status}`}
             >
-              <span className="tool-call-entry-icon">{statusIcon(entry.status)}</span>
+              <span className="tool-call-entry-icon"><StatusIcon status={entry.status} /></span>
               <span className="tool-call-entry-name">{entry.agent_name}</span>
               <span className="tool-call-entry-desc">{entry.description}</span>
               {entry.summary && (

@@ -3,6 +3,18 @@ import { listHistorySessions, loadSessionMessages, deleteHistory, listSessionMet
 import type { HistoryRecord, HistorySessionSummary, SessionMeta } from "../api";
 import type { Attachment, Message, MessageContent, ToolCallEntry } from "../types";
 import { useI18n, type Locale } from "../i18n";
+import {
+  FontAwesomeIcon,
+  faBoxArchive,
+  faBoxOpen,
+  faListCheck,
+  faPenToSquare,
+  faStar,
+  faStarOutline,
+  faTrash,
+  faXmark,
+  type IconDefinition,
+} from "../icons";
 import "./HistoryPanel.css";
 
 interface Props {
@@ -249,7 +261,9 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
     <div className="history-panel">
       <div className="history-header">
         <h2>{t("history.title")}</h2>
-        <button className="close-btn" onClick={onClose}>✕</button>
+        <button className="close-btn" onClick={onClose} aria-label={t("common.close")}>
+          <FontAwesomeIcon icon={faXmark} />
+        </button>
       </div>
 
       <div className="history-search-wrap">
@@ -266,10 +280,10 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
         )}
         <div className="history-tabs" role="tablist">
           {([
-            ["all", t("history.tabAll")],
-            ["favorites", t("history.tabFavorites")],
-            ["archived", t("history.tabArchived")],
-          ] as [HistoryTab, string][]).map(([tab, label]) => (
+            ["all", t("history.tabAll"), faListCheck],
+            ["favorites", t("history.tabFavorites"), faStar],
+            ["archived", t("history.tabArchived"), faBoxArchive],
+          ] as [HistoryTab, string, IconDefinition][]).map(([tab, label, icon]) => (
             <button
               key={tab}
               role="tab"
@@ -277,6 +291,7 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
               className={`history-tab ${activeTab === tab ? "active" : ""}`}
               onClick={() => setActiveTab(tab)}
             >
+              <FontAwesomeIcon icon={icon} />
               {label}
             </button>
           ))}
@@ -329,7 +344,9 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
                     />
                   ) : (
                     <span className="history-preview" title={title}>
-                      {isFavorite ? "★ " : ""}
+                      {isFavorite && (
+                        <FontAwesomeIcon icon={faStar} className="history-preview-star" />
+                      )}
                       {title.length > 60 ? title.slice(0, 60) + "…" : title}
                     </span>
                   )}
@@ -350,7 +367,7 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
                     }}
                     title={isFavorite ? t("history.removeFavorite") : t("history.addFavorite")}
                   >
-                    {isFavorite ? "★" : "☆"}
+                    <FontAwesomeIcon icon={isFavorite ? faStar : faStarOutline} />
                   </button>
                   <button
                     className="history-action-btn"
@@ -360,7 +377,7 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
                     }}
                     title={t("history.rename")}
                   >
-                    ✏️
+                    <FontAwesomeIcon icon={faPenToSquare} />
                   </button>
                   <button
                     className={`history-action-btn ${isArchived ? "on" : ""}`}
@@ -370,14 +387,14 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
                     }}
                     title={isArchived ? t("history.unarchive") : t("history.archive")}
                   >
-                    {isArchived ? "📤" : "🗄"}
+                    <FontAwesomeIcon icon={isArchived ? faBoxOpen : faBoxArchive} />
                   </button>
                   <button
                     className="history-action-btn delete"
                     onClick={(e) => handleDelete(e, sid)}
                     title={t("history.delete")}
                   >
-                    🗑️
+                    <FontAwesomeIcon icon={faTrash} />
                   </button>
                 </div>
               </div>

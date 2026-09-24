@@ -12,6 +12,16 @@ import { katexMathPlugin } from "../utils/markdownMath";
 // `t` (module-level) is used by the markdown-it renderer rules, which run
 // outside the React tree; the hook keeps the component re-rendering on change.
 import { t as text, useI18n } from "../i18n";
+import {
+  FontAwesomeIcon,
+  faCodeBranch,
+  faFileArrowDown,
+  faFileLines,
+  faPaperclip,
+  faTrash,
+  faVolumeHigh,
+  faWandSparkles,
+} from "../icons";
 import "./ChatMessage.css";
 
 import { writeText as tauriWriteText } from "@tauri-apps/plugin-clipboard-manager";
@@ -349,7 +359,7 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
                   key={reasoningPreview.lineCount}
                   aria-hidden="true"
                 >
-                  ✨
+                  <FontAwesomeIcon icon={faWandSparkles} />
                 </span>
               </span>
               {!reasoningOpen && reasoningPreview.current && (
@@ -440,10 +450,12 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
                   </a>
                 );
               }
-              const icon = att?.kind === "file" ? "📄" : att?.kind === "audio" ? "🔊" : "📎";
+              const icon =
+                att?.kind === "file" ? faFileLines : att?.kind === "audio" ? faVolumeHigh : faPaperclip;
               return (
                 <span key={i} className="message-attachment-pill">
-                  {icon} {name}
+                  <FontAwesomeIcon icon={icon} />
+                  {name}
                 </span>
               );
             })}
@@ -470,7 +482,7 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
               disabled={!mainContent.trim()}
               title={t("chat.exportTitle")}
             >
-              ⤓
+              <FontAwesomeIcon icon={faFileArrowDown} />
             </button>
           )}
           {onDelete && dbId !== undefined && (
@@ -480,7 +492,7 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
               onClick={() => onDelete(message.id)}
               title={t("chat.deleteTitle")}
             >
-              🗑️
+              <FontAwesomeIcon icon={faTrash} />
             </button>
           )}
           {onFork && dbId !== undefined && (
@@ -490,7 +502,7 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
               onClick={() => onFork(message.id)}
               title={t("chat.forkTitle")}
             >
-              ⑂
+              <FontAwesomeIcon icon={faCodeBranch} />
             </button>
           )}
         </div>

@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { listAgentMissions } from "../api";
 import type { AgentMissionSnapshot } from "../types";
 import { useI18n, type Locale, type MessageKey, type TranslateVars } from "../i18n";
+import { FontAwesomeIcon, faSpinner, faXmark } from "../icons";
 import "./AgentMissionPanel.css";
 
 interface Props {
@@ -116,8 +117,8 @@ export function AgentMissionPanel({ sessionId, onClose }: Props) {
                     <button type="button" className="mission-monitor-refresh" onClick={() => void loadMissions()}>
                         {t("mission.refresh")}
                     </button>
-                    <button type="button" className="close-btn" onClick={onClose}>
-                        ✕
+                    <button type="button" className="close-btn" onClick={onClose} aria-label={t("common.close")}>
+                        <FontAwesomeIcon icon={faXmark} />
                     </button>
                 </div>
             </div>
@@ -126,7 +127,11 @@ export function AgentMissionPanel({ sessionId, onClose }: Props) {
                 <div className="mission-monitor-list-panel">
                     <div className="mission-monitor-list-header">
                         <h3>{t("mission.missions", { count: missions.length })}</h3>
-                        {loading && <span className="mission-monitor-loading">⟳</span>}
+                        {loading && (
+                            <span className="mission-monitor-loading">
+                                <FontAwesomeIcon icon={faSpinner} spin />
+                            </span>
+                        )}
                     </div>
                     <div className="mission-monitor-list">
                         {missions.length === 0 ? (

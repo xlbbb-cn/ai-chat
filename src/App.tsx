@@ -27,6 +27,24 @@ import type {
   UpdateInfo,
 } from "./types";
 import { isGenerationStopped, isLocale, useI18n } from "./i18n";
+import {
+  FontAwesomeIcon,
+  faBrain,
+  faClockRotateLeft,
+  faFileLines,
+  faFilePen,
+  faGear,
+  faPaperclip,
+  faPlug,
+  faRobot,
+  faRotateRight,
+  faScrewdriverWrench,
+  faStopwatch,
+  faTriangleExclamation,
+  faVolumeHigh,
+  faWandMagicSparkles,
+  faXmark,
+} from "./icons";
 import "./App.css";
 
 type Sidebar = "settings" | "skills" | "history" | "tools" | "mcp" | "agents" | null;
@@ -1365,6 +1383,7 @@ export default function App() {
       <div className="confirm-overlay">
         <div className="confirm-dialog">
           <h2>
+            <FontAwesomeIcon icon={faTriangleExclamation} className="confirm-dialog-icon" />
             {title} <span className="confirm-dialog-badge">{badge}</span>
           </h2>
           <p>
@@ -1701,13 +1720,16 @@ export default function App() {
       <div className="chat-area" onClick={handleChatAreaClick}>
         {/* Toolbar */}
         <header className="toolbar">
-          <span className="app-title">                      <button
-            className="toolbar-btn"
-            onClick={clearChat}
-            title={t("app.newChatTitle")}
-          >
-            ↻ {t("app.newChat")}
-          </button></span>
+          <span className="app-title">
+            <button
+              className="toolbar-btn"
+              onClick={clearChat}
+              title={t("app.newChatTitle")}
+            >
+              <FontAwesomeIcon icon={faRotateRight} />
+              {t("app.newChat")}
+            </button>
+          </span>
 
           <div className="toolbar-actions">
             <button
@@ -1715,7 +1737,8 @@ export default function App() {
               onClick={() => toggleSidebar("agents")}
               title={useAgentsEnabled ? t("app.toolbarAgentsTitleEnabled") : t("app.toolbarAgentsTitle")}
             >
-              🤖 {t("app.toolbarAgents")}
+              <FontAwesomeIcon icon={faRobot} />
+              {t("app.toolbarAgents")}
               {activeAgentCount > 0 && useAgentsEnabled && (
                 <span className="toolbar-btn-count">{activeAgentCount}</span>
               )}
@@ -1725,7 +1748,8 @@ export default function App() {
               onClick={() => toggleSidebar("skills")}
               title={t("app.toolbarSkills")}
             >
-              ✦ {t("app.toolbarSkills")}
+              <FontAwesomeIcon icon={faWandMagicSparkles} />
+              {t("app.toolbarSkills")}
               {activeSkillIds.length > 0 && (
                 <span className="toolbar-btn-count">{activeSkillIds.length}</span>
               )}
@@ -1735,7 +1759,8 @@ export default function App() {
               onClick={() => toggleSidebar("mcp")}
               title={t("app.toolbarMcpTitle")}
             >
-              ⬡ {t("app.toolbarMcp")}
+              <FontAwesomeIcon icon={faPlug} />
+              {t("app.toolbarMcp")}
               {activeMcpCount > 0 && (
                 <span className="toolbar-btn-count">{activeMcpCount}</span>
               )}
@@ -1745,7 +1770,8 @@ export default function App() {
               onClick={() => toggleSidebar("tools")}
               title={t("app.toolbarTools")}
             >
-              🛠 {t("app.toolbarTools")}
+              <FontAwesomeIcon icon={faScrewdriverWrench} />
+              {t("app.toolbarTools")}
               {activeToolCount > 0 && (
                 <span className="toolbar-btn-count">{activeToolCount}</span>
               )}
@@ -1755,14 +1781,16 @@ export default function App() {
               onClick={() => toggleSidebar("history")}
               title={t("app.toolbarHistory")}
             >
-              🕒 {t("app.toolbarHistory")}
+              <FontAwesomeIcon icon={faClockRotateLeft} />
+              {t("app.toolbarHistory")}
             </button>
             <button
               className={`toolbar-btn ${sidebar === "settings" ? "active" : ""}`}
               onClick={() => toggleSidebar("settings")}
               title={t("app.toolbarSettings")}
             >
-              ⚙ {t("app.toolbarSettings")}
+              <FontAwesomeIcon icon={faGear} />
+              {t("app.toolbarSettings")}
             </button>
 
 
@@ -1877,7 +1905,10 @@ export default function App() {
         <div className="input-area" style={{ position: "relative", flexDirection: "column", alignItems: "stretch" }}>
           {timers.length > 0 && (
             <div className="timer-bar" role="status" aria-live="polite">
-              <span className="timer-bar-title">⏱️ {t("app.timers.title")}</span>
+              <span className="timer-bar-title">
+                <FontAwesomeIcon icon={faStopwatch} />
+                {t("app.timers.title")}
+              </span>
               <div className="timer-bar-chips">
                 {timers.map((timer) => {
                   const otherSession =
@@ -1903,7 +1934,7 @@ export default function App() {
                         aria-label={t("app.timers.cancel")}
                         onClick={() => void handleCancelTimer(timer.id)}
                       >
-                        ×
+                        <FontAwesomeIcon icon={faXmark} />
                       </button>
                     </div>
                   );
@@ -1937,18 +1968,26 @@ export default function App() {
                     />
                   )}
                   {file.kind === "file" && (
-                    <span className="attachment-icon" aria-hidden="true">📄</span>
+                    <span className="attachment-icon" aria-hidden="true">
+                      <FontAwesomeIcon icon={faFileLines} />
+                    </span>
                   )}
                   {file.kind === "audio" && (
-                    <span className="attachment-icon" aria-hidden="true">🔊</span>
+                    <span className="attachment-icon" aria-hidden="true">
+                      <FontAwesomeIcon icon={faVolumeHigh} />
+                    </span>
                   )}
                   {file.kind === "text" && (
-                    <span className="attachment-icon" aria-hidden="true">📝</span>
+                    <span className="attachment-icon" aria-hidden="true">
+                      <FontAwesomeIcon icon={faFilePen} />
+                    </span>
                   )}
                   <span className="attachment-name" title={file.name}>{file.name}</span>
                   <button className="attachment-remove" onClick={() => {
                     setAttachments(prev => prev.filter((_, idx) => idx !== i));
-                  }}>×</button>
+                  }}>
+                    <FontAwesomeIcon icon={faXmark} />
+                  </button>
                 </div>
               ))}
             </div>
@@ -1960,7 +1999,7 @@ export default function App() {
               onClick={() => fileInputRef.current?.click()}
               disabled={streaming || profileExporting}
             >
-              📎
+              <FontAwesomeIcon icon={faPaperclip} />
             </button>
             <input
               type="file"
@@ -2019,19 +2058,28 @@ export default function App() {
               onChange={setSelectedModel}
             />
             {reasoningSupported && (
-              <select
-                className="reasoning-select"
-                title={t("app.reasoningDepthTitle")}
-                aria-label={t("app.reasoningDepth")}
-                value={reasoningEffort}
-                onChange={(e) => void handleReasoningEffortChange(e.target.value)}
-                disabled={streaming || profileExporting}
-              >
-                <option value="">{`🧠 ${t("app.reasoningDefault")}`}</option>
-                <option value="low">{`🧠 ${t("app.reasoningLow")}`}</option>
-                <option value="medium">{`🧠 ${t("app.reasoningMedium")}`}</option>
-                <option value="high">{`🧠 ${t("app.reasoningHigh")}`}</option>
-              </select>
+              // A native `<option>` cannot hold markup, so the brain glyph is a
+              // sibling of the select rather than a prefix on every option.
+              <div className="reasoning-select-wrap">
+                <FontAwesomeIcon
+                  icon={faBrain}
+                  className="reasoning-select-icon"
+                  aria-hidden="true"
+                />
+                <select
+                  className="reasoning-select"
+                  title={t("app.reasoningDepthTitle")}
+                  aria-label={t("app.reasoningDepth")}
+                  value={reasoningEffort}
+                  onChange={(e) => void handleReasoningEffortChange(e.target.value)}
+                  disabled={streaming || profileExporting}
+                >
+                  <option value="">{t("app.reasoningDefault")}</option>
+                  <option value="low">{t("app.reasoningLow")}</option>
+                  <option value="medium">{t("app.reasoningMedium")}</option>
+                  <option value="high">{t("app.reasoningHigh")}</option>
+                </select>
+              </div>
             )}
             <button
               className="send-btn"

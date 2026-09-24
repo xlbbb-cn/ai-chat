@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { getConfig, saveConfig } from "../api";
 import type { AppConfig, AutoAcceptKind, ConfirmKind } from "../types";
 import { useI18n, type MessageKey } from "../i18n";
+import { FontAwesomeIcon, faChevronDown, faChevronUp, faXmark } from "../icons";
 import "./ToolsPanel.css";
 
 interface Props {
@@ -208,7 +209,9 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
         <div className="tools-panel">
             <div className="tools-header">
                 <h2>{t("tools.title")}</h2>
-                <button className="close-btn" onClick={onClose}>✕</button>
+                <button className="close-btn" onClick={onClose} aria-label={t("common.close")}>
+                    <FontAwesomeIcon icon={faXmark} />
+                </button>
             </div>
             <div className="tools-description">
                 {t("tools.builtIn")}
@@ -247,7 +250,9 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                                         setExpandedTool(expandedTool === tool.id ? null : tool.id);
                                     }}
                                 >
-                                    {expandedTool === tool.id ? "▲" : "▼"}
+                                    <FontAwesomeIcon
+                                        icon={expandedTool === tool.id ? faChevronUp : faChevronDown}
+                                    />
                                 </button>
                             </div>
                         </div>
@@ -288,7 +293,9 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                     aria-expanded={autoAcceptExpanded}
                 >
                     <span className="tools-footer-title">{t("tools.autoAccept")}</span>
-                    <span className="auto-accept-chevron">{autoAcceptExpanded ? "▲" : "▼"}</span>
+                    <span className="auto-accept-chevron">
+                        <FontAwesomeIcon icon={autoAcceptExpanded ? faChevronUp : faChevronDown} />
+                    </span>
                 </button>
 
                 {autoAcceptExpanded && (

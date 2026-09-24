@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useI18n, type MessageKey } from "../i18n";
 import type { ModelMetadata } from "../types";
+import {
+    FontAwesomeIcon,
+    faBrain,
+    faCaretDown,
+    faEye,
+    faFileLines,
+    faScrewdriverWrench,
+    faVolumeHigh,
+    type IconDefinition,
+} from "../icons";
 import { Portal } from "./Portal";
 import "./ModelSelect.css";
 
@@ -20,12 +30,12 @@ interface Props {
  * `settings.api.capability*` strings (Settings → API shows the same set) so the
  * two views can never drift apart.
  */
-const CAPABILITY_CHIPS: { flag: keyof ModelMetadata; icon: string; labelKey: MessageKey }[] = [
-    { flag: "supports_tools", icon: "🛠", labelKey: "settings.api.capabilityTools" },
-    { flag: "supports_reasoning", icon: "🧠", labelKey: "settings.api.capabilityReasoning" },
-    { flag: "supports_vision", icon: "👁", labelKey: "settings.api.capabilityVision" },
-    { flag: "supports_files", icon: "📄", labelKey: "settings.api.capabilityFiles" },
-    { flag: "supports_audio", icon: "🔊", labelKey: "settings.api.capabilityAudio" },
+const CAPABILITY_CHIPS: { flag: keyof ModelMetadata; icon: IconDefinition; labelKey: MessageKey }[] = [
+    { flag: "supports_tools", icon: faScrewdriverWrench, labelKey: "settings.api.capabilityTools" },
+    { flag: "supports_reasoning", icon: faBrain, labelKey: "settings.api.capabilityReasoning" },
+    { flag: "supports_vision", icon: faEye, labelKey: "settings.api.capabilityVision" },
+    { flag: "supports_files", icon: faFileLines, labelKey: "settings.api.capabilityFiles" },
+    { flag: "supports_audio", icon: faVolumeHigh, labelKey: "settings.api.capabilityAudio" },
 ];
 
 /** Badges for one model, in display order (empty when nothing is known). */
@@ -283,7 +293,7 @@ export function ModelSelect({ models, value, metadata, disabled, onChange }: Pro
             >
                 <span className="model-select-value">{value}</span>
                 <span className="model-select-caret" aria-hidden="true">
-                    ▾
+                    <FontAwesomeIcon icon={faCaretDown} />
                 </span>
             </button>
 
@@ -333,7 +343,7 @@ export function ModelSelect({ models, value, metadata, disabled, onChange }: Pro
                                                         title={t(chip.labelKey)}
                                                         aria-label={t(chip.labelKey)}
                                                     >
-                                                        {chip.icon}
+                                                        <FontAwesomeIcon icon={chip.icon} />
                                                     </span>
                                                 ))}
                                             </span>

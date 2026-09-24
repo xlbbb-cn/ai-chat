@@ -77,15 +77,15 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 20px 32px;
+  gap: 12px;
+  padding: 12px 20px;
   border-bottom: 1px solid var(--t-border);
   flex-shrink: 0;
 }
 
 .settings-page-heading h2 {
   margin: 0;
-  font-size: 22px;
+  font-size: 19px;
   font-weight: 500;
   color: var(--t-text);
 }
@@ -115,7 +115,7 @@
   flex-direction: column;
   align-items: stretch;
   gap: 2px;
-  padding: 24px 16px 24px 32px;
+  padding: 14px 10px 14px 20px;
   border-right: 1px solid var(--t-border);
   overflow-y: auto;
 }
@@ -126,8 +126,8 @@
   background: transparent;
   border: none;
   border-radius: 4px;
-  min-height: 36px;
-  padding: 8px 14px;
+  min-height: 30px;
+  padding: 6px 10px;
   font-family: inherit;
   font-size: 14px;
   font-weight: 500;
@@ -151,10 +151,10 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 28px 40px 48px;
+  padding: 18px 24px 28px;
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  gap: 20px;
 }
 
 @media (max-width: 960px) {
@@ -165,7 +165,7 @@
   .settings-nav {
     flex-direction: row;
     overflow-x: auto;
-    padding: 16px 20px;
+    padding: 10px 12px;
     border-right: none;
     border-bottom: 1px solid var(--t-border);
   }
@@ -175,11 +175,11 @@
   }
 
   .settings-content {
-    padding: 20px 20px 40px;
+    padding: 14px 14px 24px;
   }
 
   .settings-page-header {
-    padding: 16px 20px;
+    padding: 10px 14px;
   }
 }
 
@@ -188,8 +188,8 @@
 .settings-section {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  padding-bottom: 28px;
+  gap: 14px;
+  padding-bottom: 18px;
   border-bottom: 1px solid var(--t-border);
 }
 
@@ -206,7 +206,7 @@
 
 .settings-section-head h3 {
   margin: 0;
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 500;
   color: var(--t-text);
 }
@@ -227,6 +227,8 @@
 }
 
 .settings-toggle-icon {
+  display: inline-flex;
+  align-items: center;
   color: var(--t-muted);
   font-size: 12px;
   transition: transform 0.33s var(--t-ease);
@@ -239,7 +241,7 @@
 .settings-section-body {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
   max-width: 680px;
 }
 
@@ -254,8 +256,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  min-height: 40px;
+  gap: 12px;
+  min-height: 34px;
 }
 
 .settings-field-row-stacked {
@@ -281,7 +283,7 @@
   /* Cells keep their own height — a taller neighbour (the model-catalog row
      once the capability summary appears) must not stretch the others. */
   align-items: start;
-  gap: 16px;
+  gap: 12px;
 }
 
 .settings-field-grid-3 {
@@ -727,7 +729,7 @@
 }
 
 .prompt-editor-header {
-  padding: 14px 20px;
+  padding: 9px 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -761,8 +763,8 @@
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 14px;
-  padding: 14px 20px 20px;
+  gap: 12px;
+  padding: 9px 12px 12px;
 }
 
 .prompt-column {
@@ -782,7 +784,7 @@
   resize: none;
   border: 0.5px solid var(--c-border-i);
   border-radius: var(--r-md);
-  padding: 14px;
+  padding: 10px;
   font-size: 13px;
   line-height: 1.6;
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -804,7 +806,7 @@
   overflow: auto;
   border: 0.5px solid var(--c-border-i);
   border-radius: var(--r-md);
-  padding: 14px;
+  padding: 10px;
   font-size: 13px;
   line-height: 1.6;
   color: var(--c-body);

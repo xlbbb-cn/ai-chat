@@ -5,6 +5,7 @@ import {
 } from "../api";
 import type { SubAgent, AgentOrchestration } from "../types";
 import { useI18n, type MessageKey } from "../i18n";
+import { FontAwesomeIcon, faCheck, faGear, faPen, faXmark } from "../icons";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { Portal } from "./Portal";
 import "./AgentsPanel.css";
@@ -164,9 +165,24 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
   const statusIcon = (agentId: string) => {
     const s = agentStatuses[agentId];
     if (!s || s.status === "idle") return null;
-    if (s.status === "running") return <span className="agent-status-badge running">{t("agents.statusRunning")}</span>;
-    if (s.status === "done") return <span className="agent-status-badge done">{t("agents.statusDone")}</span>;
-    if (s.status === "error") return <span className="agent-status-badge error">{t("agents.statusError")}</span>;
+    if (s.status === "running") return (
+      <span className="agent-status-badge running">
+        <FontAwesomeIcon icon={faGear} spin />
+        {t("agents.statusRunning")}
+      </span>
+    );
+    if (s.status === "done") return (
+      <span className="agent-status-badge done">
+        <FontAwesomeIcon icon={faCheck} />
+        {t("agents.statusDone")}
+      </span>
+    );
+    if (s.status === "error") return (
+      <span className="agent-status-badge error">
+        <FontAwesomeIcon icon={faXmark} />
+        {t("agents.statusError")}
+      </span>
+    );
     return null;
   };
 
@@ -175,7 +191,9 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
       <div className="agents-header">
         <h2>{t("agents.title")}</h2>
         <div className="agents-header-actions">
-          <button className="close-btn" onClick={onClose}>✕</button>
+          <button className="close-btn" onClick={onClose} aria-label={t("common.close")}>
+            <FontAwesomeIcon icon={faXmark} />
+          </button>
         </div>
       </div>
 
@@ -468,23 +486,29 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
                           title={t("common.edit")}
                           onClick={() => setEditing({ ...agent })}
                         >
-                          ✎
+                          <FontAwesomeIcon icon={faPen} />
                         </button>
                         <button
                           className="mcp-action-btn danger"
                           title={t("common.delete")}
                           onClick={() => handleDeleteAgent(agent.id)}
                         >
-                          ✕
+                          <FontAwesomeIcon icon={faXmark} />
                         </button>
                       </div>
                     </div>
                     <span className="agent-desc">{agent.description}</span>
                     {st && st.status === "done" && st.summary && (
-                      <span className="agent-summary">✓ {st.summary}</span>
+                      <span className="agent-summary">
+                        <FontAwesomeIcon icon={faCheck} />
+                        {st.summary}
+                      </span>
                     )}
                     {st && st.status === "error" && st.error && (
-                      <span className="agent-summary error">✕ {st.error}</span>
+                      <span className="agent-summary error">
+                        <FontAwesomeIcon icon={faXmark} />
+                        {st.error}
+                      </span>
                     )}
                     {st && st.tokens && (
                       <span className="agent-tokens">{st.tokens} tokens</span>
