@@ -1539,14 +1539,14 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "file_actions",
-                "description": "Perform file operations strictly within the current workspace root. Always use `./...` paths (for example `./src/App.tsx`) or `.` for the workspace root. Absolute paths and any path outside the workspace are rejected. Protected self-evolution targets create automated backups before mutation.",
+                "description": "Perform file operations on workspace files. Always use `./...` paths (for example `./src/App.tsx`) or `.` for the workspace root; absolute paths inside the workspace root are also accepted. A path outside the workspace root is allowed only after explicit user approval. Protected self-evolution targets create automated backups before mutation.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["read", "write", "list", "search", "mkdir", "patch", "rename", "move", "delete"],
-                            "description": "The file action to perform: read file content, write/overwrite a file, list directory entries, search file contents with the built-in search engine, recursively create directories, apply a unified diff patch, rename a file/directory, move a file/directory, or delete a file/directory."
+                            "enum": ["read", "write", "list", "search", "mkdir", "patch", "diff", "rename", "move", "delete"],
+                            "description": "The file action to perform: read file content, write/overwrite a file, list directory entries, search file contents with the built-in search engine, recursively create directories, apply a unified diff patch, compare two files and return a unified diff, rename a file/directory, move a file/directory, or delete a file/directory."
                         },
                         "path": {
                             "type": "string",
@@ -1554,7 +1554,7 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
                         },
                         "new_path": {
                             "type": "string",
-                            "description": "Destination relative path for rename operations. Required when action is 'rename'."
+                            "description": "Destination relative path for rename operations. Required when action is 'rename'. For action 'diff' this is the second (modified) file to compare `path` against."
                         },
                         "start_line": {
                             "type": "integer",
@@ -1605,6 +1605,16 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
                         "patch": {
                             "type": "string",
                             "description": "Unified diff patch to apply to the file (only for 'patch'). Must be a valid unified diff (--- / +++ header optional). Use LF line endings; CRLF files are handled automatically."
+                        },
+                        "context_lines": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 20,
+                            "description": "Number of unchanged context lines shown around each change in a 'diff' result. Defaults to 3."
+                        },
+                        "ignore_whitespace": {
+                            "type": "boolean",
+                            "description": "Whether a 'diff' should ignore leading/trailing whitespace and repeated whitespace inside lines. Defaults to false."
                         }
                     },
                     "required": ["action", "path"]
@@ -2963,6 +2973,79 @@ mod tests {
         assert!(apply_unified_patch(original, patch).is_err());
     }
 
+    // ─── Diff Tests ────────────────────────────────────────────────────────
+
+    #[test]
+    fn diff_reports_added_and_removed_lines() {
+        use super::build_file_diff;
+
+        let diff = build_file_diff(
+            "a.txt",
+            "b.txt",
+            "line1\nline2\nline3\n",
+            "line1\nline2 changed\nline3\nline4\n",
+            3,
+            false,
+        )
+        .expect("the two inputs differ");
+
+        assert_eq!(diff.added, 2);
+        assert_eq!(diff.removed, 1);
+        // The two edit blocks are one context line apart, so with the default
+        // 3 lines of context they collapse into a single hunk.
+        assert_eq!(diff.hunks, 1);
+        assert!(diff.text.starts_with("--- a.txt\n+++ b.txt\n"));
+        assert!(diff.text.contains("@@ -"));
+        assert!(diff.text.contains("-line2\n"));
+        assert!(diff.text.contains("+line2 changed\n"));
+        assert!(diff.text.contains("+line4\n"));
+    }
+
+    #[test]
+    fn diff_returns_none_for_identical_files() {
+        use super::build_file_diff;
+
+        assert!(
+            build_file_diff("a", "b", "same\ncontent\n", "same\ncontent\n", 3, false).is_none()
+        );
+    }
+
+    #[test]
+    fn diff_ignores_line_ending_and_bom_differences() {
+        use super::build_file_diff;
+
+        // A CRLF/LF or BOM-only difference would otherwise be reported as a
+        // full-file rewrite, which is noise rather than signal.
+        assert!(
+            build_file_diff("a", "b", "line1\r\nline2\r\n", "line1\nline2\n", 3, false).is_none()
+        );
+        assert!(build_file_diff("a", "b", "\u{feff}line1\n", "line1\n", 3, false).is_none());
+    }
+
+    #[test]
+    fn diff_can_ignore_whitespace_only_changes() {
+        use super::build_file_diff;
+
+        let (original, modified) = ("let  x  =  1;\n", "let x = 1;\n");
+        assert!(build_file_diff("a", "b", original, modified, 3, false).is_some());
+        assert!(build_file_diff("a", "b", original, modified, 3, true).is_none());
+    }
+
+    #[test]
+    fn diff_honours_context_lines() {
+        use super::build_file_diff;
+
+        let (original, modified) = (
+            "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\n",
+            "a\nb\nc\nd\nCHANGED\ne\nf\ng\nh\ni\nj\n",
+        );
+        let wide = build_file_diff("a", "b", original, modified, 5, false).unwrap();
+        let narrow = build_file_diff("a", "b", original, modified, 0, false).unwrap();
+
+        assert!(wide.text.len() > narrow.text.len());
+        assert_eq!((wide.added, wide.removed), (narrow.added, narrow.removed));
+    }
+
     // ─── Path Safety Tests ─────────────────────────────────────────────────
 
     #[test]
@@ -3148,6 +3231,125 @@ fn apply_unified_patch(original: &str, patch_str: &str) -> Result<String, String
     }
 
     Ok(patched)
+}
+
+/// Maximum size of a single file accepted by the `diff` action. The Myers diff
+/// costs roughly O(N·D) in the number of changed lines, so a pair of
+/// multi-megabyte files (minified bundles, huge logs) would block the async
+/// runtime for minutes while producing a diff nobody can read.
+const DIFF_MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
+
+/// A unified diff between two files plus the counts shown in the summary line.
+struct FileDiff {
+    /// Rendered `---` / `+++` / `@@` text, ready to hand back to the model.
+    text: String,
+    added: usize,
+    removed: usize,
+    hunks: usize,
+}
+
+/// Read one side of a `diff` comparison. Directories, binary and oversized
+/// files are rejected with an actionable message instead of producing a
+/// mojibake diff the model then has to interpret.
+fn read_diff_input(path: &Path) -> Result<String, String> {
+    let metadata =
+        fs::metadata(path).map_err(|e| format!("Error reading '{}': {}", path.display(), e))?;
+    if metadata.is_dir() {
+        return Err(format!(
+            "Error: '{}' is a directory; the diff action compares two files.",
+            path.display()
+        ));
+    }
+    if metadata.len() > DIFF_MAX_FILE_BYTES {
+        return Err(format!(
+            "Error: '{}' is {} bytes, above the {} byte diff limit. Compare a smaller file, or read a line range with the 'read' action and diff the excerpts.",
+            path.display(),
+            metadata.len(),
+            DIFF_MAX_FILE_BYTES
+        ));
+    }
+
+    let bytes = fs::read(path).map_err(|e| format!("Error reading '{}': {}", path.display(), e))?;
+    if is_probably_binary(&bytes) {
+        return Err(format!(
+            "Error: '{}' looks like a binary file; the diff action only supports text files.",
+            path.display()
+        ));
+    }
+
+    String::from_utf8(bytes).map_err(|_| {
+        format!(
+            "Error: '{}' is not valid UTF-8 text; the diff action only supports text files.",
+            path.display()
+        )
+    })
+}
+
+/// Drop a UTF-8 BOM and normalize CRLF to LF, so a pair that only differs in
+/// line endings (or was saved by an editor that injects a BOM) does not show up
+/// as a whole-file rewrite — the same tolerance `apply_unified_patch` applies.
+fn normalize_diff_input(text: &str) -> String {
+    let without_bom = text.strip_prefix('\u{feff}').unwrap_or(text);
+    without_bom.replace("\r\n", "\n")
+}
+
+/// `git diff -w` style normalization: trim each line and collapse internal
+/// whitespace runs down to a single space.
+fn collapse_whitespace(text: &str) -> String {
+    text.lines()
+        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Build a git-style unified diff between two file contents. Returns `None`
+/// when the normalized contents are identical so callers can report "no
+/// differences" without materializing a patch.
+fn build_file_diff(
+    original_label: &str,
+    modified_label: &str,
+    original: &str,
+    modified: &str,
+    context_lines: usize,
+    ignore_whitespace: bool,
+) -> Option<FileDiff> {
+    let normalize = |text: &str| {
+        let normalized = normalize_diff_input(text);
+        if ignore_whitespace {
+            collapse_whitespace(&normalized)
+        } else {
+            normalized
+        }
+    };
+
+    let original = normalize(original);
+    let modified = normalize(modified);
+    if original == modified {
+        return None;
+    }
+
+    let patch = diffy::DiffOptions::new()
+        .set_context_len(context_lines)
+        .set_original_filename(original_label.to_string())
+        .set_modified_filename(modified_label.to_string())
+        .create_patch(&original, &modified);
+
+    let mut added = 0usize;
+    let mut removed = 0usize;
+    for line in patch.hunks().iter().flat_map(|hunk| hunk.lines()) {
+        match line {
+            diffy::Line::Insert(_) => added += 1,
+            diffy::Line::Delete(_) => removed += 1,
+            diffy::Line::Context(_) => {}
+        }
+    }
+
+    Some(FileDiff {
+        text: patch.to_string(),
+        added,
+        removed,
+        hunks: patch.hunks().len(),
+    })
 }
 
 /// Recursively copy a directory tree from `src` to `dst`.
@@ -4768,6 +4970,64 @@ pub async fn execute_tool(
                             }
                         }
                         Err(e) => format_file_action_error(e),
+                    }
+                }
+                "diff" => {
+                    let new_path = args["new_path"].as_str().unwrap_or("");
+                    if new_path.is_empty() {
+                        return "Error: new_path is required for diff (the file to compare against).".to_string();
+                    }
+                    let context_lines = args["context_lines"]
+                        .as_u64()
+                        .map(|value| value.clamp(0, 20) as usize)
+                        .unwrap_or(3);
+                    let ignore_whitespace = args["ignore_whitespace"].as_bool().unwrap_or(false);
+                    let _ = app.emit(
+                        "tool-call",
+                        format!("🔀 *Comparing {} → {}*\n\n", path_str, new_path),
+                    );
+
+                    let original_path = match resolve_file_action_path(
+                        app, action, path_str, &root_dir, true,
+                    )
+                    .await
+                    {
+                        Ok(p) => p,
+                        Err(e) => return format_file_action_error(e),
+                    };
+                    let modified_path = match resolve_file_action_path(
+                        app, action, new_path, &root_dir, true,
+                    )
+                    .await
+                    {
+                        Ok(p) => p,
+                        Err(e) => return format_file_action_error(e),
+                    };
+
+                    let original = match read_diff_input(&original_path) {
+                        Ok(text) => text,
+                        Err(e) => return e,
+                    };
+                    let modified = match read_diff_input(&modified_path) {
+                        Ok(text) => text,
+                        Err(e) => return e,
+                    };
+
+                    match build_file_diff(
+                        path_str,
+                        new_path,
+                        &original,
+                        &modified,
+                        context_lines,
+                        ignore_whitespace,
+                    ) {
+                        None => format!("No differences between {} and {}.", path_str, new_path),
+                        // The summary goes first: tool output keeps a head+tail
+                        // slice, so a truncation marker mid-diff never hides it.
+                        Some(diff) => format!(
+                            "{} vs {}: +{} / -{} lines across {} hunk(s)\n\n{}",
+                            path_str, new_path, diff.added, diff.removed, diff.hunks, diff.text
+                        ),
                     }
                 }
                 "mkdir" => {

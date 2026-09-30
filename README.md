@@ -74,7 +74,7 @@ Use cases:
 ### 4) Tool System
 
 - run_cmd / run_shell: Local command execution with dangerous-command confirmation
-- file_actions: File read/write/edit/patch plus mkdir/rename/move/delete
+- file_actions: File read/write/edit/patch/diff plus mkdir/rename/move/delete
 - knowledge_graph: Knowledge graph queries (supports Neo4j)
 
 ### 5) MCP Management

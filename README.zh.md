@@ -73,7 +73,7 @@ AI Chat 是一个桌面端 AI 助手应用，支持接入任意 OpenAI 兼容模
 ### 4) 工具系统（Tools）
 
 - run_cmd / run_shell：本地命令执行，内置危险命令确认
-- file_actions：文件读写、编辑、补丁，支持 mkdir / rename / move / delete
+- file_actions：文件读写、编辑、补丁、比对（diff），支持 mkdir / rename / move / delete
 - knowledge_graph：知识图谱查询（支持 Neo4j）
 
 ### 5) MCP 管理
