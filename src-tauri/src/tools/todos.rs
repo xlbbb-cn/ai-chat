@@ -185,15 +185,6 @@ fn set_active_list_id(workspace: &Path, session_id: &str, list_id: &str) -> Resu
     write_atomic(&active_marker(workspace, session_id), list_id)
 }
 
-fn clear_active_list_id(workspace: &Path, session_id: &str) -> Result<(), String> {
-    let marker = active_marker(workspace, session_id);
-    match fs::remove_file(&marker) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(format!("Failed to remove '{}': {err}", marker.display())),
-    }
-}
-
 fn load_list(workspace: &Path, session_id: &str, list_id: &str) -> Result<TodoListSummary, String> {
     let path = list_path(workspace, session_id, list_id);
     let text =
@@ -207,24 +198,6 @@ fn save_list(workspace: &Path, list: &TodoListSummary) -> Result<(), String> {
     let json = serde_json::to_string_pretty(list)
         .map_err(|e| format!("Failed to serialize todo list: {e}"))?;
     write_atomic(&path, &json)
-}
-
-fn find_list_by_id(workspace: &Path, list_id: &str) -> Result<Option<TodoListSummary>, String> {
-    let root = todo_root(workspace);
-    if !root.exists() {
-        return Ok(None);
-    }
-    for session_entry in fs::read_dir(&root).map_err(|e| e.to_string())?.flatten() {
-        let session_id = session_entry.file_name().to_string_lossy().to_string();
-        if session_id.starts_with('.') {
-            continue;
-        }
-        let candidate = list_path(workspace, &session_id, list_id);
-        if candidate.exists() {
-            return Ok(Some(load_list(workspace, &session_id, list_id)?));
-        }
-    }
-    Ok(None)
 }
 
 fn find_list_containing_todo_in_session(
@@ -253,28 +226,6 @@ fn find_list_containing_todo_in_session(
             Err(_) => continue,
         };
         if list.todos.iter().any(|t| t.id == todo_id) {
-            return Ok(Some(list));
-        }
-    }
-    Ok(None)
-}
-
-// Legacy helper: scans every session's lists. Only used by Tauri commands
-// that receive a bare todo id; tool calls use the session-scoped lookup.
-fn find_list_containing_todo(
-    workspace: &Path,
-    todo_id: &str,
-) -> Result<Option<TodoListSummary>, String> {
-    let root = todo_root(workspace);
-    if !root.exists() {
-        return Ok(None);
-    }
-    for session_entry in fs::read_dir(&root).map_err(|e| e.to_string())?.flatten() {
-        let session_id = session_entry.file_name().to_string_lossy().to_string();
-        if session_id.starts_with('.') {
-            continue;
-        }
-        if let Some(list) = find_list_containing_todo_in_session(workspace, &session_id, todo_id)? {
             return Ok(Some(list));
         }
     }
@@ -347,11 +298,6 @@ fn workspace_path(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
-
-pub fn get_list(app: &AppHandle, list_id: &str) -> Result<TodoListSummary, String> {
-    let workspace = workspace_path(app)?;
-    find_list_by_id(&workspace, list_id)?.ok_or_else(|| format!("Todo list '{list_id}' not found."))
-}
 
 pub fn get_active_list(
     app: &AppHandle,
@@ -453,100 +399,6 @@ pub fn update_todo_status(
     })
 }
 
-/// Legacy variant for id-only callers (Tauri commands): locates the owning
-/// session first, then runs the same scoped update under the session lock.
-pub fn update_todo_status_global(
-    app: &AppHandle,
-    todo_id: &str,
-    status: &str,
-) -> Result<TodoRecord, String> {
-    let new_status = TodoStatus::parse(status)?;
-    let workspace = workspace_path(app)?;
-    let list = find_list_containing_todo(&workspace, todo_id)?
-        .ok_or_else(|| format!("Todo '{todo_id}' not found."))?;
-    lock_session(&list.session_id, || {
-        update_todo_status_locked(&workspace, &list.session_id, todo_id, new_status)
-    })
-}
-
-// Must be called while holding the session lock (see update_todo_status_locked).
-fn update_todo_text_locked(
-    workspace: &Path,
-    session_id: &str,
-    todo_id: &str,
-    title: Option<&str>,
-    description: Option<&str>,
-) -> Result<TodoRecord, String> {
-    let mut list = find_list_containing_todo_in_session(workspace, session_id, todo_id)?
-        .ok_or_else(|| format!("Todo '{todo_id}' not found."))?;
-    let idx = list
-        .todos
-        .iter()
-        .position(|t| t.id == todo_id)
-        .ok_or_else(|| format!("Todo '{todo_id}' not found."))?;
-    if let Some(t) = title {
-        let trimmed = t.trim();
-        if trimmed.is_empty() {
-            return Err("Todo title cannot be empty.".to_string());
-        }
-        list.todos[idx].title = trimmed.to_string();
-    }
-    if let Some(d) = description {
-        list.todos[idx].description = d.trim().to_string();
-    }
-    let now = now_iso();
-    list.todos[idx].updated_at = now.clone();
-    list.updated_at = now;
-    let updated_record = list.todos[idx].clone();
-    let list = apply_counts(list);
-    save_list(workspace, &list)?;
-    Ok(updated_record)
-}
-
-/// Legacy variant for id-only callers (Tauri commands): locates the owning
-/// session first, then runs the same scoped update under the session lock.
-pub fn update_todo_text_global(
-    app: &AppHandle,
-    todo_id: &str,
-    title: Option<&str>,
-    description: Option<&str>,
-) -> Result<TodoRecord, String> {
-    if title.is_none() && description.is_none() {
-        return Err("No updates provided.".to_string());
-    }
-    let workspace = workspace_path(app)?;
-    let list = find_list_containing_todo(&workspace, todo_id)?
-        .ok_or_else(|| format!("Todo '{todo_id}' not found."))?;
-    lock_session(&list.session_id, || {
-        update_todo_text_locked(&workspace, &list.session_id, todo_id, title, description)
-    })
-}
-
-// Must be called while holding the session lock (see update_todo_status_locked).
-fn delete_todo_locked(workspace: &Path, session_id: &str, todo_id: &str) -> Result<(), String> {
-    let mut list = find_list_containing_todo_in_session(workspace, session_id, todo_id)?
-        .ok_or_else(|| format!("Todo '{todo_id}' not found."))?;
-    let initial_len = list.todos.len();
-    list.todos.retain(|t| t.id != todo_id);
-    if list.todos.len() == initial_len {
-        return Err(format!("Todo '{todo_id}' not found."));
-    }
-    list.updated_at = now_iso();
-    let list = apply_counts(list);
-    save_list(workspace, &list)?;
-    Ok(())
-}
-
-/// Legacy variant for id-only callers (Tauri commands).
-pub fn delete_todo_global(app: &AppHandle, todo_id: &str) -> Result<(), String> {
-    let workspace = workspace_path(app)?;
-    let list = find_list_containing_todo(&workspace, todo_id)?
-        .ok_or_else(|| format!("Todo '{todo_id}' not found."))?;
-    lock_session(&list.session_id, || {
-        delete_todo_locked(&workspace, &list.session_id, todo_id)
-    })
-}
-
 pub fn clear_completed(app: &AppHandle, session_id: &str) -> Result<TodoListSummary, String> {
     let workspace = workspace_path(app)?;
     lock_session(session_id, || {
@@ -558,19 +410,6 @@ pub fn clear_completed(app: &AppHandle, session_id: &str) -> Result<TodoListSumm
         let list = apply_counts(list);
         save_list(&workspace, &list)?;
         Ok(list)
-    })
-}
-
-pub fn archive_list(app: &AppHandle, list_id: &str) -> Result<(), String> {
-    let workspace = workspace_path(app)?;
-    let list = find_list_by_id(&workspace, list_id)?
-        .ok_or_else(|| format!("Todo list '{list_id}' not found."))?;
-    lock_session(&list.session_id, || {
-        let active = find_active_list_id(&workspace, &list.session_id)?;
-        if active.as_deref() == Some(list_id) {
-            clear_active_list_id(&workspace, &list.session_id)?;
-        }
-        Ok(())
     })
 }
 
@@ -606,18 +445,6 @@ fn create_and_activate_list(
     save_list(workspace, &list)?;
     set_active_list_id(workspace, session_id, &list.list_id)?;
     Ok(list)
-}
-
-pub fn new_list(
-    app: &AppHandle,
-    session_id: &str,
-    title: Option<&str>,
-    description: Option<&str>,
-) -> Result<TodoListSummary, String> {
-    let workspace = workspace_path(app)?;
-    lock_session(session_id, || {
-        create_and_activate_list(&workspace, session_id, title, description)
-    })
 }
 
 fn rotate_active_list_locked(
@@ -836,83 +663,6 @@ pub(super) fn handle_todos_tool(
     }
 }
 
-// ─── Tauri commands ──────────────────────────────────────────────────────────
-
-#[tauri::command]
-pub fn get_session_todo(
-    session_id: String,
-    app: AppHandle,
-) -> Result<Option<TodoListSummary>, String> {
-    get_active_list(&app, &session_id)
-}
-
-#[tauri::command]
-pub fn get_todo_list(list_id: String, app: AppHandle) -> Result<TodoListSummary, String> {
-    get_list(&app, &list_id)
-}
-
-#[tauri::command]
-pub fn create_session_todo(
-    session_id: String,
-    title: String,
-    description: Option<String>,
-    app: AppHandle,
-) -> Result<TodoListSummary, String> {
-    add_todo(
-        &app,
-        &session_id,
-        &title,
-        description.unwrap_or_default().as_str(),
-    )
-}
-
-#[tauri::command]
-pub fn update_todo_status_cmd(
-    todo_id: String,
-    status: String,
-    app: AppHandle,
-) -> Result<TodoRecord, String> {
-    update_todo_status_global(&app, &todo_id, &status)
-}
-
-#[tauri::command]
-pub fn update_todo_text_cmd(
-    todo_id: String,
-    title: Option<String>,
-    description: Option<String>,
-    app: AppHandle,
-) -> Result<TodoRecord, String> {
-    update_todo_text_global(&app, &todo_id, title.as_deref(), description.as_deref())
-}
-
-#[tauri::command]
-pub fn delete_todo_cmd(todo_id: String, app: AppHandle) -> Result<(), String> {
-    delete_todo_global(&app, &todo_id)
-}
-
-#[tauri::command]
-pub fn clear_completed_todos(
-    session_id: String,
-    app: AppHandle,
-) -> Result<TodoListSummary, String> {
-    clear_completed(&app, &session_id)
-}
-
-#[tauri::command]
-pub fn archive_todo_list(list_id: String, app: AppHandle) -> Result<(), String> {
-    archive_list(&app, &list_id)
-}
-
-#[tauri::command]
-pub fn create_todo_list(
-    session_id: String,
-    title: Option<String>,
-    description: Option<String>,
-    app: AppHandle,
-) -> Result<TodoListSummary, String> {
-    new_list(&app, &session_id, title.as_deref(), description.as_deref())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1062,39 +812,6 @@ mod tests {
             find_active_list_id(&workspace, session).unwrap(),
             Some(list_id.to_string())
         );
-        clear_active_list_id(&workspace, session).unwrap();
-        assert!(find_active_list_id(&workspace, session).unwrap().is_none());
-        let _ = fs::remove_dir_all(&workspace);
-    }
-
-    #[test]
-    fn find_list_containing_todo_searches_all_sessions() {
-        let workspace = make_temp_workspace("find-todo");
-        let list_a = sample_list(
-            "list-A",
-            "sess-A",
-            vec![sample_record("list-A", "sess-A", "pending")],
-        );
-        let list_b = sample_list(
-            "list-B",
-            "sess-B",
-            vec![sample_record("list-B", "sess-B", "completed")],
-        );
-        save_list(&workspace, &list_a).unwrap();
-        save_list(&workspace, &list_b).unwrap();
-
-        let target_id = list_b.todos[0].id.clone();
-        let found = find_list_containing_todo(&workspace, &target_id)
-            .unwrap()
-            .unwrap();
-        assert_eq!(found.list_id, "list-B");
-        assert_eq!(found.session_id, "sess-B");
-
-        // Unknown todo id returns None
-        assert!(find_list_containing_todo(&workspace, "does-not-exist")
-            .unwrap()
-            .is_none());
-
         let _ = fs::remove_dir_all(&workspace);
     }
 
@@ -1184,8 +901,6 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-        // The legacy global lookup still spans every session.
-        assert!(find_list_containing_todo(&workspace, &todo_a).unwrap().is_some());
         let _ = fs::remove_dir_all(&workspace);
     }
 
@@ -1215,44 +930,26 @@ mod tests {
         assert_eq!(reloaded.total, 2);
 
         // Unknown ids are rejected instead of silently succeeding.
-        assert!(
-            update_todo_status_locked(&workspace, session, "does-not-exist", TodoStatus::Completed)
-                .is_err()
-        );
+        assert!(update_todo_status_locked(
+            &workspace,
+            session,
+            "does-not-exist",
+            TodoStatus::Completed
+        )
+        .is_err());
         // A todo from another session cannot be updated through this session.
-        assert!(
-            update_todo_status_locked(&workspace, "other-session", &target, TodoStatus::Completed)
-                .is_err()
-        );
+        assert!(update_todo_status_locked(
+            &workspace,
+            "other-session",
+            &target,
+            TodoStatus::Completed
+        )
+        .is_err());
 
         // Status can be reverted; completion timestamp is cleared again.
-        let reverted = update_todo_status_locked(&workspace, session, &target, TodoStatus::Pending)
-            .unwrap();
+        let reverted =
+            update_todo_status_locked(&workspace, session, &target, TodoStatus::Pending).unwrap();
         assert!(reverted.completed_at.is_none());
-        let _ = fs::remove_dir_all(&workspace);
-    }
-
-    #[test]
-    fn delete_todo_locked_removes_only_target_item() {
-        let workspace = make_temp_workspace("scoped-delete");
-        let session = "sess-delete";
-        let list = sample_list(
-            "L",
-            session,
-            vec![
-                sample_record("L", session, "pending"),
-                sample_record("L", session, "pending"),
-            ],
-        );
-        save_list(&workspace, &list).unwrap();
-        let target = list.todos[0].id.clone();
-
-        delete_todo_locked(&workspace, session, &target).unwrap();
-        let reloaded = load_list(&workspace, session, "L").unwrap();
-        assert_eq!(reloaded.total, 1);
-        assert!(reloaded.todos.iter().all(|t| t.id != target));
-        // Deleting the same id twice fails cleanly.
-        assert!(delete_todo_locked(&workspace, session, &target).is_err());
         let _ = fs::remove_dir_all(&workspace);
     }
 
