@@ -368,7 +368,12 @@ export default function App() {
   const [timerTick, setTimerTick] = useState(() => Date.now());
   /** Timer that fired for a session the user is not currently in. */
   const [timerNotice, setTimerNotice] = useState<TimerEntry | null>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  /** Transcript scroll container; its position decides whether the view
+   *  follows incoming content or stays where the user left it. */
+  const messagesRef = useRef<HTMLDivElement>(null);
+  /** `true` while the transcript follows new content at the bottom; cleared
+   *  when the user scrolls up, re-armed when they come back down. */
+  const followBottomRef = useRef(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -454,9 +459,26 @@ export default function App() {
     );
   }, []);
 
+  /**
+   * Follow the tail only while the transcript is already at the bottom.
+   * Streaming updates `messages` many times per second; a view the user
+   * scrolled up to re-read must not be yanked back down by incoming tokens.
+   *
+   * `scrollTop` (not `scrollIntoView({ behavior: "smooth" })`) pins the view
+   * instantly — a smooth animation lags behind a fast stream, and that lag
+   * would look like "scrolled away from the bottom" to the scroll handler.
+   */
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = messagesRef.current;
+    if (!el || !followBottomRef.current) return;
+    el.scrollTop = el.scrollHeight;
   }, [messages]);
+
+  /** Re-arm the follow once the user scrolls back to (near) the bottom. */
+  const handleMessagesScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    const el = event.currentTarget;
+    followBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 48;
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -961,6 +983,11 @@ export default function App() {
     const rawText = (overrideText ?? input).trim();
     if ((!rawText && activeAttachments.length === 0) || streaming) return;
 
+    // Sending is an explicit "show me what happens next": re-arm the follow so
+    // the new turn is pinned into view even if the user was reading further
+    // up. A timer resume is not a user action and leaves the view alone.
+    if (!autoResume) followBottomRef.current = true;
+
     const { content: apiContent } = buildMessageContent(rawText, activeAttachments);
     const userAttachments = activeAttachments.length > 0 ? activeAttachments : undefined;
     setPendingRetryMessageId(null);
@@ -1118,6 +1145,7 @@ export default function App() {
     currentToolCallsRef.current = [];
     hasRunningToolCallRef.current = false;
 
+    followBottomRef.current = true;
     setMessages((prev) => [...prev, assistantMsg]);
     setStreaming(true);
     setError(null);
@@ -1238,6 +1266,7 @@ export default function App() {
       const forkedMessages = messages
         .filter((m) => m.dbId !== undefined && m.dbId <= msg.dbId!)
         .map((m) => ({ ...m, id: crypto.randomUUID() }));
+      followBottomRef.current = true;
       setMessages(forkedMessages);
       setSessionId(newSessionId);
       setPendingRetryMessageId(null);
@@ -1690,6 +1719,8 @@ export default function App() {
                   }
                   if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null; }
                   setStreaming(false);
+                  // A loaded transcript starts pinned to its newest turn.
+                  followBottomRef.current = true;
                   setMessages(msgs);
                   setSessionId(sid);
 
@@ -1870,7 +1901,7 @@ export default function App() {
         )}
 
         {/* Messages */}
-        <div className="messages">
+        <div className="messages" ref={messagesRef} onScroll={handleMessagesScroll}>
           {messages.length === 0 && (
             <div className="empty-state">
               <p>{t("app.emptyStart")}</p>
@@ -1898,7 +1929,6 @@ export default function App() {
             )
           )}
           {error && <div className="error-banner">{error}</div>}
-          <div ref={bottomRef} />
         </div>
 
         {/* Input */}
