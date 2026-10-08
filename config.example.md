@@ -22,8 +22,7 @@ Typical locations:
     "max_tokens": 4096
   },
   "system_message": "You are a helpful assistant.",
-  "selected_tools": ["web_search", "file_actions", "knowledge_graph"],
-  "search_engine": "duckduckgo",
+  "selected_tools": ["run_cmd", "file_actions", "knowledge_graph"],
   "kg_engine": "neo4j",
   "neo4j_uri": "bolt://localhost:7687",
   "neo4j_user": "neo4j",
@@ -45,8 +44,7 @@ Typical locations:
 - model_reasoning_effort: Per-model "thinking depth" picked next to the model selector in the chat toolbar, forwarded as `reasoning_effort`. Keyed by model id; allowed values are `minimal`, `low`, `medium`, `high` (anything else is dropped so a typo can never be sent upstream). A missing/empty entry means "let the provider decide" and falls back to `model_settings.reasoning_effort`. Only sent for the model that was configured — reasoning models that reject the parameter can be left on Default.
 - model_settings: Advanced model parameters forwarded to chat completion.
 - system_message: Global system prompt appended to each conversation.
-- selected_tools: Enabled tools list. Supported values include web_search, execute_command, fetch_web, file_actions, knowledge_graph.
-- search_engine: Default engine used by web_search.
+- selected_tools: Enabled tools list. Supported values: run_cmd, run_shell, file_actions, knowledge_graph, memory, todo_list (alias todo) and timer.
 - kg_engine: Knowledge graph backend selector. Current default is neo4j.
 - neo4j_uri: Neo4j Bolt endpoint, for example bolt://localhost:7687.
 - neo4j_user: Neo4j username.

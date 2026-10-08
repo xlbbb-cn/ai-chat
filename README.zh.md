@@ -238,8 +238,7 @@ git push origin v1.1.4
     "reasoning_effort": "medium",
     "max_tokens": 4096
   },
-  "selected_tools": ["web_search", "file_actions", "knowledge_graph"],
-  "search_engine": "duckduckgo",
+  "selected_tools": ["run_cmd", "file_actions", "knowledge_graph"],
   "kg_engine": "neo4j",
   "neo4j_uri": "bolt://localhost:7687",
   "neo4j_user": "neo4j",
@@ -274,7 +273,7 @@ ai-chat/
 
 ## 安全与边界
 
-- 工具执行具备系统能力，应谨慎开启 execute_command 与 file_actions
+- 工具执行具备系统能力，应谨慎开启 run_cmd / run_shell 与 file_actions
 - 技能执行遵循技能目录隔离原则，避免越界访问
 - MCP 外部服务接入前应先做最小权限与连通性验证
 - 建议在开发与生产中使用不同配置文件与 API 凭据

@@ -239,8 +239,7 @@ After running, a config.json file will be generated in the system app data direc
     "reasoning_effort": "medium",
     "max_tokens": 4096
   },
-  "selected_tools": ["web_search", "file_actions", "knowledge_graph"],
-  "search_engine": "duckduckgo",
+  "selected_tools": ["run_cmd", "file_actions", "knowledge_graph"],
   "kg_engine": "neo4j",
   "neo4j_uri": "bolt://localhost:7687",
   "neo4j_user": "neo4j",
@@ -275,7 +274,7 @@ ai-chat/
 
 ## Security & Boundaries
 
-- Tool execution has system-level capabilities; use execute_command and file_actions cautiously
+- Tool execution has system-level capabilities; enable run_cmd / run_shell and file_actions cautiously
 - Skill execution follows directory isolation rules to prevent boundary overreach
 - Validate MCP external services with minimal privileges and connectivity tests before integration
 - Use separate configuration files and API credentials for development and production
