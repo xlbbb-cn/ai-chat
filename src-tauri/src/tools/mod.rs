@@ -34,7 +34,7 @@ use self::{
     paths::{ensure_mutation_target_allowed, resolve_safe_path},
     process::{decode_process_bytes, OutputDecodeHint},
     risk::{calculate_risk_score, syntax_gate_check, RiskLevel, REJECT_THRESHOLD, RISK_THRESHOLDS},
-    search::{contains_ignore_case, is_probably_binary, SEARCH_MAX_FILE_BYTES},
+    search::{contains_ignore_case, SEARCH_MAX_FILE_BYTES},
 };
 
 /// Simple command-line splitter that handles single/double quotes and
@@ -1712,17 +1712,18 @@ three
         let _ = fs::remove_dir_all(&workspace_root);
     }
 
-    /// Throwaway benchmark: 3 000 files × 60 lines, sequential-walk +
-    /// per-line `to_lowercase()` (the old algorithm) vs. the new parallel,
-    /// budgeted one. Delete after measuring.
+    /// Regression for the two traps the throwaway benchmark walked into:
+    /// a match that starts mid-line must still be reported as a
+    /// `path:line:text` row, and the parallel walker must return every
+    /// matching line of a multi-file tree in a deterministic order — as long
+    /// as the budget allows it.
     #[test]
-    fn bench_search_many_files() {
-        use super::is_probably_binary;
-        use std::time::Instant;
-
-        let root = make_temp_dir("search-bench");
+    fn search_reports_mid_line_matches_across_many_files() {
+        let root = make_temp_dir("search-many-files");
         let dir = root.join("tree");
         fs::create_dir_all(&dir).unwrap();
+
+        let file_count = 128usize;
         let body: String = (0..60)
             .map(|i| {
                 if i % 7 == 0 {
@@ -1732,46 +1733,38 @@ three
                 }
             })
             .collect();
-        for i in 0..3000 {
+        for i in 0..file_count {
             fs::write(dir.join(format!("f{i:04}.txt")), &body).unwrap();
         }
 
-        // --- old algorithm replica: sequential walk + per-line to_lowercase ---
-        let needle_lower = "needle".to_string();
-        let start = Instant::now();
-        let mut old_hits = 0usize;
-        for entry in ignore::WalkBuilder::new(&dir)
-            .standard_filters(false)
-            .build()
-        {
-            let entry = entry.unwrap();
-            if !entry.file_type().is_some_and(|ft| ft.is_file()) {
-                continue;
-            }
-            let bytes = fs::read(entry.path()).unwrap();
-            if is_probably_binary(&bytes) {
-                continue;
-            }
-            let text = String::from_utf8_lossy(&bytes);
-            for line in text.lines() {
-                if line.to_lowercase().contains(&needle_lower) {
-                    old_hits += 1;
-                }
+        // Every `i % 7 == 0` line carries the needle mid-line (9 per file).
+        let mut expected: Vec<String> = Vec::new();
+        for i in 0..file_count {
+            for line in (0..60).step_by(7) {
+                expected.push(format!(
+                    "tree/f{i:04}.txt:{}:line {line} needle here padding padding padding",
+                    line + 1
+                ));
             }
         }
-        let old_elapsed = start.elapsed();
+        expected.sort();
 
-        let start = Instant::now();
-        let output =
-            run_integrated_search("needle", &dir, &root, &SearchOptions::default()).unwrap();
-        let new_elapsed = start.elapsed();
-        let new_hits = output.lines().filter(|l| l.contains(":needle")).count();
+        let output = run_integrated_search(
+            "needle",
+            &dir,
+            &root,
+            &SearchOptions {
+                // Large enough for the whole tree (128 × 9 = 1 152 rows).
+                max_matches: 20_000,
+                ..SearchOptions::default()
+            },
+        )
+        .unwrap();
 
-        println!(
-            "BENCH 3000 files: old={old_elapsed:?} ({old_hits} hits)  new={new_elapsed:?} ({new_hits} hits)  speedup={:.1}x",
-            old_elapsed.as_secs_f64() / new_elapsed.as_secs_f64()
-        );
-        assert_eq!(old_hits, new_hits);
+        let rows: Vec<String> = output.lines().map(str::to_string).collect();
+        assert_eq!(rows, expected);
+        // Nothing was dropped, so no budget footer may appear.
+        assert!(!output.contains("[search]"));
 
         let _ = fs::remove_dir_all(&root);
     }

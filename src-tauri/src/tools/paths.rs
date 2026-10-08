@@ -1,7 +1,7 @@
 // Path safety: workspace sandbox resolution, mutation guards and the shell
 // working-directory validation quoted for `run_shell`.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use super::split_command_line;
 
@@ -30,6 +30,23 @@ pub(super) fn resolve_safe_path(root_dir: &Path, rel_path: &str) -> Result<PathB
     };
 
     let rel_path = Path::new(rel_path_str);
+
+    // Rooted paths (`/etc`, `\foo` on Windows) and drive-relative prefixes
+    // (`C:foo`) ignore the current directory, so they are not
+    // workspace-relative. `Path::is_absolute()` is false for the first group on
+    // Windows, and the component loop below would otherwise swallow the
+    // `RootDir` component — `cd /etc` would "resolve" to `<workspace>/etc` and
+    // slip past the shell working-directory guard.
+    if rel_path
+        .components()
+        .any(|component| matches!(component, Component::RootDir | Component::Prefix(_)))
+    {
+        return Err(format!(
+            "Path '{}' is rooted and cannot be resolved inside the workspace root '{}'",
+            rel_path.display(),
+            root_dir.display()
+        ));
+    }
 
     let mut resolved = root_dir.to_path_buf();
     for comp in rel_path.components() {
