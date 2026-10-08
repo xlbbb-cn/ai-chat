@@ -40,7 +40,7 @@ const KNOWN_TOOLS: ToolOption[] = [
   },
   {
     id: "todo_list",
-    label: "todo_*",
+    label: "todos",
     hintKey: "agents.toolHints.todos",
   },
   {

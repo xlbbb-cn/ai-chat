@@ -1005,7 +1005,7 @@ async fn auto_configure_agents(
           {{\"id\":\"tmp-1\",\"name\":\"...\",\"description\":\"...\",\"system_prompt\":\"...\",\
             \"allowed_tools\":[\"file_actions\"],\"max_iterations\":5,\"enabled\":true}}\
         ]}}\n\
-        allowed_tools values must be a subset of: [\"file_actions\",\"run_cmd\",\"run_shell\",\"knowledge_graph\",\"memory\",\"todo_list\"] — todo_list grants the todo_* tools.\n\
+        allowed_tools values must be a subset of: [\"file_actions\",\"run_cmd\",\"run_shell\",\"knowledge_graph\",\"memory\",\"todo_list\"] — todo_list grants the `todos` tool.\n\
         Return ONLY the JSON object, no markdown, no extra text.",
     );
 

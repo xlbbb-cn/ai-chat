@@ -1,10 +1,11 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
 use crate::AppState;
@@ -628,9 +629,9 @@ fn rotate_active_list_locked(
 }
 
 /// Archive (deactivate) the current list and start a fresh active one in a
-/// single critical section. Used by the `todo_archive` tool so a concurrent
-/// `todo_add` from another agent can never land in a list that is created and
-/// then immediately orphaned by the marker swap.
+/// single critical section. Used by the `todos` tool's `archive` action so a
+/// concurrent `add` from another agent can never land in a list that is
+/// created and then immediately orphaned by the marker swap.
 pub fn rotate_active_list(
     app: &AppHandle,
     session_id: &str,
@@ -674,9 +675,165 @@ pub fn render_active_list_for_context(workspace: &Path, session_id: &str) -> Opt
         ));
     }
     body.push_str(
-        "\nUse the `todo_*` tools (todo_add, todo_update_status, todo_list, todo_clear_completed, todo_archive) to manage this list. Re-run `todo_list` whenever you need a fresh view of progress before planning the next step."
+        "\nUse the `todos` tool (actions: list, add, update_status, clear_completed, archive) to manage this list. Re-run action `list` whenever you need a fresh view of progress before planning the next step."
     );
     Some(body)
+}
+
+// ─── Tool handler (LLM interface) ────────────────────────────────────────────
+
+/// Handle the `todos` tool call — a single action-based entry point modelled
+/// on `file_actions`. The legacy per-action tool names (`todo_add`, …) are
+/// also routed here so conversations continued from an older session keep
+/// working; they map onto their equivalent action.
+///
+/// Every mutating action emits `todo-state` so the UI mirrors the list live.
+pub(super) fn handle_todos_tool(
+    app: &AppHandle,
+    name: &str,
+    args: &Value,
+    session_id: Option<&str>,
+) -> String {
+    let action = args["action"].as_str().unwrap_or(match name {
+        "todo_add" => "add",
+        "todo_update_status" => "update_status",
+        "todo_list" => "list",
+        "todo_clear_completed" => "clear_completed",
+        "todo_archive" => "archive",
+        _ => "",
+    });
+
+    match action {
+        "list" => {
+            let Some(session_id) = session_id else {
+                return "Error: todos requires an active chat session.".to_string();
+            };
+            let _ = app.emit("tool-call", "📋 *Listing active todos*\n".to_string());
+            match get_active_list(app, session_id) {
+                Ok(Some(summary)) => {
+                    serde_json::to_string_pretty(&summary).unwrap_or_else(|_| "null".to_string())
+                }
+                Ok(None) => {
+                    "No active todo list for this session. Call `todos` with action `add` to start one."
+                        .to_string()
+                }
+                Err(err) => format!("Error: {err}"),
+            }
+        }
+        "add" => {
+            let Some(session_id) = session_id else {
+                return "Error: todos requires an active chat session.".to_string();
+            };
+            let title = args["title"].as_str().unwrap_or("").to_string();
+            if title.trim().is_empty() {
+                return "Error: 'title' is required for the 'add' action.".to_string();
+            }
+            let description = args["description"].as_str().unwrap_or("").to_string();
+            let _ = app.emit("tool-call", format!("✅ *Adding todo: {}*\n", title.trim()));
+            match add_todo(app, session_id, &title, &description) {
+                Ok(summary) => {
+                    let payload = json!({
+                        "type": "todo_state",
+                        "list_id": summary.list_id,
+                        "session_id": summary.session_id,
+                        "summary": &summary,
+                    });
+                    let _ = app.emit("todo-state", payload.clone());
+                    serde_json::to_string_pretty(&summary).unwrap_or_else(|_| payload.to_string())
+                }
+                Err(err) => format!("Error: {err}"),
+            }
+        }
+        "update_status" => {
+            let Some(session_id) = session_id else {
+                return "Error: todos requires an active chat session.".to_string();
+            };
+            let todo_id = args["todo_id"].as_str().unwrap_or("");
+            let status = args["status"].as_str().unwrap_or("");
+            if todo_id.is_empty() {
+                return "Error: 'todo_id' is required for the 'update_status' action.".to_string();
+            }
+            // Truncate on char boundaries only: the model may pass multi-byte
+            // utf-8 ids, and byte slicing would panic on non-boundary offsets.
+            let id_preview: String = todo_id.chars().take(8).collect();
+            let _ = app.emit(
+                "tool-call",
+                format!("🔄 *Updating todo status: {} → {}*\n", id_preview, status),
+            );
+            match update_todo_status(app, session_id, todo_id, status) {
+                Ok(record) => {
+                    let _ = app.emit(
+                        "todo-state",
+                        json!({
+                            "type": "todo_updated",
+                            "todo": &record,
+                        }),
+                    );
+                    serde_json::to_string_pretty(&record).unwrap_or_else(|_| record.id.clone())
+                }
+                Err(err) => format!("Error: {err}"),
+            }
+        }
+        "clear_completed" => {
+            let Some(session_id) = session_id else {
+                return "Error: todos requires an active chat session.".to_string();
+            };
+            let _ = app.emit("tool-call", "🧹 *Clearing completed todos*\n".to_string());
+            match clear_completed(app, session_id) {
+                Ok(summary) => {
+                    let _ = app.emit(
+                        "todo-state",
+                        json!({
+                            "type": "todo_cleared",
+                            "list_id": summary.list_id,
+                            // Ship the authoritative snapshot so the UI never has
+                            // to prune locally: parallel agents may write between
+                            // the clear and the event being handled.
+                            "summary": &summary,
+                        }),
+                    );
+                    serde_json::to_string_pretty(&summary)
+                        .unwrap_or_else(|_| summary.list_id.clone())
+                }
+                Err(err) => format!("Error: {err}"),
+            }
+        }
+        "archive" => {
+            let Some(session_id) = session_id else {
+                return "Error: todos requires an active chat session.".to_string();
+            };
+            let new_title = args["new_title"].as_str();
+            let _ = app.emit(
+                "tool-call",
+                format!(
+                    "📦 *Archiving todo list, starting new: {}*\n",
+                    new_title.unwrap_or("Working plan")
+                ),
+            );
+            // Rotate in a single critical section: a concurrent `add` from
+            // another agent can no longer create a list that is immediately
+            // orphaned by the marker swap.
+            match rotate_active_list(app, session_id, new_title) {
+                Ok(summary) => {
+                    let _ = app.emit(
+                        "todo-state",
+                        json!({
+                            "type": "todo_list_changed",
+                            "list_id": summary.list_id,
+                            "summary": &summary,
+                        }),
+                    );
+                    serde_json::to_string_pretty(&summary)
+                        .unwrap_or_else(|_| summary.list_id.clone())
+                }
+                Err(err) => format!("Error: {err}"),
+            }
+        }
+        _ => format!(
+            "Unknown todos action '{}'. Supported: list, add, update_status, clear_completed, archive.",
+            action
+        ),
+    }
 }
 
 // ─── Tauri commands ──────────────────────────────────────────────────────────

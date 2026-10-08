@@ -465,7 +465,7 @@ const zhTW: Messages = {
             runShell: "執行 PowerShell / bash 指令碼",
             knowledgeGraph: "以 Neo4j 為後端的知識圖譜查詢",
             todos:
-                "todo_add / todo_update_status / todo_list / todo_clear_completed / todo_archive。此計畫與聊天工作階段及所有平行代理共用。",
+                "透過 `todos` 工具管理工作階段待辦清單（list / add / update_status / clear_completed / archive）。此計畫與聊天工作階段及所有平行代理共用。",
             memory: "工作階段 / 使用者 / 儲存庫記憶儲存",
         },
     },

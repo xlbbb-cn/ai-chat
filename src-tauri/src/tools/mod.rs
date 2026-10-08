@@ -421,81 +421,39 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
         tools.push(json!({
             "type": "function",
             "function": {
-                "name": "todo_add",
-                "description": "Add a new todo item to the active session todo list. Use this to plan out work for any non-trivial task. Returns the full list including the new item.",
+                "name": "todos",
+                "description": "Manage the todo list of the current chat session — the `file_actions` counterpart for plans. ALWAYS call action 'list' first to check whether this session already has todos before planning or adding items: the list is long-running session state shared with every parallel agent, and the UI mirrors every change live. Actions: 'list' returns the active list with item ids and statuses, 'add' appends a new item, 'update_status' moves one item through pending → in_progress → completed/cancelled, 'clear_completed' removes finished items, 'archive' archives the active list and starts a fresh one.",
                 "parameters": {
                     "type": "object",
                     "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["list", "add", "update_status", "clear_completed", "archive"],
+                            "description": "The operation to perform: list the session's todos, add a new item, update one item's status, clear completed items, or archive the active list."
+                        },
                         "title": {
                             "type": "string",
-                            "description": "Short, action-oriented title of the todo item."
+                            "description": "Short, action-oriented title of the todo item (required for 'add')."
                         },
                         "description": {
                             "type": "string",
-                            "description": "Optional longer description with concrete acceptance criteria."
-                        }
-                    },
-                    "required": ["title"]
-                }
-            }
-        }));
-        tools.push(json!({
-            "type": "function",
-            "function": {
-                "name": "todo_update_status",
-                "description": "Update the status of an existing todo item by id. Use this to mark items as in_progress when you start them, completed when done, or cancelled when no longer relevant.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
+                            "description": "Optional longer description with concrete acceptance criteria (only for 'add')."
+                        },
                         "todo_id": {
                             "type": "string",
-                            "description": "The id of the todo item to update."
+                            "description": "Id of the todo item to update (required for 'update_status'). Copy it from a 'list' result — do not invent one."
                         },
                         "status": {
                             "type": "string",
                             "enum": ["pending", "in_progress", "completed", "cancelled"],
-                            "description": "The new status for the todo item."
-                        }
-                    },
-                    "required": ["todo_id", "status"]
-                }
-            }
-        }));
-        tools.push(json!({
-            "type": "function",
-            "function": {
-                "name": "todo_list",
-                "description": "Return the current active todo list for this session, including all items with their ids, statuses, and descriptions. Call this whenever you need to check progress, re-plan, or pick the next todo to work on.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {}
-                }
-            }
-        }));
-        tools.push(json!({
-            "type": "function",
-            "function": {
-                "name": "todo_clear_completed",
-                "description": "Remove every completed todo item from the active list. Use this after finishing a batch of work to keep the list focused.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {}
-                }
-            }
-        }));
-        tools.push(json!({
-            "type": "function",
-            "function": {
-                "name": "todo_archive",
-                "description": "Archive the current todo list and start a fresh one. Use this when the previous plan is finished and a new round of work begins.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
+                            "description": "New status for the item (required for 'update_status')."
+                        },
                         "new_title": {
                             "type": "string",
-                            "description": "Optional title for the new active list. Defaults to 'Working plan'."
+                            "description": "Optional title for the new active list after archiving (only for 'archive'). Defaults to 'Working plan'."
                         }
-                    }
+                    },
+                    "required": ["action"]
                 }
             }
         }));
@@ -1831,7 +1789,7 @@ pub async fn execute_tool(
     protected_skill_roots: &[PathBuf],
     // Current autonomous mission identifier when executing inside a sub-agent.
     mission_id: Option<&str>,
-    // Current chat session id (used by session-scoped helpers like todo_add).
+    // Current chat session id (used by session-scoped helpers like the `todos` tool).
     session_id: Option<&str>,
     // Active skill directories accessible via skill_read tool (empty = tool not available).
     active_skill_dirs: &[(String, PathBuf)],
@@ -2026,129 +1984,11 @@ pub async fn execute_tool(
             )
             .await
         }
-        "todo_add" => {
-            let Some(session_id) = session_id else {
-                return "Error: todo_add requires an active chat session.".to_string();
-            };
-            let title = args["title"].as_str().unwrap_or("").to_string();
-            if title.trim().is_empty() {
-                return "Error: todo title cannot be empty.".to_string();
-            }
-            let description = args["description"].as_str().unwrap_or("").to_string();
-            let _ = app.emit("tool-call", format!("✅ *Adding todo: {}*\n", title.trim()));
-            match crate::todos::add_todo(app, session_id, &title, &description) {
-                Ok(summary) => {
-                    let payload = json!({
-                        "type": "todo_state",
-                        "list_id": summary.list_id,
-                        "session_id": summary.session_id,
-                        "summary": &summary,
-                    });
-                    let _ = app.emit("todo-state", payload.clone());
-                    serde_json::to_string_pretty(&summary).unwrap_or_else(|_| payload.to_string())
-                }
-                Err(err) => format!("Error: {err}"),
-            }
-        }
-        "todo_update_status" => {
-            let Some(session_id) = session_id else {
-                return "Error: todo_update_status requires an active chat session.".to_string();
-            };
-            let todo_id = args["todo_id"].as_str().unwrap_or("");
-            let status = args["status"].as_str().unwrap_or("");
-            if todo_id.is_empty() {
-                return "Error: todo_id is required.".to_string();
-            }
-            // Truncate on char boundaries only: the model may pass multi-byte
-            // utf-8 ids, and byte slicing would panic on non-boundary offsets.
-            let id_preview: String = todo_id.chars().take(8).collect();
-            let _ = app.emit(
-                "tool-call",
-                format!("🔄 *Updating todo status: {} → {}*\n", id_preview, status),
-            );
-            match crate::todos::update_todo_status(app, session_id, todo_id, status) {
-                Ok(record) => {
-                    let _ = app.emit(
-                        "todo-state",
-                        json!({
-                            "type": "todo_updated",
-                            "todo": &record,
-                        }),
-                    );
-                    serde_json::to_string_pretty(&record).unwrap_or_else(|_| record.id.clone())
-                }
-                Err(err) => format!("Error: {err}"),
-            }
-        }
-        "todo_list" => {
-            let Some(session_id) = session_id else {
-                return "Error: todo_list requires an active chat session.".to_string();
-            };
-            let _ = app.emit("tool-call", "📋 *Listing active todos*\n".to_string());
-            match crate::todos::get_active_list(app, session_id) {
-                Ok(Some(summary)) => {
-                    serde_json::to_string_pretty(&summary).unwrap_or_else(|_| "null".to_string())
-                }
-                Ok(None) => "No active todo list for this session. Call `todo_add` to start one."
-                    .to_string(),
-                Err(err) => format!("Error: {err}"),
-            }
-        }
-        "todo_clear_completed" => {
-            let Some(session_id) = session_id else {
-                return "Error: todo_clear_completed requires an active chat session.".to_string();
-            };
-            let _ = app.emit("tool-call", "🧹 *Clearing completed todos*\n".to_string());
-            match crate::todos::clear_completed(app, session_id) {
-                Ok(summary) => {
-                    let _ = app.emit(
-                        "todo-state",
-                        json!({
-                            "type": "todo_cleared",
-                            "list_id": summary.list_id,
-                            // Ship the authoritative snapshot so the UI never has
-                            // to prune locally: parallel agents may write between
-                            // the clear and the event being handled.
-                            "summary": &summary,
-                        }),
-                    );
-                    serde_json::to_string_pretty(&summary)
-                        .unwrap_or_else(|_| summary.list_id.clone())
-                }
-                Err(err) => format!("Error: {err}"),
-            }
-        }
-        "todo_archive" => {
-            let Some(session_id) = session_id else {
-                return "Error: todo_archive requires an active chat session.".to_string();
-            };
-            let new_title = args["new_title"].as_str();
-            let _ = app.emit(
-                "tool-call",
-                format!(
-                    "📦 *Archiving todo list, starting new: {}*\n",
-                    new_title.unwrap_or("Working plan")
-                ),
-            );
-            // Rotate in a single critical section: a concurrent `todo_add` from
-            // another agent can no longer create a list that is immediately
-            // orphaned by the marker swap.
-            match crate::todos::rotate_active_list(app, session_id, new_title) {
-                Ok(summary) => {
-                    let _ = app.emit(
-                        "todo-state",
-                        json!({
-                            "type": "todo_list_changed",
-                            "list_id": summary.list_id,
-                            "summary": &summary,
-                        }),
-                    );
-                    serde_json::to_string_pretty(&summary)
-                        .unwrap_or_else(|_| summary.list_id.clone())
-                }
-                Err(err) => format!("Error: {err}"),
-            }
-        }
+        // The `todos` tool is a single action-based entry point (like
+        // `file_actions`). Legacy per-action names are routed to the same
+        // handler so chats continued from older sessions keep working.
+        "todos" | "todo_add" | "todo_update_status" | "todo_list" | "todo_clear_completed"
+        | "todo_archive" => todos::handle_todos_tool(app, name, &args, session_id),
         "skill_read" => {
             let action = args["action"].as_str().unwrap_or("");
             let skill_name = args["skill_name"].as_str().unwrap_or("");

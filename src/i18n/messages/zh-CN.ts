@@ -465,7 +465,7 @@ const zhCN: Messages = {
             runShell: "运行 PowerShell / bash 脚本",
             knowledgeGraph: "基于 Neo4j 的知识图谱查询",
             todos:
-                "todo_add / todo_update_status / todo_list / todo_clear_completed / todo_archive。该计划与聊天会话及所有并行智能体共享。",
+                "通过 `todos` 工具管理会话待办清单（list / add / update_status / clear_completed / archive）。该计划与聊天会话及所有并行智能体共享。",
             memory: "会话 / 用户 / 仓库记忆存储",
         },
     },

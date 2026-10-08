@@ -497,7 +497,7 @@ const en = {
             runShell: "Run PowerShell / bash scripts",
             knowledgeGraph: "Neo4j-backed knowledge graph queries",
             todos:
-                "todo_add / todo_update_status / todo_list / todo_clear_completed / todo_archive. The plan is shared with the chat session and every parallel agent.",
+                "The session todo list via the `todos` tool (list / add / update_status / clear_completed / archive). The plan is shared with the chat session and every parallel agent.",
             memory: "Session / user / repo memory store",
         },
     },

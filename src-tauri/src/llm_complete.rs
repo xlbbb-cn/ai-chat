@@ -1430,6 +1430,29 @@ pub async fn chat_completion(
         system_content.push_str(timer_guidance);
     }
 
+    // ── Todo guidance ───────────────────────────────────────────────────────
+    // The tool description carries the mechanics; this states the *policy* —
+    // check the session's list before planning so work continues from the
+    // existing plan instead of silently starting a new one.
+    if config
+        .selected_tools
+        .iter()
+        .any(|t| t == "todo_list" || t == "todo")
+    {
+        let todo_guidance = "\
+        TODOS: You have a `todos` tool managing this session's todo list. Before \
+        planning or starting non-trivial work, call it with action `list` to check \
+        whether the session already has todos; the active list is also shown to you \
+        as internal context when it has unfinished items. If a list exists, continue \
+        from it and update each item's status as you work (`pending` → `in_progress` \
+        → `completed`); add items (action `add`) when a new multi-step task begins. \
+        The UI mirrors every change live, so never leave stale items behind.";
+        if !system_content.is_empty() {
+            system_content.push_str("\n\n");
+        }
+        system_content.push_str(todo_guidance);
+    }
+
     // ── Message layout (prompt-cache conscious) ─────────────────────────────
     // Static prefix first (system prompt, skill context, conversation history),
     // dynamic blocks (session summary, todo list) last — right before the
