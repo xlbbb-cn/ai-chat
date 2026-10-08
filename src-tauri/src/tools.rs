@@ -1,8 +1,11 @@
 use crate::db;
+use ignore::WalkState;
 use serde_json::{json, Value};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager};
 
 #[derive(Clone, Copy)]
@@ -918,7 +921,7 @@ impl SearchMatcher {
                 if *case_sensitive {
                     line.contains(needle)
                 } else {
-                    line.to_lowercase().contains(needle_lower)
+                    contains_ignore_case(line, needle_lower)
                 }
             }
             SearchMatcher::Regex(regex) => regex.is_match(line),
@@ -926,14 +929,73 @@ impl SearchMatcher {
     }
 }
 
-struct SearchOptions<'a> {
+/// Case-insensitive `contains` that does not allocate. The previous version
+/// lowercased *every line of every file*, i.e. one `String` allocation per
+/// line — hundreds of thousands of them on a large tree. ASCII folding is
+/// byte-identical to `str::to_lowercase` for ASCII input, so it is only used
+/// when both sides are ASCII; anything else falls back to the allocating path
+/// so Unicode casing behaviour is unchanged.
+fn contains_ignore_case(haystack: &str, needle_lower: &str) -> bool {
+    if !(haystack.is_ascii() && needle_lower.is_ascii()) {
+        return haystack.to_lowercase().contains(needle_lower);
+    }
+
+    let hay = haystack.as_bytes();
+    let needle = needle_lower.as_bytes();
+    if needle.is_empty() {
+        return true;
+    }
+    if hay.len() < needle.len() {
+        return false;
+    }
+
+    let first = needle[0];
+    let last_start = hay.len() - needle.len();
+    (0..=last_start).any(|i| {
+        // The candidate byte must be folded too — matching a raw 'H' against a
+        // lowercased 'h' would skip every capitalised hit.
+        hay[i].to_ascii_lowercase() == first
+            && hay[i..i + needle.len()].eq_ignore_ascii_case(needle)
+    })
+}
+
+/// Search budgets. A broad `file_actions` search used to walk the entire
+/// workspace, read every file in full and buffer every matching line, which
+/// turns a tree with a few thousand files into a multi-second (or worse)
+/// block — even though `truncate_tool_output` keeps only 8 000 characters of
+/// the result. The walk is now parallel and aborts as soon as a budget is
+/// full, so a huge tree degrades to a "useful prefix" instead of a hang.
+const SEARCH_MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
+const SEARCH_MAX_FILES: usize = 20_000;
+const SEARCH_MAX_MATCHES: usize = 1_000;
+const SEARCH_MAX_ERRORS: usize = 20;
+
+#[derive(Clone, Debug)]
+struct SearchOptions {
     recursive: bool,
     case_sensitive: bool,
     use_regex: bool,
     smart_case: bool,
     include_hidden: bool,
     respect_gitignore: bool,
-    glob: Option<&'a str>,
+    glob: Option<String>,
+    /// Hard cap on collected `path:line:text` rows.
+    max_matches: usize,
+}
+
+impl Default for SearchOptions {
+    fn default() -> Self {
+        Self {
+            recursive: true,
+            case_sensitive: false,
+            use_regex: false,
+            smart_case: false,
+            include_hidden: true,
+            respect_gitignore: false,
+            glob: None,
+            max_matches: SEARCH_MAX_MATCHES,
+        }
+    }
 }
 
 fn should_use_case_sensitive_search(query: &str, case_sensitive: bool, smart_case: bool) -> bool {
@@ -968,30 +1030,45 @@ fn build_search_glob_matcher(glob: Option<&str>) -> Result<Option<globset::GlobS
 }
 
 fn build_search_display_path(target: &Path, root: &Path) -> String {
-    target
-        .strip_prefix(root)
-        .ok()
-        .filter(|path| !path.as_os_str().is_empty())
-        .unwrap_or(target)
-        .to_string_lossy()
-        .to_string()
+    // Forward slashes on every platform: the same tree must produce the same
+    // `path:line:text` rows on Windows as on macOS/Linux, otherwise the model
+    // sees (and has to re-parse) backslash paths it cannot paste back in.
+    normalize_search_match_path(target, root)
 }
 
 fn is_probably_binary(bytes: &[u8]) -> bool {
     bytes.iter().take(1024).any(|&byte| byte == 0)
 }
 
-fn search_file_contents(
+/// Result of inspecting one candidate file.
+enum FileScan {
+    /// Nothing matched (also used for glob-filtered-out files).
+    Empty,
+    Hits(Vec<String>),
+    /// Larger than `SEARCH_MAX_FILE_BYTES`; skipped without being read.
+    TooLarge,
+    /// Contains NUL bytes in the first KiB; skipped.
+    Binary,
+}
+
+fn scan_entry(
     target: &Path,
     target_root: &Path,
     matcher: &SearchMatcher,
     glob_matcher: Option<&globset::GlobSet>,
-    results: &mut Vec<String>,
-) -> Result<(), String> {
+) -> Result<FileScan, String> {
     if let Some(glob_matcher) = glob_matcher {
         let match_path = normalize_search_match_path(target, target_root);
         if !glob_matcher.is_match(&match_path) {
-            return Ok(());
+            return Ok(FileScan::Empty);
+        }
+    }
+
+    // Cheap `stat` first: a workspace full of multi-hundred-MB artifacts used
+    // to be slurped into memory just to be rejected as binary afterwards.
+    if let Ok(metadata) = fs::metadata(target) {
+        if metadata.len() > SEARCH_MAX_FILE_BYTES {
+            return Ok(FileScan::TooLarge);
         }
     }
 
@@ -999,99 +1076,231 @@ fn search_file_contents(
         fs::read(target).map_err(|e| format!("Failed to read '{}': {}", target.display(), e))?;
 
     if is_probably_binary(&bytes) {
-        return Ok(());
+        return Ok(FileScan::Binary);
     }
 
     let text = String::from_utf8_lossy(&bytes);
     let display_path = build_search_display_path(target, target_root);
+    let mut hits = Vec::new();
     for (index, line) in text.lines().enumerate() {
         if matcher.is_match(line) {
-            results.push(format!("{}:{}:{}", display_path, index + 1, line));
+            hits.push(format!("{}:{}:{}", display_path, index + 1, line));
         }
     }
 
-    Ok(())
+    if hits.is_empty() {
+        Ok(FileScan::Empty)
+    } else {
+        Ok(FileScan::Hits(hits))
+    }
+}
+
+/// Shared, mutex-guarded state for one search. The parallel walker runs several
+/// threads at once, so the match budget is authoritative here rather than in an
+/// atomic — an exact cap is worth one uncontended lock per file that has hits.
+#[derive(Default)]
+struct SearchAccumulator {
+    results: Vec<String>,
+    errors: Vec<String>,
+    files_scanned: usize,
+    files_skipped_large: usize,
+    files_skipped_binary: usize,
+    match_budget_left: usize,
+    exhausted: bool,
+}
+
+impl SearchAccumulator {
+    fn with_match_budget(max_matches: usize) -> Self {
+        Self {
+            match_budget_left: max_matches,
+            ..Self::default()
+        }
+    }
+
+    fn push_error(&mut self, message: String) {
+        if self.errors.len() < SEARCH_MAX_ERRORS {
+            self.errors.push(message);
+        }
+    }
+}
+
+/// Folds one file's scan into the accumulator. Returns `WalkState::Quit` once a
+/// budget is spent so the walker stops descending immediately.
+fn accumulate_scan(acc: &mut SearchAccumulator, scan: Result<FileScan, String>) -> WalkState {
+    if acc.exhausted {
+        return WalkState::Quit;
+    }
+
+    acc.files_scanned += 1;
+    if acc.files_scanned > SEARCH_MAX_FILES {
+        acc.exhausted = true;
+        return WalkState::Quit;
+    }
+
+    match scan {
+        Ok(FileScan::Hits(hits)) => {
+            let take = hits.len().min(acc.match_budget_left);
+            acc.match_budget_left -= take;
+            acc.results.extend(hits.into_iter().take(take));
+            if acc.match_budget_left == 0 {
+                acc.exhausted = true;
+                return WalkState::Quit;
+            }
+        }
+        Ok(FileScan::TooLarge) => acc.files_skipped_large += 1,
+        Ok(FileScan::Binary) => acc.files_skipped_binary += 1,
+        Ok(FileScan::Empty) => {}
+        Err(err) => acc.push_error(err),
+    }
+
+    WalkState::Continue
+}
+
+fn render_search_output(acc: &SearchAccumulator, max_matches: usize) -> String {
+    if acc.results.is_empty() && acc.errors.is_empty() {
+        return "(no matches)".to_string();
+    }
+
+    let mut output = acc.results.join("\n");
+    if !acc.errors.is_empty() {
+        if !output.is_empty() {
+            output.push('\n');
+        }
+        output.push_str("STDERR:\n");
+        output.push_str(&acc.errors.join("\n"));
+    }
+
+    // The footer is emitted after the body so `truncate_tool_output`'s tail
+    // window always keeps it: the model learns *why* the list is short and can
+    // narrow the query instead of retrying the same search.
+    let mut notes: Vec<String> = Vec::new();
+    if acc.exhausted {
+        notes.push(format!(
+            "stopped early at the {max_matches}-match limit — narrow the path, add a `glob`, or raise `max_results`"
+        ));
+    }
+    if acc.files_skipped_large > 0 {
+        notes.push(format!(
+            "{} file(s) over {} MiB skipped",
+            acc.files_skipped_large,
+            SEARCH_MAX_FILE_BYTES / (1024 * 1024)
+        ));
+    }
+    if acc.files_skipped_binary > 0 {
+        notes.push(format!(
+            "{} binary file(s) skipped",
+            acc.files_skipped_binary
+        ));
+    }
+    if !notes.is_empty() {
+        if !output.is_empty() {
+            output.push('\n');
+        }
+        output.push_str(&format!(
+            "[search] {} file(s) scanned — {}",
+            acc.files_scanned,
+            notes.join("; ")
+        ));
+    }
+
+    output
 }
 
 fn run_integrated_search(
     query: &str,
     target: &Path,
     target_root: &Path,
-    options: SearchOptions<'_>,
+    options: &SearchOptions,
 ) -> Result<String, String> {
     let case_sensitive =
         should_use_case_sensitive_search(query, options.case_sensitive, options.smart_case);
     let matcher = SearchMatcher::build(query, case_sensitive, options.use_regex)?;
-    let glob_matcher = build_search_glob_matcher(options.glob)?;
-    let mut results = Vec::new();
-    let mut errors = Vec::new();
+    let glob_matcher = build_search_glob_matcher(options.glob.as_deref())?;
+    let max_matches = options.max_matches.max(1);
 
     if target.is_file() {
-        search_file_contents(
-            target,
-            target_root,
-            &matcher,
-            glob_matcher.as_ref(),
-            &mut results,
-        )?;
-    } else if target.is_dir() {
-        let mut walker = ignore::WalkBuilder::new(target);
-        walker.standard_filters(false);
-        walker.hidden(!options.include_hidden);
-        walker.git_ignore(options.respect_gitignore);
-        walker.git_exclude(options.respect_gitignore);
-        walker.parents(options.respect_gitignore);
-        walker.ignore(options.respect_gitignore);
-        walker.follow_links(false);
+        let mut acc = SearchAccumulator::with_match_budget(max_matches);
+        let scan = scan_entry(target, target_root, &matcher, glob_matcher.as_ref());
+        accumulate_scan(&mut acc, scan);
+        return Ok(render_search_output(&acc, max_matches));
+    }
 
-        if !options.recursive {
-            walker.max_depth(Some(1));
-        }
-
-        for entry in walker.build() {
-            match entry {
-                Ok(entry) => {
-                    if !entry
-                        .file_type()
-                        .is_some_and(|file_type| file_type.is_file())
-                    {
-                        continue;
-                    }
-
-                    if let Err(err) = search_file_contents(
-                        entry.path(),
-                        target_root,
-                        &matcher,
-                        glob_matcher.as_ref(),
-                        &mut results,
-                    ) {
-                        errors.push(err);
-                    }
-                }
-                Err(err) => errors.push(err.to_string()),
-            }
-        }
-    } else {
+    if !target.is_dir() {
         return Err(format!(
             "Search target '{}' does not exist",
             target.display()
         ));
     }
 
-    if results.is_empty() && errors.is_empty() {
-        return Ok("(no matches)".to_string());
+    let mut walker = ignore::WalkBuilder::new(target);
+    walker.standard_filters(false);
+    walker.hidden(!options.include_hidden);
+    walker.git_ignore(options.respect_gitignore);
+    walker.git_exclude(options.respect_gitignore);
+    walker.parents(options.respect_gitignore);
+    walker.ignore(options.respect_gitignore);
+    walker.follow_links(false);
+
+    if !options.recursive {
+        walker.max_depth(Some(1));
     }
 
-    let mut output = results.join("\n");
-    if !errors.is_empty() {
-        if !output.is_empty() {
-            output.push('\n');
-        }
-        output.push_str("STDERR:\n");
-        output.push_str(&errors.join("\n"));
-    }
+    let acc = Mutex::new(SearchAccumulator::with_match_budget(max_matches));
+    // Read-mostly flag so the other worker threads bail out without first
+    // serialising on the accumulator mutex.
+    let exhausted = AtomicBool::new(false);
+    let matcher = &matcher;
+    let glob_matcher = glob_matcher.as_ref();
+    let acc_ref = &acc;
+    let exhausted_ref = &exhausted;
 
-    Ok(output)
+    // Directory traversal dominates the cost of a search over a few thousand
+    // files (one `stat` + one `open` + one `read` per file, all IO-bound), so
+    // it is fanned out across cores. `ignore` defaults to
+    // `available_parallelism().min(12)` worker threads.
+    walker.build_parallel().run(|| {
+        Box::new(move |entry| {
+            if exhausted_ref.load(Ordering::Relaxed) {
+                return WalkState::Quit;
+            }
+
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(err) => {
+                    acc_ref
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .push_error(err.to_string());
+                    return WalkState::Continue;
+                }
+            };
+
+            if !entry
+                .file_type()
+                .is_some_and(|file_type| file_type.is_file())
+            {
+                return WalkState::Continue;
+            }
+
+            // Read + match outside the lock; only the merge is serialised.
+            let scan = scan_entry(entry.path(), target_root, matcher, glob_matcher);
+            let state =
+                accumulate_scan(&mut acc_ref.lock().unwrap_or_else(|p| p.into_inner()), scan);
+            if state == WalkState::Quit {
+                exhausted_ref.store(true, Ordering::Relaxed);
+            }
+            state
+        })
+    });
+
+    let mut acc = acc
+        .into_inner()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    // Parallel traversal returns rows in nondeterministic order; sort so the
+    // same tree always produces byte-identical output.
+    acc.results.sort();
+
+    Ok(render_search_output(&acc, max_matches))
 }
 
 fn decode_process_bytes(bytes: &[u8], _hint: OutputDecodeHint) -> String {
@@ -1600,7 +1809,13 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
                         },
                         "respect_gitignore": {
                             "type": "boolean",
-                            "description": "Whether .gitignore, .ignore, and git exclude rules should be respected during directory searches (only for 'search'). Defaults to false."
+                            "description": "Whether .gitignore, .ignore, and git exclude rules should be respected during directory searches (only for 'search'). Defaults to false. Set true on large trees — it is the single biggest speedup, because it skips node_modules/, target/ and similar build output."
+                        },
+                        "max_results": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 20000,
+                            "description": "Maximum number of matching lines to return for 'search'. Defaults to 1000. Searching is parallel and stops early once this budget is spent, so a broad query degrades to a fast prefix instead of a long stall."
                         },
                         "patch": {
                             "type": "string",
@@ -1884,6 +2099,12 @@ pub fn get_skill_read_tool() -> Value {
                     "glob": {
                         "type": "string",
                         "description": "Optional file path glob filter for search targets, such as '**/*.md' (only for 'search')."
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 20000,
+                        "description": "Maximum number of matching lines to return for 'search'. Defaults to 1000 (only for 'search')."
                     }
                 },
                 "required": ["action", "skill_name"]
@@ -2335,6 +2556,7 @@ fn build_workspace_scoped_shell_code(shell_type: &str, workspace_dir: &Path, cod
 
 #[cfg(test)]
 mod tests {
+    use super::contains_ignore_case;
     use super::decode_process_bytes;
     #[cfg(windows)]
     use super::decode_windows_process_bytes_with_code_pages;
@@ -2343,6 +2565,7 @@ mod tests {
     use super::validate_shell_working_directory_changes;
     use super::OutputDecodeHint;
     use super::SearchOptions;
+    use super::SEARCH_MAX_FILE_BYTES;
     use std::fs;
     use std::path::PathBuf;
     use uuid::Uuid;
@@ -2377,14 +2600,9 @@ mod tests {
             "needle",
             &dir,
             &root,
-            SearchOptions {
+            &SearchOptions {
                 recursive: false,
-                case_sensitive: false,
-                use_regex: false,
-                smart_case: false,
-                include_hidden: true,
-                respect_gitignore: false,
-                glob: None,
+                ..SearchOptions::default()
             },
         )
         .unwrap();
@@ -2407,14 +2625,9 @@ mod tests {
             "alpha\\d+",
             &dir,
             &root,
-            SearchOptions {
-                recursive: true,
-                case_sensitive: false,
+            &SearchOptions {
                 use_regex: true,
-                smart_case: false,
-                include_hidden: true,
-                respect_gitignore: false,
-                glob: None,
+                ..SearchOptions::default()
             },
         )
         .unwrap();
@@ -2434,14 +2647,9 @@ mod tests {
             "Needle",
             &file,
             &root,
-            SearchOptions {
-                recursive: true,
-                case_sensitive: false,
-                use_regex: false,
+            &SearchOptions {
                 smart_case: true,
-                include_hidden: true,
-                respect_gitignore: false,
-                glob: None,
+                ..SearchOptions::default()
             },
         )
         .unwrap();
@@ -2469,14 +2677,11 @@ mod tests {
             "needle",
             &dir,
             &root,
-            SearchOptions {
-                recursive: true,
-                case_sensitive: false,
-                use_regex: false,
-                smart_case: false,
+            &SearchOptions {
                 include_hidden: false,
                 respect_gitignore: true,
-                glob: Some("**/*.md"),
+                glob: Some("**/*.md".to_string()),
+                ..SearchOptions::default()
             },
         )
         .unwrap();
@@ -2487,6 +2692,81 @@ mod tests {
         assert!(!output.contains(".hidden.md"));
 
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn search_caps_matches_and_reports_the_truncation() {
+        let root = make_temp_dir("search-match-cap");
+        let dir = root.join("many");
+        fs::create_dir_all(&dir).unwrap();
+        for index in 0..40 {
+            fs::write(
+                dir.join(format!("file-{index:02}.txt")),
+                "needle one\nneedle two\n",
+            )
+            .unwrap();
+        }
+
+        let output = run_integrated_search(
+            "needle",
+            &dir,
+            &root,
+            &SearchOptions {
+                max_matches: 10,
+                ..SearchOptions::default()
+            },
+        )
+        .unwrap();
+
+        // 10 rows, no more, and a footer the model can act on.
+        let hits = output
+            .lines()
+            .filter(|line| line.contains(":needle"))
+            .count();
+        assert_eq!(hits, 10);
+        assert!(output.contains("[search]"));
+        assert!(output.contains("10-match limit"));
+        assert!(output.contains("max_results"));
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn search_skips_oversized_and_binary_files() {
+        let root = make_temp_dir("search-skip");
+        let dir = root.join("mixed");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("small.txt"), "needle here\n").unwrap();
+        fs::write(dir.join("blob.bin"), [0u8, 1, 2, 0, 3]).unwrap();
+        // Sparse-ish oversized file: 3 MiB of a repeated needle line.
+        let big_line = format!("needle {}\n", "x".repeat(64));
+        fs::write(
+            dir.join("big.txt"),
+            big_line.repeat((SEARCH_MAX_FILE_BYTES as usize / big_line.len()) + 8),
+        )
+        .unwrap();
+
+        let output =
+            run_integrated_search("needle", &dir, &root, &SearchOptions::default()).unwrap();
+
+        assert!(output.contains("small.txt:1:needle here"));
+        assert!(!output.contains("big.txt"));
+        assert!(!output.contains("blob.bin"));
+        assert!(output.contains("1 file(s) over 2 MiB skipped"));
+        assert!(output.contains("1 binary file(s) skipped"));
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn case_insensitive_literal_search_avoids_regressions() {
+        assert!(contains_ignore_case("Hello World", "hello"));
+        assert!(contains_ignore_case("HELLO", "hello"));
+        assert!(!contains_ignore_case("Hell", "hello"));
+        assert!(contains_ignore_case("aXaXa", ""));
+        // Non-ASCII still falls back to the Unicode-aware path.
+        assert!(contains_ignore_case("ÄÖÜ straße", "straße"));
+        assert!(!contains_ignore_case("ÄÖÜ", "abc"));
     }
 
     #[cfg(windows)]
@@ -3121,6 +3401,70 @@ mod tests {
         assert!(resolved.starts_with(&workspace_root));
 
         let _ = fs::remove_dir_all(&workspace_root);
+    }
+
+    /// Throwaway benchmark: 3 000 files × 60 lines, sequential-walk +
+    /// per-line `to_lowercase()` (the old algorithm) vs. the new parallel,
+    /// budgeted one. Delete after measuring.
+    #[test]
+    fn bench_search_many_files() {
+        use super::is_probably_binary;
+        use std::time::Instant;
+
+        let root = make_temp_dir("search-bench");
+        let dir = root.join("tree");
+        fs::create_dir_all(&dir).unwrap();
+        let body: String = (0..60)
+            .map(|i| {
+                if i % 7 == 0 {
+                    format!("line {i} needle here padding padding padding\n")
+                } else {
+                    format!("line {i} nothing to see padding padding padding\n")
+                }
+            })
+            .collect();
+        for i in 0..3000 {
+            fs::write(dir.join(format!("f{i:04}.txt")), &body).unwrap();
+        }
+
+        // --- old algorithm replica: sequential walk + per-line to_lowercase ---
+        let needle_lower = "needle".to_string();
+        let start = Instant::now();
+        let mut old_hits = 0usize;
+        for entry in ignore::WalkBuilder::new(&dir)
+            .standard_filters(false)
+            .build()
+        {
+            let entry = entry.unwrap();
+            if !entry.file_type().is_some_and(|ft| ft.is_file()) {
+                continue;
+            }
+            let bytes = fs::read(entry.path()).unwrap();
+            if is_probably_binary(&bytes) {
+                continue;
+            }
+            let text = String::from_utf8_lossy(&bytes);
+            for line in text.lines() {
+                if line.to_lowercase().contains(&needle_lower) {
+                    old_hits += 1;
+                }
+            }
+        }
+        let old_elapsed = start.elapsed();
+
+        let start = Instant::now();
+        let output =
+            run_integrated_search("needle", &dir, &root, &SearchOptions::default()).unwrap();
+        let new_elapsed = start.elapsed();
+        let new_hits = output.lines().filter(|l| l.contains(":needle")).count();
+
+        println!(
+            "BENCH 3000 files: old={old_elapsed:?} ({old_hits} hits)  new={new_elapsed:?} ({new_hits} hits)  speedup={:.1}x",
+            old_elapsed.as_secs_f64() / new_elapsed.as_secs_f64()
+        );
+        assert_eq!(old_hits, new_hits);
+
+        let _ = fs::remove_dir_all(&root);
     }
 }
 
@@ -3869,14 +4213,10 @@ pub async fn execute_tool(
                             &query,
                             &memory_root,
                             &workspace_dir,
-                            SearchOptions {
-                                recursive: true,
-                                case_sensitive: false,
-                                use_regex: false,
-                                smart_case: false,
+                            &SearchOptions {
                                 include_hidden: false,
-                                respect_gitignore: false,
-                                glob: Some("**/*.md"),
+                                glob: Some("**/*.md".to_string()),
+                                ..SearchOptions::default()
                             },
                         ) {
                             Ok(output) => {
@@ -4224,14 +4564,20 @@ pub async fn execute_tool(
                     }
                 }
                 "search" => {
-                    let query = args["query"].as_str().unwrap_or("");
-                    let recursive = args["recursive"].as_bool().unwrap_or(true);
-                    let case_sensitive = args["case_sensitive"].as_bool().unwrap_or(false);
-                    let smart_case = args["smart_case"].as_bool().unwrap_or(false);
-                    let use_regex = args["use_regex"].as_bool().unwrap_or(false);
-                    let glob = args["glob"].as_str();
-                    let include_hidden = args["include_hidden"].as_bool().unwrap_or(true);
-                    let respect_gitignore = args["respect_gitignore"].as_bool().unwrap_or(false);
+                    let query = args["query"].as_str().unwrap_or("").to_string();
+                    let options = SearchOptions {
+                        recursive: args["recursive"].as_bool().unwrap_or(true),
+                        case_sensitive: args["case_sensitive"].as_bool().unwrap_or(false),
+                        smart_case: args["smart_case"].as_bool().unwrap_or(false),
+                        use_regex: args["use_regex"].as_bool().unwrap_or(false),
+                        include_hidden: args["include_hidden"].as_bool().unwrap_or(true),
+                        respect_gitignore: args["respect_gitignore"].as_bool().unwrap_or(false),
+                        glob: args["glob"].as_str().map(str::to_string),
+                        max_matches: args["max_results"]
+                            .as_u64()
+                            .map(|value| value.clamp(1, 20_000) as usize)
+                            .unwrap_or(SEARCH_MAX_MATCHES),
+                    };
 
                     if query.is_empty() {
                         return "Error: query is required for search.".to_string();
@@ -4242,7 +4588,7 @@ pub async fn execute_tool(
                         format!(
                             "🔎 *Searching skill {} for {}*\n\n",
                             skill_name,
-                            serde_json::to_string(query).unwrap_or_else(|_| query.to_string())
+                            serde_json::to_string(&query).unwrap_or_else(|_| query.to_string())
                         ),
                     );
 
@@ -4250,20 +4596,14 @@ pub async fn execute_tool(
                         return format!("Error: path '{}' does not exist in skill '{}'", rel_path, skill_name);
                     }
 
-                    match run_integrated_search(
-                        query,
-                        &target_path,
-                        &skill_dir,
-                        SearchOptions {
-                            recursive,
-                            case_sensitive,
-                            use_regex,
-                            smart_case,
-                            include_hidden,
-                            respect_gitignore,
-                            glob,
-                        },
-                    ) {
+                    let search_root = skill_dir.clone();
+                    let outcome = tauri::async_runtime::spawn_blocking(move || {
+                        run_integrated_search(&query, &target_path, &search_root, &options)
+                    })
+                    .await
+                    .unwrap_or_else(|e| Err(format!("Search task failed: {}", e)));
+
+                    match outcome {
                         Ok(output) => with_root_header(output),
                         Err(e) => format!("Error: {}", e),
                     }
@@ -4805,14 +5145,20 @@ pub async fn execute_tool(
                     }
                 }
                 "search" => {
-                    let query = args["query"].as_str().unwrap_or("");
-                    let recursive = args["recursive"].as_bool().unwrap_or(true);
-                    let case_sensitive = args["case_sensitive"].as_bool().unwrap_or(false);
-                    let smart_case = args["smart_case"].as_bool().unwrap_or(false);
-                    let use_regex = args["use_regex"].as_bool().unwrap_or(false);
-                    let glob = args["glob"].as_str();
-                    let include_hidden = args["include_hidden"].as_bool().unwrap_or(true);
-                    let respect_gitignore = args["respect_gitignore"].as_bool().unwrap_or(false);
+                    let query = args["query"].as_str().unwrap_or("").to_string();
+                    let options = SearchOptions {
+                        recursive: args["recursive"].as_bool().unwrap_or(true),
+                        case_sensitive: args["case_sensitive"].as_bool().unwrap_or(false),
+                        smart_case: args["smart_case"].as_bool().unwrap_or(false),
+                        use_regex: args["use_regex"].as_bool().unwrap_or(false),
+                        include_hidden: args["include_hidden"].as_bool().unwrap_or(true),
+                        respect_gitignore: args["respect_gitignore"].as_bool().unwrap_or(false),
+                        glob: args["glob"].as_str().map(str::to_string),
+                        max_matches: args["max_results"]
+                            .as_u64()
+                            .map(|value| value.clamp(1, 20_000) as usize)
+                            .unwrap_or(SEARCH_MAX_MATCHES),
+                    };
 
                     if query.is_empty() {
                         return "Error: query is required for search.".to_string();
@@ -4823,26 +5169,23 @@ pub async fn execute_tool(
                         format!(
                             "🔎 *Searching {} for {}*\n\n",
                             path_str,
-                            serde_json::to_string(query).unwrap_or_else(|_| query.to_string())
+                            serde_json::to_string(&query).unwrap_or_else(|_| query.to_string())
                         ),
                     );
 
                     match resolve_file_action_path(app, action, path_str, &root_dir, true).await {
                         Ok(p) => {
-                            match run_integrated_search(
-                                query,
-                                &p,
-                                &root_dir,
-                                SearchOptions {
-                                    recursive,
-                                    case_sensitive,
-                                    use_regex,
-                                    smart_case,
-                                    include_hidden,
-                                    respect_gitignore,
-                                    glob,
-                                },
-                            ) {
+                            // Fan-out over a large tree plus per-file IO is
+                            // long-running blocking work — keep it off the
+                            // async runtime so streaming keeps flowing.
+                            let search_root = root_dir.clone();
+                            let outcome = tauri::async_runtime::spawn_blocking(move || {
+                                run_integrated_search(&query, &p, &search_root, &options)
+                            })
+                            .await
+                            .unwrap_or_else(|e| Err(format!("Search task failed: {}", e)));
+
+                            match outcome {
                                 Ok(output) => with_root_header(output),
                                 Err(e) => format!("Error: {}", e),
                             }
