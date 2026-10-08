@@ -107,7 +107,7 @@ export interface Message {
  * values `auto_accept_confirm_kinds` can meaningfully hold.
  *
  * The command kinds mirror `RiskLevel::confirm_kind()` in
- * `src-tauri/src/tools.rs`: L0 (`dangerous`), L1 (`system_config`),
+ * `src-tauri/src/tools/risk.rs`: L0 (`dangerous`), L1 (`system_config`),
  * L2 (`user_software`) and L3 (`user_data`) require approval, while L4-L6 never
  * prompt at all. `external_path` covers `file_actions` targeting an absolute
  * path outside the workspace. Keep this union in sync with the Rust side.

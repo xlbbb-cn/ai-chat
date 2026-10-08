@@ -46,7 +46,7 @@ node scripts/sync-version.cjs --bump patch
 npm run sync-version:git-tag
 npm run sync-version:bump-patch
 
-# Rust unit tests (only `todos` and `tools` modules have tests)
+# Rust unit tests (inside the `tools` module: dispatcher, `tools/todos`, `tools/timer`)
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
@@ -80,7 +80,7 @@ to a **draft** GitHub Release for the tag (also kept as workflow artifacts).
 - **Agent orchestration** (toggle via `use_agents` in config): `agent-plan-start`, `agent-task-start`, `agent-task-token`, `agent-task-done`, `agent-task-error`, `agent-aggregate-start`.
 - **Profiles / backup**: `src-tauri/src/backup.rs` owns profile export/import (app menu `save-profile` / `restore-profile`). The zip holds `config.json`, `profiles.json`, `mcp_servers.json`, `sub_agents.json`, `skills/`, `workspace/memory/`, `workspace/todos/` and a `chat.db` snapshot; import restores the workspace folders into the (possibly switched) active workspace. Named profiles inside the app (`save_profile_config` / `apply_profile_config` / `delete_profile_config`) are separate and stay in `lib.rs`.
 - **MCP warmup**: enabled servers in `mcp_servers.json` are spawned at app startup (`mcp::spawn_warmup`).
-- **Delay timers** (`src-tauri/src/timer.rs`): the `timer` tool (`timer_set` / `timer_list` / `timer_cancel`, toggled in the Tools panel) lets the assistant wait for slow work instead of polling — the LLM arms a delay and ends its turn; when it fires the backend emits `timer-fired` and the frontend injects the timer's `message` into the same session as a new user turn (`timer-state` keeps the timer bar above the input box in sync). Timers are mirrored to `timers.json` and re-armed at startup, where overdue ones fire immediately. Sub-agents never receive the timer tools (`agents.rs` filters them out).
+- **Delay timers** (`src-tauri/src/tools/timer.rs`): the `timer` tool (`timer_set` / `timer_list` / `timer_cancel`, toggled in the Tools panel) lets the assistant wait for slow work instead of polling — the LLM arms a delay and ends its turn; when it fires the backend emits `timer-fired` and the frontend injects the timer's `message` into the same session as a new user turn (`timer-state` keeps the timer bar above the input box in sync). Timers are mirrored to `timers.json` and re-armed at startup, where overdue ones fire immediately. Sub-agents never receive the timer tools (`agents.rs` filters them out).
 - **Model metadata** (`src-tauri/src/model_metadata.rs`): `fetch_model_metadata` pulls the public basellm/llm-metadata catalogue (6 h in-memory cache) and expands its `tags` into capability flags. `src/utils/modelMetadata.ts` fuzzy-matches remote model ids against it (vendor prefixes, date stamps, modality guards); "Fetch Models From API" stores the matches per model in `config.model_metadata` and uses the catalogue context window when the provider reports none. The chat toolbar renders those flags as icons inside the model picker's options, plus a thinking-depth selector for reasoning-capable models (`config.model_reasoning_effort` → `reasoning_effort`, resolved by `llm_complete::resolve_reasoning_effort` and applied to chat + sub-agent requests). The attachment picker follows the same flags: text is always accepted (inlined into the prompt), images need `Vision` (`image_url` parts), PDFs need `Files` (`file` parts), `wav`/`mp3` need `Audio` (`input_audio` parts); an unmatched model keeps the permissive default.
 - **Update check** (`src-tauri/src/update.rs`): `check_update` reads the releases of `xlbbb-cn/ai-chat` from the GitHub API, keeps the highest semver (drafts are always skipped, pre-releases behind `include_prerelease_updates`), ranks the attached bundles for the current OS/arch and flags the preferred one as `recommended`. `download_update` streams into the downloads folder while emitting `update-download-progress`; `open_update_file` / `reveal_update_file` / `open_release_page` hand off to the OS (URLs are restricted to this repository). UI: startup probe + banner in `App.tsx`, dialog in `components/UpdatePanel.tsx`, toggles under Settings → About & Updates.
 - **API layer**: `src/api.ts` wraps `invoke` + `listen`. `src/types.ts` is the canonical TS shape for `AppConfig`, `Skill`, `McpServer`, `SubAgent`, `AgentOrchestration`, `Profile`, `AgentMissionSnapshot`, `ModelMetadata`.
@@ -104,9 +104,9 @@ This is enforced by the skills/tools layer. Don't add code that lets a skill esc
 
 ## Tools & dangerous commands
 
-- Tools: `run_cmd`, `run_shell`, `file_actions`, `knowledge_graph` (Neo4j backend), plus `web_search` / `fetch_web` in `tools.rs`.
+- Tools: `run_cmd`, `run_shell`, `file_actions`, `knowledge_graph` (Neo4j backend), plus the `memory`, `todo_list` and `timer` tool families — all in `src-tauri/src/tools/` (`skill_read` is auto-injected when skills are active).
 - Some command patterns raise a frontend confirmation dialog. The Rust side blocks on `confirm_command` until the user replies. **If a tool call appears to hang, check the React tree for a pending `ConfirmDialog` / dangerous-command prompt before debugging the Rust side.**
-- `ConfirmKind` values: `dangerous` (L0), `system_config` (L1), `user_software` (L2), `user_data` (L3), `external_path` — these mirror `RiskLevel::confirm_kind()` in `tools.rs` (L4-L6 never prompt). Users can auto-accept kinds via `auto_accept_confirm_kinds` in config; the Tools panel only offers kinds the backend can actually emit, plus a one-click master switch that stores the `"*"` wildcard (matches every kind, including future ones).
+- `ConfirmKind` values: `dangerous` (L0), `system_config` (L1), `user_software` (L2), `user_data` (L3), `external_path` — these mirror `RiskLevel::confirm_kind()` in `tools/risk.rs` (L4-L6 never prompt). Users can auto-accept kinds via `auto_accept_confirm_kinds` in config; the Tools panel only offers kinds the backend can actually emit, plus a one-click master switch that stores the `"*"` wildcard (matches every kind, including future ones).
 
 ## Tauri 2 specifics for this repo
 
@@ -134,14 +134,22 @@ src-tauri/
   src/lib.rs               # state, menu, command registration, app setup
   src/llm_complete.rs      # chat_completion (SSE streaming)
   src/skills.rs            # SKILL.md frontmatter parser, list/save/delete
-  src/tools.rs             # run_cmd/run_shell/file_actions/kg/web_search
+  src/tools/               # tool executor, split by feature:
+    mod.rs                 #   dispatch/schemas/shared helpers (+ tests)
+    memory.rs              #   memory tool (session/user/repo + "all" fan-out)
+    file_actions.rs        #   file_actions handler, backups, diff compare
+    patch.rs               #   LLM-hardened unified patch parser/applier
+    paths.rs               #   workspace sandbox + shell cwd validation
+    process.rs             #   run_command + child output decoding
+    risk.rs                #   L0-L6 risk assessment, syntax gate
+    search.rs              #   integrated search engine
+    timer.rs               #   delay timers (fire → resume a session, + tests)
+    todos.rs               #   todo lists (+ tests)
+    neo4j_db.rs            #   Neo4j client wrapper (pub, re-exported at root)
   src/mcp.rs               # MCP stdio/SSE/HTTP/Streamable-HTTP, warmup, test
   src/model_metadata.rs    # llm-metadata catalogue fetch (capabilities/context)
   src/agents.rs            # sub-agents, orchestration, missions
-  src/todos.rs             # todo lists (also has unit tests)
   src/db.rs                # SQLite: history, API monitor, interaction log
-  src/neo4j_db.rs          # Neo4j client wrapper
-  src/search.rs            # web search / fetch helpers
   src/logger.rs            # file + println AppLogger
   capabilities/default.json
   tauri.conf.json

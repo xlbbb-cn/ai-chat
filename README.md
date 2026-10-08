@@ -265,7 +265,7 @@ ai-chat/
 │  ├─ src/lib.rs        # App entry and command registration
 │  ├─ src/llm_complete.rs
 │  ├─ src/skills.rs
-│  ├─ src/tools.rs
+│  ├─ src/tools/        # tools module (memory, file_actions, patch, risk, ...)
 │  ├─ src/mcp.rs
 │  └─ src/db.rs
 └─ README.md

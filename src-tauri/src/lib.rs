@@ -19,14 +19,13 @@ mod llm_complete;
 mod logger;
 pub mod mcp;
 pub mod model_metadata;
-pub mod neo4j_db;
 mod skills;
-mod timer;
-mod todos;
 mod tools;
 mod update;
 
 use logger::{AppLogger, LoggerOutput};
+pub use tools::neo4j_db;
+use tools::{timer, todos};
 
 const OPEN_APP_DATA_DIR_MENU_ID: &str = "open-app-data-dir";
 const SAVE_PROFILE_MENU_ID: &str = "save-profile";

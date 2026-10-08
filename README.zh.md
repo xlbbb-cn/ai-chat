@@ -264,7 +264,7 @@ ai-chat/
 │  ├─ src/lib.rs        # 应用入口与命令注册
 │  ├─ src/llm_complete.rs
 │  ├─ src/skills.rs
-│  ├─ src/tools.rs
+│  ├─ src/tools/        # 工具模块（memory / file_actions / patch / risk 等）
 │  ├─ src/mcp.rs
 │  └─ src/db.rs
 └─ README.md
