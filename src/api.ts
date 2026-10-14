@@ -349,8 +349,12 @@ export async function testMcpServer(server: McpServer): Promise<string> {
   return invoke("test_mcp_server", { server });
 }
 
-export async function cancelMcpTest(id: string): Promise<void> {
-  return invoke("cancel_mcp_test", { id });
+export async function startStdioMcp(id: string): Promise<void> {
+  return invoke("mcp_start_stdio", { serverId: id });
+}
+
+export async function stopStdioMcp(id: string): Promise<void> {
+  return invoke("mcp_stop_stdio", { serverId: id });
 }
 
 // ─── MCP Diagnostic Log ───────────────────────────────────────────────────────

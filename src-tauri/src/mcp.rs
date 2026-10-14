@@ -6,6 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::State;
 use tokio::io::AsyncBufReadExt;
 
+
 use crate::AppState;
 
 // ─── MCP Types ────────────────────────────────────────────────────────────────
@@ -108,6 +109,175 @@ pub fn append_mcp_log(state: &AppState, id: &str, level: McpLogLevel, message: S
         level,
         message,
     });
+}
+
+// ─── Stdio process pool ───────────────────────────────────────────────────────
+
+/// A live stdio MCP child process with its stdin/stdout handles.
+/// Stored in `AppState.mcp_children` and shared across LLM turns.
+pub struct StdioProcessHandle {
+    pub child: tokio::process::Child,
+    pub stdin: tokio::process::ChildStdin,
+    pub stdout_reader: tokio::io::BufReader<tokio::process::ChildStdout>,
+    pub next_id: u64,
+}
+
+/// Start a stdio MCP process: validate → spawn → initialize handshake → store in pool.
+pub async fn start_stdio_process(
+    state: &AppState,
+    server: &McpServer,
+) -> Result<(), String> {
+    let id = server.id.clone();
+    let name = server.name.clone();
+    let logs = state.mcp_logs.clone();
+
+    // Pre-flight validation: check command exists BEFORE spawning
+    if !command_exists(&server.command) {
+        let msg = format!(
+            "Command not found in PATH: {}. Make sure it is installed.",
+            server.command
+        );
+        append_mcp_log(&state, &id, McpLogLevel::Error, msg.clone());
+        return Err(msg);
+    }
+
+    append_mcp_log(
+        &state,
+        &id,
+        McpLogLevel::Info,
+        format!(
+            "Starting stdio process: {} {}",
+            server.command,
+            server.args.join(" ")
+        ),
+    );
+
+    let (mut child, stdin_handle, stdout_reader) = stdio_init(server, |stderr| {
+        spawn_stderr_drain(logs, id.clone(), name.clone(), stderr);
+    })
+    .await?;
+
+    // Move the owned handles into the handle struct.
+    child.stdin = None;
+    child.stdout = None;
+
+    let handle = StdioProcessHandle {
+        child,
+        stdin: stdin_handle,
+        stdout_reader,
+        next_id: 2, // id 1 was used by initialize
+    };
+
+    state
+        .mcp_children
+        .lock()
+        .await
+        .insert(server.id.clone(), handle);
+
+    append_mcp_log(
+        &state,
+        &id,
+        McpLogLevel::Info,
+        "Stdio process started and initialized".to_string(),
+    );
+
+    Ok(())
+}
+
+/// Kill a running stdio process and remove it from the pool.
+pub async fn stop_stdio_process(state: &AppState, server_id: &str) {
+    let mut pool = state.mcp_children.lock().await;
+    if let Some(mut handle) = pool.remove(server_id) {
+        let _ = handle.child.start_kill();
+        drop(handle);
+        append_mcp_log(
+            state,
+            server_id,
+            McpLogLevel::Info,
+            "Stdio process stopped".to_string(),
+        );
+    }
+}
+
+/// Check whether a stdio process is still alive (hasn't exited).
+fn is_process_alive(handle: &mut StdioProcessHandle) -> bool {
+    handle
+        .child
+        .try_wait()
+        .map(|status| status.is_none())
+        .unwrap_or(true)
+}
+
+/// Ensure a stdio process is running for the given server. Returns true if
+/// a process was (re)started. The caller should then call `with_stdio_handle`
+/// to use the process.
+pub async fn ensure_stdio_process(state: &AppState, server: &McpServer) -> bool {
+    // Check if already alive
+    {
+        let mut pool = state.mcp_children.lock().await;
+        if let Some(handle) = pool.get_mut(&server.id) {
+            if is_process_alive(handle) {
+                return false; // Already running
+            }
+            // Dead process — remove and restart
+            append_mcp_log(
+                state,
+                &server.id,
+                McpLogLevel::Warn,
+                "Previous process had exited; restarting".to_string(),
+            );
+        }
+    }
+
+    // Start fresh
+    match start_stdio_process(state, server).await {
+        Ok(()) => true,
+        Err(e) => {
+            append_mcp_log(
+                state,
+                &server.id,
+                McpLogLevel::Error,
+                format!("Failed to start process: {e}"),
+            );
+            false
+        }
+    }
+}
+
+/// Send a JSON-RPC request on the persistent stdio process and wait for
+/// the matching response. Locks the pool for the duration, serializing
+/// requests through the process.
+pub async fn stdio_request_persistent(
+    state: &AppState,
+    server_id: &str,
+    method: &str,
+    params: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let mut pool = state.mcp_children.lock().await;
+    let handle = pool
+        .get_mut(server_id)
+        .ok_or_else(|| "Process not running".to_string())?;
+    stdio_request(handle, method, params).await
+}
+
+/// Send a JSON-RPC request on an existing stdio process and wait for the
+/// matching response. Requires exclusive access to the handle.
+async fn stdio_request(
+    handle: &mut StdioProcessHandle,
+    method: &str,
+    params: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let id = handle.next_id;
+    handle.next_id += 1;
+
+    let req = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": method,
+        "params": params,
+        "id": id,
+    });
+    stdio_write_json(&mut handle.stdin, &req).await?;
+    stdio_read_response(&mut handle.stdout_reader, id).await
 }
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
@@ -220,6 +390,37 @@ pub fn delete_mcp_server(state: State<'_, AppState>, id: String) -> Result<(), S
     save_result
 }
 
+/// Start a stdio MCP process (called when user enables a server).
+#[tauri::command]
+pub async fn mcp_start_stdio(
+    state: State<'_, AppState>,
+    server_id: String,
+) -> Result<(), String> {
+    let server = load_servers(&state.mcp_servers_path)
+        .into_iter()
+        .find(|s| s.id == server_id)
+        .ok_or("Server not found")?;
+    start_stdio_process(&state, &server).await
+}
+
+/// Stop a stdio MCP process (called when user disables a server).
+#[tauri::command]
+pub async fn mcp_stop_stdio(
+    state: State<'_, AppState>,
+    server_id: String,
+) -> Result<(), String> {
+    stop_stdio_process(&state, &server_id).await;
+    Ok(())
+}
+
+/// Stop all running stdio MCP processes (called on app shutdown).
+pub async fn stop_all_stdio_processes(state: &AppState) {
+    let ids: Vec<String> = state.mcp_children.lock().await.keys().cloned().collect();
+    for id in ids {
+        stop_stdio_process(state, &id).await;
+    }
+}
+
 /// Return the most recent diagnostic log entries for a server.
 #[tauri::command]
 pub fn get_mcp_logs(state: State<'_, AppState>, id: String) -> Vec<McpLogEntry> {
@@ -238,31 +439,24 @@ pub fn clear_mcp_logs(state: State<'_, AppState>, id: String) {
     state.mcp_logs.lock().unwrap().remove(&id);
 }
 
-/// Cancel a running MCP server test.
-#[tauri::command]
-pub fn cancel_mcp_test(state: State<'_, AppState>, id: String) {
-    state.mcp_cancelled_tests.lock().unwrap().insert(id);
-}
 
-/// Check whether a test has been cancelled for the given server id.
-fn is_test_cancelled(state: &AppState, id: &str) -> bool {
-    state.mcp_cancelled_tests.lock().unwrap().contains(id)
-}
-
-/// Remove a test from the cancelled set (called when the test finishes).
-fn clear_test_cancelled(state: &AppState, id: &str) {
-    state.mcp_cancelled_tests.lock().unwrap().remove(id);
-}
 
 /// Test connectivity to an MCP server.
 /// Returns Ok(message) on success or Err(message) on failure.
+///
+/// NOTE: This is a pure config validation — it does NOT spawn any process.
+/// For stdio it only checks basic config sanity (command non-empty).
+/// Command existence is validated in `start_stdio_process` before spawning.
+/// For SSE/HTTP it pings the URL. No MCP handshake is performed.
 #[tauri::command]
 pub async fn test_mcp_server(
     state: State<'_, AppState>,
     server: McpServer,
 ) -> Result<String, String> {
-    // Clear any stale cancellation for this server
-    clear_test_cancelled(&state, &server.id);
+    // Guard: only enabled servers can be tested
+    if !server.enabled {
+        return Err("请先启用该服务器".to_string());
+    }
 
     append_mcp_log(
         &state,
@@ -271,55 +465,12 @@ pub async fn test_mcp_server(
         format!("Test started: {}", summarise_server_for_log(&server)),
     );
 
-    // Log the test timeout
-    let test_timeout_s = 120u64;
-    append_mcp_log(
-        &state,
-        &server.id,
-        McpLogLevel::Info,
-        format!(
-            "Test timeout set to {}s (first run may install packages)",
-            test_timeout_s
-        ),
-    );
-
-    let result = {
-        let test_fut = async {
-            match server.transport {
-                McpTransport::Stdio => test_stdio_server(&state, &server).await,
-                McpTransport::Sse => test_sse_server(&state, &server).await,
-                McpTransport::Http | McpTransport::StreamHttp => {
-                    test_http_server(&state, &server).await
-                }
-            }
-        };
-        tokio::time::timeout(std::time::Duration::from_secs(test_timeout_s), test_fut)
-            .await
-            .unwrap_or_else(|_| {
-                append_mcp_log(
-                    &state,
-                    &server.id,
-                    McpLogLevel::Error,
-                    format!(
-                        "Test timed out after {}s (package installation may still be in progress)",
-                        test_timeout_s
-                    ),
-                );
-                Err(format!("Test timed out after {}s", test_timeout_s))
-            })
+    let result = match server.transport {
+        McpTransport::Stdio => test_stdio_config(&server),
+        McpTransport::Sse | McpTransport::Http | McpTransport::StreamHttp => {
+            test_http_mcp_server(&server).await
+        }
     };
-
-    // If the test was cancelled, return a cancelled message
-    if is_test_cancelled(&state, &server.id) {
-        clear_test_cancelled(&state, &server.id);
-        append_mcp_log(
-            &state,
-            &server.id,
-            McpLogLevel::Warn,
-            "Test cancelled by user".to_string(),
-        );
-        return Err("Test cancelled by user".to_string());
-    }
 
     match &result {
         Ok(msg) => append_mcp_log(
@@ -336,6 +487,103 @@ pub async fn test_mcp_server(
         ),
     }
     result
+}
+
+/// Pure config validation for stdio servers — no process spawn.
+/// Note: command existence is already validated by `start_stdio_process`
+/// before spawning, so this only checks basic config sanity.
+fn test_stdio_config(server: &McpServer) -> Result<String, String> {
+    if server.command.trim().is_empty() {
+        return Err("Command is empty".to_string());
+    }
+
+    Ok("Configuration valid".to_string())
+}
+
+/// Check if a command exists in PATH (cross-platform, no spawn).
+fn command_exists(cmd: &str) -> bool {
+    use std::path::Path;
+
+    // If it's an absolute path, check directly
+    let path = Path::new(cmd);
+    if path.is_absolute() {
+        return path.exists();
+    }
+
+    // Search PATH entries
+    if let Ok(path_var) = std::env::var("PATH") {
+        let separator = if cfg!(windows) { ';' } else { ':' };
+        for dir in path_var.split(separator) {
+            let candidate = Path::new(dir).join(cmd);
+            if candidate.exists() {
+                return true;
+            }
+            // On Windows also check with .exe extension
+            if cfg!(windows) {
+                let with_exe = Path::new(dir).join(format!("{cmd}.exe"));
+                if with_exe.exists() {
+                    return true;
+                }
+                let with_cmd = Path::new(dir).join(format!("{cmd}.cmd"));
+                if with_cmd.exists() {
+                    return true;
+                }
+                let with_bat = Path::new(dir).join(format!("{cmd}.bat"));
+                if with_bat.exists() {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Test HTTP-based MCP servers by sending a real `initialize` request.
+/// This validates the full MCP handshake without spawning any process.
+async fn test_http_mcp_server(server: &McpServer) -> Result<String, String> {
+    use tokio::time::{timeout, Duration};
+
+    let url = server.url.trim();
+    if url.is_empty() {
+        return Err("URL is empty".to_string());
+    }
+
+    match server.transport {
+        McpTransport::StreamHttp => {
+            // Streamable HTTP: POST initialize with session handling
+            let mut session = StreamHttpSession::new(server)?;
+            let name = timeout(Duration::from_secs(30), session.initialize())
+                .await
+                .map_err(|_| "Initialize timed out after 30s".to_string())??;
+            Ok(format!("Connected successfully (server: {name})"))
+        }
+        McpTransport::Http => {
+            // Plain HTTP JSON-RPC: POST initialize
+            let resp = http_post_jsonrpc(server, &init_request_json()).await?;
+            if let Some(err) = resp.get("error") {
+                return Err(format!("MCP initialize error: {err}"));
+            }
+            let name = server_name_from_init(&resp);
+            Ok(format!("Connected successfully (server: {name})"))
+        }
+        McpTransport::Sse => {
+            // SSE: open stream, get endpoint, POST initialize
+            let mut session = SseSession::connect(server).await?;
+            let init_result = session.post_json(&init_request_json()).await.and_then(|_| {
+                // Read response with timeout
+                let read_fut = session.read_response(1);
+                tokio::runtime::Handle::current().block_on(timeout(Duration::from_secs(30), read_fut))
+                    .map_err(|_| "Initialize timed out after 30s".to_string())
+                    .and_then(|r| r)
+            })?;
+            if let Some(err) = init_result.get("error") {
+                return Err(format!("MCP initialize error: {err}"));
+            }
+            let name = server_name_from_init(&init_result);
+            Ok(format!("Connected successfully (server: {name})"))
+        }
+        _ => Err("unsupported transport".to_string()),
+    }
 }
 
 // ─── LLM integration helpers ──────────────────────────────────────────────────
@@ -1203,25 +1451,11 @@ async fn get_tools_stdio(
     state: &AppState,
     server: &McpServer,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let id = server.id.clone();
-    let name = server.name.clone();
-    let logs = state.mcp_logs.clone();
-    let (mut child, mut stdin, mut reader) = stdio_init(server, |stderr| {
-        spawn_stderr_drain(logs, id, name, stderr);
-    })
-    .await?;
+    // Ensure the persistent process is running
+    ensure_stdio_process(state, server).await;
 
-    let list_req = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "tools/list",
-        "params": {},
-        "id": 2
-    });
-    stdio_write_json(&mut stdin, &list_req).await?;
-    let resp = stdio_read_response(&mut reader, 2).await;
-    let _ = child.kill().await;
+    let resp = stdio_request_persistent(state, &server.id, "tools/list", serde_json::json!({})).await?;
 
-    let resp = resp?;
     if let Some(err) = resp.get("error") {
         return Err(format!("MCP tools/list error: {err}"));
     }
@@ -1364,28 +1598,20 @@ async fn invoke_tool_stdio(
     tool_name: &str,
     arguments: serde_json::Value,
 ) -> Result<String, String> {
-    let id = server.id.clone();
-    let name = server.name.clone();
-    let logs = state.mcp_logs.clone();
-    let (mut child, mut stdin, mut reader) = stdio_init(server, |stderr| {
-        spawn_stderr_drain(logs, id, name, stderr);
-    })
-    .await?;
+    // Ensure the persistent process is running
+    ensure_stdio_process(state, server).await;
 
-    let call_req = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "tools/call",
-        "params": {
+    let resp = stdio_request_persistent(
+        state,
+        &server.id,
+        "tools/call",
+        serde_json::json!({
             "name": tool_name,
             "arguments": arguments
-        },
-        "id": 2
-    });
-    stdio_write_json(&mut stdin, &call_req).await?;
-    let resp = stdio_read_response(&mut reader, 2).await;
-    let _ = child.kill().await;
+        }),
+    )
+    .await?;
 
-    let resp = resp?;
     if let Some(err) = resp.get("error") {
         return Err(format!("MCP tool error: {err}"));
     }
@@ -1485,338 +1711,4 @@ fn extract_tool_result(result: &serde_json::Value) -> String {
     serde_json::to_string_pretty(result).unwrap_or_default()
 }
 
-async fn test_stdio_server(state: &AppState, server: &McpServer) -> Result<String, String> {
-    use tokio::io::AsyncWriteExt;
-    use tokio::time::{timeout, Duration};
 
-    let id = server.id.clone();
-    let name = server.name.clone();
-    let log = |level: McpLogLevel, msg: String| append_mcp_log(state, &id, level, msg);
-
-    if server.command.trim().is_empty() {
-        let msg = "Command is empty".to_string();
-        log(McpLogLevel::Error, msg.clone());
-        return Err(msg);
-    }
-
-    // Early cancellation check
-    if is_test_cancelled(state, &id) {
-        return Err("Test cancelled by user".to_string());
-    }
-
-    let started = std::time::Instant::now();
-    log(
-        McpLogLevel::Info,
-        format!(
-            "⏳ Phase: spawning — {} {}",
-            server.command,
-            server.args.join(" ")
-        ),
-    );
-    log(
-        McpLogLevel::Info,
-        format!(
-            "Env vars: {} (keys only, values redacted)",
-            server.env.len()
-        ),
-    );
-
-    // MCP initialize request (protocol version 2025-03-26)
-    let init_request = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "initialize",
-        "params": {
-            "protocolVersion": "2025-03-26",
-            "capabilities": {},
-            "clientInfo": {
-                "name": "ai-chat",
-                "version": "0.1.0"
-            }
-        },
-        "id": 1
-    });
-    let request_line = format!("{}\n", init_request);
-
-    if is_test_cancelled(state, &id) {
-        return Err("Test cancelled by user".to_string());
-    }
-
-    let mut cmd = build_stdio_cmd(server, true);
-    let mut child = match cmd.spawn() {
-        Ok(c) => {
-            log(
-                McpLogLevel::Info,
-                format!("Process spawned (pid={:?})", c.id()),
-            );
-            c
-        }
-        Err(e) => {
-            let msg = format!("Failed to start process: {e}");
-            log(McpLogLevel::Error, msg.clone());
-            return Err(msg);
-        }
-    };
-
-    // Drain stderr into the log buffer so the user can see why a server
-    // crashed at startup. The drain task ends when stderr closes (EOF).
-    if let Some(stderr) = child.stderr.take() {
-        let logs_arc = state.mcp_logs.clone();
-        spawn_stderr_drain(logs_arc, id.clone(), name.clone(), stderr);
-    }
-
-    let mut stdin = child.stdin.take().ok_or("No stdin")?;
-    let mut stdout = child.stdout.take().ok_or("No stdout")?;
-
-    if is_test_cancelled(state, &id) {
-        let _ = child.kill().await;
-        return Err("Test cancelled by user".to_string());
-    }
-
-    log(
-        McpLogLevel::Info,
-        "⏳ Phase: initializing — sending MCP initialize request".to_string(),
-    );
-
-    if let Err(e) = stdin.write_all(request_line.as_bytes()).await {
-        let msg = format!("Write error: {e}");
-        log(McpLogLevel::Error, msg.clone());
-        let _ = child.kill().await;
-        return Err(msg);
-    }
-    drop(stdin);
-    log(
-        McpLogLevel::Info,
-        "Sent initialize request (id=1)".to_string(),
-    );
-
-    log(
-        McpLogLevel::Info,
-        "⏳ Phase: waiting for response — may take a while if installing packages...".to_string(),
-    );
-
-    // Read lines until a valid JSON-RPC initialize response arrives.
-    // Some servers print a startup banner (non-JSON lines) before the
-    // real JSON-RPC response — those are skipped and logged instead of
-    // failing the test.
-    let read_result = timeout(Duration::from_secs(120), async {
-        let mut reader = tokio::io::BufReader::new(&mut stdout);
-        let mut line = String::new();
-        loop {
-            line.clear();
-            let n = reader
-                .read_line(&mut line)
-                .await
-                .map_err(|e| format!("Read error: {e}"))?;
-            if n == 0 {
-                // EOF: server closed stdout without a response.
-                return Err("Server closed connection without response".to_string());
-            }
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            // A valid JSON-RPC response carries "jsonrpc" plus "result"/"error".
-            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
-                if parsed.get("jsonrpc").is_some()
-                    && (parsed.get("result").is_some() || parsed.get("error").is_some())
-                {
-                    return Ok(line);
-                }
-            }
-            // Non-JSON line (startup banner, logging output, …) — log and keep reading.
-            let preview: String = trimmed.chars().take(200).collect();
-            log(McpLogLevel::Info, format!("{preview}"));
-        }
-    })
-    .await;
-
-    let _ = child.kill().await;
-
-    // Check cancellation again after the long wait
-    if is_test_cancelled(state, &id) {
-        return Err("Test cancelled by user".to_string());
-    }
-
-    let result = match read_result {
-        Ok(Ok(line)) => {
-            log(
-                McpLogLevel::Info,
-                format!("Received {} bytes from server", line.len()),
-            );
-            Ok(format!(
-                "✅ Connected successfully (received {} bytes)",
-                line.len()
-            ))
-        }
-        Ok(Err(msg)) => {
-            log(McpLogLevel::Error, msg.clone());
-            Err(msg)
-        }
-        Err(_) => {
-            let msg = "⏱ Timeout: no response within 120 seconds (package installation may still be in progress)".to_string();
-            log(McpLogLevel::Error, msg.clone());
-            Err(msg)
-        }
-    };
-    let elapsed_ms = started.elapsed().as_millis();
-    log(
-        McpLogLevel::Info,
-        format!("Test finished in {} ms", elapsed_ms),
-    );
-    result
-}
-
-async fn test_sse_server(state: &AppState, server: &McpServer) -> Result<String, String> {
-    use tokio::time::{timeout, Duration};
-
-    let id = server.id.clone();
-    let log = |level: McpLogLevel, msg: String| append_mcp_log(state, &id, level, msg);
-
-    if server.url.trim().is_empty() {
-        let msg = "URL is empty".to_string();
-        log(McpLogLevel::Error, msg.clone());
-        return Err(msg);
-    }
-
-    let started = std::time::Instant::now();
-    let url_display = if server.auth_token.is_empty() {
-        server.url.clone()
-    } else {
-        format!(
-            "{}?<token redacted>",
-            server.url.split('?').next().unwrap_or(&server.url)
-        )
-    };
-    log(
-        McpLogLevel::Info,
-        format!("⏳ Phase: connecting — GET {url_display} (SSE stream)"),
-    );
-
-    // Steps 1+2: open the SSE stream and receive the `endpoint` event.
-    let mut session = match SseSession::connect(server).await {
-        Ok(s) => {
-            log(
-                McpLogLevel::Info,
-                format!("SSE stream opened, message endpoint: {}", s.endpoint),
-            );
-            s
-        }
-        Err(e) => {
-            log(McpLogLevel::Error, e.clone());
-            return Err(e);
-        }
-    };
-
-    // Steps 3+4: POST `initialize` and read the JSON-RPC response from the
-    // SSE stream — this proves the full round trip works.
-    log(
-        McpLogLevel::Info,
-        "⏳ Phase: initializing — sending MCP initialize request".to_string(),
-    );
-    let init_request = init_request_json();
-
-    let init_result = match session.post_json(&init_request).await {
-        Err(e) => Err(e),
-        Ok(()) => match timeout(
-            Duration::from_secs(SSE_RESPONSE_TIMEOUT_SECS),
-            session.read_response(1),
-        )
-        .await
-        {
-            Ok(Ok(resp)) => {
-                if let Some(err) = resp.get("error") {
-                    Err(format!("MCP initialize error: {err}"))
-                } else {
-                    Ok(server_name_from_init(&resp))
-                }
-            }
-            Ok(Err(e)) => Err(e),
-            Err(_) => Err(format!(
-                "⏱ Timeout: no initialize response within {SSE_RESPONSE_TIMEOUT_SECS} seconds"
-            )),
-        },
-    };
-
-    let result = init_result.map(|server_name| {
-        format!(
-            "✅ Connected successfully (server: {server_name}, endpoint: {})",
-            session.endpoint
-        )
-    });
-
-    match &result {
-        Ok(msg) => log(McpLogLevel::Info, msg.clone()),
-        Err(e) => log(McpLogLevel::Error, e.clone()),
-    }
-    let elapsed_ms = started.elapsed().as_millis();
-    log(
-        McpLogLevel::Info,
-        format!("Test finished in {} ms", elapsed_ms),
-    );
-    result
-}
-
-async fn test_http_server(state: &AppState, server: &McpServer) -> Result<String, String> {
-    let id = server.id.clone();
-    let log = |level: McpLogLevel, msg: String| append_mcp_log(state, &id, level, msg);
-
-    if server.url.trim().is_empty() {
-        let msg = "URL is empty".to_string();
-        log(McpLogLevel::Error, msg.clone());
-        return Err(msg);
-    }
-
-    let started = std::time::Instant::now();
-    let url_display = if server.auth_token.is_empty() {
-        server.url.clone()
-    } else {
-        format!(
-            "{}?<token redacted>",
-            server.url.split('?').next().unwrap_or(&server.url)
-        )
-    };
-    log(
-        McpLogLevel::Info,
-        format!(
-            "⏳ Phase: initializing — POST {url_display} ({})",
-            transport_name(&server.transport)
-        ),
-    );
-
-    let result = match server.transport {
-        McpTransport::Http => {
-            // Plain JSON-RPC: a single initialize round trip is enough.
-            match http_post_jsonrpc(server, &init_request_json()).await {
-                Ok(resp) => {
-                    if let Some(err) = resp.get("error") {
-                        Err(format!("MCP initialize error: {err}"))
-                    } else {
-                        Ok(server_name_from_init(&resp))
-                    }
-                }
-                Err(e) => Err(e),
-            }
-        }
-        McpTransport::StreamHttp => {
-            // Streamable HTTP: initialize + initialized notification, with
-            // `Mcp-Session-Id` session handling.
-            match StreamHttpSession::new(server) {
-                Ok(mut session) => session.initialize().await,
-                Err(e) => Err(e),
-            }
-        }
-        _ => Err("unsupported transport".to_string()),
-    }
-    .map(|name| format!("✅ Connected successfully (server: {name})"));
-
-    match &result {
-        Ok(msg) => log(McpLogLevel::Info, msg.clone()),
-        Err(e) => log(McpLogLevel::Error, e.clone()),
-    }
-    let elapsed_ms = started.elapsed().as_millis();
-    log(
-        McpLogLevel::Info,
-        format!("Test finished in {} ms", elapsed_ms),
-    );
-    result
-}

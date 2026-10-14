@@ -250,6 +250,11 @@ pub struct AppState {
     >,
     /// Server IDs whose current test has been cancelled by the user.
     pub mcp_cancelled_tests: std::sync::Arc<Mutex<std::collections::HashSet<String>>>,
+    /// Live stdio MCP child processes, keyed by server id. Held as a Tokio
+    /// mutex so async tasks can lock across await points.
+    pub mcp_children: std::sync::Arc<
+        tokio::sync::Mutex<std::collections::HashMap<String, mcp::StdioProcessHandle>>,
+    >,
     /// Session-scoped memories: session_id -> key -> JSON entry.
     pub session_memories: Mutex<
         std::collections::HashMap<String, std::collections::HashMap<String, serde_json::Value>>,
@@ -849,6 +854,7 @@ pub fn run() {
                 confirm_sender: Mutex::new(None),
                 mcp_logs: std::sync::Arc::new(Mutex::new(Default::default())),
                 mcp_cancelled_tests: std::sync::Arc::new(Mutex::new(Default::default())),
+                mcp_children: std::sync::Arc::new(tokio::sync::Mutex::new(Default::default())),
                 session_memories: Mutex::new(Default::default()),
             });
 
@@ -863,7 +869,40 @@ pub fn run() {
                 let _ = win.set_title(&title);
             }
 
+            // Warmup: auto-start all enabled stdio MCP servers
+            {
+                let servers = mcp::load_servers(&mcp_servers_path);
+                let enabled_stdio: Vec<_> = servers
+                    .iter()
+                    .filter(|s| s.enabled && matches!(s.transport, mcp::McpTransport::Stdio))
+                    .cloned()
+                    .collect();
+                if !enabled_stdio.is_empty() {
+                    let app_handle = app.handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Some(state) = app_handle.try_state::<AppState>() {
+                            for server in enabled_stdio {
+                                let _ = mcp::start_stdio_process(&state, &server).await;
+                            }
+                        }
+                    });
+                }
+            }
+
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                let app = window.app_handle();
+                if let Some(state) = app.try_state::<AppState>() {
+                    let mut pool = state.mcp_children.try_lock();
+                    if let Ok(pool) = &mut pool {
+                        for (_, handle) in pool.iter_mut() {
+                            let _ = handle.child.start_kill();
+                        }
+                    }
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             llm_complete::chat_completion,
@@ -901,9 +940,10 @@ pub fn run() {
             mcp::save_mcp_server,
             mcp::delete_mcp_server,
             mcp::test_mcp_server,
-            mcp::cancel_mcp_test,
             mcp::get_mcp_logs,
             mcp::clear_mcp_logs,
+            mcp::mcp_start_stdio,
+            mcp::mcp_stop_stdio,
             agents::list_sub_agents,
             agents::save_sub_agent,
             agents::delete_sub_agent,

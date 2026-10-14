@@ -4,7 +4,8 @@ import {
     saveMcpServer,
     deleteMcpServer,
     testMcpServer,
-    cancelMcpTest,
+    startStdioMcp,
+    stopStdioMcp,
     getMcpLogs,
     clearMcpLogs,
 } from "../api";
@@ -152,10 +153,20 @@ export function McpPanel({ onClose, onServersChange }: Props) {
         await saveMcpServer(updated);
         setServers((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
 
-        // Auto-start the server when enabling: run a connectivity test so the
-        // user gets immediate feedback and the process boots up.
         if (enabling) {
-            await runTest(updated);
+            // Start the persistent stdio process
+            try {
+                await startStdioMcp(updated.id);
+            } catch (err) {
+                console.error("Failed to start stdio process:", err);
+            }
+        } else {
+            // Stop the persistent stdio process
+            try {
+                await stopStdioMcp(updated.id);
+            } catch (err) {
+                console.error("Failed to stop stdio process:", err);
+            }
         }
     }
 
@@ -194,13 +205,7 @@ export function McpPanel({ onClose, onServersChange }: Props) {
         }
     }
 
-    async function cancelTest(s: McpServer) {
-        try {
-            await cancelMcpTest(s.id);
-        } catch (err) {
-            console.error("cancelMcpTest failed", err);
-        }
-    }
+
 
     function openLogs(s: McpServer) {
         logStuckToBottom.current = true;
@@ -387,7 +392,7 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                                     className="mcp-action-btn"
                                     title={t("mcp.testConnection")}
                                     onClick={() => void runTest(s)}
-                                    disabled={testing === s.id}
+                                    disabled={testing === s.id || !s.enabled}
                                 >
                                     <FontAwesomeIcon icon={faBolt} />
                                 </button>
@@ -441,14 +446,6 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                                 </span>
                             </div>
                             <div className="mcp-log-modal-actions">
-                                {testing === logServer.id && (
-                                    <button
-                                        className="mcp-log-btn danger"
-                                        onClick={() => void cancelTest(logServer)}
-                                    >
-                                        {t("mcp.cancelTest")}
-                                    </button>
-                                )}
                                 <button
                                     className="mcp-log-btn"
                                     onClick={() => void refreshLogs()}
