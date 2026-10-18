@@ -18,6 +18,7 @@ import type {
   AppConfig,
   Message,
   AgentTaskEvent,
+  AgentTaskTokenEvent,
   ToolCallEntry,
   Attachment,
   ContentPart,
@@ -332,7 +333,7 @@ export default function App() {
     reason: string;
     cmd_type: string;
     code: string;
-    confirm_kind?: "dangerous" | "sudo" | "elevation" | "external_path" | "system_config" | "user_software" | "user_data" | "sensitive_read" | "general_query";
+    confirm_kind?: "dangerous" | "sudo" | "elevation" | "external_path" | "system_config" | "user_software" | "user_data" | "sensitive_read" | "general_query" | "external_agent";
     requires_auth?: "none" | "sudo" | "elevation";
     risk_level?: string;
     risk_score?: number;
@@ -382,6 +383,8 @@ export default function App() {
   const currentAssistantMessageIdRef = useRef<string | null>(null);
   const hasRunningToolCallRef = useRef(false);
   const currentToolCallsRef = useRef<ToolCallEntry[]>([]);
+  /** Buffered `agent-task-token` chunks per task, flushed on a timer. */
+  const pendingAgentTokensRef = useRef<Map<string, string>>(new Map());
   /** Resume prompts from fired timers, waiting for the chat to become idle. */
   const [pendingTimerPrompts, setPendingTimerPrompts] = useState<string[]>([]);
   /** Latest active session for the timer listener (registered once). */
@@ -674,7 +677,7 @@ export default function App() {
       reason: string;
       cmd_type: string;
       code: string;
-      confirm_kind?: "dangerous" | "sudo" | "elevation" | "external_path" | "system_config" | "user_software" | "user_data" | "sensitive_read" | "general_query";
+      confirm_kind?: "dangerous" | "sudo" | "elevation" | "external_path" | "system_config" | "user_software" | "user_data" | "sensitive_read" | "general_query" | "external_agent";
       requires_auth?: "none" | "sudo" | "elevation";
       risk_level?: string;
       risk_score?: number;
@@ -895,6 +898,15 @@ export default function App() {
         updateActiveAssistantToolCalls(currentToolCallsRef.current);
         hasRunningToolCallRef.current = true;
       }),
+      listen<AgentTaskTokenEvent>("agent-task-token", (e) => {
+        // Sub-agent output (llm / cli / cloud) arrives token by token; buffer
+        // it and let the flush interval update the entry, so a long stream does
+        // not re-render the whole transcript per token.
+        const { task_id, token } = e.payload;
+        if (!task_id || !token) return;
+        const buffered = pendingAgentTokensRef.current.get(task_id) ?? "";
+        pendingAgentTokensRef.current.set(task_id, (buffered + token).slice(-4000));
+      }),
       listen<string>("skill-loaded", (e) => {
         // Structured skill-load event. The entry carries `skill_name`, which
         // is what later turns send back as `loaded_skills`.
@@ -921,6 +933,36 @@ export default function App() {
       unlisteners.forEach((p) => p.then((fn) => fn()));
     };
   }, [updateActiveAssistantToolCalls, t]);
+
+  // Flush buffered sub-agent output into its tool-call entry a few times per
+  // second (see the `agent-task-token` listener above).
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      const pending = pendingAgentTokensRef.current;
+      if (pending.size === 0) return;
+      const chunks = new Map(pending);
+      pending.clear();
+
+      currentToolCallsRef.current = currentToolCallsRef.current.map((entry) => {
+        const chunk = chunks.get(entry.task_id);
+        if (!chunk) return entry;
+        const output = ((entry.summary ?? "") + chunk).slice(-1200);
+        const lastLine = chunk
+          .split("\n")
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0)
+          .pop();
+        return {
+          ...entry,
+          summary: output,
+          description: lastLine ? lastLine.slice(0, 140) : entry.description,
+        };
+      });
+      updateActiveAssistantToolCalls(currentToolCallsRef.current);
+    }, 400);
+
+    return () => window.clearInterval(interval);
+  }, [updateActiveAssistantToolCalls]);
 
   // The timer listener is registered once, so it reads the active session from
   // a ref instead of re-subscribing whenever the user switches chats.
@@ -1376,6 +1418,7 @@ export default function App() {
     const requiresSudo = confirmDialog.requires_auth === "sudo";
     const requiresElevation = confirmDialog.requires_auth === "elevation";
     const isExternalPath = confirmDialog.confirm_kind === "external_path";
+    const isExternalAgent = confirmDialog.confirm_kind === "external_agent";
     // Prefer structured risk data from the risk-assessment event, falling back
     // to fields carried on the confirm-required payload itself.
     const riskLevel = riskAssessment?.risk_level ?? confirmDialog.risk_level;
@@ -1391,18 +1434,22 @@ export default function App() {
         ? t("app.confirm.titleElevation")
         : isExternalPath
           ? t("app.confirm.titleExternalPath")
-          : hasRisk
-            ? t("app.confirm.titleRisk", { level: riskLevel ?? "" })
-            : t("app.confirm.titleDangerous");
+          : isExternalAgent
+            ? t("app.confirm.titleExternalAgent")
+            : hasRisk
+              ? t("app.confirm.titleRisk", { level: riskLevel ?? "" })
+              : t("app.confirm.titleDangerous");
     const badge = requiresSudo
       ? t("app.confirm.badgeSudo")
       : requiresElevation
         ? t("app.confirm.badgeAdmin")
         : isExternalPath
           ? t("app.confirm.badgePath")
-          : hasRisk
-            ? riskLevel ?? t("app.confirm.badgeRisk")
-            : t("app.confirm.badgeDangerous");
+          : isExternalAgent
+            ? t("app.confirm.badgeExternalAgent")
+            : hasRisk
+              ? riskLevel ?? t("app.confirm.badgeRisk")
+              : t("app.confirm.badgeDangerous");
     const preview =
       confirmDialog.code.length > 400
         ? confirmDialog.code.slice(0, 400) + "…"
@@ -1487,6 +1534,11 @@ export default function App() {
           {isExternalPath && (
             <p className="confirm-dialog-hint">
               {t("app.confirm.externalPathHint")}
+            </p>
+          )}
+          {isExternalAgent && (
+            <p className="confirm-dialog-hint">
+              {t("app.confirm.externalAgentHint")}
             </p>
           )}
           <div className="confirm-dialog-preview">

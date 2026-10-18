@@ -100,11 +100,13 @@ const zhTW: Messages = {
             titleSudo: "特權操作（sudo）",
             titleElevation: "特權操作（系統管理員）",
             titleExternalPath: "外部檔案存取要求",
+            titleExternalAgent: "外部代理呼叫要求",
             titleRisk: "風險等級 {level} —— 請確認執行",
             titleDangerous: "偵測到危險命令",
             badgeSudo: "SUDO",
             badgeAdmin: "ADMIN",
             badgePath: "PATH",
+            badgeExternalAgent: "AGENT",
             badgeRisk: "RISK",
             badgeDangerous: "危險",
             reason: "原因：",
@@ -120,6 +122,8 @@ const zhTW: Messages = {
             elevationHint: "此操作將要求系統管理員提高權限（UAC），可能會變更系統設定。",
             externalPathHint:
                 "此檔案操作嘗試存取目前工作區根目錄之外的絕對路徑。請僅在確認該外部位置是預期目標時允許。",
+            externalAgentHint:
+                "此 CLI / 雲端代理在應用程式之外執行：CLI 以你的使用者權限在工作區內執行，雲端代理把任務送到遠端端點。每個代理在本次應用程式執行中只需核准一次。",
             deny: "拒絕",
             allow: "允許",
         },
@@ -426,14 +430,22 @@ const zhTW: Messages = {
     agents: {
         title: "子代理",
         orchestration: "協調設定",
-        enableMode: "啟用子代理模式",
+        enableMode: "自動協調",
+        enableModeHint:
+            "開啟後，協調器會為單一請求自動規劃並平行執行多個代理。主代理透過 `call_subagent` 委派任務不受此開關影響。",
         autoConfigure: "自動設定模式",
         executionMode: "執行方式",
         modeParallel: "平行",
         modeSequential: "循序",
         maxConcurrency: "最大並行數",
-        empty: "尚無子代理。點選下方按鈕即可建立。",
+        empty: "尚無代理。點選下方按鈕即可建立。",
         newAgent: "+ 新增代理",
+        typeLabel: "代理類型",
+        typeLlm: "LLM",
+        typeCli: "CLI",
+        typeCloud: "雲端",
+        typeHint:
+            "LLM：在應用程式內執行自主工具迴圈；CLI：啟動本機安裝的無介面編碼 CLI；雲端：把任務送到遠端 HTTP 端點。",
         name: "名稱",
         namePlaceholder: "例如 code-analyzer",
         description: "說明",
@@ -443,6 +455,7 @@ const zhTW: Messages = {
         modelLimits: "模型與限制",
         model: "模型（選填，會覆寫主設定）",
         modelPlaceholder: "留空則繼承主模型",
+        cliModelArgsModelHint: "作為 CLI 模型參數中的 {model} 佔位符使用，其他類型會忽略。",
         maxTokens: "最大補完 tokens",
         maxTokensPlaceholder: "預設補完上限 8192",
         temperature: "溫度",
@@ -468,6 +481,67 @@ const zhTW: Messages = {
                 "透過 `todos` 工具管理工作階段待辦清單（list / add / update_status / clear_completed / archive）。此計畫與聊天工作階段及所有平行代理共用。",
             memory: "工作階段 / 使用者 / 儲存庫記憶儲存",
         },
+
+        // ── CLI 類型 ──
+        cliSection: "CLI 設定",
+        cliCommand: "命令",
+        cliCommandPlaceholder: "opencode",
+        cliCommandHint:
+            "可執行檔名稱（在 PATH 中尋找）或完整路徑。Windows 的 .cmd/.bat/.ps1 啟動器會自動處理。",
+        cliArgs: "參數 —— 每行一個",
+        cliArgsHint:
+            "可用佔位符：{prompt}、{model}、{cwd}、{agent_name}。範例：一行寫 `run`，下一行寫 `{prompt}`，等同於 `opencode run \"…\"`。若沒有任何位置使用 {prompt}，提示詞會附加為最後一個參數。",
+        cliPromptVia: "提示詞傳遞方式",
+        cliPromptViaArg: "作為參數（{prompt}）",
+        cliPromptViaStdin: "透過 stdin",
+        cliPromptViaHint:
+            "適合從管線讀取輸入的 CLI；在 Windows 上，當提示詞可能包含 %VAR% 形式的內容時也建議使用。",
+        cliContinueArgs: "續接工作階段參數 —— 每行一個",
+        cliContinueArgsHint: "當後續執行需要續接該 CLI 的工作階段時附加，例如 --continue。",
+        cliModelArgs: "模型參數 —— 每行一個",
+        cliModelArgsHint:
+            "當此代理設定了模型時附加；請在需要的位置使用 {model} 佔位符，例如一行 --model、一行 {model}。",
+        cliEnv: "環境變數 —— 每行一個 KEY=VALUE",
+        cliCwd: "工作目錄",
+        cliCwdPlaceholder: "工作區根目錄",
+        cliCwdHint: "相對於工作區的目錄；留空表示工作區根目錄。",
+        timeout: "預設逾時（秒）",
+        noCommand: "尚未設定命令",
+        inheritModel: "繼承主模型",
+
+        // ── 雲端類型 ──
+        cloudSection: "雲端設定",
+        cloudEndpoint: "端點 URL",
+        cloudEndpointPlaceholder: "https://api.example.com/agent",
+        cloudToken: "權杖",
+        cloudTokenPlaceholder: "選填",
+        cloudTokenHint: "以 `Authorization: Bearer <token>` 送出。",
+        cloudHeaders: "附加標頭 —— 每行一個 KEY=VALUE",
+        cloudBodyTemplate: "請求主體範本（JSON）",
+        cloudBodyTemplateHint:
+            "作為 POST 主體送出的 JSON。{prompt}、{agent_name}、{cwd} 會被取代並以 JSON 轉義。",
+        cloudResultPath: "結果路徑",
+        cloudResultPathHint:
+            "從回應中取出文字的路徑，例如 `choices.0.message.content` 或 `result.output`。",
+        cloudPollUrl: "輪詢 URL（選填）",
+        cloudPollUrlHint:
+            "用於非同步工作：輪詢此 URL（可用 `{id}` 代表工作 id），直到狀態符合為止。留空表示單次回應。",
+        cloudPollIdPath: "工作 id 路徑",
+        cloudPollStatusPath: "狀態路徑",
+        cloudPollInterval: "輪詢間隔（秒）",
+        cloudPollDoneValues: "完成狀態值 —— 每行一個",
+        cloudPollFailedValues: "失敗狀態值 —— 每行一個",
+        cloudUnreachable: "無法連線",
+
+        // ── 共用 ──
+        requireApproval: "執行前需確認",
+        requireApprovalHint:
+            "開啟時，此代理在每次應用程式執行中的首次執行會要求確認；關閉則代表「啟用開關」即為長期授權。",
+        probe: "測試",
+        probing: "正在執行…",
+        probeCliHint: "執行 `<命令> --version` 以驗證可執行檔能否被解析。",
+        probeCloudHint: "送出一個 GET 請求檢查端點是否可連線。",
+        noEndpoint: "尚未設定端點",
     },
 
     history: {

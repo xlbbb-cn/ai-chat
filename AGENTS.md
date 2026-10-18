@@ -105,8 +105,9 @@ This is enforced by the skills/tools layer. Don't add code that lets a skill esc
 ## Tools & dangerous commands
 
 - Tools: `run_cmd`, `run_shell`, `file_actions`, `knowledge_graph` (Neo4j backend), plus the `memory`, `todos` and `timer` tools — all in `src-tauri/src/tools/` (`skill_read` is auto-injected when skills are active).
+- **Sub-agents are typed** (`agent_type` in `sub_agents.json`): `llm` runs the built-in autonomous loop, `cli` launches a headless coding CLI installed on this machine (`agents/cli.rs`: PATH + `PATHEXT` resolution, Windows `.cmd`/`.bat`/`.ps1` wrapping, output streaming on `agent-task-token`, process-tree kill on timeout/Stop), `cloud` posts the task to a remote HTTP endpoint with optional job polling (`agents/cloud.rs`). All three are configured in the Sub Agents panel and reachable from the main agent through `call_subagent` whenever at least one agent is enabled — the `use_agents` switch only turns the automatic planner on. `cli`/`cloud` agents ask for approval once per app session unless their `require_approval` switch is off (kind `external_agent`).
 - Some command patterns raise a frontend confirmation dialog. The Rust side blocks on `confirm_command` until the user replies. **If a tool call appears to hang, check the React tree for a pending `ConfirmDialog` / dangerous-command prompt before debugging the Rust side.**
-- `ConfirmKind` values: `dangerous` (L0), `system_config` (L1), `user_software` (L2), `user_data` (L3), `external_path` — these mirror `RiskLevel::confirm_kind()` in `tools/risk.rs` (L4-L6 never prompt). Users can auto-accept kinds via `auto_accept_confirm_kinds` in config; the Tools panel only offers kinds the backend can actually emit, plus a one-click master switch that stores the `"*"` wildcard (matches every kind, including future ones).
+- `ConfirmKind` values: `dangerous` (L0), `system_config` (L1), `user_software` (L2), `user_data` (L3), `external_path`, `external_agent` — the L0-L3 kinds mirror `RiskLevel::confirm_kind()` in `tools/risk.rs` (L4-L6 never prompt). Users can auto-accept kinds via `auto_accept_confirm_kinds` in config; the Tools panel only offers kinds the backend can actually emit (`external_agent` is approved per agent in the Sub Agents panel instead), plus a one-click master switch that stores the `"*"` wildcard (matches every kind, including future ones).
 
 ## Tauri 2 specifics for this repo
 
@@ -133,6 +134,10 @@ src/                       # React 19 + TS frontend
 src-tauri/
   src/lib.rs               # state, menu, command registration, app setup
   src/llm_complete.rs      # chat_completion (SSE streaming)
+  src/agents.rs            # sub-agent types, missions, orchestration
+  src/agents/
+    cli.rs                 #   `cli` backend: headless coding CLIs
+    cloud.rs               #   `cloud` backend: remote HTTP agent endpoints
   src/skills.rs            # SKILL.md frontmatter parser, list/save/delete
   src/tools/               # tool executor, split by feature:
     mod.rs                 #   dispatch/schemas/shared helpers (+ tests)

@@ -95,6 +95,13 @@ const AUTO_ACCEPT_OPTIONS: Array<{
         },
     ];
 
+/**
+ * Kinds that are preserved in `auto_accept_confirm_kinds` but are not offered
+ * here: `cli` / `cloud` agents are approved per agent from the Sub Agents
+ * panel (`require_approval`), so their kind has no Tools-panel switch.
+ */
+const HIDDEN_AUTO_ACCEPT_KINDS = ["external_agent"];
+
 /** Every kind the panel can toggle individually. */
 const ALL_AUTO_ACCEPT_KINDS: ConfirmKind[] = AUTO_ACCEPT_OPTIONS.map((option) => option.kind);
 
@@ -110,12 +117,14 @@ const AUTO_ACCEPT_ALL = "*";
 /**
  * Drop values the backend would never emit (e.g. the retired `sudo` /
  * `elevation` kinds) so a stale config cannot keep dead entries around, while
- * preserving the `"*"` wildcard.
+ * preserving the `"*"` wildcard and the kinds hidden from this panel.
  */
 function sanitizeAutoAcceptKinds(values: readonly string[] | undefined): AutoAcceptKind[] {
     return (values ?? []).filter(
         (value): value is AutoAcceptKind =>
-            value === AUTO_ACCEPT_ALL || AUTO_ACCEPT_KIND_SET.has(value),
+            value === AUTO_ACCEPT_ALL ||
+            AUTO_ACCEPT_KIND_SET.has(value) ||
+            HIDDEN_AUTO_ACCEPT_KINDS.includes(value),
     );
 }
 

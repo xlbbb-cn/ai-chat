@@ -23,6 +23,10 @@ pub(crate) mod todos;
 
 pub use self::process::run_command;
 
+// Re-exports for the agent runners (`crate::agents::cli` / `cloud`) and tests.
+pub(crate) use self::paths::resolve_safe_path;
+pub(crate) use self::process::{decode_process_bytes, OutputDecodeHint};
+
 // Re-exports for the test module below: `mod tests` still reaches the moved
 // items through `super::name`, so those names must exist in this namespace.
 #[cfg(all(test, windows))]
@@ -31,8 +35,7 @@ use self::process::decode_windows_process_bytes_with_code_pages;
 use self::{
     file_actions::{build_file_diff, external_absolute_path_candidate},
     patch::apply_unified_patch,
-    paths::{ensure_mutation_target_allowed, resolve_safe_path},
-    process::{decode_process_bytes, OutputDecodeHint},
+    paths::ensure_mutation_target_allowed,
     risk::{calculate_risk_score, syntax_gate_check, RiskLevel, REJECT_THRESHOLD, RISK_THRESHOLDS},
     search::{contains_ignore_case, SEARCH_MAX_FILE_BYTES},
 };
@@ -86,7 +89,7 @@ fn split_command_line(code: &str) -> Vec<String> {
     args
 }
 
-async fn request_tool_confirmation(
+pub(crate) async fn request_tool_confirmation(
     app: &AppHandle,
     reason: String,
     cmd_type: String,
@@ -171,7 +174,7 @@ async fn request_tool_confirmation(
 const TOOL_OUTPUT_HEAD_CHARS: usize = 6_000;
 const TOOL_OUTPUT_TAIL_CHARS: usize = 2_000;
 
-fn truncate_tool_output(output: String) -> String {
+pub(crate) fn truncate_tool_output(output: String) -> String {
     let total = output.chars().count();
     let budget = TOOL_OUTPUT_HEAD_CHARS + TOOL_OUTPUT_TAIL_CHARS;
     if total <= budget {

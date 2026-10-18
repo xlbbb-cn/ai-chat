@@ -13,6 +13,9 @@ import type {
   AgentOrchestration,
   AgentTaskEvent,
   AgentMissionSnapshot,
+  CliProbe,
+  CloudProbe,
+  KeyValue,
   Profile,
   TimerEntry,
   UpdateInfo,
@@ -464,6 +467,32 @@ export async function saveAgentOrchestration(orchestration: AgentOrchestration):
 
 export async function listAgentMissions(sessionId: string): Promise<AgentMissionSnapshot[]> {
   return invoke("list_agent_missions", { sessionId });
+}
+
+// ─── Agent probes (Sub Agents panel "Test" buttons) ──────────────────────────
+
+/**
+ * Resolve a `cli` agent's command (PATH + PATHEXT) and try to run it (`args`,
+ * e.g. `["--version"]`).
+ */
+export async function probeAgentCli(
+  command: string,
+  args?: string[],
+): Promise<CliProbe> {
+  return invoke("probe_agent_cli", { command, args: args ?? null });
+}
+
+/** Check that a `cloud` agent's endpoint is reachable with the given token. */
+export async function probeAgentCloud(
+  endpoint: string,
+  token?: string,
+  headers?: KeyValue[],
+): Promise<CloudProbe> {
+  return invoke("probe_agent_cloud", {
+    endpoint,
+    token: token ?? null,
+    headers: headers ?? null,
+  });
 }
 
 // ─── Interaction Log Monitor ──────────────────────────────────────────────────

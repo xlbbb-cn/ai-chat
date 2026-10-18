@@ -259,6 +259,14 @@ pub struct AppState {
     pub session_memories: Mutex<
         std::collections::HashMap<String, std::collections::HashMap<String, serde_json::Value>>,
     >,
+    /// External-agent ids (`cli` / `cloud`) the user already approved in this
+    /// app run. Each such agent asks once, then runs without prompting until
+    /// restart — unless its `require_approval` switch is off.
+    pub external_agent_confirmed: Mutex<std::collections::HashSet<String>>,
+    /// Serializes external-agent approval requests: `confirm_sender` holds one
+    /// pending request at a time, so parallel agents must queue here instead of
+    /// overwriting each other's dialog.
+    pub external_agent_confirm_lock: tokio::sync::Mutex<()>,
 }
 
 #[derive(Clone, Debug)]
@@ -427,6 +435,10 @@ pub struct Profile {
     pub selected_tools: Vec<String>,
     pub agents: Vec<agents::SubAgent>,
     pub orchestration: agents::AgentOrchestration,
+    /// Legacy standalone CLI agents (pre agent-type profiles). Migrated into
+    /// `agents` with `agent_type = "cli"` when the profile is applied.
+    #[serde(default)]
+    pub cli_agents: Vec<agents::LegacyCliAgent>,
     pub mcp_servers: Vec<mcp::McpServer>,
     pub created_at: String,
     pub updated_at: String,
@@ -508,13 +520,14 @@ fn apply_profile_config(
 
     apply_config(&app, &state, config)?;
 
-    // Save agents config
+    // Save agents config (legacy standalone CLI agents are folded into the
+    // typed agent list by the normalizing save).
     let agents_config = agents::AgentsConfig {
         agents: profile.agents,
         orchestration: profile.orchestration,
+        cli_agents: profile.cli_agents,
     };
-    let agents_json = serde_json::to_string_pretty(&agents_config).map_err(|e| e.to_string())?;
-    fs::write(&state.agents_config_path, agents_json).map_err(|e| e.to_string())?;
+    agents::save_agents_config_file(&state.agents_config_path, &agents_config)?;
 
     // Save MCP servers
     let mcp_file = mcp::McpServersFile {
@@ -856,6 +869,8 @@ pub fn run() {
                 mcp_cancelled_tests: std::sync::Arc::new(Mutex::new(Default::default())),
                 mcp_children: std::sync::Arc::new(tokio::sync::Mutex::new(Default::default())),
                 session_memories: Mutex::new(Default::default()),
+                external_agent_confirmed: Mutex::new(Default::default()),
+                external_agent_confirm_lock: tokio::sync::Mutex::new(()),
             });
 
             // Delayed "continue the task" timers, mirrored to timers.json so a
@@ -950,6 +965,8 @@ pub fn run() {
             agents::get_agent_orchestration,
             agents::save_agent_orchestration,
             agents::list_agent_missions,
+            agents::probe_agent_cli,
+            agents::probe_agent_cloud,
             timer::list_timers,
             timer::cancel_timer,
             list_profiles,

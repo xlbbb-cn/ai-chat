@@ -1361,27 +1361,33 @@ pub async fn chat_completion(
         system_content.push_str(&skills_sys_msg);
     }
 
-    let enabled_agents: Vec<agents::SubAgent> = if multi_agent_enabled {
-        agents::load_agents_config(&state.agents_config_path)
-            .agents
-            .into_iter()
-            .filter(|a| a.enabled)
-            .collect()
-    } else {
-        Vec::new()
-    };
+    // Sub-agents (`llm`, `cli`, `cloud`) are callable whenever at least one is
+    // enabled. The orchestration toggle only controls the automatic planner —
+    // delegation itself is always available.
+    let enabled_agents: Vec<agents::SubAgent> = agents::load_agents_config(&state.agents_config_path)
+        .agents
+        .into_iter()
+        .filter(|a| a.enabled)
+        .collect();
 
     if !enabled_agents.is_empty() {
         let mut available_agents_info = String::new();
         for agent in &enabled_agents {
+            let kind = agents::normalize_agent_type(&agent.agent_type);
+            let detail = match kind.as_str() {
+                agents::AGENT_TYPE_CLI => format!(" (CLI: {})", agent.cli.command.trim()),
+                agents::AGENT_TYPE_CLOUD => format!(" (Cloud: {})", agent.cloud.endpoint.trim()),
+                _ => format!(" (Model: {})", agent.model.clone().unwrap_or_else(|| "inherits the main model".to_string())),
+            };
             available_agents_info.push_str(&format!(
-                "- ID: {}\n  Name: {}\n  Description: {}\n",
-                agent.id, agent.name, agent.description
+                "- ID: {}\n  Name: {} [{}]{}\n  Description: {}\n",
+                agent.id, agent.name, kind, detail, agent.description
             ));
         }
         let agents_sys_msg = format!(
-        "You have access to the following specialized sub-agents. To delegate a task to one of them, use the `call_subagent` tool with the corresponding `agent_id`.\n\n\
-        Available sub-agents:\n{}",
+        "You have access to the following agents. To delegate a task to one of them, use the `call_subagent` tool with the corresponding `agent_id` and a self-contained `task_description` (they never see this conversation).\n\
+        Agent types: `llm` agents run an autonomous tool-using loop inside the app; `cli` agents are headless coding CLIs installed on this machine (they edit files in the workspace directly); `cloud` agents run the task on a remote endpoint. Prefer `llm` for reasoning/reporting, `cli`/`cloud` for large end-to-end coding work. The first run of a `cli`/`cloud` agent may require the user's approval.\n\n\
+        Available agents:\n{}",
         available_agents_info
     );
         if !system_content.is_empty() {
@@ -1629,17 +1635,21 @@ pub async fn chat_completion(
             "type": "function",
             "function": {
                 "name": "call_subagent",
-                "description": "Delegate a complex or specialized task to an autonomous sub-agent. You must specify the exact agent_id. Wait for its execution fully; it returns the final task result.",
+                "description": "Delegate a task to one of the configured agents (llm / cli / cloud). You must specify the exact agent_id from the available-agents list. The agent does not see this conversation, so `task_description` must be self-contained. Wait for it to finish; it returns the final result.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "agent_id": {
                             "type": "string",
-                            "description": "The exact ID of the sub-agent to invoke"
+                            "description": "The exact ID of the agent to invoke"
                         },
                         "task_description": {
                             "type": "string",
-                            "description": "Detailed prompt/description of the task for the sub-agent to perform"
+                            "description": "Detailed, self-contained prompt/description of the task for the agent to perform"
+                        },
+                        "context": {
+                            "type": "string",
+                            "description": "Optional extra context (file paths, findings, constraints) appended to the task description"
                         }
                     },
                     "required": ["agent_id", "task_description"]
@@ -1984,13 +1994,14 @@ pub async fn chat_completion(
                 let args_json: Value = serde_json::from_str(args).unwrap_or_default();
                 let agent_id = args_json["agent_id"].as_str().unwrap_or("");
                 let task_desc = args_json["task_description"].as_str().unwrap_or("");
+                let task_context = args_json["context"].as_str().unwrap_or("");
 
                 if let Some(agent) = enabled_agents.iter().find(|a| a.id == agent_id) {
                     let task = agents::Task {
                         id: uuid::Uuid::new_v4().to_string(),
                         agent_id: agent_id.to_string(),
                         description: task_desc.to_string(),
-                        context: String::new(),
+                        context: task_context.to_string(),
                         dependencies: vec![],
                     };
                     let workspace_dir = state.workspace_dir.lock().unwrap().clone();

@@ -113,11 +113,13 @@ const en = {
             titleSudo: "Privileged operation (sudo)",
             titleElevation: "Privileged operation (administrator)",
             titleExternalPath: "External file access request",
+            titleExternalAgent: "External agent request",
             titleRisk: "Risk Level {level} — confirm execution",
             titleDangerous: "Dangerous command detected",
             badgeSudo: "SUDO",
             badgeAdmin: "ADMIN",
             badgePath: "PATH",
+            badgeExternalAgent: "AGENT",
             badgeRisk: "RISK",
             badgeDangerous: "DANGEROUS",
             reason: "Reason:",
@@ -134,6 +136,8 @@ const en = {
                 "This will request administrator elevation (UAC) and may modify system settings.",
             externalPathHint:
                 "This file action wants to access an absolute path outside the current workspace root. Allow it only if that external location is intentional.",
+            externalAgentHint:
+                "This CLI / cloud agent runs outside the app: a CLI runs with your user permissions in the workspace, a cloud agent runs the task on a remote endpoint. It is approved once per agent for this app run.",
             deny: "Deny",
             allow: "Allow",
         },
@@ -457,14 +461,22 @@ const en = {
     agents: {
         title: "Sub Agents",
         orchestration: "Orchestration settings",
-        enableMode: "Enable sub-agent mode",
+        enableMode: "Automatic orchestration",
+        enableModeHint:
+            "When on, an orchestrator plans and runs several agents for one request. Delegation through `call_subagent` works regardless of this switch.",
         autoConfigure: "Auto-configure mode",
         executionMode: "Execution mode",
         modeParallel: "Parallel",
         modeSequential: "Sequential",
         maxConcurrency: "Max concurrency",
-        empty: "No sub-agents yet. Click the button below to create one.",
+        empty: "No agents yet. Click the button below to create one.",
         newAgent: "+ New Agent",
+        typeLabel: "Agent type",
+        typeLlm: "LLM",
+        typeCli: "CLI",
+        typeCloud: "Cloud",
+        typeHint:
+            "LLM runs an autonomous tool-using loop inside the app. CLI launches a headless coding CLI installed on this machine. Cloud sends the task to a remote HTTP endpoint.",
         name: "Name",
         namePlaceholder: "e.g. code-analyzer",
         description: "Description",
@@ -474,6 +486,8 @@ const en = {
         modelLimits: "Model & limits",
         model: "Model (optional, overrides main config)",
         modelPlaceholder: "Leave empty to inherit the main model",
+        cliModelArgsModelHint:
+            "Used as the `{model}` placeholder in the CLI model arguments, and ignored otherwise.",
         maxTokens: "Max completion tokens",
         maxTokensPlaceholder: "Default completion limit 8192",
         temperature: "Temperature",
@@ -500,6 +514,68 @@ const en = {
                 "The session todo list via the `todos` tool (list / add / update_status / clear_completed / archive). The plan is shared with the chat session and every parallel agent.",
             memory: "Session / user / repo memory store",
         },
+
+        // ── cli backend ──
+        cliSection: "CLI settings",
+        cliCommand: "Command",
+        cliCommandPlaceholder: "opencode",
+        cliCommandHint:
+            "Executable name (searched on PATH) or a full path. Windows .cmd/.bat/.ps1 launchers are handled automatically.",
+        cliArgs: "Arguments — one per line",
+        cliArgsHint:
+            "Placeholders: {prompt}, {model}, {cwd}, {agent_name}. Example: a line `run` and a line `{prompt}` runs `opencode run \"…\"`. If {prompt} is missing anywhere, the prompt is appended as the last argument.",
+        cliPromptVia: "Prompt delivery",
+        cliPromptViaArg: "As an argument ({prompt})",
+        cliPromptViaStdin: "Through stdin",
+        cliPromptViaHint:
+            "Use stdin for CLIs that read piped input, and on Windows when a prompt could contain %VAR% text.",
+        cliContinueArgs: "Continue-session arguments — one per line",
+        cliContinueArgsHint:
+            "Appended when a later run continues this CLI's previous session, e.g. --continue.",
+        cliModelArgs: "Model arguments — one per line",
+        cliModelArgsHint:
+            "Appended when the agent has a model configured. Include the {model} placeholder, e.g. --model then {model}.",
+        cliEnv: "Environment — KEY=VALUE per line",
+        cliCwd: "Working directory",
+        cliCwdPlaceholder: "workspace root",
+        cliCwdHint: "Workspace-relative directory to run in. Leave empty for the workspace root.",
+        timeout: "Default timeout (seconds)",
+        noCommand: "No command configured",
+        inheritModel: "Inherits the main model",
+
+        // ── cloud backend ──
+        cloudSection: "Cloud settings",
+        cloudEndpoint: "Endpoint URL",
+        cloudEndpointPlaceholder: "https://api.example.com/agent",
+        cloudToken: "Token",
+        cloudTokenPlaceholder: "optional",
+        cloudTokenHint: "Sent as `Authorization: Bearer <token>`.",
+        cloudHeaders: "Extra headers — KEY=VALUE per line",
+        cloudBodyTemplate: "Request body template (JSON)",
+        cloudBodyTemplateHint:
+            "JSON sent as the POST body. Placeholders {prompt}, {agent_name} and {cwd} are inserted already JSON-escaped.",
+        cloudResultPath: "Result path",
+        cloudResultPathHint:
+            "Dot path into the response holding the agent's text, e.g. `choices.0.message.content` or `result.output`.",
+        cloudPollUrl: "Poll URL (optional)",
+        cloudPollUrlHint:
+            "For asynchronous jobs: poll this URL (use `{id}` for the job id) until the status matches. Leave empty for a single response.",
+        cloudPollIdPath: "Job id path",
+        cloudPollStatusPath: "Status path",
+        cloudPollInterval: "Poll interval (s)",
+        cloudPollDoneValues: "Done status values — one per line",
+        cloudPollFailedValues: "Failed status values — one per line",
+        cloudUnreachable: "unreachable",
+
+        // ── shared ──
+        requireApproval: "Ask before running",
+        requireApprovalHint:
+            "When on, this agent asks for approval on its first run per app session; off means the enabled switch is the standing authorization.",
+        probe: "Test",
+        probing: "Running…",
+        probeCliHint: "Runs `<command> --version` to verify the executable resolves.",
+        probeCloudHint: "Sends a GET request to check the endpoint is reachable.",
+        noEndpoint: "No endpoint configured",
     },
 
     history: {

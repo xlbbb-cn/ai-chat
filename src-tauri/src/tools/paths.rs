@@ -5,7 +5,7 @@ use std::path::{Component, Path, PathBuf};
 
 use super::split_command_line;
 
-pub(super) fn resolve_safe_path(root_dir: &Path, rel_path: &str) -> Result<PathBuf, String> {
+pub(crate) fn resolve_safe_path(root_dir: &Path, rel_path: &str) -> Result<PathBuf, String> {
     // If an absolute path is given and it starts with root_dir, strip the prefix
     // so the AI can pass either relative or absolute paths within the workspace.
     let stripped;

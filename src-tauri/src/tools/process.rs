@@ -7,14 +7,14 @@ use super::split_command_line;
 use super::truncate_tool_output;
 
 #[derive(Clone, Copy)]
-pub(super) enum OutputDecodeHint {
+pub(crate) enum OutputDecodeHint {
     Default,
     Direct,
     CmdShell,
     PowerShell,
 }
 
-pub(super) fn decode_process_bytes(bytes: &[u8], _hint: OutputDecodeHint) -> String {
+pub(crate) fn decode_process_bytes(bytes: &[u8], _hint: OutputDecodeHint) -> String {
     if bytes.is_empty() {
         return String::new();
     }

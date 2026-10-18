@@ -18,13 +18,28 @@ use crate::{
     tools, AppConfig, AppState,
 };
 
+pub mod cli;
+pub mod cloud;
+
 // ─── Public types ─────────────────────────────────────────────────────────────
 
+/// A sub-agent. `agent_type` decides which execution backend runs it:
+///
+/// - `llm`   — the built-in autonomous LLM loop (tools + mission state);
+/// - `cli`   — a headless coding CLI installed on this machine (opencode,
+///             Claude Code, Codex, …) driven through `cli`;
+/// - `cloud` — a remote HTTP agent endpoint, driven through `cloud`.
+///
+/// The type-specific settings live in `cli` / `cloud`; the LLM fields are
+/// ignored by the other two backends.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubAgent {
     pub id: String,
     pub name: String,
     pub description: String,
+    #[serde(default = "default_agent_type")]
+    pub agent_type: String,
+    // ── `llm` backend ────────────────────────────────────────────────────────
     #[serde(default)]
     pub system_prompt: String,
     #[serde(default)]
@@ -41,8 +56,36 @@ pub struct SubAgent {
     pub allowed_skills: Vec<String>,
     #[serde(default = "default_max_iterations")]
     pub max_iterations: u32,
+    // ── `cli` backend ────────────────────────────────────────────────────────
+    #[serde(default)]
+    pub cli: CliAgentSettings,
+    // ── `cloud` backend ──────────────────────────────────────────────────────
+    #[serde(default)]
+    pub cloud: CloudAgentSettings,
+    /// `cli` / `cloud` agents only: ask the user before the first run of this
+    /// agent in each app session. Turn off to treat the panel switch as the
+    /// standing authorization.
+    #[serde(default = "default_true")]
+    pub require_approval: bool,
     #[serde(default = "default_true")]
     pub enabled: bool,
+}
+
+pub const AGENT_TYPE_LLM: &str = "llm";
+pub const AGENT_TYPE_CLI: &str = "cli";
+pub const AGENT_TYPE_CLOUD: &str = "cloud";
+
+fn default_agent_type() -> String {
+    AGENT_TYPE_LLM.to_string()
+}
+
+/// Normalizes a user-supplied agent type, falling back to `llm`.
+pub fn normalize_agent_type(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        AGENT_TYPE_CLI => AGENT_TYPE_CLI.to_string(),
+        AGENT_TYPE_CLOUD => AGENT_TYPE_CLOUD.to_string(),
+        _ => AGENT_TYPE_LLM.to_string(),
+    }
 }
 
 fn default_max_iterations() -> u32 {
@@ -50,6 +93,245 @@ fn default_max_iterations() -> u32 {
 }
 fn default_true() -> bool {
     true
+}
+
+/// A key/value pair: an environment variable for `cli` agents, or an extra
+/// header for `cloud` agents.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyValue {
+    pub key: String,
+    #[serde(default)]
+    pub value: String,
+}
+
+/// Settings of a `cli` agent: how to launch the external executable.
+///
+/// `command` + `args` form the argv template: `{prompt}`, `{model}`, `{cwd}`
+/// and `{agent_name}` are substituted before spawning. With
+/// `prompt_via = "stdin"` the prompt is written to the child's stdin instead of
+/// appearing in argv (use it for CLIs that read piped input, and on Windows
+/// `.cmd` shims where cmd.exe could expand `%VAR%` text).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CliAgentSettings {
+    /// Executable to launch: a bare name (resolved through PATH) or a path.
+    #[serde(default)]
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default = "default_prompt_via")]
+    pub prompt_via: String,
+    #[serde(default)]
+    pub continue_args: Vec<String>,
+    #[serde(default)]
+    pub model_args: Vec<String>,
+    #[serde(default)]
+    pub env: Vec<KeyValue>,
+    #[serde(default = "default_cli_timeout_seconds")]
+    pub default_timeout_seconds: u32,
+    /// Optional workspace-relative directory to run in (default: workspace root).
+    #[serde(default)]
+    pub cwd: String,
+}
+
+impl Default for CliAgentSettings {
+    fn default() -> Self {
+        Self {
+            command: String::new(),
+            args: Vec::new(),
+            prompt_via: default_prompt_via(),
+            continue_args: Vec::new(),
+            model_args: Vec::new(),
+            env: Vec::new(),
+            default_timeout_seconds: default_cli_timeout_seconds(),
+            cwd: String::new(),
+        }
+    }
+}
+
+fn default_prompt_via() -> String {
+    "arg".to_string()
+}
+
+fn default_cli_timeout_seconds() -> u32 {
+    600
+}
+
+/// Settings of a `cloud` agent: a remote HTTP endpoint that accepts a task and
+/// returns its result, optionally asynchronously through a polling URL.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CloudAgentSettings {
+    /// POST target that accepts the task.
+    #[serde(default)]
+    pub endpoint: String,
+    /// Sent as `Authorization: Bearer <token>`. Leave empty for none.
+    #[serde(default)]
+    pub token: String,
+    /// Extra request headers.
+    #[serde(default)]
+    pub headers: Vec<KeyValue>,
+    /// JSON request body template; `{prompt}`, `{agent_name}` and `{cwd}` are
+    /// substituted (JSON-escaped where they appear inside string literals).
+    #[serde(default = "default_cloud_body_template")]
+    pub body_template: String,
+    /// Dot path into the JSON response that holds the agent's text
+    /// (e.g. `choices.0.message.content`, `result.output`).
+    #[serde(default = "default_cloud_result_path")]
+    pub result_path: String,
+    /// Overall timeout in seconds, covering polling.
+    #[serde(default = "default_cloud_timeout_seconds")]
+    pub timeout_seconds: u32,
+    /// Async mode: poll this URL (supports the `{id}` placeholder) until the
+    /// status matches one of the done/failed values. Empty = single response.
+    #[serde(default)]
+    pub poll_url: String,
+    /// Dot path in the POST response holding the job id used for `{id}`.
+    #[serde(default = "default_poll_id_path")]
+    pub poll_id_path: String,
+    /// Dot path in the poll response holding the job status.
+    #[serde(default = "default_poll_status_path")]
+    pub poll_status_path: String,
+    /// Status values that mean "done, read the result".
+    #[serde(default = "default_poll_done_values")]
+    pub poll_done_values: Vec<String>,
+    /// Status values that mean "the job failed".
+    #[serde(default = "default_poll_failed_values")]
+    pub poll_failed_values: Vec<String>,
+    #[serde(default = "default_poll_interval_seconds")]
+    pub poll_interval_seconds: u32,
+}
+
+impl Default for CloudAgentSettings {
+    fn default() -> Self {
+        Self {
+            endpoint: String::new(),
+            token: String::new(),
+            headers: Vec::new(),
+            body_template: default_cloud_body_template(),
+            result_path: default_cloud_result_path(),
+            timeout_seconds: default_cloud_timeout_seconds(),
+            poll_url: String::new(),
+            poll_id_path: default_poll_id_path(),
+            poll_status_path: default_poll_status_path(),
+            poll_done_values: default_poll_done_values(),
+            poll_failed_values: default_poll_failed_values(),
+            poll_interval_seconds: default_poll_interval_seconds(),
+        }
+    }
+}
+
+fn default_cloud_body_template() -> String {
+    "{\"messages\":[{\"role\":\"user\",\"content\":\"{prompt}\"}]}".to_string()
+}
+fn default_cloud_result_path() -> String {
+    "choices.0.message.content".to_string()
+}
+fn default_cloud_timeout_seconds() -> u32 {
+    1_800
+}
+fn default_poll_id_path() -> String {
+    "id".to_string()
+}
+fn default_poll_status_path() -> String {
+    "status".to_string()
+}
+fn default_poll_done_values() -> Vec<String> {
+    ["completed", "succeeded", "success", "done", "finished"]
+        .iter()
+        .map(|value| value.to_string())
+        .collect()
+}
+fn default_poll_failed_values() -> Vec<String> {
+    ["failed", "error", "cancelled", "canceled"]
+        .iter()
+        .map(|value| value.to_string())
+        .collect()
+}
+fn default_poll_interval_seconds() -> u32 {
+    5
+}
+
+/// Definition of a standalone CLI agent written by builds that predate agent
+/// types. Only used to migrate `sub_agents.json` / profiles forward.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LegacyCliAgent {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default = "default_prompt_via")]
+    pub prompt_via: String,
+    #[serde(default)]
+    pub continue_args: Vec<String>,
+    #[serde(default)]
+    pub model_args: Vec<String>,
+    #[serde(default)]
+    pub env: Vec<KeyValue>,
+    #[serde(default = "default_cli_timeout_seconds")]
+    pub default_timeout_seconds: u32,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AgentsConfig {
+    #[serde(default)]
+    pub agents: Vec<SubAgent>,
+    #[serde(default)]
+    pub orchestration: AgentOrchestration,
+    /// Legacy standalone CLI agents — migrated into `agents` (type `cli`) on
+    /// load and never written back.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cli_agents: Vec<LegacyCliAgent>,
+}
+
+/// Normalizes a loaded config in place: agent types are canonicalized and any
+/// legacy standalone CLI agents become `cli`-type agents.
+pub fn normalize_config(config: &mut AgentsConfig) {
+    for agent in &mut config.agents {
+        agent.agent_type = normalize_agent_type(&agent.agent_type);
+    }
+
+    if config.cli_agents.is_empty() {
+        return;
+    }
+
+    let legacy = std::mem::take(&mut config.cli_agents);
+    for entry in legacy {
+        let already_present = config.agents.iter().any(|agent| agent.id == entry.id);
+        if already_present {
+            continue;
+        }
+        config.agents.push(SubAgent {
+            id: entry.id,
+            name: entry.name,
+            description: entry.description,
+            agent_type: AGENT_TYPE_CLI.to_string(),
+            system_prompt: String::new(),
+            model: None,
+            max_complete_tokens: None,
+            max_tokens: None,
+            temperature: None,
+            allowed_tools: Vec::new(),
+            allowed_skills: Vec::new(),
+            max_iterations: default_max_iterations(),
+            cli: CliAgentSettings {
+                command: entry.command,
+                args: entry.args,
+                prompt_via: entry.prompt_via,
+                continue_args: entry.continue_args,
+                model_args: entry.model_args,
+                env: entry.env,
+                default_timeout_seconds: entry.default_timeout_seconds,
+                cwd: String::new(),
+            },
+            cloud: CloudAgentSettings::default(),
+            require_approval: true,
+            enabled: entry.enabled,
+        });
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,14 +362,6 @@ impl Default for AgentOrchestration {
             mode: "parallel".to_string(),
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct AgentsConfig {
-    #[serde(default)]
-    pub agents: Vec<SubAgent>,
-    #[serde(default)]
-    pub orchestration: AgentOrchestration,
 }
 
 // ─── Internal planning types ──────────────────────────────────────────────────
@@ -694,14 +968,18 @@ pub fn load_agents_config(path: &Path) -> AgentsConfig {
     if !path.exists() {
         return AgentsConfig::default();
     }
-    std::fs::read_to_string(path)
+    let mut config = std::fs::read_to_string(path)
         .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+        .and_then(|s| serde_json::from_str::<AgentsConfig>(&s).ok())
+        .unwrap_or_default();
+    normalize_config(&mut config);
+    config
 }
 
-fn save_agents_config_file(path: &Path, config: &AgentsConfig) -> Result<(), String> {
-    let json = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
+pub(crate) fn save_agents_config_file(path: &Path, config: &AgentsConfig) -> Result<(), String> {
+    let mut config = config.clone();
+    normalize_config(&mut config);
+    let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
     std::fs::write(path, json).map_err(|e| e.to_string())
 }
 
@@ -716,6 +994,36 @@ pub fn list_sub_agents(state: State<'_, AppState>) -> Vec<SubAgent> {
 pub fn save_sub_agent(state: State<'_, AppState>, agent: SubAgent) -> Result<(), String> {
     let mut config = load_agents_config(&state.agents_config_path);
     let mut a = agent;
+    if a.name.trim().is_empty() {
+        return Err("The agent name cannot be empty.".to_string());
+    }
+    a.agent_type = normalize_agent_type(&a.agent_type);
+    match a.agent_type.as_str() {
+        AGENT_TYPE_CLI => {
+            a.cli.command = a.cli.command.trim().to_string();
+            if a.cli.command.is_empty() {
+                return Err("A CLI agent needs a command to launch.".to_string());
+            }
+            a.cli.prompt_via = if a.cli.prompt_via.trim().eq_ignore_ascii_case("stdin") {
+                "stdin".to_string()
+            } else {
+                "arg".to_string()
+            };
+        }
+        AGENT_TYPE_CLOUD => {
+            a.cloud.endpoint = a.cloud.endpoint.trim().to_string();
+            if a.cloud.endpoint.is_empty() {
+                return Err("A cloud agent needs an endpoint URL.".to_string());
+            }
+            if a.cloud.timeout_seconds == 0 {
+                a.cloud.timeout_seconds = default_cloud_timeout_seconds();
+            }
+            if a.cloud.poll_interval_seconds == 0 {
+                a.cloud.poll_interval_seconds = default_poll_interval_seconds();
+            }
+        }
+        _ => {}
+    }
     if a.id.is_empty() {
         a.id = Uuid::new_v4().to_string();
     }
@@ -747,6 +1055,33 @@ pub fn save_agent_orchestration(
     let mut config = load_agents_config(&state.agents_config_path);
     config.orchestration = orchestration;
     save_agents_config_file(&state.agents_config_path, &config)
+}
+
+// ─── Agent probes (panel "Test" buttons) ─────────────────────────────────────
+
+/// Resolve a `cli` agent's command (PATH + PATHEXT) and run it with the given
+/// arguments, so the panel can verify it before the model ever uses it.
+#[tauri::command]
+pub async fn probe_agent_cli(
+    command: String,
+    args: Option<Vec<String>>,
+) -> Result<cli::CliProbe, String> {
+    cli::probe(&command, &args.unwrap_or_default()).await
+}
+
+/// Check that a `cloud` agent's endpoint is reachable with the given token.
+#[tauri::command]
+pub async fn probe_agent_cloud(
+    endpoint: String,
+    token: Option<String>,
+    headers: Option<Vec<KeyValue>>,
+) -> Result<cloud::CloudProbe, String> {
+    cloud::probe(
+        &endpoint,
+        token.as_deref().unwrap_or(""),
+        &headers.unwrap_or_default(),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -1388,18 +1723,31 @@ pub async fn run_sub_agent(
     skill_access_roots: Vec<PathBuf>,
 ) -> TaskResult {
     let mission_id = mission_id_for_task(task).to_string();
-    let result = run_sub_agent_inner(
-        app,
-        client,
-        url,
-        config,
-        session_id,
-        agent,
-        task,
-        workspace_dir,
-        skill_access_roots,
-    )
-    .await;
+    let agent_type = normalize_agent_type(&agent.agent_type);
+    let result = match agent_type.as_str() {
+        AGENT_TYPE_CLI => {
+            run_external_agent(app, agent, task, session_id, workspace_dir, ExternalBackend::Cli)
+                .await
+        }
+        AGENT_TYPE_CLOUD => {
+            run_external_agent(app, agent, task, session_id, workspace_dir, ExternalBackend::Cloud)
+                .await
+        }
+        _ => {
+            run_sub_agent_inner(
+                app,
+                client,
+                url,
+                config,
+                session_id,
+                agent,
+                task,
+                workspace_dir,
+                skill_access_roots,
+            )
+            .await
+        }
+    };
 
     // Close the mission unless the sub-agent completed it explicitly: without
     // this, a stopped, failed or cancelled mission keeps reporting "running"
@@ -1417,6 +1765,290 @@ pub async fn run_sub_agent(
     }
 
     result
+}
+
+// ─── External agents (cli / cloud) ───────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExternalBackend {
+    Cli,
+    Cloud,
+}
+
+impl ExternalBackend {
+    fn label(self) -> &'static str {
+        match self {
+            ExternalBackend::Cli => "CLI",
+            ExternalBackend::Cloud => "Cloud",
+        }
+    }
+}
+
+/// Runs a `cli` / `cloud` agent. The agent has no LLM loop of its own inside the
+/// app: it receives one self-contained prompt, runs to completion (or the
+/// timeout) and its output becomes the mission report.
+async fn run_external_agent(
+    app: &AppHandle,
+    agent: &SubAgent,
+    task: &Task,
+    session_id: &str,
+    workspace_dir: PathBuf,
+    backend: ExternalBackend,
+) -> TaskResult {
+    let mission_id = mission_id_for_task(task).to_string();
+    let _ = app.emit(
+        "agent-task-start",
+        json!({
+            "task_id": task.id,
+            "agent_id": agent.id,
+            "agent_name": agent.name,
+            "description": task.description,
+        }),
+    );
+
+    {
+        let state = app.state::<AppState>();
+        let db = match state.db.lock() {
+            Ok(db) => db,
+            Err(err) => {
+                let error = format!("Failed to lock database for mission initialization: {err}");
+                let _ = app.emit(
+                    "agent-task-error",
+                    json!({ "task_id": task.id, "agent_id": agent.id, "error": error }),
+                );
+                return TaskResult {
+                    task_id: task.id.clone(),
+                    agent_id: agent.id.clone(),
+                    agent_name: agent.name.clone(),
+                    status: "error".to_string(),
+                    content: error,
+                    tool_calls_count: 0,
+                    tokens_used: 0,
+                };
+            }
+        };
+
+        if let Err(err) = initialize_mission_state(&db, session_id, agent, task) {
+            let _ = app.emit(
+                "agent-task-error",
+                json!({ "task_id": task.id, "agent_id": agent.id, "error": err }),
+            );
+            return TaskResult {
+                task_id: task.id.clone(),
+                agent_id: agent.id.clone(),
+                agent_name: agent.name.clone(),
+                status: "error".to_string(),
+                content: format!("Error: {}", err),
+                tool_calls_count: 0,
+                tokens_used: 0,
+            };
+        }
+    }
+    let _ = app.emit(
+        "agent-task-state",
+        json!({ "mission_id": mission_id, "session_id": session_id, "status": "running", "event": "initialized" }),
+    );
+
+    let prompt = build_external_prompt(agent, task);
+
+    if agent.require_approval {
+        if let Some(rejection) =
+            request_external_agent_approval(app, agent, &prompt, &workspace_dir, backend).await
+        {
+            let _ = app.emit(
+                "agent-task-error",
+                json!({ "task_id": task.id, "agent_id": agent.id, "error": rejection.clone() }),
+            );
+            return TaskResult {
+                task_id: task.id.clone(),
+                agent_id: agent.id.clone(),
+                agent_name: agent.name.clone(),
+                status: "error".to_string(),
+                content: rejection,
+                tool_calls_count: 0,
+                tokens_used: 0,
+            };
+        }
+    }
+
+    let outcome: Result<(String, String), String> = match backend {
+        ExternalBackend::Cli => {
+            let cwd = match resolve_agent_cwd(agent, &workspace_dir) {
+                Ok(cwd) => cwd,
+                Err(err) => {
+                    let _ = app.emit(
+                        "agent-task-error",
+                        json!({ "task_id": task.id, "agent_id": agent.id, "error": err }),
+                    );
+                    return TaskResult {
+                        task_id: task.id.clone(),
+                        agent_id: agent.id.clone(),
+                        agent_name: agent.name.clone(),
+                        status: "error".to_string(),
+                        content: format!("Error: {err}"),
+                        tool_calls_count: 0,
+                        tokens_used: 0,
+                    };
+                }
+            };
+            cli::run(app, agent, &task.id, &prompt, cwd)
+                .await
+                .map(|run| (run.output, run.summary))
+                .map_err(|err| format!("CLI agent \"{}\" failed: {err}", agent.name))
+        }
+        ExternalBackend::Cloud => cloud::run(app, agent, &task.id, &prompt, &workspace_dir)
+            .await
+            .map(|run| (run.result, run.summary))
+            .map_err(|err| format!("Cloud agent \"{}\" failed: {err}", agent.name)),
+    };
+
+    match outcome {
+        Ok((content, summary)) => {
+            let state = app.state::<AppState>();
+            if let Ok(db) = state.db.lock() {
+                let _ = mark_mission_accomplished(&db, &mission_id, Some(&content));
+            }
+            let _ = app.emit(
+                "agent-task-done",
+                json!({
+                    "task_id": task.id,
+                    "agent_id": agent.id,
+                    "agent_name": agent.name,
+                    "summary": summary.chars().take(200).collect::<String>(),
+                }),
+            );
+            TaskResult {
+                task_id: task.id.clone(),
+                agent_id: agent.id.clone(),
+                agent_name: agent.name.clone(),
+                status: "success".to_string(),
+                content,
+                tool_calls_count: 0,
+                tokens_used: 0,
+            }
+        }
+        Err(err) => {
+            let _ = app.emit(
+                "agent-task-error",
+                json!({ "task_id": task.id, "agent_id": agent.id, "error": err }),
+            );
+            TaskResult {
+                task_id: task.id.clone(),
+                agent_id: agent.id.clone(),
+                agent_name: agent.name.clone(),
+                status: "error".to_string(),
+                content: format!("Error: {err}"),
+                tool_calls_count: 0,
+                tokens_used: 0,
+            }
+        }
+    }
+}
+
+/// The single prompt handed to a `cli` / `cloud` agent: the task plus whatever
+/// context the caller attached. External agents never see the chat history.
+fn build_external_prompt(agent: &SubAgent, task: &Task) -> String {
+    let mut prompt = String::new();
+    if !agent.system_prompt.trim().is_empty() {
+        prompt.push_str(agent.system_prompt.trim());
+        prompt.push_str("\n\n");
+    }
+    prompt.push_str(task.description.trim());
+    if !task.context.trim().is_empty() {
+        prompt.push_str("\n\nContext:\n");
+        prompt.push_str(task.context.trim());
+    }
+    prompt
+}
+
+/// Workspace-relative `cwd` configured on a CLI agent (defaults to the
+/// workspace root). The path is checked against the workspace sandbox.
+fn resolve_agent_cwd(agent: &SubAgent, workspace_dir: &Path) -> Result<PathBuf, String> {
+    let configured = agent.cli.cwd.trim();
+    if configured.is_empty() {
+        return Ok(workspace_dir.to_path_buf());
+    }
+    let path = crate::tools::resolve_safe_path(workspace_dir, configured)?;
+    if !path.is_dir() {
+        return Err(format!(
+            "the agent's working directory '{}' does not exist",
+            path.display()
+        ));
+    }
+    Ok(path)
+}
+
+/// Approval gate for `cli` / `cloud` agents: asked once per agent per app run
+/// (unless `require_approval` is off, in which case the panel switch is the
+/// standing authorization).
+async fn request_external_agent_approval(
+    app: &AppHandle,
+    agent: &SubAgent,
+    prompt: &str,
+    workspace_dir: &Path,
+    backend: ExternalBackend,
+) -> Option<String> {
+    let state = app.state::<AppState>();
+    if state
+        .external_agent_confirmed
+        .lock()
+        .map(|set| set.contains(&agent.id))
+        .unwrap_or(false)
+    {
+        return None;
+    }
+
+    // Only one confirmation dialog can be pending at a time (single
+    // `confirm_sender`), so parallel agents must queue here instead of
+    // overwriting each other's request.
+    let _guard = state.external_agent_confirm_lock.lock().await;
+
+    if state
+        .external_agent_confirmed
+        .lock()
+        .map(|set| set.contains(&agent.id))
+        .unwrap_or(false)
+    {
+        return None;
+    }
+
+    let target = match backend {
+        ExternalBackend::Cli => cli::describe_run(agent, prompt, workspace_dir)
+            .map(|command| format!("It runs with your user permissions and can read and write files in the workspace.\n\n{}", command))
+            .unwrap_or_else(|err| format!("Its command could not be resolved yet: {err}")),
+        ExternalBackend::Cloud => format!(
+            "It sends the task to a remote endpoint and can read and write files there.\n\nPOST {}",
+            agent.cloud.endpoint.trim()
+        ),
+    };
+
+    let confirm = crate::tools::request_tool_confirmation(
+        app,
+        format!(
+            "The {} agent '{}' is about to run.\n\n{}",
+            backend.label(),
+            agent.name,
+            target
+        ),
+        "external_agent".to_string(),
+        target.clone(),
+        "external_agent",
+        "none",
+    )
+    .await;
+
+    if !confirm.confirmed {
+        return Some(format!(
+            "⛔ The user rejected running the {} agent '{}'. Do not retry it; ask the user how to proceed or do the work with the available tools.",
+            backend.label(),
+            agent.name
+        ));
+    }
+
+    if let Ok(mut set) = state.external_agent_confirmed.lock() {
+        set.insert(agent.id.clone());
+    }
+    None
 }
 
 async fn run_sub_agent_inner(
@@ -1936,6 +2568,85 @@ async fn run_sub_agent_inner(
         content: final_content,
         tool_calls_count,
         tokens_used: total_tokens,
+    }
+}
+
+// ─── Tests ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The user's pre-typed config: an `llm` agent plus the legacy standalone
+    /// CLI-agent array. Loading it must yield two typed agents and drop the
+    /// legacy array.
+    #[test]
+    fn legacy_cli_agents_are_migrated_into_typed_agents() {
+        let raw = r#"{
+            "agents": [
+                {
+                    "id": "code-writer",
+                    "name": "code-writer",
+                    "description": "reviews code",
+                    "system_prompt": "be precise",
+                    "allowed_tools": ["file_actions"],
+                    "max_iterations": 10,
+                    "enabled": true
+                }
+            ],
+            "orchestration": { "use_agents": true, "auto_configure": false, "max_concurrent": 3, "mode": "parallel" },
+            "cli_agents": [
+                {
+                    "id": "opencode-agent",
+                    "name": "opencode",
+                    "description": "",
+                    "command": "C:\\Users\\x\\AppData\\Roaming\\npm\\opencode2.ps1",
+                    "args": ["run", "{prompt}"],
+                    "prompt_via": "arg",
+                    "continue_args": [],
+                    "model_args": [],
+                    "env": [],
+                    "default_timeout_seconds": 600,
+                    "enabled": true
+                }
+            ]
+        }"#;
+
+        let mut config: AgentsConfig = serde_json::from_str(raw).expect("legacy config parses");
+        normalize_config(&mut config);
+
+        assert_eq!(config.agents.len(), 2);
+        assert!(config.cli_agents.is_empty());
+
+        let llm_agent = config
+            .agents
+            .iter()
+            .find(|agent| agent.id == "code-writer")
+            .expect("llm agent kept");
+        assert_eq!(llm_agent.agent_type, AGENT_TYPE_LLM);
+        assert!(llm_agent.require_approval);
+
+        let cli_agent = config
+            .agents
+            .iter()
+            .find(|agent| agent.id == "opencode-agent")
+            .expect("legacy CLI agent migrated");
+        assert_eq!(cli_agent.agent_type, AGENT_TYPE_CLI);
+        assert_eq!(cli_agent.cli.args, vec!["run".to_string(), "{prompt}".to_string()]);
+        assert_eq!(cli_agent.cli.default_timeout_seconds, 600);
+        assert!(cli_agent.cli.command.ends_with("opencode2.ps1"));
+
+        // The legacy array must not come back when the config is serialized.
+        let serialized = serde_json::to_string(&config).expect("serializes");
+        assert!(!serialized.contains("\"cli_agents\""));
+    }
+
+    #[test]
+    fn unknown_agent_types_fall_back_to_llm() {
+        assert_eq!(normalize_agent_type("CLI"), AGENT_TYPE_CLI);
+        assert_eq!(normalize_agent_type(" cloud "), AGENT_TYPE_CLOUD);
+        assert_eq!(normalize_agent_type("banana"), AGENT_TYPE_LLM);
+        assert_eq!(normalize_agent_type(""), AGENT_TYPE_LLM);
     }
 }
 

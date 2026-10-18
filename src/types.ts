@@ -117,7 +117,9 @@ export type ConfirmKind =
   | "system_config"
   | "user_software"
   | "user_data"
-  | "external_path";
+  | "external_path"
+  /** `cli` / `cloud` sub-agents (approved per agent in the Sub Agents panel). */
+  | "external_agent";
 
 /**
  * Values persisted in `auto_accept_confirm_kinds`. `"*"` is the
@@ -304,6 +306,9 @@ export interface SubAgent {
   id: string;
   name: string;
   description: string;
+  /** Execution backend; the other type's settings are ignored. */
+  agent_type: AgentType;
+  // ── `llm` backend ──
   system_prompt: string;
   model?: string;
   max_tokens?: number;
@@ -312,6 +317,15 @@ export interface SubAgent {
   allowed_tools: string[];
   allowed_skills: string[];
   max_iterations: number;
+  // ── `cli` backend ──
+  cli: CliAgentSettings;
+  // ── `cloud` backend ──
+  cloud: CloudAgentSettings;
+  /**
+   * `cli` / `cloud` agents only: ask the user before this agent's first run in
+   * each app session. Off = the enabled switch is the standing authorization.
+   */
+  require_approval: boolean;
   enabled: boolean;
 }
 
@@ -320,6 +334,96 @@ export interface AgentOrchestration {
   auto_configure: boolean;
   max_concurrent: number;
   mode: "parallel" | "sequential";
+}
+
+/** One key/value pair: a CLI agent's env var, or a cloud agent's header. */
+export interface KeyValue {
+  key: string;
+  value: string;
+}
+
+/**
+ * How a sub-agent is executed:
+ * - `llm`   — the built-in autonomous LLM loop (tools + mission state);
+ * - `cli`   — a headless coding CLI installed on this machine;
+ * - `cloud` — a remote HTTP agent endpoint.
+ */
+export type AgentType = "llm" | "cli" | "cloud";
+
+/**
+ * Settings of a `cli` agent. `command` + `args` form the argv template:
+ * `{prompt}`, `{model}`, `{cwd}` and `{agent_name}` are substituted before
+ * spawning. With `prompt_via: "stdin"` the prompt is piped to the child.
+ */
+export interface CliAgentSettings {
+  command: string;
+  args: string[];
+  prompt_via: "arg" | "stdin" | string;
+  continue_args: string[];
+  model_args: string[];
+  env: KeyValue[];
+  default_timeout_seconds: number;
+  /** Workspace-relative directory to run in (empty = workspace root). */
+  cwd: string;
+}
+
+/**
+ * Settings of a `cloud` agent: an HTTP endpoint that accepts the task and
+ * returns the result, optionally asynchronously through `poll_url`.
+ */
+export interface CloudAgentSettings {
+  endpoint: string;
+  token: string;
+  headers: KeyValue[];
+  /** JSON body template with `{prompt}` / `{agent_name}` / `{cwd}` placeholders. */
+  body_template: string;
+  /** Dot path into the response holding the text (e.g. `choices.0.message.content`). */
+  result_path: string;
+  timeout_seconds: number;
+  /** Async mode: poll this URL (`{id}` placeholder). Empty = single response. */
+  poll_url: string;
+  poll_id_path: string;
+  poll_status_path: string;
+  poll_done_values: string[];
+  poll_failed_values: string[];
+  poll_interval_seconds: number;
+}
+
+/** Result of `probe_agent_cli`: the resolved executable and its output. */
+export interface CliProbe {
+  command: string;
+  resolved_path: string;
+  exit_code?: number | null;
+  output: string;
+}
+
+/** Result of `probe_agent_cloud`: endpoint reachability. */
+export interface CloudProbe {
+  endpoint: string;
+  reachable: boolean;
+  status?: number | null;
+  detail: string;
+}
+
+/** `agent-task-token` payload: one streamed chunk of agent output. */
+export interface AgentTaskTokenEvent {
+  task_id: string;
+  token: string;
+}
+
+/** Legacy standalone CLI agent (pre agent-type profiles), kept for imports. */
+export interface LegacyCliAgent {
+  id: string;
+  name: string;
+  description: string;
+  command: string;
+  args: string[];
+  prompt_via: string;
+  continue_args: string[];
+  model_args: string[];
+  env: KeyValue[];
+  default_timeout_seconds: number;
+  enabled: boolean;
 }
 
 export interface AgentTaskEvent {
@@ -361,6 +465,8 @@ export interface Profile {
   selected_tools: string[];
   agents: SubAgent[];
   orchestration: AgentOrchestration;
+  /** Legacy standalone CLI agents (pre agent-type profiles). */
+  cli_agents?: LegacyCliAgent[];
   mcp_servers: McpServer[];
   created_at: string;
   updated_at: string;

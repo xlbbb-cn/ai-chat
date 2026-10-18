@@ -100,11 +100,13 @@ const zhCN: Messages = {
             titleSudo: "特权操作（sudo）",
             titleElevation: "特权操作（管理员）",
             titleExternalPath: "外部文件访问请求",
+            titleExternalAgent: "外部智能体调用请求",
             titleRisk: "风险等级 {level} —— 请确认执行",
             titleDangerous: "检测到危险命令",
             badgeSudo: "SUDO",
             badgeAdmin: "ADMIN",
             badgePath: "PATH",
+            badgeExternalAgent: "AGENT",
             badgeRisk: "RISK",
             badgeDangerous: "危险",
             reason: "原因：",
@@ -120,6 +122,8 @@ const zhCN: Messages = {
             elevationHint: "该操作将请求管理员提权（UAC），可能会修改系统设置。",
             externalPathHint:
                 "该文件操作尝试访问当前工作区根目录之外的绝对路径。请仅在确认该外部位置是预期目标时允许。",
+            externalAgentHint:
+                "该 CLI / 云端智能体在应用之外执行：CLI 以你的用户权限在工作区内运行，云端智能体把任务发送到远程端点。每个智能体在本次应用运行中只需批准一次。",
             deny: "拒绝",
             allow: "允许",
         },
@@ -426,14 +430,22 @@ const zhCN: Messages = {
     agents: {
         title: "子智能体",
         orchestration: "编排设置",
-        enableMode: "启用子智能体模式",
+        enableMode: "自动编排",
+        enableModeHint:
+            "开启后，编排器会为一次请求自动规划并并行执行多个智能体。主智能体通过 `call_subagent` 委派任务不受此开关影响。",
         autoConfigure: "自动配置模式",
         executionMode: "执行方式",
         modeParallel: "并行",
         modeSequential: "串行",
         maxConcurrency: "最大并发数",
-        empty: "还没有子智能体。点击下方按钮创建一个。",
+        empty: "还没有智能体。点击下方按钮创建一个。",
         newAgent: "+ 新建智能体",
+        typeLabel: "智能体类型",
+        typeLlm: "LLM",
+        typeCli: "CLI",
+        typeCloud: "云端",
+        typeHint:
+            "LLM：在应用内运行自主工具循环；CLI：启动本机安装的无界面编码 CLI；云端：把任务发送到远程 HTTP 端点。",
         name: "名称",
         namePlaceholder: "例如 code-analyzer",
         description: "描述",
@@ -443,6 +455,7 @@ const zhCN: Messages = {
         modelLimits: "模型与限制",
         model: "模型（可选，覆盖主配置）",
         modelPlaceholder: "留空则继承主模型",
+        cliModelArgsModelHint: "作为 CLI 模型参数里的 {model} 占位符使用，其他类型忽略此项。",
         maxTokens: "最大补全 tokens",
         maxTokensPlaceholder: "默认补全上限 8192",
         temperature: "温度",
@@ -468,6 +481,67 @@ const zhCN: Messages = {
                 "通过 `todos` 工具管理会话待办清单（list / add / update_status / clear_completed / archive）。该计划与聊天会话及所有并行智能体共享。",
             memory: "会话 / 用户 / 仓库记忆存储",
         },
+
+        // ── CLI 类型 ──
+        cliSection: "CLI 设置",
+        cliCommand: "命令",
+        cliCommandPlaceholder: "opencode",
+        cliCommandHint:
+            "可执行文件名（在 PATH 中查找）或完整路径。Windows 的 .cmd/.bat/.ps1 启动器会自动处理。",
+        cliArgs: "参数 —— 每行一个",
+        cliArgsHint:
+            "可用占位符：{prompt}、{model}、{cwd}、{agent_name}。示例：一行写 `run`，下一行写 `{prompt}`，等价于 `opencode run \"…\"`。若没有任何位置使用 {prompt}，提示词会追加为最后一个参数。",
+        cliPromptVia: "提示词传递方式",
+        cliPromptViaArg: "作为参数（{prompt}）",
+        cliPromptViaStdin: "通过 stdin",
+        cliPromptViaHint:
+            "适合从管道读取输入的 CLI；在 Windows 上，当提示词可能包含 %VAR% 形式的内容时也建议使用。",
+        cliContinueArgs: "续接会话参数 —— 每行一个",
+        cliContinueArgsHint: "当后续运行需要续接该 CLI 的会话时追加，例如 --continue。",
+        cliModelArgs: "模型参数 —— 每行一个",
+        cliModelArgsHint:
+            "当该智能体配置了模型时追加；请在需要的位置使用 {model} 占位符，例如一行 --model、一行 {model}。",
+        cliEnv: "环境变量 —— 每行一个 KEY=VALUE",
+        cliCwd: "工作目录",
+        cliCwdPlaceholder: "工作区根目录",
+        cliCwdHint: "相对于工作区的目录；留空表示工作区根目录。",
+        timeout: "默认超时（秒）",
+        noCommand: "未配置命令",
+        inheritModel: "继承主模型",
+
+        // ── 云端类型 ──
+        cloudSection: "云端设置",
+        cloudEndpoint: "端点 URL",
+        cloudEndpointPlaceholder: "https://api.example.com/agent",
+        cloudToken: "令牌",
+        cloudTokenPlaceholder: "可选",
+        cloudTokenHint: "以 `Authorization: Bearer <token>` 发送。",
+        cloudHeaders: "附加请求头 —— 每行一个 KEY=VALUE",
+        cloudBodyTemplate: "请求体模板（JSON）",
+        cloudBodyTemplateHint:
+            "作为 POST 请求体发送的 JSON。{prompt}、{agent_name}、{cwd} 会被替换并按 JSON 转义。",
+        cloudResultPath: "结果路径",
+        cloudResultPathHint:
+            "从响应中提取文本的点号路径，例如 `choices.0.message.content` 或 `result.output`。",
+        cloudPollUrl: "轮询 URL（可选）",
+        cloudPollUrlHint:
+            "用于异步任务：轮询该 URL（可用 `{id}` 表示任务 id），直到状态匹配为止。留空表示一次性返回。",
+        cloudPollIdPath: "任务 id 路径",
+        cloudPollStatusPath: "状态路径",
+        cloudPollInterval: "轮询间隔（秒）",
+        cloudPollDoneValues: "完成状态值 —— 每行一个",
+        cloudPollFailedValues: "失败状态值 —— 每行一个",
+        cloudUnreachable: "无法连接",
+
+        // ── 通用 ──
+        requireApproval: "运行前需确认",
+        requireApprovalHint:
+            "开启时，该智能体在每次应用运行中的首次执行会请求确认；关闭则视为「启用开关」即为长期授权。",
+        probe: "测试",
+        probing: "正在运行…",
+        probeCliHint: "运行 `<命令> --version` 以验证可执行文件能否被解析。",
+        probeCloudHint: "发送一个 GET 请求检测端点是否可达。",
+        noEndpoint: "未配置端点",
     },
 
     history: {
