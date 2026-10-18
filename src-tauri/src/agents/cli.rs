@@ -233,12 +233,6 @@ fn quote_windows_argument(argument: &str) -> String {
     out
 }
 
-/// PowerShell single-quoted literal (`''` escapes a quote). Used for `-File`
-/// script arguments, which PowerShell parses with its own rules.
-fn quote_powershell_argument(argument: &str) -> String {
-    format!("'{}'", argument.replace('\'', "''"))
-}
-
 fn build_command(
     target: &SpawnTarget,
     args: &[String],
