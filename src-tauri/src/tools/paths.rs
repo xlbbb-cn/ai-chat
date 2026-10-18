@@ -114,7 +114,7 @@ fn path_is_within_any_root(path: &Path, roots: &[PathBuf]) -> bool {
 }
 
 fn workspace_skills_root(workspace_dir: &Path) -> PathBuf {
-    workspace_dir.join("skills")
+    crate::workspace::skills_root(workspace_dir)
 }
 
 pub(super) fn with_root_header(body: String) -> String {
@@ -140,24 +140,26 @@ pub(super) fn ensure_mutation_target_allowed(
         return Err("The workspace root itself cannot be modified or deleted.".to_string());
     }
 
-    // The persistent memory directory is managed by the memory tool; direct
-    // mutation would wipe user/repo memories.
-    let memory_root = workspace_dir.join("memory");
-    if path_is_within(path, &memory_root) || path.starts_with(&memory_root) {
-        return Err(
-            "The memory directory is managed by the memory tool and cannot be modified directly."
-                .to_string(),
-        );
-    }
-
-    let workspace_skills = workspace_skills_root(workspace_dir);
-    if path_is_within(path, &workspace_skills)
-        && !path_is_within_any_root(path, writable_skill_roots)
-    {
-        return Err(
-            "Skill directories are read-only. Only workspace/skills is writable in self-evolution mode."
-                .to_string(),
-        );
+    // The hidden `.data` directory holds application-managed workspace state:
+    // the SQLite database, the memory store, todo lists and the skill status
+    // file. Only the skills root is writable, and only when the caller passes
+    // it as a writable root (self-evolution mode) — direct mutation of the
+    // database or the memory/todo files would corrupt or wipe user data.
+    let data_root = crate::workspace::data_root(workspace_dir);
+    if path_is_within(path, &data_root) || path.starts_with(&data_root) {
+        if !path_is_within_any_root(path, writable_skill_roots) {
+            let skills_root = workspace_skills_root(workspace_dir);
+            if path_is_within(path, &skills_root) || path.starts_with(&skills_root) {
+                return Err(
+                    "Skill directories are read-only. Only .data/skills is writable in self-evolution mode."
+                        .to_string(),
+                );
+            }
+            return Err(
+                "The workspace .data directory is managed by the application and cannot be modified directly."
+                    .to_string(),
+            );
+        }
     }
 
     Ok(())

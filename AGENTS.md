@@ -78,23 +78,40 @@ to a **draft** GitHub Release for the tag (also kept as workflow artifacts).
 - **Streaming chat**: `chat_completion` command opens an SSE connection (`reqwest` + `futures-util`) and emits to the frontend:
   `chat-token`, `chat-reasoning-token`, `chat-done`, `chat-error`, `chat-usage`.
 - **Agent orchestration** (toggle via `use_agents` in config): `agent-plan-start`, `agent-task-start`, `agent-task-token`, `agent-task-done`, `agent-task-error`, `agent-aggregate-start`.
-- **Profiles / backup**: `src-tauri/src/backup.rs` owns profile export/import (app menu `save-profile` / `restore-profile`). The zip holds `config.json`, `profiles.json`, `mcp_servers.json`, `sub_agents.json`, `skills/`, `workspace/memory/`, `workspace/todos/` and a `chat.db` snapshot; import restores the workspace folders into the (possibly switched) active workspace. Named profiles inside the app (`save_profile_config` / `apply_profile_config` / `delete_profile_config`) are separate and stay in `lib.rs`.
+- **Profiles / backup**: `src-tauri/src/backup.rs` owns profile export/import (app menu `save-profile` / `restore-profile`). The zip holds `config.json`, `profiles.json`, `mcp_servers.json`, `sub_agents.json`, `workspace/{memory,todos,skills}/`, `workspace/skills.status` and a `chat.db` snapshot; every `workspace/...` entry is read from and restored into the hidden `<workspace>/.data` directory of the (possibly switched) active workspace. Named profiles inside the app (`save_profile_config` / `apply_profile_config` / `delete_profile_config`) are separate and stay in `lib.rs`; a profile carries tools/agents/MCP but **no** skill selection (that is per-workspace state).
 - **MCP warmup**: enabled servers in `mcp_servers.json` are spawned at app startup (`mcp::spawn_warmup`).
 - **Delay timers** (`src-tauri/src/tools/timer.rs`): the `timer` tool (`timer_set` / `timer_list` / `timer_cancel`, toggled in the Tools panel) lets the assistant wait for slow work instead of polling — the LLM arms a delay and ends its turn; when it fires the backend emits `timer-fired` and the frontend injects the timer's `message` into the same session as a new user turn (`timer-state` keeps the timer bar above the input box in sync). Timers are mirrored to `timers.json` and re-armed at startup, where overdue ones fire immediately. Sub-agents never receive the timer tools (`agents.rs` filters them out).
 - **Model metadata** (`src-tauri/src/model_metadata.rs`): `fetch_model_metadata` pulls the public basellm/llm-metadata catalogue (6 h in-memory cache) and expands its `tags` into capability flags. `src/utils/modelMetadata.ts` fuzzy-matches remote model ids against it (vendor prefixes, date stamps, modality guards); "Fetch Models From API" stores the matches per model in `config.model_metadata` and uses the catalogue context window when the provider reports none. The chat toolbar renders those flags as icons inside the model picker's options, plus a thinking-depth selector for reasoning-capable models (`config.model_reasoning_effort` → `reasoning_effort`, resolved by `llm_complete::resolve_reasoning_effort` and applied to chat + sub-agent requests). The attachment picker follows the same flags: text is always accepted (inlined into the prompt), images need `Vision` (`image_url` parts), PDFs need `Files` (`file` parts), `wav`/`mp3` need `Audio` (`input_audio` parts); an unmatched model keeps the permissive default.
 - **Update check** (`src-tauri/src/update.rs`): `check_update` reads the releases of `xlbbb-cn/ai-chat` from the GitHub API, keeps the highest semver (drafts are always skipped, pre-releases behind `include_prerelease_updates`), ranks the attached bundles for the current OS/arch and flags the preferred one as `recommended`. `download_update` streams into the downloads folder while emitting `update-download-progress`; `open_update_file` / `reveal_update_file` / `open_release_page` hand off to the OS (URLs are restricted to this repository). UI: startup probe + banner in `App.tsx`, dialog in `components/UpdatePanel.tsx`, toggles under Settings → About & Updates.
-- **API layer**: `src/api.ts` wraps `invoke` + `listen`. `src/types.ts` is the canonical TS shape for `AppConfig`, `Skill`, `McpServer`, `SubAgent`, `AgentOrchestration`, `Profile`, `AgentMissionSnapshot`, `ModelMetadata`.
-- **Persistence**: SQLite (`chat.db`) for history, API request monitor, interaction logs, and agent missions. `app.log` is written next to the DB.
+- **API layer**: `src/api.ts` wraps `invoke` + `listen`. `src/types.ts` is the canonical TS shape for `AppConfig`, `Skill`, `SkillsStatus`, `McpServer`, `SubAgent`, `AgentOrchestration`, `Profile`, `AgentMissionSnapshot`, `ModelMetadata`.
+- **Workspace state** (`src-tauri/src/workspace.rs`): single source of truth for the per-workspace layout. Everything workspace-scoped (SQLite database, memory, todos, skills, skill status) lives in the hidden `<workspace>/.data` directory, so switching `workspace_dir` in config swaps the whole state — `apply_config` closes and re-opens the SQLite connection at `<workspace>/.data/chat.db` when the workspace changes.
+- **Persistence**: SQLite (`<workspace>/.data/chat.db`) for history, API request monitor, interaction logs, and agent missions. `app.log` stays in the app data dir.
 
 ## On-disk layout (runtime)
 
-Config and DB live in the OS app data dir (`name` from `tauri.conf.json` identifier `com.leonard.aichat`):
+Application files live in the OS app data dir (`name` from `tauri.conf.json` identifier `com.leonard.aichat`):
 
 - macOS: `~/Library/Application Support/ai-chat/`
 - Linux: `~/.local/share/ai-chat/`
 - Windows: `%APPDATA%/../Local/ai-chat/`
 
-Contents: `config.json`, `chat.db`, `mcp_servers.json`, `agents.json`, `timers.json`, `app.log`, `profiles/`, and a `workspace/` dir (default — overridable via `workspace_dir` in config). `workspace/skills/` is **not** created automatically: skill listing scans it when present and otherwise only reads the app-data `skills/` root.
+App-data contents: `config.json`, `mcp_servers.json`, `sub_agents.json`, `profiles.json`, `timers.json`, `app.log`, and a `workspace/` dir (default — overridable via `workspace_dir` in config).
+
+Everything that belongs to the *current workspace* lives in a hidden `.data` directory inside it (see `src-tauri/src/workspace.rs`):
+
+```text
+<workspace>/.data/
+  chat.db                  SQLite: history / API monitor / interaction log / agent missions
+  memory/{user,repo}/…     memory tool file backend
+  todos/<session>/…        todos tool
+  skills/<name>/skill.md   the only skills root
+  skills.status            per-workspace skill enablement + metadata (JSON)
+```
+
+- `.data` is hidden (Windows: file-system hidden attribute) and off-limits to the assistant: mutations below it are rejected (`tools/paths.rs`), `file_actions list` and search skip it. The single writable exception is `.data/skills`, and only in self-evolution mode.
+- `chat.db` moves with the workspace: `apply_config` re-opens the SQLite connection when `workspace_dir` changes, so history, monitor logs and missions are per workspace.
+- `.data/skills` is **not** created automatically; skill listing and the memory store create what they need on demand.
+- `skills.status` is the source of truth for which skills are enabled. It is per workspace and entries are never pruned automatically — a skill folder that disappears stays recorded (and simply stops reaching the model) until the folder returns. `config.selected_skills` no longer exists.
 
 ## Skills — path isolation rule
 
@@ -138,7 +155,9 @@ src-tauri/
   src/agents/
     cli.rs                 #   `cli` backend: headless coding CLIs
     cloud.rs               #   `cloud` backend: remote HTTP agent endpoints
-  src/skills.rs            # SKILL.md frontmatter parser, list/save/delete
+  src/skills.rs            # SKILL.md frontmatter parser, list/save/delete,
+                           # workspace skill status (.data/skills.status)
+  src/workspace.rs         # hidden `<workspace>/.data` layout (paths + hidden attr)
   src/tools/               # tool executor, split by feature:
     mod.rs                 #   dispatch/schemas/shared helpers (+ tests)
     memory.rs              #   memory tool (session/user/repo + "all" fan-out)

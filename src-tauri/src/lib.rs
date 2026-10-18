@@ -22,6 +22,7 @@ pub mod model_metadata;
 mod skills;
 mod tools;
 mod update;
+mod workspace;
 
 use logger::{AppLogger, LoggerOutput};
 pub use tools::neo4j_db;
@@ -53,6 +54,51 @@ fn resolve_workspace_path(app: &AppHandle, workspace_dir: Option<&str>) -> Resul
     })
 }
 
+/// Create the hidden `<workspace>/.data` layout (best effort, logged on error).
+fn ensure_workspace_data_layout(state: &AppState, workspace_dir: &PathBuf) {
+    if let Err(err) = workspace::ensure_data_layout(workspace_dir) {
+        state
+            .logger
+            .lock()
+            .unwrap()
+            .log(
+                "WARN",
+                &format!(
+                    "Failed to create workspace data directory '{}': {err}",
+                    workspace::data_root(workspace_dir).display()
+                ),
+            );
+    }
+}
+
+/// Point the SQLite connection at `workspace_dir`'s database.
+///
+/// The database lives inside the workspace (`<workspace>/.data/chat.db`), so a
+/// workspace switch must close the old connection and open (creating if
+/// needed) the new one — otherwise history rows would keep landing in the
+/// previous workspace's file.
+fn reopen_workspace_db(state: &AppState, workspace_dir: &PathBuf) -> Result<(), String> {
+    ensure_workspace_data_layout(state, workspace_dir);
+    let db_path = workspace::db_path(workspace_dir);
+    let db = db::open_db(&db_path)
+        .map_err(|e| format!("failed to open database '{}': {e}", db_path.display()))?;
+    let retention_days = state.config.lock().unwrap().log_retention_days as i64;
+    match db::prune_old_logs(&db, retention_days) {
+        Ok(0) => {}
+        Ok(removed) => state.logger.lock().unwrap().log(
+            "INFO",
+            &format!("Log retention: removed {removed} rows older than {retention_days} days"),
+        ),
+        Err(err) => state
+            .logger
+            .lock()
+            .unwrap()
+            .log("WARN", &format!("Log retention failed: {err}")),
+    }
+    *state.db.lock().unwrap() = db;
+    Ok(())
+}
+
 pub(crate) fn apply_config(
     app: &AppHandle,
     state: &AppState,
@@ -61,32 +107,43 @@ pub(crate) fn apply_config(
     let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
     fs::write(&state.config_path, json).map_err(|e| e.to_string())?;
 
-    let new_workspace_path = resolve_workspace_path(app, config.workspace_dir.as_deref())?;
+    let logger_output = config.logger_output.clone();
+    *state.config.lock().unwrap() = config;
+
+    let new_workspace_path = resolve_workspace_path(
+        app,
+        state.config.lock().unwrap().workspace_dir.as_deref(),
+    )?;
     fs::create_dir_all(&new_workspace_path).ok();
-    // Note: workspace/skills is NOT created eagerly. Skills are discovered by
-    // scanning; when the folder is absent only the app-managed skills root is used.
+    // Note: `<workspace>/.data/skills` is NOT created eagerly. Skills are
+    // discovered by scanning; a missing folder simply yields no workspace
+    // skills until the Skills panel (or self-evolution) creates one.
     let previous_workspace_path = std::mem::replace(
         &mut *state.workspace_dir.lock().unwrap(),
         new_workspace_path.clone(),
     );
 
-    // The active skill list is workspace-scoped: skills that came from the old
-    // workspace may not exist in the new one. Notify the UI so it can re-validate
-    // `selected_skills` against the skills that actually resolve now.
+    // The database, memories, todo lists and skills are all workspace-scoped
+    // (`<workspace>/.data`), so a workspace switch must re-point the SQLite
+    // connection before the UI reloads anything from it.
     if previous_workspace_path != new_workspace_path {
+        reopen_workspace_db(state, &new_workspace_path)?;
+
+        // The active skill list is workspace-scoped too: skills that came from
+        // the old workspace may not exist in the new one. Notify the UI so it
+        // can reload `skills.status` and re-validate the selection.
         let _ = app.emit(
             WORKSPACE_CHANGED_EVENT,
             new_workspace_path.to_string_lossy().to_string(),
         );
+    } else {
+        ensure_workspace_data_layout(state, &new_workspace_path);
     }
 
     if let Some(win) = app.get_webview_window("main") {
         let title = format!("AI Chat — {}", new_workspace_path.display());
         let _ = win.set_title(&title);
     }
-
-    let logger_output = config.logger_output.clone();
-    *state.config.lock().unwrap() = config;
 
     let mut logger = state.logger.lock().unwrap();
     logger.set_output(logger_output);
@@ -160,8 +217,6 @@ pub struct AppConfig {
     #[serde(default)]
     pub selected_tools: Vec<String>,
     #[serde(default)]
-    pub selected_skills: Vec<String>,
-    #[serde(default)]
     pub self_evolution_mode: bool,
     pub kg_engine: Option<String>,
     pub neo4j_uri: Option<String>,
@@ -207,7 +262,6 @@ impl Default for AppConfig {
             model_reasoning_effort: HashMap::new(),
             system_message: String::new(),
             selected_tools: vec![],
-            selected_skills: vec![],
             self_evolution_mode: false,
             kg_engine: None,
             neo4j_uri: Some("bolt://localhost:7687".to_string()),
@@ -229,9 +283,6 @@ pub struct AppState {
     pub config: Mutex<AppConfig>,
     pub config_path: PathBuf,
     pub workspace_dir: Mutex<PathBuf>,
-    pub db_path: PathBuf,
-    // App-managed skills root under app data. Workspace-local skills live under workspace_dir/skills.
-    pub skills_dir: PathBuf,
     pub mcp_servers_path: PathBuf,
     pub agents_config_path: PathBuf,
     pub profiles_path: PathBuf,
@@ -267,6 +318,23 @@ pub struct AppState {
     /// pending request at a time, so parallel agents must queue here instead of
     /// overwriting each other's dialog.
     pub external_agent_confirm_lock: tokio::sync::Mutex<()>,
+}
+
+impl AppState {
+    /// Hidden workspace state root (`<workspace>/.data`).
+    pub fn data_dir(&self) -> PathBuf {
+        workspace::data_root(&self.workspace_dir.lock().unwrap())
+    }
+
+    /// Active workspace SQLite database (`<workspace>/.data/chat.db`).
+    pub fn db_path(&self) -> PathBuf {
+        workspace::db_path(&self.workspace_dir.lock().unwrap())
+    }
+
+    /// Active workspace skill status file (`<workspace>/.data/skills.status`).
+    pub fn skills_status_path(&self) -> PathBuf {
+        workspace::skills_status_path(&self.workspace_dir.lock().unwrap())
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -431,7 +499,6 @@ fn save_markdown_file(path: String, content: String) -> Result<(), String> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Profile {
     pub name: String,
-    pub selected_skills: Vec<String>,
     pub selected_tools: Vec<String>,
     pub agents: Vec<agents::SubAgent>,
     pub orchestration: agents::AgentOrchestration,
@@ -513,9 +580,9 @@ fn apply_profile_config(
         .find(|p| p.name == name)
         .ok_or_else(|| format!("Profile '{}' not found", name))?;
 
-    // Update config with profile's selected_skills and selected_tools
+    // Update config with the profile's selected tools. Skill enablement is not
+    // part of a profile: it is per-workspace state (`<workspace>/.data/skills.status`).
     let mut config = state.config.lock().unwrap().clone();
-    config.selected_skills = profile.selected_skills;
     config.selected_tools = profile.selected_tools;
 
     apply_config(&app, &state, config)?;
@@ -699,118 +766,9 @@ pub fn run() {
                 .expect("failed to create app menu");
             app.set_menu(menu).expect("failed to set app menu");
 
-            let skills_dir = data_dir.join("skills");
-            fs::create_dir_all(&skills_dir).ok();
-
             let mcp_servers_path = data_dir.join("mcp_servers.json");
             let agents_config_path = data_dir.join("sub_agents.json");
             let profiles_path = data_dir.join("profiles.json");
-
-            let db_path = data_dir.join("chat.db");
-            let db = Connection::open(&db_path).unwrap();
-            db.execute("CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)", []).unwrap();
-            let _ = db.execute("ALTER TABLE history ADD COLUMN tool_calls TEXT", []);
-            let _ = db.execute("ALTER TABLE history ADD COLUMN reasoning_content TEXT", []);
-            // Attachments column: JSON-serialized `Attachment[]` for user
-            // messages. The column is added lazily via ALTER TABLE so older
-            // databases (without the column) upgrade in place; new rows
-            // always include it.
-            let _ = db.execute("ALTER TABLE history ADD COLUMN attachments TEXT", []);
-            // The sidebar lists sessions and loads one session at a time, both
-            // filtered by `session_id`.
-            db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_history_session_id ON history (session_id, id)",
-                [],
-            ).unwrap();
-            let _ = db.execute("ALTER TABLE api_requests ADD COLUMN reasoning_content TEXT", []);
-            // Session meta: per-session title / favorite / archived flags.
-            // Kept in a separate table so history rows stay append-only.
-            db.execute(
-                "CREATE TABLE IF NOT EXISTS session_meta (\
-                    session_id TEXT PRIMARY KEY, \
-                    title TEXT, \
-                    favorite INTEGER NOT NULL DEFAULT 0, \
-                    archived INTEGER NOT NULL DEFAULT 0\
-                )",
-                [],
-            ).unwrap();
-            db.execute(
-                "CREATE TABLE IF NOT EXISTS session_summaries (\
-                    session_id TEXT PRIMARY KEY, \
-                    summary TEXT NOT NULL, \
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP\
-                )",
-                [],
-            ).unwrap();
-            db.execute(
-                "CREATE TABLE IF NOT EXISTS api_requests (\
-                    id INTEGER PRIMARY KEY AUTOINCREMENT, \
-                    session_id TEXT, \
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, \
-                    model TEXT, \
-                    request_body TEXT, \
-                    response_content TEXT, \
-                    tool_calls TEXT, \
-                    finish_reason TEXT, \
-                    prompt_tokens INTEGER DEFAULT 0, \
-                    completion_tokens INTEGER DEFAULT 0, \
-                    duration_ms INTEGER DEFAULT 0, \
-                    error TEXT\
-                )",
-                [],
-            ).unwrap();
-            db.execute(
-                "CREATE TABLE IF NOT EXISTS interaction_log (\
-                    id INTEGER PRIMARY KEY AUTOINCREMENT, \
-                    session_id TEXT NOT NULL, \
-                    interaction_type TEXT NOT NULL, \
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, \
-                    actor TEXT, \
-                    action_name TEXT, \
-                    input_data TEXT, \
-                    output_data TEXT, \
-                    error_message TEXT, \
-                    duration_ms INTEGER DEFAULT 0, \
-                    metadata TEXT\
-                )",
-                [],
-            ).unwrap();
-            db.execute(
-                "CREATE TABLE IF NOT EXISTS agent_missions (\
-                    mission_id TEXT PRIMARY KEY, \
-                    session_id TEXT, \
-                    parent_task_id TEXT, \
-                    agent_id TEXT NOT NULL, \
-                    root_task_description TEXT NOT NULL, \
-                    root_task_context TEXT NOT NULL DEFAULT '', \
-                    status TEXT NOT NULL DEFAULT 'running', \
-                    mission_accomplished INTEGER NOT NULL DEFAULT 0, \
-                    episodic_summary TEXT NOT NULL DEFAULT '', \
-                    final_report TEXT NOT NULL DEFAULT '', \
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP, \
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP\
-                )",
-                [],
-            ).unwrap();
-            db.execute(
-                "CREATE TABLE IF NOT EXISTS agent_tasks (\
-                    task_id TEXT PRIMARY KEY, \
-                    mission_id TEXT NOT NULL, \
-                    name TEXT NOT NULL, \
-                    description TEXT NOT NULL, \
-                    status TEXT NOT NULL DEFAULT 'pending', \
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP, \
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, \
-                    completed_at DATETIME\
-                )",
-                [],
-            ).unwrap();
-            db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_agent_tasks_mission_status \
-                 ON agent_tasks (mission_id, status)",
-                [],
-            ).unwrap();
-
             let config_path = data_dir.join("config.json");
             let config = if config_path.exists() {
                 fs::read_to_string(&config_path)
@@ -820,6 +778,21 @@ pub fn run() {
             } else {
                 AppConfig::default()
             };
+
+            // Resolve the active workspace first: the database, memory, todo
+            // lists and skills all live in its hidden `.data` directory, so the
+            // workspace must be known before the database is opened.
+            let workspace_dir = match config.workspace_dir.as_deref().filter(|s| !s.is_empty()) {
+                Some(dir) => PathBuf::from(dir),
+                None => data_dir.join("workspace"),
+            };
+            fs::create_dir_all(&workspace_dir).ok();
+            workspace::ensure_data_layout(&workspace_dir).ok();
+            // `<workspace>/.data/skills` is created on demand (e.g. by the Skills
+            // panel or self-evolution); skill listing tolerates its absence.
+
+            let db_path = workspace::db_path(&workspace_dir);
+            let db = db::open_db(&db_path).expect("failed to open workspace database");
 
             let app_logger = AppLogger::new(
                 cfg!(debug_assertions),
@@ -843,23 +816,12 @@ pub fn run() {
                 Err(err) => app_logger.log("WARN", &format!("Log retention failed: {err}")),
             }
 
-            // Resolve workspace_dir from config, or fall back to default
-            let workspace_dir = match config.workspace_dir.as_deref().filter(|s| !s.is_empty()) {
-                Some(dir) => PathBuf::from(dir),
-                None => data_dir.join("workspace"),
-            };
-            fs::create_dir_all(&workspace_dir).ok();
-            // workspace/skills is created on demand (e.g. by self-evolution or the
-            // user); skill listing tolerates its absence.
-
             app.manage(AppState {
                 config: Mutex::new(config),
                 config_path,
                 workspace_dir: Mutex::new(workspace_dir.clone()),
                 db: Mutex::new(db),
-                db_path,
                 logger: Mutex::new(app_logger),
-                skills_dir,
                 mcp_servers_path: mcp_servers_path.clone(),
                 agents_config_path,
                 profiles_path,
@@ -933,6 +895,8 @@ pub fn run() {
             skills::save_skill,
             skills::delete_skill,
             skills::filter_existing_skills,
+            skills::get_skills_status,
+            skills::save_skills_status,
             db::save_history,
             db::list_history_sessions,
             db::load_session_messages,

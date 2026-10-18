@@ -109,7 +109,7 @@ fn lock_session<T>(session_id: &str, f: impl FnOnce() -> Result<T, String>) -> R
 // ─── Path helpers ────────────────────────────────────────────────────────────
 
 fn todo_root(workspace: &Path) -> PathBuf {
-    workspace.join("todos")
+    crate::workspace::todos_root(workspace)
 }
 
 fn session_dir(workspace: &Path, session_id: &str) -> PathBuf {
@@ -727,18 +727,19 @@ mod tests {
         let session = "sess-abc";
         let list_id = "list-xyz";
 
-        assert_eq!(todo_root(&workspace), workspace.join("todos"));
+        assert_eq!(todo_root(&workspace), workspace.join(".data").join("todos"));
         assert_eq!(
             session_dir(&workspace, session),
-            workspace.join("todos").join(session)
+            workspace.join(".data").join("todos").join(session)
         );
         assert_eq!(
             session_lists_dir(&workspace, session),
-            workspace.join("todos").join(session).join("lists")
+            workspace.join(".data").join("todos").join(session).join("lists")
         );
         assert_eq!(
             list_path(&workspace, session, list_id),
             workspace
+                .join(".data")
                 .join("todos")
                 .join(session)
                 .join("lists")
@@ -746,7 +747,11 @@ mod tests {
         );
         assert_eq!(
             active_marker(&workspace, session),
-            workspace.join("todos").join(session).join(".active")
+            workspace
+                .join(".data")
+                .join("todos")
+                .join(session)
+                .join(".active")
         );
 
         let _ = fs::remove_dir_all(&workspace);

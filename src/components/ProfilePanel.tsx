@@ -45,7 +45,6 @@ export function ProfilePanel({ onClose, onProfileApplied }: Props) {
 
             const profile: Profile = {
                 name: newProfileName.trim(),
-                selected_skills: config.selected_skills || [],
                 selected_tools: config.selected_tools || [],
                 agents: agents,
                 orchestration: orchestration,
@@ -123,7 +122,6 @@ export function ProfilePanel({ onClose, onProfileApplied }: Props) {
                                 <div className="profile-info">
                                     <div className="profile-name">{profile.name}</div>
                                     <div className="profile-meta">
-                                        <span>{t("profile.metaSkills", { count: profile.selected_skills.length })}</span>
                                         <span>{t("profile.metaTools", { count: profile.selected_tools.length })}</span>
                                         <span>{t("profile.metaAgents", { count: profile.agents.length })}</span>
                                         <span>{t("profile.metaMcp", { count: profile.mcp_servers.length })}</span>

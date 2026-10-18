@@ -7,15 +7,18 @@
 //! profiles.json           named profiles (copy of the app-data profiles.json)
 //! mcp_servers.json        MCP server definitions
 //! sub_agents.json         sub-agents + orchestration
-//! skills/...              app-managed skills root
 //! workspace/memory/...    workspace-scoped memory notes
 //! workspace/todos/...     workspace-scoped todo lists
+//! workspace/skills/...    workspace skills
+//! workspace/skills.status workspace skill enablement + metadata
 //! chat.db                 SQLite snapshot (VACUUM INTO)
 //! ```
 //!
-//! Import applies `config.json` first (which may switch the active workspace)
-//! and then restores the workspace-scoped folders into the *newly active*
-//! workspace directory.
+//! Every `workspace/...` entry is read from (and restored into) the hidden
+//! `<workspace>/.data` directory of the *active* workspace, so a profile is
+//! portable across machines and workspaces. Import applies `config.json` first
+//! (which may switch the active workspace) and then restores the
+//! workspace-scoped folders into the newly active workspace.
 
 use std::fs;
 use std::io::{Read, Write};
@@ -33,8 +36,15 @@ const PROFILE_EXPORT_DONE_EVENT: &str = "profile-export-done";
 const PROFILE_EXPORT_ERROR_EVENT: &str = "profile-export-error";
 pub(crate) const PROFILE_RESTORED_EVENT: &str = "profile-restored";
 
-/// Workspace sub-directories that are part of a profile backup.
-const WORKSPACE_BACKUP_DIRS: [&str; 2] = ["memory", "todos"];
+/// Workspace-scoped state directories that are part of a profile backup, as
+/// `(zip name, path under <workspace>/.data)`.
+fn workspace_backup_dirs(workspace_dir: &Path) -> [(&'static str, PathBuf); 3] {
+    [
+        ("memory", crate::workspace::memory_root(workspace_dir)),
+        ("todos", crate::workspace::todos_root(workspace_dir)),
+        ("skills", crate::workspace::skills_root(workspace_dir)),
+    ]
+}
 
 // ─── Zip helpers ─────────────────────────────────────────────────────────────
 
@@ -119,7 +129,7 @@ fn escape_sql_string(value: &str) -> String {
 /// consistent copy while the app keeps its connection open.
 fn backup_chat_db(state: &AppState) -> Result<PathBuf, String> {
     let backup_path = state
-        .db_path
+        .db_path()
         .with_file_name(format!("chat-export-{}.db", Uuid::new_v4()));
     let escaped_path = escape_sql_string(&backup_path.to_string_lossy());
 
@@ -166,16 +176,10 @@ fn export_profile(app: &AppHandle, profile_path: &Path) -> Result<(), String> {
     };
     write_text_entry(&mut zip, "sub_agents.json", &sub_agents_json)?;
 
-    emit_profile_export_status(app, "Packing skills directory");
-    zip.add_directory("skills/", zip_options())
-        .map_err(|e| e.to_string())?;
-    add_path_to_zip(&mut zip, &state.skills_dir, &state.skills_dir, "skills")?;
-
-    // Workspace-scoped state: memory notes and todo lists live inside the
-    // workspace directory, so they are packed as `workspace/<dir>/...`.
+    // Workspace-scoped state lives in the hidden `<workspace>/.data`
+    // directory, so it is packed as `workspace/<name>/...`.
     let workspace_dir = state.workspace_dir.lock().unwrap().clone();
-    for dir_name in WORKSPACE_BACKUP_DIRS {
-        let dir_path = workspace_dir.join(dir_name);
+    for (dir_name, dir_path) in workspace_backup_dirs(&workspace_dir) {
         if !dir_path.is_dir() {
             continue;
         }
@@ -184,6 +188,19 @@ fn export_profile(app: &AppHandle, profile_path: &Path) -> Result<(), String> {
         zip.add_directory(format!("{zip_prefix}/"), zip_options())
             .map_err(|e| e.to_string())?;
         add_path_to_zip(&mut zip, &dir_path, &dir_path, &zip_prefix)?;
+    }
+
+    let status_path = crate::workspace::skills_status_path(&workspace_dir);
+    if status_path.is_file() {
+        emit_profile_export_status(app, "Packing workspace/skills.status");
+        let result = (|| -> Result<(), String> {
+            zip.start_file("workspace/skills.status", zip_options())
+                .map_err(|e| e.to_string())?;
+            let mut status_file = fs::File::open(&status_path).map_err(|e| e.to_string())?;
+            std::io::copy(&mut status_file, &mut zip).map_err(|e| e.to_string())?;
+            Ok(())
+        })();
+        result?;
     }
 
     emit_profile_export_status(app, "Exporting chat.db (sending disabled during export)");
@@ -226,7 +243,8 @@ pub(crate) fn spawn_profile_export(app: AppHandle, profile_path: PathBuf) {
 
 // ─── Import ──────────────────────────────────────────────────────────────────
 
-/// Restore the workspace-scoped folders (`memory`, `todos`) from the archive.
+/// Restore the workspace-scoped folders (`memory`, `todos`, `skills`) and the
+/// skill status file from the archive into `<workspace>/.data`.
 ///
 /// Folders present in the archive replace their on-disk counterpart; folders
 /// that are absent from the archive are left untouched. Entry paths are
@@ -237,7 +255,7 @@ fn restore_workspace_dirs(
 ) -> Result<(), String> {
     let workspace_dir = state.workspace_dir.lock().unwrap().clone();
 
-    for dir_name in WORKSPACE_BACKUP_DIRS {
+    for (dir_name, target_root) in workspace_backup_dirs(&workspace_dir) {
         let zip_prefix = format!("workspace/{dir_name}/");
         let entry_names: Vec<String> = (0..archive.len())
             .filter_map(|index| {
@@ -252,7 +270,6 @@ fn restore_workspace_dirs(
             continue;
         }
 
-        let target_root = workspace_dir.join(dir_name);
         if target_root.exists() {
             fs::remove_dir_all(&target_root).map_err(|e| e.to_string())?;
         }
@@ -278,6 +295,23 @@ fn restore_workspace_dirs(
         state.logger.lock().unwrap().log(
             "INFO",
             &format!("Restored workspace/{dir_name} from profile archive"),
+        );
+    }
+
+    // Skill enablement lives next to the skills it describes.
+    if let Ok(mut status_entry) = archive.by_name("workspace/skills.status") {
+        let status_path = crate::workspace::skills_status_path(&workspace_dir);
+        if let Some(parent) = status_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let mut contents = Vec::new();
+        status_entry
+            .read_to_end(&mut contents)
+            .map_err(|e| e.to_string())?;
+        fs::write(&status_path, contents).map_err(|e| e.to_string())?;
+        state.logger.lock().unwrap().log(
+            "INFO",
+            "Restored workspace/skills.status from profile archive",
         );
     }
 

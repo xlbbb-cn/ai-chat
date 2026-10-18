@@ -1162,7 +1162,7 @@ fn record_conclusion_to_memory(
     session_id: &str,
     content: &str,
 ) {
-    let memory_root = workspace_dir.join("memory").join("repo");
+    let memory_root = crate::workspace::memory_root(workspace_dir).join("repo");
     if let Err(e) = fs::create_dir_all(&memory_root) {
         log_event(state, "ERROR", format!("failed to create memory dir: {e}"));
         return;
@@ -1291,12 +1291,10 @@ pub async fn chat_completion(
         without asking for confirmation.",
     ); //Add system info & explicit invocation syntax to system prompt
 
-    let ws_skills_dir = workspace_dir_for_roots.join("skills");
+    let ws_skills_dir = crate::workspace::skills_root(&workspace_dir_for_roots);
 
     for skill_name in &skill_ids {
-        if let Ok(resolved_skill) =
-            skills::resolve_skill_by_name(&ws_skills_dir, &state.skills_dir, skill_name)
-        {
+        if let Ok(resolved_skill) = skills::resolve_skill_by_name(&ws_skills_dir, skill_name) {
             let skill = resolved_skill.skill;
             merge_allowed_commands(&mut skill_allowed_commands, &skill.allowed_commands);
 
@@ -1331,9 +1329,7 @@ pub async fn chat_completion(
         if skill_ids.iter().any(|id| id == skill_name) {
             continue;
         }
-        if let Ok(resolved_skill) =
-            skills::resolve_skill_by_name(&ws_skills_dir, &state.skills_dir, skill_name)
-        {
+        if let Ok(resolved_skill) = skills::resolve_skill_by_name(&ws_skills_dir, skill_name) {
             let skill = resolved_skill.skill;
             merge_allowed_commands(&mut skill_allowed_commands, &skill.allowed_commands);
             if !active_skill_dirs.iter().any(|(n, _)| n == &skill.name) {
@@ -1478,7 +1474,7 @@ pub async fn chat_completion(
              Workspace root: {workspace_root_display}\n\
              All local filesystem tools are sandboxed to the workspace root (see tool descriptions). \
              `skill_read` paths are locked to each skill's own directory — `..` escapes are rejected. \
-             Skill edits are limited to `./skills/...` and create `.bak.<n>` backups automatically. \
+             Skill edits are limited to `./.data/skills/...` and create `.bak.<n>` backups automatically. \
              MCP tools are NOT sandboxed — treat their path arguments as opaque. \
              Reuse exact paths returned by tools; do not reference app-data or external absolute paths.\n\n\
              Active skill instructions:{}",
@@ -1929,10 +1925,9 @@ pub async fn chat_completion(
             let result = if name == "use_skill" {
                 let args_json: Value = serde_json::from_str(args).unwrap_or_default();
                 let skill_name = args_json["skill_name"].as_str().unwrap_or("");
-                let ws_skills_dir = workspace_dir_for_roots.join("skills");
+                let ws_skills_dir = crate::workspace::skills_root(&workspace_dir_for_roots);
 
-                if let Ok(resolved_skill) =
-                    skills::resolve_skill_by_name(&ws_skills_dir, &state.skills_dir, skill_name)
+                if let Ok(resolved_skill) = skills::resolve_skill_by_name(&ws_skills_dir, skill_name)
                 {
                     let skill = resolved_skill.skill;
                     let dyn_marker = format!("--- Skill (Dynamically Loaded): {} ---", skill.name);

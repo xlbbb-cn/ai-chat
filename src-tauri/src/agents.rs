@@ -1278,7 +1278,6 @@ pub async fn orchestrate(
     let use_parallel = orchestration.mode != "sequential" && plan.execution_mode != "sequential";
     let workspace_dir = state.workspace_dir.lock().unwrap().clone();
     let skill_access_roots = crate::skills::collect_self_evolution_roots(
-        &state.skills_dir,
         Some(&workspace_dir),
         config.self_evolution_mode,
     );
@@ -2121,7 +2120,7 @@ async fn run_sub_agent_inner(
         format!(
             "\n\nSelf-evolution: skill roots available:\n{roots}\n\
              Use `file_actions` only with workspace-relative paths. \
-             Skill edits are limited to `./skills/...` under the workspace and create `.bak.<n>` backups automatically. \
+             Skill edits are limited to `./.data/skills/...` under the workspace and create `.bak.<n>` backups automatically. \
              Do not reference app-data skill paths or any path outside the workspace root. \
              Reuse exact paths returned by tools."
         )

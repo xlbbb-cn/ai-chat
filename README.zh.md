@@ -66,7 +66,8 @@ AI Chat 是一个桌面端 AI 助手应用，支持接入任意 OpenAI 兼容模
 
 - 基于 skill.md（YAML frontmatter + system prompt）定义技能
 - 支持技能的新增、删除、启用/停用
-- 支持从应用目录和用户目录加载技能
+- 技能存放在工作区内（`<workspace>/.data/skills`），每个工作区独立一套
+- 启用状态按工作区保存在 `.data/skills.status`，与技能本体同目录
 - 技能目录隔离，约束文件与命令作用范围
 - 多技能下命令白名单可合并
 
@@ -85,9 +86,10 @@ AI Chat 是一个桌面端 AI 助手应用，支持接入任意 OpenAI 兼容模
 ### 6) 本地持久化与运维
 
 - config.json 保存模型与工具配置
-- SQLite 保存聊天历史与 API 请求监控数据
+- 工作区状态存放在隐藏目录 `<workspace>/.data`：SQLite 数据库、记忆、待办、技能与技能状态
+- SQLite 保存聊天历史与 API 请求监控数据（随工作区切换）
 - 请求监控面板支持列表、详情与删除
-- 支持通过 zip 导出/恢复 Profile，skills 目录随包导出但需手动恢复
+- 支持通过 zip 导出/恢复 Profile（配置、工具、智能体、MCP 服务、工作区记忆/待办/技能）
 - 支持在设置中管理工作目录
 
 ---
@@ -204,8 +206,8 @@ npm run tauri build
 并上传到该标签对应的 GitHub Release（默认先创建为**草稿**）。
 
 ```bash
-git tag v1.1.4
-git push origin v1.1.4
+git tag v2.0.0
+git push origin v2.0.0
 ```
 
 | 平台 | 产物 |
@@ -224,7 +226,7 @@ git push origin v1.1.4
 
 ## 配置说明
 
-运行后会在系统应用数据目录生成配置文件 config.json，常见字段：
+运行后会在系统应用数据目录生成配置文件 config.json；所有随工作区的数据则存放在 `<workspace>/.data`（见「项目结构」），常见字段：
 
 ```json
 {
@@ -239,6 +241,7 @@ git push origin v1.1.4
     "max_tokens": 4096
   },
   "selected_tools": ["run_cmd", "file_actions", "knowledge_graph"],
+  "workspace_dir": "D:/projects/my-repo",
   "kg_engine": "neo4j",
   "neo4j_uri": "bolt://localhost:7687",
   "neo4j_user": "neo4j",
@@ -251,6 +254,7 @@ git push origin v1.1.4
 - 不要提交真实 API Key
 - 生产环境使用独立密钥与最小权限账号
 - 将知识图谱账号与应用账号分离
+- 若工作区本身是 git 仓库，把 `<workspace>/.data/` 加入 `.gitignore`（其中包含聊天数据库、记忆、待办与技能）
 
 ---
 
@@ -262,11 +266,20 @@ ai-chat/
 ├─ src-tauri/           # Rust + Tauri 后端
 │  ├─ src/lib.rs        # 应用入口与命令注册
 │  ├─ src/llm_complete.rs
-│  ├─ src/skills.rs
+│  ├─ src/skills.rs     # 技能解析 + 工作区技能状态
+│  ├─ src/workspace.rs  # 隐藏目录 `<workspace>/.data` 布局
 │  ├─ src/tools/        # 工具模块（memory / file_actions / patch / risk 等）
 │  ├─ src/mcp.rs
 │  └─ src/db.rs
 └─ README.md
+```
+
+运行时布局 —— 应用数据目录放应用文件，工作区内放该工作区自己的状态：
+
+```text
+<应用数据目录>/            config.json、app.log、mcp_servers.json、sub_agents.json、
+                          profiles.json、timers.json、workspace/（默认工作区）
+<workspace>/.data/         chat.db、memory/、todos/、skills/、skills.status（隐藏）
 ```
 
 ---
@@ -285,6 +298,5 @@ ai-chat/
 - 增加模型提供方预设（OpenAI / Azure / 本地网关）
 - 增加工具调用审计与回放
 - 增加技能签名与发布机制
-- 增加多工作区会话隔离与同步
 - 增加端到端测试与安全基线扫描
 

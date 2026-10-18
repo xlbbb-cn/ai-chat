@@ -1,6 +1,6 @@
 [package]
 name = "ai-chat"
-version = "1.3.1"
+version = "2.0.0"
 description = "OpenAI-compatible chat client with skills"
 authors = []
 edition = "2021"
@@ -38,7 +38,7 @@ globset = "0.4"
 chrono = "0.4"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Globalization"] }
+windows-sys = { version = "0.59", features = ["Win32_Globalization", "Win32_Storage_FileSystem"] }
 
 [target.'cfg(unix)'.dependencies]
 # Whole-process-group kill for cancelled/timed-out CLI agents (`process_group`).

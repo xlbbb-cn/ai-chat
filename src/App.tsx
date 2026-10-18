@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { chatCompletion, checkUpdate, getConfig, getAgentOrchestration, listMcpServers, listSubAgents, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills, listTimers, cancelTimer } from "./api";
+import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, listMcpServers, listSubAgents, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills, listTimers, cancelTimer } from "./api";
 
 import { ChatMessage } from "./components/ChatMessage";
 import { ToolCallGroup } from "./components/ToolCallGroup";
@@ -24,6 +24,7 @@ import type {
   ContentPart,
   MessageContent,
   ModelMetadata,
+  SkillsStatus,
   TimerEntry,
   UpdateInfo,
 } from "./types";
@@ -303,6 +304,17 @@ export default function App() {
   const [sidebar, setSidebar] = useState<Sidebar>(null);
   const [sidebarMotion, setSidebarMotion] = useState<"opening" | "closing" | null>(null);
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
+  /**
+   * Per-workspace skill status (`<workspace>/.data/skills.status`): the
+   * persisted enablement plus provenance. `activeSkillIds` is the *derived*
+   * subset that actually resolves right now and is sent to the model — the
+   * persisted selection is never pruned by a workspace switch.
+   */
+  const [skillStatus, setSkillStatus] = useState<SkillsStatus | null>(null);
+  /** Gate: the status file is only written back after the first load. */
+  const [skillStatusLoaded, setSkillStatusLoaded] = useState(false);
+  /** Bumped after a workspace switch so HistoryPanel re-reads its DB. */
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
   // Newest published release; shared by the startup banner and the update dialog.
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
@@ -327,7 +339,6 @@ export default function App() {
   const [activeAgentCount, setActiveAgentCount] = useState(0);
   const [useAgentsEnabled, setUseAgentsEnabled] = useState(false);
   const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
-  const [skillsLoadedFromConfig, setSkillsLoadedFromConfig] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<{
     request_id: string;
     reason: string;
@@ -391,26 +402,29 @@ export default function App() {
   const sessionIdRef = useRef(sessionId);
 
   /**
-   * Drop `selected_skills` entries that no longer resolve to a real skill.
+   * Load the workspace skill status and derive the enabled list.
    *
-   * `selected_skills` is persisted in the config, so it goes stale whenever the
-   * workspace directory changes or a different profile is applied — the skill a
-   * name referred to may live in the previous workspace and no longer exist.
+   * The status file is the source of truth and lives next to the workspace's
+   * skills, so switching workspaces loads a different selection instead of
+   * pruning a global one. Names whose folder has gone missing are kept in the
+   * file but filtered out here, so only resolvable skills reach the model.
    */
-  const reconcileActiveSkills = useCallback(async (ids: string[]): Promise<string[]> => {
-    if (ids.length === 0) return ids;
+  const loadSkillStatus = useCallback(async (): Promise<void> => {
+    const status = await getSkillsStatus();
+    const enabled = Object.entries(status.skills)
+      .filter(([, entry]) => entry.enabled)
+      .map(([name]) => name);
+    let resolvable = enabled;
     try {
-      const existing = await filterExistingSkills(ids);
-      if (existing.length === ids.length) return ids;
-      const existingSet = new Set(existing);
-      // Preserve the original selection order.
-      return ids.filter((id) => existingSet.has(id));
+      resolvable = await filterExistingSkills(enabled);
     } catch (err) {
       // If validation itself fails (IPC error), keep the selection rather than
-      // silently discarding the user's active skills.
+      // silently dropping the user's active skills.
       console.error("Failed to validate active skills", err);
-      return ids;
     }
+    setSkillStatus(status);
+    setActiveSkillIds(resolvable);
+    setSkillStatusLoaded(true);
   }, []);
 
   /** Reload persisted config into the UI, pruning skills that no longer exist. */
@@ -422,13 +436,12 @@ export default function App() {
     setMaxTokens(cfg.model_context_lengths?.[cfg.model] ?? cfg.model_settings?.max_tokens ?? null);
     setModelMetadata(cfg.model_metadata ?? {});
     setReasoningEfforts(cfg.model_reasoning_effort ?? {});
-    setActiveSkillIds(await reconcileActiveSkills(cfg.selected_skills ?? []));
     setActiveToolCount((cfg.selected_tools ?? []).length);
     // The config is the source of truth for the UI language (localStorage is
     // only a first-paint cache), so a profile import can switch it too.
     if (isLocale(cfg.language)) setLocale(cfg.language);
     return cfg;
-  }, [reconcileActiveSkills, setLocale]);
+  }, [setLocale]);
 
   // Silent update probe on startup: it never blocks the chat and never surfaces
   // errors — Settings has an explicit "Check for updates" action instead.
@@ -620,13 +633,15 @@ export default function App() {
     };
   }, []);
 
-  // Switching workspaces changes which skills resolve. Reload the config and
-  // re-validate `selected_skills` so stale names (e.g. skills that only existed
-  // in the previous workspace) are dropped instead of being sent to the model.
+  // A workspace switch swaps the whole workspace-scoped state: config reload,
+  // skill status (the previous workspace's selection must not leak into the
+  // new one), and the database that backs the history sidebar.
   useEffect(() => {
     const unlisten = listen<string>("workspace-changed", async () => {
       try {
         await applyConfigToUi();
+        await loadSkillStatus();
+        setHistoryRefreshKey((key) => key + 1);
       } catch (err) {
         console.error(err);
       }
@@ -634,7 +649,7 @@ export default function App() {
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [applyConfigToUi]);
+  }, [applyConfigToUi, loadSkillStatus]);
 
   useEffect(() => {
     const unlisteners: Promise<() => void>[] = [];
@@ -713,14 +728,14 @@ export default function App() {
   useEffect(() => {
     applyConfigToUi()
       .then((cfg) => {
-        // Only start persisting `selected_skills` once the restored list has
-        // been validated against the skills that actually exist.
-        setSkillsLoadedFromConfig(true);
         themeRef.current = cfg.theme ?? "auto";
         applyTheme(cfg.theme);
       })
       .catch(console.error);
-  }, [applyConfigToUi]);
+    // The skill selection is workspace-scoped, so it is loaded from the
+    // workspace status file instead of the config.
+    loadSkillStatus().catch(console.error);
+  }, [applyConfigToUi, loadSkillStatus]);
 
   useEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
@@ -789,13 +804,21 @@ export default function App() {
     };
   }, [t]);
 
+  // The Skills panel lists what is on disk; reloading the status when it opens
+  // keeps the two in sync (e.g. after a skill was created by self-evolution).
   useEffect(() => {
-    if (!skillsLoadedFromConfig) return;
+    if (sidebar === "skills") {
+      loadSkillStatus().catch(console.error);
+    }
+  }, [sidebar, loadSkillStatus]);
 
-    getConfig()
-      .then((cfg) => saveConfig({ ...cfg, selected_skills: activeSkillIds }))
-      .catch(console.error);
-  }, [activeSkillIds, skillsLoadedFromConfig]);
+  // Persist skill enablement to the workspace status file. Waiting for the
+  // initial load avoids writing an empty selection over the stored one.
+  useEffect(() => {
+    if (!skillStatusLoaded || !skillStatus) return;
+
+    saveSkillsStatus(skillStatus).catch(console.error);
+  }, [skillStatus, skillStatusLoaded]);
 
   // Agent task progress tracking
   useEffect(() => {
@@ -1739,8 +1762,25 @@ export default function App() {
               <SkillsPanel
                 activeSkillIds={activeSkillIds}
                 onToggle={(name, active) => {
+                  // Two pieces of state: the persisted status (kept complete,
+                  // so a missing folder can come back) and the derived list
+                  // that is actually sent to the model.
+                  setSkillStatus((prev) => {
+                    if (!prev) return prev;
+                    // Provenance is owned by the backend; the placeholder is
+                    // only there to satisfy the type until the next reload.
+                    const entry = prev.skills[name] ?? { enabled: false, source: "" };
+                    return {
+                      ...prev,
+                      skills: { ...prev.skills, [name]: { ...entry, enabled: active } },
+                    };
+                  });
                   setActiveSkillIds((prev) =>
-                    active ? [...prev, name] : prev.filter((id) => id !== name)
+                    active
+                      ? prev.includes(name)
+                        ? prev
+                        : [...prev, name]
+                      : prev.filter((id) => id !== name)
                   );
                 }}
                 onClose={closeSidebar}
@@ -1763,6 +1803,7 @@ export default function App() {
             {sidebar === "history" && (
               <HistoryPanel
                 currentSessionId={sessionId}
+                refreshKey={historyRefreshKey}
                 disableSessionSwitch={streaming}
                 onLoad={(sid, msgs) => {
                   if (streaming) {

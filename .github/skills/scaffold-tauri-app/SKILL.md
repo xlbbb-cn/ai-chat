@@ -1,8 +1,8 @@
 ---
 name: scaffold-tauri-app
-description: "Scaffold a new Tauri 2.0 Rust GUI project in the current workspace. Runs tauri init, sets up frontend (Vite + React or Vanilla), and wires initial Tauri commands."
+description: Scaffold a new Tauri 2.0 Rust GUI project in the current workspace. Runs tauri init, sets up frontend (Vite + React or Vanilla), and wires initial Tauri commands.
+disable-model-invocation: true
 ---
-
 # Scaffold Tauri 2.0 App
 
 Set up a new Tauri 2.0 desktop application in the current workspace.

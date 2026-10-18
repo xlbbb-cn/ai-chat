@@ -17,6 +17,7 @@ import type {
   CloudProbe,
   KeyValue,
   Profile,
+  SkillsStatus,
   TimerEntry,
   UpdateInfo,
   UpdateDownloadProgress,
@@ -88,10 +89,26 @@ export async function deleteSkill(name: string): Promise<void> {
 
 /**
  * Return the subset of `names` that still resolve to a loadable skill.
- * Used to prune `selected_skills` after a workspace switch or profile load.
+ *
+ * Read-only: the persisted selection (`<workspace>/.data/skills.status`) keeps
+ * names whose folder is temporarily gone, so this only decides which of them
+ * can be sent to the model right now — it never edits the selection.
  */
 export async function filterExistingSkills(names: string[]): Promise<string[]> {
   return invoke("filter_existing_skills", { names });
+}
+
+/**
+ * Read the workspace skill status (`<workspace>/.data/skills.status`), folding
+ * in any skill that appeared on disk. Entries are never removed.
+ */
+export async function getSkillsStatus(): Promise<SkillsStatus> {
+  return invoke("get_skills_status");
+}
+
+/** Persist the workspace skill status (enablement + metadata). */
+export async function saveSkillsStatus(status: SkillsStatus): Promise<void> {
+  return invoke("save_skills_status", { status });
 }
 
 // ─── Update check (GitHub Releases) ──────────────────────────────────────────

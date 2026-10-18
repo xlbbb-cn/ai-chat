@@ -362,6 +362,10 @@ pub(super) fn run_integrated_search(
     walker.parents(options.respect_gitignore);
     walker.ignore(options.respect_gitignore);
     walker.follow_links(false);
+    // The hidden workspace state directory is internal: searching it would
+    // expose the database, memories, todo lists and the skill status file to
+    // the model. Filtered by name anywhere in the tree.
+    walker.filter_entry(|entry| !crate::workspace::is_internal_entry(entry.file_name()));
 
     if !options.recursive {
         walker.max_depth(Some(1));

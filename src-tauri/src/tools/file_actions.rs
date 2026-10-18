@@ -157,6 +157,12 @@ pub(super) async fn handle_file_actions(
                         Ok(entries) => {
                             let mut res = Vec::new();
                             for entry in entries.flatten() {
+                                // The hidden workspace state directory (`.data`:
+                                // database, memory, todos, skill status) is
+                                // internal — never listed to the assistant.
+                                if crate::workspace::is_internal_file_name(&entry.file_name()) {
+                                    continue;
+                                }
                                 if let Ok(name) = entry.file_name().into_string() {
                                     let is_dir = entry
                                         .file_type()

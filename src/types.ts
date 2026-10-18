@@ -166,7 +166,6 @@ export interface AppConfig {
   ds_format?: boolean;
   system_message?: string;
   selected_tools?: string[];
-  selected_skills?: string[];
   self_evolution_mode?: boolean;
   kg_engine?: string;
   neo4j_uri?: string;
@@ -461,7 +460,6 @@ export interface AgentMissionSnapshot {
 
 export interface Profile {
   name: string;
-  selected_skills: string[];
   selected_tools: string[];
   agents: SubAgent[];
   orchestration: AgentOrchestration;
@@ -470,4 +468,25 @@ export interface Profile {
   mcp_servers: McpServer[];
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * Per-skill status metadata, stored per workspace in
+ * `<workspace>/.data/skills.status`. Only `enabled` drives the chat request —
+ * the rest is provenance shown in the Skills panel.
+ */
+export interface SkillStatusEntry {
+  enabled: boolean;
+  /** `user` (written through the Skills panel) or `self-evolution`. */
+  source: string;
+  enabled_at?: string;
+  updated_at?: string;
+  last_seen_at?: string;
+  file_mtime?: string;
+}
+
+export interface SkillsStatus {
+  version: number;
+  updated_at?: string;
+  skills: Record<string, SkillStatusEntry>;
 }

@@ -20,6 +20,12 @@ import "./HistoryPanel.css";
 interface Props {
   currentSessionId: string;
   onLoad: (sessionId: string, messages: Message[]) => void;
+  /**
+   * Bumped by the parent when the active workspace changed: the history
+   * database lives inside the workspace (`<workspace>/.data/chat.db`), so the
+   * sidebar must re-query instead of showing the previous workspace's sessions.
+   */
+  refreshKey?: number;
   disableSessionSwitch?: boolean;
   onClose: () => void;
 }
@@ -103,7 +109,7 @@ function recordsToMessages(sessionRecords: HistoryRecord[]): Message[] {
   return messages;
 }
 
-export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = false, onClose }: Props) {
+export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, disableSessionSwitch = false, onClose }: Props) {
   const { t, locale } = useI18n();
   const [summaries, setSummaries] = useState<HistorySessionSummary[]>([]);
   const [searchKeyword, setSearchKeyword] = useState("");
@@ -121,7 +127,7 @@ export function HistoryPanel({ currentSessionId, onLoad, disableSessionSwitch = 
     listSessionMeta()
       .then((metas) => setMetaMap(new Map(metas.map((m) => [m.session_id, m]))))
       .catch(console.error);
-  }, []);
+  }, [refreshKey]);
 
   // Message-content search runs in SQLite — the panel only holds session
   // summaries, so the full history never has to fit in the webview. The

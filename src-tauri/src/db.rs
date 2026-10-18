@@ -1,5 +1,118 @@
 use rusqlite::Connection;
 use serde::Serialize;
+use std::path::Path;
+
+/// Open the workspace database and bring its schema up to date.
+///
+/// The database follows the active workspace (`<workspace>/.data/chat.db`), so
+/// this runs both at startup and whenever the workspace is switched. Every
+/// statement is `IF NOT EXISTS` / lazy `ALTER TABLE`, so an existing database
+/// upgrades in place and a fresh one is created empty.
+pub fn open_db(path: &Path) -> rusqlite::Result<Connection> {
+    let db = Connection::open(path)?;
+    db.execute("CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)", [])?;
+    let _ = db.execute("ALTER TABLE history ADD COLUMN tool_calls TEXT", []);
+    let _ = db.execute("ALTER TABLE history ADD COLUMN reasoning_content TEXT", []);
+    // Attachments column: JSON-serialized `Attachment[]` for user messages.
+    // The column is added lazily via ALTER TABLE so older databases (without
+    // the column) upgrade in place; new rows always include it.
+    let _ = db.execute("ALTER TABLE history ADD COLUMN attachments TEXT", []);
+    // The sidebar lists sessions and loads one session at a time, both
+    // filtered by `session_id`.
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_history_session_id ON history (session_id, id)",
+        [],
+    )?;
+    let _ = db.execute("ALTER TABLE api_requests ADD COLUMN reasoning_content TEXT", []);
+    // Session meta: per-session title / favorite / archived flags.
+    // Kept in a separate table so history rows stay append-only.
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS session_meta (\
+            session_id TEXT PRIMARY KEY, \
+            title TEXT, \
+            favorite INTEGER NOT NULL DEFAULT 0, \
+            archived INTEGER NOT NULL DEFAULT 0\
+        )",
+        [],
+    )?;
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS session_summaries (\
+            session_id TEXT PRIMARY KEY, \
+            summary TEXT NOT NULL, \
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP\
+        )",
+        [],
+    )?;
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS api_requests (\
+            id INTEGER PRIMARY KEY AUTOINCREMENT, \
+            session_id TEXT, \
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, \
+            model TEXT, \
+            request_body TEXT, \
+            response_content TEXT, \
+            tool_calls TEXT, \
+            finish_reason TEXT, \
+            prompt_tokens INTEGER DEFAULT 0, \
+            completion_tokens INTEGER DEFAULT 0, \
+            duration_ms INTEGER DEFAULT 0, \
+            error TEXT\
+        )",
+        [],
+    )?;
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS interaction_log (\
+            id INTEGER PRIMARY KEY AUTOINCREMENT, \
+            session_id TEXT NOT NULL, \
+            interaction_type TEXT NOT NULL, \
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, \
+            actor TEXT, \
+            action_name TEXT, \
+            input_data TEXT, \
+            output_data TEXT, \
+            error_message TEXT, \
+            duration_ms INTEGER DEFAULT 0, \
+            metadata TEXT\
+        )",
+        [],
+    )?;
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS agent_missions (\
+            mission_id TEXT PRIMARY KEY, \
+            session_id TEXT, \
+            parent_task_id TEXT, \
+            agent_id TEXT NOT NULL, \
+            root_task_description TEXT NOT NULL, \
+            root_task_context TEXT NOT NULL DEFAULT '', \
+            status TEXT NOT NULL DEFAULT 'running', \
+            mission_accomplished INTEGER NOT NULL DEFAULT 0, \
+            episodic_summary TEXT NOT NULL DEFAULT '', \
+            final_report TEXT NOT NULL DEFAULT '', \
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP, \
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP\
+        )",
+        [],
+    )?;
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS agent_tasks (\
+            task_id TEXT PRIMARY KEY, \
+            mission_id TEXT NOT NULL, \
+            name TEXT NOT NULL, \
+            description TEXT NOT NULL, \
+            status TEXT NOT NULL DEFAULT 'pending', \
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP, \
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, \
+            completed_at DATETIME\
+        )",
+        [],
+    )?;
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agent_tasks_mission_status \
+         ON agent_tasks (mission_id, status)",
+        [],
+    )?;
+    Ok(db)
+}
 
 #[derive(Serialize)]
 pub struct HistoryRecord {
@@ -724,7 +837,7 @@ pub fn clear_logs(state: tauri::State<'_, crate::AppState>) -> Result<usize, Str
 pub async fn compact_database(
     state: tauri::State<'_, crate::AppState>,
 ) -> Result<CompactResult, String> {
-    let db_path = state.db_path.clone();
+    let db_path = state.db_path();
     let days = {
         let config = state.config.lock().unwrap();
         config.log_retention_days as i64

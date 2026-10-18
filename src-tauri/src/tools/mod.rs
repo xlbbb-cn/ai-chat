@@ -379,7 +379,7 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "memory",
-                "description": "Manage a persistent memory system with three scopes:\n- `session`: Short-term, in-memory only. Survives for the current chat session. Use for task-specific context and in-progress notes.\n- `user`: Long-term, file-backed. Cross-session persistent. Use for user preferences, patterns, and general insights.\n- `repo`: Long-term, file-backed. Repository-scoped. Use for codebase conventions, build commands, and project facts.\n\nPass `scope: \"all\"` to run get/list/search across every scope at once (read-only); add/delete need one concrete scope. Session memories are automatically discarded when the app restarts. User and repo memories persist as markdown files in the workspace memory directory.",
+                "description": "Manage a persistent memory system with three scopes:\n- `session`: Short-term, in-memory only. Survives for the current chat session. Use for task-specific context and in-progress notes.\n- `user`: Long-term, file-backed. Cross-session persistent. Use for user preferences, patterns, and general insights.\n- `repo`: Long-term, file-backed. Repository-scoped. Use for codebase conventions, build commands, and project facts.\n\nPass `scope: \"all\"` to run get/list/search across every scope at once (read-only); add/delete need one concrete scope. Session memories are automatically discarded when the app restarts. User and repo memories persist as markdown files in the workspace memory directory (`.data/memory`, app-managed — never edit it with file tools).",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -891,10 +891,33 @@ mod tests {
     }
 
     #[test]
+    fn integrated_search_skips_the_hidden_data_directory() {
+        let root = make_temp_dir("search-data-skip");
+        fs::create_dir_all(root.join(".data").join("memory")).unwrap();
+        fs::write(root.join(".data").join("chat.db"), "needle").unwrap();
+        fs::write(
+            root.join(".data").join("memory").join("note.md"),
+            "needle",
+        )
+        .unwrap();
+        fs::write(root.join("notes.md"), "needle").unwrap();
+
+        let output =
+            run_integrated_search("needle", &root, &root, &SearchOptions::default()).unwrap();
+
+        assert!(output.contains("notes.md:1:needle"));
+        assert!(!output.contains(".data"));
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn workspace_skill_dir_is_writable_in_self_evolution_mode() {
         let workspace_root = make_temp_dir("writable-skills");
-        let writable_root = workspace_root.join("skills");
+        let writable_root = workspace_root.join(".data").join("skills");
         let skill_file = writable_root.join("demo").join("skill.md");
+        fs::create_dir_all(skill_file.parent().unwrap()).unwrap();
+        fs::write(&skill_file, "---\nname: demo\ndescription: d\n---\n").unwrap();
 
         let result = ensure_mutation_target_allowed(
             &skill_file,
@@ -1653,15 +1676,48 @@ three
     }
 
     #[test]
-    fn ensure_mutation_target_allowed_rejects_memory_dir() {
+    fn ensure_mutation_target_allowed_rejects_internal_data_dir() {
         use super::ensure_mutation_target_allowed;
 
-        let workspace_root = make_temp_dir("mutation-memory");
-        let memory_file = workspace_root.join("memory").join("repo").join("note.md");
-        fs::create_dir_all(memory_file.parent().unwrap()).unwrap();
+        let workspace_root = make_temp_dir("mutation-data");
+        let data_root = workspace_root.join(".data");
+        let files = [
+            data_root.join("chat.db"),
+            data_root.join("memory").join("repo").join("note.md"),
+            data_root.join("todos").join("sess").join("lists").join("list.json"),
+            data_root.join("skills.status"),
+        ];
+        for file in &files {
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, "x").unwrap();
+        }
 
-        let err = ensure_mutation_target_allowed(&memory_file, &workspace_root, &[]).unwrap_err();
-        assert!(err.contains("memory directory"));
+        // Database, memory, todos and the skill status file are app-managed.
+        for file in &files {
+            let err = ensure_mutation_target_allowed(file, &workspace_root, &[]).unwrap_err();
+            assert!(
+                err.contains(".data"),
+                "unexpected error for {}: {err}",
+                file.display()
+            );
+        }
+
+        // A skill below `.data/skills` is rejected while self-evolution is off
+        // and allowed once the caller passes that root as writable.
+        let skill_file = data_root.join("skills").join("demo").join("skill.md");
+        fs::create_dir_all(skill_file.parent().unwrap()).unwrap();
+        fs::write(&skill_file, "x").unwrap();
+
+        let err = ensure_mutation_target_allowed(&skill_file, &workspace_root, &[]).unwrap_err();
+        assert!(err.contains("read-only"));
+
+        let writable_root = data_root.join("skills");
+        assert!(ensure_mutation_target_allowed(
+            &skill_file,
+            &workspace_root,
+            std::slice::from_ref(&writable_root)
+        )
+        .is_ok());
 
         let _ = fs::remove_dir_all(&workspace_root);
     }

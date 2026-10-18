@@ -251,7 +251,7 @@ pub(super) async fn handle_memory_tool(
         }
     // ── User / Repo scoped (file-backed) ────────────────────────────
     } else if scope == "user" || scope == "repo" {
-        let memory_root = workspace_dir.join("memory").join(scope);
+        let memory_root = crate::workspace::memory_root(workspace_dir).join(scope);
         let _ = fs::create_dir_all(&memory_root);
 
         match action {

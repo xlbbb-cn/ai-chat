@@ -67,7 +67,8 @@ Use cases:
 
 - Define skills via skill.md (YAML frontmatter + system prompt)
 - Add, delete, enable/disable skills
-- Load skills from both app and user directories
+- Skills live in the workspace (`<workspace>/.data/skills`), so each workspace has its own set
+- Enablement is stored per workspace in `.data/skills.status`, next to the skills it describes
 - Skill path isolation for safer file and command scope
 - Skill command allowlist merging across multiple selected skills
 
@@ -86,9 +87,10 @@ Use cases:
 ### 6) Local Persistence & Operations
 
 - config.json for model and tool configurations
-- SQLite for chat history and API request monitoring data
+- Per-workspace state in a hidden `<workspace>/.data` directory: SQLite database, memory, todos, skills and skill status
+- SQLite for chat history and API request monitoring data (switches with the workspace)
 - Request monitoring panel for listing, details, and deletion
-- Profile export/import via zip archives, with skills packaged for manual restore
+- Profile export/import via zip archives (config, tools, agents, MCP servers, workspace memory/todos/skills)
 - Workspace directory setting in the UI
 
 ---
@@ -205,8 +207,8 @@ Pushing a `v*` tag triggers `.github/workflows/release.yml`, which builds the Li
 installers in parallel and uploads them to the GitHub Release of that tag (created as a **draft**).
 
 ```bash
-git tag v1.1.4
-git push origin v1.1.4
+git tag v2.0.0
+git push origin v2.0.0
 ```
 
 | Platform | Bundles |
@@ -225,7 +227,7 @@ git push origin v1.1.4
 
 ## Configuration
 
-After running, a config.json file will be generated in the system app data directory. Common fields:
+After running, a config.json file will be generated in the system app data directory. Everything workspace-scoped lives in `<workspace>/.data` instead (see [Project Structure](#project-structure)). Common fields:
 
 ```json
 {
@@ -240,6 +242,7 @@ After running, a config.json file will be generated in the system app data direc
     "max_tokens": 4096
   },
   "selected_tools": ["run_cmd", "file_actions", "knowledge_graph"],
+  "workspace_dir": "D:/projects/my-repo",
   "kg_engine": "neo4j",
   "neo4j_uri": "bolt://localhost:7687",
   "neo4j_user": "neo4j",
@@ -252,6 +255,7 @@ Security recommendations:
 - Do not commit real API keys
 - Use separate keys and minimal privilege accounts for production
 - Separate knowledge graph accounts from application accounts
+- Add `<workspace>/.data/` to the workspace's `.gitignore` when the workspace is a git repository (it holds the chat database, memories, todos and skills)
 
 ---
 
@@ -263,11 +267,20 @@ ai-chat/
 ├─ src-tauri/           # Rust + Tauri backend
 │  ├─ src/lib.rs        # App entry and command registration
 │  ├─ src/llm_complete.rs
-│  ├─ src/skills.rs
+│  ├─ src/skills.rs     # skills + workspace skill status
+│  ├─ src/workspace.rs  # hidden `<workspace>/.data` layout
 │  ├─ src/tools/        # tools module (memory, file_actions, patch, risk, ...)
 │  ├─ src/mcp.rs
 │  └─ src/db.rs
 └─ README.md
+```
+
+Runtime layout — app data holds the application files, the workspace holds its own state:
+
+```text
+<app data>/                 config.json, app.log, mcp_servers.json, sub_agents.json,
+                            profiles.json, timers.json, workspace/ (default workspace)
+<workspace>/.data/          chat.db, memory/, todos/, skills/, skills.status   (hidden)
 ```
 
 ---
@@ -286,7 +299,6 @@ ai-chat/
 - Add presets for model providers (OpenAI / Azure / local gateways)
 - Add tool invocation auditing and replay
 - Add skill signing and publishing mechanisms
-- Add multi-workspace session isolation and synchronization
 - Add end-to-end testing and security baseline scans
 
 ---

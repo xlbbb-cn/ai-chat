@@ -243,15 +243,13 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
   async function handleSave() {
     setSaving(true);
     try {
-      // `selected_skills` / `selected_tools` are owned by the skills and tools
-      // panels, not by this form. Re-read them before saving so that changing
-      // the workspace (or any other setting) doesn't roll back skill/tool
-      // toggles made while this panel was open.
+      // `selected_tools` is owned by the tools panel, not by this form.
+      // Re-read it before saving so that changing the workspace (or any other
+      // setting) doesn't roll back tool toggles made while this panel was open.
       const persisted = await getConfig();
       const normalized: AppConfig = {
         ...config,
         model_catalog: modelCatalog,
-        selected_skills: persisted.selected_skills ?? [],
         selected_tools: persisted.selected_tools ?? [],
       };
       await saveConfig(normalized);
@@ -284,8 +282,7 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
       const normalized: AppConfig = {
         ...config,
         language: next,
-        // Owned by the skills / tools panels — never roll those back.
-        selected_skills: persisted.selected_skills ?? [],
+        // Owned by the tools panel — never roll those back.
         selected_tools: persisted.selected_tools ?? [],
       };
       await saveConfig(normalized);
@@ -335,7 +332,6 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
       ]);
       const profile: Profile = {
         name: newProfileName.trim(),
-        selected_skills: config.selected_skills || [],
         selected_tools: config.selected_tools || [],
         agents,
         orchestration,
@@ -555,7 +551,6 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
                           <span className="profile-item-name">{profile.name}</span>
                           <span className="profile-item-meta">
                             {t("settings.workspace.profileMeta", {
-                              skills: profile.selected_skills.length,
                               tools: profile.selected_tools.length,
                               agents: profile.agents.length,
                             })}

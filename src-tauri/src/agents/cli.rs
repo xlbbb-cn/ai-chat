@@ -274,7 +274,11 @@ fn build_command(
                 "-File",
             ]);
             command.arg(script);
-            command.args(args.iter().map(|arg| quote_powershell_argument(arg)));
+            // Everything after `-File <script>` is passed through to the script
+            // as literal strings: PowerShell parses none of it, so the arguments
+            // must NOT be quoted for PowerShell (adding `'…'` would hand the
+            // script a value that literally contains the quotes).
+            command.args(args);
             command
         }
     };
