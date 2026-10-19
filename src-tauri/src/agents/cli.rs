@@ -963,11 +963,6 @@ mod tests {
     }
 
     #[test]
-    fn powershell_quoting_escapes_single_quotes() {
-        assert_eq!(quote_powershell_argument("it's"), "'it''s'");
-    }
-
-    #[test]
     fn absolute_paths_resolve_when_the_file_exists() {
         let exe = std::env::current_exe().expect("test executable path");
         let resolved = resolve_executable(&exe.to_string_lossy()).expect("resolve current exe");

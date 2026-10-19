@@ -194,6 +194,32 @@ mod tests {
     }
 
     #[test]
+    fn conversation_id_header_value_keeps_uuid_v4_session_ids() {
+        let session_id = "01234567-89ab-4cde-8f01-23456789abcd";
+        assert_eq!(conversation_id_header_value(session_id), session_id);
+        // Whitespace is trimmed, so a stray newline can never reach the header.
+        assert_eq!(
+            conversation_id_header_value("  01234567-89ab-4cde-8f01-23456789abcd \n"),
+            session_id
+        );
+    }
+
+    #[test]
+    fn conversation_id_header_value_canonicalises_and_falls_back() {
+        // Uppercase UUID → canonical lowercase form (same id).
+        assert_eq!(
+            conversation_id_header_value("01234567-89AB-4CDE-8F01-23456789ABCD"),
+            "01234567-89ab-4cde-8f01-23456789abcd"
+        );
+
+        // A non-UUID session id is never forwarded verbatim: the header always
+        // carries a UUID v4.
+        let value = conversation_id_header_value("legacy-session");
+        let parsed = uuid::Uuid::parse_str(&value).expect("fallback must be a UUID");
+        assert_eq!(parsed.get_version_num(), 4);
+    }
+
+    #[test]
     fn collect_loaded_skills_unions_messages_in_first_seen_order() {
         let messages = vec![
             ChatMessage {
@@ -312,6 +338,9 @@ pub struct StreamOptions<'a> {
     /// messages carry `reasoning_content` back, as DeepSeek-family thinking
     /// models require.
     pub ds_format: bool,
+    /// Chat session id, forwarded as the `x-conversation-id` header (UUID v4)
+    /// so upstreams can correlate every request of one conversation.
+    pub conversation_id: Option<&'a str>,
 }
 
 const CONTEXT_COMPRESSION_THRESHOLD: f32 = 0.8;
@@ -372,6 +401,23 @@ pub(crate) fn build_http_client() -> Result<Client, String> {
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {e}"))
 }
+
+/// Header correlating every upstream request with the chat session it belongs to.
+pub(crate) const CONVERSATION_ID_HEADER: &str = "x-conversation-id";
+
+/// Value for the `x-conversation-id` header, derived from the chat session id.
+///
+/// Session ids are UUID v4 strings — the UI creates them with
+/// `crypto.randomUUID()`. A valid UUID is forwarded in canonical form, so the
+/// header always matches the session id verbatim; a malformed value is
+/// replaced by a fresh v4 id, because upstreams that key conversations on this
+/// header expect UUID v4 and must never receive a non-UUID value.
+pub(crate) fn conversation_id_header_value(session_id: &str) -> String {
+    uuid::Uuid::parse_str(session_id.trim())
+        .map(|id| id.to_string())
+        .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string())
+}
+
 /// Apply output token limits to the request body.
 ///
 /// OpenAI-compatible APIs accept two related but distinct parameters:
@@ -861,17 +907,20 @@ pub async fn stream_llm_request(
     // Single choke point for every streaming request (main agent + sub-agents):
     // DS-Format guard, see `ensure_reasoning_passthrough`.
     ensure_reasoning_passthrough(&mut req_body, opts.ds_format);
+    // Resolved once per call (not per attempt) so every retry and every round
+    // of the same session carries the same conversation id.
+    let conversation_id = opts.conversation_id.map(conversation_id_header_value);
     let mut last_err: Option<String> = None;
 
     for attempt in 1..=STREAM_MAX_RETRIES {
-        let res = match client
+        let mut request = client
             .post(url)
             .header(reqwest::header::ACCEPT, "text/event-stream")
-            .bearer_auth(api_key)
-            .json(&req_body)
-            .send()
-            .await
-        {
+            .bearer_auth(api_key);
+        if let Some(conversation_id) = conversation_id.as_deref() {
+            request = request.header(CONVERSATION_ID_HEADER, conversation_id);
+        }
+        let res = match request.json(&req_body).send().await {
             Ok(res) => res,
             Err(err) => {
                 let err = err.to_string();
@@ -1034,6 +1083,7 @@ async fn stream_request(
     cancelled: &AtomicBool,
     usage_max_tokens: Option<u32>,
     ds_format: bool,
+    session_id: &str,
 ) -> Result<StreamResult, String> {
     stream_llm_request(
         app,
@@ -1049,6 +1099,7 @@ async fn stream_request(
             emit_usage: true,
             usage_max_tokens,
             ds_format,
+            conversation_id: Some(session_id),
         },
     )
     .await
@@ -1718,6 +1769,7 @@ pub async fn chat_completion(
             &state.chat_cancelled,
             Some(effective_max_tokens),
             config.ds_format,
+            &session_id,
         )
         .await;
 

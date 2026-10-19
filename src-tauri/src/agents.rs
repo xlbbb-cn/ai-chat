@@ -12,8 +12,9 @@ const LLM_DEFAULT_MAX_COMLETE_TOKENS: u32 = 4_096;
 
 use crate::{
     llm_complete::{
-        apply_completion_token_limit, content_to_text, extract_upstream_error_message,
-        resolve_reasoning_effort, sanitize_tool_pairs, stream_llm_request, StreamOptions,
+        apply_completion_token_limit, content_to_text, conversation_id_header_value,
+        extract_upstream_error_message, resolve_reasoning_effort, sanitize_tool_pairs,
+        stream_llm_request, StreamOptions, CONVERSATION_ID_HEADER,
     },
     tools, AppConfig, AppState,
 };
@@ -873,6 +874,7 @@ async fn summarize_agent_memory(
     client: &Client,
     url: &str,
     api_key: &str,
+    session_id: &str,
     model: &str,
     current_summary: &str,
     messages_to_compress: &[Value],
@@ -886,6 +888,7 @@ async fn summarize_agent_memory(
         client,
         url,
         api_key,
+        session_id,
         vec![
             json!({
                 "role": "system",
@@ -916,6 +919,7 @@ async fn compress_working_memory_if_needed(
     client: &Client,
     url: &str,
     api_key: &str,
+    session_id: &str,
     model: &str,
     static_system_prompt: &str,
     snapshot_prompt: &str,
@@ -952,6 +956,7 @@ async fn compress_working_memory_if_needed(
         client,
         url,
         api_key,
+        session_id,
         model,
         episodic_summary,
         &older_messages,
@@ -1180,6 +1185,7 @@ async fn call_llm_once(
     client: &Client,
     url: &str,
     api_key: &str,
+    session_id: &str,
     mut messages: Vec<Value>,
     model: &str,
     max_complete_tokens: u32,
@@ -1198,6 +1204,10 @@ async fn call_llm_once(
     );
     let res = client
         .post(url)
+        .header(
+            CONVERSATION_ID_HEADER,
+            conversation_id_header_value(session_id),
+        )
         .bearer_auth(api_key)
         .json(&body)
         .send()
@@ -1247,9 +1257,17 @@ pub async fn orchestrate(
 
     // Step 1: Optionally auto-configure temporary agents
     let working_agents: Vec<SubAgent> = if orchestration.auto_configure {
-        auto_configure_agents(&client, &url, &config.api_key, &model, messages, &enabled)
-            .await
-            .unwrap_or(enabled)
+        auto_configure_agents(
+            &client,
+            &url,
+            &config.api_key,
+            session_id,
+            &model,
+            messages,
+            &enabled,
+        )
+        .await
+        .unwrap_or(enabled)
     } else {
         enabled
     };
@@ -1260,6 +1278,7 @@ pub async fn orchestrate(
         &client,
         &url,
         &config.api_key,
+        session_id,
         &model,
         messages,
         &working_agents,
@@ -1311,6 +1330,7 @@ async fn auto_configure_agents(
     client: &Client,
     url: &str,
     api_key: &str,
+    session_id: &str,
     model: &str,
     messages: &[crate::llm_complete::ChatMessage],
     existing: &[SubAgent],
@@ -1347,6 +1367,7 @@ async fn auto_configure_agents(
         client,
         url,
         api_key,
+        session_id,
         vec![
             json!({"role":"system","content": system}),
             json!({"role":"user","content": user_query}),
@@ -1403,6 +1424,7 @@ async fn plan_tasks(
     client: &Client,
     url: &str,
     api_key: &str,
+    session_id: &str,
     model: &str,
     messages: &[crate::llm_complete::ChatMessage],
     agents: &[SubAgent],
@@ -1452,7 +1474,7 @@ async fn plan_tasks(
     );
 
     let raw = call_llm_once(
-        client, url, api_key,
+        client, url, api_key, session_id,
         vec![
             json!({"role":"system","content": system}),
             json!({"role":"user","content": format!("Conversation:\n{conversation}\n\nCreate a task plan.")}),
@@ -2244,6 +2266,7 @@ async fn run_sub_agent_inner(
             client,
             url,
             &config.api_key,
+            session_id,
             model,
             &static_system_prompt,
             &snapshot_prompt,
@@ -2327,6 +2350,7 @@ async fn run_sub_agent_inner(
                 emit_usage: false,
                 usage_max_tokens: None,
                 ds_format: config.ds_format,
+                conversation_id: Some(session_id),
             },
         )
         .await
