@@ -25,6 +25,12 @@ interface ToolOption {
   hintKey: MessageKey;
 }
 
+/**
+ * Tools an `llm` sub-agent may be granted. Sub-agents are execution workers,
+ * so the selection is limited to the local execution tools; memory, todos and
+ * the knowledge graph stay with the main agent (the backend still understands
+ * those ids for backwards compatibility, but they are not offered here).
+ */
 const KNOWN_TOOLS: ToolOption[] = [
   {
     id: "file_actions",
@@ -40,21 +46,6 @@ const KNOWN_TOOLS: ToolOption[] = [
     id: "run_shell",
     label: "run_shell",
     hintKey: "agents.toolHints.runShell",
-  },
-  {
-    id: "knowledge_graph",
-    label: "knowledge_graph",
-    hintKey: "agents.toolHints.knowledgeGraph",
-  },
-  {
-    id: "todo_list",
-    label: "todos",
-    hintKey: "agents.toolHints.todos",
-  },
-  {
-    id: "memory",
-    label: "memory",
-    hintKey: "agents.toolHints.memory",
   },
 ];
 
@@ -440,6 +431,7 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
               onChange={(e) => updateDraft({ envText: e.target.value })}
               placeholder={"KEY=VALUE"}
             />
+            <small className="agent-field-hint">{t("agents.cliEnvHint")}</small>
           </label>
           <label>
             {t("agents.cliCwd")}

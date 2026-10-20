@@ -490,7 +490,7 @@ const zhTW: Messages = {
             "可執行檔名稱（在 PATH 中尋找）或完整路徑。Windows 的 .cmd/.bat/.ps1 啟動器會自動處理。",
         cliArgs: "參數 —— 每行一個",
         cliArgsHint:
-            "可用佔位符：{prompt}、{model}、{cwd}、{agent_name}。範例：一行寫 `run`，下一行寫 `{prompt}`，等同於 `opencode run \"…\"`。若沒有任何位置使用 {prompt}，提示詞會附加為最後一個參數。",
+            "每行一個參數；可用佔位符：{prompt}、{model}、{cwd}、{agent_name}。範例：一行寫 `run`，下一行寫 `{prompt}`，等同於 `opencode run \"…\"`。若沒有任何位置使用 {prompt}，提示詞會附加為最後一個參數。留空會自動使用內建的無頭呼叫形式（opencode：`run`，claude/gemini/cursor-agent/copilot：`-p`，codex/droid：`exec`，crush：`run`，amp：`-x`）。",
         cliPromptVia: "提示詞傳遞方式",
         cliPromptViaArg: "作為參數（{prompt}）",
         cliPromptViaStdin: "透過 stdin",
@@ -502,6 +502,8 @@ const zhTW: Messages = {
         cliModelArgsHint:
             "當此代理設定了模型時附加；請在需要的位置使用 {model} 佔位符，例如一行 --model、一行 {model}。",
         cliEnv: "環境變數 —— 每行一個 KEY=VALUE",
+        cliEnvHint:
+            "擷取的輸出會自動移除 ANSI 顏色控制符。子行程預設帶有 NO_COLOR=1、CLICOLOR=0、CLICOLOR_FORCE=0、FORCE_COLOR=0 和 TERM=dumb，此處填寫同名變數可覆寫。",
         cliCwd: "工作目錄",
         cliCwdPlaceholder: "工作區根目錄",
         cliCwdHint: "相對於工作區的目錄；留空表示工作區根目錄。",

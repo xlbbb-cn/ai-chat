@@ -523,7 +523,7 @@ const en = {
             "Executable name (searched on PATH) or a full path. Windows .cmd/.bat/.ps1 launchers are handled automatically.",
         cliArgs: "Arguments — one per line",
         cliArgsHint:
-            "Placeholders: {prompt}, {model}, {cwd}, {agent_name}. Example: a line `run` and a line `{prompt}` runs `opencode run \"…\"`. If {prompt} is missing anywhere, the prompt is appended as the last argument.",
+            "One argument per line; placeholders: {prompt}, {model}, {cwd}, {agent_name}. Example: `run` + `{prompt}` runs `opencode run \"…\"`. If {prompt} is missing, the prompt is appended as the last argument. Leave empty to use the built-in headless form (opencode: `run`, claude/gemini/cursor-agent/copilot: `-p`, codex/droid: `exec`, crush: `run`, amp: `-x`).",
         cliPromptVia: "Prompt delivery",
         cliPromptViaArg: "As an argument ({prompt})",
         cliPromptViaStdin: "Through stdin",
@@ -536,6 +536,8 @@ const en = {
         cliModelArgsHint:
             "Appended when the agent has a model configured. Include the {model} placeholder, e.g. --model then {model}.",
         cliEnv: "Environment — KEY=VALUE per line",
+        cliEnvHint:
+            "ANSI colour codes are stripped from captured output. Children start with NO_COLOR=1, CLICOLOR=0, CLICOLOR_FORCE=0, FORCE_COLOR=0 and TERM=dumb; entries above override those defaults.",
         cliCwd: "Working directory",
         cliCwdPlaceholder: "workspace root",
         cliCwdHint: "Workspace-relative directory to run in. Leave empty for the workspace root.",

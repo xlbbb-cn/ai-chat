@@ -1359,7 +1359,7 @@ async fn auto_configure_agents(
           {{\"id\":\"tmp-1\",\"name\":\"...\",\"description\":\"...\",\"system_prompt\":\"...\",\
             \"allowed_tools\":[\"file_actions\"],\"max_iterations\":5,\"enabled\":true}}\
         ]}}\n\
-        allowed_tools values must be a subset of: [\"file_actions\",\"run_cmd\",\"run_shell\",\"knowledge_graph\",\"memory\",\"todo_list\"] — todo_list grants the `todos` tool.\n\
+        allowed_tools values must be a subset of: [\"file_actions\",\"run_cmd\",\"run_shell\"].\n\
         Return ONLY the JSON object, no markdown, no extra text.",
     );
 
@@ -2034,9 +2034,15 @@ async fn request_external_agent_approval(
     }
 
     let target = match backend {
-        ExternalBackend::Cli => cli::describe_run(agent, prompt, workspace_dir)
-            .map(|command| format!("It runs with your user permissions and can read and write files in the workspace.\n\n{}", command))
-            .unwrap_or_else(|err| format!("Its command could not be resolved yet: {err}")),
+        ExternalBackend::Cli => {
+            // The approval text must show `{cwd}` as the directory the agent
+            // will actually start in, not the workspace root.
+            let cwd = resolve_agent_cwd(agent, workspace_dir)
+                .unwrap_or_else(|_| workspace_dir.to_path_buf());
+            cli::describe_run(agent, prompt, &cwd)
+                .map(|command| format!("It runs with your user permissions and can read and write files in the workspace.\n\n{}", command))
+                .unwrap_or_else(|err| format!("Its command could not be resolved yet: {err}"))
+        }
         ExternalBackend::Cloud => format!(
             "It sends the task to a remote endpoint and can read and write files there.\n\nPOST {}",
             agent.cloud.endpoint.trim()

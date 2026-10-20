@@ -151,11 +151,26 @@ fn windows_path_extensions() -> Vec<String> {
 
 // ─── Spawn targets & argument quoting ────────────────────────────────────────
 
+/// Colour/terminal hints applied to every CLI child. Well-behaved tools then
+/// omit ANSI colours and interactive redraws at the source; the stream is
+/// sanitised as a safety net regardless. The agent's own env list is applied
+/// afterwards, so any of these can be overridden per agent.
+const NO_COLOR_ENV: &[(&str, &str)] = &[
+    ("NO_COLOR", "1"),
+    ("CLICOLOR", "0"),
+    ("CLICOLOR_FORCE", "0"),
+    ("FORCE_COLOR", "0"),
+    ("TERM", "dumb"),
+];
+
 enum SpawnTarget {
     Direct(PathBuf),
     /// Windows `.cmd` / `.bat` shim — must go through `cmd.exe`.
+    /// Constructed only on Windows; the match arm still exists elsewhere.
+    #[cfg_attr(not(windows), allow(dead_code))]
     CmdShim(PathBuf),
     /// PowerShell script — must go through `powershell -File`.
+    #[cfg_attr(not(windows), allow(dead_code))]
     PsFile(PathBuf),
 }
 
@@ -277,6 +292,9 @@ fn build_command(
         }
     };
 
+    for (key, value) in NO_COLOR_ENV {
+        command.env(key, value);
+    }
     for KeyValue { key, value } in env {
         if !key.trim().is_empty() {
             command.env(key, value);
@@ -284,6 +302,12 @@ fn build_command(
     }
 
     command.current_dir(cwd);
+    // `current_dir` changes the real working directory but not the inherited
+    // `PWD` environment variable. CLIs that resolve their project root from
+    // `PWD` (opencode does) would otherwise keep the directory the app itself
+    // was launched from — e.g. `src-tauri` during `tauri dev` — and read/write
+    // files outside the workspace. Keep the two in sync for every child.
+    command.env("PWD", cwd);
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -398,6 +422,77 @@ fn byte_index_for_chars(text: &str, chars: usize) -> usize {
     }
 }
 
+// ─── Terminal output sanitising ──────────────────────────────────────────────
+
+/// Remove ANSI escape sequences and terminal control characters from CLI
+/// output before it is streamed, captured or shown to the model. Without this,
+/// colours (`\x1b[31m…\x1b[0m`), OSC hyperlinks, progress-bar redraws (`\r`)
+/// and spinner backspaces end up as literal garbage in the chat transcript.
+fn strip_terminal_sequences(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\u{1b}' => skip_escape_sequence(&mut chars),
+            '\r' => {
+                // A carriage return redraws the current line: keep only the
+                // text after the last one.
+                match out.rfind('\n') {
+                    Some(index) => out.truncate(index + 1),
+                    None => out.clear(),
+                }
+            }
+            '\u{8}' => {
+                if !out.ends_with('\n') {
+                    out.pop();
+                }
+            }
+            '\n' | '\t' => out.push(ch),
+            ch if ch.is_control() => {}
+            ch => out.push(ch),
+        }
+    }
+
+    out
+}
+
+/// Consume the rest of an escape sequence whose leading `ESC` was already
+/// consumed (CSI, OSC/DCS/PM/APC strings and two-character escapes).
+fn skip_escape_sequence<I: Iterator<Item = char>>(chars: &mut std::iter::Peekable<I>) {
+    match chars.peek().copied() {
+        // CSI: parameter/intermediate bytes, then one final byte in 0x40–0x7E.
+        Some('[') => {
+            chars.next();
+            for ch in chars.by_ref() {
+                if ('\u{40}'..='\u{7e}').contains(&ch) {
+                    break;
+                }
+            }
+        }
+        // OSC / DCS / PM / APC: terminated by BEL or ST (`ESC \`).
+        Some(']') | Some('P') | Some('^') | Some('_') => {
+            chars.next();
+            while let Some(ch) = chars.next() {
+                if ch == '\u{7}' {
+                    break;
+                }
+                if ch == '\u{1b}' {
+                    if chars.peek() == Some(&'\\') {
+                        chars.next();
+                    }
+                    break;
+                }
+            }
+        }
+        // Two-character escape (e.g. `ESC 7`, `ESC =`).
+        Some(_) => {
+            chars.next();
+        }
+        None => {}
+    }
+}
+
 // ─── Streaming ───────────────────────────────────────────────────────────────
 
 struct PumpOutput {
@@ -450,11 +545,11 @@ async fn pump<R: AsyncRead + Unpin>(
             Ok(_) => {
                 // Decode per line with the code-page-aware helper: Windows CLIs
                 // (and cmd.exe shims) write in the OEM/ANSI code page, not UTF-8.
-                let line = decode_process_bytes(&buffer, decode_hint)
-                    .trim_end_matches(['\r', '\n'])
-                    .to_string();
-                capture.push_line(&line);
-                pending.push_str(&line);
+                // Strip terminal colour codes before the text reaches the UI.
+                let line = strip_terminal_sequences(&decode_process_bytes(&buffer, decode_hint));
+                let line = line.trim_end_matches('\n');
+                capture.push_line(line);
+                pending.push_str(line);
                 pending.push('\n');
                 emit_chunk(&app, &task_id, &mut pending, &mut last_emit, false);
             }
@@ -469,6 +564,84 @@ async fn pump<R: AsyncRead + Unpin>(
 }
 
 // ─── Argument templating ─────────────────────────────────────────────────────
+
+/// Non-interactive invocation of a well-known coding CLI.
+struct BuiltinInvocation {
+    /// Executable stem (lower-case, extension stripped), e.g. `opencode`.
+    program: &'static str,
+    /// Argument template used when the agent leaves `args` empty.
+    args: &'static [&'static str],
+}
+
+/// These CLIs do not accept a bare prompt as their first positional argument:
+/// `opencode "<prompt>"` treats the text as the project directory and dies with
+/// `ENOENT … chdir`. An agent with no configured args therefore gets the
+/// documented headless form instead of the unusable bare command.
+const BUILTIN_INVOCATIONS: &[BuiltinInvocation] = &[
+    BuiltinInvocation {
+        program: "opencode",
+        args: &["run", "{prompt}"],
+    },
+    BuiltinInvocation {
+        program: "claude",
+        args: &["-p", "{prompt}"],
+    },
+    BuiltinInvocation {
+        program: "codex",
+        args: &["exec", "{prompt}"],
+    },
+    BuiltinInvocation {
+        program: "gemini",
+        args: &["-p", "{prompt}"],
+    },
+    BuiltinInvocation {
+        program: "qwen",
+        args: &["-p", "{prompt}"],
+    },
+    BuiltinInvocation {
+        program: "crush",
+        args: &["run", "{prompt}"],
+    },
+    BuiltinInvocation {
+        program: "droid",
+        args: &["exec", "{prompt}"],
+    },
+    BuiltinInvocation {
+        program: "cursor-agent",
+        args: &["-p", "{prompt}"],
+    },
+    BuiltinInvocation {
+        program: "copilot",
+        args: &["-p", "{prompt}"],
+    },
+    BuiltinInvocation {
+        program: "amp",
+        args: &["-x", "{prompt}"],
+    },
+];
+
+/// File stem of the configured command, lower-cased and stripped of wrappers:
+/// `/opt/homebrew/bin/opencode`, `C:\…\opencode.cmd` and `opencode` all map to
+/// `opencode`.
+fn executable_stem(command: &str) -> String {
+    let name = command
+        .trim()
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or_default();
+    let stem = match name.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() && ext.len() <= 4 => stem,
+        _ => name,
+    };
+    stem.to_ascii_lowercase()
+}
+
+fn builtin_invocation(command: &str) -> Option<&'static BuiltinInvocation> {
+    let stem = executable_stem(command);
+    BUILTIN_INVOCATIONS
+        .iter()
+        .find(|entry| entry.program == stem)
+}
 
 fn expand_template(
     template: &str,
@@ -492,6 +665,11 @@ fn expand_template(
 /// Renders the argv actually passed to the CLI. In `arg` mode the prompt fills
 /// `{prompt}`; if no template position uses it, it is appended as the last
 /// argument so a bare `opencode run` + empty args still works.
+///
+/// An empty `args` list is not "no arguments": well-known CLIs need their
+/// headless subcommand (`opencode run`, `claude -p`, `codex exec`, …) or they
+/// interpret the prompt itself as a subcommand/project path. Those defaults are
+/// only applied when the user configured nothing, so explicit args always win.
 fn render_arguments(
     settings: &CliAgentSettings,
     agent_name: &str,
@@ -513,6 +691,17 @@ fn render_arguments(
             args.push(expand_template(template, prompt_for_args, model, cwd, agent_name));
         };
 
+        if settings.args.is_empty() {
+            if let Some(invocation) = builtin_invocation(&settings.command) {
+                for template in invocation.args {
+                    // In stdin mode the prompt is piped, not placed in argv.
+                    if use_stdin && template.contains("{prompt}") {
+                        continue;
+                    }
+                    push(template, &mut args, &mut placeholder_used);
+                }
+            }
+        }
         for template in &settings.args {
             push(template, &mut args, &mut placeholder_used);
         }
@@ -642,9 +831,8 @@ async fn read_all<R: AsyncRead + Unpin>(reader: R, decode_hint: OutputDecodeHint
         match reader.read_until(b'\n', &mut buffer).await {
             Ok(0) => break,
             Ok(_) => {
-                out.push_str(
-                    decode_process_bytes(&buffer, decode_hint).trim_end_matches(['\r', '\n']),
-                );
+                let line = strip_terminal_sequences(&decode_process_bytes(&buffer, decode_hint));
+                out.push_str(line.trim_end_matches('\n'));
                 out.push('\n');
             }
             Err(_) => break,
@@ -654,6 +842,25 @@ async fn read_all<R: AsyncRead + Unpin>(reader: R, decode_hint: OutputDecodeHint
 }
 
 // ─── Execution ───────────────────────────────────────────────────────────────
+
+/// Detect the classic misconfiguration where the prompt was handed to a CLI as
+/// its first positional argument. Those tools read it as a project path or
+/// subcommand, so they die with `ENOENT … chdir "<the prompt>"` — a message that
+/// explains nothing to the caller. Returns an actionable hint instead.
+fn misdirected_prompt_hint(settings: &CliAgentSettings, output: &str) -> Option<String> {
+    let lowered = output.to_ascii_lowercase();
+    let chdir_failure = lowered.contains("chdir")
+        && (lowered.contains("enoent") || lowered.contains("no such file or directory"));
+    if !chdir_failure {
+        return None;
+    }
+    let invocation = builtin_invocation(&settings.command)?;
+    Some(format!(
+        "\nHint: `{}` reads its first positional argument as a subcommand or project directory, so the prompt text cannot be passed on its own. Set this agent's arguments to `{}` (one per line) or leave them empty to use that built-in default.",
+        executable_stem(&settings.command),
+        invocation.args.join(" ")
+    ))
+}
 
 /// Runs a `cli`-type agent for `prompt` inside `cwd` (already sandbox-checked by
 /// the caller) and returns its outcome. Output is streamed as `agent-task-token`
@@ -823,6 +1030,11 @@ pub async fn run(
         body.push_str(
             "\nThe CLI agent did not report success. Inspect the output above and decide whether to retry with adjusted arguments or continue with other tools.",
         );
+        if let Some(hint) =
+            misdirected_prompt_hint(settings, &format!("{stdout_text}\n{stderr_text}"))
+        {
+            body.push_str(&hint);
+        }
     }
 
     Ok(CliRunOutcome {
@@ -916,6 +1128,82 @@ mod tests {
     }
 
     #[test]
+    fn empty_arguments_use_the_builtin_headless_invocation() {
+        let settings = settings(Vec::new(), "arg");
+        let (args, use_stdin) = render_arguments(
+            &settings,
+            "opencode",
+            "write hello world",
+            None,
+            Path::new("."),
+            false,
+        );
+        assert_eq!(
+            args,
+            vec!["run".to_string(), "write hello world".to_string()],
+            "opencode must be called as `opencode run <prompt>`, never `<prompt>`"
+        );
+        assert!(!use_stdin);
+    }
+
+    #[test]
+    fn explicit_arguments_keep_the_builtin_defaults_out() {
+        let settings = settings(vec!["--version"], "arg");
+        let (args, _) =
+            render_arguments(&settings, "opencode", "hello", None, Path::new("."), false);
+        assert_eq!(args, vec!["--version".to_string(), "hello".to_string()]);
+    }
+
+    #[test]
+    fn stdin_mode_drops_the_builtin_prompt_placeholder() {
+        let settings = settings(Vec::new(), "stdin");
+        let (args, use_stdin) =
+            render_arguments(&settings, "opencode", "hello", None, Path::new("."), false);
+        assert_eq!(args, vec!["run".to_string()]);
+        assert!(use_stdin);
+    }
+
+    #[test]
+    fn builtin_invocations_match_paths_shims_and_stems() {
+        for command in [
+            "opencode",
+            "/opt/homebrew/bin/opencode",
+            "C:\\Users\\x\\AppData\\Roaming\\npm\\opencode.cmd",
+            "opencode.ps1",
+        ] {
+            assert_eq!(
+                builtin_invocation(command).map(|entry| entry.program),
+                Some("opencode"),
+                "failed to match {command}"
+            );
+        }
+        assert_eq!(
+            builtin_invocation("/usr/local/bin/claude").map(|entry| entry.args),
+            Some(&["-p", "{prompt}"][..])
+        );
+    }
+
+    #[test]
+    fn unknown_commands_have_no_builtin_invocation() {
+        assert!(builtin_invocation("my-own-cli").is_none());
+        assert!(builtin_invocation("/usr/bin/env").is_none());
+    }
+
+    #[test]
+    fn chdir_enoent_failures_point_at_the_missing_subcommand() {
+        let configured = settings(Vec::new(), "arg");
+        let output =
+            "Error: ENOENT: no such file or directory, chdir '/Users/x' -> 'write hello world'";
+        let hint = misdirected_prompt_hint(&configured, output).expect("hint");
+        assert!(hint.contains("run {prompt}"));
+
+        let mut unknown = settings(Vec::new(), "arg");
+        unknown.command = "my-own-cli".to_string();
+        assert!(misdirected_prompt_hint(&unknown, output).is_none());
+        assert!(misdirected_prompt_hint(&configured, "exit code 1").is_none());
+    }
+
+    #[test]
     fn continue_and_model_arguments_are_appended() {
         let settings = settings(vec!["run", "{prompt}"], "arg");
         let (args, _) = render_arguments(
@@ -967,6 +1255,65 @@ mod tests {
         let exe = std::env::current_exe().expect("test executable path");
         let resolved = resolve_executable(&exe.to_string_lossy()).expect("resolve current exe");
         assert_eq!(resolved, exe);
+    }
+
+    /// `current_dir` alone leaves the inherited `PWD` stale; opencode resolves
+    /// its project directory from `PWD`, which made sub-agents work in the
+    /// directory the app was launched from instead of the workspace.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn children_get_a_pwd_that_matches_their_working_directory() {
+        let dir = std::env::temp_dir();
+        let target = SpawnTarget::Direct(PathBuf::from("/usr/bin/env"));
+        let output = build_command(&target, &[], &[], &dir)
+            .output()
+            .await
+            .expect("run /usr/bin/env");
+        assert!(output.status.success());
+
+        let text = String::from_utf8_lossy(&output.stdout);
+        let pwd = text
+            .lines()
+            .find_map(|line| line.strip_prefix("PWD="))
+            .expect("PWD is present in the child environment");
+        assert_eq!(Path::new(pwd), dir.as_path());
+    }
+
+    #[test]
+    fn ansi_colour_sequences_are_stripped() {
+        assert_eq!(
+            strip_terminal_sequences("\u{1b}[31mred\u{1b}[0m and \u{1b}[1;32mgreen\u{1b}[m"),
+            "red and green"
+        );
+    }
+
+    #[test]
+    fn osc_hyperlinks_and_two_character_escapes_are_stripped() {
+        let linked = "\u{1b}]8;;https://example.com\u{7}example\u{1b}]8;;\u{1b}\\";
+        assert_eq!(strip_terminal_sequences(linked), "example");
+        assert_eq!(strip_terminal_sequences("\u{1b}7text\u{1b}8"), "text");
+    }
+
+    #[test]
+    fn carriage_returns_keep_only_the_last_frame() {
+        assert_eq!(
+            strip_terminal_sequences("progress 10%\rprogress 100%\nnext"),
+            "progress 100%\nnext"
+        );
+        assert_eq!(
+            strip_terminal_sequences("line one\nold\rnew"),
+            "line one\nnew"
+        );
+    }
+
+    #[test]
+    fn backspaces_and_control_characters_are_removed() {
+        assert_eq!(strip_terminal_sequences("abc\u{8}\u{8}d"), "ad");
+        assert_eq!(
+            strip_terminal_sequences("中文\u{1b}[32m正常\u{1b}[0m"),
+            "中文正常"
+        );
+        assert_eq!(strip_terminal_sequences("a\u{7}b\u{0}c"), "abc");
     }
 
     #[test]

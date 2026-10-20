@@ -490,7 +490,7 @@ const zhCN: Messages = {
             "可执行文件名（在 PATH 中查找）或完整路径。Windows 的 .cmd/.bat/.ps1 启动器会自动处理。",
         cliArgs: "参数 —— 每行一个",
         cliArgsHint:
-            "可用占位符：{prompt}、{model}、{cwd}、{agent_name}。示例：一行写 `run`，下一行写 `{prompt}`，等价于 `opencode run \"…\"`。若没有任何位置使用 {prompt}，提示词会追加为最后一个参数。",
+            "每行一个参数；可用占位符：{prompt}、{model}、{cwd}、{agent_name}。示例：一行写 `run`，下一行写 `{prompt}`，等价于 `opencode run \"…\"`。若没有任何位置使用 {prompt}，提示词会追加为最后一个参数。留空会自动使用内置的无头调用形式（opencode：`run`，claude/gemini/cursor-agent/copilot：`-p`，codex/droid：`exec`，crush：`run`，amp：`-x`）。",
         cliPromptVia: "提示词传递方式",
         cliPromptViaArg: "作为参数（{prompt}）",
         cliPromptViaStdin: "通过 stdin",
@@ -502,6 +502,8 @@ const zhCN: Messages = {
         cliModelArgsHint:
             "当该智能体配置了模型时追加；请在需要的位置使用 {model} 占位符，例如一行 --model、一行 {model}。",
         cliEnv: "环境变量 —— 每行一个 KEY=VALUE",
+        cliEnvHint:
+            "捕获的输出会自动移除 ANSI 颜色控制符。子进程默认带有 NO_COLOR=1、CLICOLOR=0、CLICOLOR_FORCE=0、FORCE_COLOR=0 和 TERM=dumb，此处填写同名变量可覆盖。",
         cliCwd: "工作目录",
         cliCwdPlaceholder: "工作区根目录",
         cliCwdHint: "相对于工作区的目录；留空表示工作区根目录。",
