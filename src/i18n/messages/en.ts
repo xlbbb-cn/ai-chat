@@ -463,7 +463,7 @@ const en = {
         orchestration: "Orchestration settings",
         enableMode: "Automatic orchestration",
         enableModeHint:
-            "When on, an orchestrator plans and runs several agents for one request. Delegation through `call_subagent` works regardless of this switch.",
+            "When on, an orchestrator plans and runs several agents for one request, and the main agent can delegate through `call_subagent`. When off, the main agent answers directly and `call_subagent` is not offered.",
         autoConfigure: "Auto-configure mode",
         executionMode: "Execution mode",
         modeParallel: "Parallel",

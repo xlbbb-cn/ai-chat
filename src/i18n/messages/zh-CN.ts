@@ -432,7 +432,7 @@ const zhCN: Messages = {
         orchestration: "编排设置",
         enableMode: "自动编排",
         enableModeHint:
-            "开启后，编排器会为一次请求自动规划并并行执行多个智能体。主智能体通过 `call_subagent` 委派任务不受此开关影响。",
+            "开启后，编排器会为一次请求自动规划并并行执行多个智能体，主智能体也可以使用 `call_subagent` 把任务委派给子智能体。关闭时主智能体直接作答，不提供 `call_subagent`。",
         autoConfigure: "自动配置模式",
         executionMode: "执行方式",
         modeParallel: "并行",

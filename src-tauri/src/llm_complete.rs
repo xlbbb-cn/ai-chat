@@ -1408,14 +1408,19 @@ pub async fn chat_completion(
         system_content.push_str(&skills_sys_msg);
     }
 
-    // Sub-agents (`llm`, `cli`, `cloud`) are callable whenever at least one is
-    // enabled. The orchestration toggle only controls the automatic planner —
-    // delegation itself is always available.
-    let enabled_agents: Vec<agents::SubAgent> = agents::load_agents_config(&state.agents_config_path)
-        .agents
-        .into_iter()
-        .filter(|a| a.enabled)
-        .collect();
+    // Sub-agents (`llm`, `cli`, `cloud`) are only reachable when automatic
+    // orchestration is enabled (`use_agents`). With orchestration off the main
+    // agent answers directly: `call_subagent` is neither advertised in the
+    // system prompt nor exposed in the tool list.
+    let enabled_agents: Vec<agents::SubAgent> = if multi_agent_enabled {
+        agents::load_agents_config(&state.agents_config_path)
+            .agents
+            .into_iter()
+            .filter(|a| a.enabled)
+            .collect()
+    } else {
+        Vec::new()
+    };
 
     if !enabled_agents.is_empty() {
         let mut available_agents_info = String::new();
@@ -2043,7 +2048,9 @@ pub async fn chat_completion(
                 let task_desc = args_json["task_description"].as_str().unwrap_or("");
                 let task_context = args_json["context"].as_str().unwrap_or("");
 
-                if let Some(agent) = enabled_agents.iter().find(|a| a.id == agent_id) {
+                if !multi_agent_enabled {
+                    "Error: sub-agent delegation is disabled. Enable automatic orchestration (`use_agents`) in the Agents panel to use `call_subagent`.".to_string()
+                } else if let Some(agent) = enabled_agents.iter().find(|a| a.id == agent_id) {
                     let task = agents::Task {
                         id: uuid::Uuid::new_v4().to_string(),
                         agent_id: agent_id.to_string(),

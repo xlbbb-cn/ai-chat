@@ -432,7 +432,7 @@ const zhTW: Messages = {
         orchestration: "協調設定",
         enableMode: "自動協調",
         enableModeHint:
-            "開啟後，協調器會為單一請求自動規劃並平行執行多個代理。主代理透過 `call_subagent` 委派任務不受此開關影響。",
+            "開啟後，協調器會為單一請求自動規劃並平行執行多個代理，主代理也可以使用 `call_subagent` 將任務委派給子代理。關閉時主代理直接作答，不提供 `call_subagent`。",
         autoConfigure: "自動設定模式",
         executionMode: "執行方式",
         modeParallel: "平行",
