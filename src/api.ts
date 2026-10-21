@@ -558,6 +558,31 @@ export async function saveMarkdownFile(path: string, content: string): Promise<v
   return invoke("save_markdown_file", { path, content });
 }
 
+// ─── App menu (custom titlebar) ──────────────────────────────────────────────
+
+/** Open the app data directory in the OS file manager. */
+export async function openAppDataDir(): Promise<void> {
+  return invoke("app_open_data_dir");
+}
+
+/**
+ * Read a user-picked Markdown file and hand it to the built-in editor
+ * (`markdown-edit-open` / `markdown-edit-error` events).
+ */
+export async function openMarkdownFile(path: string): Promise<void> {
+  return invoke("app_open_markdown", { path });
+}
+
+/** Export the profile archive to a path the caller picked. */
+export async function exportProfileTo(path: string): Promise<void> {
+  return invoke("app_export_profile", { path });
+}
+
+/** Restore a profile archive from a path the caller picked. */
+export async function importProfileFrom(path: string): Promise<void> {
+  return invoke("app_import_profile", { path });
+}
+
 // ─── Named Profiles ──────────────────────────────────────────────────────────
 
 export async function listProfiles(): Promise<Profile[]> {

@@ -44,6 +44,17 @@ const zhTW: Messages = {
         toolbarHistory: "歷史",
         toolbarSettings: "設定",
 
+        windowMinimize: "最小化",
+        windowMaximize: "最大化",
+        windowRestore: "還原",
+        windowClose: "關閉",
+        appMenu: "應用程式選單",
+        appMenuOpenDataDir: "開啟應用程式資料夾",
+        appMenuSaveProfile: "匯出設定檔…",
+        appMenuRestoreProfile: "還原設定檔…",
+        appMenuMarkdownEdit: "Markdown 編輯…",
+        appMenuAbout: "關於 AI Chat",
+
         emptyStart: "開始一段對話",
         emptyHint: "使用{skills}設定系統提示詞，或在{settings}中設定 API。",
 

@@ -133,6 +133,7 @@ This is enforced by the skills/tools layer. Don't add code that lets a skill esc
 
 - **Identifier**: `com.leonard.aichat` (set in `tauri.conf.json`).
 - **Window label**: `main` (the only window).
+- **Window chrome is custom**: `decorations: false` + `shadow: true`; `src/components/TitleBar.tsx` draws the drag region (`data-tauri-drag-region`) and the window buttons via `@tauri-apps/api/window`. The required permissions live in `capabilities/default.json` (`allow-start-dragging`, `allow-minimize`, `allow-toggle-maximize`, `allow-close`, …). The titlebar is fixed above overlays; fullscreen pages start at `top: var(--titlebar-h)` (`src/App.css`). The native File/Tools/About menu stays for macOS, and the same 4 actions are exposed as commands (`app_open_data_dir`, `app_open_markdown`, `app_export_profile`, `app_import_profile`) for the titlebar's `⋯` menu.
 - **Plugins registered in `lib.rs`**: `tauri-plugin-opener`, `tauri-plugin-dialog`, `tauri-plugin-clipboard-manager`. No `fs` / `shell` / `http` plugins. If you need them, add the crate to `Cargo.toml`, register with `.plugin(...)`, AND add the permission to `src-tauri/capabilities/default.json` (Tauri 2 denies by default).
 - **App menu**: defined in `lib.rs` — items include `open-app-data-dir`, `save-profile`, `restore-profile`, `markdown-edit`, `about`.
 - **Vite dev server**: port `1420`, `strictPort: true`. If the port is busy, Tauri dev fails. HMR uses `1421` if `TAURI_DEV_HOST` is set.
@@ -149,7 +150,8 @@ src/                       # React 19 + TS frontend
   components/              # ChatMessage, HistoryPanel, SettingsPanel,
                            # SkillsPanel, ToolsPanel, McpPanel, AgentsPanel,
                            # AgentMissionPanel, ProfilePanel, MonitorPanel,
-                           # MarkdownPreview, TodoList, ToolCallGroup, Portal
+                           # MarkdownPreview, TodoList, ToolCallGroup, Portal,
+                           # TitleBar
 
 src-tauri/
   src/lib.rs               # state, menu, command registration, app setup

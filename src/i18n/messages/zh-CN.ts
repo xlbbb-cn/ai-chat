@@ -44,6 +44,17 @@ const zhCN: Messages = {
         toolbarHistory: "历史",
         toolbarSettings: "设置",
 
+        windowMinimize: "最小化",
+        windowMaximize: "最大化",
+        windowRestore: "还原",
+        windowClose: "关闭",
+        appMenu: "应用菜单",
+        appMenuOpenDataDir: "打开应用数据目录",
+        appMenuSaveProfile: "导出配置…",
+        appMenuRestoreProfile: "恢复配置…",
+        appMenuMarkdownEdit: "Markdown 编辑…",
+        appMenuAbout: "关于 AI Chat",
+
         emptyStart: "开始一段对话",
         emptyHint: "使用{skills}设置系统提示词，或在{settings}中配置 API。",
 

@@ -9,7 +9,7 @@
 
 .settings-overlay {
   position: fixed;
-  inset: 0;
+  inset: var(--titlebar-h) 0 0 0;
   z-index: 900;
   background: var(--c-bg);
   animation: settings-fade-in 0.2s ease;

@@ -32,6 +32,7 @@ export {
     faCircleXmark,
     faClockRotateLeft,
     faCodeBranch,
+    faEllipsis,
     faEye,
     faFileArrowDown,
     faFileLines,
@@ -54,6 +55,9 @@ export {
     faVolumeHigh,
     faWandMagicSparkles,
     faWandSparkles,
+    faWindowMaximize,
+    faWindowMinimize,
+    faWindowRestore,
     faXmark,
 } from "@fortawesome/free-solid-svg-icons";
 

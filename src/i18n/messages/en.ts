@@ -53,6 +53,17 @@ const en = {
         toolbarHistory: "History",
         toolbarSettings: "Settings",
 
+        windowMinimize: "Minimize",
+        windowMaximize: "Maximize",
+        windowRestore: "Restore",
+        windowClose: "Close",
+        appMenu: "App menu",
+        appMenuOpenDataDir: "Open app data directory",
+        appMenuSaveProfile: "Save profile…",
+        appMenuRestoreProfile: "Restore profile…",
+        appMenuMarkdownEdit: "Markdown edit…",
+        appMenuAbout: "About AI Chat",
+
         emptyStart: "Start a conversation",
         emptyHint: "Use {skills} to set a system prompt, or configure the API in {settings}.",
 

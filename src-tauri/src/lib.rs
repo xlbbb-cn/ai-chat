@@ -2,7 +2,7 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 use tauri::{
@@ -42,6 +42,100 @@ const WORKSPACE_CHANGED_EVENT: &str = "workspace-changed";
 struct MarkdownEditPayload {
     path: String,
     content: String,
+}
+
+// ─── App menu actions ────────────────────────────────────────────────────────
+//
+// Shared by the native menu (macOS global menu bar, and the File/Tools/About
+// entries on platforms that still show one) and the custom titlebar's `⋯`
+// menu. The titlebar picks its paths with the dialog plugin on the frontend,
+// then calls the commands below — Rust never blocks on a dialog there.
+
+/// Open the OS file manager at the app data directory.
+fn open_app_data_dir(app: &AppHandle) {
+    if let Ok(data_dir) = app.path().app_data_dir() {
+        let _ = app
+            .opener()
+            .open_path(data_dir.to_string_lossy().into_owned(), None::<&str>);
+    }
+}
+
+/// Read a Markdown file and hand it to the built-in editor via events.
+fn read_markdown_into_editor(app: &AppHandle, markdown_path: &Path) {
+    match fs::read_to_string(markdown_path) {
+        Ok(content) => {
+            let payload = MarkdownEditPayload {
+                path: markdown_path.to_string_lossy().to_string(),
+                content,
+            };
+            let _ = app.emit(MARKDOWN_EDIT_OPEN_EVENT, payload);
+        }
+        Err(err) => {
+            let msg = format!("Failed to open markdown file: {err}");
+            app.state::<AppState>()
+                .logger
+                .lock()
+                .unwrap()
+                .log("ERROR", &msg);
+            let _ = app.emit(MARKDOWN_EDIT_ERROR_EVENT, msg);
+        }
+    }
+}
+
+/// Restore a profile archive and log failures without interrupting the caller.
+fn import_profile_archive(app: &AppHandle, profile_path: &Path) {
+    if let Err(err) = backup::import_profile(app, profile_path) {
+        app.state::<AppState>()
+            .logger
+            .lock()
+            .unwrap()
+            .log("ERROR", &format!("Restore profile failed: {err}"));
+    }
+}
+
+/// Native About dialog, shared by the menu bar and the titlebar menu.
+fn show_about(app: &AppHandle) {
+    app.dialog()
+        .message(format!(
+            "About AI Chat\n\nAI Chat\nOpenAI-compatible desktop assistant\nVersion {}",
+            env!("CARGO_PKG_VERSION")
+        ))
+        .buttons(MessageDialogButtons::Ok)
+        .show(|_| {});
+}
+
+// ─── Custom titlebar commands ────────────────────────────────────────────────
+
+#[tauri::command]
+fn app_open_data_dir(app: AppHandle) {
+    open_app_data_dir(&app);
+}
+
+#[tauri::command]
+fn app_open_markdown(app: AppHandle, path: String) {
+    read_markdown_into_editor(&app, Path::new(&path));
+}
+
+#[tauri::command]
+fn app_export_profile(app: AppHandle, path: String) -> Result<(), String> {
+    if path.trim().is_empty() {
+        return Err("Profile path is empty".into());
+    }
+    backup::spawn_profile_export(app, PathBuf::from(path));
+    Ok(())
+}
+
+#[tauri::command]
+async fn app_import_profile(app: AppHandle, path: String) -> Result<(), String> {
+    if path.trim().is_empty() {
+        return Err("Profile path is empty".into());
+    }
+    let profile_path = PathBuf::from(path);
+    // Import rewrites the workspace and the SQLite snapshot, so keep it off
+    // the IPC thread.
+    tauri::async_runtime::spawn_blocking(move || backup::import_profile(&app, &profile_path))
+        .await
+        .map_err(|err| format!("Profile import task failed: {err}"))?
 }
 
 fn resolve_workspace_path(app: &AppHandle, workspace_dir: Option<&str>) -> Result<PathBuf, String> {
@@ -632,9 +726,7 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .on_menu_event(|app, event| {
             if event.id() == OPEN_APP_DATA_DIR_MENU_ID {
-                if let Ok(data_dir) = app.path().app_data_dir() {
-                    let _ = app.opener().open_path(data_dir.to_string_lossy().into_owned(), None::<&str>);
-                }
+                open_app_data_dir(app);
             } else if event.id() == SAVE_PROFILE_MENU_ID {
                 if let Some(path) = app
                     .dialog()
@@ -643,8 +735,7 @@ pub fn run() {
                     .set_file_name("ai-chat.profile.zip")
                     .blocking_save_file()
                 {
-                    let profile_path = path.into_path().map_err(|_| "unsupported save path").ok();
-                    if let Some(profile_path) = profile_path {
+                    if let Some(profile_path) = path.into_path().ok() {
                         backup::spawn_profile_export(app.clone(), profile_path);
                     }
                 }
@@ -655,50 +746,23 @@ pub fn run() {
                     .add_filter("Profile", &["zip"])
                     .blocking_pick_file()
                 {
-                    let profile_path = path.into_path().map_err(|_| "unsupported profile path").ok();
-                    if let Some(profile_path) = profile_path {
-                        if let Err(err) = backup::import_profile(app, &profile_path) {
-                            app.state::<AppState>()
-                                .logger
-                                .lock()
-                                .unwrap()
-                                .log("ERROR", &format!("Restore profile failed: {err}"));
-                        }
+                    if let Some(profile_path) = path.into_path().ok() {
+                        import_profile_archive(app, &profile_path);
                     }
                 }
             } else if event.id() == MARKDOWN_EDIT_MENU_ID {
                 if let Some(path) = app
                     .dialog()
                     .file()
-                    .add_filter("Markdown", &["md", "markdown", "mdown", "mkd"]) 
+                    .add_filter("Markdown", &["md", "markdown", "mdown", "mkd"])
                     .blocking_pick_file()
                 {
-                    let profile_path = path.into_path().map_err(|_| "unsupported markdown path").ok();
-                    if let Some(markdown_path) = profile_path {
-                        match fs::read_to_string(&markdown_path) {
-                            Ok(content) => {
-                                let payload = MarkdownEditPayload {
-                                    path: markdown_path.to_string_lossy().to_string(),
-                                    content,
-                                };
-                                let _ = app.emit(MARKDOWN_EDIT_OPEN_EVENT, payload);
-                            }
-                            Err(err) => {
-                                let msg = format!("Failed to open markdown file: {err}");
-                                app.state::<AppState>().logger.lock().unwrap().log("ERROR", &msg);
-                                let _ = app.emit(MARKDOWN_EDIT_ERROR_EVENT, msg);
-                            }
-                        }
+                    if let Some(markdown_path) = path.into_path().ok() {
+                        read_markdown_into_editor(app, &markdown_path);
                     }
                 }
             } else if event.id() == ABOUT_MENU_ID {
-                app.dialog()
-                    .message(format!(
-                        "About AI Chat\n\nAI Chat\nOpenAI-compatible desktop assistant\nVersion {}",
-                        env!("CARGO_PKG_VERSION")
-                    ))
-                    .buttons(MessageDialogButtons::Ok)
-                    .show(|_| {});
+                show_about(app);
             }
         })
         .setup(|app| {
@@ -902,6 +966,10 @@ pub fn run() {
             model_metadata::fetch_model_metadata,
             get_workspace_dir,
             save_markdown_file,
+            app_open_data_dir,
+            app_open_markdown,
+            app_export_profile,
+            app_import_profile,
             skills::list_skills,
             skills::save_skill,
             skills::delete_skill,

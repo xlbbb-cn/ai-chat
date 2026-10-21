@@ -13,6 +13,7 @@ import { McpPanel } from "./components/McpPanel";
 import { AgentsPanel } from "./components/AgentsPanel";
 import { MarkdownPreview } from "./components/MarkdownPreview";
 import { Portal } from "./components/Portal";
+import { TitleBar } from "./components/TitleBar";
 import { UpdatePanel } from "./components/UpdatePanel";
 import type {
   AppConfig,
@@ -1699,6 +1700,7 @@ export default function App() {
 
   return (
     <div className="app-layout">
+      <TitleBar />
       {markdownEditorOpen && (
         <Portal>
           <div className="markdown-editor-overlay" role="dialog" aria-modal="true" aria-label={t("app.markdownEditorAria")}>

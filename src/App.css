@@ -94,6 +94,10 @@
   /* Motion — one timing curve for every interactive state change. */
   --t-ease: cubic-bezier(0.5, 0, 0, 0.75);
   --t-dur: 0.33s;
+
+  /* Layout — height of the custom window chrome. Fullscreen portals and the
+     sidebar start below it so the drag region stays reachable. */
+  --titlebar-h: 32px;
 }
 
 [data-theme="dark"] {
@@ -169,15 +173,158 @@ body {
   display: flex;
   width: 100%;
   height: 100%;
+  /* The titlebar is fixed above the app; reserve its height so no content is
+     hidden underneath it. */
+  padding-top: var(--titlebar-h);
   position: relative;
   overflow: hidden;
+}
+
+/* ── Window chrome ──────────────────────────────────────────────────────────
+   The window is frameless (`decorations: false`), so this bar replaces the OS
+   titlebar. It stays fixed above every overlay so the window controls remain
+   reachable while Settings / the Markdown editor are open. See DESIGN.md. */
+.titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--titlebar-h);
+  padding: 0 6px 0 12px;
+  background: var(--c-toolbar);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--c-border);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Drag region — `data-tauri-drag-region` does not inherit, so the filler is
+   tagged in JSX as well. Interactive children never carry the attribute. */
+.titlebar-drag {
+  flex: 1 1 auto;
+  min-width: 0;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.titlebar-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--c-text);
+  letter-spacing: normal;
+  white-space: nowrap;
+}
+
+.titlebar-workspace {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--c-muted);
+}
+
+.titlebar-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.titlebar-btn {
+  width: 34px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--c-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: color var(--t-dur) var(--t-ease),
+    background-color var(--t-dur) var(--t-ease);
+}
+
+.titlebar-btn:hover,
+.titlebar-btn.active {
+  background: var(--c-hover);
+  color: var(--c-text);
+}
+
+.titlebar-btn:active {
+  background: var(--c-active);
+}
+
+/* Destructive variant of the shared icon-button style. */
+.titlebar-btn.is-close:hover {
+  background: var(--c-danger-soft);
+  color: var(--c-danger);
+}
+
+.titlebar-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.titlebar-menu-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.titlebar-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 216px;
+  padding: 4px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border-i);
+  border-radius: 4px;
+  z-index: 2001;
+}
+
+.titlebar-menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--c-text);
+  font-size: 13px;
+  font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--t-dur) var(--t-ease);
+}
+
+.titlebar-menu-item:hover {
+  background: var(--c-hover);
+}
+
+.titlebar-menu-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--c-border);
 }
 
 /* Sidebar */
 .sidebar {
   width: 400px;
   position: fixed;
-  top: 0;
+  top: var(--titlebar-h);
   left: 0;
   bottom: 0;
   flex-shrink: 0;
@@ -1232,14 +1379,14 @@ body {
 
 .markdown-editor-overlay {
   position: fixed;
-  inset: 0;
+  inset: var(--titlebar-h) 0 0 0;
   z-index: 1990;
   background: var(--c-bg);
   animation: fade-in 200ms ease;
 }
 
 .markdown-editor-shell {
-  height: 100vh;
+  height: 100%;
   display: flex;
   flex-direction: column;
 }
@@ -1361,6 +1508,7 @@ body {
 /* Sidebar/toolbar vibrancy needs a slightly stronger backdrop in dark mode */
 [data-theme="dark"] .sidebar,
 [data-theme="dark"] .toolbar,
+[data-theme="dark"] .titlebar,
 [data-theme="dark"] .input-area,
 [data-theme="dark"] .markdown-editor-header,
 [data-theme="dark"] .profile-export-progress {

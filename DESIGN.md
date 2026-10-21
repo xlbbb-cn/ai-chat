@@ -286,6 +286,28 @@ always fewer elements, not more spacing.
 
 ---
 
+## Window chrome
+
+The window is frameless (`decorations: false` in `tauri.conf.json`); the titlebar
+is ours. It is the only chrome above the app and it follows the same rules as
+every other surface — no shadow, one hairline, one accent.
+
+| Part | Rule |
+|---|---|
+| Bar | `--titlebar-h` (32px), `--c-toolbar` + `blur(20px)`, 1px `--c-border` bottom, `user-select: none` |
+| Drag region | The bar **and** its filler carry `data-tauri-drag-region` (the attribute does not inherit); buttons never do |
+| Window buttons | 34×28, 4px radius, `--c-muted` glyph at 12px; hover `--c-hover` + `--c-text`; active `--c-active` |
+| Close button | Destructive variant: hover is `--c-danger-soft` fill + `--c-danger` glyph |
+| App menu (`⋯`) | `--c-surface`, 1px `--c-border-i`, 4px radius, no shadow; rows 32px, 13px/400, hover `--c-hover` |
+| Placement | Windows/Linux: minimize / maximize / close on the right; macOS: close / minimize / maximize on the left |
+
+The titlebar is `position: fixed` at `z-index: 2000`, above every overlay, so the
+window controls stay reachable while Settings or the Markdown editor is open.
+Fullscreen pages start at `top: var(--titlebar-h)`; the sidebar starts below it
+too. True modal dialogs (9999 layer) still cover the titlebar on purpose.
+
+---
+
 ## Do's and Don'ts
 
 ### Do
@@ -321,13 +343,14 @@ always fewer elements, not more spacing.
 
 | File | Owns |
 |---|---|
-| `src/App.css` | **All tokens**, app shell, toolbar, transcript, input row, dialogs, markdown editor, scrollbars, shared primitives |
+| `src/App.css` | **All tokens**, app shell, toolbar, **titlebar / window chrome**, transcript, input row, dialogs, markdown editor, scrollbars, shared primitives |
 | `src/components/ChatMessage.css` | Transcript turns, reasoning, code blocks, tables (`--ts-*` are aliases of `--c-*`) |
 | `src/components/ToolCallGroup.css` | Tool-call cards and streaming states |
 | `src/components/TodoList.css` | Todo rows |
 | `src/components/{Skills,Mcp,Tools,Agents,History}Panel.css` | Panel-specific layout only — chrome comes from the shared primitives |
 | `src/components/SettingsPanel.css` | Settings page (`--t-*` are aliases of `--c-*`) |
 | `src/components/ModelSelect.css` | Model picker trigger + portal popup |
+| `src/components/TitleBar.tsx` | Custom window chrome: drag region, window controls, `⋯` app menu (styles in `App.css`) |
 | `src/components/{Update,Monitor,AgentMission,Profile}Panel.css` | Feature surfaces, self-contained |
 
 ### Theme plumbing
