@@ -35,6 +35,28 @@ export interface TimerEntry {
 }
 
 /**
+ * One background process started by `run_shell` with `run_type: "serve"`.
+ * Mirrors `ServeProcessInfo` in `src-tauri/src/tools/serve.rs`; the Tools panel
+ * polls it to monitor running serve processes and stop them.
+ */
+export interface ServeProcessInfo {
+  id: string;
+  pid: number;
+  /** Shell the script runs in (`bash`, `sh`, `powershell`, `pwsh`). */
+  shell_type: string;
+  /** Script preview, clamped by the backend. */
+  code: string;
+  cwd: string;
+  /** `running`, `exited`, `lost`, `stopped` or `unknown`. */
+  state: string;
+  exit_code: number | null;
+  /** Seconds since the process was started. */
+  uptime_secs: number;
+  /** Tail of stdout/stderr (last few lines). */
+  recent_output: string;
+}
+
+/**
  * One part of a multimodal `Message.content`. Mirrors the OpenAI Chat
  * Completions `messages[].content` array element shape.
  *

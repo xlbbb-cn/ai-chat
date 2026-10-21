@@ -18,6 +18,7 @@ import type {
   KeyValue,
   Profile,
   SkillsStatus,
+  ServeProcessInfo,
   TimerEntry,
   UpdateInfo,
   UpdateDownloadProgress,
@@ -167,6 +168,21 @@ export async function listTimers(): Promise<TimerEntry[]> {
 /** Cancel a pending timer so it never resumes the conversation. */
 export async function cancelTimer(id: string): Promise<TimerEntry> {
   return invoke("cancel_timer", { id });
+}
+
+// ─── run_shell serve processes ───────────────────────────────────────────────
+
+/**
+ * Every background process started by `run_shell` with `run_type: "serve"`,
+ * including recently finished ones. Polled by the Tools panel monitor.
+ */
+export async function listServeProcesses(): Promise<ServeProcessInfo[]> {
+  return invoke("list_serve_processes");
+}
+
+/** Stop one serve process (or remove a finished entry). */
+export async function stopServeProcess(serveId: string): Promise<string> {
+  return invoke("stop_serve_process", { serveId });
 }
 
 export interface StreamCallbacks {

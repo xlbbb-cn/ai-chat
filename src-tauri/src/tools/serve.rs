@@ -7,6 +7,9 @@
 //   returns immediately with a serve id.
 // - `stop` terminates the whole process tree and removes the entry.
 // - `list` reports running/finished entries with their recent output.
+// - The Tools panel polls `list_serve_processes` for the same data and stops
+//   entries through `stop_serve_process`, so the user does not need a chat turn
+//   to manage background servers.
 // - The pid is also registered in `crate::process_guard`, so app exit (and a
 //   Windows hard crash, via the kill-on-close job object) cleans it up.
 
@@ -16,7 +19,8 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use tauri::{AppHandle, Manager};
+use serde::Serialize;
+use tauri::{AppHandle, Manager, State};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use super::process::{build_command, decode_hint_for_shell, decode_process_bytes};
@@ -28,6 +32,8 @@ const MAX_OUTPUT_CHARS: usize = 16_000;
 const CODE_PREVIEW_CHARS: usize = 240;
 /// Finished entries are kept this long for `list`, then pruned on the next start.
 const FINISHED_RETENTION: Duration = Duration::from_secs(600);
+/// Number of tail lines handed to the Tools panel for live monitoring.
+const PANEL_OUTPUT_LINES: usize = 8;
 
 #[derive(Default)]
 struct ServeStatus {
@@ -44,6 +50,24 @@ pub struct ServeProcess {
     pub cwd: PathBuf,
     pub started_at: Instant,
     status: Arc<Mutex<ServeStatus>>,
+}
+
+/// Snapshot of one serve process, consumed by the Tools panel monitor.
+#[derive(Debug, Clone, Serialize)]
+pub struct ServeProcessInfo {
+    pub id: String,
+    pub pid: u32,
+    pub shell_type: String,
+    /// Script preview, clamped to [`CODE_PREVIEW_CHARS`].
+    pub code: String,
+    pub cwd: String,
+    /// `running`, `exited`, `lost`, `stopped` or `unknown`.
+    pub state: String,
+    pub exit_code: Option<i32>,
+    /// Seconds since the process was started.
+    pub uptime_secs: u64,
+    /// Tail of stdout/stderr, truncated to [`PANEL_OUTPUT_LINES`] lines.
+    pub recent_output: String,
 }
 
 /// Registry held in `AppState`; shared by `run_shell` calls from every agent.
@@ -176,6 +200,44 @@ impl ServeRegistry {
         }
 
         output
+    }
+
+    /// Structured snapshot for the Tools panel's serve monitor. Finished
+    /// entries are included so the user can inspect why a process exited and
+    /// remove the entry without waiting for the retention window.
+    pub fn snapshot(&self) -> Vec<ServeProcessInfo> {
+        let mut processes = match self.processes.lock() {
+            Ok(processes) => processes,
+            Err(_) => return Vec::new(),
+        };
+        // Polled by the panel, so this is also the natural place to enforce the
+        // finished-entry retention window without waiting for the next start.
+        self.prune_finished(&mut processes);
+
+        let mut entries: Vec<&ServeProcess> = processes.values().collect();
+        entries.sort_by_key(|process| process.started_at);
+
+        entries
+            .into_iter()
+            .filter_map(|process| {
+                let status = process.status.lock().ok()?;
+                Some(ServeProcessInfo {
+                    id: process.id.clone(),
+                    pid: process.pid,
+                    shell_type: process.shell_type.clone(),
+                    code: truncate_chars(&process.code, CODE_PREVIEW_CHARS),
+                    cwd: process.cwd.display().to_string(),
+                    state: if status.state.is_empty() {
+                        "unknown".to_string()
+                    } else {
+                        status.state.clone()
+                    },
+                    exit_code: status.exit_code,
+                    uptime_secs: process.started_at.elapsed().as_secs(),
+                    recent_output: recent_output(&status.output, PANEL_OUTPUT_LINES),
+                })
+            })
+            .collect()
     }
 }
 
@@ -384,6 +446,20 @@ fn recent_output(output: &str, max_lines: usize) -> String {
     lines[lines.len().saturating_sub(max_lines)..].join("\n")
 }
 
+/// Every serve process the app knows about (running and recently finished),
+/// oldest first. Polled by the Tools panel's serve monitor.
+#[tauri::command]
+pub fn list_serve_processes(state: State<'_, crate::AppState>) -> Vec<ServeProcessInfo> {
+    state.serve_processes.snapshot()
+}
+
+/// Stop one serve process (or drop a finished entry). Returns the same
+/// human-readable status the `run_shell` tool prints for `action: "stop"`.
+#[tauri::command]
+pub fn stop_serve_process(state: State<'_, crate::AppState>, serve_id: String) -> String {
+    state.serve_processes.stop(&serve_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -418,6 +494,22 @@ mod tests {
         let stopped = registry.stop("serve-test1");
         assert!(stopped.contains("Removed finished"));
         assert!(registry.list().contains("No background serve processes"));
+    }
+
+    #[test]
+    fn snapshot_reports_panel_fields() {
+        let registry = ServeRegistry::default();
+        registry.insert(finished_process("serve-test2"));
+
+        let snapshot = registry.snapshot();
+        assert_eq!(snapshot.len(), 1);
+        let entry = &snapshot[0];
+        assert_eq!(entry.id, "serve-test2");
+        assert_eq!(entry.state, "exited");
+        assert_eq!(entry.exit_code, Some(0));
+        assert_eq!(entry.shell_type, "bash");
+        assert!(entry.recent_output.contains("hello"));
+        assert!(!entry.cwd.is_empty());
     }
 
     #[test]

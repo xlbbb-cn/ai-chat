@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
-import { getConfig, saveConfig } from "../api";
-import type { AppConfig, AutoAcceptKind, ConfirmKind } from "../types";
+import { getConfig, saveConfig, listServeProcesses, stopServeProcess } from "../api";
+import type { AppConfig, AutoAcceptKind, ConfirmKind, ServeProcessInfo } from "../types";
 import { useI18n, type MessageKey } from "../i18n";
-import { FontAwesomeIcon, faChevronDown, faChevronUp, faXmark } from "../icons";
+import { FontAwesomeIcon, faChevronDown, faChevronUp, faTrash, faXmark } from "../icons";
 import "./ToolsPanel.css";
 
 interface Props {
@@ -122,11 +122,34 @@ function sanitizeAutoAcceptKinds(values: readonly string[] | undefined): AutoAcc
     );
 }
 
+/** Message key for a serve process state reported by the backend. */
+const SERVE_STATE_KEYS: Record<string, MessageKey> = {
+    running: "tools.serveStateRunning",
+    exited: "tools.serveStateExited",
+    lost: "tools.serveStateLost",
+    stopped: "tools.serveStateStopped",
+};
+
+/** `75` → `1m 15s`; keeps the monitor row to one line. */
+function formatUptime(totalSeconds: number): string {
+    if (totalSeconds >= 3600) {
+        return `${Math.floor(totalSeconds / 3600)}h ${Math.floor((totalSeconds % 3600) / 60)}m`;
+    }
+    if (totalSeconds >= 60) {
+        return `${Math.floor(totalSeconds / 60)}m ${totalSeconds % 60}s`;
+    }
+    return `${totalSeconds}s`;
+}
+
 export function ToolsPanel({ onClose, onToolsChange }: Props) {
     const { t } = useI18n();
     const [config, setConfig] = useState<AppConfig | null>(null);
     const [expandedTool, setExpandedTool] = useState<string | null>(null);
     const [autoAcceptExpanded, setAutoAcceptExpanded] = useState(true);
+    const [kgExpanded, setKgExpanded] = useState(false);
+    const [serveExpanded, setServeExpanded] = useState(false);
+    const [serveProcesses, setServeProcesses] = useState<ServeProcessInfo[]>([]);
+    const [stoppingServe, setStoppingServe] = useState<string | null>(null);
 
     useEffect(() => {
         getConfig()
@@ -142,6 +165,27 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                 onToolsChange(selected);
             })
             .catch(console.error);
+    }, []);
+
+    // Serve processes can start or exit at any moment (the model may launch one
+    // while this panel is open), so poll the registry while the panel is
+    // mounted. The header count also stays correct when the section is closed.
+    useEffect(() => {
+        let cancelled = false;
+        const refresh = async () => {
+            try {
+                const list = await listServeProcesses();
+                if (!cancelled) setServeProcesses(list);
+            } catch (err) {
+                console.error("listServeProcesses failed", err);
+            }
+        };
+        void refresh();
+        const timer = window.setInterval(refresh, 2000);
+        return () => {
+            cancelled = true;
+            window.clearInterval(timer);
+        };
     }, []);
 
     async function toggleTool(toolId: string) {
@@ -162,6 +206,18 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
         const newConfig = { ...config, kg_engine };
         setConfig(newConfig);
         await saveConfig(newConfig);
+    }
+
+    async function stopServe(id: string) {
+        setStoppingServe(id);
+        try {
+            await stopServeProcess(id);
+            setServeProcesses(await listServeProcesses());
+        } catch (err) {
+            console.error("stopServeProcess failed", err);
+        } finally {
+            setStoppingServe(null);
+        }
     }
 
     async function persistAutoAcceptKinds(kinds: AutoAcceptKind[]) {
@@ -203,6 +259,8 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
     const selectedTools = config.selected_tools ?? [];
     const kgEngine = config.kg_engine ?? "neo4j";
     const kgEnabled = selectedTools.includes("knowledge_graph");
+    const kgEngineLabel = KG_ENGINES.find((engine) => engine.value === kgEngine)?.label ?? kgEngine;
+    const runningServeCount = serveProcesses.filter((process) => process.state === "running").length;
     const autoAcceptKinds = sanitizeAutoAcceptKinds(config.auto_accept_confirm_kinds);
     const autoAcceptAll = autoAcceptKinds.includes(AUTO_ACCEPT_ALL);
     const allAutoAcceptEnabled =
@@ -269,24 +327,125 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                 ))}
             </div>
 
-            <div className="search-engine-section">
-                <label className="search-engine-label" htmlFor="kg-engine-select">
-                    {t("tools.kgEngine")}
-                </label>
-                <select
-                    id="kg-engine-select"
-                    className="search-engine-select"
-                    value={kgEngine}
-                    onChange={(e) => void updateKgEngine(e.target.value)}
-                    disabled={!kgEnabled}
+            <div className="tools-footer-section">
+                <button
+                    type="button"
+                    className="tools-footer-toggle"
+                    onClick={() => setKgExpanded((expanded) => !expanded)}
+                    aria-expanded={kgExpanded}
                     title={kgEnabled ? t("tools.kgEngineTitle") : t("tools.kgEngineDisabled")}
                 >
-                    {KG_ENGINES.map(engine => (
-                        <option key={engine.value} value={engine.value}>
-                            {engine.label}
-                        </option>
-                    ))}
-                </select>
+                    <span className="tools-footer-title">{t("tools.kgEngine")}</span>
+                    <span className="tools-footer-aside">
+                        <span className="tools-footer-value">{kgEngineLabel}</span>
+                        <span className="tools-footer-chevron">
+                            <FontAwesomeIcon icon={kgExpanded ? faChevronUp : faChevronDown} />
+                        </span>
+                    </span>
+                </button>
+
+                {kgExpanded && (
+                    <select
+                        id="kg-engine-select"
+                        className="search-engine-select"
+                        value={kgEngine}
+                        onChange={(e) => void updateKgEngine(e.target.value)}
+                        disabled={!kgEnabled}
+                        aria-label={t("tools.kgEngine")}
+                        title={kgEnabled ? t("tools.kgEngineTitle") : t("tools.kgEngineDisabled")}
+                    >
+                        {KG_ENGINES.map(engine => (
+                            <option key={engine.value} value={engine.value}>
+                                {engine.label}
+                            </option>
+                        ))}
+                    </select>
+                )}
+            </div>
+
+            <div className="tools-footer-section">
+                <button
+                    type="button"
+                    className="tools-footer-toggle"
+                    onClick={() => setServeExpanded((expanded) => !expanded)}
+                    aria-expanded={serveExpanded}
+                >
+                    <span className="tools-footer-title">{t("tools.serveProcesses")}</span>
+                    <span className="tools-footer-aside">
+                        {runningServeCount > 0 && (
+                            <span className="serve-count">
+                                {t("tools.serveCount", { count: runningServeCount })}
+                            </span>
+                        )}
+                        <span className="tools-footer-chevron">
+                            <FontAwesomeIcon icon={serveExpanded ? faChevronUp : faChevronDown} />
+                        </span>
+                    </span>
+                </button>
+
+                {serveExpanded && (
+                    <div className="serve-list">
+                        {serveProcesses.length === 0 && (
+                            <div className="serve-empty">{t("tools.serveEmpty")}</div>
+                        )}
+                        {serveProcesses.map((process) => {
+                            const running = process.state === "running";
+                            return (
+                                <div
+                                    key={process.id}
+                                    className={`serve-item ${running ? "" : "inactive"}`}
+                                >
+                                    <div className="serve-row">
+                                        <span
+                                            className={`serve-dot ${process.state}`}
+                                            aria-hidden="true"
+                                        />
+                                        <span className="serve-id" title={process.id}>
+                                            {process.id}
+                                        </span>
+                                        <span className="serve-state">
+                                            {t(SERVE_STATE_KEYS[process.state] ?? "tools.serveStateUnknown")}
+                                        </span>
+                                        <span className="serve-meta">
+                                            {t("tools.serveMeta", {
+                                                pid: process.pid,
+                                                uptime: formatUptime(process.uptime_secs),
+                                            })}
+                                            {typeof process.exit_code === "number"
+                                                ? ` · ${t("tools.serveExitCode", { code: process.exit_code })}`
+                                                : ""}
+                                        </span>
+                                        <button
+                                            type="button"
+                                            className="tool-action-btn danger"
+                                            onClick={() => void stopServe(process.id)}
+                                            disabled={stoppingServe === process.id}
+                                            title={running ? t("tools.serveStop") : t("tools.serveRemove")}
+                                            aria-label={running ? t("tools.serveStop") : t("tools.serveRemove")}
+                                        >
+                                            <FontAwesomeIcon icon={faTrash} />
+                                        </button>
+                                    </div>
+                                    <code className="serve-code" title={process.shell_type}>
+                                        {process.shell_type} · {process.code}
+                                    </code>
+                                    <span className="serve-cwd" title={process.cwd}>
+                                        {t("tools.serveCwd", { path: process.cwd })}
+                                    </span>
+                                    {process.recent_output.trim() !== "" && (
+                                        <pre
+                                            className="serve-output"
+                                            aria-label={t("tools.serveOutput")}
+                                            title={t("tools.serveOutput")}
+                                        >
+                                            {process.recent_output}
+                                        </pre>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
             </div>
 
             <div className="tools-footer-section">
@@ -297,7 +456,7 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                     aria-expanded={autoAcceptExpanded}
                 >
                     <span className="tools-footer-title">{t("tools.autoAccept")}</span>
-                    <span className="auto-accept-chevron">
+                    <span className="tools-footer-chevron">
                         <FontAwesomeIcon icon={autoAcceptExpanded ? faChevronUp : faChevronDown} />
                     </span>
                 </button>

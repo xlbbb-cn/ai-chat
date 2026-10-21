@@ -344,6 +344,21 @@ const en = {
         kgEngine: "Knowledge Graph Engine",
         kgEngineTitle: "Default engine for knowledge graph",
         kgEngineDisabled: "Enable Knowledge Graph tool first",
+        serveProcesses: "Background Serve Processes",
+        serveEmpty:
+            'No background serve processes. Processes started by run_shell with run_type "serve" appear here.',
+        serveCount: "{count} running",
+        serveStateRunning: "running",
+        serveStateExited: "exited",
+        serveStateLost: "lost",
+        serveStateStopped: "stopped",
+        serveStateUnknown: "unknown",
+        serveStop: "Stop",
+        serveRemove: "Remove",
+        serveMeta: "pid {pid} · {uptime}",
+        serveExitCode: "exit {code}",
+        serveCwd: "cwd: {path}",
+        serveOutput: "Recent output",
         autoAccept: "AutoAccept Mode",
         items: {
             fileActions: {

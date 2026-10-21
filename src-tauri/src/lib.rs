@@ -1012,6 +1012,8 @@ pub fn run() {
             agents::probe_agent_cloud,
             timer::list_timers,
             timer::cancel_timer,
+            tools::serve::list_serve_processes,
+            tools::serve::stop_serve_process,
             list_profiles,
             save_profile_config,
             delete_profile_config,

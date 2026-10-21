@@ -210,21 +210,6 @@
     border: 1px solid var(--c-border-s);
 }
 
-.search-engine-section {
-    padding: 10px 12px;
-    border-top: 1px solid var(--c-border);
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    flex-shrink: 0;
-}
-
-.search-engine-label {
-    font-size: 14px;
-    color: var(--c-text);
-    letter-spacing: normal;
-}
-
 .search-engine-select {
     height: 34px;
     border: 1px solid var(--c-border-i);
@@ -289,12 +274,151 @@
     letter-spacing: normal;
 }
 
-.auto-accept-chevron {
+.tools-footer-aside {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    min-width: 0;
+}
+
+.tools-footer-value {
+    font-size: 12px;
+    color: var(--c-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tools-footer-chevron {
     display: inline-flex;
     align-items: center;
     flex-shrink: 0;
     font-size: 11px;
     color: var(--c-muted);
+}
+
+.serve-count {
+    font-size: 12px;
+    color: var(--c-success);
+    white-space: nowrap;
+}
+
+.serve-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-top: 4px;
+    /* Compact rows; cap the height so live output cannot squeeze the tool
+       list away on short screens. */
+    max-height: min(36vh, 300px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.serve-empty {
+    font-size: 12px;
+    color: var(--c-muted);
+    line-height: 1.5;
+}
+
+.serve-item {
+    border: 1px solid var(--c-border-i);
+    border-radius: 4px;
+    background: var(--c-surface);
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.serve-item.inactive {
+    opacity: 0.55;
+}
+
+.serve-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+/* Status dot — the deliberate dot indicator sanctioned by the design system. */
+.serve-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--c-placeholder);
+}
+
+.serve-dot.running {
+    background: var(--c-success);
+}
+
+.serve-dot.lost {
+    background: var(--c-danger);
+}
+
+.serve-id {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+    color: var(--c-text);
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.serve-state {
+    font-size: 12px;
+    color: var(--c-muted);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.serve-meta {
+    font-size: 12px;
+    color: var(--c-muted);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.serve-code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--c-body);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 3.9em;
+    overflow: hidden;
+}
+
+.serve-cwd {
+    font-size: 12px;
+    color: var(--c-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.serve-output {
+    margin: 2px 0 0;
+    padding: 6px 8px;
+    border: 1px solid var(--c-border-s);
+    border-radius: 4px;
+    background: var(--c-surface-2);
+    color: var(--c-muted);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    max-height: 96px;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
 }
 
 .auto-accept-list {
