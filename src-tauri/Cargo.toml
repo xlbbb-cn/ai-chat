@@ -3,6 +3,7 @@ name = "ai-chat"
 version = "2.1.0"
 description = "OpenAI-compatible chat client with skills"
 authors = []
+license = "GPL-2.0-only"
 edition = "2021"
 
 [lib]

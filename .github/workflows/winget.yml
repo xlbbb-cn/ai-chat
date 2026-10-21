@@ -1,0 +1,76 @@
+# 每个正式 Release 发布后，把其中的 NSIS 安装包自动提交到 microsoft/winget-pkgs。
+#
+# 前置条件（只需配置一次）：
+#   1. Leonard.AIChat 至少有一个版本已合并进 winget-pkgs（首个 PR）；
+#   2. 在 xlbbb-cn 账号下 fork microsoft/winget-pkgs；
+#   3. 仓库 Secrets 配置 WINGET_TOKEN：classic PAT，勾选 public_repo + workflow。
+#
+# 触发方式：release.yml 现在是 releaseDraft: false，Release 在第一个平台构建完成时
+# 就会被创建（此时 Windows 安装包还没上传），所以这里先轮询等待 *-setup.exe 出现，
+# 再交给 winget-releaser 生成清单并提 PR。
+name: Publish to WinGet
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要提交到 winget 的 Release tag（例如 v2.2.0）'
+        required: true
+
+concurrency:
+  group: winget-${{ inputs.tag || github.event.release.tag_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read # 读取 Release / assets
+
+jobs:
+  winget:
+    # 预发布不提交（published 事件对 pre-release 也会触发）
+    if: github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Resolve tag and version
+        id: meta
+        env:
+          TAG: ${{ inputs.tag || github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      # Windows job 可能比 Release 创建晚十几分钟，期间 assets 仍在陆续上传
+      - name: Wait for the Windows NSIS installer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          echo "等待 $TAG 的 NSIS 安装包上传（最多 60 分钟）..."
+          for i in $(seq 1 120); do
+            name="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets \
+              --jq '.assets[] | select(.state == "uploaded" and (.name | endswith("-setup.exe"))) | .name' \
+              2>/dev/null | head -n 1 || true)"
+            if [ -n "$name" ]; then
+              echo "找到安装包：$name"
+              exit 0
+            fi
+            if [ "$((i % 10))" -eq 0 ]; then
+              echo "已等待 $((i / 2)) 分钟..."
+            fi
+            sleep 30
+          done
+          echo "::error::等待超时：$TAG 中找不到已上传完成的 *-setup.exe，请检查 Windows 构建。"
+          exit 1
+
+      - name: Submit to winget-pkgs
+        uses: vedantmgoyal9/winget-releaser@main
+        with:
+          identifier: Leonard.AIChat
+          version: ${{ steps.meta.outputs.version }}
+          release-tag: ${{ steps.meta.outputs.tag }}
+          installers-regex: '_x64-setup\.exe$' # 只提交 NSIS 安装包，忽略 .msi
+          token: ${{ secrets.WINGET_TOKEN }}
