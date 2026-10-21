@@ -350,7 +350,7 @@ const en = {
             runShell: {
                 name: "Run Shell",
                 description:
-                    "Execute a script in a shell (PowerShell or Bash). The shell starts in the workspace root, and directory changes must stay inside that workspace. Supports pipes, loops, variables, and other shell features. Privileged operations and dangerous commands require explicit confirmation.",
+                    "Execute a script in a shell (PowerShell or Bash). The shell starts in the workspace root, and directory changes must stay inside that workspace. Supports pipes, loops, variables, and other shell features. `direct` blocks until the script exits and returns its output; `serve` starts a long-lived background process (for example an HTTP server), returns its id immediately, and supports list / stop, with automatic cleanup when the app exits. Privileged operations and dangerous commands require explicit confirmation.",
             },
             memory: {
                 name: "Memory",
@@ -502,7 +502,7 @@ const en = {
         toolHints: {
             fileActions: "Read, write, patch and search files inside the workspace",
             runCmd: "Execute a single command with risk assessment",
-            runShell: "Run PowerShell / bash scripts",
+            runShell: "Run PowerShell / bash scripts (direct or background serve)",
             knowledgeGraph: "Neo4j-backed knowledge graph queries",
             todos:
                 "The session todo list via the `todos` tool (list / add / update_status / clear_completed / archive). The plan is shared with the chat session and every parallel agent.",

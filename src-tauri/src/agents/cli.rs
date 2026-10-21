@@ -17,6 +17,7 @@ use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 
+use crate::process_guard::{kill_process_tree, track_child};
 use crate::tools::{decode_process_bytes, truncate_tool_output, OutputDecodeHint};
 use crate::AppState;
 
@@ -325,40 +326,6 @@ fn build_command(
         command.process_group(0);
     }
     command
-}
-
-/// Terminate the child and everything it spawned. CLI agents start their own
-/// subprocesses (node, git, build tools), so killing only the shim is not
-/// enough.
-fn kill_process_tree(pid: Option<u32>) {
-    let Some(pid) = pid else { return };
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        let mut command = std::process::Command::new("taskkill");
-        command
-            .args(["/F", "/T", "/PID", &pid.to_string()])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .creation_flags(CREATE_NO_WINDOW);
-        let _ = command.status();
-    }
-
-    #[cfg(unix)]
-    {
-        // Negative pid = whole process group (see `process_group(0)`).
-        unsafe {
-            libc::kill(-(pid as i32), libc::SIGKILL);
-        }
-    }
-
-    #[cfg(not(any(windows, unix)))]
-    {
-        let _ = pid;
-    }
 }
 
 // ─── Capture buffers ─────────────────────────────────────────────────────────
@@ -776,6 +743,7 @@ pub async fn probe(command: &str, args: &[String]) -> Result<CliProbe, String> {
     let mut child = build_command(&target, args, &[], &cwd)
         .spawn()
         .map_err(|e| format!("Failed to start '{}': {e}", resolved.display()))?;
+    let _tracked = track_child(&child, format!("cli-agent probe '{command}'"));
 
     let pid = child.id();
     let stdout = child.stdout.take();
@@ -909,6 +877,7 @@ pub async fn run(
     let mut child = build_command(&target, &rendered_args, &settings.env, &cwd)
         .spawn()
         .map_err(|e| format!("failed to start '{}': {e}", resolved.display()))?;
+    let _tracked = track_child(&child, format!("cli-agent '{}'", agent.name));
 
     let stdout_task = child.stdout.take().map(|reader| {
         tokio::spawn(pump(app.clone(), task_id.to_string(), reader, decode_hint))

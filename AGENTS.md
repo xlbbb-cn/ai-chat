@@ -122,6 +122,8 @@ This is enforced by the skills/tools layer. Don't add code that lets a skill esc
 ## Tools & dangerous commands
 
 - Tools: `run_cmd`, `run_shell`, `file_actions`, `knowledge_graph` (Neo4j backend), plus the `memory`, `todos` and `timer` tools — all in `src-tauri/src/tools/` (`skill_read` is auto-injected when skills are active).
+- **`run_shell` run types**: `direct` (default) waits for the script to exit and returns its output; `serve` starts a long-lived background child (HTTP server, watcher…) and returns a `serve_id` immediately. The same tool manages them: `action: "list"` shows running/finished entries with recent output, and `action: "stop"` with `serve_id` (or `"all"`) kills the whole tree. Serve state lives in `tools/serve.rs`; stopping a serve process never asks for confirmation because it only targets children this app started.
+- **Child-process cleanup** (`src-tauri/src/process_guard.rs`): every long-lived child (stdio MCP server, `serve` process, `cli` sub-agent) is registered by pid. `RunEvent::Exit` and the main-window `CloseRequested` hook call `kill_all()`, which terminates each process tree. On Windows children are also assigned to a job object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, so even a hard crash cannot leave MCP servers / CLI agents / serve processes running. On Unix children opt into their own process group (`process_group(0)`) so `kill(-pid)` reaches grandchildren.
 - **Path policy**: `file_actions` is strictly workspace-scoped — any path that resolves outside the workspace root is rejected outright, with no confirmation override. `run_cmd` starts in the workspace (`current_dir` + `PWD`) and takes no path guarding. `run_shell` also starts in the workspace but its working directory is **not** restricted: scripts may `cd` anywhere (risk assessment still applies).
 - **Sub-agents are typed** (`agent_type` in `sub_agents.json`): `llm` runs the built-in autonomous loop, `cli` launches a headless coding CLI installed on this machine (`agents/cli.rs`: PATH + `PATHEXT` resolution, Windows `.cmd`/`.bat`/`.ps1` wrapping, output streaming on `agent-task-token`, process-tree kill on timeout/Stop), `cloud` posts the task to a remote HTTP endpoint with optional job polling (`agents/cloud.rs`). All three are configured in the Sub Agents panel and reachable from the main agent through `call_subagent` **only while the `use_agents` (自动编排) switch is on** — with it off the tool is neither advertised nor callable, and the main agent answers directly. `cli`/`cloud` agents ask for approval once per app session unless their `require_approval` switch is off (kind `external_agent`).
 - Some command patterns raise a frontend confirmation dialog. The Rust side blocks on `confirm_command` until the user replies. **If a tool call appears to hang, check the React tree for a pending `ConfirmDialog` / dangerous-command prompt before debugging the Rust side.**
@@ -159,13 +161,15 @@ src-tauri/
   src/skills.rs            # SKILL.md frontmatter parser, list/save/delete,
                            # workspace skill status (.data/skills.status)
   src/workspace.rs         # hidden `<workspace>/.data` layout (paths + hidden attr)
+  src/process_guard.rs     # app-wide child registry + process-tree kill / Windows job
   src/tools/               # tool executor, split by feature:
     mod.rs                 #   dispatch/schemas/shared helpers (+ tests)
     memory.rs              #   memory tool (session/user/repo + "all" fan-out)
     file_actions.rs        #   file_actions handler, backups, diff compare
     patch.rs               #   LLM-hardened unified patch parser/applier
     paths.rs               #   workspace sandbox + shell cwd validation
-    process.rs             #   run_command + child output decoding
+    process.rs             #   command building, run_command, child output decoding
+    serve.rs               #   `run_shell` serve processes (start/list/stop)
     risk.rs                #   L0-L6 risk assessment, syntax gate
     search.rs              #   integrated search engine
     timer.rs               #   delay timers (fire → resume a session, + tests)

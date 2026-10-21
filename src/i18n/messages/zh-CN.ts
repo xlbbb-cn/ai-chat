@@ -326,7 +326,7 @@ const zhCN: Messages = {
             runShell: {
                 name: "运行脚本",
                 description:
-                    "在 shell（PowerShell 或 Bash）中执行脚本。shell 在工作区根目录启动，切换目录必须保持在该工作区内。支持管道、循环、变量等 shell 特性。特权操作和危险命令需要显式确认。",
+                    "在 shell（PowerShell 或 Bash）中执行脚本。shell 在工作区根目录启动，切换目录必须保持在该工作区内。支持管道、循环、变量等 shell 特性。`direct` 模式等待脚本结束并返回输出；`serve` 模式在后台启动长期进程（例如 HTTP 服务）并立即返回进程 ID，可随时 list / stop，退出应用时自动清理。特权操作和危险命令需要显式确认。",
             },
             memory: {
                 name: "记忆",
@@ -467,7 +467,7 @@ const zhCN: Messages = {
         toolHints: {
             fileActions: "在工作区内读取、写入、修补和搜索文件",
             runCmd: "执行单条命令并附带风险评估",
-            runShell: "运行 PowerShell / bash 脚本",
+            runShell: "运行 PowerShell / bash 脚本（direct / serve 后台进程）",
             knowledgeGraph: "基于 Neo4j 的知识图谱查询",
             todos:
                 "通过 `todos` 工具管理会话待办清单（list / add / update_status / clear_completed / archive）。该计划与聊天会话及所有并行智能体共享。",

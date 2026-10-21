@@ -16,6 +16,7 @@ mod paths;
 mod process;
 mod risk;
 mod search;
+pub(crate) mod serve;
 pub(crate) mod timer;
 pub(crate) mod todos;
 
@@ -226,7 +227,7 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "run_shell",
-                "description": "Execute a shell script with patent-compliant risk assessment. L5/L6 (safe/read-only) scripts execute directly. L0-L4 scripts require user confirmation with risk score display. Syntax errors are rejected with detailed error report. Returns execution result or rejection reason.",
+                "description": "Execute or manage a shell script with patent-compliant risk assessment. L5/L6 (safe/read-only) scripts execute directly. L0-L4 scripts require user confirmation with risk score display. Syntax errors are rejected with detailed error report.\n\nUse `run_type: \"direct\"` (default) to run a script to completion and return its output. Use `run_type: \"serve\"` to start a long-lived background process (for example an HTTP service or a file watcher) and return immediately with a serve id; list running serve processes with `run_type: \"serve\", action: \"list\"`, and terminate one (or all, with `serve_id: \"all\"`) with `action: \"stop\"`. Serve process trees are terminated automatically when the app exits.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -235,9 +236,23 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
                             "enum": ["powershell",  "bash"],
                             "description": "Shell to use. On Windows prefer 'powershell'; on Linux/macOS use 'bash'."
                         },
+                        "run_type": {
+                            "type": "string",
+                            "enum": ["direct", "serve"],
+                            "description": "Execution mode. 'direct' (default) waits for the script to finish and returns its output. 'serve' starts the script as a long-lived background process and returns a serve id immediately."
+                        },
+                        "action": {
+                            "type": "string",
+                            "enum": ["start", "stop", "list"],
+                            "description": "Only used with run_type 'serve': 'start' (default) launches a background process, 'stop' terminates the process named by serve_id, 'list' shows all known serve processes and their recent output."
+                        },
+                        "serve_id": {
+                            "type": "string",
+                            "description": "Serve process id returned by a previous `run_type: \"serve\"` start call (required for action 'stop'). Use 'all' to stop every running serve process."
+                        },
                         "code": {
                             "type": "string",
-                            "description": "The shell script body to execute."
+                            "description": "The shell script body to execute. Required for run_type 'direct' and for serve action 'start'; not needed for 'stop'/'list'."
                         },
                         "sudo": {
                             "type": "boolean",
@@ -251,10 +266,10 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
                             "type": "integer",
                             "minimum": 1,
                             "maximum": 3600,
-                            "description": "Optional timeout for the command, in seconds. Defaults to 30 if omitted."
+                            "description": "Optional timeout for run_type 'direct', in seconds. Defaults to 30 if omitted. Ignored for serve processes, which keep running until stopped or the app exits."
                         }
                     },
-                    "required": ["type", "code"]
+                    "required": ["type"]
                 }
             }
         }));
@@ -2378,8 +2393,61 @@ pub async fn execute_tool(
         }
         "run_shell" => {
             let shell_type = args["type"].as_str().unwrap_or("powershell").to_string();
-            let code = args["code"].as_str().unwrap_or("").to_string();
+            let run_type = args["run_type"]
+                .as_str()
+                .unwrap_or("direct")
+                .trim()
+                .to_ascii_lowercase();
+            let action = args["action"]
+                .as_str()
+                .unwrap_or("start")
+                .trim()
+                .to_ascii_lowercase();
             let command_cwd = workspace_dir.clone();
+
+            if !matches!(run_type.as_str(), "direct" | "serve") {
+                return format!(
+                    "Error: unsupported run_type '{}'. Supported: direct, serve",
+                    run_type
+                );
+            }
+
+            // Serve management is about processes this app started, not about
+            // running a script — no shell validation, risk assessment or
+            // confirmation is needed to list/stop them.
+            if run_type == "serve" {
+                match action.as_str() {
+                    "list" => {
+                        return app.state::<crate::AppState>().serve_processes.list();
+                    }
+                    "stop" => {
+                        let serve_id = args["serve_id"]
+                            .as_str()
+                            .or_else(|| args["code"].as_str())
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
+                        return app
+                            .state::<crate::AppState>()
+                            .serve_processes
+                            .stop(&serve_id);
+                    }
+                    "start" => {}
+                    other => {
+                        return format!(
+                            "Error: unsupported serve action '{}'. Supported: start, stop, list",
+                            other
+                        );
+                    }
+                }
+            } else if action != "start" {
+                return format!(
+                    "Error: action '{}' is only valid with run_type 'serve'. Use run_type 'direct' to run a script.",
+                    action
+                );
+            }
+
+            let code = args["code"].as_str().unwrap_or("").to_string();
 
             // Only known shell types are supported; anything else is rejected
             // before risk assessment so an attacker cannot smuggle an
@@ -2482,6 +2550,10 @@ pub async fn execute_tool(
                     .unwrap_or(30)
                     .clamp(1, 3600) as u64;
 
+                if run_type == "serve" {
+                    return serve::start(app, &shell_type, &code, scoped_code, command_cwd).await;
+                }
+
                 return tokio::time::timeout(
                     std::time::Duration::from_secs(timeout_secs),
                     run_command(shell_type, scoped_code, Some(command_cwd)),
@@ -2544,6 +2616,10 @@ pub async fn execute_tool(
                 .as_i64()
                 .unwrap_or(30)
                 .clamp(1, 3600) as u64;
+
+            if run_type == "serve" {
+                return serve::start(app, &shell_type, &code, scoped_code, command_cwd).await;
+            }
 
             tokio::time::timeout(
                 std::time::Duration::from_secs(timeout_secs),

@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::State;
 use tokio::io::AsyncBufReadExt;
 
-
+use crate::process_guard;
 use crate::AppState;
 
 // ─── MCP Types ────────────────────────────────────────────────────────────────
@@ -120,6 +120,8 @@ pub struct StdioProcessHandle {
     pub stdin: tokio::process::ChildStdin,
     pub stdout_reader: tokio::io::BufReader<tokio::process::ChildStdout>,
     pub next_id: u64,
+    /// Removes the pid from the app-exit registry when the handle drops.
+    pub tracked: crate::process_guard::TrackedProcess,
 }
 
 /// Start a stdio MCP process: validate → spawn → initialize handshake → store in pool.
@@ -155,7 +157,7 @@ pub async fn start_stdio_process(
         ),
     );
 
-    let (mut child, stdin_handle, stdout_reader) =
+    let (mut child, stdin_handle, stdout_reader, tracked) =
         stdio_init(server, &workspace_dir, |stderr| {
             spawn_stderr_drain(logs, id.clone(), name.clone(), stderr);
         })
@@ -170,6 +172,7 @@ pub async fn start_stdio_process(
         stdin: stdin_handle,
         stdout_reader,
         next_id: 2, // id 1 was used by initialize
+        tracked,
     };
 
     state
@@ -192,6 +195,9 @@ pub async fn start_stdio_process(
 pub async fn stop_stdio_process(state: &AppState, server_id: &str) {
     let mut pool = state.mcp_children.lock().await;
     if let Some(mut handle) = pool.remove(server_id) {
+        // Kill the whole tree, not just the shim (`npx`/`uvx`/`node` spawn
+        // grandchildren). Dropping `handle.tracked` then unregisters the pid.
+        process_guard::kill_process_tree(handle.tracked.pid());
         let _ = handle.child.start_kill();
         drop(handle);
         append_mcp_log(
@@ -223,7 +229,8 @@ pub async fn ensure_stdio_process(state: &AppState, server: &McpServer) -> bool 
             if is_process_alive(handle) {
                 return false; // Already running
             }
-            // Dead process — remove and restart
+            // Dead process — remove (unregisters its pid) and restart.
+            pool.remove(&server.id);
             append_mcp_log(
                 state,
                 &server.id,
@@ -622,6 +629,11 @@ fn build_stdio_cmd(
     let mut cmd = build_stdio_cmd_inner(server, pipe_stderr);
     cmd.current_dir(workspace_dir);
     cmd.env("PWD", workspace_dir);
+    #[cfg(unix)]
+    {
+        // Own process group, so app exit / stop can kill the whole tree.
+        cmd.process_group(0);
+    }
     cmd
 }
 
@@ -918,6 +930,7 @@ async fn stdio_init(
         tokio::process::Child,
         tokio::process::ChildStdin,
         tokio::io::BufReader<tokio::process::ChildStdout>,
+        process_guard::TrackedProcess,
     ),
     String,
 > {
@@ -925,36 +938,60 @@ async fn stdio_init(
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("Failed to start process: {e}"))?;
+    let tracked = process_guard::track_child(&child, format!("mcp stdio '{}'", server.name));
+
     if let Some(stderr) = child.stderr.take() {
         on_stderr(stderr);
     }
-    let mut stdin = child.stdin.take().ok_or("no stdin")?;
-    let stdout = child.stdout.take().ok_or("no stdout")?;
+    let mut stdin = match child.stdin.take() {
+        Some(stdin) => stdin,
+        None => {
+            process_guard::kill_process_tree(tracked.pid());
+            return Err("no stdin".to_string());
+        }
+    };
+    let stdout = match child.stdout.take() {
+        Some(stdout) => stdout,
+        None => {
+            process_guard::kill_process_tree(tracked.pid());
+            return Err("no stdout".to_string());
+        }
+    };
     let mut reader = tokio::io::BufReader::new(stdout);
 
-    // initialize
-    let init_req = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "initialize",
-        "params": {
-            "protocolVersion": "2025-03-26",
-            "capabilities": {},
-            "clientInfo": { "name": "ai-chat", "version": "0.1.0" }
-        },
-        "id": 1
-    });
-    stdio_write_json(&mut stdin, &init_req).await?;
-    stdio_read_response(&mut reader, 1).await?;
+    let handshake: Result<(), String> = async {
+        // initialize
+        let init_req = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "clientInfo": { "name": "ai-chat", "version": "0.1.0" }
+            },
+            "id": 1
+        });
+        stdio_write_json(&mut stdin, &init_req).await?;
+        stdio_read_response(&mut reader, 1).await?;
 
-    // send initialized notification (no response expected)
-    let notif = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "notifications/initialized",
-        "params": {}
-    });
-    stdio_write_json(&mut stdin, &notif).await?;
+        // send initialized notification (no response expected)
+        let notif = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+            "params": {}
+        });
+        stdio_write_json(&mut stdin, &notif).await?;
+        Ok(())
+    }
+    .await;
 
-    Ok((child, stdin, reader))
+    if let Err(err) = handshake {
+        // A process that never completed the handshake must not linger.
+        process_guard::kill_process_tree(tracked.pid());
+        return Err(err);
+    }
+
+    Ok((child, stdin, reader, tracked))
 }
 
 // ── SSE transport (HTTP + Server-Sent Events) ───────────────────────────────

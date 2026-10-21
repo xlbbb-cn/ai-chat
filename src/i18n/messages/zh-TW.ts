@@ -326,7 +326,7 @@ const zhTW: Messages = {
             runShell: {
                 name: "執行指令碼",
                 description:
-                    "在 shell（PowerShell 或 Bash）中執行指令碼。shell 會在工作區根目錄啟動，切換目錄必須保持在該工作區內。支援管線、迴圈、變數等 shell 功能。特權操作與危險命令需要明確確認。",
+                    "在 shell（PowerShell 或 Bash）中執行指令碼。shell 會在工作區根目錄啟動，切換目錄必須保持在該工作區內。支援管線、迴圈、變數等 shell 功能。`direct` 模式會等待指令碼結束並回傳輸出；`serve` 模式會在背景啟動長期程序（例如 HTTP 服務）並立即回傳程序 ID，可隨時 list / stop，退出應用程式時自動清理。特權操作與危險命令需要明確確認。",
             },
             memory: {
                 name: "記憶",
@@ -467,7 +467,7 @@ const zhTW: Messages = {
         toolHints: {
             fileActions: "在工作區內讀取、寫入、修補與搜尋檔案",
             runCmd: "執行單一命令並附帶風險評估",
-            runShell: "執行 PowerShell / bash 指令碼",
+            runShell: "執行 PowerShell / bash 指令碼（direct / serve 背景程序）",
             knowledgeGraph: "以 Neo4j 為後端的知識圖譜查詢",
             todos:
                 "透過 `todos` 工具管理工作階段待辦清單（list / add / update_status / clear_completed / archive）。此計畫與聊天工作階段及所有平行代理共用。",

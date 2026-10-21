@@ -204,22 +204,26 @@ fn format_process_output(output: std::process::Output, hint: OutputDecodeHint) -
     truncate_tool_output(result)
 }
 
-pub async fn run_command(
-    cmd_type: String,
-    code: String,
-    cwd: Option<PathBuf>,
-) -> Result<String, String> {
-    let decode_hint = match cmd_type.as_str() {
+pub(crate) fn decode_hint_for_shell(cmd_type: &str) -> OutputDecodeHint {
+    match cmd_type {
         "direct" => OutputDecodeHint::Direct,
         "bash" | "sh" if cfg!(windows) => OutputDecodeHint::CmdShell,
         "powershell" | "pwsh" => OutputDecodeHint::PowerShell,
         _ => OutputDecodeHint::Default,
-    };
+    }
+}
 
-    let mut cmd = match cmd_type.as_str() {
+/// Build a command for `cmd_type` rooted at `cwd`, without running it.
+/// Used by `run_command` (synchronous) and by `serve` (long-lived children).
+pub(crate) fn build_command(
+    cmd_type: &str,
+    code: &str,
+    cwd: Option<PathBuf>,
+) -> Result<tokio::process::Command, String> {
+    let mut cmd = match cmd_type {
         "direct" => {
             // Run the executable directly — no shell wrapper needed.
-            let parts = split_command_line(&code);
+            let parts = split_command_line(code);
             if parts.is_empty() {
                 return Err("Empty command".to_string());
             }
@@ -233,7 +237,7 @@ pub async fn run_command(
             #[cfg(windows)]
             let c = {
                 let mut cmd = tokio::process::Command::new("cmd.exe");
-                let wrapped = wrap_cmd_script_for_utf8(&code);
+                let wrapped = wrap_cmd_script_for_utf8(code);
                 cmd.args(["/D", "/S", "/C", &wrapped]);
                 cmd
             };
@@ -274,7 +278,7 @@ pub async fn run_command(
         }
         "powershell" | "pwsh" => {
             let mut c = tokio::process::Command::new("powershell");
-            let wrapped = wrap_powershell_script_for_utf8(&code);
+            let wrapped = wrap_powershell_script_for_utf8(code);
             c.args(["-NoProfile", "-NonInteractive", "-Command", &wrapped]);
             c
         }
@@ -296,6 +300,27 @@ pub async fn run_command(
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
+    #[cfg(unix)]
+    {
+        // Own process group, so a timeout/cancel can kill the whole tree (see
+        // `crate::process_guard::kill_process_tree`).
+        cmd.process_group(0);
+    }
+
+    // A dropped run (e.g. the 30s timeout future in `execute_tool`) must not
+    // leave the child running.
+    cmd.kill_on_drop(true);
+
+    Ok(cmd)
+}
+
+pub async fn run_command(
+    cmd_type: String,
+    code: String,
+    cwd: Option<PathBuf>,
+) -> Result<String, String> {
+    let decode_hint = decode_hint_for_shell(&cmd_type);
+    let mut cmd = build_command(&cmd_type, &code, cwd)?;
     let output = cmd.output().await.map_err(|e| e.to_string())?;
     Ok(format_process_output(output, decode_hint))
 }

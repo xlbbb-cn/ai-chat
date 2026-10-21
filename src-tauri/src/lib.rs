@@ -19,6 +19,7 @@ mod llm_complete;
 mod logger;
 pub mod mcp;
 pub mod model_metadata;
+mod process_guard;
 mod skills;
 mod tools;
 mod update;
@@ -317,6 +318,9 @@ pub struct AppState {
     pub mcp_children: std::sync::Arc<
         tokio::sync::Mutex<std::collections::HashMap<String, mcp::StdioProcessHandle>>,
     >,
+    /// Long-lived background children started by `run_shell run_type="serve"`.
+    /// Killed on demand by the tool and automatically at app exit.
+    pub serve_processes: tools::serve::ServeRegistry,
     /// Session-scoped memories: session_id -> key -> JSON entry.
     pub session_memories: Mutex<
         std::collections::HashMap<String, std::collections::HashMap<String, serde_json::Value>>,
@@ -841,6 +845,7 @@ pub fn run() {
                 mcp_logs: std::sync::Arc::new(Mutex::new(Default::default())),
                 mcp_cancelled_tests: std::sync::Arc::new(Mutex::new(Default::default())),
                 mcp_children: std::sync::Arc::new(tokio::sync::Mutex::new(Default::default())),
+                serve_processes: Default::default(),
                 session_memories: Mutex::new(Default::default()),
                 external_agent_confirmed: Mutex::new(Default::default()),
                 external_agent_confirm_lock: tokio::sync::Mutex::new(()),
@@ -879,17 +884,12 @@ pub fn run() {
 
             Ok(())
         })
-        .on_window_event(|window, event| {
+        .on_window_event(|_window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
-                let app = window.app_handle();
-                if let Some(state) = app.try_state::<AppState>() {
-                    let mut pool = state.mcp_children.try_lock();
-                    if let Ok(pool) = &mut pool {
-                        for (_, handle) in pool.iter_mut() {
-                            let _ = handle.child.start_kill();
-                        }
-                    }
-                }
+                // The only window is closing, so the app is exiting. Tear down
+                // every child tree (MCP servers, serve processes, CLI agents)
+                // instead of only the MCP pool.
+                process_guard::kill_all();
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -955,6 +955,14 @@ pub fn run() {
             update::open_release_page,
             update::get_app_version,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app_handle, event| {
+            // Normal quit path. `kill_all` is idempotent, so running it after
+            // the window-close hook is harmless; it also covers tray/menu
+            // quits that never emit `CloseRequested`.
+            if let tauri::RunEvent::Exit = event {
+                process_guard::kill_all();
+            }
+        });
 }
