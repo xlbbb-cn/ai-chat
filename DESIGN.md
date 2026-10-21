@@ -271,6 +271,21 @@ Nothing in between.
 | Settings section | `gap: 10px`, `padding-bottom: 14px`, 1px hairline |
 | Settings section body | `gap: 8px`, `max-width: 760px` |
 
+### Context-usage bar
+
+The 2px bar pinned to the input area's top border has two states:
+
+- **Streaming, usage unknown** — a soft `--c-accent` gradient dash sweeps across
+  the track, so a long think shows activity before the provider reports token
+  usage. This is one of the two sanctioned gradients (the other is a streaming
+  label sweep).
+- **Usage known / idle** — the request's context ratio as a flat `--c-accent`
+  fill, switching to `--c-danger` at 90 % and above.
+
+`prefers-reduced-motion` replaces the sweep with a dim static line. The bar is
+absolutely positioned over the input area's top border, so it never causes
+layout shift.
+
 ### The compact zone
 
 Settings, the chat input row, and the sidebar panels all share **34px controls**.

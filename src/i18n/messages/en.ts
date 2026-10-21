@@ -164,6 +164,7 @@ const en = {
 
     chat: {
         thoughtProcess: "Thought Process",
+        tokenUsage: "Token usage",
         attachedFiles: "Attached Files:",
         retryTitle: "Retry this unfinished user message",
         exportTitle: "Export this reply to PDF",

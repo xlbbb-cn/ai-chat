@@ -328,6 +328,8 @@ export default function App() {
     max_tokens?: number;
     usage_ratio?: number;
   } | null>(null);
+  /** True once `chat-usage` arrived for the request currently streaming. */
+  const [usageReady, setUsageReady] = useState(false);
   const [maxTokens, setMaxTokens] = useState<number | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>(["gpt-4o-mini"]);
   const [selectedModel, setSelectedModel] = useState("gpt-4o-mini");
@@ -520,6 +522,9 @@ export default function App() {
       max_tokens?: number;
       usage_ratio?: number;
     }>("chat-usage", (e) => {
+      // This request's token figures are known from here on; the usage bar
+      // above the input switches from its indeterminate sweep to a real ratio.
+      setUsageReady(true);
       setUsage((prevUsage) => {
         // If this is the first usage data, return it as-is
         if (!prevUsage) return e.payload;
@@ -1087,6 +1092,9 @@ export default function App() {
     }
     setStreaming(true);
     setError(null);
+    // A new request starts with no token figures yet — the usage bar above the
+    // input must sweep until this request's `chat-usage` arrives.
+    setUsageReady(false);
 
     const history = [...messages, userMsg]
       .filter((m) => !m.streaming && !m.id.startsWith("agent-progress-") && m.role !== "tool_group")
@@ -1231,6 +1239,9 @@ export default function App() {
     setMessages((prev) => [...prev, assistantMsg]);
     setStreaming(true);
     setError(null);
+    // A new request starts with no token figures yet — the usage bar above the
+    // input must sweep until this request's `chat-usage` arrives.
+    setUsageReady(false);
 
     const history = [...messages]
       .filter((m) => !m.streaming && !m.id.startsWith("agent-progress-") && m.role !== "tool_group")
@@ -1455,6 +1466,7 @@ export default function App() {
     setMessages([]);
     setError(null);
     setUsage(null);
+    setUsageReady(false);
     setPendingRetryMessageId(null);
     setSessionId(crypto.randomUUID());
   }
@@ -2099,17 +2111,29 @@ export default function App() {
               </div>
             </div>
           )}
-          {usage && (
+          {(usage || streaming) && (
             <div
               className="usage-panel"
-              role="status"
+              role="progressbar"
               aria-live="polite"
-              aria-label={t("app.contextUsage", { percent: usagePercent })}
+              aria-busy={streaming && !usageReady}
+              aria-label={
+                streaming && !usageReady
+                  ? t("chat.tokenUsage")
+                  : t("app.contextUsage", { percent: usagePercent })
+              }
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={streaming && !usageReady ? undefined : usagePercent}
             >
-              <div
-                className={`usage-panel-fill${usagePercent >= 90 ? " danger" : ""}`}
-                style={{ width: `${usagePercent}%` }}
-              />
+              {streaming && !usageReady ? (
+                <div className="usage-panel-sweep" aria-hidden="true" />
+              ) : (
+                <div
+                  className={`usage-panel-fill${usagePercent >= 90 ? " danger" : ""}`}
+                  style={{ width: `${usagePercent}%` }}
+                />
+              )}
             </div>
           )}
           {attachments.length > 0 && (

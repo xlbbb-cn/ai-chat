@@ -147,6 +147,7 @@ const zhTW: Messages = {
 
     chat: {
         thoughtProcess: "思考過程",
+        tokenUsage: "Token 用量",
         attachedFiles: "附件：",
         retryTitle: "重試這則未完成的使用者訊息",
         exportTitle: "將這則回覆匯出為 PDF",
