@@ -1320,7 +1320,14 @@ pub async fn orchestrate(
     // workers — they never write the user-facing answer: the main agent (full
     // chat context, skills and tools) defines the final result, so
     // llm_complete injects this report and runs its normal completion flow.
-    let _ = app.emit("agent-aggregate-start", ());
+    //
+    // The aggregation itself is instantaneous (it only renders the report
+    // below), so the event reports a *completed* step: a "start" event here
+    // would leave the UI spinning until the whole final answer is streamed.
+    let _ = app.emit(
+        "agent-aggregate-done",
+        json!({ "task_count": results.len() }),
+    );
     Ok(build_mission_results_block(&results))
 }
 

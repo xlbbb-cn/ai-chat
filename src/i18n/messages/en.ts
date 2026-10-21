@@ -112,13 +112,11 @@ const en = {
         confirm: {
             titleSudo: "Privileged operation (sudo)",
             titleElevation: "Privileged operation (administrator)",
-            titleExternalPath: "External file access request",
             titleExternalAgent: "External agent request",
             titleRisk: "Risk Level {level} — confirm execution",
             titleDangerous: "Dangerous command detected",
             badgeSudo: "SUDO",
             badgeAdmin: "ADMIN",
-            badgePath: "PATH",
             badgeExternalAgent: "AGENT",
             badgeRisk: "RISK",
             badgeDangerous: "DANGEROUS",
@@ -134,8 +132,6 @@ const en = {
             sudoHint: "This will run with elevated privileges and may modify your system.",
             elevationHint:
                 "This will request administrator elevation (UAC) and may modify system settings.",
-            externalPathHint:
-                "This file action wants to access an absolute path outside the current workspace root. Allow it only if that external location is intentional.",
             externalAgentHint:
                 "This CLI / cloud agent runs outside the app: a CLI runs with your user permissions in the workspace, a cloud agent runs the task on a remote endpoint. It is approved once per agent for this app run.",
             deny: "Deny",
@@ -147,7 +143,10 @@ const en = {
             aggregator: "Aggregator",
             tool: "Tool",
             planDone: "Plan completed — {count} tasks total",
-            aggregating: "Aggregating all subtask results...",
+            aggregated: {
+                one: "Aggregated {count} subtask result",
+                other: "Aggregated {count} subtask results",
+            },
             loadingSkill: "Loading skill: {name}",
         },
     },
@@ -408,11 +407,6 @@ const en = {
                 label: "User data changes (L3)",
                 description:
                     "Skip the approval prompt for L3 requests that modify or delete user data files (score 40–54).",
-            },
-            externalPath: {
-                label: "External absolute paths",
-                description:
-                    "Allow file_actions to access absolute paths outside the workspace without prompting.",
             },
         },
     },

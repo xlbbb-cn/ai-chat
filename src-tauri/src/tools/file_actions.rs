@@ -10,7 +10,6 @@ use tauri::{AppHandle, Emitter};
 
 use super::patch::apply_unified_patch;
 use super::paths::{ensure_mutation_target_allowed, resolve_safe_path, with_root_header};
-use super::request_tool_confirmation;
 use super::search::{
     is_probably_binary, run_integrated_search, SearchOptions, SEARCH_MAX_MATCHES,
 };
@@ -30,7 +29,7 @@ pub(super) async fn handle_file_actions(
             let _ = app.emit("tool-call", format!("📄 *Reading {}*\n\n", path_str));
             let start_line = args["start_line"].as_i64();
             let end_line = args["end_line"].as_i64();
-            match resolve_file_action_path(app, action, path_str, &root_dir, true).await {
+            match resolve_file_action_path(path_str, &root_dir, true) {
                 Ok(p) => {
                     match fs::metadata(&p) {
                         Ok(metadata) if metadata.is_dir() => {
@@ -93,7 +92,7 @@ pub(super) async fn handle_file_actions(
         "write" => {
             let content_str = args["content"].as_str().unwrap_or("");
             let _ = app.emit("tool-call", format!("💾 *Writing {}*\n\n", path_str));
-            match resolve_file_action_path(app, action, path_str, &root_dir, false).await {
+            match resolve_file_action_path(path_str, &root_dir, false) {
                 Ok(p) => {
                     if let Err(e) =
                         ensure_mutation_target_allowed(&p, &root_dir, protected_skill_roots)
@@ -133,7 +132,7 @@ pub(super) async fn handle_file_actions(
         }
         "list" => {
             let _ = app.emit("tool-call", format!("📂 *Listing {}*\n\n", path_str));
-            match resolve_file_action_path(app, action, path_str, &root_dir, true).await {
+            match resolve_file_action_path(path_str, &root_dir, true) {
                 Ok(p) => {
                     match fs::metadata(&p) {
                         Ok(metadata) => {
@@ -219,7 +218,7 @@ pub(super) async fn handle_file_actions(
                 ),
             );
 
-            match resolve_file_action_path(app, action, path_str, &root_dir, true).await {
+            match resolve_file_action_path(path_str, &root_dir, true) {
                 Ok(p) => {
                     // Fan-out over a large tree plus per-file IO is
                     // long-running blocking work — keep it off the
@@ -248,14 +247,14 @@ pub(super) async fn handle_file_actions(
             if new_path.is_empty() {
                 return "Error: new_path is required for move/rename.".to_string();
             }
-            match resolve_file_action_path(app, action, path_str, &root_dir, true).await {
+            match resolve_file_action_path(path_str, &root_dir, true) {
                 Ok(src) => {
                     if let Err(e) =
                         ensure_mutation_target_allowed(&src, &root_dir, protected_skill_roots)
                     {
                         return format_file_action_error(e);
                     }
-                    match resolve_file_action_path(app, action, new_path, &root_dir, false).await {
+                    match resolve_file_action_path(new_path, &root_dir, false) {
                         Ok(dst) => {
                             if let Err(e) = ensure_mutation_target_allowed(
                                 &dst,
@@ -326,7 +325,7 @@ pub(super) async fn handle_file_actions(
                     .unwrap_or_default(),
             };
             let _ = app.emit("tool-call", format!("🩹 *Patching {}*\n\n", path_str));
-            match resolve_file_action_path(app, action, path_str, &root_dir, true).await {
+            match resolve_file_action_path(path_str, &root_dir, true) {
                 Ok(p) => {
                     if let Err(e) =
                         ensure_mutation_target_allowed(&p, &root_dir, protected_skill_roots)
@@ -393,22 +392,16 @@ pub(super) async fn handle_file_actions(
                 format!("🔀 *Comparing {} → {}*\n\n", path_str, new_path),
             );
 
-            let original_path = match resolve_file_action_path(
-                app, action, path_str, &root_dir, true,
-            )
-            .await
-            {
-                Ok(p) => p,
-                Err(e) => return format_file_action_error(e),
-            };
-            let modified_path = match resolve_file_action_path(
-                app, action, new_path, &root_dir, true,
-            )
-            .await
-            {
-                Ok(p) => p,
-                Err(e) => return format_file_action_error(e),
-            };
+            let original_path =
+                match resolve_file_action_path(path_str, &root_dir, true) {
+                    Ok(p) => p,
+                    Err(e) => return format_file_action_error(e),
+                };
+            let modified_path =
+                match resolve_file_action_path(new_path, &root_dir, true) {
+                    Ok(p) => p,
+                    Err(e) => return format_file_action_error(e),
+                };
 
             let original = match read_diff_input(&original_path) {
                 Ok(text) => text,
@@ -441,7 +434,7 @@ pub(super) async fn handle_file_actions(
                 "tool-call",
                 format!("📁 *Creating directory {}*\n\n", path_str),
             );
-            match resolve_file_action_path(app, action, path_str, &root_dir, false).await {
+            match resolve_file_action_path(path_str, &root_dir, false) {
                 Ok(p) => {
                     if let Err(e) =
                         ensure_mutation_target_allowed(&p, &root_dir, protected_skill_roots)
@@ -461,7 +454,7 @@ pub(super) async fn handle_file_actions(
         }
         "delete" => {
             let _ = app.emit("tool-call", format!("🗑️ *Deleting {}*\n\n", path_str));
-            match resolve_file_action_path(app, action, path_str, &root_dir, true).await {
+            match resolve_file_action_path(path_str, &root_dir, true) {
                 Ok(p) => {
                     if let Err(e) =
                         ensure_mutation_target_allowed(&p, &root_dir, protected_skill_roots)
@@ -501,73 +494,33 @@ pub(super) async fn handle_file_actions(
     }
 }
 
-pub(super) fn external_absolute_path_candidate(workspace_dir: &Path, input: &str) -> Option<PathBuf> {
-    let candidate = PathBuf::from(input);
-    if !candidate.is_absolute() {
-        return None;
-    }
-
-    let normalized = candidate
-        .canonicalize()
-        .unwrap_or_else(|_| candidate.clone());
-    let canonical_root = workspace_dir
-        .canonicalize()
-        .unwrap_or_else(|_| workspace_dir.to_path_buf());
-
-    (!normalized.starts_with(&canonical_root)).then_some(normalized)
-}
-
-async fn resolve_file_action_path(
-    app: &AppHandle,
-    action: &str,
+/// Resolve a `file_actions` path strictly inside the workspace.
+///
+/// There is deliberately no "external path" escape hatch: `file_actions` is
+/// the structured, model-facing file API and must never reach outside the
+/// workspace. Anything that resolves outside the root is rejected outright,
+/// before any filesystem access happens. Shell tools (`run_shell`) are the
+/// place where the user stays in control of arbitrary paths.
+fn resolve_file_action_path(
     input: &str,
     workspace_dir: &Path,
     require_exists: bool,
 ) -> Result<PathBuf, String> {
-    match resolve_safe_path(workspace_dir, input) {
-        Ok(path) => {
-            if require_exists && !path.exists() {
-                return Err(format!(
-                    "Path '{}' was not found under workspace root '{}'",
-                    input,
-                    workspace_dir.display()
-                ));
-            }
-            Ok(path)
-        }
-        Err(_) => {
-            let Some(path) = external_absolute_path_candidate(workspace_dir, input) else {
-                return Err(format!(
-                    "Path '{}' is outside the workspace root '{}'",
-                    input,
-                    workspace_dir.display()
-                ));
-            };
-
-            let confirm = request_tool_confirmation(
-                app,
-                format!(
-                    "external absolute path access requested outside workspace root '{}'",
-                    workspace_dir.display()
-                ),
-                "file_actions".to_string(),
-                format!("{}: {}", action, path.display()),
-                "external_path",
-                "none",
-            )
-            .await;
-
-            if !confirm.confirmed {
-                return Err("⛔ External absolute path access denied by user.".to_string());
-            }
-
-            if require_exists && !path.exists() {
-                return Err(format!("Path '{}' does not exist", path.display()));
-            }
-
-            Ok(path)
-        }
+    let path = resolve_safe_path(workspace_dir, input).map_err(|_| {
+        format!(
+            "Path '{}' is outside the workspace root '{}'. file_actions can only operate on workspace files.",
+            input,
+            workspace_dir.display()
+        )
+    })?;
+    if require_exists && !path.exists() {
+        return Err(format!(
+            "Path '{}' was not found under workspace root '{}'",
+            input,
+            workspace_dir.display()
+        ));
     }
+    Ok(path)
 }
 
 fn format_file_action_error(err: String) -> String {

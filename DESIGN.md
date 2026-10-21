@@ -162,7 +162,7 @@ breaks those rules.
 
 ### Primary CTA — the only place Electric Blue is allowed
 
-`.send-btn`, `.btn-primary`, `.settings-btn-primary`, `.confirm-dialog-button.confirm`
+`.send-btn`, `.btn-primary`, `.settings-btn-primary`
 
 ```css
 background: var(--c-accent);

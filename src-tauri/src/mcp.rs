@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::State;
 use tokio::io::AsyncBufReadExt;
@@ -130,6 +130,9 @@ pub async fn start_stdio_process(
     let id = server.id.clone();
     let name = server.name.clone();
     let logs = state.mcp_logs.clone();
+    // Children must start in the active workspace, never in the app's own
+    // launch directory (see `build_stdio_cmd`).
+    let workspace_dir = state.workspace_dir.lock().unwrap().clone();
 
     // Pre-flight validation: check command exists BEFORE spawning
     if !command_exists(&server.command) {
@@ -152,10 +155,11 @@ pub async fn start_stdio_process(
         ),
     );
 
-    let (mut child, stdin_handle, stdout_reader) = stdio_init(server, |stderr| {
-        spawn_stderr_drain(logs, id.clone(), name.clone(), stderr);
-    })
-    .await?;
+    let (mut child, stdin_handle, stdout_reader) =
+        stdio_init(server, &workspace_dir, |stderr| {
+            spawn_stderr_drain(logs, id.clone(), name.clone(), stderr);
+        })
+        .await?;
 
     // Move the owned handles into the handle struct.
     child.stdin = None;
@@ -602,6 +606,25 @@ pub fn sanitize_fn_name(s: &str) -> String {
         .collect()
 }
 
+/// Build the command for a stdio MCP server, rooted at the active workspace.
+///
+/// MCP servers are workspace-scoped: a child started from the app's launch
+/// directory would resolve relative paths (and report them to the model)
+/// against the wrong tree, so `current_dir` is always the workspace.
+/// `current_dir` alone leaves the inherited `PWD` stale — CLIs that derive
+/// their project root from `PWD` would still see the old directory — so the
+/// two are kept in sync (same rule as `agents/cli.rs`).
+fn build_stdio_cmd(
+    server: &McpServer,
+    pipe_stderr: bool,
+    workspace_dir: &Path,
+) -> tokio::process::Command {
+    let mut cmd = build_stdio_cmd_inner(server, pipe_stderr);
+    cmd.current_dir(workspace_dir);
+    cmd.env("PWD", workspace_dir);
+    cmd
+}
+
 /// Build a `tokio::process::Command` for a stdio MCP server.
 ///
 /// On Windows, Tauri apps may not inherit the full system PATH, making
@@ -620,7 +643,7 @@ pub fn sanitize_fn_name(s: &str) -> String {
 /// asynchronously and surfaced in the server's log buffer. Callers that
 /// don't read stderr (i.e. would block on a noisy server) should pass
 /// `false` and let stderr go to `/dev/null`.
-fn build_stdio_cmd(server: &McpServer, pipe_stderr: bool) -> tokio::process::Command {
+fn build_stdio_cmd_inner(server: &McpServer, pipe_stderr: bool) -> tokio::process::Command {
 
     use std::process::Stdio;
 
@@ -888,6 +911,7 @@ async fn stdio_read_response(
 /// diagnostic buffer). Pass `|_| {}` if you don't want stderr captured.
 async fn stdio_init(
     server: &McpServer,
+    workspace_dir: &Path,
     on_stderr: impl FnOnce(tokio::process::ChildStderr) + Send,
 ) -> Result<
     (
@@ -897,7 +921,7 @@ async fn stdio_init(
     ),
     String,
 > {
-    let mut cmd = build_stdio_cmd(server, true);
+    let mut cmd = build_stdio_cmd(server, true, workspace_dir);
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("Failed to start process: {e}"))?;

@@ -99,13 +99,11 @@ const zhTW: Messages = {
         confirm: {
             titleSudo: "特權操作（sudo）",
             titleElevation: "特權操作（系統管理員）",
-            titleExternalPath: "外部檔案存取要求",
             titleExternalAgent: "外部代理呼叫要求",
             titleRisk: "風險等級 {level} —— 請確認執行",
             titleDangerous: "偵測到危險命令",
             badgeSudo: "SUDO",
             badgeAdmin: "ADMIN",
-            badgePath: "PATH",
             badgeExternalAgent: "AGENT",
             badgeRisk: "RISK",
             badgeDangerous: "危險",
@@ -120,8 +118,6 @@ const zhTW: Messages = {
             passwordPlaceholder: "必填",
             sudoHint: "此操作將以較高權限執行，可能會變更你的系統。",
             elevationHint: "此操作將要求系統管理員提高權限（UAC），可能會變更系統設定。",
-            externalPathHint:
-                "此檔案操作嘗試存取目前工作區根目錄之外的絕對路徑。請僅在確認該外部位置是預期目標時允許。",
             externalAgentHint:
                 "此 CLI / 雲端代理在應用程式之外執行：CLI 以你的使用者權限在工作區內執行，雲端代理把任務送到遠端端點。每個代理在本次應用程式執行中只需核准一次。",
             deny: "拒絕",
@@ -133,7 +129,7 @@ const zhTW: Messages = {
             aggregator: "彙總器",
             tool: "工具",
             planDone: "規劃完成 —— 共 {count} 個任務",
-            aggregating: "正在彙總所有子任務結果…",
+            aggregated: "已彙總 {count} 個子任務結果",
             loadingSkill: "正在載入技能：{name}",
         },
     },
@@ -382,10 +378,6 @@ const zhTW: Messages = {
             userData: {
                 label: "使用者資料變更（L3）",
                 description: "對修改或刪除使用者資料檔案的 L3 請求（風險分 40–54）略過確認提示。",
-            },
-            externalPath: {
-                label: "外部絕對路徑",
-                description: "允許 file_actions 存取工作區之外的絕對路徑而不需提示。",
             },
         },
     },

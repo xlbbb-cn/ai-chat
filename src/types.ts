@@ -109,15 +109,13 @@ export interface Message {
  * The command kinds mirror `RiskLevel::confirm_kind()` in
  * `src-tauri/src/tools/risk.rs`: L0 (`dangerous`), L1 (`system_config`),
  * L2 (`user_software`) and L3 (`user_data`) require approval, while L4-L6 never
- * prompt at all. `external_path` covers `file_actions` targeting an absolute
- * path outside the workspace. Keep this union in sync with the Rust side.
+ * prompt at all. Keep this union in sync with the Rust side.
  */
 export type ConfirmKind =
   | "dangerous"
   | "system_config"
   | "user_software"
   | "user_data"
-  | "external_path"
   /** `cli` / `cloud` sub-agents (approved per agent in the Sub Agents panel). */
   | "external_agent";
 

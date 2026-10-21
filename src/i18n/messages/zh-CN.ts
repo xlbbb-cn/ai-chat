@@ -99,13 +99,11 @@ const zhCN: Messages = {
         confirm: {
             titleSudo: "特权操作（sudo）",
             titleElevation: "特权操作（管理员）",
-            titleExternalPath: "外部文件访问请求",
             titleExternalAgent: "外部智能体调用请求",
             titleRisk: "风险等级 {level} —— 请确认执行",
             titleDangerous: "检测到危险命令",
             badgeSudo: "SUDO",
             badgeAdmin: "ADMIN",
-            badgePath: "PATH",
             badgeExternalAgent: "AGENT",
             badgeRisk: "RISK",
             badgeDangerous: "危险",
@@ -120,8 +118,6 @@ const zhCN: Messages = {
             passwordPlaceholder: "必填",
             sudoHint: "该操作将以提升的权限运行，可能会修改你的系统。",
             elevationHint: "该操作将请求管理员提权（UAC），可能会修改系统设置。",
-            externalPathHint:
-                "该文件操作尝试访问当前工作区根目录之外的绝对路径。请仅在确认该外部位置是预期目标时允许。",
             externalAgentHint:
                 "该 CLI / 云端智能体在应用之外执行：CLI 以你的用户权限在工作区内运行，云端智能体把任务发送到远程端点。每个智能体在本次应用运行中只需批准一次。",
             deny: "拒绝",
@@ -133,7 +129,7 @@ const zhCN: Messages = {
             aggregator: "汇总器",
             tool: "工具",
             planDone: "规划完成 —— 共 {count} 个任务",
-            aggregating: "正在汇总所有子任务结果…",
+            aggregated: "已汇总 {count} 个子任务结果",
             loadingSkill: "正在加载技能：{name}",
         },
     },
@@ -382,10 +378,6 @@ const zhCN: Messages = {
             userData: {
                 label: "用户数据变更（L3）",
                 description: "对修改或删除用户数据文件的 L3 请求（风险分 40–54）跳过确认提示。",
-            },
-            externalPath: {
-                label: "外部绝对路径",
-                description: "允许 file_actions 访问工作区之外的绝对路径而无需提示。",
             },
         },
     },

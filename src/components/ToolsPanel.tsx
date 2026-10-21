@@ -60,8 +60,7 @@ const KG_ENGINES = [
  * Confirmation kinds that can actually reach the approval dialog. The `kind`
  * strings are matched against `auto_accept_confirm_kinds` by the Rust side,
  * which sends them from `RiskLevel::confirm_kind()` in `src-tauri/src/tools/risk.rs`
- * (L0-L3 ask for approval, L4-L6 never prompt) plus the literal
- * `external_path` for out-of-workspace `file_actions` paths. Keep in sync.
+ * (L0-L3 ask for approval, L4-L6 never prompt). Keep in sync.
  */
 const AUTO_ACCEPT_OPTIONS: Array<{
     kind: ConfirmKind;
@@ -87,11 +86,6 @@ const AUTO_ACCEPT_OPTIONS: Array<{
             kind: "user_data",
             labelKey: "tools.autoAcceptItems.userData.label",
             descriptionKey: "tools.autoAcceptItems.userData.description",
-        },
-        {
-            kind: "external_path",
-            labelKey: "tools.autoAcceptItems.externalPath.label",
-            descriptionKey: "tools.autoAcceptItems.externalPath.description",
         },
     ];
 

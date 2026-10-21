@@ -344,7 +344,7 @@ export default function App() {
     reason: string;
     cmd_type: string;
     code: string;
-    confirm_kind?: "dangerous" | "sudo" | "elevation" | "external_path" | "system_config" | "user_software" | "user_data" | "sensitive_read" | "general_query" | "external_agent";
+    confirm_kind?: "dangerous" | "sudo" | "elevation" | "system_config" | "user_software" | "user_data" | "sensitive_read" | "general_query" | "external_agent";
     requires_auth?: "none" | "sudo" | "elevation";
     risk_level?: string;
     risk_score?: number;
@@ -692,7 +692,7 @@ export default function App() {
       reason: string;
       cmd_type: string;
       code: string;
-      confirm_kind?: "dangerous" | "sudo" | "elevation" | "external_path" | "system_config" | "user_software" | "user_data" | "sensitive_read" | "general_query" | "external_agent";
+      confirm_kind?: "dangerous" | "sudo" | "elevation" | "system_config" | "user_software" | "user_data" | "sensitive_read" | "general_query" | "external_agent";
       requires_auth?: "none" | "sudo" | "elevation";
       risk_level?: string;
       risk_score?: number;
@@ -877,12 +877,15 @@ export default function App() {
           updateActiveAssistantToolCalls(currentToolCallsRef.current);
         }
       }),
-      listen("agent-aggregate-start", () => {
+      listen<{ task_count: number }>("agent-aggregate-done", (e) => {
+        // The backend emits this *after* the mission report is assembled, so
+        // the step is complete the moment it arrives — rendering it as
+        // "running" would spin until the whole final answer is streamed.
         const entry: ToolCallEntry = {
           task_id: `aggregate-${Date.now()}`,
           agent_name: t("app.agents.aggregator"),
-          description: t("app.agents.aggregating"),
-          status: "running",
+          description: t("app.agents.aggregated", { count: e.payload?.task_count ?? 0 }),
+          status: "done",
         };
         currentToolCallsRef.current = [...currentToolCallsRef.current, entry];
         updateActiveAssistantToolCalls(currentToolCallsRef.current);
@@ -1141,7 +1144,13 @@ export default function App() {
         );
       },
       onDone() {
-        saveHistory(sessionId, "assistant", accumulatedContent, currentToolCallsRef.current.length > 0 ? JSON.stringify(currentToolCallsRef.current) : undefined, accumulatedReasoning || undefined)
+        // Settle the still-running steps before persisting: the transcript
+        // must never carry a "running" entry into the history (it would spin
+        // forever once the chat is reloaded).
+        const finalToolCalls = currentToolCallsRef.current.map((e) =>
+          e.status === "running" ? { ...e, status: "done" as const } : e
+        );
+        saveHistory(sessionId, "assistant", accumulatedContent, finalToolCalls.length > 0 ? JSON.stringify(finalToolCalls) : undefined, accumulatedReasoning || undefined)
           .then((dbId) => {
             setMessages((prev) =>
               prev.map((m) => (m.id === assistantId ? { ...m, dbId } : m))
@@ -1149,9 +1158,6 @@ export default function App() {
           })
           .catch(console.error);
         setMessages((prev) => {
-          const finalToolCalls = currentToolCallsRef.current.map((e) =>
-            e.status === "running" ? { ...e, status: "done" as const } : e
-          );
           return prev
             .filter((m) => !m.id.startsWith("agent-progress-"))
             .map((m) => {
@@ -1168,12 +1174,22 @@ export default function App() {
       },
       onError(err) {
         setError(err);
+        // A step that was still running when the turn failed never completed:
+        // settle it so the group does not keep a spinner spinning forever.
+        const settledToolCalls = currentToolCallsRef.current.map((e) =>
+          e.status === "running" ? { ...e, status: "error" as const } : e
+        );
         setMessages((prev) =>
           prev
             .filter((m) => !m.id.startsWith("agent-progress-"))
             .map((m) =>
               m.id === assistantId
-                ? { ...m, content: m.content || t("app.errorPrefix") + err, streaming: false }
+                ? {
+                    ...m,
+                    content: m.content || t("app.errorPrefix") + err,
+                    streaming: false,
+                    ...(settledToolCalls.length ? { tool_calls: settledToolCalls } : {}),
+                  }
                 : m
             )
         );
@@ -1259,7 +1275,10 @@ export default function App() {
         );
       },
       onDone() {
-        saveHistory(sessionId, "assistant", accumulatedContent, currentToolCallsRef.current.length > 0 ? JSON.stringify(currentToolCallsRef.current) : undefined, accumulatedReasoning || undefined)
+        const finalToolCalls = currentToolCallsRef.current.map((e) =>
+          e.status === "running" ? { ...e, status: "done" as const } : e
+        );
+        saveHistory(sessionId, "assistant", accumulatedContent, finalToolCalls.length > 0 ? JSON.stringify(finalToolCalls) : undefined, accumulatedReasoning || undefined)
           .then((dbId) => {
             setMessages((prev) =>
               prev.map((m) => (m.id === assistantId ? { ...m, dbId } : m))
@@ -1267,9 +1286,6 @@ export default function App() {
           })
           .catch(console.error);
         setMessages((prev) => {
-          const finalToolCalls = currentToolCallsRef.current.map((e) =>
-            e.status === "running" ? { ...e, status: "done" as const } : e
-          );
           return prev
             .filter((m) => !m.id.startsWith("agent-progress-"))
             .map((m) => {
@@ -1286,12 +1302,20 @@ export default function App() {
       },
       onError(err) {
         setError(err);
+        const settledToolCalls = currentToolCallsRef.current.map((e) =>
+          e.status === "running" ? { ...e, status: "error" as const } : e
+        );
         setMessages((prev) =>
           prev
             .filter((m) => !m.id.startsWith("agent-progress-"))
             .map((m) =>
               m.id === assistantId
-                ? { ...m, content: m.content || t("app.errorPrefix") + err, streaming: false }
+                ? {
+                    ...m,
+                    content: m.content || t("app.errorPrefix") + err,
+                    streaming: false,
+                    ...(settledToolCalls.length ? { tool_calls: settledToolCalls } : {}),
+                  }
                 : m
             )
         );
@@ -1440,7 +1464,6 @@ export default function App() {
     }
     const requiresSudo = confirmDialog.requires_auth === "sudo";
     const requiresElevation = confirmDialog.requires_auth === "elevation";
-    const isExternalPath = confirmDialog.confirm_kind === "external_path";
     const isExternalAgent = confirmDialog.confirm_kind === "external_agent";
     // Prefer structured risk data from the risk-assessment event, falling back
     // to fields carried on the confirm-required payload itself.
@@ -1455,44 +1478,81 @@ export default function App() {
       ? t("app.confirm.titleSudo")
       : requiresElevation
         ? t("app.confirm.titleElevation")
-        : isExternalPath
-          ? t("app.confirm.titleExternalPath")
-          : isExternalAgent
-            ? t("app.confirm.titleExternalAgent")
-            : hasRisk
-              ? t("app.confirm.titleRisk", { level: riskLevel ?? "" })
-              : t("app.confirm.titleDangerous");
+        : isExternalAgent
+          ? t("app.confirm.titleExternalAgent")
+          : hasRisk
+            ? t("app.confirm.titleRisk", { level: riskLevel ?? "" })
+            : t("app.confirm.titleDangerous");
     const badge = requiresSudo
       ? t("app.confirm.badgeSudo")
       : requiresElevation
         ? t("app.confirm.badgeAdmin")
-        : isExternalPath
-          ? t("app.confirm.badgePath")
-          : isExternalAgent
-            ? t("app.confirm.badgeExternalAgent")
-            : hasRisk
-              ? riskLevel ?? t("app.confirm.badgeRisk")
-              : t("app.confirm.badgeDangerous");
+        : isExternalAgent
+          ? t("app.confirm.badgeExternalAgent")
+          : hasRisk
+            ? riskLevel ?? t("app.confirm.badgeRisk")
+            : t("app.confirm.badgeDangerous");
     const preview =
       confirmDialog.code.length > 400
         ? confirmDialog.code.slice(0, 400) + "…"
         : confirmDialog.code;
 
     return (
-      <div className="confirm-overlay">
-        <div className="confirm-dialog">
-          <h2>
-            <FontAwesomeIcon icon={faTriangleExclamation} className="confirm-dialog-icon" />
-            {title} <span className="confirm-dialog-badge">{badge}</span>
-          </h2>
-          <p>
-            <strong>{t("app.confirm.reason")}</strong> {confirmDialog.reason}
-          </p>
-          <p>
-            <strong>{t("app.confirm.type")}</strong> {confirmDialog.cmd_type}
-          </p>
+      <div className="confirm-panel" role="alertdialog" aria-label={title}>
+        <div className="confirm-panel-body">
+          <div className="confirm-panel-header">
+            <FontAwesomeIcon icon={faTriangleExclamation} className="confirm-panel-icon" />
+            <span className="confirm-panel-title">{title}</span>
+            <span className="confirm-panel-badge">{badge}</span>
+          </div>
+          <div className="confirm-panel-meta">
+            <span>
+              <strong>{t("app.confirm.reason")}</strong> {confirmDialog.reason}
+            </span>
+            <span>
+              <strong>{t("app.confirm.type")}</strong> {confirmDialog.cmd_type}
+            </span>
+          </div>
+          <div className="confirm-panel-preview">
+            <pre>{preview}</pre>
+          </div>
+          {requiresSudo && (
+            <div className="confirm-panel-credentials">
+              <label>
+                {t("app.confirm.username")}
+                <input
+                  value={confirmUsername}
+                  onChange={(e) => setConfirmUsername(e.target.value)}
+                  placeholder={t("app.confirm.usernamePlaceholder")}
+                />
+              </label>
+              <label>
+                {t("app.confirm.password")}
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder={t("app.confirm.passwordPlaceholder")}
+                  autoFocus
+                />
+              </label>
+              <p className="confirm-panel-hint">
+                {t("app.confirm.sudoHint")}
+              </p>
+            </div>
+          )}
+          {requiresElevation && (
+            <p className="confirm-panel-hint">
+              {t("app.confirm.elevationHint")}
+            </p>
+          )}
+          {isExternalAgent && (
+            <p className="confirm-panel-hint">
+              {t("app.confirm.externalAgentHint")}
+            </p>
+          )}
           {hasRisk && (
-            <div className="confirm-dialog-risk">
+            <div className="confirm-panel-risk">
               <div className="confirm-risk-header">
                 <span className={`confirm-risk-level confirm-risk-level-${String(riskLevel).toLowerCase()}`}>
                   {riskLevel}
@@ -1524,64 +1584,23 @@ export default function App() {
               )}
             </div>
           )}
-          {requiresSudo && (
-            <div className="confirm-dialog-credentials">
-              <label>
-                {t("app.confirm.username")}
-                <input
-                  value={confirmUsername}
-                  onChange={(e) => setConfirmUsername(e.target.value)}
-                  placeholder={t("app.confirm.usernamePlaceholder")}
-                />
-              </label>
-              <label>
-                {t("app.confirm.password")}
-                <input
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder={t("app.confirm.passwordPlaceholder")}
-                  autoFocus
-                />
-              </label>
-              <p className="confirm-dialog-hint">
-                {t("app.confirm.sudoHint")}
-              </p>
-            </div>
-          )}
-          {requiresElevation && (
-            <p className="confirm-dialog-hint">
-              {t("app.confirm.elevationHint")}
-            </p>
-          )}
-          {isExternalPath && (
-            <p className="confirm-dialog-hint">
-              {t("app.confirm.externalPathHint")}
-            </p>
-          )}
-          {isExternalAgent && (
-            <p className="confirm-dialog-hint">
-              {t("app.confirm.externalAgentHint")}
-            </p>
-          )}
-          <div className="confirm-dialog-preview">
-            <pre>{preview}</pre>
-          </div>
-          <div className="confirm-dialog-buttons">
-            <button
-              className="confirm-dialog-button cancel"
-              onClick={() => respondToConfirm(false)}
-            >
-              {t("app.confirm.deny")}
-            </button>
-            <button
-              className="confirm-dialog-button confirm"
-              onClick={() => respondToConfirm(true)}
-              disabled={requiresSudo && confirmPassword.trim().length === 0}
-            >
-              {t("app.confirm.allow")}
-            </button>
-          </div>
+        </div>
+        <div className="confirm-panel-actions">
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => respondToConfirm(false)}
+          >
+            {t("app.confirm.deny")}
+          </button>
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => respondToConfirm(true)}
+            disabled={requiresSudo && confirmPassword.trim().length === 0}
+          >
+            {t("app.confirm.allow")}
+          </button>
         </div>
       </div>
     );
@@ -1599,6 +1618,13 @@ export default function App() {
       cleanupRef.current = null;
     }
 
+    // A step that was still running when the user hit Stop never completed:
+    // settle it so the group does not keep a spinner spinning forever.
+    const assistantId = currentAssistantMessageIdRef.current;
+    const settledToolCalls = currentToolCallsRef.current.map((e) =>
+      e.status === "running" ? { ...e, status: "error" as const } : e
+    );
+
     setMessages((prev) =>
       prev.map((m) => {
         if (!m.streaming) return m;
@@ -1612,7 +1638,14 @@ export default function App() {
         const content = isGenerationStopped(m.content)
           ? m.content
           : (m.content || "") + stopSuffix;
-        return { ...m, content, streaming: false };
+        return {
+          ...m,
+          content,
+          streaming: false,
+          ...(m.id === assistantId && settledToolCalls.length
+            ? { tool_calls: settledToolCalls }
+            : {}),
+        };
       })
     );
     setStreaming(false);
@@ -1666,7 +1699,6 @@ export default function App() {
 
   return (
     <div className="app-layout">
-      {renderConfirmDialog()}
       {markdownEditorOpen && (
         <Portal>
           <div className="markdown-editor-overlay" role="dialog" aria-modal="true" aria-label={t("app.markdownEditorAria")}>
@@ -2115,6 +2147,7 @@ export default function App() {
               ))}
             </div>
           )}
+          {renderConfirmDialog()}
           <div className="input-row">
             <button
               className="attach-btn"

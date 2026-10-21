@@ -4,9 +4,7 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, Manager};
 
-use self::paths::{
-    build_workspace_scoped_shell_code, validate_shell_working_directory_changes, with_root_header,
-};
+use self::paths::{build_workspace_scoped_shell_code, with_root_header};
 use self::risk::{generate_risk_report, score_to_risk_level};
 use self::search::{run_integrated_search, SearchOptions, SEARCH_MAX_MATCHES};
 
@@ -33,7 +31,7 @@ pub(crate) use self::process::{decode_process_bytes, OutputDecodeHint};
 use self::process::decode_windows_process_bytes_with_code_pages;
 #[cfg(test)]
 use self::{
-    file_actions::{build_file_diff, external_absolute_path_candidate},
+    file_actions::build_file_diff,
     patch::apply_unified_patch,
     paths::ensure_mutation_target_allowed,
     risk::{calculate_risk_score, syntax_gate_check, RiskLevel, REJECT_THRESHOLD, RISK_THRESHOLDS},
@@ -97,11 +95,11 @@ pub(crate) async fn request_tool_confirmation(
     confirm_kind: &'static str,
     requires_auth: &'static str,
 ) -> crate::ToolConfirmation {
-    // `confirm_kind` comes from `RiskLevel::confirm_kind()` (or the literal
-    // "external_path" call sites below) and is matched against the kinds the
-    // Tools panel persisted in `auto_accept_confirm_kinds` — which may also hold
-    // the `"*"` wildcard meaning "every kind". Compare case-insensitively and
-    // ignore stray whitespace so hand-edited config.json values still match.
+    // `confirm_kind` comes from `RiskLevel::confirm_kind()` and is matched
+    // against the kinds the Tools panel persisted in
+    // `auto_accept_confirm_kinds` — which may also hold the `"*"` wildcard
+    // meaning "every kind". Compare case-insensitively and ignore stray
+    // whitespace so hand-edited config.json values still match.
     let auto_accept_enabled = app
         .state::<crate::AppState>()
         .config
@@ -267,7 +265,7 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "file_actions",
-                "description": "Perform file operations on workspace files. Always use `./...` paths (for example `./src/App.tsx`) or `.` for the workspace root; absolute paths inside the workspace root are also accepted. A path outside the workspace root is allowed only after explicit user approval. Protected self-evolution targets create automated backups before mutation.",
+                "description": "Perform file operations strictly inside the workspace. Always use `./...` paths (for example `./src/App.tsx`) or `.` for the workspace root; absolute paths inside the workspace root are also accepted. Anything that resolves outside the workspace root is rejected — use `run_shell` only when external access is genuinely required. Protected self-evolution targets create automated backups before mutation.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -673,7 +671,6 @@ mod tests {
     use super::decode_windows_process_bytes_with_code_pages;
     use super::ensure_mutation_target_allowed;
     use super::run_integrated_search;
-    use super::validate_shell_working_directory_changes;
     use super::OutputDecodeHint;
     use super::SearchOptions;
     use super::SEARCH_MAX_FILE_BYTES;
@@ -931,22 +928,6 @@ mod tests {
     }
 
     #[test]
-    fn shell_directory_changes_cannot_escape_workspace() {
-        let workspace_root = make_temp_dir("shell-dir-guard");
-
-        let err = validate_shell_working_directory_changes(
-            "powershell",
-            "Set-Location ..\\..",
-            &workspace_root,
-        )
-        .unwrap_err();
-
-        assert!(err.contains("workspace root"));
-
-        let _ = fs::remove_dir_all(&workspace_root);
-    }
-
-    #[test]
     fn resolve_safe_path_rejects_external_absolute_paths() {
         let workspace_root = make_temp_dir("resolve-safe-path");
         let external_root = make_temp_dir("resolve-safe-path-external");
@@ -957,25 +938,6 @@ mod tests {
             .unwrap_err();
 
         assert!(err.contains("outside the workspace root"));
-
-        let _ = fs::remove_dir_all(&workspace_root);
-        let _ = fs::remove_dir_all(&external_root);
-    }
-
-    #[test]
-    fn detects_external_absolute_path_candidate() {
-        let workspace_root = make_temp_dir("external-path-candidate-workspace");
-        let external_root = make_temp_dir("external-path-candidate-external");
-        let external_file = external_root.join("outside.txt");
-        fs::write(&external_file, "outside").unwrap();
-
-        let resolved = super::external_absolute_path_candidate(
-            &workspace_root,
-            &external_file.display().to_string(),
-        )
-        .unwrap();
-
-        assert_eq!(resolved, external_file.canonicalize().unwrap());
 
         let _ = fs::remove_dir_all(&workspace_root);
         let _ = fs::remove_dir_all(&external_root);
@@ -1238,40 +1200,6 @@ mod tests {
             vec!["echo", "hello world"]
         );
         assert_eq!(split_command_line("echo 'a b' c"), vec!["echo", "a b", "c"]);
-    }
-
-    #[test]
-    fn shell_cd_escape_is_caught_anywhere_in_statement() {
-        let workspace_root = make_temp_dir("shell-cd-anywhere");
-
-        for code in [
-            "echo hi && cd /etc",
-            "echo hi; cd /etc",
-            "(cd /etc && ls)",
-            "for d in a b; do cd /etc; done",
-            "cd $HOME",
-            "cd ~",
-            "cd",
-            "pushd /etc",
-        ] {
-            let err = validate_shell_working_directory_changes("bash", code, &workspace_root)
-                .unwrap_err();
-            assert!(
-                err.contains("workspace root") || err.contains("literal path"),
-                "expected '{}' to be rejected, got: {}",
-                code,
-                err
-            );
-        }
-
-        validate_shell_working_directory_changes("bash", "# cd /etc\necho hi", &workspace_root)
-            .unwrap();
-
-        let sub = workspace_root.join("sub");
-        fs::create_dir_all(&sub).unwrap();
-        validate_shell_working_directory_changes("bash", "cd sub && ls", &workspace_root).unwrap();
-
-        let _ = fs::remove_dir_all(&workspace_root);
     }
 
     // ─── Unified Patch Application Tests ───────────────────────────────────
@@ -2464,12 +2392,6 @@ pub async fn execute_tool(
             }
             if code.trim().is_empty() {
                 return "Error: run_shell requires a non-empty 'code' argument.".to_string();
-            }
-
-            if let Err(err) =
-                validate_shell_working_directory_changes(&shell_type, &code, &workspace_dir)
-            {
-                return format!("⛔ {}", err);
             }
 
             // ── Patent-compliant risk assessment ──────────────────────────────

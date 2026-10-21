@@ -282,7 +282,12 @@ pub async fn run_command(
     };
 
     if let Some(dir) = cwd {
-        cmd.current_dir(dir);
+        cmd.current_dir(&dir);
+        // `current_dir` does not update the inherited `PWD`, and programs that
+        // resolve their project root from it would keep seeing the app's launch
+        // directory. Keep the two in sync for run_cmd / run_shell (same rule as
+        // `agents/cli.rs` and `mcp.rs`).
+        cmd.env("PWD", &dir);
     }
 
     #[cfg(windows)]

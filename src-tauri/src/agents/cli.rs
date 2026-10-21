@@ -436,8 +436,14 @@ fn strip_terminal_sequences(input: &str) -> String {
         match ch {
             '\u{1b}' => skip_escape_sequence(&mut chars),
             '\r' => {
-                // A carriage return redraws the current line: keep only the
-                // text after the last one.
+                // CRLF is a plain line ending: drop the CR and keep the text.
+                // Windows CLIs write `\r\n`, and treating that CR like a
+                // progress-bar redraw would erase the whole line.
+                if chars.peek() == Some(&'\n') {
+                    continue;
+                }
+                // A lone carriage return redraws the current line: keep only
+                // the text after the last one.
                 match out.rfind('\n') {
                     Some(index) => out.truncate(index + 1),
                     None => out.clear(),

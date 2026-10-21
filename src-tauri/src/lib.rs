@@ -127,6 +127,17 @@ pub(crate) fn apply_config(
     // (`<workspace>/.data`), so a workspace switch must re-point the SQLite
     // connection before the UI reloads anything from it.
     if previous_workspace_path != new_workspace_path {
+        // Stdio MCP children are rooted in the workspace they were started in
+        // (`mcp::build_stdio_cmd`), so a switch must retire them. The next MCP
+        // tool call re-spawns them through `ensure_stdio_process`, now rooted
+        // in the new workspace.
+        let app_handle = app.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Some(state) = app_handle.try_state::<AppState>() {
+                mcp::stop_all_stdio_processes(&state).await;
+            }
+        });
+
         reopen_workspace_db(state, &new_workspace_path)?;
 
         // The active skill list is workspace-scoped too: skills that came from

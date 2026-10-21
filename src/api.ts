@@ -178,7 +178,8 @@ export interface StreamCallbacks {
   onAgentTaskDone?: (e: AgentTaskEvent) => void;
   onAgentTaskError?: (e: AgentTaskEvent) => void;
   onAgentPlanStart?: (taskCount: number) => void;
-  onAgentAggregateStart?: () => void;
+  /** The mission report was assembled — the step is already complete. */
+  onAgentAggregateDone?: (taskCount: number) => void;
 }
 
 export async function chatCompletion(
@@ -230,11 +231,11 @@ export async function chatCompletion(
   const unPlanStart = await listen<{ task_count: number }>("agent-plan-start", (e) => {
     callbacks.onAgentPlanStart?.(e.payload.task_count);
   });
-  const unAggStart = await listen<void>("agent-aggregate-start", () => {
-    callbacks.onAgentAggregateStart?.();
+  const unAggDone = await listen<{ task_count: number }>("agent-aggregate-done", (e) => {
+    callbacks.onAgentAggregateDone?.(e.payload?.task_count ?? 0);
   });
 
-  unlisteners.push(unToken, unReasoning, unDone, unError, unTaskStart, unTaskDone, unTaskError, unPlanStart, unAggStart);
+  unlisteners.push(unToken, unReasoning, unDone, unError, unTaskStart, unTaskDone, unTaskError, unPlanStart, unAggDone);
 
   invoke("chat_completion", {
     messages: messages.map((m) => ({
