@@ -4,7 +4,7 @@
 
 [English](./README.md) · [最新版本](https://github.com/xlbbb-cn/ai-chat/releases/latest) · [快速开始](#快速开始)
 
-![AI Chat 主界面 —— 在工作区内执行技能审计，工具调用与工作区路径一目了然](docs/app.png)
+![AI Chat 主界面 —— 在工作区内执行技能审计，工具调用与工作区路径一目了然](docs/main-window.png)
 
 <p align="center">
   <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/AI-Chat-Windows-x64-setup.exe"><img alt="下载 Windows 安装包" src="https://img.shields.io/badge/Download-Windows%20.exe-3E6AE1?style=for-the-badge&logo=windows11&logoColor=white" height="38"></a>
