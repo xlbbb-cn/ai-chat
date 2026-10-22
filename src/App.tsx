@@ -1637,29 +1637,37 @@ export default function App() {
     const settledToolCalls = currentToolCallsRef.current.map((e) =>
       e.status === "running" ? { ...e, status: "error" as const } : e
     );
-
+    // The turn is over: sub-agents were torn down by the backend and their
+    // `agent-task-done` events arrive after the listeners are gone, so settle
+    // the per-agent spinners and drop the in-turn progress rows here.
+    setAgentStatuses({});
+    hasRunningToolCallRef.current = false;
+    currentAssistantMessageIdRef.current = null;
+    currentToolCallsRef.current = [];
     setMessages((prev) =>
-      prev.map((m) => {
-        if (!m.streaming) return m;
-        const stopSuffix = "\n\n" + t("app.generationStopped");
-        // `content` may be a string OR a multimodal array — only mutate
-        // string content (assistant streamed text). Leave other shapes
-        // untouched.
-        if (typeof m.content !== "string") {
-          return { ...m, streaming: false };
-        }
-        const content = isGenerationStopped(m.content)
-          ? m.content
-          : (m.content || "") + stopSuffix;
-        return {
-          ...m,
-          content,
-          streaming: false,
-          ...(m.id === assistantId && settledToolCalls.length
-            ? { tool_calls: settledToolCalls }
-            : {}),
-        };
-      })
+      prev
+        .filter((m) => !m.id.startsWith("agent-progress-"))
+        .map((m) => {
+          if (!m.streaming) return m;
+          const stopSuffix = "\n\n" + t("app.generationStopped");
+          // `content` may be a string OR a multimodal array — only mutate
+          // string content (assistant streamed text). Leave other shapes
+          // untouched.
+          if (typeof m.content !== "string") {
+            return { ...m, streaming: false };
+          }
+          const content = isGenerationStopped(m.content)
+            ? m.content
+            : (m.content || "") + stopSuffix;
+          return {
+            ...m,
+            content,
+            streaming: false,
+            ...(m.id === assistantId && settledToolCalls.length
+              ? { tool_calls: settledToolCalls }
+              : {}),
+          };
+        })
     );
     setStreaming(false);
   }

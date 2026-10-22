@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tiktoken_rs::cl100k_base;
 use uuid::Uuid;
@@ -1228,12 +1229,16 @@ async fn call_llm_once(
 // ─── Orchestration entry point ────────────────────────────────────────────────
 
 /// Main orchestration entry point called from llm_complete.rs.
+///
+/// `cancelled` is THIS turn's cancel flag (the per-turn flag swapped in by
+/// `chat_completion`), so the mission observes the Stop of its own turn only.
 pub async fn orchestrate(
     app: &AppHandle,
     state: &AppState,
     config: &AppConfig,
     messages: &[crate::llm_complete::ChatMessage],
     session_id: &str,
+    cancelled: Arc<AtomicBool>,
 ) -> Result<String, String> {
     let agents_config = load_agents_config(&state.agents_config_path);
     let enabled: Vec<SubAgent> = agents_config
@@ -1272,8 +1277,12 @@ pub async fn orchestrate(
         enabled
     };
 
-    // Step 2: Plan
+    // Step 2: Plan. Stop pressed between steps aborts the mission here, before
+    // any sub-agent is launched.
     let _ = app.emit("agent-plan-start", json!({ "task_count": 0 }));
+    if cancelled.load(Ordering::SeqCst) {
+        return Err("stopped by the user".to_string());
+    }
     let plan = plan_tasks(
         &client,
         &url,
@@ -1285,6 +1294,9 @@ pub async fn orchestrate(
     )
     .await?;
 
+    if cancelled.load(Ordering::SeqCst) {
+        return Err("stopped by the user".to_string());
+    }
     if plan.tasks.is_empty() {
         return Err("Planner produced no tasks".to_string());
     }
@@ -1312,7 +1324,7 @@ pub async fn orchestrate(
         skill_access_roots,
         use_parallel,
         orchestration.max_concurrent,
-        &state.chat_cancelled,
+        &cancelled,
     )
     .await;
 
@@ -1515,7 +1527,7 @@ async fn execute_tasks(
     skill_access_roots: Vec<PathBuf>,
     use_parallel: bool,
     max_concurrent: usize,
-    cancelled: &AtomicBool,
+    cancelled: &Arc<AtomicBool>,
 ) -> Vec<TaskResult> {
     if use_parallel {
         execute_parallel(
@@ -1560,7 +1572,7 @@ async fn execute_parallel(
     workspace_dir: PathBuf,
     skill_access_roots: Vec<PathBuf>,
     max_concurrent: usize,
-    cancelled: &AtomicBool,
+    cancelled: &Arc<AtomicBool>,
 ) -> Vec<TaskResult> {
     use std::collections::HashMap;
     use tokio::task::JoinSet;
@@ -1614,6 +1626,11 @@ async fn execute_parallel(
                 let task_c = task.clone();
                 let wd_c = workspace_dir.clone();
                 let skill_roots_c = skill_access_roots.clone();
+                // Arc snapshot of the app-global cancel flag: the spawned job
+                // and every sub-agent inside it observe the same flag, so Stop
+                // tears down mid-flight agents instead of only skipping future
+                // tasks.
+                let cancelled_c = cancelled.clone();
                 let is_cancelled = cancelled.load(Ordering::SeqCst);
                 let job_meta = (task.id.clone(), agent.id.clone(), agent.name.clone());
 
@@ -1639,6 +1656,7 @@ async fn execute_parallel(
                         &task_c,
                         wd_c,
                         skill_roots_c,
+                        cancelled_c,
                     )
                     .await
                 });
@@ -1709,7 +1727,7 @@ async fn execute_sequential(
     tasks: Vec<Task>,
     workspace_dir: PathBuf,
     skill_access_roots: Vec<PathBuf>,
-    cancelled: &AtomicBool,
+    cancelled: &Arc<AtomicBool>,
 ) -> Vec<TaskResult> {
     let mut results = Vec::new();
     for task in tasks {
@@ -1730,6 +1748,7 @@ async fn execute_sequential(
             &task,
             workspace_dir.clone(),
             skill_access_roots.clone(),
+            cancelled.clone(),
         )
         .await;
         results.push(res);
@@ -1749,16 +1768,17 @@ pub async fn run_sub_agent(
     task: &Task,
     workspace_dir: PathBuf,
     skill_access_roots: Vec<PathBuf>,
+    cancelled: Arc<AtomicBool>,
 ) -> TaskResult {
     let mission_id = mission_id_for_task(task).to_string();
     let agent_type = normalize_agent_type(&agent.agent_type);
     let result = match agent_type.as_str() {
         AGENT_TYPE_CLI => {
-            run_external_agent(app, agent, task, session_id, workspace_dir, ExternalBackend::Cli)
+            run_external_agent(app, agent, task, session_id, workspace_dir, ExternalBackend::Cli, cancelled)
                 .await
         }
         AGENT_TYPE_CLOUD => {
-            run_external_agent(app, agent, task, session_id, workspace_dir, ExternalBackend::Cloud)
+            run_external_agent(app, agent, task, session_id, workspace_dir, ExternalBackend::Cloud, cancelled)
                 .await
         }
         _ => {
@@ -1772,6 +1792,7 @@ pub async fn run_sub_agent(
                 task,
                 workspace_dir,
                 skill_access_roots,
+                &cancelled,
             )
             .await
         }
@@ -1822,6 +1843,7 @@ async fn run_external_agent(
     session_id: &str,
     workspace_dir: PathBuf,
     backend: ExternalBackend,
+    cancelled: Arc<AtomicBool>,
 ) -> TaskResult {
     let mission_id = mission_id_for_task(task).to_string();
     let _ = app.emit(
@@ -1899,7 +1921,7 @@ async fn run_external_agent(
         }
     }
 
-    let outcome: Result<(String, String), String> = match backend {
+    let outcome: Result<(&'static str, String, String), String> = match backend {
         ExternalBackend::Cli => {
             let cwd = match resolve_agent_cwd(agent, &workspace_dir) {
                 Ok(cwd) => cwd,
@@ -1919,22 +1941,34 @@ async fn run_external_agent(
                     };
                 }
             };
-            cli::run(app, agent, &task.id, &prompt, cwd)
+            cli::run(app, agent, &task.id, &prompt, cwd, cancelled)
                 .await
-                .map(|run| (run.output, run.summary))
+                // The run status distinguishes "user stopped it" from a real
+                // success so the mission is not marked accomplished on cancel.
+                .map(|run| (run.status, run.output, run.summary))
                 .map_err(|err| format!("CLI agent \"{}\" failed: {err}", agent.name))
         }
-        ExternalBackend::Cloud => cloud::run(app, agent, &task.id, &prompt, &workspace_dir)
+        ExternalBackend::Cloud => cloud::run(app, agent, &task.id, &prompt, &workspace_dir, cancelled)
             .await
-            .map(|run| (run.result, run.summary))
+            .map(|run| ("success", run.result, run.summary))
             .map_err(|err| format!("Cloud agent \"{}\" failed: {err}", agent.name)),
     };
 
     match outcome {
-        Ok((content, summary)) => {
-            let state = app.state::<AppState>();
-            if let Ok(db) = state.db.lock() {
-                let _ = mark_mission_accomplished(&db, &mission_id, Some(&content));
+        Ok((run_status, content, summary)) => {
+            // A run the user stopped is not a success: the mission closes as
+            // "stopped" (via run_sub_agent) instead of "accomplished".
+            let status = if run_status == "cancelled" {
+                "stopped"
+            } else {
+                "success"
+            };
+            if status == "success" {
+                let state = app.state::<AppState>();
+                let db = state.db.lock();
+                if let Ok(db) = db {
+                    let _ = mark_mission_accomplished(&db, &mission_id, Some(&content));
+                }
             }
             let _ = app.emit(
                 "agent-task-done",
@@ -1949,13 +1983,16 @@ async fn run_external_agent(
                 task_id: task.id.clone(),
                 agent_id: agent.id.clone(),
                 agent_name: agent.name.clone(),
-                status: "success".to_string(),
+                status: status.to_string(),
                 content,
                 tool_calls_count: 0,
                 tokens_used: 0,
             }
         }
         Err(err) => {
+            // Cloud agents report a stop as an error message; surface the
+            // mission as "stopped" rather than "failed" for those.
+            let status = if err.contains("cancel") { "stopped" } else { "error" };
             let _ = app.emit(
                 "agent-task-error",
                 json!({ "task_id": task.id, "agent_id": agent.id, "error": err }),
@@ -1964,7 +2001,7 @@ async fn run_external_agent(
                 task_id: task.id.clone(),
                 agent_id: agent.id.clone(),
                 agent_name: agent.name.clone(),
-                status: "error".to_string(),
+                status: status.to_string(),
                 content: format!("Error: {err}"),
                 tool_calls_count: 0,
                 tokens_used: 0,
@@ -2095,6 +2132,7 @@ async fn run_sub_agent_inner(
     task: &Task,
     workspace_dir: PathBuf,
     skill_access_roots: Vec<PathBuf>,
+    cancelled: &AtomicBool,
 ) -> TaskResult {
     let _ = app.emit(
         "agent-task-start",
@@ -2120,7 +2158,10 @@ async fn run_sub_agent_inner(
         .collect();
     let mut tools_list = tools::get_all_tools(&agent_tool_ids);
     tools_list.extend(tools::get_agent_task_tools());
-    let cancelled = AtomicBool::new(false);
+    // `cancelled` is the caller's flag — the turn's own cancel flag when the
+    // agent runs inside a chat turn, so pressing Stop in the chat tears the
+    // autonomous loop down as well. It is never a fresh local flag: a detached
+    // flag can never become true, and Stop would be ignored.
     let mut total_tokens: u32 = 0;
     let mut tool_calls_count: u32 = 0;
     let mission_id = mission_id_for_task(task).to_string();
@@ -2355,7 +2396,7 @@ async fn run_sub_agent_inner(
             url,
             &config.api_key,
             req_body,
-            &cancelled,
+            cancelled,
             StreamOptions {
                 token_event: "agent-task-token",
                 task_id: Some(&task.id),

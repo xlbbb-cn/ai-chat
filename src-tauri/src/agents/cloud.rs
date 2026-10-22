@@ -13,10 +13,9 @@ use std::time::Duration;
 
 use serde::Serialize;
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 use super::{KeyValue, SubAgent};
-use crate::AppState;
 
 /// Timeout for the panel's connectivity probe.
 const PROBE_TIMEOUT_SECS: u64 = 30;
@@ -185,6 +184,7 @@ pub async fn run(
     task_id: &str,
     prompt: &str,
     cwd: &Path,
+    cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<CloudRunOutcome, String> {
     let settings = &agent.cloud;
     let endpoint = settings.endpoint.trim();
@@ -261,7 +261,7 @@ pub async fn run(
     let mut attempt: u32 = 0;
     let mut last_status = String::new();
     loop {
-        if app.state::<AppState>().chat_cancelled.load(Ordering::SeqCst) {
+        if cancelled.load(Ordering::SeqCst) {
             return Err("cancelled by the user".to_string());
         }
         if tokio::time::Instant::now() >= deadline {

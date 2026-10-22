@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 
@@ -1270,7 +1271,19 @@ pub async fn chat_completion(
     use_agents: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    state.chat_cancelled.store(false, Ordering::SeqCst);
+    // A fresh cancel flag belongs to this turn. Any previous turn that is still
+    // winding down keeps polling its own flag — which just became permanently
+    // `true` — so it exits instead of resurrecting when this turn runs. Stop
+    // pressed while idle can also never leak into the next turn.
+    let turn_cancelled = {
+        let turn_flag = Arc::new(AtomicBool::new(false));
+        let previous = {
+            let mut slot = state.chat_cancelled.lock().unwrap();
+            std::mem::replace(&mut *slot, turn_flag.clone())
+        };
+        previous.store(true, Ordering::SeqCst);
+        turn_flag
+    };
     let config = state.config.lock().unwrap().clone();
     let multi_agent_enabled = use_agents.unwrap_or(false);
     log_event(
@@ -1291,7 +1304,16 @@ pub async fn chat_completion(
         let agents_cfg = agents::load_agents_config(&state.agents_config_path);
         let has_enabled = agents_cfg.agents.iter().any(|a| a.enabled);
         if has_enabled {
-            match agents::orchestrate(&app, &state, &config, &messages, &session_id).await {
+            match agents::orchestrate(
+                &app,
+                &state,
+                &config,
+                &messages,
+                &session_id,
+                turn_cancelled.clone(),
+            )
+            .await
+            {
                 Ok(report) => mission_results = Some(report),
                 Err(err) => log_event(
                     &state,
@@ -1299,7 +1321,21 @@ pub async fn chat_completion(
                     format!("agent orchestration skipped, answering directly: {err}"),
                 ),
             }
-            state.chat_cancelled.store(false, Ordering::SeqCst);
+            // "Stop" pressed during planning/execution ends the whole turn: the
+            // in-flight sub-agents tore themselves down (cli/cloud kill their
+            // process trees, the executor skipped the remaining tasks), so the
+            // final answer must not run — and the turn flag must NOT be reset
+            // here, or the rest of the turn would keep working after the user
+            // asked it to stop.
+            if turn_cancelled.load(Ordering::SeqCst) {
+                log_event(
+                    &state,
+                    "INFO",
+                    format!("agent orchestration stopped by user: session_id={}", session_id),
+                );
+                let _ = app.emit("chat-done", ());
+                return Ok(());
+            }
             log_event(
                 &state,
                 "INFO",
@@ -1771,7 +1807,7 @@ pub async fn chat_completion(
             &url,
             &config.api_key,
             req_body,
-            &state.chat_cancelled,
+            &turn_cancelled,
             Some(effective_max_tokens),
             config.ds_format,
             &session_id,
@@ -1973,7 +2009,7 @@ pub async fn chat_completion(
         let mut pending_skill_context_messages: Vec<Value> = vec![];
 
         for (id, name, args) in &sr.tool_calls {
-            if state.chat_cancelled.load(Ordering::SeqCst) {
+            if turn_cancelled.load(Ordering::SeqCst) {
                 break;
             }
             if name == "memory" {
@@ -2075,6 +2111,7 @@ pub async fn chat_completion(
                                 &task,
                                 workspace_dir,
                                 vec![],
+                                turn_cancelled.clone(),
                             )
                             .await;
 
@@ -2214,7 +2251,6 @@ pub async fn chat_completion(
         }
     }
 
-    state.chat_cancelled.store(false, Ordering::SeqCst);
     log_event(
         &state,
         "INFO",

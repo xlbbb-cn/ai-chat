@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
@@ -394,7 +395,14 @@ pub struct AppState {
     pub profiles_path: PathBuf,
     pub db: Mutex<Connection>,
     pub logger: Mutex<AppLogger>,
-    pub chat_cancelled: AtomicBool,
+    /// Per-turn stop flag, published by `stop_chat_completion` (Stop button).
+    /// `chat_completion` swaps in a fresh `Arc<AtomicBool>` for every new turn,
+    /// which (a) makes a turn's cancellation race-free — a superseded turn keeps
+    /// polling its own flag, which stays `true` forever, so it can never be
+    /// resurrected by the next turn resetting the slot — and (b) means Stop
+    /// pressed while idle cannot leak into the next turn (the next turn
+    /// installs its own flag anyway).
+    pub chat_cancelled: Mutex<Arc<AtomicBool>>,
     /// One-shot channel sender used to relay the user's confirm/deny response
     /// back to a waiting `execute_tool` call. Stores the request_id alongside
     /// the sender so a stale confirmation can never approve the wrong command.
@@ -560,9 +568,12 @@ fn extract_context_length(model: &serde_json::Value) -> Option<u64> {
 
 #[tauri::command]
 fn stop_chat_completion(state: State<'_, AppState>) {
-    state
-        .chat_cancelled
-        .store(true, std::sync::atomic::Ordering::SeqCst);
+    // Cancel the *current* turn's flag. If no turn is running this simply
+    // marks the slot's default flag — a new turn installs a fresh flag anyway,
+    // so the stop never leaks into the next turn.
+    if let Ok(flag) = state.chat_cancelled.lock() {
+        flag.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 /// Called by the frontend to confirm or deny a pending dangerous-command execution.
@@ -904,7 +915,7 @@ pub fn run() {
                 mcp_servers_path: mcp_servers_path.clone(),
                 agents_config_path,
                 profiles_path,
-                chat_cancelled: AtomicBool::new(false),
+                chat_cancelled: Mutex::new(Arc::new(AtomicBool::new(false))),
                 confirm_sender: Mutex::new(None),
                 mcp_logs: std::sync::Arc::new(Mutex::new(Default::default())),
                 mcp_cancelled_tests: std::sync::Arc::new(Mutex::new(Default::default())),

@@ -14,12 +14,11 @@ use std::time::Duration;
 
 use serde::Serialize;
 use serde_json::json;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 
 use crate::process_guard::{kill_process_tree, track_child};
 use crate::tools::{decode_process_bytes, truncate_tool_output, OutputDecodeHint};
-use crate::AppState;
 
 use super::{CliAgentSettings, KeyValue, SubAgent};
 
@@ -845,6 +844,7 @@ pub async fn run(
     task_id: &str,
     prompt: &str,
     cwd: PathBuf,
+    cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<CliRunOutcome, String> {
     let settings = &agent.cli;
     let resolved = resolve_executable(&settings.command)?;
@@ -928,7 +928,7 @@ pub async fn run(
                 break;
             }
             _ = poll.tick() => {
-                if app.state::<AppState>().chat_cancelled.load(Ordering::SeqCst) {
+                if cancelled.load(Ordering::SeqCst) {
                     stop_reason = Some("cancelled");
                     break;
                 }
