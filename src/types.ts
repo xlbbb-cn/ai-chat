@@ -11,6 +11,17 @@ export interface ToolCallEntry {
    * so a skill is loaded at most once per session.
    */
   skill_name?: string;
+  /**
+   * Set while this entry is blocked waiting for the user to allow or deny a
+   * risky `run_shell` command (a `confirm-required` payload that needs no
+   * credentials). ToolCallGroup renders the inline allow/deny row and the
+   * response is routed back through `confirm_command` with `request_id`.
+   */
+  confirm?: {
+    request_id: string;
+    code: string;
+    reason: string;
+  };
 }
 
 /**

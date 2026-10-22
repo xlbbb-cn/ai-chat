@@ -159,6 +159,8 @@ const zhCN: Messages = {
         completed: "已完成 {count} 次工具调用",
         completedWithErrors: "{count} 个步骤：{done} 个成功，{errors} 个失败",
         steps: "{count} 个步骤",
+        confirmTitle: "允许执行此 Shell 命令？",
+        rejected: "用户已拒绝",
     },
 
     settings: {

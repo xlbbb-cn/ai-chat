@@ -709,6 +709,28 @@ export default function App() {
       "confirm-required",
       (e) => {
         const { request_id, reason, cmd_type, code, confirm_kind, requires_auth, risk_level, risk_score, disposition, blacklist_hits, penalty_items } = e.payload;
+        // `run_shell` confirmations that need no credentials are answered
+        // inline in the tool-call group (allow/deny buttons on the card);
+        // everything else — run_cmd, sudo/elevation, external agents — keeps
+        // the standalone dialog. `run_shell` carries the shell type as
+        // `cmd_type`, `run_cmd` sends "direct".
+        const inlineShell =
+          (requires_auth ?? "none") === "none" &&
+          confirm_kind !== "external_agent" &&
+          ["bash", "sh", "powershell", "pwsh"].includes(cmd_type);
+        if (inlineShell) {
+          const entry: ToolCallEntry = {
+            task_id: request_id,
+            agent_name: "run_shell",
+            description: code.split("\n")[0].slice(0, 140),
+            status: "running",
+            confirm: { request_id, code, reason },
+          };
+          currentToolCallsRef.current = [...currentToolCallsRef.current, entry];
+          updateActiveAssistantToolCalls(currentToolCallsRef.current);
+          hasRunningToolCallRef.current = true;
+          return;
+        }
         setConfirmDialog((current) =>
           current ?? { request_id, reason, cmd_type, code, confirm_kind, requires_auth, risk_level, risk_score, disposition, blacklist_hits, penalty_items }
         );
@@ -720,7 +742,7 @@ export default function App() {
       unlisten.then((fn) => fn());
       unlistenRisk.then((fn) => fn());
     };
-  }, []);
+  }, [updateActiveAssistantToolCalls]);
 
   const respondToConfirm = useCallback((confirmed: boolean) => {
     const requiresSudo = confirmDialog?.requires_auth === "sudo";
@@ -730,6 +752,27 @@ export default function App() {
     setConfirmPassword("");
     setRiskAssessment(null);
   }, [confirmDialog, confirmUsername, confirmPassword]);
+
+  /**
+   * Answer an inline `run_shell` confirmation from the tool-call group: reply
+   * to the backend (it is blocked inside the tool call), then settle the
+   * pending entry — "running" on allow (the follow-up `tool-call` event marks
+   * it done), "error" on deny (the tool returns without emitting anything).
+   */
+  const respondToolCallConfirm = useCallback((requestId: string, allowed: boolean) => {
+    confirmCommand(requestId, allowed).catch(console.error);
+    currentToolCallsRef.current = currentToolCallsRef.current.map((entry) =>
+      entry.confirm?.request_id === requestId
+        ? {
+            ...entry,
+            confirm: undefined,
+            status: allowed ? ("running" as const) : ("error" as const),
+            error: allowed ? undefined : t("toolGroup.rejected"),
+          }
+        : entry
+    );
+    updateActiveAssistantToolCalls(currentToolCallsRef.current);
+  }, [updateActiveAssistantToolCalls, t]);
 
   useEffect(() => {
     applyConfigToUi()
@@ -1186,7 +1229,7 @@ export default function App() {
         // A step that was still running when the turn failed never completed:
         // settle it so the group does not keep a spinner spinning forever.
         const settledToolCalls = currentToolCallsRef.current.map((e) =>
-          e.status === "running" ? { ...e, status: "error" as const } : e
+          e.status === "running" ? { ...e, status: "error" as const, confirm: undefined } : e
         );
         setMessages((prev) =>
           prev
@@ -1315,7 +1358,7 @@ export default function App() {
       onError(err) {
         setError(err);
         const settledToolCalls = currentToolCallsRef.current.map((e) =>
-          e.status === "running" ? { ...e, status: "error" as const } : e
+          e.status === "running" ? { ...e, status: "error" as const, confirm: undefined } : e
         );
         setMessages((prev) =>
           prev
@@ -1634,8 +1677,13 @@ export default function App() {
     // A step that was still running when the user hit Stop never completed:
     // settle it so the group does not keep a spinner spinning forever.
     const assistantId = currentAssistantMessageIdRef.current;
+    // A stopped turn also drops any pending inline confirmation: clear the
+    // `confirm` payload so no stale allow/deny row survives the settle (the
+    // 120 s backend timeout already answers it as "not confirmed").
     const settledToolCalls = currentToolCallsRef.current.map((e) =>
-      e.status === "running" ? { ...e, status: "error" as const } : e
+      e.status === "running"
+        ? { ...e, status: "error" as const, confirm: undefined }
+        : e
     );
     // The turn is over: sub-agents were torn down by the backend and their
     // `agent-task-done` events arrive after the listeners are gone, so settle
@@ -2062,7 +2110,7 @@ export default function App() {
           )}
           {messages.map((m) =>
             m.role === "tool_group" ? (
-              <ToolCallGroup key={m.id} message={m} />
+              <ToolCallGroup key={m.id} message={m} onConfirm={respondToolCallConfirm} />
             ) : (
               <ChatMessage
                 key={m.id}
@@ -2072,6 +2120,7 @@ export default function App() {
                 onDelete={handleDeleteMessage}
                 onFork={handleForkMessage}
                 dbId={m.dbId}
+                onConfirm={respondToolCallConfirm}
               />
             )
           )}

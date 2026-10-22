@@ -159,6 +159,8 @@ const zhTW: Messages = {
         completed: "已完成 {count} 次工具呼叫",
         completedWithErrors: "{count} 個步驟：{done} 個成功，{errors} 個失敗",
         steps: "{count} 個步驟",
+        confirmTitle: "允許執行此 Shell 命令？",
+        rejected: "使用者已拒絕",
     },
 
     settings: {

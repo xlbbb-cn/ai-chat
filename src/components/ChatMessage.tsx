@@ -231,6 +231,8 @@ interface Props {
   onDelete?: (messageId: string) => void;
   onFork?: (messageId: string) => void;
   dbId?: number;
+  /** Inline allow/deny for a pending `run_shell` confirmation in the tool-call group. */
+  onConfirm?: (requestId: string, allowed: boolean) => void;
 }
 
 function extractAttachmentNames(content: string): string[] {
@@ -282,7 +284,7 @@ function extractEmbeddedThoughtProcess(content: string): {
   return { reasoningContent, mainContent };
 }
 
-export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onFork, dbId }: Props) {
+export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onFork, dbId, onConfirm }: Props) {
   const { t } = useI18n();
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
@@ -390,7 +392,7 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
             />
           </details>
         )}
-        {isAssistant && <ToolCallGroup message={message} />}
+        {isAssistant && <ToolCallGroup message={message} onConfirm={onConfirm} />}
         {isAssistant && <TodoList />}
         <div
           className="message-content"

@@ -1,11 +1,16 @@
 import type { Message, ToolCallEntry } from "../types";
 import { useRef, useState, type ReactNode } from "react";
 import { useI18n } from "../i18n";
-import { FontAwesomeIcon, faCheck, faChevronRight, faSpinner, faXmark } from "../icons";
+import { FontAwesomeIcon, faCheck, faChevronRight, faSpinner, faTriangleExclamation, faXmark } from "../icons";
 import "./ToolCallGroup.css";
 
 interface Props {
   message: Message;
+  /**
+   * Answer an inline `run_shell` confirmation (`request_id`, `allowed`).
+   * Absent for persisted history — the buttons only render for live turns.
+   */
+  onConfirm?: (requestId: string, allowed: boolean) => void;
 }
 
 /** Per-status glyph; the running spinner is the only animated one. */
@@ -55,7 +60,7 @@ function FlipRow({ flipKey, className, children }: FlipRowProps) {
   );
 }
 
-export function ToolCallGroup({ message }: Props) {
+export function ToolCallGroup({ message, onConfirm }: Props) {
   const { t } = useI18n();
   const entries = message.tool_calls ?? [];
   const [open, setOpen] = useState(false);
@@ -64,6 +69,10 @@ export function ToolCallGroup({ message }: Props) {
   const isRunning = runningEntry !== undefined;
   const doneCount = entries.filter((e) => e.status === "done").length;
   const errorCount = entries.filter((e) => e.status === "error").length;
+  // At most one confirmation can be pending at a time (the backend blocks the
+  // tool call until it is answered), so the first entry that carries one wins.
+  const confirmEntry = entries.find((e) => e.confirm !== undefined);
+  const confirmInfo = confirmEntry?.confirm;
 
   // Rows 2–3 preview the running tool call; once nothing is running the last
   // entry stays put, so the next call gives the flip something to swap with.
@@ -139,6 +148,38 @@ export function ToolCallGroup({ message }: Props) {
           ))}
         </ul>
       </details>
+      {confirmInfo && onConfirm && (
+        <div className="tool-call-confirm" role="alertdialog" aria-label={t("toolGroup.confirmTitle")}>
+          <div className="tool-call-confirm-head">
+            <FontAwesomeIcon icon={faTriangleExclamation} className="tool-call-confirm-icon" />
+            <span className="tool-call-confirm-title">{t("toolGroup.confirmTitle")}</span>
+          </div>
+          <div className="tool-call-confirm-reason">
+            <strong>{t("app.confirm.reason")}</strong> {confirmInfo.reason}
+          </div>
+          <pre className="tool-call-confirm-code">
+            {confirmInfo.code.length > 400
+              ? confirmInfo.code.slice(0, 400) + "…"
+              : confirmInfo.code}
+          </pre>
+          <div className="tool-call-confirm-actions">
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => onConfirm(confirmInfo.request_id, false)}
+            >
+              {t("app.confirm.deny")}
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => onConfirm(confirmInfo.request_id, true)}
+            >
+              {t("app.confirm.allow")}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

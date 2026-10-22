@@ -91,6 +91,9 @@ function recordsToMessages(sessionRecords: HistoryRecord[]): Message[] {
         const parsed = (JSON.parse(r.tool_calls) as ToolCallEntry[]).map((e) => ({
           ...e,
           status: "done" as const,
+          // A pending inline confirmation is dead the moment the turn ended —
+          // never replay its allow/deny buttons from persisted history.
+          confirm: undefined,
         }));
         if (parsed.length > 0) toolCalls = parsed;
       } catch { /* ignore malformed */ }

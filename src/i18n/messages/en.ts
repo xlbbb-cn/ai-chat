@@ -179,6 +179,8 @@ const en = {
             other: "{count} steps: {done} completed, {errors} failed",
         },
         steps: { one: "{count} step", other: "{count} steps" },
+        confirmTitle: "Allow this shell command?",
+        rejected: "Rejected by user",
     },
 
     settings: {
