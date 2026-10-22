@@ -33,20 +33,29 @@ jobs:
             slug: macos-aarch64
             rustTargets: aarch64-apple-darwin
             args: '--target aarch64-apple-darwin'
+            # README 的 releases/latest/download/... 链接依赖这些不带版本号的副本。
+            stableAsset: AI-Chat-macOS-Apple-Silicon.dmg
+            bundleGlob: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
           - name: macOS (Intel)
             platform: macos-latest
             slug: macos-x86_64
             rustTargets: x86_64-apple-darwin
             args: '--target x86_64-apple-darwin'
+            stableAsset: AI-Chat-macOS-Intel.dmg
+            bundleGlob: src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
           - name: Linux (x86_64)
             platform: ubuntu-22.04
             slug: linux-x86_64
             rustTargets: ''
             args: ''
+            stableAsset: AI-Chat-Linux-x86_64.AppImage
+            bundleGlob: src-tauri/target/release/bundle/appimage/*.AppImage
           - name: Windows (x86_64)
             platform: windows-latest
             slug: windows-x86_64
             rustTargets: ''
+            stableAsset: AI-Chat-Windows-x64-setup.exe
+            bundleGlob: src-tauri/target/release/bundle/nsis/*-setup.exe
             # 默认同时产出 .msi 与 NSIS -setup.exe；若 Runner 上 MSI（light.exe / VBSCRIPT）不可用，
             # 把 args 改成 '--bundles nsis' 只产出 NSIS 安装包即可。
             args: ''
@@ -145,3 +154,18 @@ jobs:
           uploadUpdaterJson: false # 未配置 updater，无需生成 latest.json
           uploadWorkflowArtifacts: true # 同时保留 Actions 运行产物，未发布也能下载
           args: ${{ matrix.args }}
+
+      # GitHub 的 releases/latest/download/<name> 要求文件名的版本号固定，而 Tauri 的
+      # 产物名带 <version>。这里额外上传一份不带版本号的副本，README 的三平台按钮
+      # 才能一直指向最新版（手动触发只构建，不碰 Release）。
+      - name: Upload stable-named asset
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          src="$(ls ${{ matrix.bundleGlob }} | head -n 1)"
+          dest="$(dirname "$src")/${{ matrix.stableAsset }}"
+          cp "$src" "$dest"
+          gh release upload "${GITHUB_REF_NAME}" "$dest" --clobber
+          echo "Uploaded ${{ matrix.stableAsset }} from $src"
