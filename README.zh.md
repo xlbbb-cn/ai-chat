@@ -1,24 +1,50 @@
 # AI Chat
 
+**把任意 OpenAI 兼容模型变成工作区感知的桌面 Agent —— Skills、工具与 Sub-Agent 开箱即用，每一次请求都留在本机可查。**
 
-[![GPL-2.0 License](https://img.shields.io/badge/license-GPL--2.0-blue.svg)](./LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/xlbbb-cn/ai-chat?style=social)](https://github.com/xlbbb-cn/ai-chat/stargazers)
-[![GitHub issues](https://img.shields.io/github/issues/xlbbb-cn/ai-chat)](https://github.com/xlbbb-cn/ai-chat/issues)
-[![GitHub pull requests](https://img.shields.io/github/issues-pr/xlbbb-cn/ai-chat)](https://github.com/xlbbb-cn/ai-chat/pulls)
-[![Last Commit](https://img.shields.io/github/last-commit/xlbbb-cn/ai-chat)](https://github.com/xlbbb-cn/ai-chat/commits)
+[English](./README.md) · [最新版本](https://github.com/xlbbb-cn/ai-chat/releases/latest) · [快速开始](#快速开始)
 
-[English](./README.md)
+![AI Chat 主界面 —— 在工作区内执行技能审计，工具调用与工作区路径一目了然](docs/app.png)
 
-一个基于 Tauri 2 + React + TypeScript + Rust 的桌面 AI 对话客户端，面向 OpenAI 兼容接口，支持流式回复、技能系统、工具调用、MCP 服务接入和会话持久化。
+<p align="center">
+  <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/AI-Chat-Windows-x64-setup.exe"><img alt="下载 Windows 安装包" src="https://img.shields.io/badge/Download-Windows%20.exe-3E6AE1?style=for-the-badge&logo=windows11&logoColor=white" height="38"></a>
+  &nbsp;
+  <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/AI-Chat-macOS-Apple-Silicon.dmg"><img alt="下载 macOS 安装包" src="https://img.shields.io/badge/Download-macOS%20.dmg-3E6AE1?style=for-the-badge&logo=apple&logoColor=white" height="38"></a>
+  &nbsp;
+  <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/AI-Chat-Linux-x86_64.AppImage"><img alt="下载 Linux 安装包" src="https://img.shields.io/badge/Download-Linux%20.AppImage-3E6AE1?style=for-the-badge&logo=linux&logoColor=white" height="38"></a>
+</p>
 
-> 目标：把“通用大模型能力”与“本地可控执行能力”融合到同一个安全、轻量、跨平台桌面应用中。
+<p align="center">
+  <code>winget install Leonard.AIChat</code> &nbsp;·&nbsp; <code>brew install --cask ai-chat</code> &nbsp;·&nbsp; <code>scoop install ai-chat</code><br>
+  <sub>Windows 的 winget 清单仍在审核中（<a href="https://github.com/microsoft/winget-pkgs/pull/458061">winget-pkgs#458061</a>）；Homebrew 与 Scoop 清单尚未发布，当前请直接使用上方安装包。Intel Mac 请下载 <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/AI-Chat-macOS-Intel.dmg">.dmg</a>。</sub>
+</p>
+
+<p align="center">
+  <a href="./LICENSE"><img alt="许可证：GPL-2.0-only" src="https://img.shields.io/badge/license-GPL--2.0-blue.svg"></a>
+  <a href="https://github.com/xlbbb-cn/ai-chat/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/xlbbb-cn/ai-chat?style=social"></a>
+  <a href="https://github.com/xlbbb-cn/ai-chat/issues"><img alt="GitHub issues" src="https://img.shields.io/github/issues/xlbbb-cn/ai-chat"></a>
+  <a href="https://github.com/xlbbb-cn/ai-chat/pulls"><img alt="GitHub pull requests" src="https://img.shields.io/github/issues-pr/xlbbb-cn/ai-chat"></a>
+  <a href="https://github.com/xlbbb-cn/ai-chat/commits"><img alt="最近提交" src="https://img.shields.io/github/last-commit/xlbbb-cn/ai-chat"></a>
+</p>
+
+## 差异点
+
+聊天只是起点。AI Chat 把 Agent 放进一个可操作的工作区，并留下它执行过的每一步。
+
+| | **AI Chat** | Cherry Studio | Chatbox | LM Studio |
+| --- | :---: | :---: | :---: | :---: |
+| **Skills 工作区隔离** —— 每个工作区独立的 `.data/skills`，技能根目录锁定在自身 `SKILL.md` | ✅ | ◐ Agent 自带工作区与 Skills | — | — |
+| **本地请求审计** —— 请求/响应、token、耗时、状态与错误 | ✅ | ◐ 仅本地会话历史 | ◐ 仅本地会话历史 | ◐ 本地会话 + 服务端日志 |
+| **Sub-Agent 编排** —— `llm` / `cli` / `cloud`，并行或串行 | ✅ | ◐ Agent 任务 | — | — |
+| **知识图谱** —— Neo4j 工具 | ✅ | — | — | — |
+
+<sub>✅ 原生 · ◐ 部分/相近 · — 未提供；基于 2026 年 10 月的公开文档。</sub>
 
 ---
 
-
-
 ## 目录
 
+- [差异点](#差异点)
 - [项目介绍](#项目介绍)
 - [核心功能](#核心功能)
 - [第一性设计原理](#第一性设计原理)

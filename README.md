@@ -1,25 +1,50 @@
 # AI Chat
 
+**Turn any OpenAI-compatible model into a workspace-aware desktop agent — Skills, tools, sub-agents and a local, auditable request log.**
 
-[![GPL-2.0 License](https://img.shields.io/badge/license-GPL--2.0-blue.svg)](./LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/xlbbb-cn/ai-chat?style=social)](https://github.com/xlbbb-cn/ai-chat/stargazers)
-[![GitHub issues](https://img.shields.io/github/issues/xlbbb-cn/ai-chat)](https://github.com/xlbbb-cn/ai-chat/issues)
-[![GitHub pull requests](https://img.shields.io/github/issues-pr/xlbbb-cn/ai-chat)](https://github.com/xlbbb-cn/ai-chat/pulls)
-[![Last Commit](https://img.shields.io/github/last-commit/xlbbb-cn/ai-chat)](https://github.com/xlbbb-cn/ai-chat/commits)
+[中文](./README.zh.md) · [Latest release](https://github.com/xlbbb-cn/ai-chat/releases/latest) · [Quick start](#quick-start)
 
-[中文](./README.zh.md)
+![AI Chat main window — a skill-scoped release audit with tool calls and the workspace path visible](docs/app.png)
 
-A desktop AI chat client built with Tauri 2 + React + TypeScript + Rust, compatible with OpenAI APIs. It supports streaming responses, skill systems, tool invocation, MCP server integration, and session persistence.
+<p align="center">
+  <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/AI-Chat-Windows-x64-setup.exe"><img alt="Download for Windows" src="https://img.shields.io/badge/Download-Windows%20.exe-3E6AE1?style=for-the-badge&logo=windows11&logoColor=white" height="38"></a>
+  &nbsp;
+  <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/AI-Chat-macOS-Apple-Silicon.dmg"><img alt="Download for macOS" src="https://img.shields.io/badge/Download-macOS%20.dmg-3E6AE1?style=for-the-badge&logo=apple&logoColor=white" height="38"></a>
+  &nbsp;
+  <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/AI-Chat-Linux-x86_64.AppImage"><img alt="Download for Linux" src="https://img.shields.io/badge/Download-Linux%20.AppImage-3E6AE1?style=for-the-badge&logo=linux&logoColor=white" height="38"></a>
+</p>
 
-> Goal: Combine "general AI model capabilities" with "local controllable execution" into a secure, lightweight, cross-platform desktop application.
+<p align="center">
+  <code>winget install Leonard.AIChat</code> &nbsp;·&nbsp; <code>brew install --cask ai-chat</code> &nbsp;·&nbsp; <code>scoop install ai-chat</code><br>
+  <sub>Windows: the winget manifest is in review (<a href="https://github.com/microsoft/winget-pkgs/pull/458061">winget-pkgs#458061</a>). Homebrew and Scoop manifests are not published yet — the installers above work today. Intel Mac: <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/AI-Chat-macOS-Intel.dmg">.dmg</a>.</sub>
+</p>
 
+<p align="center">
+  <a href="./LICENSE"><img alt="License: GPL-2.0-only" src="https://img.shields.io/badge/license-GPL--2.0-blue.svg"></a>
+  <a href="https://github.com/xlbbb-cn/ai-chat/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/xlbbb-cn/ai-chat?style=social"></a>
+  <a href="https://github.com/xlbbb-cn/ai-chat/issues"><img alt="GitHub issues" src="https://img.shields.io/github/issues/xlbbb-cn/ai-chat"></a>
+  <a href="https://github.com/xlbbb-cn/ai-chat/pulls"><img alt="GitHub pull requests" src="https://img.shields.io/github/issues-pr/xlbbb-cn/ai-chat"></a>
+  <a href="https://github.com/xlbbb-cn/ai-chat/commits"><img alt="Last commit" src="https://img.shields.io/github/last-commit/xlbbb-cn/ai-chat"></a>
+</p>
 
+## Why AI Chat
 
+Chat is the easy part. AI Chat is built around a workspace the agent can work in, and a record of everything it ran.
+
+| | **AI Chat** | Cherry Studio | Chatbox | LM Studio |
+| --- | :---: | :---: | :---: | :---: |
+| **Skills scoped to the workspace** — a separate `.data/skills` per workspace, skill root pinned to its `SKILL.md` | ✅ | ◐ agents have workspaces + Skills | — | — |
+| **Local request audit** — request/response, tokens, latency, status and errors | ✅ | ◐ local chat history | ◐ local chat history | ◐ local chat + server log |
+| **Sub-agent orchestration** — `llm` / `cli` / `cloud`, parallel or serial | ✅ | ◐ agent tasks | — | — |
+| **Knowledge graph** — Neo4j-backed tool | ✅ | — | — | — |
+
+<sub>✅ built in · ◐ partial or adjacent · — not offered. Based on public documentation as of October 2026.</sub>
 
 ---
 
 ## Table of Contents
 
+- [Why AI Chat](#why-ai-chat)
 - [Introduction](#introduction)
 - [Core Features](#core-features)
 - [First Principles Design](#first-principles-design)
