@@ -29,13 +29,15 @@
 
 ## Why AI Chat
 
-Chat is the easy part. AI Chat is built around a workspace the agent can work in, and a record of everything it ran.
+Chat is the easy part. AI Chat gives the agent a workspace, real utilities (memory, timers, todos) and an audit trail — without imposing a persona.
 
 | Feature | **AI Chat** | Cherry Studio | Chatbox | LM Studio |
 | --- | :---: | :---: | :---: | :---: |
-| **Workspace-scoped Skills** — `.data/skills` per workspace, root pinned to its `SKILL.md` | ✅ | ◐ agent workspaces | — | — |
+| **Skill sandbox** — `.data/skills` per workspace, root pinned to its `SKILL.md` | ✅ | ◐ agent workspaces | — | — |
+| **Built-in agent utilities** — 3-level memory (`session` / `user` / `repo`), timers, todos | ✅ | ◐ scheduled tasks | — | — |
+| **Agent runtime** — LLM, local CLI or remote cloud, configured in-app | ✅ | ◐ LLM agents | — | — |
+| **Prompt ownership** — no default persona or hidden rewrite; your system message is the base, tool/skill guidance is appended | ✅ | ◐ assistant prompts | ◐ prompt library | ◐ per-model prompt |
 | **Local request audit** — body, tokens, latency, status, errors | ✅ | ◐ history only | ◐ history only | ◐ history + server log |
-| **Sub-agent orchestration** — `llm` / `cli` / `cloud`, parallel or serial | ✅ | ◐ agent tasks | — | — |
 | **Knowledge graph** — Neo4j-backed tool | ✅ | — | — | — |
 
 <sub>✅ built in · ◐ partial or adjacent · — not offered. Based on public documentation as of October 2026.</sub>
@@ -82,11 +84,14 @@ Use cases:
 - Interruptible generation
 - File attachment support in messages
 - Model switching and parameter configuration (temperature, top_p, max_tokens, etc.)
+- No default persona: your system message stays the base; only tool/skill guidance and OS/invocation hints are appended
 
 ### 2) Sub-Agent Orchestration
 
+- Three runtimes: `llm` (built-in autonomous loop), `cli` (headless coding CLI on this machine), `cloud` (remote HTTP endpoint)
+- Per-agent model, system prompt, tool/skill allowlist and iteration budget
 - Create, edit, enable, and delete sub-agents
-- Configure agent orchestration and toggle sub-agent mode
+- Configure agent orchestration (parallel / sequential, concurrency) and toggle sub-agent mode
 - Task-level orchestration events in the chat flow
 
 ### 3) Skill System
@@ -102,12 +107,15 @@ Use cases:
 
 - run_cmd / run_shell: Local command execution with dangerous-command confirmation
 - file_actions: File read/write/edit/patch/diff plus mkdir/rename/move/delete
+- memory: Three scopes (`session` / `user` / `repo`) for searching and persisting conclusions
+- todos: Per-session task lists the model can plan, update and close
+- timer: One-shot delay timers that resume the session instead of polling
 - knowledge_graph: Knowledge graph queries (supports Neo4j)
 
 ### 5) MCP Management
 
 - Add, edit, delete MCP servers
-- Supports stdio / SSE transport modes with relative path handling improvements
+- Supports stdio / SSE / HTTP / Streamable HTTP transports, with relative path handling improvements
 - Connectivity testing
 
 ### 6) Local Persistence & Operations

@@ -29,13 +29,15 @@
 
 ## 差异点
 
-聊天只是起点。AI Chat 把 Agent 放进一个可操作的工作区，并留下它执行过的每一步。
+聊天只是起点。AI Chat 给 Agent 一个工作区、一套真正可用的工具（记忆、定时器、待办），以及可查的执行记录 —— 并且不替用户设定人设。
 
 | 能力 | **AI Chat** | Cherry Studio | Chatbox | LM Studio |
 | --- | :---: | :---: | :---: | :---: |
-| **Skills 工作区隔离** —— 每个工作区独立的 `.data/skills`，根目录锁定在自身 `SKILL.md` | ✅ | ◐ Agent 工作区 | — | — |
+| **Skills 沙箱** —— 每个工作区独立的 `.data/skills`，根目录锁定在自身 `SKILL.md` | ✅ | ◐ Agent 工作区 | — | — |
+| **内置 Agent 工具** —— 3 级 memory（`session` / `user` / `repo`）、timer、todos | ✅ | ◐ 定时任务 | — | — |
+| **Agent 运行时** —— LLM、本地 CLI 或远程 cloud，界面内自由配置 | ✅ | ◐ LLM Agent | — | — |
+| **提示词自主** —— 无默认人设、无隐藏改写；你的 system message 是基底，只追加工具/技能说明 | ✅ | ◐ 助手提示词 | ◐ 提示词库 | ◐ 按模型提示词 |
 | **本地请求审计** —— 请求体、token、耗时、状态、错误 | ✅ | ◐ 仅历史记录 | ◐ 仅历史记录 | ◐ 历史 + 服务端日志 |
-| **Sub-Agent 编排** —— `llm` / `cli` / `cloud`，并行或串行 | ✅ | ◐ Agent 任务 | — | — |
 | **知识图谱** —— Neo4j 工具 | ✅ | — | — | — |
 
 <sub>✅ 原生 · ◐ 部分/相近 · — 未提供；基于 2026 年 10 月的公开文档。</sub>
@@ -82,11 +84,14 @@ AI Chat 是一个桌面端 AI 助手应用，支持接入任意 OpenAI 兼容模
 - 支持中断生成
 - 支持消息文件附件展示
 - 支持模型切换与模型参数配置（temperature、top_p、max_tokens 等）
+- 无默认人设：system message 作为基底，只追加工具/技能说明与系统/调用提示
 
 ### 2) 子代理编排（Sub-Agents）
 
+- 三种运行时：`llm`（内置自主循环）、`cli`（本机无头编码 CLI）、`cloud`（远程 HTTP 端点）
+- 每个 Agent 可单独配置模型、系统提示词、工具/技能白名单与迭代预算
 - 支持子代理新增、编辑、启用与删除
-- 支持编排配置与子代理模式开关
+- 支持编排配置（并行 / 串行、并发数）与子代理模式开关
 - 对话中支持任务级编排事件
 
 ### 3) 技能系统（Skills）
@@ -102,12 +107,15 @@ AI Chat 是一个桌面端 AI 助手应用，支持接入任意 OpenAI 兼容模
 
 - run_cmd / run_shell：本地命令执行，内置危险命令确认
 - file_actions：文件读写、编辑、补丁、比对（diff），支持 mkdir / rename / move / delete
+- memory：`session` / `user` / `repo` 三级记忆，可检索与沉淀结论
+- todos：按会话维护任务清单，模型可规划、更新与关闭
+- timer：一次性延时定时器，到点自动恢复会话，无需轮询
 - knowledge_graph：知识图谱查询（支持 Neo4j）
 
 ### 5) MCP 管理
 
 - 支持 MCP Server 的增删改查
-- 支持 stdio / sse 两种传输模式，并改进相对路径处理
+- 支持 stdio / SSE / HTTP / Streamable HTTP 四种传输模式，并改进相对路径处理
 - 支持连通性测试
 
 ### 6) 本地持久化与运维
