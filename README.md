@@ -4,7 +4,7 @@
 
 [中文](./README.zh.md) · [Latest release](https://github.com/xlbbb-cn/ai-chat/releases/latest) · [Quick start](#quick-start)
 
-![AI Chat main window — a skill-scoped release audit with tool calls and the workspace path visible](docs/main-window.png)
+![AI Chat — big models plan, local tools execute](docs/banner.png)
 
 <p align="center">
   <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/AI-Chat-Windows-x64-setup.exe"><img alt="Download for Windows" src="https://img.shields.io/badge/Download-Windows%20.exe-3E6AE1?style=for-the-badge&logo=windows11&logoColor=white" height="38"></a>
