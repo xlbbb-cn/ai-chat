@@ -1,11 +1,11 @@
 # AI Chat
 
 
-[![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/LeonardSSH/ai-chat?style=social)](https://github.com/LeonardSSH/ai-chat/stargazers)
-[![GitHub issues](https://img.shields.io/github/issues/LeonardSSH/ai-chat)](https://github.com/LeonardSSH/ai-chat/issues)
-[![GitHub pull requests](https://img.shields.io/github/issues-pr/LeonardSSH/ai-chat)](https://github.com/LeonardSSH/ai-chat/pulls)
-[![Last Commit](https://img.shields.io/github/last-commit/LeonardSSH/ai-chat)](https://github.com/LeonardSSH/ai-chat/commits)
+[![GPL-2.0 License](https://img.shields.io/badge/license-GPL--2.0-blue.svg)](./LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/xlbbb-cn/ai-chat?style=social)](https://github.com/xlbbb-cn/ai-chat/stargazers)
+[![GitHub issues](https://img.shields.io/github/issues/xlbbb-cn/ai-chat)](https://github.com/xlbbb-cn/ai-chat/issues)
+[![GitHub pull requests](https://img.shields.io/github/issues-pr/xlbbb-cn/ai-chat)](https://github.com/xlbbb-cn/ai-chat/pulls)
+[![Last Commit](https://img.shields.io/github/last-commit/xlbbb-cn/ai-chat)](https://github.com/xlbbb-cn/ai-chat/commits)
 
 [English](./README.md)
 
@@ -29,6 +29,7 @@
 - [项目结构](#项目结构)
 - [安全与边界](#安全与边界)
 - [开发路线建议](#开发路线建议)
+- [许可证](#许可证)
 
 ---
 
@@ -150,7 +151,7 @@ AI Chat 是一个桌面端 AI 助手应用，支持接入任意 OpenAI 兼容模
 
 ### 1. 环境要求
 
-- Node.js 18+
+- Node.js 20.19+（或 22.12+）
 - Rust stable（建议 rustup 管理）
 - Tauri CLI 2.x
 - Windows 建议使用 MSVC 工具链
@@ -194,16 +195,18 @@ npm run tauri build
 
 ### C. 安装方式
 
-- Windows：运行 bundle 目录中的安装包（如 NSIS / MSI）
+- Windows：`winget install --id Leonard.AIChat -e`，或运行 bundle 目录中的 NSIS / MSI 安装包
 - macOS：使用 .app / .dmg（按构建目标）
 - Linux：使用 .deb / .AppImage / .rpm（按构建目标）
+
+> winget 包仍在审核中（[microsoft/winget-pkgs#458061](https://github.com/microsoft/winget-pkgs/pull/458061)），合并前请先从 GitHub Release 下载安装包。
 
 > Windows 上如果遇到 GNU linker 与 WebView2 相关问题，建议切换到 MSVC 工具链构建。
 
 ### D. 用 GitHub Actions 发布（打 Tag）
 
 推送 `v*` 标签后会触发 `.github/workflows/release.yml`，并行构建 Linux / macOS / Windows 安装包，
-并上传到该标签对应的 GitHub Release（默认先创建为**草稿**）。
+并直接发布到该标签对应的 GitHub Release（非草稿，构建完成即可下载）。
 
 ```bash
 git tag v2.0.0
@@ -217,7 +220,8 @@ git push origin v2.0.0
 | Linux | `.AppImage`、`.deb`、`.rpm` |
 
 - 版本号取自最新的 git tag（`npm run build` 内部会执行 `sync-version:git-tag`），因此本次推送的 tag 必须是最新 tag，否则流程会直接失败提示。
-- Release 先以草稿创建：在 Releases 页面确认产物无误后再点发布。
+- Release 在第一个平台构建完成时就会发布，其余平台的安装包随后陆续上传。
+- 每个正式 Release 还会通过 `.github/workflows/winget.yml` 把 NSIS 安装包自动提交到 `microsoft/winget-pkgs`（需要 `WINGET_TOKEN` secret，且仓库中已存在该包的版本）。
 - macOS 产物为 ad-hoc 签名（暂无 Apple 开发者证书），首次打开需要在「系统设置 → 隐私与安全性」选择「仍要打开」，或右键 App → 打开。
 - 也可在 `Actions → Release → Run workflow` 手动触发，只构建不创建 Release（用于验证流程）。
 - 已安装的旧版本会在启动时检查最新**已发布**的 Release，并在应用内提示新版本、展示更新说明、直接下载匹配当前系统的安装包（可在「设置 → About & Updates」关闭）。草稿状态的 Release 不会被检查到。
@@ -299,4 +303,10 @@ ai-chat/
 - 增加工具调用审计与回放
 - 增加技能签名与发布机制
 - 增加端到端测试与安全基线扫描
+
+---
+
+## 许可证
+
+本项目采用 GNU 通用公共许可证第 2 版（GPL-2.0-only）授权，详见 `LICENSE` 文件。
 

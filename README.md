@@ -1,11 +1,11 @@
 # AI Chat
 
 
-[![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/LeonardSSH/ai-chat?style=social)](https://github.com/LeonardSSH/ai-chat/stargazers)
-[![GitHub issues](https://img.shields.io/github/issues/LeonardSSH/ai-chat)](https://github.com/LeonardSSH/ai-chat/issues)
-[![GitHub pull requests](https://img.shields.io/github/issues-pr/LeonardSSH/ai-chat)](https://github.com/LeonardSSH/ai-chat/pulls)
-[![Last Commit](https://img.shields.io/github/last-commit/LeonardSSH/ai-chat)](https://github.com/LeonardSSH/ai-chat/commits)
+[![GPL-2.0 License](https://img.shields.io/badge/license-GPL--2.0-blue.svg)](./LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/xlbbb-cn/ai-chat?style=social)](https://github.com/xlbbb-cn/ai-chat/stargazers)
+[![GitHub issues](https://img.shields.io/github/issues/xlbbb-cn/ai-chat)](https://github.com/xlbbb-cn/ai-chat/issues)
+[![GitHub pull requests](https://img.shields.io/github/issues-pr/xlbbb-cn/ai-chat)](https://github.com/xlbbb-cn/ai-chat/pulls)
+[![Last Commit](https://img.shields.io/github/last-commit/xlbbb-cn/ai-chat)](https://github.com/xlbbb-cn/ai-chat/commits)
 
 [中文](./README.zh.md)
 
@@ -30,6 +30,7 @@ A desktop AI chat client built with Tauri 2 + React + TypeScript + Rust, compati
 - [Project Structure](#project-structure)
 - [Security & Boundaries](#security--boundaries)
 - [Development Roadmap](#development-roadmap)
+- [License](#license)
 
 ---
 
@@ -151,7 +152,7 @@ Think of it as:
 
 ### 1. Prerequisites
 
-- Node.js 18+
+- Node.js 20.19+ (or 22.12+)
 - Rust stable (recommended: rustup)
 - Tauri CLI 2.x
 - Windows: MSVC toolchain recommended
@@ -195,16 +196,18 @@ Build artifacts are located in:
 
 ### C. Installation
 
-- Windows: Run the installer in the bundle directory (e.g., NSIS / MSI)
+- Windows: `winget install --id Leonard.AIChat -e`, or run the NSIS / MSI installer from the bundle directory
 - macOS: Use .app / .dmg (depending on the build target)
 - Linux: Use .deb / .AppImage / .rpm (depending on the build target)
+
+> The winget package is still under review in [microsoft/winget-pkgs#458061](https://github.com/microsoft/winget-pkgs/pull/458061); until it is merged, use the installer from the GitHub Release.
 
 > On Windows, if you encounter GNU linker or WebView2 issues, switch to the MSVC toolchain.
 
 ### D. Release via GitHub Actions (Tag)
 
 Pushing a `v*` tag triggers `.github/workflows/release.yml`, which builds the Linux / macOS / Windows
-installers in parallel and uploads them to the GitHub Release of that tag (created as a **draft**).
+installers in parallel and publishes them to the GitHub Release of that tag (no draft, available immediately).
 
 ```bash
 git tag v2.0.0
@@ -218,7 +221,8 @@ git push origin v2.0.0
 | Linux | `.AppImage`, `.deb`, `.rpm` |
 
 - The app version comes from the newest git tag (`sync-version:git-tag` runs inside `npm run build`), so the pushed tag must be the newest one — otherwise the workflow fails fast.
-- The release is created as a draft: check the uploaded bundles on the Releases page and publish it.
+- The release is published as soon as the first platform finishes; the remaining installers upload afterwards.
+- Each published release also submits its NSIS installer to `microsoft/winget-pkgs` through `.github/workflows/winget.yml` (requires the `WINGET_TOKEN` secret and an existing package entry).
 - macOS builds are ad-hoc signed (no Apple Developer certificate yet), so the first launch needs "Right click → Open" or System Settings → Privacy & Security → "Open Anyway".
 - `Actions → Release → Run workflow` runs the same build without creating a release (smoke test).
 - Installed builds check the newest **published** release on startup and show an in-app banner with release notes and a direct download for the matching bundle (toggle it under Settings → About & Updates). Draft releases are never visible to the update check.
@@ -305,5 +309,5 @@ Runtime layout — app data holds the application files, the workspace holds its
 
 ## License
 
-This project is licensed under the MIT License. See the `LICENSE` file for details.
+This project is licensed under the GNU General Public License v2.0 only (GPL-2.0-only). See the `LICENSE` file for details.
 
