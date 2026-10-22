@@ -31,10 +31,10 @@
 
 Chat is the easy part. AI Chat is built around a workspace the agent can work in, and a record of everything it ran.
 
-| | **AI Chat** | Cherry Studio | Chatbox | LM Studio |
+| Feature | **AI Chat** | Cherry Studio | Chatbox | LM Studio |
 | --- | :---: | :---: | :---: | :---: |
-| **Skills scoped to the workspace** — a separate `.data/skills` per workspace, skill root pinned to its `SKILL.md` | ✅ | ◐ agents have workspaces + Skills | — | — |
-| **Local request audit** — request/response, tokens, latency, status and errors | ✅ | ◐ local chat history | ◐ local chat history | ◐ local chat + server log |
+| **Workspace-scoped Skills** — `.data/skills` per workspace, root pinned to its `SKILL.md` | ✅ | ◐ agent workspaces | — | — |
+| **Local request audit** — body, tokens, latency, status, errors | ✅ | ◐ history only | ◐ history only | ◐ history + server log |
 | **Sub-agent orchestration** — `llm` / `cli` / `cloud`, parallel or serial | ✅ | ◐ agent tasks | — | — |
 | **Knowledge graph** — Neo4j-backed tool | ✅ | — | — | — |
 

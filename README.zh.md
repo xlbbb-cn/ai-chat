@@ -31,10 +31,10 @@
 
 聊天只是起点。AI Chat 把 Agent 放进一个可操作的工作区，并留下它执行过的每一步。
 
-| | **AI Chat** | Cherry Studio | Chatbox | LM Studio |
+| 能力 | **AI Chat** | Cherry Studio | Chatbox | LM Studio |
 | --- | :---: | :---: | :---: | :---: |
-| **Skills 工作区隔离** —— 每个工作区独立的 `.data/skills`，技能根目录锁定在自身 `SKILL.md` | ✅ | ◐ Agent 自带工作区与 Skills | — | — |
-| **本地请求审计** —— 请求/响应、token、耗时、状态与错误 | ✅ | ◐ 仅本地会话历史 | ◐ 仅本地会话历史 | ◐ 本地会话 + 服务端日志 |
+| **Skills 工作区隔离** —— 每个工作区独立的 `.data/skills`，根目录锁定在自身 `SKILL.md` | ✅ | ◐ Agent 工作区 | — | — |
+| **本地请求审计** —— 请求体、token、耗时、状态、错误 | ✅ | ◐ 仅历史记录 | ◐ 仅历史记录 | ◐ 历史 + 服务端日志 |
 | **Sub-Agent 编排** —— `llm` / `cli` / `cloud`，并行或串行 | ✅ | ◐ Agent 任务 | — | — |
 | **知识图谱** —— Neo4j 工具 | ✅ | — | — | — |
 
