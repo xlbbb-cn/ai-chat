@@ -113,16 +113,60 @@ pub fn skill_to_md(skill: &Skill) -> Result<String, String> {
 }
 
 /// Load one skill from the workspace skills root (`<workspace>/.data/skills`).
+///
+/// Names are resolved by folder name first, then by the skill's frontmatter
+/// `name`. The fallback matters because the frontmatter name is the
+/// model-facing identity (it is what the chat listing, the Skills panel and
+/// `use_skill` all use), while the folder name can differ — e.g. a skill
+/// folder taken verbatim from a zip download (`gracker-writing-main`) whose
+/// frontmatter declares `name: gracker-writing`. Without the fallback every
+/// chat request and skill-status validation for such a skill silently fails,
+/// which made the skills selection drop to empty whenever the panel reloaded.
 pub fn resolve_skill_by_name(skills_dir: &Path, name: &str) -> Result<ResolvedSkill, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("empty skill name".to_string());
+    }
+
     let skill_dir = skills_dir.join(name);
-    let skill_file = skill_dir.join("skill.md");
-    let content = fs::read_to_string(&skill_file).map_err(|e| e.to_string())?;
-    let skill = parse_skill_md(&content)?;
-    Ok(ResolvedSkill {
-        skill,
-        skill_dir,
-        skill_file,
-    })
+    if let Some(skill_file) = find_skill_file(&skill_dir) {
+        let content = fs::read_to_string(&skill_file).map_err(|e| e.to_string())?;
+        let skill = parse_skill_md(&content)?;
+        return Ok(ResolvedSkill {
+            skill,
+            skill_dir,
+            skill_file,
+        });
+    }
+
+    // No folder matches: scan the skill roots and match the frontmatter name
+    // (exact match wins over a case-insensitive one).
+    let mut ci_match: Option<ResolvedSkill> = None;
+    for (folder, skill_file) in scan_skill_dirs(skills_dir) {
+        let Ok(content) = fs::read_to_string(&skill_file) else {
+            continue;
+        };
+        let Ok(skill) = parse_skill_md(&content) else {
+            continue;
+        };
+        let declared = skill.name.trim();
+        if declared == name {
+            return Ok(ResolvedSkill {
+                skill,
+                skill_dir: skills_dir.join(&folder),
+                skill_file,
+            });
+        }
+        if declared.eq_ignore_ascii_case(name) {
+            ci_match.get_or_insert(ResolvedSkill {
+                skill,
+                skill_dir: skills_dir.join(&folder),
+                skill_file,
+            });
+        }
+    }
+
+    ci_match.ok_or_else(|| format!("skill '{}' not found", name))
 }
 
 /// Collect skill roots eligible for self-evolution edits.
@@ -224,7 +268,23 @@ fn write_status_file(path: &Path, status: &SkillsStatus) -> Result<(), String> {
     fs::write(path, json).map_err(|e| e.to_string())
 }
 
-/// Every skill directory on disk as `(name, skill.md path)`.
+/// Locate the skill document inside a skill directory.
+///
+/// This app's own skills use a lower-case `skill.md`, while imported skill
+/// packages commonly use the upper-case `SKILL.md` convention. Both are
+/// accepted (the lower-case name first, so platform instances where the
+/// filesystem is case-sensitive resolve app-authored files deterministically).
+fn find_skill_file(skill_dir: &Path) -> Option<PathBuf> {
+    for file_name in ["skill.md", "SKILL.md"] {
+        let candidate = skill_dir.join(file_name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// Every skill directory on disk as `(folder name, skill file path)`.
 fn scan_skill_dirs(skills_root: &Path) -> Vec<(String, PathBuf)> {
     if !skills_root.is_dir() {
         return Vec::new();
@@ -237,8 +297,8 @@ fn scan_skill_dirs(skills_root: &Path) -> Vec<(String, PathBuf)> {
                 .filter(|entry| entry.path().is_dir())
                 .filter_map(|entry| {
                     let name = entry.file_name().into_string().ok()?;
-                    let skill_file = entry.path().join("skill.md");
-                    skill_file.is_file().then_some((name, skill_file))
+                    let skill_file = find_skill_file(&entry.path())?;
+                    Some((name, skill_file))
                 })
                 .collect()
         })
@@ -253,12 +313,25 @@ fn skill_md_mtime(skill_file: &Path) -> Option<String> {
 
 /// Fold the skills currently on disk into `status`. Returns `true` when a new
 /// entry was discovered or an existing one observed a changed file.
+///
+/// Entries are keyed by the skill's frontmatter `name` — the same identity the
+/// Skills panel toggles and the chat deliverable (`use_skill`,
+/// `filter_existing_skills`) resolves — not by the folder name, which may
+/// differ (zip downloads, renamed folders). A skill file that fails to parse
+/// falls back to the folder name so its metadata is still tracked.
 fn refresh_skill_status(status: &mut SkillsStatus, skills_root: &Path) -> bool {
     let mut changed = false;
     let observed_at = now_rfc3339();
 
-    for (name, skill_file) in scan_skill_dirs(skills_root) {
+    for (folder, skill_file) in scan_skill_dirs(skills_root) {
         let mtime = skill_md_mtime(&skill_file);
+        let name = fs::read_to_string(&skill_file)
+            .ok()
+            .and_then(|content| parse_skill_md(&content).ok())
+            .map(|skill| skill.name)
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or(folder);
+        let name = name.trim().to_string();
         match status.skills.get_mut(&name) {
             Some(entry) => {
                 if entry.file_mtime != mtime {
@@ -451,4 +524,122 @@ pub fn filter_existing_skills(state: State<'_, AppState>, names: Vec<String>) ->
         .into_iter()
         .filter(|name| resolve_skill_by_name(&skills_root, name).is_ok())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write_skill(root: &Path, folder: &str, declared_name: &str, file_name: &str) {
+        let dir = root.join(folder);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join(file_name),
+            format!(
+                "---\nname: {declared_name}\ndescription: test skill\n---\n\nBody of {declared_name}.\n"
+            ),
+        )
+        .unwrap();
+    }
+
+    struct TempSkillsRoot(PathBuf);
+
+    impl TempSkillsRoot {
+        fn new(tag: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "ai-chat-skills-test-{}-{}",
+                tag,
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            TempSkillsRoot(dir)
+        }
+    }
+
+    impl Drop for TempSkillsRoot {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// A skill imported from a zip archive: folder `x-main` with an upper-case
+    /// `SKILL.md` declaring `name: x`. It must be discoverable, listed, and
+    /// resolvable both ways.
+    #[test]
+    fn resolves_zip_imported_skill_by_frontmatter_and_folder_name() {
+        let root = TempSkillsRoot::new("zip-import");
+        write_skill(&root.0, "gracker-writing-main", "gracker-writing", "SKILL.md");
+
+        // Discoverable despite the upper-case file name.
+        let scanned = scan_skill_dirs(&root.0);
+        assert_eq!(scanned.len(), 1);
+        assert_eq!(scanned[0].0, "gracker-writing-main");
+
+        // Resolve by the frontmatter name (model-facing identity).
+        let by_declared = resolve_skill_by_name(&root.0, "gracker-writing").unwrap();
+        assert_eq!(by_declared.skill.name, "gracker-writing");
+
+        // Resolve by the folder name too.
+        let by_folder = resolve_skill_by_name(&root.0, "gracker-writing-main").unwrap();
+        assert_eq!(by_folder.skill.name, "gracker-writing");
+
+        // Unknown names still fail.
+        assert!(resolve_skill_by_name(&root.0, "nope").is_err());
+        assert!(resolve_skill_by_name(&root.0, "").is_err());
+    }
+
+    /// The reported bug: the panel toggles/status use the frontmatter `name`
+    /// (`x`), so a pre-existing enabled entry under that name must keep its
+    /// `enabled` flag when the on-disk folder is keyed differently
+    /// (`x-main`). It must NOT be re-keyed to the folder name and reset to
+    /// disabled, which is what emptied the selection on every panel open.
+    #[test]
+    fn refresh_keys_status_by_frontmatter_name_and_preserves_enablement() {
+        let root = TempSkillsRoot::new("refresh-keys");
+        write_skill(&root.0, "gracker-writing-main", "gracker-writing", "SKILL.md");
+
+        // Status as left behind by an earlier session: the skill was enabled
+        // through the panel under its frontmatter name; the folder entry
+        // (non-parse state aside) may also exist from an older refresh.
+        let mut status = SkillsStatus::default();
+        status.skills.insert(
+            "gracker-writing".to_string(),
+            SkillStatusEntry {
+                enabled: true,
+                source: SKILL_SOURCE_SELF_EVOLUTION.to_string(),
+                ..SkillStatusEntry::default()
+            },
+        );
+
+        refresh_skill_status(&mut status, &root.0);
+
+        let entry = status.skills.get("gracker-writing").expect("frontmatter entry");
+        assert!(entry.enabled, "enablement must survive the refresh");
+        assert!(entry.file_mtime.is_some(), "mtime must be refreshed");
+
+        // No second entry under the folder name is created for the same skill.
+        assert!(!status.skills.contains_key("gracker-writing-main"));
+    }
+
+    /// Workspace skills written by the app itself keep resolving exactly as
+    /// before (folder name == frontmatter name, lower-case file).
+    #[test]
+    fn resolves_own_panel_skills_unchanged() {
+        let root = TempSkillsRoot::new("panel-skill");
+        write_skill(&root.0, "code-reviewer", "code-reviewer", "skill.md");
+
+        let resolved = resolve_skill_by_name(&root.0, "code-reviewer").unwrap();
+        assert_eq!(resolved.skill.name, "code-reviewer");
+        assert_eq!(resolved.skill_dir, root.0.join("code-reviewer"));
+
+        let mut status = SkillsStatus::default();
+        assert!(refresh_skill_status(&mut status, &root.0), "new skill discovered");
+        assert!(status.skills.contains_key("code-reviewer"));
+        assert!(!status
+            .skills
+            .get("code-reviewer")
+            .unwrap()
+            .enabled, "newly discovered skills start disabled");
+    }
 }
