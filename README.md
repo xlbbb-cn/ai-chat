@@ -2,7 +2,7 @@
 
 **Turn any OpenAI-compatible model into a workspace-aware desktop agent — Skills, tools, sub-agents and a local, auditable request log.**
 
-[中文](./README.zh.md) · [Latest release](https://github.com/xlbbb-cn/ai-chat/releases/latest) · [Quick start](#quick-start)
+[Wiki](https://github.com/xlbbb-cn/ai-chat/wiki) · [中文](./README.zh.md) · [Latest release](https://github.com/xlbbb-cn/ai-chat/releases/latest) · [Quick start](#quick-start)
 
 ![AI Chat — big models plan, local tools execute](docs/banner.png)
 
@@ -48,6 +48,7 @@ Chat is the easy part. AI Chat gives the agent a workspace, real utilities (memo
 
 - [Why AI Chat](#why-ai-chat)
 - [Introduction](#introduction)
+- [Documentation](#documentation)
 - [Core Features](#core-features)
 - [First Principles Design](#first-principles-design)
 - [Tech Stack & Architecture](#tech-stack--architecture)
@@ -71,6 +72,15 @@ Use cases:
 - Contextual conversations with history tracking
 - Semi-automated task execution combining local commands, files, and web scraping
 - MCP server integration and tool ecosystem expansion
+
+---
+
+## Documentation
+
+Full usage guides live in the GitHub Wiki:
+
+- [English Wiki](https://github.com/xlbbb-cn/ai-chat/wiki) — installation, chat and models, workspace, skills, tools, memory/todos/timers, Neo4j, MCP, sub-agents, prompts and context, configuration/backup, monitoring, updates, security, development and FAQ.
+- [简体中文 Wiki](https://github.com/xlbbb-cn/ai-chat/wiki/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87) — complete Simplified Chinese translation of every page.
 
 ---
 

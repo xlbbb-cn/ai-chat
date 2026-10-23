@@ -2,7 +2,7 @@
 
 **把任意 OpenAI 兼容模型变成工作区感知的桌面 Agent —— Skills、工具与 Sub-Agent 开箱即用，每一次请求都留在本机可查。**
 
-[English](./README.md) · [最新版本](https://github.com/xlbbb-cn/ai-chat/releases/latest) · [快速开始](#快速开始)
+[Wiki](https://github.com/xlbbb-cn/ai-chat/wiki) · [English](./README.md) · [最新版本](https://github.com/xlbbb-cn/ai-chat/releases/latest) · [快速开始](#快速开始)
 
 ![AI Chat —— 大模型负责规划，本地工具负责执行](docs/banner.png)
 
@@ -48,6 +48,7 @@
 
 - [差异点](#差异点)
 - [项目介绍](#项目介绍)
+- [文档与教程](#文档与教程)
 - [核心功能](#核心功能)
 - [第一性设计原理](#第一性设计原理)
 - [技术栈与架构](#技术栈与架构)
@@ -71,6 +72,15 @@ AI Chat 是一个桌面端 AI 助手应用，支持接入任意 OpenAI 兼容模
 - 带上下文的持续对话与历史回溯
 - 结合本地命令、文件、网页抓取的半自动任务执行
 - MCP 服务接入与工具生态扩展
+
+---
+
+## 文档与教程
+
+完整使用教程在 GitHub Wiki：
+
+- [English Wiki](https://github.com/xlbbb-cn/ai-chat/wiki) — 英文主站，包含安装、聊天与模型、工作区、技能、工具、记忆/待办/定时器、Neo4j、MCP、子智能体、提示词与上下文、配置与备份、监控、更新、安全、开发构建和常见问题。
+- [简体中文 Wiki](https://github.com/xlbbb-cn/ai-chat/wiki/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87) — 每个页面的完整简体中文对照。
 
 ---
 
