@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::{agents, db, mcp, skills, todos, tools, AppState};
 
@@ -1261,8 +1261,11 @@ fn record_conclusion_to_memory(
 
 // ─── Chat command ─────────────────────────────────────────────────────────────
 
-#[tauri::command]
-pub async fn chat_completion(
+/// The whole chat turn: orchestration, the main-agent tool loop, and the
+/// final answer. Extracted from `chat_completion` so the command wrapper can
+/// run turn-end cleanup on every exit path (final answer, upstream error,
+/// or Stop pressed) while holding the shared sleep lock.
+async fn run_chat_turn(
     app: AppHandle,
     messages: Vec<ChatMessage>,
     skill_ids: Vec<String>,
@@ -2258,4 +2261,63 @@ pub async fn chat_completion(
     );
     let _ = app.emit("chat-done", ());
     Ok(())
+}
+
+/// Thin command wrapper: the turn itself plus turn-end cleanup that must run
+/// on EVERY path — serve processes are stopped and their whole process trees
+/// are verified dead, so a `run_shell` serve child never outlives the turn
+/// that spawned it (see `ServeRegistry::shutdown_all`).
+#[tauri::command]
+pub async fn chat_completion(
+    app: AppHandle,
+    messages: Vec<ChatMessage>,
+    skill_ids: Vec<String>,
+    session_id: String,
+    model_override: Option<String>,
+    use_agents: Option<bool>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    // This turn keeps the system awake (a long streaming answer or a slow
+    // sub-agent mission is exactly the kind of idle-looking stretch during
+    // which Windows/macOS would suspend the machine). RAII: released on every
+    // exit path — final answer, upstream error, Stop — and only after the
+    // turn-end cleanup below finished.
+    let sleep_guard = app.state::<crate::timer::SleepLock>().acquire();
+
+    let result = run_chat_turn(
+        app.clone(),
+        messages,
+        skill_ids,
+        session_id.clone(),
+        model_override,
+        use_agents,
+        state,
+    )
+    .await;
+
+    end_turn_cleanup(&app, &session_id).await;
+    drop(sleep_guard);
+    result
+}
+
+/// Turn-end cleanup: stop every serve process and verify that the killed
+/// trees are actually gone. Runs in a blocking thread — verification polls
+/// for up to a few seconds in the pathological case, which must not stall the
+/// async runtime. Silent when no serve process ever existed.
+async fn end_turn_cleanup(app: &AppHandle, session_id: &str) {
+    let session_id = session_id.to_string();
+    let summary = tauri::async_runtime::spawn_blocking({
+        let app = app.clone();
+        move || app.state::<AppState>().serve_processes.shutdown_all()
+    })
+    .await
+    .unwrap_or_else(|err| format!("Error: serve cleanup task failed: {err}"));
+
+    if !summary.contains("No background serve processes") {
+        log_event(
+            &app.state::<AppState>(),
+            "INFO",
+            format!("turn ended (session {session_id}): {summary}"),
+        );
+    }
 }

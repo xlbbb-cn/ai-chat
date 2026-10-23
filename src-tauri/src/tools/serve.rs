@@ -34,6 +34,10 @@ const CODE_PREVIEW_CHARS: usize = 240;
 const FINISHED_RETENTION: Duration = Duration::from_secs(600);
 /// Number of tail lines handed to the Tools panel for live monitoring.
 const PANEL_OUTPUT_LINES: usize = 8;
+/// How long turn-end shutdown keeps verifying that killed trees are gone.
+const SHUTDOWN_VERIFY_DEADLINE: Duration = Duration::from_secs(3);
+/// Poll interval while verifying killed trees.
+const SHUTDOWN_VERIFY_POLL: Duration = Duration::from_millis(100);
 
 #[derive(Default)]
 struct ServeStatus {
@@ -146,6 +150,57 @@ impl ServeRegistry {
         } else {
             format!(
                 "✅ Stopped {running} running background serve process(es); removed {total} registry entries."
+            )
+        }
+    }
+
+    /// Turn-end shutdown: stop every serve process and then VERIFY that each
+    /// killed tree is actually gone before returning. Escalates (re-kill of
+    /// the whole tree) once for stragglers and reports anything that could
+    /// still not be confirmed. The returned summary is app-log material.
+    ///
+    /// Synchronous by design and blocking up to
+    /// [`SHUTDOWN_VERIFY_DEADLINE`] in the pathological case; call it through
+    /// `spawn_blocking` from async command contexts.
+    pub fn shutdown_all(&self) -> String {
+        // Which entries are still running (and thus need post-kill
+        // verification)? Finished entries are just registry bookkeeping.
+        let running: Vec<(String, u32)> = {
+            let processes = match self.processes.lock() {
+                Ok(processes) => processes,
+                Err(err) => return format!("Error: serve registry is unavailable: {err}"),
+            };
+            processes
+                .values()
+                .filter(|process| {
+                    process
+                        .status
+                        .lock()
+                        .map(|status| status.state == "running")
+                        .unwrap_or(true)
+                })
+                .filter(|process| process.pid != 0)
+                .map(|process| (process.id.clone(), process.pid))
+                .collect()
+        };
+
+        let stopped = self.stop_all();
+        if running.is_empty() {
+            return stopped;
+        }
+
+        let ids: Vec<&str> = running.iter().map(|(id, _)| id.as_str()).collect();
+        let unresolved = verify_trees_exited(&running);
+        if unresolved.is_empty() {
+            format!(
+                "{stopped} Turn ended: killed serve trees [{}] — exit verified for all.",
+                ids.join(", ")
+            )
+        } else {
+            format!(
+                "{stopped} Turn ended: killed serve trees [{}] — WARNING, exit NOT confirmed for: {}.",
+                ids.join(", "),
+                unresolved.join(", ")
             )
         }
     }
@@ -276,6 +331,91 @@ fn stop_entry(process: ServeProcess) -> String {
     )
 }
 
+/// True when the pid can no longer be waited on. Platform notes:
+/// - Windows: wait on a fresh `PROCESS_SYNCHRONIZE` handle; an unreachable
+///   OpenProcess (invalid pid, exited and reaped) counts as gone. Signal
+///   happens at process termination, independent of any reaping.
+/// - Linux: `/proc/<pid>/stat` state — a zombie means the process is dead
+///   (every resource freed except the pid slot), so it counts as gone.
+/// - Other Unix: `kill(pid, 0)`; the serve child is reaped by this process's
+///   watcher task right after the kill, so the small zombie window between
+///   death and reap is the only false "alive" here.
+#[cfg(windows)]
+fn pid_gone(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE,
+    };
+
+    unsafe {
+        let handle = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
+        if handle.is_null() {
+            return true;
+        }
+        let waited = WaitForSingleObject(handle, 0);
+        let _ = CloseHandle(handle);
+        waited == WAIT_OBJECT_0
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn pid_gone(pid: u32) -> bool {
+    let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+        return true; // No /proc entry: the process is gone.
+    };
+    // Format: `pid (comm) state ...` — comm may contain spaces/parens, so
+    // locate the state after the LAST ')'.
+    let Some(rest) = stat.rsplit_once(')').map(|(_, rest)| rest) else {
+        return true;
+    };
+    // State is the first non-space field; 'Z' = zombie = dead.
+    !rest.trim_start().starts_with('Z')
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn pid_gone(pid: u32) -> bool {
+    let delivered = unsafe { libc::kill(pid as i32, 0) };
+    delivered == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+}
+
+#[cfg(not(any(windows, unix)))]
+fn pid_gone(pid: u32) -> bool {
+    let _ = pid;
+    true
+}
+
+/// Wait until every `(id, pid)` tree is confirmed gone, re-killing the whole
+/// tree once for any straggler. Returns the ids that could not be confirmed
+/// within the deadline (normally empty).
+fn verify_trees_exited(targets: &[(String, u32)]) -> Vec<String> {
+    if targets.is_empty() {
+        return Vec::new();
+    }
+
+    let deadline = Instant::now() + SHUTDOWN_VERIFY_DEADLINE;
+    let mut pending: Vec<(String, u32)> = targets
+        .iter()
+        .filter(|(_, pid)| !pid_gone(*pid))
+        .cloned()
+        .collect();
+    let mut escalated = false;
+
+    while !pending.is_empty() && Instant::now() < deadline {
+        std::thread::sleep(SHUTDOWN_VERIFY_POLL);
+        pending.retain(|(_, pid)| !pid_gone(*pid));
+        if !pending.is_empty() && !escalated {
+            // One poll cycle was not enough: re-kill the whole trees once
+            // (the same mechanism the initial stop used) and keep waiting.
+            escalated = true;
+            for (_, pid) in &pending {
+                process_guard::kill_process_tree(Some(*pid));
+            }
+        }
+    }
+
+    pending.into_iter().map(|(id, _)| id).collect()
+}
+
 /// Start a long-lived child for `code` and return the tool result immediately.
 pub async fn start(
     app: &AppHandle,
@@ -371,10 +511,10 @@ pub async fn start(
          pid: {pid}\n\
          shell: {shell_type}\n\
          status: running\n\n\
-         It keeps running after this tool call returns. Manage it with:\n\
+         It keeps running for the rest of this chat turn. Manage it with:\n\
          - `run_shell` {{\"type\":\"{shell_type}\",\"run_type\":\"serve\",\"action\":\"list\"}}\n\
          - `run_shell` {{\"type\":\"{shell_type}\",\"run_type\":\"serve\",\"action\":\"stop\",\"serve_id\":\"{id}\"}}\n\n\
-         The process tree is terminated automatically when the app exits."
+         The process tree is stopped with verified termination when this chat turn ends, and at app exit."
     )
 }
 
@@ -558,6 +698,53 @@ mod tests {
         assert!(
             matches!(status, Ok(Ok(_))),
             "the process should exit after its tree is killed"
+        );
+    }
+
+    /// Turn-end shutdown must kill the running tree AND verify its exit in the
+    /// returned summary.
+    #[tokio::test]
+    async fn shutdown_all_verifies_running_trees() {
+        #[cfg(windows)]
+        let sleep_code = "ping -n 30 127.0.0.1 >nul";
+        #[cfg(not(windows))]
+        let sleep_code = "sleep 30";
+
+        let mut command = build_command("bash", sleep_code, None).expect("build sleep command");
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+
+        let mut child = command.spawn().expect("spawn sleep process");
+        let tracked = process_guard::track_child(&child, "serve shutdown test");
+
+        let registry = ServeRegistry::default();
+        registry.insert(ServeProcess {
+            id: "serve-shutdown".to_string(),
+            pid: child.id().unwrap_or(0),
+            shell_type: "bash".to_string(),
+            code: sleep_code.to_string(),
+            cwd: PathBuf::from("."),
+            started_at: Instant::now(),
+            status: Arc::new(Mutex::new(ServeStatus {
+                state: "running".to_string(),
+                exit_code: None,
+                output: String::new(),
+            })),
+        });
+
+        let summary = registry.shutdown_all();
+        drop(tracked);
+
+        assert!(summary.contains("serve-shutdown"), "{summary}");
+        assert!(summary.contains("verified"), "{summary}");
+        assert!(!summary.contains("NOT confirmed"), "{summary}");
+
+        let status = tokio::time::timeout(Duration::from_secs(10), child.wait()).await;
+        assert!(
+            matches!(status, Ok(Ok(_))),
+            "the process should exit after shutdown_all"
         );
     }
 }

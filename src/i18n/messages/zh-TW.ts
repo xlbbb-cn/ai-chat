@@ -75,6 +75,8 @@ const zhTW: Messages = {
             otherSession: "計時器「{label}」在另一個工作階段中觸發。可填入此處以繼續該任務。",
             insert: "填入輸入框",
             dismiss: "略過",
+            sleepLock: "已阻止休眠",
+            sleepLockHint: "有計時器在等待或本輪對話仍在執行，系統將保持喚醒。",
         },
 
         attachFiles: "附加檔案",

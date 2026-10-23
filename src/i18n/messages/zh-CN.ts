@@ -75,6 +75,8 @@ const zhCN: Messages = {
             otherSession: "定时器「{label}」在另一个会话中触发。可填入此处以继续该任务。",
             insert: "填入输入框",
             dismiss: "忽略",
+            sleepLock: "已阻止休眠",
+            sleepLockHint: "有定时器在等待或本轮对话仍在运行，系统将保持唤醒。",
         },
 
         attachFiles: "添加附件",

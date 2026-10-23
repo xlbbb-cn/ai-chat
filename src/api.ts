@@ -19,6 +19,7 @@ import type {
   Profile,
   SkillsStatus,
   ServeProcessInfo,
+  SleepLockState,
   TimerEntry,
   UpdateInfo,
   UpdateDownloadProgress,
@@ -168,6 +169,14 @@ export async function listTimers(): Promise<TimerEntry[]> {
 /** Cancel a pending timer so it never resumes the conversation. */
 export async function cancelTimer(id: string): Promise<TimerEntry> {
   return invoke("cancel_timer", { id });
+}
+
+/**
+ * Current sleep-lock state (badge in the timer bar). Used once on mount;
+ * afterwards the `sleep-lock` event reports every change.
+ */
+export async function getSleepLockState(): Promise<SleepLockState> {
+  return invoke("get_sleep_lock_state");
 }
 
 // ─── run_shell serve processes ───────────────────────────────────────────────

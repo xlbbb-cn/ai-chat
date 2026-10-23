@@ -928,7 +928,12 @@ pub fn run() {
 
             // Delayed "continue the task" timers, mirrored to timers.json so a
             // pending wait survives an app restart.
-            app.manage(timer::TimerRegistry::load(data_dir.join("timers.json")));
+            let sleep_lock = timer::SleepLock::new(app.handle().clone());
+            app.manage(sleep_lock.clone());
+            app.manage(timer::TimerRegistry::load(
+                data_dir.join("timers.json"),
+                sleep_lock,
+            ));
             timer::restore_on_startup(app.handle());
 
             // Set window title to show current workspace directory
@@ -1023,6 +1028,7 @@ pub fn run() {
             agents::probe_agent_cloud,
             timer::list_timers,
             timer::cancel_timer,
+            timer::get_sleep_lock_state,
             tools::serve::list_serve_processes,
             tools::serve::stop_serve_process,
             list_profiles,

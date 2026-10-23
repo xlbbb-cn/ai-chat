@@ -227,7 +227,7 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "run_shell",
-                "description": "Execute or manage a shell script with patent-compliant risk assessment. L5/L6 (safe/read-only) scripts execute directly. L0-L4 scripts require user confirmation with risk score display. Syntax errors are rejected with detailed error report.\n\nUse `run_type: \"direct\"` (default) to run a script to completion and return its output. Use `run_type: \"serve\"` to start a long-lived background process (for example an HTTP service or a file watcher) and return immediately with a serve id; list running serve processes with `run_type: \"serve\", action: \"list\"`, and terminate one (or all, with `serve_id: \"all\"`) with `action: \"stop\"`. Serve process trees are terminated automatically when the app exits.",
+                "description": "Execute or manage a shell script with patent-compliant risk assessment. L5/L6 (safe/read-only) scripts execute directly. L0-L4 scripts require user confirmation with risk score display. Syntax errors are rejected with detailed error report.\n\nUse `run_type: \"direct\"` (default) to run a script to completion and return its output. Use `run_type: \"serve\"` to start a long-lived background process (for example an HTTP service or a file watcher) and return immediately with a serve id; list running serve processes with `run_type: \"serve\", action: \"list\"`, and terminate one (or all, with `serve_id: \"all\"`) with `action: \"stop\"`. IMPORTANT: serve processes live only for the current chat turn — they are stopped (whole process tree, exit verified) as soon as this turn ends, and at app exit.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -266,7 +266,7 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
                             "type": "integer",
                             "minimum": 1,
                             "maximum": 3600,
-                            "description": "Optional timeout for run_type 'direct', in seconds. Defaults to 30 if omitted. Ignored for serve processes, which keep running until stopped or the app exits."
+                            "description": "Optional timeout for run_type 'direct', in seconds. Defaults to 30 if omitted. Ignored for serve processes, which keep running until stopped, the current chat turn ends, or the app exits."
                         }
                     },
                     "required": ["type"]

@@ -46,6 +46,18 @@ export interface TimerEntry {
 }
 
 /**
+ * Cross-platform "system awake" lock state. Mirrors `SleepLockState` in
+ * `src-tauri/src/tools/timer.rs`: held while a timer is pending or a chat turn
+ * is streaming, which keeps the OS from suspending mid-task.
+ */
+export interface SleepLockState {
+  /** True while the OS has been asked not to idle-suspend. */
+  active: boolean;
+  /** Number of live holders (pending timers, running turns, …). */
+  holders: number;
+}
+
+/**
  * One background process started by `run_shell` with `run_type: "serve"`.
  * Mirrors `ServeProcessInfo` in `src-tauri/src/tools/serve.rs`; the Tools panel
  * polls it to monitor running serve processes and stop them.

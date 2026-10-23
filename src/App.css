@@ -632,6 +632,28 @@ body {
   color: var(--c-danger);
 }
 
+/* "System sleep blocked" badge: the cross-platform lock holds while a timer
+   is pending or the current turn is streaming (see `SleepLock` in timer.rs).
+   Informational, not a control — hairline outline, no filled emphasis. */
+.sleep-lock-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border: 1px solid var(--c-border);
+  border-radius: 4px;
+  background: var(--c-surface);
+  font-size: 12px;
+  color: var(--c-muted);
+  flex-shrink: 0;
+  transition: color var(--t-dur) var(--t-ease), border-color var(--t-dur) var(--t-ease);
+}
+
+.sleep-lock-badge svg {
+  color: var(--c-success);
+  font-size: 10px;
+}
+
 /* Banner for a timer that fired while the user was in another session. */
 .timer-notice {
   flex-shrink: 0;

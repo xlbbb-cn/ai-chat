@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, listMcpServers, listSubAgents, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills, listTimers, cancelTimer } from "./api";
+import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, listMcpServers, listSubAgents, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState } from "./api";
 
 import { ChatMessage } from "./components/ChatMessage";
 import { ToolCallGroup } from "./components/ToolCallGroup";
@@ -26,12 +26,14 @@ import type {
   MessageContent,
   ModelMetadata,
   SkillsStatus,
+  SleepLockState,
   TimerEntry,
   UpdateInfo,
 } from "./types";
 import { isGenerationStopped, isLocale, useI18n } from "./i18n";
 import {
   FontAwesomeIcon,
+  faBolt,
   faBrain,
   faClockRotateLeft,
   faFileLines,
@@ -379,6 +381,8 @@ export default function App() {
   const [markdownSaving, setMarkdownSaving] = useState(false);
   /** Pending delay timers created by the `timer_set` tool (soonest first). */
   const [timers, setTimers] = useState<TimerEntry[]>([]);
+  /** Cross-platform "system awake" lock, shown as a badge above the input. */
+  const [sleepLock, setSleepLock] = useState<SleepLockState>({ active: false, holders: 0 });
   /** 1 s heartbeat that drives the countdowns in the timer bar. */
   const [timerTick, setTimerTick] = useState(() => Date.now());
   /** Timer that fired for a session the user is not currently in. */
@@ -1050,10 +1054,18 @@ export default function App() {
     listTimers()
       .then(setTimers)
       .catch((err) => console.error("Failed to load timers", err));
+    getSleepLockState()
+      .then(setSleepLock)
+      .catch((err) => console.error("Failed to load sleep-lock state", err));
 
     const unlisteners: Promise<() => void>[] = [];
     unlisteners.push(
       listen<TimerEntry[]>("timer-state", (e) => setTimers(e.payload ?? [])),
+      // The sleep lock is held while a timer is pending or a chat turn is
+      // streaming; the badge above the input mirrors it.
+      listen<SleepLockState>("sleep-lock", (e) =>
+        setSleepLock(e.payload ?? { active: false, holders: 0 }),
+      ),
       listen<TimerEntry>("timer-fired", (e) => {
         const timer = e.payload;
         if (!timer) return;
@@ -2129,43 +2141,56 @@ export default function App() {
 
         {/* Input */}
         <div className="input-area" style={{ position: "relative", flexDirection: "column", alignItems: "stretch" }}>
-          {timers.length > 0 && (
+          {(timers.length > 0 || sleepLock.active) && (
             <div className="timer-bar" role="status" aria-live="polite">
-              <span className="timer-bar-title">
-                <FontAwesomeIcon icon={faStopwatch} />
-                {t("app.timers.title")}
-              </span>
-              <div className="timer-bar-chips">
-                {timers.map((timer) => {
-                  const otherSession =
-                    Boolean(timer.session_id) && timer.session_id !== sessionId;
-                  return (
-                    <div
-                      key={timer.id}
-                      className={`timer-chip${otherSession ? " other-session" : ""}`}
-                      title={timer.message}
-                    >
-                      <span className="timer-chip-label">
-                        {timer.label || t("app.timers.untitled")}
-                      </span>
-                      <span className="timer-chip-countdown">
-                        {t("app.timers.firesIn", {
-                          time: formatCountdown(timer.fire_at - timerTick),
-                        })}
-                      </span>
-                      <button
-                        type="button"
-                        className="timer-chip-cancel"
-                        title={t("app.timers.cancel")}
-                        aria-label={t("app.timers.cancel")}
-                        onClick={() => void handleCancelTimer(timer.id)}
-                      >
-                        <FontAwesomeIcon icon={faXmark} />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
+              {timers.length > 0 && (
+                <>
+                  <span className="timer-bar-title">
+                    <FontAwesomeIcon icon={faStopwatch} />
+                    {t("app.timers.title")}
+                  </span>
+                  <div className="timer-bar-chips">
+                    {timers.map((timer) => {
+                      const otherSession =
+                        Boolean(timer.session_id) && timer.session_id !== sessionId;
+                      return (
+                        <div
+                          key={timer.id}
+                          className={`timer-chip${otherSession ? " other-session" : ""}`}
+                          title={timer.message}
+                        >
+                          <span className="timer-chip-label">
+                            {timer.label || t("app.timers.untitled")}
+                          </span>
+                          <span className="timer-chip-countdown">
+                            {t("app.timers.firesIn", {
+                              time: formatCountdown(timer.fire_at - timerTick),
+                            })}
+                          </span>
+                          <button
+                            type="button"
+                            className="timer-chip-cancel"
+                            title={t("app.timers.cancel")}
+                            aria-label={t("app.timers.cancel")}
+                            onClick={() => void handleCancelTimer(timer.id)}
+                          >
+                            <FontAwesomeIcon icon={faXmark} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+              {sleepLock.active && (
+                <span
+                  className="sleep-lock-badge"
+                  title={t("app.timers.sleepLockHint")}
+                >
+                  <FontAwesomeIcon icon={faBolt} />
+                  {t("app.timers.sleepLock")}
+                </span>
+              )}
             </div>
           )}
           {(usage || streaming) && (

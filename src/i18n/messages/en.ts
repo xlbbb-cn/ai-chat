@@ -85,6 +85,9 @@ const en = {
                 "Timer “{label}” fired in another chat session. Insert it here to continue that task.",
             insert: "Insert into input",
             dismiss: "Dismiss",
+            sleepLock: "Sleep blocked",
+            sleepLockHint:
+                "A timer is pending or this turn is still running, so the system is kept awake.",
         },
 
         attachFiles: "Attach files",
