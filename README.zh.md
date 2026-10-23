@@ -118,10 +118,11 @@ AI Chat 是一个桌面端 AI 助手应用，支持接入任意 OpenAI 兼容模
 ### 4) 工具系统（Tools）
 
 - run_cmd / run_shell：本地命令执行，内置危险命令确认
+- run_shell serve：当前回合的后台进程；回合结束时整棵进程树会被停止并核验退出
 - file_actions：文件读写、编辑、补丁、比对（diff），支持 mkdir / rename / move / delete
 - memory：`session` / `user` / `repo` 三级记忆，可检索与沉淀结论
 - todos：按会话维护任务清单，模型可规划、更新与关闭
-- timer：一次性延时定时器，到点自动恢复会话，无需轮询
+- timer：一次性延时定时器，到点自动恢复会话，无需轮询；定时器挂起与回合进行中会阻止系统休眠（Windows / macOS / Linux）
 - knowledge_graph：知识图谱查询（支持 Neo4j）
 
 ### 5) MCP 管理

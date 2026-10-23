@@ -118,10 +118,11 @@ Full usage guides live in the GitHub Wiki:
 ### 4) Tool System
 
 - run_cmd / run_shell: Local command execution with dangerous-command confirmation
+- run_shell serve: Background processes for the current turn; the whole process tree is stopped and its exit verified when the turn ends
 - file_actions: File read/write/edit/patch/diff plus mkdir/rename/move/delete
 - memory: Three scopes (`session` / `user` / `repo`) for searching and persisting conclusions
 - todos: Per-session task lists the model can plan, update and close
-- timer: One-shot delay timers that resume the session instead of polling
+- timer: One-shot delay timers that resume the session instead of polling; timers and running turns keep the system awake (Windows / macOS / Linux)
 - knowledge_graph: Knowledge graph queries (supports Neo4j)
 
 ### 5) MCP Management
