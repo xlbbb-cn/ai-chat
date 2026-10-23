@@ -31,6 +31,8 @@
 
 Chat is the easy part. AI Chat gives the agent a workspace, real utilities (memory, timers, todos) and an audit trail — without imposing a persona.
 
+**Core philosophy:** first principles; freedom returned to you (tools, LLM API, prompts); a minimal, professional interface.
+
 | Feature | **AI Chat** | Cherry Studio | Chatbox | LM Studio |
 | --- | :---: | :---: | :---: | :---: |
 | **Skill sandbox** — `.data/skills` per workspace, root pinned to its `SKILL.md` | ✅ | ◐ agent workspaces | — | — |
@@ -140,6 +142,8 @@ Full usage guides live in the GitHub Wiki:
 ---
 
 ## First Principles Design
+
+The core intent is simple: reason from first principles, return freedom to the user (tools, LLM API, prompts), and keep the interface minimal and professional.
 
 From first principles, this project breaks down the desktop AI assistant into four irreducible problems:
 
