@@ -82,6 +82,11 @@ const zhTW: Messages = {
         attachFiles: "附加檔案",
         attachmentUnsupported: "已跳過 {names}：「{model}」無法讀取該檔案類型。",
         inputPlaceholder: "輸入訊息…（Enter 送出，Shift+Enter 換行）",
+        injections: {
+            title: "本輪內追加",
+            queued: "等待送達",
+            placeholder: "助理正在工作，輸入新資訊即可追加給它（Enter 追加）",
+        },
         selectModel: "選擇模型",
         reasoningDepth: "思考深度",
         reasoningDepthTitle: "模型回答前的思考量 —— 以 reasoning_effort 參數送出。",
@@ -155,6 +160,7 @@ const zhTW: Messages = {
         exportTitle: "將這則回覆匯出為 PDF",
         deleteTitle: "刪除這則訊息",
         forkTitle: "從這則訊息建立分支工作階段",
+        injected: "本輪內追加",
     },
 
     toolGroup: {

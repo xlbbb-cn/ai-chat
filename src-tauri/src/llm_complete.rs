@@ -354,6 +354,13 @@ const DEFAULT_MODEL_MAX_TOKENS: u32 = 524_288;
 const STREAM_MAX_RETRIES: usize = 3;
 const STREAM_RETRY_BACKOFF_MS: [u64; 2] = [300, 900];
 
+/// Wrapper around text the user pushed into a running turn. It has to read as
+/// a NEW user instruction, not as an internal note: some OpenAI-compatible
+/// gateways reject `system` messages that appear mid-conversation, and a
+/// `user` message is what this actually is.
+const MID_TURN_INJECTION_PREFIX: &str =
+    "[User update received while you were working — treat this as a new user message and adjust the current work if it changes anything]";
+
 fn retry_backoff_ms(attempt: usize) -> u64 {
     STREAM_RETRY_BACKOFF_MS
         .get(attempt.saturating_sub(1))
@@ -1261,6 +1268,34 @@ fn record_conclusion_to_memory(
 
 // ─── Chat command ─────────────────────────────────────────────────────────────
 
+/// Closes the mid-turn injection window when a turn ends — on EVERY path,
+/// including the `?` early return after an upstream error (that path emits
+/// `chat-error` and never reaches `chat-done`).
+///
+/// The window is keyed by turn id, so a turn that is still winding down after
+/// `chat-done` can neither close a newer turn's window nor drop its items.
+struct InjectionWindow {
+    app: AppHandle,
+    turn_id: u64,
+}
+
+impl InjectionWindow {
+    fn open(app: &AppHandle, state: &AppState, session_id: &str) -> Self {
+        Self {
+            app: app.clone(),
+            turn_id: state.open_turn_window(session_id),
+        }
+    }
+}
+
+impl Drop for InjectionWindow {
+    fn drop(&mut self) {
+        if let Some(state) = self.app.try_state::<AppState>() {
+            state.close_turn_window(self.turn_id);
+        }
+    }
+}
+
 /// The whole chat turn: orchestration, the main-agent tool loop, and the
 /// final answer. Extracted from `chat_completion` so the command wrapper can
 /// run turn-end cleanup on every exit path (final answer, upstream error,
@@ -1287,6 +1322,12 @@ async fn run_chat_turn(
         previous.store(true, Ordering::SeqCst);
         turn_flag
     };
+
+    // From here on the user may push new information into this turn; the
+    // window is closed (and all undelivered items dropped for the UI to
+    // re-send) by the guard's `Drop`, whatever path the turn takes.
+    let injection_window = InjectionWindow::open(&app, &state, &session_id);
+
     let config = state.config.lock().unwrap().clone();
     let multi_agent_enabled = use_agents.unwrap_or(false);
     log_event(
@@ -1336,6 +1377,9 @@ async fn run_chat_turn(
                     "INFO",
                     format!("agent orchestration stopped by user: session_id={}", session_id),
                 );
+                // Close the injection window before announcing the end of the
+                // turn, so nothing accepted after this point can be stranded.
+                drop(injection_window);
                 let _ = app.emit("chat-done", ());
                 return Ok(());
             }
@@ -1762,6 +1806,53 @@ async fn run_chat_turn(
         // Sanitize tool call pairs before each request to prevent the API error:
         // "Messages with role 'tool' must be a response to a preceding message with 'tool_calls'"
         sanitize_tool_pairs(&mut all_messages);
+
+        // ── Mid-turn injections ──────────────────────────────────────────────
+        // The user can append new information while the assistant is working
+        // (external state changed, a wrong path, a new constraint). A request
+        // boundary is the only safe place: an `assistant` message carrying
+        // `tool_calls` must stay adjacent to its `tool` results, so the injected
+        // text goes AFTER the whole round, right before the next request.
+        //
+        // A turn whose last request was the final answer never reaches another
+        // boundary — those items stay in the inbox, the window closes with the
+        // turn, and the UI sends the text as a normal next-turn message.
+        let injections = state.drain_turn_injections(injection_window.turn_id);
+        if !injections.is_empty() {
+            for item in &injections {
+                all_messages.push(json!({
+                    "role": "user",
+                    "content": format!("{}\n\n{}", MID_TURN_INJECTION_PREFIX, item.text),
+                }));
+            }
+            log_event(
+                &state,
+                "INFO",
+                format!(
+                    "mid-turn injection delivered: session_id={}, count={}",
+                    session_id,
+                    injections.len()
+                ),
+            );
+            // Only now is the text actually part of a request. The UI keeps
+            // showing an item as "queued" until this event lands, so anything
+            // that never reached a request is re-sent as a normal turn instead
+            // of vanishing.
+            let _ = app.emit(
+                "chat-injected",
+                json!({
+                    "items": injections
+                        .iter()
+                        .map(|item| json!({
+                            "id": item.id,
+                            "text": item.text,
+                            "created_at_ms": item.created_at_ms,
+                        }))
+                        .collect::<Vec<_>>(),
+                }),
+            );
+        }
+
 
         // Context window used for the usage gauge (`Tokens: X / Y`).
         // Resolution order: per-model context window (auto-detected from the
@@ -2259,6 +2350,9 @@ async fn run_chat_turn(
         "INFO",
         format!("chat_completion finished: session_id={}", session_id),
     );
+    // Close the injection window before announcing the end of the turn. The
+    // guard also runs on the error path, where `chat-done` is never emitted.
+    drop(injection_window);
     let _ = app.emit("chat-done", ());
     Ok(())
 }

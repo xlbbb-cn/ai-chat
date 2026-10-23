@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { listHistorySessions, loadSessionMessages, deleteHistory, listSessionMeta, updateSessionMeta } from "../api";
 import type { HistoryRecord, HistorySessionSummary, SessionMeta } from "../api";
-import type { Attachment, Message, MessageContent, ToolCallEntry } from "../types";
+import type { Attachment, ChatInjection, Message, MessageContent, ToolCallEntry } from "../types";
 import { useI18n, type Locale } from "../i18n";
 import {
   FontAwesomeIcon,
@@ -99,11 +99,19 @@ function recordsToMessages(sessionRecords: HistoryRecord[]): Message[] {
       } catch { /* ignore malformed */ }
     }
     const attachments = parseStoredAttachments(r.attachments);
+    let injections: ChatInjection[] | undefined;
+    if (r.injections) {
+      try {
+        const parsed = JSON.parse(r.injections) as ChatInjection[];
+        if (Array.isArray(parsed) && parsed.length > 0) injections = parsed;
+      } catch { /* ignore malformed */ }
+    }
     messages.push({
       id: crypto.randomUUID(),
       role: r.role as "user" | "assistant",
       content: parseStoredContent(r.content),
       ...(attachments ? { attachments } : {}),
+      ...(injections ? { injections } : {}),
       tool_calls: toolCalls,
       ...(r.reasoning_content ? { reasoning_content: r.reasoning_content } : {}),
       dbId: r.id,

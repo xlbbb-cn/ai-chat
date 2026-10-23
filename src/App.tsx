@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, listMcpServers, listSubAgents, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState } from "./api";
+import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState } from "./api";
 
 import { ChatMessage } from "./components/ChatMessage";
 import { ToolCallGroup } from "./components/ToolCallGroup";
@@ -20,6 +20,7 @@ import type {
   Message,
   AgentTaskEvent,
   AgentTaskTokenEvent,
+  ChatInjection,
   ToolCallEntry,
   Attachment,
   ContentPart,
@@ -42,6 +43,7 @@ import {
   faFilePen,
   faGear,
   faPaperclip,
+  faPenToSquare,
   faPlug,
   faRobot,
   faRotateRight,
@@ -414,8 +416,19 @@ export default function App() {
   const currentToolCallsRef = useRef<ToolCallEntry[]>([]);
   /** Buffered `agent-task-token` chunks per task, flushed on a timer. */
   const pendingAgentTokensRef = useRef<Map<string, string>>(new Map());
-  /** Resume prompts from fired timers, waiting for the chat to become idle. */
-  const [pendingTimerPrompts, setPendingTimerPrompts] = useState<string[]>([]);
+  /** Resume prompts from fired timers, plus mid-turn injections that arrived
+   *  after the turn's last request. Sent one at a time once the chat is idle,
+   *  so the turn order stays intact. */
+  const [pendingAutoPrompts, setPendingAutoPrompts] = useState<string[]>([]);
+  /** Injections accepted by the running turn that have not reached a request
+   *  yet, shown as queued chips above the input. */
+  const [pendingInjections, setPendingInjections] = useState<ChatInjection[]>([]);
+  /** Authoritative copy of `pendingInjections` for the once-registered event
+   *  listener and the turn-end callback, neither of which may read stale state. */
+  const pendingInjectionsRef = useRef<ChatInjection[]>([]);
+  /** Injections already delivered to a request during the turn that is
+   *  streaming now — persisted with the assistant row in `onDone`. */
+  const currentInjectionsRef = useRef<ChatInjection[]>([]);
   /** Latest active session for the timer listener (registered once). */
   const sessionIdRef = useRef(sessionId);
 
@@ -1019,6 +1032,28 @@ export default function App() {
         updateActiveAssistantToolCalls(currentToolCallsRef.current);
         hasRunningToolCallRef.current = true;
       }),
+      listen<{ items: ChatInjection[] }>("chat-injected", (e) => {
+        // The backend drained these into the next request, so the model has
+        // seen them. Anything still queued stays a chip until it either lands
+        // here or the turn ends (see `onDone`, which re-sends the leftovers).
+        const items = e.payload?.items ?? [];
+        if (items.length === 0) return;
+        const delivered = new Set(items.map((item) => item.id));
+        pendingInjectionsRef.current = pendingInjectionsRef.current.filter(
+          (item) => !delivered.has(item.id)
+        );
+        setPendingInjections(pendingInjectionsRef.current);
+        currentInjectionsRef.current = [...currentInjectionsRef.current, ...items];
+        const targetId = currentAssistantMessageIdRef.current;
+        if (!targetId) return;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === targetId
+              ? { ...m, injections: [...(m.injections ?? []), ...items] }
+              : m
+          )
+        );
+      }),
     );
     return () => {
       unlisteners.forEach((p) => p.then((fn) => fn()));
@@ -1090,7 +1125,7 @@ export default function App() {
         // Queue the resume prompt; the effect below sends it once the chat is
         // idle. Queuing (instead of sending directly) means a timer that fires
         // mid-reply still continues the task when the reply finishes.
-        setPendingTimerPrompts((prev) => [...prev, timerPromptText(timer)]);
+        setPendingAutoPrompts((prev) => [...prev, timerPromptText(timer)]);
       }),
     );
     return () => {
@@ -1112,6 +1147,56 @@ export default function App() {
     } catch (err) {
       setError(String(err));
     }
+  }, []);
+
+  /**
+   * Push the composed text into the turn that is currently running.
+   *
+   * It joins the model at the next request boundary (before the next tool
+   * round or the final answer), which is the only place a turn can accept new
+   * input — a stream already in flight cannot be appended to. When no turn
+   * accepts it (the reply ended in the meantime), the text is queued as a
+   * normal next-turn message instead of being dropped.
+   */
+  const appendInjection = useCallback(async () => {
+    const text = input.trim();
+    if (!text || !streaming || profileExporting) return;
+
+    const item: ChatInjection = {
+      id: crypto.randomUUID(),
+      text,
+      created_at_ms: Date.now(),
+    };
+    setInput("");
+    pendingInjectionsRef.current = [...pendingInjectionsRef.current, item];
+    setPendingInjections(pendingInjectionsRef.current);
+
+    try {
+      const { accepted } = await injectUserMessage(sessionId, item.id, text);
+      if (accepted) return;
+    } catch (err) {
+      console.error("Failed to inject mid-turn message", err);
+    }
+
+    // The turn had already made its last request: send it as the next turn.
+    pendingInjectionsRef.current = pendingInjectionsRef.current.filter(
+      (pending) => pending.id !== item.id
+    );
+    setPendingInjections(pendingInjectionsRef.current);
+    setPendingAutoPrompts((prev) => [...prev, text]);
+  }, [input, streaming, sessionId, profileExporting]);
+
+  /**
+   * Turn-end flush: an injection still queued when the turn ended never
+   * reached a request (the model never saw it), so queue its text as the next
+   * user turn instead of letting it disappear with the window.
+   */
+  const flushUndeliveredInjections = useCallback(() => {
+    const undelivered = pendingInjectionsRef.current;
+    if (undelivered.length === 0) return;
+    pendingInjectionsRef.current = [];
+    setPendingInjections([]);
+    setPendingAutoPrompts((prev) => [...prev, ...undelivered.map((item) => item.text)]);
   }, []);
 
   const sendMessage = useCallback(async (overrideText?: string) => {
@@ -1148,6 +1233,7 @@ export default function App() {
     const assistantMsg: Message = { id: assistantId, role: "assistant", content: "", streaming: true };
     currentAssistantMessageIdRef.current = assistantId;
     currentToolCallsRef.current = [];
+    currentInjectionsRef.current = [];
     hasRunningToolCallRef.current = false;
 
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
@@ -1165,12 +1251,28 @@ export default function App() {
 
     const history = [...messages, userMsg]
       .filter((m) => !m.streaming && !m.id.startsWith("agent-progress-") && m.role !== "tool_group")
-      .map((m) => ({
-        role: m.role,
-        content: m.content,
-        reasoning_content: m.reasoning_content,
-        loaded_skills: loadedSkillsOfMessage(m),
-      }));
+      .flatMap((m) => {
+        const entry = {
+          role: m.role,
+          content: m.content,
+          reasoning_content: m.reasoning_content,
+          loaded_skills: loadedSkillsOfMessage(m),
+        };
+        // A mid-turn injection was a real user message the model answered
+        // after seeing. History replays it as its own user turn directly
+        // before the assistant reply, because one stored assistant row
+        // covers the whole multi-request turn.
+        const injections = m.role === "assistant" ? m.injections ?? [] : [];
+        return [
+          ...injections.map((injection) => ({
+            role: "user" as const,
+            content: injection.text,
+            reasoning_content: undefined,
+            loaded_skills: undefined,
+          })),
+          entry,
+        ];
+      });
 
     saveHistory(
       sessionId,
@@ -1226,7 +1328,18 @@ export default function App() {
         const finalToolCalls = currentToolCallsRef.current.map((e) =>
           e.status === "running" ? { ...e, status: "done" as const } : e
         );
-        saveHistory(sessionId, "assistant", accumulatedContent, finalToolCalls.length > 0 ? JSON.stringify(finalToolCalls) : undefined, accumulatedReasoning || undefined)
+        // Deliveries are stored on the assistant row: one turn is one row, and
+        // the reply was generated after the model saw them.
+        const deliveredInjections = currentInjectionsRef.current;
+        saveHistory(
+          sessionId,
+          "assistant",
+          accumulatedContent,
+          finalToolCalls.length > 0 ? JSON.stringify(finalToolCalls) : undefined,
+          accumulatedReasoning || undefined,
+          undefined,
+          deliveredInjections.length > 0 ? JSON.stringify(deliveredInjections) : undefined,
+        )
           .then((dbId) => {
             setMessages((prev) =>
               prev.map((m) => (m.id === assistantId ? { ...m, dbId } : m))
@@ -1243,6 +1356,8 @@ export default function App() {
         });
         setAgentStatuses({});
         hasRunningToolCallRef.current = false;
+        // Whatever never reached a request is sent as the next user turn.
+        flushUndeliveredInjections();
         currentAssistantMessageIdRef.current = null;
         currentToolCallsRef.current = [];
         setStreaming(false);
@@ -1272,6 +1387,8 @@ export default function App() {
         setPendingRetryMessageId(userMsg.id);
         setAgentStatuses({});
         hasRunningToolCallRef.current = false;
+        // Whatever never reached a request is sent as the next user turn.
+        flushUndeliveredInjections();
         currentAssistantMessageIdRef.current = null;
         currentToolCallsRef.current = [];
         setStreaming(false);
@@ -1280,18 +1397,19 @@ export default function App() {
     }, useAgentsEnabled);
 
     cleanupRef.current = cleanup;
-  }, [input, messages, streaming, profileExporting, activeSkillIds, sessionId, attachments, selectedModel, useAgentsEnabled, t]);
+  }, [input, messages, streaming, profileExporting, activeSkillIds, sessionId, attachments, selectedModel, useAgentsEnabled, t, flushUndeliveredInjections]);
 
-  // Continue the conversation from a fired timer once the chat is idle. The
-  // prompt goes out as a new user turn, so the assistant resumes the task with
-  // the full history. Sending one prompt at a time keeps the turn order intact
-  // when several timers fire together.
+  // Continue the conversation from a fired timer — or deliver an injection
+  // that arrived after the turn's last request — once the chat is idle. The
+  // prompt goes out as a new user turn, so the assistant continues with the
+  // full history. Sending one at a time keeps the turn order intact when
+  // several prompts queue together.
   useEffect(() => {
-    if (streaming || profileExporting || pendingTimerPrompts.length === 0) return;
-    const [next, ...rest] = pendingTimerPrompts;
-    setPendingTimerPrompts(rest);
+    if (streaming || profileExporting || pendingAutoPrompts.length === 0) return;
+    const [next, ...rest] = pendingAutoPrompts;
+    setPendingAutoPrompts(rest);
     void sendMessage(next);
-  }, [pendingTimerPrompts, streaming, profileExporting, sendMessage]);
+  }, [pendingAutoPrompts, streaming, profileExporting, sendMessage]);
 
   const retryPendingUserMessage = useCallback(async () => {
     if (streaming || !pendingRetryMessageId) return;
@@ -1300,6 +1418,7 @@ export default function App() {
     const assistantMsg: Message = { id: assistantId, role: "assistant", content: "", streaming: true };
     currentAssistantMessageIdRef.current = assistantId;
     currentToolCallsRef.current = [];
+    currentInjectionsRef.current = [];
     hasRunningToolCallRef.current = false;
 
     followBottomRef.current = true;
@@ -1312,12 +1431,24 @@ export default function App() {
 
     const history = [...messages]
       .filter((m) => !m.streaming && !m.id.startsWith("agent-progress-") && m.role !== "tool_group")
-      .map((m) => ({
-        role: m.role,
-        content: m.content,
-        reasoning_content: m.reasoning_content,
-        loaded_skills: loadedSkillsOfMessage(m),
-      }));
+      .flatMap((m) => {
+        const entry = {
+          role: m.role,
+          content: m.content,
+          reasoning_content: m.reasoning_content,
+          loaded_skills: loadedSkillsOfMessage(m),
+        };
+        const injections = m.role === "assistant" ? m.injections ?? [] : [];
+        return [
+          ...injections.map((injection) => ({
+            role: "user" as const,
+            content: injection.text,
+            reasoning_content: undefined,
+            loaded_skills: undefined,
+          })),
+          entry,
+        ];
+      });
 
     let accumulatedContent = "";
     let accumulatedReasoning = "";
@@ -1357,7 +1488,18 @@ export default function App() {
         const finalToolCalls = currentToolCallsRef.current.map((e) =>
           e.status === "running" ? { ...e, status: "done" as const } : e
         );
-        saveHistory(sessionId, "assistant", accumulatedContent, finalToolCalls.length > 0 ? JSON.stringify(finalToolCalls) : undefined, accumulatedReasoning || undefined)
+        // Deliveries are stored on the assistant row: one turn is one row, and
+        // the reply was generated after the model saw them.
+        const deliveredInjections = currentInjectionsRef.current;
+        saveHistory(
+          sessionId,
+          "assistant",
+          accumulatedContent,
+          finalToolCalls.length > 0 ? JSON.stringify(finalToolCalls) : undefined,
+          accumulatedReasoning || undefined,
+          undefined,
+          deliveredInjections.length > 0 ? JSON.stringify(deliveredInjections) : undefined,
+        )
           .then((dbId) => {
             setMessages((prev) =>
               prev.map((m) => (m.id === assistantId ? { ...m, dbId } : m))
@@ -1374,6 +1516,8 @@ export default function App() {
         });
         setPendingRetryMessageId(null);
         setAgentStatuses({});
+        // Whatever never reached a request is sent as the next user turn.
+        flushUndeliveredInjections();
         currentAssistantMessageIdRef.current = null;
         currentToolCallsRef.current = [];
         setStreaming(false);
@@ -1400,6 +1544,8 @@ export default function App() {
         );
         setAgentStatuses({});
         hasRunningToolCallRef.current = false;
+        // Whatever never reached a request is sent as the next user turn.
+        flushUndeliveredInjections();
         currentAssistantMessageIdRef.current = null;
         currentToolCallsRef.current = [];
         setStreaming(false);
@@ -1408,7 +1554,7 @@ export default function App() {
     }, useAgentsEnabled);
 
     cleanupRef.current = cleanup;
-  }, [messages, streaming, pendingRetryMessageId, activeSkillIds, sessionId, selectedModel, useAgentsEnabled, t]);
+  }, [messages, streaming, pendingRetryMessageId, activeSkillIds, sessionId, selectedModel, useAgentsEnabled, t, flushUndeliveredInjections]);
 
   const handleDeleteMessage = useCallback(async (messageId: string) => {
     const msg = messages.find((m) => m.id === messageId);
@@ -1452,7 +1598,14 @@ export default function App() {
 
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      sendMessage();
+      // While a turn is running the composer is an injection channel, not a
+      // new-message channel: the text joins the running turn at its next
+      // request boundary instead of starting a second turn.
+      if (streaming) {
+        void appendInjection();
+      } else {
+        sendMessage();
+      }
     }
   }
 
@@ -2235,6 +2388,20 @@ export default function App() {
               )}
             </div>
           )}
+          {pendingInjections.length > 0 && (
+            <div className="injection-bar" role="status" aria-live="polite">
+              <span className="injection-bar-title">
+                <FontAwesomeIcon icon={faPenToSquare} />
+                {t("app.injections.title")}
+              </span>
+              {pendingInjections.map((item) => (
+                <span key={item.id} className="injection-chip" title={item.text}>
+                  <span className="injection-chip-text">{item.text}</span>
+                  <span className="injection-chip-state">{t("app.injections.queued")}</span>
+                </span>
+              ))}
+            </div>
+          )}
           {attachments.length > 0 && (
             <div className="attachments-bar">
               {attachments.map((file, i) => (
@@ -2328,8 +2495,10 @@ export default function App() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={t("app.inputPlaceholder")}
-              disabled={streaming || profileExporting}
+              placeholder={streaming ? t("app.injections.placeholder") : t("app.inputPlaceholder")}
+              // Stays usable while a reply streams: Enter then adds the text to
+              // the running turn instead of starting a new one.
+              disabled={profileExporting}
             />
             <ModelSelect
               models={availableModels}

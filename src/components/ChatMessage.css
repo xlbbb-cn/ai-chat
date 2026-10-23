@@ -547,6 +547,44 @@
   background: var(--c-hover);
 }
 
+/* Mid-turn injections: real user input the model saw during this turn. They
+   belong to the assistant bubble (one turn = one message), marked with a
+   hairline rule instead of a second card so the transcript stays calm. */
+.message-injections {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.message-injection {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 10px;
+  border-left: 1px solid var(--ts-cloud);
+}
+
+.message-injection-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ts-pewter);
+}
+
+.message-injection-time {
+  color: var(--ts-silver);
+  font-variant-numeric: tabular-nums;
+}
+
+.message-injection-text {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ts-graphite);
+  white-space: pre-wrap;
+}
+
 .message-attachments {
   display: flex;
   flex-wrap: wrap;

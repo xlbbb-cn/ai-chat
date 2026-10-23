@@ -288,6 +288,8 @@ export async function saveHistory(
   toolCalls?: string,
   reasoningContent?: string,
   attachments?: Attachment[],
+  /** JSON-serialized `ChatInjection[]` for an assistant turn. */
+  injections?: string,
 ): Promise<number> {
   // Serialise the attachments array as JSON so it can be stored in a
   // single TEXT column. Pass `null` (not `undefined`) when absent so the
@@ -302,7 +304,23 @@ export async function saveHistory(
     toolCalls: toolCalls ?? null,
     reasoningContent: reasoningContent ?? null,
     attachments: attachmentsJson,
+    injections: injections ?? null,
   });
+}
+
+/**
+ * Push a message into the assistant turn that is currently running.
+ *
+ * Returns `accepted: false` when no turn is running for this session — the
+ * caller must then send the text as a normal next-turn message, because a turn
+ * that already made its last request will never read the queue.
+ */
+export async function injectUserMessage(
+  sessionId: string,
+  id: string,
+  text: string,
+): Promise<{ accepted: boolean }> {
+  return invoke("inject_user_message", { sessionId, id, text });
 }
 
 export interface HistoryRecord {
@@ -315,6 +333,8 @@ export interface HistoryRecord {
   reasoning_content?: string;
   /** JSON-serialized `Attachment[]` for user messages. */
   attachments?: string;
+  /** JSON-serialized `ChatInjection[]` for assistant turns. */
+  injections?: string;
 }
 
 /** One row of the history sidebar — no message bodies. */

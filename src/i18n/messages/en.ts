@@ -94,6 +94,12 @@ const en = {
         attachmentUnsupported:
             "Skipped {names}: “{model}” cannot read that file type.",
         inputPlaceholder: "Type a message… (Enter to send, Shift+Enter for newline)",
+        injections: {
+            title: "Added mid-turn",
+            queued: "Waiting to be delivered",
+            placeholder:
+                "The assistant is working — type an update to add it mid-turn (Enter to add)",
+        },
         selectModel: "Select model",
         reasoningDepth: "Thinking depth",
         reasoningDepthTitle:
@@ -173,6 +179,7 @@ const en = {
         exportTitle: "Export this reply to PDF",
         deleteTitle: "Delete this message",
         forkTitle: "Fork conversation from this message",
+        injected: "Added mid-turn",
     },
 
     toolGroup: {

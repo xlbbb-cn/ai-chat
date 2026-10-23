@@ -18,6 +18,7 @@ import {
   faFileArrowDown,
   faFileLines,
   faPaperclip,
+  faPenToSquare,
   faTrash,
   faVolumeHigh,
   faWandSparkles,
@@ -284,6 +285,15 @@ function extractEmbeddedThoughtProcess(content: string): {
   return { reasoningContent, mainContent };
 }
 
+/** Clock label for a mid-turn injection ("14:03"), local time. */
+function formatInjectionTime(createdAtMs: number): string {
+  if (!createdAtMs) return "";
+  return new Date(createdAtMs).toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onFork, dbId, onConfirm }: Props) {
   const { t } = useI18n();
   const isUser = message.role === "user";
@@ -432,6 +442,25 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
           }}
         />
         {message.streaming && <span className="cursor">_</span>}
+        {/* Information the user pushed into this turn while it was running.
+            One turn stays one bubble, so the block sits under the reply and
+            states when the model actually received it. */}
+        {isAssistant && message.injections && message.injections.length > 0 && (
+          <div className="message-injections">
+            {message.injections.map((injection) => (
+              <div key={injection.id} className="message-injection">
+                <span className="message-injection-head">
+                  <FontAwesomeIcon icon={faPenToSquare} aria-hidden="true" />
+                  {t("chat.injected")}
+                  <span className="message-injection-time">
+                    {formatInjectionTime(injection.created_at_ms)}
+                  </span>
+                </span>
+                <span className="message-injection-text">{injection.text}</span>
+              </div>
+            ))}
+          </div>
+        )}
         {attachmentNames.length > 0 && (
           <div className="message-attachments">
             <span>{t("chat.attachedFiles")}</span>

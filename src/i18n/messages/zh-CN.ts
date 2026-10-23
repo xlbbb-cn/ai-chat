@@ -82,6 +82,11 @@ const zhCN: Messages = {
         attachFiles: "添加附件",
         attachmentUnsupported: "已跳过 {names}：“{model}” 无法读取该文件类型。",
         inputPlaceholder: "输入消息…（Enter 发送，Shift+Enter 换行）",
+        injections: {
+            title: "本轮内追加",
+            queued: "等待送达",
+            placeholder: "助手正在工作，输入新信息即可追加给它（Enter 追加）",
+        },
         selectModel: "选择模型",
         reasoningDepth: "思考深度",
         reasoningDepthTitle: "模型回答前的思考量 —— 以 reasoning_effort 参数发送。",
@@ -155,6 +160,7 @@ const zhCN: Messages = {
         exportTitle: "将本条回复导出为 PDF",
         deleteTitle: "删除这条消息",
         forkTitle: "从这条消息创建分支会话",
+        injected: "本轮内追加",
     },
 
     toolGroup: {
