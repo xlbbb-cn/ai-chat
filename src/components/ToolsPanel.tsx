@@ -52,6 +52,15 @@ const AVAILABLE_TOOLS: { id: string; nameKey: MessageKey; descriptionKey: Messag
 
 const AVAILABLE_TOOL_IDS = new Set(AVAILABLE_TOOLS.map((t) => t.id));
 
+/**
+ * Tools that self-evolution mode owns. The assistant needs `file_actions` to
+ * edit its own skills and `memory` to record what it learned, so while the
+ * mode is on they cannot be switched off. The backend enforces the same
+ * invariant (`AppConfig::effective_tools`), so this is only the UI mirror of
+ * it — the switches stay visible and checked, just locked.
+ */
+const SELF_EVOLUTION_LOCKED_TOOLS = ["file_actions", "memory"];
+
 const KG_ENGINES = [
     { value: "neo4j", label: "Neo4j" }
 ];
@@ -190,6 +199,8 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
 
     async function toggleTool(toolId: string) {
         if (!config) return;
+        // Self-evolution mode owns these two — they stay on.
+        if (config.self_evolution_mode && SELF_EVOLUTION_LOCKED_TOOLS.includes(toolId)) return;
         const current = config.selected_tools ?? [];
         const updated = current.includes(toolId)
             ? current.filter(t => t !== toolId)
@@ -257,6 +268,9 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
     }
 
     const selectedTools = config.selected_tools ?? [];
+    const selfEvolution = config.self_evolution_mode ?? false;
+    const isLockedTool = (toolId: string) =>
+        selfEvolution && SELF_EVOLUTION_LOCKED_TOOLS.includes(toolId);
     const kgEngine = config.kg_engine ?? "neo4j";
     const kgEnabled = selectedTools.includes("knowledge_graph");
     const kgEngineLabel = KG_ENGINES.find((engine) => engine.value === kgEngine)?.label ?? kgEngine;
@@ -279,52 +293,69 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                 {t("tools.builtIn")}
             </div>
             <div className="tools-list">
-                {AVAILABLE_TOOLS.map(tool => (
-                    <div
-                        key={tool.id}
-                        className={`tool-item ${!selectedTools.includes(tool.id) ? "disabled" : ""}`}
-                    >
-                        <div className="tool-row">
-                            <label className="tool-toggle" title={selectedTools.includes(tool.id) ? t("common.disable") : t("common.enable")}>
-                                <input
-                                    type="checkbox"
-                                    checked={selectedTools.includes(tool.id)}
-                                    onChange={() => toggleTool(tool.id)}
-                                />
-                                <span className="tool-toggle-slider" />
-                            </label>
-                            <div className="tool-info">
-                                <span
-                                    className={`tool-name ${selectedTools.includes(tool.id) ? "active" : ""}`}
-                                    onClick={() => toggleTool(tool.id)}
+                {AVAILABLE_TOOLS.map(tool => {
+                    const locked = isLockedTool(tool.id);
+                    const enabled = selectedTools.includes(tool.id);
+                    return (
+                        <div
+                            key={tool.id}
+                            className={`tool-item ${!enabled ? "disabled" : ""}`}
+                        >
+                            <div className="tool-row">
+                                <label
+                                    className="tool-toggle"
+                                    title={
+                                        locked
+                                            ? t("tools.lockedBySelfEvolution")
+                                            : enabled
+                                                ? t("common.disable")
+                                                : t("common.enable")
+                                    }
                                 >
-                                    {t(tool.nameKey)}
-                                </span>
-                                <span className="tool-transport">
-                                    {t(tool.descriptionKey).split("\n")[0]}
-                                </span>
-                            </div>
-                            <div className="tool-actions">
-                                <button
-                                    className="tool-action-btn"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        setExpandedTool(expandedTool === tool.id ? null : tool.id);
-                                    }}
-                                >
-                                    <FontAwesomeIcon
-                                        icon={expandedTool === tool.id ? faChevronUp : faChevronDown}
+                                    <input
+                                        type="checkbox"
+                                        checked={enabled}
+                                        disabled={locked}
+                                        onChange={() => toggleTool(tool.id)}
                                     />
-                                </button>
+                                    <span className="tool-toggle-slider" />
+                                </label>
+                                <div className="tool-info">
+                                    <span
+                                        className={`tool-name ${enabled ? "active" : ""}`}
+                                        onClick={() => toggleTool(tool.id)}
+                                    >
+                                        {t(tool.nameKey)}
+                                        {locked && (
+                                            <span className="tool-locked">{t("tools.lockedBadge")}</span>
+                                        )}
+                                    </span>
+                                    <span className="tool-transport">
+                                        {t(tool.descriptionKey).split("\n")[0]}
+                                    </span>
+                                </div>
+                                <div className="tool-actions">
+                                    <button
+                                        className="tool-action-btn"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setExpandedTool(expandedTool === tool.id ? null : tool.id);
+                                        }}
+                                    >
+                                        <FontAwesomeIcon
+                                            icon={expandedTool === tool.id ? faChevronUp : faChevronDown}
+                                        />
+                                    </button>
+                                </div>
                             </div>
+                            {expandedTool === tool.id && (
+                                <div className="tool-desc-expanded">
+                                    {t(tool.descriptionKey)}
+                                </div>
+                            )}
                         </div>
-                        {expandedTool === tool.id && (
-                            <div className="tool-desc-expanded">
-                                {t(tool.descriptionKey)}
-                            </div>
-                        )}
-                    </div>
-                ))}
+                    );
+                })}
             </div>
 
             <div className="tools-footer-section">

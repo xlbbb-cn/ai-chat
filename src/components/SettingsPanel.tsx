@@ -49,6 +49,32 @@ function mergeModels(current: string[] | undefined, incoming: string[]): string[
   return Array.from(new Set(merged));
 }
 
+/**
+ * Tools that self-evolution mode owns. The assistant needs `file_actions` to
+ * edit its own skills and `memory` to record what it learned, so enabling the
+ * mode switches them on and they cannot be switched off again while it is on.
+ * The backend enforces the same invariant (`AppConfig::effective_tools`).
+ */
+const SELF_EVOLUTION_REQUIRED_TOOLS = ["file_actions", "memory"];
+
+/**
+ * Apply the self-evolution invariant to a tool selection: the two required
+ * tools are added when the mode is on. Turning the mode off leaves the
+ * selection alone — the tools simply become optional again.
+ */
+function withSelfEvolutionTools(
+  tools: string[] | undefined,
+  selfEvolution: boolean
+): string[] {
+  const current = tools ?? [];
+  if (!selfEvolution) return current;
+  const next = [...current];
+  for (const tool of SELF_EVOLUTION_REQUIRED_TOOLS) {
+    if (!next.includes(tool)) next.push(tool);
+  }
+  return next;
+}
+
 function updateModelSettings(
   settings: ModelSettings | undefined,
   patch: Partial<ModelSettings>
@@ -261,7 +287,10 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
       const normalized: AppConfig = {
         ...config,
         model_catalog: modelCatalog,
-        selected_tools: persisted.selected_tools ?? [],
+        selected_tools: withSelfEvolutionTools(
+          persisted.selected_tools ?? [],
+          config.self_evolution_mode ?? false
+        ),
       };
       await saveConfig(normalized);
       setSaved(true);
@@ -554,10 +583,17 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
                   type="checkbox"
                   checked={config.self_evolution_mode ?? false}
                   onChange={(e) =>
-                    setConfig((prev) => ({
-                      ...prev,
-                      self_evolution_mode: e.target.checked,
-                    }))
+                    setConfig((prev) => {
+                      const enabled = e.target.checked;
+                      return {
+                        ...prev,
+                        self_evolution_mode: enabled,
+                        selected_tools: withSelfEvolutionTools(
+                          prev.selected_tools,
+                          enabled
+                        ),
+                      };
+                    })
                   }
                 />
                 <div className="settings-checkbox-copy">

@@ -9,7 +9,7 @@ use self::risk::{generate_risk_report, score_to_risk_level};
 use self::search::{run_integrated_search, SearchOptions, SEARCH_MAX_MATCHES};
 
 mod file_actions;
-mod memory;
+pub(crate) mod memory;
 pub mod neo4j_db; // re-exported at the crate root (`crate::neo4j_db`)
 mod patch;
 mod paths;
@@ -190,7 +190,11 @@ pub(crate) fn truncate_tool_output(output: String) -> String {
     )
 }
 
-pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
+/// Build the tool list advertised to the model.
+///
+/// `self_evolution` adds the dedicated `evolution` memory scope to the memory
+/// tool — it only exists while self-evolution mode is on.
+pub fn get_all_tools(selected_tools: &[String], self_evolution: bool) -> Vec<Value> {
     let mut tools = vec![];
 
     let want_run_cmd = selected_tools.iter().any(|t| t == "run_cmd");
@@ -201,13 +205,13 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "run_cmd",
-                "description": "Execute a command with patent-compliant risk assessment. L5/L6 (safe/read-only) commands execute directly. L0-L4 commands require user confirmation with risk score display. Syntax errors are rejected with detailed error report. Returns execution result or rejection reason.",
+                "description": "Execute a program with patent-compliant risk assessment. L5/L6 (safe/read-only) commands execute directly. L0-L4 commands require user confirmation with risk score display. Syntax errors are rejected with detailed error report. Returns execution result or rejection reason.\n\nThe program must be a bare name that the operating system resolves through the PATH environment variable (for example 'python', 'python3', 'git', 'node'). Absolute and relative paths are rejected — use `run_shell` when an absolute path is really needed.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "command": {
                             "type": "string",
-                            "description": "The full command line to execute (e.g. 'curl -s https://example.com'). The first word is the executable; the rest are arguments."
+                            "description": "The full command line to execute (e.g. 'python script.py', 'curl -s https://example.com'). The first word must be a bare program name resolved through PATH; the rest are arguments."
                         },
                         "timeout_seconds": {
                             "type": "integer",
@@ -227,7 +231,7 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "run_shell",
-                "description": "Execute or manage a shell script with patent-compliant risk assessment. L5/L6 (safe/read-only) scripts execute directly. L0-L4 scripts require user confirmation with risk score display. Syntax errors are rejected with detailed error report.\n\nUse `run_type: \"direct\"` (default) to run a script to completion and return its output. Use `run_type: \"serve\"` to start a long-lived background process (for example an HTTP service or a file watcher) and return immediately with a serve id; list running serve processes with `run_type: \"serve\", action: \"list\"`, and terminate one (or all, with `serve_id: \"all\"`) with `action: \"stop\"`. IMPORTANT: serve processes live only for the current chat turn — they are stopped (whole process tree, exit verified) as soon as this turn ends, and at app exit.",
+                "description": "Execute or manage a shell script with patent-compliant risk assessment. L5/L6 (safe/read-only) scripts execute directly. L0-L4 scripts require user confirmation with risk score display. Syntax errors are rejected with detailed error report.\n\nThe script has full freedom: it starts in the workspace but may change directory anywhere and run anything, and every script is audited by the risk engine before it runs. Use it when a PATH-resolved program is not enough (absolute paths, pipes, loops, redirections).\n\nUse `run_type: \"direct\"` (default) to run a script to completion and return its output. Use `run_type: \"serve\"` to start a long-lived background process (for example an HTTP service or a file watcher) and return immediately with a serve id; list running serve processes with `run_type: \"serve\", action: \"list\"`, and terminate one (or all, with `serve_id: \"all\"`) with `action: \"stop\"`. IMPORTANT: serve processes live only for the current chat turn — they are stopped (whole process tree, exit verified) as soon as this turn ends, and at app exit.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -280,7 +284,7 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "file_actions",
-                "description": "Perform file operations strictly inside the workspace. Always use `./...` paths (for example `./src/App.tsx`) or `.` for the workspace root; absolute paths inside the workspace root are also accepted. Anything that resolves outside the workspace root is rejected — use `run_shell` only when external access is genuinely required. Protected self-evolution targets create automated backups before mutation.",
+                "description": "Perform file operations strictly inside the workspace. Always use `./...` paths (for example `./src/App.tsx`) or `.` for the workspace root; absolute paths inside the workspace root are also accepted. Anything that resolves outside the workspace root is rejected — use `run_shell` only when external access is genuinely required. In self-evolution mode the skill directory `./.data/skills/...` is writable (create, edit, move and delete skills there); the rest of `.data` stays read-only. Protected self-evolution targets create automated backups before mutation.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -388,11 +392,19 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
     }
 
     if selected_tools.iter().any(|t| t == "memory") {
+        let evolution_scope = if self_evolution {
+            "\n- `evolution`: Long-term, file-backed. The self-evolution area: verified facts that \
+             must survive across sessions (the default interpreter and runtime environment, the \
+             correct way to operate a tool, the file locations you use often). Read it before \
+             starting work so you reuse what you already learned."
+        } else {
+            ""
+        };
         tools.push(json!({
             "type": "function",
             "function": {
                 "name": "memory",
-                "description": "Manage a persistent memory system with three scopes:\n- `session`: Short-term, in-memory only. Survives for the current chat session. Use for task-specific context and in-progress notes.\n- `user`: Long-term, file-backed. Cross-session persistent. Use for user preferences, patterns, and general insights.\n- `repo`: Long-term, file-backed. Repository-scoped. Use for codebase conventions, build commands, and project facts.\n\nPass `scope: \"all\"` to run get/list/search across every scope at once (read-only); add/delete need one concrete scope. Session memories are automatically discarded when the app restarts. User and repo memories persist as markdown files in the workspace memory directory (`.data/memory`, app-managed — never edit it with file tools).",
+                "description": format!("Manage a persistent memory system with three scopes:\n- `session`: Short-term, in-memory only. Survives for the current chat session. Use for task-specific context and in-progress notes.\n- `user`: Long-term, file-backed. Cross-session persistent. Use for user preferences, patterns, and general insights.\n- `repo`: Long-term, file-backed. Repository-scoped. Use for codebase conventions, build commands, and project facts.{evolution_scope}\n\nPass `scope: \"all\"` to run get/list/search across every scope at once (read-only); add/delete need one concrete scope. Session memories are automatically discarded when the app restarts. User and repo memories persist as markdown files in the workspace memory directory (`.data/memory`, app-managed — never edit it with file tools)."),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -403,8 +415,16 @@ pub fn get_all_tools(selected_tools: &[String]) -> Vec<Value> {
                         },
                         "scope": {
                             "type": "string",
-                            "enum": ["session", "user", "repo", "all"],
-                            "description": "Memory scope. 'session' is in-memory only (cleared on restart). 'user' and 'repo' are file-backed and persist across sessions. 'all' runs get/list/search across every scope and returns a merged view (read-only). Defaults to 'session'."
+                            "enum": if self_evolution {
+                                json!(["session", "user", "repo", "evolution", "all"])
+                            } else {
+                                json!(["session", "user", "repo", "all"])
+                            },
+                            "description": if self_evolution {
+                                "Memory scope. 'session' is in-memory only (cleared on restart). 'user', 'repo' and 'evolution' are file-backed and persist across sessions — 'evolution' is the self-evolution area for verified, reusable facts. 'all' runs get/list/search across every scope and returns a merged view (read-only). Defaults to 'session'."
+                            } else {
+                                "Memory scope. 'session' is in-memory only (cleared on restart). 'user' and 'repo' are file-backed and persist across sessions. 'all' runs get/list/search across every scope and returns a merged view (read-only). Defaults to 'session'."
+                            }
                         },
                         "key": {
                             "type": "string",
@@ -903,8 +923,8 @@ mod tests {
     }
 
     #[test]
-    fn integrated_search_skips_the_hidden_data_directory() {
-        let root = make_temp_dir("search-data-skip");
+    fn integrated_search_reaches_the_workspace_state_directory() {
+        let root = make_temp_dir("search-data-reach");
         fs::create_dir_all(root.join(".data").join("memory")).unwrap();
         fs::write(root.join(".data").join("chat.db"), "needle").unwrap();
         fs::write(
@@ -918,7 +938,12 @@ mod tests {
             run_integrated_search("needle", &root, &root, &SearchOptions::default()).unwrap();
 
         assert!(output.contains("notes.md:1:needle"));
-        assert!(!output.contains(".data"));
+        // `.data` is part of the workspace, so the assistant can look up its own
+        // skills, memories and todo lists.
+        assert!(
+            output.contains("note.md"),
+            "the workspace state directory must be searchable: {output}"
+        );
 
         let _ = fs::remove_dir_all(&root);
     }
@@ -934,10 +959,169 @@ mod tests {
         let result = ensure_mutation_target_allowed(
             &skill_file,
             &workspace_root,
-            std::slice::from_ref(&writable_root),
+            Some(&writable_root),
+            "write",
         );
 
         assert!(result.is_ok());
+
+        let _ = fs::remove_dir_all(&workspace_root);
+    }
+
+    #[test]
+    fn self_evolution_can_create_new_skill_files_and_folders() {
+        let workspace_root = make_temp_dir("new-skill");
+        let writable_root = workspace_root.join(".data").join("skills");
+        fs::create_dir_all(writable_root.parent().unwrap()).unwrap();
+
+        // Nothing exists yet below `.data/skills` — creating a skill folder
+        // and its `skill.md` is exactly what self-evolution has to do.
+        let new_skill_dir = writable_root.join("brand-new");
+        let new_skill_file = new_skill_dir.join("skill.md");
+
+        for path in [&new_skill_dir, &new_skill_file] {
+            assert!(
+                ensure_mutation_target_allowed(path, &workspace_root, Some(&writable_root), "write")
+                    .is_ok(),
+                "expected {} to be writable in self-evolution mode",
+                path.display()
+            );
+        }
+
+        // The workspace state folder is part of the workspace: the memory store,
+        // the todo lists and the skill status file are reachable in both modes.
+        for path in [
+            workspace_root.join(".data").join("skills.status"),
+            workspace_root.join(".data").join("memory").join("repo").join("note.md"),
+            workspace_root.join(".data").join("todos").join("sess").join("list.json"),
+        ] {
+            assert!(
+                ensure_mutation_target_allowed(&path, &workspace_root, Some(&writable_root), "write")
+                    .is_ok(),
+                "expected {} to be writable",
+                path.display()
+            );
+            assert!(
+                ensure_mutation_target_allowed(&path, &workspace_root, None, "write").is_ok(),
+                "expected {} to be writable",
+                path.display()
+            );
+        }
+
+        // The SQLite database is the exception: `file_actions` can only
+        // truncate or delete it, never rewrite it.
+        for path in [
+            workspace_root.join(".data").join("chat.db"),
+            workspace_root.join(".data").join("chat.db-wal"),
+        ] {
+            let err =
+                ensure_mutation_target_allowed(&path, &workspace_root, Some(&writable_root), "write")
+                    .unwrap_err();
+            assert!(
+                err.contains("database"),
+                "unexpected error for {}: {err}",
+                path.display()
+            );
+        }
+
+        let _ = fs::remove_dir_all(&workspace_root);
+    }
+
+    #[test]
+    fn self_evolution_cannot_wipe_the_whole_skills_root() {
+        let workspace_root = make_temp_dir("skills-root-guard");
+        let writable_root = workspace_root.join(".data").join("skills");
+        fs::create_dir_all(writable_root.join("demo")).unwrap();
+
+        let err = ensure_mutation_target_allowed(
+            &writable_root,
+            &workspace_root,
+            Some(&writable_root),
+            "delete",
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("skills root itself"),
+            "unexpected error: {err}"
+        );
+
+        // `mkdir` on the existing root stays a harmless no-op.
+        assert!(ensure_mutation_target_allowed(
+            &writable_root,
+            &workspace_root,
+            Some(&writable_root),
+            "mkdir"
+        )
+        .is_ok());
+
+        let _ = fs::remove_dir_all(&workspace_root);
+    }
+
+    /// End-to-end shape of a self-evolution edit: the model asks for
+    /// `./.data/skills/<name>/skill.md`, the path is resolved inside the
+    /// workspace, the guard lets it through and the skill becomes loadable.
+    #[test]
+    fn self_evolution_can_install_edit_and_remove_a_skill() {
+        let workspace_root = make_temp_dir("self-evolution-e2e");
+
+        // The writable root is exactly the workspace skills directory — and it is
+        // the only one: there is no second skills location anywhere.
+        let root =
+            crate::skills::self_evolution_skill_root(Some(&workspace_root), true)
+                .expect("self-evolution exposes one skills root");
+        assert_eq!(
+            root,
+            workspace_root.join(".data").join("skills"),
+            "self-evolution must be restricted to .data/skills"
+        );
+
+        // Off → nothing is writable.
+        assert!(crate::skills::self_evolution_skill_root(Some(&workspace_root), false).is_none());
+
+        // Install: create the skill folder and its document.
+        let skill_dir = workspace_root.join(".data").join("skills").join("demo");
+        let resolved = super::resolve_safe_path(&workspace_root, "./.data/skills/demo/skill.md")
+            .expect("the skill path must resolve inside the workspace");
+        assert!(
+            ensure_mutation_target_allowed(&resolved, &workspace_root, Some(&root), "write")
+                .is_ok()
+        );
+        fs::create_dir_all(resolved.parent().unwrap()).unwrap();
+        fs::write(
+            &resolved,
+            "---\nname: demo\ndescription: a demo skill\n---\n\nDo the thing.\n",
+        )
+        .unwrap();
+
+        // The skill resolves like any panel-authored skill.
+        let resolved_skill =
+            crate::skills::resolve_skill_by_name(&root, "demo").expect("skill loads");
+        assert_eq!(resolved_skill.skill.name, "demo");
+        assert!(resolved_skill.skill.system_prompt.contains("Do the thing."));
+
+        // Edit: overwrite the document (the tool layer keeps a `.bak.1`).
+        let backup = super::file_actions::backup_protected_path(&resolved, Some(&root))
+            .unwrap()
+            .expect("the edit is backed up");
+        assert_eq!(
+            backup.file_name().and_then(|n| n.to_str()),
+            Some("skill.md.bak.1")
+        );
+        fs::write(&resolved, "---\nname: demo\ndescription: edited\n---\n\nEdited.\n")
+            .unwrap();
+        assert!(crate::skills::resolve_skill_by_name(&root, "demo")
+            .unwrap()
+            .skill
+            .system_prompt
+            .contains("Edited."));
+
+        // Remove: the folder is copied aside first, then deleted.
+        let folder_backup = super::file_actions::backup_protected_path(&skill_dir, Some(&root))
+            .unwrap()
+            .expect("the folder is backed up");
+        fs::remove_dir_all(&skill_dir).unwrap();
+        assert!(folder_backup.join("skill.md").is_file());
+        assert!(crate::skills::resolve_skill_by_name(&root, "demo").is_err());
 
         let _ = fs::remove_dir_all(&workspace_root);
     }
@@ -1611,21 +1795,55 @@ three
         use super::ensure_mutation_target_allowed;
 
         let workspace_root = make_temp_dir("mutation-root");
-        let err =
-            ensure_mutation_target_allowed(&workspace_root, &workspace_root, &[]).unwrap_err();
+        let err = ensure_mutation_target_allowed(&workspace_root, &workspace_root, None, "delete")
+            .unwrap_err();
         assert!(err.contains("workspace root"));
 
         let _ = fs::remove_dir_all(&workspace_root);
     }
 
     #[test]
-    fn ensure_mutation_target_allowed_rejects_internal_data_dir() {
+    fn ensure_mutation_target_allowed_rejects_the_workspace_database() {
         use super::ensure_mutation_target_allowed;
 
         let workspace_root = make_temp_dir("mutation-data");
         let data_root = workspace_root.join(".data");
+        let db = data_root.join("chat.db");
+        fs::create_dir_all(&data_root).unwrap();
+        fs::write(&db, "sqlite").unwrap();
+
+        // The database cannot be truncated or deleted through the file tools.
+        for action in ["write", "delete", "patch"] {
+            let err =
+                ensure_mutation_target_allowed(&db, &workspace_root, None, action).unwrap_err();
+            assert!(
+                err.contains("database"),
+                "unexpected error for {action}: {err}"
+            );
+        }
+
+        // Its SQLite sidecars are protected as well.
+        for sidecar in ["chat.db-wal", "chat.db-shm", "chat.db-journal"] {
+            let err = ensure_mutation_target_allowed(
+                &data_root.join(sidecar),
+                &workspace_root,
+                None,
+                "delete",
+            )
+            .unwrap_err();
+            assert!(err.contains("database"), "unexpected error: {err}");
+        }
+
+        let _ = fs::remove_dir_all(&workspace_root);
+    }
+
+    #[test]
+    fn ensure_mutation_target_allowed_allows_the_workspace_state_folder() {
+        use super::ensure_mutation_target_allowed;
+
+        let workspace_root = make_temp_dir("mutation-state");
+        let data_root = workspace_root.join(".data");
         let files = [
-            data_root.join("chat.db"),
             data_root.join("memory").join("repo").join("note.md"),
             data_root.join("todos").join("sess").join("lists").join("list.json"),
             data_root.join("skills.status"),
@@ -1635,30 +1853,35 @@ three
             fs::write(file, "x").unwrap();
         }
 
-        // Database, memory, todos and the skill status file are app-managed.
+        // `.data` lives inside the workspace: it is part of the file tool's
+        // scope, so the assistant may read and manage its own state there.
         for file in &files {
-            let err = ensure_mutation_target_allowed(file, &workspace_root, &[]).unwrap_err();
             assert!(
-                err.contains(".data"),
-                "unexpected error for {}: {err}",
+                ensure_mutation_target_allowed(file, &workspace_root, None, "write").is_ok(),
+                "expected {} to be writable",
                 file.display()
             );
         }
 
-        // A skill below `.data/skills` is rejected while self-evolution is off
-        // and allowed once the caller passes that root as writable.
-        let skill_file = data_root.join("skills").join("demo").join("skill.md");
+        let _ = fs::remove_dir_all(&workspace_root);
+    }
+
+    #[test]
+    fn ensure_mutation_target_allowed_allows_the_skills_root_in_self_evolution() {
+        use super::ensure_mutation_target_allowed;
+
+        let workspace_root = make_temp_dir("mutation-skills");
+        let data_root = workspace_root.join(".data");
+        let writable_root = data_root.join("skills");
+        let skill_file = writable_root.join("demo").join("skill.md");
         fs::create_dir_all(skill_file.parent().unwrap()).unwrap();
         fs::write(&skill_file, "x").unwrap();
 
-        let err = ensure_mutation_target_allowed(&skill_file, &workspace_root, &[]).unwrap_err();
-        assert!(err.contains("read-only"));
-
-        let writable_root = data_root.join("skills");
         assert!(ensure_mutation_target_allowed(
             &skill_file,
             &workspace_root,
-            std::slice::from_ref(&writable_root)
+            Some(&writable_root),
+            "write"
         )
         .is_ok());
 
@@ -1780,8 +2003,10 @@ pub async fn execute_tool(
     config: &crate::AppConfig,
     // Allowlist of executable names from the active skill (empty = unrestricted).
     allowed_commands: &[String],
-    // Writable skill roots that require automatic `.bak.N` backups before mutation.
-    protected_skill_roots: &[PathBuf],
+    // The one skill root that self-evolution mode makes writable. It requires
+    // automatic `.bak.N` backups before mutation. `None` = nothing outside the
+    // workspace is writable.
+    protected_skill_root: Option<&Path>,
     // Current autonomous mission identifier when executing inside a sub-agent.
     mission_id: Option<&str>,
     // Current chat session id (used by session-scoped helpers like the `todos` tool).
@@ -1973,7 +2198,7 @@ pub async fn execute_tool(
                 &workspace_dir,
                 config,
                 allowed_commands,
-                protected_skill_roots,
+                protected_skill_root,
                 mission_id,
                 active_skill_dirs,
             )
@@ -2210,6 +2435,19 @@ pub async fn execute_tool(
 
             if command.trim().is_empty() {
                 return "Error: run_cmd requires a non-empty 'command' argument.".to_string();
+            }
+
+            // ── PATH-resolved program only ───────────────────────────────────
+            // `run_cmd` runs a program the OS resolves through `PATH`
+            // (`python`, `python3`, `git`, …). Absolute and relative paths are
+            // refused — `run_shell` is the tool that may run any script, from
+            // anywhere, under the risk audit.
+            {
+                let parts = split_command_line(&command);
+                let program = parts.first().map(|s| s.as_str()).unwrap_or("");
+                if let Err(e) = process::validate_path_resolved_program(program) {
+                    return e;
+                }
             }
 
             // ── Allowed-commands enforcement (skill context) ──────────────────
@@ -2630,7 +2868,7 @@ pub async fn execute_tool(
             .unwrap_or_else(|e| format!("Error: {}", e))
         }
         "file_actions" => {
-            file_actions::handle_file_actions(app, &args, &workspace_dir, protected_skill_roots)
+            file_actions::handle_file_actions(app, &args, &workspace_dir, protected_skill_root)
                 .await
         }
         "knowledge_graph" => {

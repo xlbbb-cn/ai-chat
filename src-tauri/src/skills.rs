@@ -169,19 +169,64 @@ pub fn resolve_skill_by_name(skills_dir: &Path, name: &str) -> Result<ResolvedSk
     ci_match.ok_or_else(|| format!("skill '{}' not found", name))
 }
 
-/// Collect skill roots eligible for self-evolution edits.
-/// Self-evolution is restricted to `<workspace>/.data/skills`.
-pub fn collect_self_evolution_roots(
+/// The one and only skill root, and the only root self-evolution may write to.
+///
+/// There is exactly **one** skills directory in the whole app:
+/// `<workspace>/.data/skills`. It is computed here and nowhere else, so the
+/// assistant can never be pointed at a second location — the app-data folder
+/// has no skills directory, and a workspace switch moves the whole thing.
+///
+/// Returns `None` while self-evolution mode is off (nothing is writable then).
+pub fn self_evolution_skill_root(
     workspace_dir: Option<&Path>,
     enabled: bool,
-) -> Vec<PathBuf> {
+) -> Option<PathBuf> {
     if !enabled {
-        return Vec::new();
+        return None;
     }
 
-    workspace_dir
-        .map(|ws_dir| vec![crate::workspace::skills_root(ws_dir)])
-        .unwrap_or_default()
+    workspace_dir.map(crate::workspace::skills_root)
+}
+
+/// Model-facing description of the self-evolution capability.
+///
+/// Shared by the main chat and by sub-agents so both describe the same
+/// contract: skills may be installed, edited and deleted **only** under
+/// `<workspace>/.data/skills`, through the `file_actions` tool.
+pub fn self_evolution_prompt(root: Option<&Path>) -> String {
+    let Some(root) = root else {
+        return String::new();
+    };
+
+    format!(
+        "SELF-EVOLUTION: you may install, extend, edit and delete skills yourself. \
+         The one skill directory is `{}` (workspace-relative: `./.data/skills`).\n\
+         Use `file_actions` with workspace-relative paths under `./.data/skills/...`: \
+         `mkdir` a skill folder, `write`/`patch` its `skill.md` to create or extend a skill, \
+         `move`/`rename` to reorganise, `delete` to remove a skill. \
+         A skill is a folder containing `skill.md`: YAML frontmatter with `name` and \
+         `description`, then the instructions that are loaded into the model. \
+         Every mutation creates a `.bak.<n>` backup automatically.\n\
+         Skills live in exactly one directory — `./.data/skills`. The rest of the \
+         workspace is yours to read and write, including the `.data` state folder \
+         (memory, todos, skill status); only `.data/chat.db` is protected by the \
+         application. There is no second skill directory: do not create or look \
+         for one. Do not reference app-data skill paths or any path outside the \
+         workspace root. Reuse exact paths returned by tools.\n\n\
+         EVOLUTION MEMORY: you have a dedicated `evolution` memory scope (the `memory` tool \
+         with scope \"evolution\") for facts that must survive across sessions and that you \
+         have verified to be correct — for example:\n\
+         - the runtime environment: which interpreter is the default one (`python` vs \
+         `python3`), the package manager, the shell, the path to a project interpreter;\n\
+         - the correct way to operate a tool: how to drive the browser, how to run the \
+         project's tests, the exact command that works;\n\
+         - the file locations you use often: important paths, output directories, config files.\n\
+         Store such a fact with `memory add`, scope `evolution`, and a short descriptive key \
+         as soon as you have confirmed it — and read the scope (`memory list` / `get` / \
+         `search`) before starting work so you reuse what you already learned. \
+         Record only facts you verified; never store guesses.",
+        root.display()
+    )
 }
 
 // ─── Skill status (`<workspace>/.data/skills.status`) ────────────────────────
@@ -297,12 +342,27 @@ fn scan_skill_dirs(skills_root: &Path) -> Vec<(String, PathBuf)> {
                 .filter(|entry| entry.path().is_dir())
                 .filter_map(|entry| {
                     let name = entry.file_name().into_string().ok()?;
+                    if is_backup_artifact(&name) {
+                        return None;
+                    }
                     let skill_file = find_skill_file(&entry.path())?;
                     Some((name, skill_file))
                 })
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// Backup artifacts created by the tool layer (`<name>.bak.<n>`) sit next to
+/// the original — a deleted skill folder is copied there before removal.
+///
+/// They are not skills: a backup folder still contains the original
+/// `skill.md`, so scanning it would advertise the same skill twice.
+fn is_backup_artifact(folder: &str) -> bool {
+    let Some((_, suffix)) = folder.rsplit_once(".bak.") else {
+        return false;
+    };
+    !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit())
 }
 
 fn skill_md_mtime(skill_file: &Path) -> Option<String> {
@@ -641,5 +701,24 @@ mod tests {
             .get("code-reviewer")
             .unwrap()
             .enabled, "newly discovered skills start disabled");
+    }
+
+    /// Deleting a skill in self-evolution mode leaves a `demo.bak.1` folder
+    /// next to it. It still contains the original `skill.md`, so it must not be
+    /// advertised as a second skill with the same name.
+    #[test]
+    fn backup_folders_are_not_scanned_as_skills() {
+        let root = TempSkillsRoot::new("backup-artifact");
+        write_skill(&root.0, "demo", "demo", "skill.md");
+        write_skill(&root.0, "demo.bak.1", "demo", "skill.md");
+
+        let scanned = scan_skill_dirs(&root.0);
+        assert_eq!(scanned.len(), 1);
+        assert_eq!(scanned[0].0, "demo");
+
+        let mut status = SkillsStatus::default();
+        refresh_skill_status(&mut status, &root.0);
+        assert_eq!(status.skills.len(), 1);
+        assert!(status.skills.contains_key("demo"));
     }
 }

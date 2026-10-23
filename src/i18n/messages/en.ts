@@ -236,7 +236,7 @@ const en = {
             resetAria: "Reset workspace directory to default",
             selfEvolution: "Enable Self-Evolution Mode",
             selfEvolutionHint:
-                "Let the assistant evolve its own skills and tools inside the workspace.",
+                "Let the assistant evolve its own skills inside the workspace. The file actions and memory tools stay enabled while the mode is on, and the assistant keeps verified facts (runtime environment, correct tool usage, file locations) in a dedicated evolution memory.",
             profilesTitle: "Configuration Profiles",
             profileNamePlaceholder: "Profile name",
             saveCurrent: "Save Current",
@@ -377,24 +377,33 @@ const en = {
         serveCwd: "cwd: {path}",
         serveOutput: "Recent output",
         autoAccept: "AutoAccept Mode",
+        lockedBadge: "Required",
+        lockedBySelfEvolution:
+            "Required by self-evolution mode — it cannot be switched off.",
         items: {
             fileActions: {
                 name: "File Actions",
                 description: [
-                    "Read, write, list, search, patch, rename, move, create, and delete files only inside the current workspace root.",
+                    "Read, write, list, search, patch, rename, move, create, and delete files only inside the current workspace root — including the `.data` state folder (skills, memory, todos).",
                     "Use `./...` paths such as `./src/App.tsx`, `./.data/skills/demo/skill.md`, or `.` for the workspace root.",
-                    "Paths such as `workspace/...` and `../...` are rejected. Absolute paths outside the workspace require an explicit approval dialog before access is allowed.",
+                    "Paths such as `workspace/...` and `../...` are rejected. The workspace database (`.data/chat.db`) is managed by the app and cannot be modified through this tool.",
                 ].join("\n"),
             },
             runCmd: {
                 name: "Run Command",
-                description:
-                    "Run an executable program directly (without a shell). The process starts in the workspace root. Preferred for simple commands like curl, git, or wget. Privileged operations and dangerous commands require explicit confirmation.",
+                description: [
+                    "Run a program directly (without a shell). The process starts in the workspace root.",
+                    "The program must be a bare name that the operating system resolves through the PATH environment variable — for example `python`, `python3`, `git`, `curl`, `wget`. Absolute and relative paths are rejected; use Run Shell when a path is really needed.",
+                    "Privileged operations and dangerous commands require explicit confirmation.",
+                ].join("\n"),
             },
             runShell: {
                 name: "Run Shell",
-                description:
-                    "Execute a script in a shell (PowerShell or Bash). The shell starts in the workspace root, and directory changes must stay inside that workspace. Supports pipes, loops, variables, and other shell features. `direct` blocks until the script exits and returns its output; `serve` starts a long-lived background process (for example an HTTP server), returns its id immediately, and supports list / stop, with automatic cleanup when the app exits. Privileged operations and dangerous commands require explicit confirmation.",
+                description: [
+                    "Execute a script in a shell (PowerShell or Bash). The script has full freedom: it starts in the workspace root but may change directory anywhere and run anything, and every script is audited by the risk engine before it runs.",
+                    "Supports pipes, loops, variables, and other shell features. `direct` blocks until the script exits and returns its output; `serve` starts a long-lived background process (for example an HTTP server), returns its id immediately, and supports list / stop, with automatic cleanup when the app exits.",
+                    "Privileged operations and dangerous commands require explicit confirmation.",
+                ].join("\n"),
             },
             memory: {
                 name: "Memory",
@@ -404,6 +413,7 @@ const en = {
                     "**session** — Short-term, in-memory only. Survives for the current chat session. Use for task-specific context and in-progress notes.",
                     "**user** — Long-term, file-backed. Cross-session persistent. Use for user preferences, patterns, and general insights.",
                     "**repo** — Long-term, file-backed. Repository-scoped. Use for codebase conventions, build commands, and project facts.",
+                    "**evolution** — Long-term, file-backed. The self-evolution area, available while self-evolution mode is on. Use for verified facts that must survive across sessions: the default interpreter and runtime environment, the correct way to operate a tool, the file locations you use often.",
                     "",
                     "Supports add, get, list, search, and delete operations.",
                 ].join("\n"),

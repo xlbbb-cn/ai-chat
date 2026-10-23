@@ -161,6 +161,25 @@
     outline-offset: 2px;
 }
 
+/* Locked by self-evolution mode — the switch stays on and cannot be turned
+   off, so it reads as locked rather than merely inert. */
+.tool-toggle input:disabled+.tool-toggle-slider {
+    cursor: not-allowed;
+    opacity: 0.65;
+}
+
+.tool-locked {
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 16px;
+    color: var(--c-muted);
+    border: 1px solid var(--c-border-i);
+    border-radius: 4px;
+    padding: 0 4px;
+    white-space: nowrap;
+    letter-spacing: normal;
+}
+
 .tool-actions {
     display: flex;
     gap: 4px;

@@ -14,13 +14,13 @@
 //!     skills.status            per-workspace skill enablement + metadata
 //! ```
 //!
-//! `.data` is invisible to the assistant: path mutations below it are
-//! rejected (`tools::paths`), file listing/search skip it, and on Windows the
-//! directory carries the file-system hidden attribute so it also stays out of
-//! Explorer. Application-level files (config.json, app.log, MCP/sub-agent
-//! definitions, profiles, timers) remain in the OS app data directory.
+//! `.data` is part of the workspace: `file_actions` lists, searches, reads and
+//! writes it like any other folder (the SQLite database excepted — see
+//! `tools::paths`). On Windows the directory carries the file-system hidden
+//! attribute so it stays out of Explorer. Application-level files
+//! (config.json, app.log, MCP/sub-agent definitions, profiles, timers) remain
+//! in the OS app data directory.
 
-use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
 /// Name of the hidden workspace state directory.
@@ -69,20 +69,6 @@ pub fn ensure_data_layout(workspace_dir: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// True for entries of a workspace listing that must stay invisible to tools.
-///
-/// The `.data` directory is reserved by the application; file listing and
-/// search skip it so the assistant never sees (or tries to edit) the database,
-/// memories, todo lists or skill status file.
-pub fn is_internal_entry(name: &OsStr) -> bool {
-    name == OsStr::new(DATA_DIR)
-}
-
-/// `is_internal_entry` for an owned file name.
-pub fn is_internal_file_name(name: &OsString) -> bool {
-    is_internal_entry(name.as_os_str())
-}
-
 #[cfg(windows)]
 fn mark_hidden(path: &Path) {
     use std::os::windows::ffi::OsStrExt;
@@ -120,10 +106,14 @@ mod tests {
     }
 
     #[test]
-    fn only_the_data_directory_counts_as_internal() {
-        assert!(is_internal_entry(OsStr::new(".data")));
-        assert!(!is_internal_entry(OsStr::new("data")));
-        assert!(!is_internal_entry(OsStr::new("skills")));
-        assert!(is_internal_file_name(&OsString::from(".data")));
+    fn there_is_exactly_one_skills_root_per_workspace() {
+        let workspace = Path::new("/workspace");
+        // The one and only skills directory: `<workspace>/.data/skills`.
+        assert_eq!(skills_root(workspace), workspace.join(".data").join("skills"));
+        // It is not mirrored anywhere else in the workspace layout.
+        assert_ne!(skills_root(workspace), memory_root(workspace));
+        assert_ne!(skills_root(workspace), todos_root(workspace));
+        // The skill status file lives next to it, not inside it.
+        assert_eq!(skills_status_path(workspace), workspace.join(".data").join("skills.status"));
     }
 }

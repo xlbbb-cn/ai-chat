@@ -35,8 +35,9 @@ Chat is the easy part. AI Chat gives the agent a workspace, real utilities (memo
 
 | Feature | **AI Chat** | Cherry Studio | Chatbox | LM Studio |
 | --- | :---: | :---: | :---: | :---: |
-| **Skill sandbox** — `.data/skills` per workspace, root pinned to its `SKILL.md` | ✅ | ◐ agent workspaces | — | — |
-| **Built-in agent utilities** — 3-level memory (`session` / `user` / `repo`), timers, todos | ✅ | ◐ scheduled tasks | — | — |
+| **Skill sandbox** — one skill root per workspace (`.data/skills`), root pinned to its `SKILL.md` | ✅ | ◐ agent workspaces | — | — |
+| **Self-evolution** — the assistant installs/edits/deletes its own skills, keeps verified facts in a dedicated memory scope | ✅ | — | — | — |
+| **Built-in agent utilities** — 4-level memory (`session` / `user` / `repo` / `evolution`), timers, todos | ✅ | ◐ scheduled tasks | — | — |
 | **Agent runtime** — LLM, local CLI or remote cloud, configured in-app | ✅ | ◐ LLM agents | — | — |
 | **Prompt ownership** — no default persona or hidden rewrite; your system message is the base, tool/skill guidance is appended | ✅ | ◐ assistant prompts | ◐ prompt library | ◐ per-model prompt |
 | **Local request audit** — body, tokens, latency, status, errors | ✅ | ◐ history only | ◐ history only | ◐ history + server log |
@@ -110,20 +111,24 @@ Full usage guides live in the GitHub Wiki:
 
 - Define skills via skill.md (YAML frontmatter + system prompt)
 - Add, delete, enable/disable skills
-- Skills live in the workspace (`<workspace>/.data/skills`), so each workspace has its own set
+- **Exactly one skill root** per workspace (`<workspace>/.data/skills`), so each workspace has its own set and there is never a second location
 - Enablement is stored per workspace in `.data/skills.status`, next to the skills it describes
 - Skill path isolation for safer file and command scope
 - Skill command allowlist merging across multiple selected skills
+- **Self-evolution mode** lets the assistant install, extend, edit and delete skills itself, with `.bak.n` backups, while forcing the file-actions and memory tools on
 
 ### 4) Tool System
 
-- run_cmd / run_shell: Local command execution with dangerous-command confirmation
-- run_shell serve: Background processes for the current turn; the whole process tree is stopped and its exit verified when the turn ends
-- file_actions: File read/write/edit/patch/diff plus mkdir/rename/move/delete
-- memory: Three scopes (`session` / `user` / `repo`) for searching and persisting conclusions
-- todos: Per-session task lists the model can plan, update and close
-- timer: One-shot delay timers that resume the session instead of polling; timers and running turns keep the system awake (Windows / macOS / Linux)
-- knowledge_graph: Knowledge graph queries (supports Neo4j)
+Three execution tools with deliberately different scopes:
+
+- `run_cmd`: runs one program the OS resolves through `PATH` (`python`, `python3`, `git`, …) — absolute and relative paths are refused
+- `run_shell`: full freedom — the script may `cd` anywhere and run anything, and every script is audited by the risk engine before it runs
+- `run_shell` serve: Background processes for the current turn; the whole process tree is stopped and its exit verified when the turn ends
+- `file_actions`: read/write/edit/patch/diff plus mkdir/rename/move/delete, strictly inside the workspace (including the hidden `.data` state folder; the workspace database stays protected)
+- `memory`: Four scopes (`session` / `user` / `repo` / `evolution`) for searching and persisting conclusions
+- `todos`: Per-session task lists the model can plan, update and close
+- `timer`: One-shot delay timers that resume the session instead of polling; timers and running turns keep the system awake (Windows / macOS / Linux)
+- `knowledge_graph`: Knowledge graph queries (supports Neo4j)
 
 ### 5) MCP Management
 
@@ -294,6 +299,7 @@ After running, a config.json file will be generated in the system app data direc
     "max_tokens": 4096
   },
   "selected_tools": ["run_cmd", "file_actions", "knowledge_graph"],
+  "self_evolution_mode": false,
   "workspace_dir": "D:/projects/my-repo",
   "kg_engine": "neo4j",
   "neo4j_uri": "bolt://localhost:7687",
@@ -301,6 +307,8 @@ After running, a config.json file will be generated in the system app data direc
   "neo4j_password": "your_password"
 }
 ```
+
+> `self_evolution_mode: true` lets the assistant evolve its own skills and forces the `file_actions` and `memory` tools on — the app rewrites the selection on every save and on startup, so they cannot be switched off while the mode is active.
 
 Security recommendations:
 
@@ -332,15 +340,26 @@ Runtime layout — app data holds the application files, the workspace holds its
 ```text
 <app data>/                 config.json, app.log, mcp_servers.json, sub_agents.json,
                             profiles.json, timers.json, workspace/ (default workspace)
-<workspace>/.data/          chat.db, memory/, todos/, skills/, skills.status   (hidden)
+<workspace>/.data/          chat.db, memory/{user,repo,evolution}/, todos/, skills/,
+                            skills.status                                              (hidden)
 ```
 
 ---
 
 ## Security & Boundaries
 
-- Tool execution has system-level capabilities; enable run_cmd / run_shell and file_actions cautiously
-- Skill execution follows directory isolation rules to prevent boundary overreach
+The three execution tools have deliberately different scopes:
+
+| Tool | Where it may reach | How it is bounded |
+| --- | --- | --- |
+| `file_actions` | Inside the workspace root, including the hidden `.data` folder — the workspace database is the one exception | Path sandbox: outside paths, `../` escapes and symlink escapes are rejected |
+| `run_cmd` | One program the OS resolves through `PATH` — a bare name like `python` | Name check, risk assessment L0–L6, confirmation for L0–L3 |
+| `run_shell` | Anywhere, including outside the workspace | Risk assessment L0–L6, confirmation for L0–L3, syntax gate |
+
+Other boundaries:
+
+- Skills live in exactly one root per workspace; the skill folder is pinned to its own `SKILL.md`
+- Self-evolution mode lets the assistant rewrite its own instructions — use it briefly, in a controlled workspace, and inspect the `.bak` files afterwards
 - Validate MCP external services with minimal privileges and connectivity tests before integration
 - Use separate configuration files and API credentials for development and production
 

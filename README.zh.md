@@ -35,8 +35,9 @@
 
 | 能力 | **AI Chat** | Cherry Studio | Chatbox | LM Studio |
 | --- | :---: | :---: | :---: | :---: |
-| **Skills 沙箱** —— 每个工作区独立的 `.data/skills`，根目录锁定在自身 `SKILL.md` | ✅ | ◐ Agent 工作区 | — | — |
-| **内置 Agent 工具** —— 3 级 memory（`session` / `user` / `repo`）、timer、todos | ✅ | ◐ 定时任务 | — | — |
+| **Skills 沙箱** —— 每个工作区**唯一**的技能根目录 `.data/skills`，根目录锁定在自身 `SKILL.md` | ✅ | ◐ Agent 工作区 | — | — |
+| **自我进化** —— 助手自行安装/修改/删除技能，并把已验证的关键事实存进专属记忆区 | ✅ | — | — | — |
+| **内置 Agent 工具** —— 4 级 memory（`session` / `user` / `repo` / `evolution`）、timer、todos | ✅ | ◐ 定时任务 | — | — |
 | **Agent 运行时** —— LLM、本地 CLI 或远程 cloud，界面内自由配置 | ✅ | ◐ LLM Agent | — | — |
 | **提示词自主** —— 无默认人设、无隐藏改写；你的 system message 是基底，只追加工具/技能说明 | ✅ | ◐ 助手提示词 | ◐ 提示词库 | ◐ 按模型提示词 |
 | **本地请求审计** —— 请求体、token、耗时、状态、错误 | ✅ | ◐ 仅历史记录 | ◐ 仅历史记录 | ◐ 历史 + 服务端日志 |
@@ -110,17 +111,21 @@ AI Chat 是一个桌面端 AI 助手应用，支持接入任意 OpenAI 兼容模
 
 - 基于 skill.md（YAML frontmatter + system prompt）定义技能
 - 支持技能的新增、删除、启用/停用
-- 技能存放在工作区内（`<workspace>/.data/skills`），每个工作区独立一套
+- 每个工作区**有且只有一个**技能根目录（`<workspace>/.data/skills`），各自独立一套，不存在第二个位置
 - 启用状态按工作区保存在 `.data/skills.status`，与技能本体同目录
 - 技能目录隔离，约束文件与命令作用范围
 - 多技能下命令白名单可合并
+- **自我进化模式**允许助手自行安装、扩展、修改和删除技能（自动生成 `.bak.n` 备份），同时强制打开文件操作与记忆工具
 
 ### 4) 工具系统（Tools）
 
-- run_cmd / run_shell：本地命令执行，内置危险命令确认
+三个执行工具的作用域刻意不同：
+
+- run_cmd：只运行由系统通过 `PATH` 解析的程序（`python`、`python3`、`git` 等），绝对路径与相对路径一律拒绝
+- run_shell：完全自由——脚本可以 `cd` 到任何地方执行任何内容，但每个脚本执行前都会经过风险引擎审计
 - run_shell serve：当前回合的后台进程；回合结束时整棵进程树会被停止并核验退出
-- file_actions：文件读写、编辑、补丁、比对（diff），支持 mkdir / rename / move / delete
-- memory：`session` / `user` / `repo` 三级记忆，可检索与沉淀结论
+- file_actions：文件读写、编辑、补丁、比对（diff），支持 mkdir / rename / move / delete；严格限制在工作区内（包含隐藏的 `.data` 状态目录，工作区数据库受保护）
+- memory：`session` / `user` / `repo` / `evolution` 四级记忆，可检索与沉淀结论
 - todos：按会话维护任务清单，模型可规划、更新与关闭
 - timer：一次性延时定时器，到点自动恢复会话，无需轮询；定时器挂起与回合进行中会阻止系统休眠（Windows / macOS / Linux）
 - knowledge_graph：知识图谱查询（支持 Neo4j）
@@ -294,6 +299,7 @@ git push origin v2.0.0
     "max_tokens": 4096
   },
   "selected_tools": ["run_cmd", "file_actions", "knowledge_graph"],
+  "self_evolution_mode": false,
   "workspace_dir": "D:/projects/my-repo",
   "kg_engine": "neo4j",
   "neo4j_uri": "bolt://localhost:7687",
@@ -301,6 +307,8 @@ git push origin v2.0.0
   "neo4j_password": "your_password"
 }
 ```
+
+> `self_evolution_mode: true` 允许助手自行演进技能，并**强制打开** `file_actions` 与 `memory` 两个工具——应用每次保存与每次启动都会重写这份选择，模式开启期间无法把它们关掉。
 
 安全建议：
 
@@ -332,15 +340,26 @@ ai-chat/
 ```text
 <应用数据目录>/            config.json、app.log、mcp_servers.json、sub_agents.json、
                           profiles.json、timers.json、workspace/（默认工作区）
-<workspace>/.data/         chat.db、memory/、todos/、skills/、skills.status（隐藏）
+<workspace>/.data/         chat.db、memory/{user,repo,evolution}/、todos/、skills/、
+                          skills.status                                          （隐藏）
 ```
 
 ---
 
 ## 安全与边界
 
-- 工具执行具备系统能力，应谨慎开启 run_cmd / run_shell 与 file_actions
-- 技能执行遵循技能目录隔离原则，避免越界访问
+三个执行工具的作用域刻意不同：
+
+| 工具 | 能触达的范围 | 约束方式 |
+| --- | --- | --- |
+| file_actions | 工作区根目录之内，含隐藏的 `.data` 目录；工作区数据库是唯一例外 | 路径沙箱：工作区外路径、`../` 逃逸、符号链接逃逸一律拒绝 |
+| run_cmd | 一个由系统通过 `PATH` 解析的程序，也就是 `python` 这样的裸名称 | 名称校验、风险评估 L0–L6、L0–L3 需确认 |
+| run_shell | 任意位置，包括工作区之外 | 风险评估 L0–L6、L0–L3 需确认、语法门禁 |
+
+其他边界：
+
+- 技能每个工作区只有一个根目录，技能目录锁定在自身 `SKILL.md`
+- 自我进化模式允许助手改写自己的指令——请短时、在受控工作区使用，事后检查 `.bak` 文件
 - MCP 外部服务接入前应先做最小权限与连通性验证
 - 建议在开发与生产中使用不同配置文件与 API 凭据
 

@@ -12,6 +12,11 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::{agents, db, mcp, skills, todos, tools, AppState};
 
+/// How much of the self-evolution memory area is injected into the system
+/// prompt. The facts are short (one line each), so a few thousand characters
+/// cover a large library without bloating the cached prompt prefix.
+const EVOLUTION_CONTEXT_BUDGET_CHARS: usize = 4_000;
+
 fn log_event(state: &State<'_, AppState>, level: &str, message: String) {
     if let Ok(logger) = state.logger.lock() {
         logger.log(level, &message);
@@ -1211,17 +1216,20 @@ fn looks_like_conclusion(content: &str) -> bool {
     MARKERS.iter().any(|m| lower.contains(m))
 }
 
-/// Persist a conclusion to repo-scoped memory (workspace_dir/memory/repo/).
-/// Mirrors the `memory` tool's `repo` scope file layout so entries are
-/// discoverable by the same search/list paths.
+/// Persist a conclusion to a file-backed memory scope (workspace
+/// `.data/memory/<scope>/`).
+///
+/// Mirrors the `memory` tool's file layout so entries are discoverable by the
+/// same search/list paths.
 fn record_conclusion_to_memory(
     state: &State<'_, AppState>,
     app: &AppHandle,
     workspace_dir: &Path,
     session_id: &str,
+    scope: &str,
     content: &str,
 ) {
-    let memory_root = crate::workspace::memory_root(workspace_dir).join("repo");
+    let memory_root = crate::workspace::memory_root(workspace_dir).join(scope);
     if let Err(e) = fs::create_dir_all(&memory_root) {
         log_event(state, "ERROR", format!("failed to create memory dir: {e}"));
         return;
@@ -1249,11 +1257,11 @@ fn record_conclusion_to_memory(
             log_event(
                 state,
                 "INFO",
-                format!("conclusion recorded to repo memory: {key}"),
+                format!("conclusion recorded to {scope} memory: {key}"),
             );
             let _ = app.emit(
                 "tool-call",
-                format!("🧠 *Conclusion recorded to repo memory: {}*\n", key),
+                format!("🧠 *Conclusion recorded to {scope} memory: {}*\n", key),
             );
         }
         Err(e) => {
@@ -1427,6 +1435,14 @@ async fn run_chat_turn(
 
     let ws_skills_dir = crate::workspace::skills_root(&workspace_dir_for_roots);
 
+    // Self-evolution mode: the assistant owns `<workspace>/.data/skills` and may
+    // install/edit/delete skills through `file_actions`. The one root is handed
+    // to the tool layer below — without it every skill write is rejected.
+    let skill_evolution_root = skills::self_evolution_skill_root(
+        Some(&workspace_dir_for_roots),
+        config.self_evolution_mode,
+    );
+
     for skill_name in &skill_ids {
         if let Ok(resolved_skill) = skills::resolve_skill_by_name(&ws_skills_dir, skill_name) {
             let skill = resolved_skill.skill;
@@ -1491,6 +1507,35 @@ async fn run_chat_turn(
         system_content.push_str(&skills_sys_msg);
     }
 
+    // ── Self-evolution guidance ─────────────────────────────────────────────
+    // The tool description carries the mechanics; this states the *policy* so
+    // the model actually creates/updates/deletes skills instead of only
+    // describing how it would do it.
+    let self_evolution_context = skills::self_evolution_prompt(skill_evolution_root.as_deref());
+    if !self_evolution_context.is_empty() {
+        if !system_content.is_empty() {
+            system_content.push_str("\n\n");
+        }
+        system_content.push_str(&self_evolution_context);
+
+        // The facts the assistant verified in earlier sessions — the default
+        // interpreter and runtime environment, the correct way to operate a
+        // tool, the file locations it uses often — are injected here so they
+        // are reused instead of rediscovered every session.
+        let evolution_facts = crate::tools::memory::render_evolution_context(
+            &workspace_dir_for_roots,
+            EVOLUTION_CONTEXT_BUDGET_CHARS,
+        );
+        if !evolution_facts.is_empty() {
+            system_content.push_str("\n\n");
+            system_content.push_str(
+                "VERIFIED FACTS (self-evolution memory, already known — reuse them, do not \
+                 rediscover):\n",
+            );
+            system_content.push_str(&evolution_facts);
+        }
+    }
+
     // Sub-agents (`llm`, `cli`, `cloud`) are only reachable when automatic
     // orchestration is enabled (`use_agents`). With orchestration off the main
     // agent answers directly: `call_subagent` is neither advertised in the
@@ -1534,20 +1579,29 @@ async fn run_chat_turn(
     // ── Memory guidance ─────────────────────────────────────────────────────
     // Explicit instructions so conclusions are reliably persisted via the
     // `memory` tool (the tool description carries the full scope/usage details).
-    if config.selected_tools.iter().any(|t| t == "memory") {
-        let memory_guidance = "\
-        MEMORY: You have a `memory` tool (scopes: `session`, `user`, `repo`). \
+    if config.effective_tools().iter().any(|t| t == "memory") {
+        let evolution_hint = if config.self_evolution_mode {
+            " `evolution` for verified facts that must survive across sessions \
+             (runtime environment, correct tool usage, file locations)."
+        } else {
+            ""
+        };
+        let memory_guidance = format!(
+            "\
+        MEMORY: You have a `memory` tool (scopes: `session`, `user`, `repo`{}). \
         Search memory before answering to reuse prior conclusions. \
         When you reach a definitive, accurate conclusion — a resolved question, \
         confirmed root cause, decided approach, or verified fact — you MUST call \
         `memory add` to persist it before ending your turn. \
         Scope guidance: `repo` for project/codebase facts and decisions, `user` for \
         user preferences and general insights, `session` for task-specific in-progress \
-        notes. Use a short descriptive `key` and put the conclusion in `content`.";
+        notes. Use a short descriptive `key` and put the conclusion in `content`.",
+            evolution_hint
+        );
         if !system_content.is_empty() {
             system_content.push_str("\n\n");
         }
-        system_content.push_str(memory_guidance);
+        system_content.push_str(&memory_guidance);
     }
 
     // ── Timer guidance ──────────────────────────────────────────────────────
@@ -1681,7 +1735,8 @@ async fn run_chat_turn(
     );
     let client = build_http_client()?;
 
-    let mut tools_list = tools::get_all_tools(&config.selected_tools);
+    let mut tools_list =
+        tools::get_all_tools(&config.effective_tools(), config.self_evolution_mode);
 
     // ── Skill-read tool ─────────────────────────────────────────────────────
     // Auto-inject skill_read when one or more skills are active.
@@ -1748,7 +1803,10 @@ async fn run_chat_turn(
         }
     }
 
-    if !skill_ids.is_empty() {
+    // `use_skill` is advertised when the user has at least one enabled skill —
+// and always in self-evolution mode, where the assistant may have just written
+// a new skill that is not enabled yet but must still be loadable.
+if !skill_ids.is_empty() || skill_evolution_root.is_some() {
         tools_list.push(json!({
             "type": "function",
             "function": {
@@ -1852,7 +1910,6 @@ async fn run_chat_turn(
                 }),
             );
         }
-
 
         // Context window used for the usage gauge (`Tokens: X / Y`).
         // Resolution order: per-model context window (auto-detected from the
@@ -2204,7 +2261,7 @@ async fn run_chat_turn(
                                 agent,
                                 &task,
                                 workspace_dir,
-                                vec![],
+                                skill_evolution_root.clone(),
                                 turn_cancelled.clone(),
                             )
                             .await;
@@ -2284,7 +2341,7 @@ async fn run_chat_turn(
                     workspace_dir,
                     &config,
                     &skill_allowed_commands,
-                    &[],
+                    skill_evolution_root.as_deref(),
                     None,
                     Some(&session_id),
                     &active_skill_dirs,
@@ -2332,16 +2389,29 @@ async fn run_chat_turn(
     // ── Automatic conclusion recording ──────────────────────────────────────
     // If the turn ended with a substantive final answer that reads like a
     // conclusion, and the LLM did not already persist it via the `memory`
-    // tool, record it to repo memory so it survives across sessions.
+    // tool, record it so it survives across sessions. Self-evolution mode
+    // routes it into the dedicated evolution area instead of `repo`.
     if let Some(answer) = final_answer {
-        let memory_enabled = config.selected_tools.iter().any(|t| t == "memory");
+        let memory_enabled = config.effective_tools().iter().any(|t| t == "memory");
         if memory_enabled
             && !memory_tool_called
             && should_record_conclusion(&answer)
             && looks_like_conclusion(&answer)
         {
             let workspace_dir = state.workspace_dir.lock().unwrap().clone();
-            record_conclusion_to_memory(&state, &app, &workspace_dir, &session_id, &answer);
+            let scope = if config.self_evolution_mode {
+                crate::tools::memory::EVOLUTION_SCOPE
+            } else {
+                "repo"
+            };
+            record_conclusion_to_memory(
+                &state,
+                &app,
+                &workspace_dir,
+                &session_id,
+                scope,
+                &answer,
+            );
         }
     }
 

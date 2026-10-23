@@ -1,7 +1,7 @@
 // Child-process execution and output decoding: `run_command`, and the
 // Windows code-page aware decoding of child stdout/stderr.
 
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 
 use super::split_command_line;
 use super::truncate_tool_output;
@@ -213,6 +213,40 @@ pub(crate) fn decode_hint_for_shell(cmd_type: &str) -> OutputDecodeHint {
     }
 }
 
+/// Reject a `run_cmd` program that is a path instead of a bare name.
+///
+/// `run_cmd` runs a *program* that the operating system resolves through the
+/// `PATH` environment variable — `python`, `python3`, `git`, `node`, ….
+/// Absolute paths (`C:\Python\python.exe`, `/usr/bin/python3`) and relative
+/// paths (`.\build\tool.exe`, `sub/tool`) are refused: they would let the
+/// assistant run an arbitrary file instead of a PATH-resolved command.
+///
+/// `run_shell` is the tool with that freedom — it may `cd` anywhere and run
+/// any script — and every script it runs is audited by `tools/risk.rs`.
+pub(crate) fn validate_path_resolved_program(program: &str) -> Result<(), String> {
+    let trimmed = program.trim();
+    if trimmed.is_empty() {
+        return Err("run_cmd requires a program name.".to_string());
+    }
+
+    // A bare program name is exactly one `Normal` component. Anything else
+    // carries a separator, a drive prefix or a root — that is a path.
+    let mut components = Path::new(trimmed).components();
+    let is_bare_name = matches!(components.next(), Some(Component::Normal(_)))
+        && components.next().is_none();
+
+    if !is_bare_name {
+        return Err(format!(
+            "⛔ run_cmd only runs programs that PATH resolves (for example 'python' or \
+             'python3'). '{}' is a path — pass a bare program name instead, or use \
+             `run_shell` when an absolute path is really needed.",
+            trimmed
+        ));
+    }
+
+    Ok(())
+}
+
 /// Build a command for `cmd_type` rooted at `cwd`, without running it.
 /// Used by `run_command` (synchronous) and by `serve` (long-lived children).
 pub(crate) fn build_command(
@@ -227,6 +261,9 @@ pub(crate) fn build_command(
             if parts.is_empty() {
                 return Err("Empty command".to_string());
             }
+            // `direct` is the `run_cmd` contract: a PATH-resolved program name,
+            // never a path.
+            validate_path_resolved_program(&parts[0])?;
             let mut c = tokio::process::Command::new(&parts[0]);
             if parts.len() > 1 {
                 c.args(&parts[1..]);
@@ -323,4 +360,58 @@ pub async fn run_command(
     let mut cmd = build_command(&cmd_type, &code, cwd)?;
     let output = cmd.output().await.map_err(|e| e.to_string())?;
     Ok(format_process_output(output, decode_hint))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_path_resolved_program;
+
+    /// `run_cmd` runs a program the OS resolves through `PATH`.
+    #[test]
+    fn bare_program_names_are_accepted() {
+        for program in ["python", "python3", "git", "node", "cargo", "npm"] {
+            assert!(
+                validate_path_resolved_program(program).is_ok(),
+                "'{program}' must be accepted"
+            );
+        }
+    }
+
+    /// Absolute and relative paths are refused: they are files, not
+    /// PATH-resolved programs.
+    #[test]
+    fn paths_are_refused() {
+        let paths = [
+            "/usr/bin/python3",
+            "/bin/sh",
+            "./script.sh",
+            "../script.sh",
+            "sub/dir/tool.exe",
+            r"C:\Python\python.exe",
+            r"C:\Windows\System32\cmd.exe",
+            r"..\..\evil.exe",
+        ];
+        for path in paths {
+            let err = validate_path_resolved_program(path)
+                .expect_err(&format!("'{path}' must be refused"));
+            assert!(
+                err.contains("PATH"),
+                "unexpected error for '{path}': {err}"
+            );
+        }
+    }
+
+    /// A drive-relative path (`C:foo`) is a path too.
+    #[cfg(windows)]
+    #[test]
+    fn drive_relative_paths_are_refused() {
+        assert!(validate_path_resolved_program("C:tool.exe").is_err());
+    }
+
+    /// An empty program name is not a program at all.
+    #[test]
+    fn an_empty_program_is_refused() {
+        assert!(validate_path_resolved_program("").is_err());
+        assert!(validate_path_resolved_program("   ").is_err());
+    }
 }

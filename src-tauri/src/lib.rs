@@ -39,6 +39,14 @@ const MARKDOWN_EDIT_OPEN_EVENT: &str = "markdown-edit-open";
 const MARKDOWN_EDIT_ERROR_EVENT: &str = "markdown-edit-error";
 const WORKSPACE_CHANGED_EVENT: &str = "workspace-changed";
 
+/// Tools that self-evolution mode always keeps enabled.
+///
+/// The assistant must be able to edit its own skills (`file_actions`) and to
+/// remember what it learned (`memory`). While the mode is on they cannot be
+/// switched off — not from the Tools panel, not by applying a profile, and not
+/// by hand-editing `config.json`.
+pub const SELF_EVOLUTION_REQUIRED_TOOLS: [&str; 2] = ["file_actions", "memory"];
+
 #[derive(Debug, Clone, Serialize)]
 struct MarkdownEditPayload {
     path: String,
@@ -200,6 +208,12 @@ pub(crate) fn apply_config(
     state: &AppState,
     config: AppConfig,
 ) -> Result<(), String> {
+    // Self-evolution mode owns `file_actions` and `memory`: they are forced
+    // on before anything is written, so no caller (UI, profile, backup
+    // restore) can switch them off while the mode is active.
+    let mut config = config;
+    config.enforce_self_evolution_tools();
+
     let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
     fs::write(&state.config_path, json).map_err(|e| e.to_string())?;
 
@@ -392,6 +406,45 @@ impl Default for AppConfig {
     }
 }
 
+impl AppConfig {
+    /// Force the self-evolution tools into the persisted selection.
+    ///
+    /// Called on every config write and on startup, so the invariant holds
+    /// even when the config was edited outside the app.
+    fn enforce_self_evolution_tools(&mut self) {
+        if !self.self_evolution_mode {
+            return;
+        }
+        for required in SELF_EVOLUTION_REQUIRED_TOOLS {
+            if !self.selected_tools.iter().any(|tool| tool == required) {
+                self.selected_tools.push(required.to_string());
+            }
+        }
+    }
+
+    /// The tool ids actually offered to the model.
+    ///
+    /// Self-evolution mode forces `file_actions` and `memory` on here, so a
+    /// hand-edited config or a stale in-memory selection can never take them
+    /// away from the assistant.
+    pub fn effective_tools(&self) -> Vec<String> {
+        let mut tools: Vec<String> = Vec::with_capacity(self.selected_tools.len() + 2);
+        for tool in &self.selected_tools {
+            if !tools.iter().any(|existing| existing == tool) {
+                tools.push(tool.clone());
+            }
+        }
+        if self.self_evolution_mode {
+            for required in SELF_EVOLUTION_REQUIRED_TOOLS {
+                if !tools.iter().any(|existing| existing == required) {
+                    tools.push(required.to_string());
+                }
+            }
+        }
+        tools
+    }
+}
+
 /// One message the user pushed into a turn that was already running.
 ///
 /// A turn is a *sequence* of requests (one per tool round), so an injection
@@ -411,7 +464,7 @@ pub struct TurnInboxItem {
 
 #[derive(Serialize)]
 pub struct InjectUserMessageResult {
-    /// `false` — no turn is running for this session; the UI sends the text as
+    /// `false` → no turn is running for this session; the UI sends the text as
     /// a normal next-turn message instead of leaving it in the inbox.
     pub accepted: bool,
 }
@@ -558,7 +611,11 @@ pub struct ToolConfirmation {
 
 #[tauri::command]
 fn get_config(state: State<'_, AppState>) -> AppConfig {
-    state.config.lock().unwrap().clone()
+    let mut config = state.config.lock().unwrap().clone();
+    // The UI must see the enforced selection, so the two self-evolution tools
+    // always show as enabled while the mode is on.
+    config.enforce_self_evolution_tools();
+    config
 }
 
 #[tauri::command]
@@ -1011,6 +1068,10 @@ pub fn run() {
             } else {
                 AppConfig::default()
             };
+            // A config edited outside the app may be missing the tools that
+            // self-evolution mode requires — re-add them before the first turn.
+            let mut config = config;
+            config.enforce_self_evolution_tools();
 
             // Resolve the active workspace first: the database, memory, todo
             // lists and skills all live in its hidden `.data` directory, so the
@@ -1199,4 +1260,72 @@ pub fn run() {
                 process_guard::kill_all();
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Self-evolution mode owns `file_actions` and `memory`: the assistant
+    /// must be able to edit its own skills and to remember what it learned.
+    #[test]
+    fn self_evolution_forces_the_file_and_memory_tools() {
+        let mut config = AppConfig::default();
+        config.selected_tools = vec!["run_cmd".to_string()];
+        config.self_evolution_mode = true;
+
+        config.enforce_self_evolution_tools();
+        assert!(config.selected_tools.contains(&"file_actions".to_string()));
+        assert!(config.selected_tools.contains(&"memory".to_string()));
+        assert!(config.selected_tools.contains(&"run_cmd".to_string()));
+
+        // Enforcing twice must not duplicate the entries.
+        config.enforce_self_evolution_tools();
+        assert_eq!(
+            config
+                .selected_tools
+                .iter()
+                .filter(|tool| *tool == "file_actions")
+                .count(),
+            1
+        );
+    }
+
+    /// A hand-edited config that drops the tools cannot take them away from
+    /// the model while the mode is on.
+    #[test]
+    fn effective_tools_keeps_the_required_tools_even_if_the_config_lacks_them() {
+        let mut config = AppConfig::default();
+        config.selected_tools = vec!["run_shell".to_string()];
+        config.self_evolution_mode = true;
+
+        let tools = config.effective_tools();
+        assert!(tools.contains(&"file_actions".to_string()));
+        assert!(tools.contains(&"memory".to_string()));
+        assert!(tools.contains(&"run_shell".to_string()));
+
+        // With the mode off the selection is untouched.
+        config.self_evolution_mode = false;
+        let tools = config.effective_tools();
+        assert!(!tools.contains(&"file_actions".to_string()));
+        assert!(!tools.contains(&"memory".to_string()));
+    }
+
+    /// Duplicates in the persisted selection are collapsed.
+    #[test]
+    fn effective_tools_deduplicates_the_selection() {
+        let mut config = AppConfig::default();
+        config.selected_tools = vec![
+            "memory".to_string(),
+            "run_cmd".to_string(),
+            "memory".to_string(),
+        ];
+
+        let tools = config.effective_tools();
+        assert_eq!(
+            tools.iter().filter(|tool| *tool == "memory").count(),
+            1
+        );
+        assert_eq!(tools.len(), 2);
+    }
 }

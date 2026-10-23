@@ -1,5 +1,5 @@
-// Memory tool: session (in-memory), user/repo (file-backed) and the read-only
-// `all` fan-out across every scope.
+// Memory tool: session (in-memory), user/repo/evolution (file-backed) and the
+// read-only `all` fan-out across every scope.
 
 use crate::db;
 use serde_json::{json, Value};
@@ -9,6 +9,88 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use super::search::{run_integrated_search, SearchOptions};
 use super::truncate_tool_output;
+
+/// The self-evolution memory area.
+///
+/// A dedicated scope for verified facts that must survive across sessions:
+/// the default interpreter / runtime environment, the correct way to operate a
+/// tool, the file locations that are used often. It only exists while
+/// self-evolution mode is on.
+pub const EVOLUTION_SCOPE: &str = "evolution";
+
+/// Every scope the `memory` tool accepts, in fan-out order.
+fn concrete_scopes(self_evolution: bool) -> Vec<&'static str> {
+    if self_evolution {
+        vec!["session", "user", "repo", EVOLUTION_SCOPE]
+    } else {
+        vec!["session", "user", "repo"]
+    }
+}
+
+/// Sanitize a memory key so it can be used as a file name.
+fn safe_memory_key(key: &str) -> String {
+    key.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// Render the self-evolution memory area for the model prompt.
+///
+/// The entries are the verified facts the assistant recorded in earlier
+/// sessions (the default interpreter and runtime environment, the correct way
+/// to operate a tool, the file locations that are used often). They are
+/// injected into the system prompt so the assistant reuses them instead of
+/// rediscovering them every session.
+pub fn render_evolution_context(workspace_dir: &Path, budget_chars: usize) -> String {
+    let memory_root = crate::workspace::memory_root(workspace_dir).join(EVOLUTION_SCOPE);
+    let Ok(entries) = fs::read_dir(&memory_root) else {
+        return String::new();
+    };
+
+    let mut files: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("md"))
+        .collect();
+    files.sort();
+
+    let mut rendered = String::new();
+    let mut used = 0usize;
+    for file in files {
+        let Ok(raw) = fs::read_to_string(&file) else {
+            continue;
+        };
+        // The file is `# <key>\n\n<content>` — the heading repeats the key.
+        let body = raw
+            .lines()
+            .skip_while(|line| line.trim().is_empty() || line.starts_with("# "))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim()
+            .to_string();
+        if body.is_empty() {
+            continue;
+        }
+        let key = file
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("fact");
+        let entry = format!("- {key}: {body}\n");
+        if used + entry.len() > budget_chars {
+            break;
+        }
+        used += entry.len();
+        rendered.push_str(&entry);
+    }
+
+    rendered.trim_end().to_string()
+}
 
 /// Handle the `memory` tool call.
 ///
@@ -23,7 +105,7 @@ pub(super) async fn handle_memory_tool(
     workspace_dir: &Path,
     config: &crate::AppConfig,
     allowed_commands: &[String],
-    protected_skill_roots: &[PathBuf],
+    protected_skill_root: Option<&Path>,
     mission_id: Option<&str>,
     active_skill_dirs: &[(String, PathBuf)],
 ) -> String {
@@ -41,6 +123,14 @@ pub(super) async fn handle_memory_tool(
         })
         .unwrap_or_default();
 
+    // The evolution scope only exists while self-evolution mode is on.
+    if scope == EVOLUTION_SCOPE && !config.self_evolution_mode {
+        return format!(
+            "Error: the '{}' memory scope is only available while self-evolution mode is on.",
+            EVOLUTION_SCOPE
+        );
+    }
+
     // ── All scopes (read-only fan-out) ──────────────────────────────
     // `scope: "all"` re-runs this same tool once per concrete scope and
     // merges the results, so `all` behaves exactly like three separate
@@ -49,7 +139,12 @@ pub(super) async fn handle_memory_tool(
         if !matches!(action, "get" | "list" | "search") {
             if matches!(action, "add" | "delete") {
                 return format!(
-                    "Error: memory scope 'all' is read-only (get, list, search). Call the memory tool again with scope 'session', 'user', or 'repo' to {}.",
+                    "Error: memory scope 'all' is read-only (get, list, search). Call the memory tool again with scope 'session', 'user', 'repo'{} to {}.",
+                    if config.self_evolution_mode {
+                        ", or 'evolution'"
+                    } else {
+                        ""
+                    },
                     if action == "add" {
                         "add a memory"
                     } else {
@@ -75,7 +170,7 @@ pub(super) async fn handle_memory_tool(
         );
 
         let mut sections: Vec<String> = Vec::new();
-        for sub_scope in ["session", "user", "repo"] {
+        for sub_scope in concrete_scopes(config.self_evolution_mode) {
             let mut sub_args = args.clone();
             sub_args["scope"] = json!(sub_scope);
             let sub_args_str = sub_args.to_string();
@@ -86,7 +181,7 @@ pub(super) async fn handle_memory_tool(
                 workspace_dir.to_path_buf(),
                 config,
                 allowed_commands,
-                protected_skill_roots,
+                protected_skill_root,
                 mission_id,
                 session_id,
                 active_skill_dirs,
@@ -249,8 +344,8 @@ pub(super) async fn handle_memory_tool(
                 action
             ),
         }
-    // ── User / Repo scoped (file-backed) ────────────────────────────
-    } else if scope == "user" || scope == "repo" {
+    // ── User / Repo / Evolution scoped (file-backed) ─────────────────
+    } else if scope == "user" || scope == "repo" || scope == EVOLUTION_SCOPE {
         let memory_root = crate::workspace::memory_root(workspace_dir).join(scope);
         let _ = fs::create_dir_all(&memory_root);
 
@@ -260,16 +355,7 @@ pub(super) async fn handle_memory_tool(
                     return "Error: 'key' is required for memory add.".to_string();
                 }
                 // Sanitize key for use as filename
-                let safe_key = key
-                    .chars()
-                    .map(|c| {
-                        if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
-                            c
-                        } else {
-                            '_'
-                        }
-                    })
-                    .collect::<String>();
+                let safe_key = safe_memory_key(&key);
                 let file_path = memory_root.join(format!("{}.md", safe_key));
 
                 let tags_line = if tags.is_empty() {
@@ -302,16 +388,7 @@ pub(super) async fn handle_memory_tool(
                 if key.is_empty() {
                     return "Error: 'key' is required for memory get.".to_string();
                 }
-                let safe_key = key
-                    .chars()
-                    .map(|c| {
-                        if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
-                            c
-                        } else {
-                            '_'
-                        }
-                    })
-                    .collect::<String>();
+                let safe_key = safe_memory_key(&key);
                 let file_path = memory_root.join(format!("{}.md", safe_key));
 
                 match fs::read_to_string(&file_path) {
@@ -389,16 +466,7 @@ pub(super) async fn handle_memory_tool(
                 if key.is_empty() {
                     return "Error: 'key' is required for memory delete.".to_string();
                 }
-                let safe_key = key
-                    .chars()
-                    .map(|c| {
-                        if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
-                            c
-                        } else {
-                            '_'
-                        }
-                    })
-                    .collect::<String>();
+                let safe_key = safe_memory_key(&key);
                 let file_path = memory_root.join(format!("{}.md", safe_key));
 
                 match fs::remove_file(&file_path) {
@@ -419,8 +487,102 @@ pub(super) async fn handle_memory_tool(
         }
     } else {
         format!(
-            "Unknown memory scope '{}'. Supported scopes: session, user, repo, all.",
-            scope
+            "Unknown memory scope '{}'. Supported scopes: session, user, repo, all{}.",
+            scope,
+            if config.self_evolution_mode {
+                ", evolution"
+            } else {
+                ""
+            }
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_workspace(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "ai-chat-memory-test-{tag}-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// The evolution scope only exists while self-evolution mode is on.
+    #[test]
+    fn the_evolution_scope_follows_the_self_evolution_switch() {
+        assert!(!concrete_scopes(false).contains(&EVOLUTION_SCOPE));
+        assert!(concrete_scopes(true).contains(&EVOLUTION_SCOPE));
+    }
+
+    /// The `all` fan-out covers the evolution area once the mode is on.
+    #[test]
+    fn the_fan_out_includes_the_evolution_scope() {
+        let scopes = concrete_scopes(true);
+        assert_eq!(scopes, vec!["session", "user", "repo", "evolution"]);
+        assert_eq!(concrete_scopes(false), vec!["session", "user", "repo"]);
+    }
+
+    /// The evolution area is a normal file-backed scope: one markdown file per
+    /// key, inside the workspace memory directory.
+    #[test]
+    fn the_evolution_area_is_file_backed_inside_the_workspace() {
+        let workspace = temp_workspace("evolution");
+        let root = crate::workspace::memory_root(&workspace).join(EVOLUTION_SCOPE);
+        fs::create_dir_all(&root).unwrap();
+
+        let key = safe_memory_key("python default interpreter");
+        assert_eq!(key, "python_default_interpreter");
+        let file = root.join(format!("{key}.md"));
+        fs::write(&file, "# python-default-interpreter\n\nUse `python`.\n").unwrap();
+
+        assert!(file.is_file());
+        assert!(file.starts_with(workspace.join(".data").join("memory")));
+
+        let _ = fs::remove_dir_all(&workspace);
+    }
+
+    /// The recorded facts are injected into the system prompt so the
+    /// assistant reuses them instead of rediscovering them.
+    #[test]
+    fn the_evolution_context_renders_the_recorded_facts() {
+        let workspace = temp_workspace("evolution-context");
+        let root = crate::workspace::memory_root(&workspace).join(EVOLUTION_SCOPE);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("python.md"),
+            "# python\n\nThe default interpreter is `python`, not `python3`.\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("browser.md"),
+            "# browser\n\nDrive the browser through the MCP browser tool, not `run_cmd`.\n",
+        )
+        .unwrap();
+
+        let rendered = render_evolution_context(&workspace, 4_000);
+        assert!(rendered.contains("python"));
+        assert!(rendered.contains("not `python3`"));
+        assert!(rendered.contains("browser"));
+        // The `# key` heading is not repeated in the rendered line.
+        assert!(!rendered.contains("# python"));
+
+        // The budget caps how much is injected.
+        let capped = render_evolution_context(&workspace, 40);
+        assert!(capped.chars().count() < 200);
+
+        let _ = fs::remove_dir_all(&workspace);
+    }
+
+    /// A workspace without an evolution area renders nothing (no error).
+    #[test]
+    fn a_missing_evolution_area_renders_nothing() {
+        let workspace = temp_workspace("evolution-missing");
+        assert!(render_evolution_context(&workspace, 4_000).is_empty());
+        let _ = fs::remove_dir_all(&workspace);
     }
 }

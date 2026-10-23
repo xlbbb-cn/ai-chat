@@ -9,16 +9,17 @@
 //! sub_agents.json         sub-agents + orchestration
 //! workspace/memory/...    workspace-scoped memory notes
 //! workspace/todos/...     workspace-scoped todo lists
-//! workspace/skills/...    workspace skills
+//! workspace/skills/...    workspace skills (the one skills root)
 //! workspace/skills.status workspace skill enablement + metadata
 //! chat.db                 SQLite snapshot (VACUUM INTO)
 //! ```
 //!
 //! Every `workspace/...` entry is read from (and restored into) the hidden
 //! `<workspace>/.data` directory of the *active* workspace, so a profile is
-//! portable across machines and workspaces. Import applies `config.json` first
-//! (which may switch the active workspace) and then restores the
-//! workspace-scoped folders into the newly active workspace.
+//! portable across machines and workspaces. The zip layout is flat: the
+//! `workspace/` prefix stands for `<workspace>/.data/`. Import applies
+//! `config.json` first (which may switch the active workspace) and then
+//! restores the workspace-scoped folders into the newly active workspace.
 
 use std::fs;
 use std::io::{Read, Write};

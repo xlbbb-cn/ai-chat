@@ -19,11 +19,17 @@ pub(super) async fn handle_file_actions(
     app: &AppHandle,
     args: &Value,
     workspace_dir: &Path,
-    protected_skill_roots: &[PathBuf],
+    protected_skill_root: Option<&Path>,
 ) -> String {
     let action = args["action"].as_str().unwrap_or("");
     let path_str = args["path"].as_str().unwrap_or("");
     let root_dir = workspace_dir.to_path_buf();
+    // The one skills root is always backup-protected: whatever the mode, a
+    // skill file or folder that is overwritten or deleted is copied aside
+    // first (`skill.md.bak.1`, `demo.bak.1`). The backup is a safety net, not
+    // a permission — the writable root stays mode-dependent.
+    let skills_root = crate::workspace::skills_root(workspace_dir);
+    let backup_root = Some(skills_root.as_path());
     match action {
         "read" => {
             let _ = app.emit("tool-call", format!("📄 *Reading {}*\n\n", path_str));
@@ -94,12 +100,15 @@ pub(super) async fn handle_file_actions(
             let _ = app.emit("tool-call", format!("💾 *Writing {}*\n\n", path_str));
             match resolve_file_action_path(path_str, &root_dir, false) {
                 Ok(p) => {
-                    if let Err(e) =
-                        ensure_mutation_target_allowed(&p, &root_dir, protected_skill_roots)
-                    {
+                    if let Err(e) = ensure_mutation_target_allowed(
+                        &p,
+                        &root_dir,
+                        protected_skill_root,
+                        action,
+                    ) {
                         return format_file_action_error(e);
                     }
-                    let backup = match backup_protected_file(&p, protected_skill_roots) {
+                    let backup = match backup_protected_path(&p, backup_root) {
                         Ok(backup) => backup,
                         Err(e) => return format!("Error: {}", e),
                     };
@@ -156,12 +165,10 @@ pub(super) async fn handle_file_actions(
                         Ok(entries) => {
                             let mut res = Vec::new();
                             for entry in entries.flatten() {
-                                // The hidden workspace state directory (`.data`:
-                                // database, memory, todos, skill status) is
-                                // internal — never listed to the assistant.
-                                if crate::workspace::is_internal_file_name(&entry.file_name()) {
-                                    continue;
-                                }
+                                // `.data` (database, memory, todos, skills) lives
+                                // inside the workspace, so it is listed like any
+                                // other folder — the assistant may read and
+                                // manage its own state there.
                                 if let Ok(name) = entry.file_name().into_string() {
                                     let is_dir = entry
                                         .file_type()
@@ -249,9 +256,12 @@ pub(super) async fn handle_file_actions(
             }
             match resolve_file_action_path(path_str, &root_dir, true) {
                 Ok(src) => {
-                    if let Err(e) =
-                        ensure_mutation_target_allowed(&src, &root_dir, protected_skill_roots)
-                    {
+                    if let Err(e) = ensure_mutation_target_allowed(
+                        &src,
+                        &root_dir,
+                        protected_skill_root,
+                        action,
+                    ) {
                         return format_file_action_error(e);
                     }
                     match resolve_file_action_path(new_path, &root_dir, false) {
@@ -259,18 +269,19 @@ pub(super) async fn handle_file_actions(
                             if let Err(e) = ensure_mutation_target_allowed(
                                 &dst,
                                 &root_dir,
-                                protected_skill_roots,
+                                protected_skill_root,
+                                action,
                             ) {
                                 return format_file_action_error(e);
                             }
-                            let backup = match backup_protected_file(&src, protected_skill_roots) {
+                            let backup = match backup_protected_path(&src, backup_root) {
                                 Ok(backup) => backup,
                                 Err(e) => return format!("Error: {}", e),
                             };
                             // If the destination already exists and is a
                             // protected file, back it up before overwriting.
                             let dst_backup =
-                                match backup_protected_file(&dst, protected_skill_roots) {
+                                match backup_protected_path(&dst, backup_root) {
                                     Ok(backup) => backup,
                                     Err(e) => return format!("Error: {}", e),
                                 };
@@ -327,12 +338,15 @@ pub(super) async fn handle_file_actions(
             let _ = app.emit("tool-call", format!("🩹 *Patching {}*\n\n", path_str));
             match resolve_file_action_path(path_str, &root_dir, true) {
                 Ok(p) => {
-                    if let Err(e) =
-                        ensure_mutation_target_allowed(&p, &root_dir, protected_skill_roots)
-                    {
+                    if let Err(e) = ensure_mutation_target_allowed(
+                        &p,
+                        &root_dir,
+                        protected_skill_root,
+                        action,
+                    ) {
                         return format_file_action_error(e);
                     }
-                    let backup = match backup_protected_file(&p, protected_skill_roots) {
+                    let backup = match backup_protected_path(&p, backup_root) {
                         Ok(backup) => backup,
                         Err(e) => return format!("Error: {}", e),
                     };
@@ -436,9 +450,12 @@ pub(super) async fn handle_file_actions(
             );
             match resolve_file_action_path(path_str, &root_dir, false) {
                 Ok(p) => {
-                    if let Err(e) =
-                        ensure_mutation_target_allowed(&p, &root_dir, protected_skill_roots)
-                    {
+                    if let Err(e) = ensure_mutation_target_allowed(
+                        &p,
+                        &root_dir,
+                        protected_skill_root,
+                        action,
+                    ) {
                         return format_file_action_error(e);
                     }
                     if p.exists() && p.is_file() {
@@ -456,12 +473,15 @@ pub(super) async fn handle_file_actions(
             let _ = app.emit("tool-call", format!("🗑️ *Deleting {}*\n\n", path_str));
             match resolve_file_action_path(path_str, &root_dir, true) {
                 Ok(p) => {
-                    if let Err(e) =
-                        ensure_mutation_target_allowed(&p, &root_dir, protected_skill_roots)
-                    {
+                    if let Err(e) = ensure_mutation_target_allowed(
+                        &p,
+                        &root_dir,
+                        protected_skill_root,
+                        action,
+                    ) {
                         return format_file_action_error(e);
                     }
-                    let backup = match backup_protected_file(&p, protected_skill_roots) {
+                    let backup = match backup_protected_path(&p, backup_root) {
                         Ok(backup) => backup,
                         Err(e) => return format!("Error: {}", e),
                     };
@@ -531,13 +551,16 @@ fn format_file_action_error(err: String) -> String {
     }
 }
 
-fn is_path_protected(path: &Path, protected_roots: &[PathBuf]) -> bool {
+fn is_path_protected(path: &Path, protected_root: Option<&Path>) -> bool {
+    let Some(protected_root) = protected_root else {
+        return false;
+    };
     let normalized = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
 
-    protected_roots.iter().any(|root| {
-        let normalized_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
-        normalized.starts_with(&normalized_root)
-    })
+    let normalized_root = protected_root
+        .canonicalize()
+        .unwrap_or_else(|_| protected_root.to_path_buf());
+    normalized.starts_with(&normalized_root)
 }
 
 fn next_backup_path(path: &Path) -> Result<PathBuf, String> {
@@ -564,23 +587,38 @@ fn next_backup_path(path: &Path) -> Result<PathBuf, String> {
     Err(format!("Cannot create backup for '{}'", path.display()))
 }
 
-fn backup_protected_file(
+pub(super) fn backup_protected_path(
     path: &Path,
-    protected_roots: &[PathBuf],
+    protected_root: Option<&Path>,
 ) -> Result<Option<PathBuf>, String> {
-    if !path.exists() || !path.is_file() || !is_path_protected(path, protected_roots) {
+    if !path.exists() || !is_path_protected(path, protected_root) {
         return Ok(None);
     }
 
     let backup_path = next_backup_path(path)?;
-    fs::copy(path, &backup_path).map_err(|e| {
-        format!(
-            "Failed to back up '{}' to '{}': {}",
-            path.display(),
-            backup_path.display(),
-            e
-        )
-    })?;
+    if path.is_dir() {
+        // A deleted skill folder is copied wholesale — the backup keeps the
+        // whole skill (not just `skill.md`) so it can be restored.
+        copy_dir_recursive(path, &backup_path).map_err(|e| {
+            format!(
+                "Failed to back up '{}' to '{}': {}",
+                path.display(),
+                backup_path.display(),
+                e
+            )
+        })?;
+    } else if path.is_file() {
+        fs::copy(path, &backup_path).map_err(|e| {
+            format!(
+                "Failed to back up '{}' to '{}': {}",
+                path.display(),
+                backup_path.display(),
+                e
+            )
+        })?;
+    } else {
+        return Ok(None);
+    }
     Ok(Some(backup_path))
 }
 
@@ -740,5 +778,83 @@ fn move_path(src: &Path, dst: &Path) -> Result<(), String> {
                 fs::remove_file(src).map_err(|e| e.to_string())
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    fn make_temp_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ai-chat-file-actions-{label}-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A skill folder deleted in self-evolution mode is copied to
+    /// `<name>.bak.<n>` before removal — the whole folder, not just the
+    /// `skill.md` inside it.
+    #[test]
+    fn deleting_a_skill_backs_up_the_whole_folder() {
+        let skills_root = make_temp_dir("skill-backup").join("skills");
+        let skill_dir = skills_root.join("demo");
+        fs::create_dir_all(skill_dir.join("assets")).unwrap();
+        fs::write(
+            skill_dir.join("skill.md"),
+            "---\nname: demo\ndescription: d\n---\n",
+        )
+        .unwrap();
+        fs::write(skill_dir.join("assets").join("note.txt"), "hello").unwrap();
+
+        let backup = backup_protected_path(&skill_dir, Some(&skills_root))
+            .unwrap()
+            .expect("a protected folder must be backed up");
+
+        assert_eq!(backup, skills_root.join("demo.bak.1"));
+        assert!(backup.join("skill.md").is_file());
+        assert_eq!(
+            fs::read_to_string(backup.join("assets").join("note.txt")).unwrap(),
+            "hello"
+        );
+
+        // A second backup never overwrites the first one.
+        let second = backup_protected_path(&skill_dir, Some(&skills_root))
+            .unwrap()
+            .expect("a protected folder must be backed up");
+        assert_eq!(second, skills_root.join("demo.bak.2"));
+
+        let _ = fs::remove_dir_all(skills_root.parent().unwrap());
+    }
+
+    /// A plain file inside the skills root is backed up next to itself.
+    #[test]
+    fn editing_a_skill_file_creates_a_sibling_backup() {
+        let skills_root = make_temp_dir("skill-file-backup").join("skills");
+        let skill_dir = skills_root.join("demo");
+        fs::create_dir_all(&skill_dir).unwrap();
+        let skill_file = skill_dir.join("skill.md");
+        fs::write(&skill_file, "original").unwrap();
+
+        let backup = backup_protected_path(&skill_file, Some(&skills_root))
+            .unwrap()
+            .expect("a protected file must be backed up");
+
+        assert_eq!(backup, skill_dir.join("skill.md.bak.1"));
+        assert_eq!(fs::read_to_string(&backup).unwrap(), "original");
+
+        let _ = fs::remove_dir_all(skills_root.parent().unwrap());
+    }
+
+    /// Paths outside the protected roots are never backed up.
+    #[test]
+    fn unprotected_paths_are_not_backed_up() {
+        let root = make_temp_dir("unprotected");
+        let file = root.join("notes.md");
+        fs::write(&file, "x").unwrap();
+
+        assert!(backup_protected_path(&file, None).unwrap().is_none());
+
+        let _ = fs::remove_dir_all(&root);
     }
 }

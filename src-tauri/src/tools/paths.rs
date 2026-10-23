@@ -1,5 +1,6 @@
 // Path safety: workspace sandbox resolution and mutation guards.
 
+use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 
 pub(crate) fn resolve_safe_path(root_dir: &Path, rel_path: &str) -> Result<PathBuf, String> {
@@ -75,22 +76,18 @@ pub(crate) fn resolve_safe_path(root_dir: &Path, rel_path: &str) -> Result<PathB
         // File does not exist yet (e.g. write to a new file). A lexical
         // `starts_with` check alone is unsafe: a symlinked parent (e.g.
         // `./link/newfile` where `link -> /etc`) would pass lexically while
-        // actually resolving outside the workspace. Canonicalize the parent
-        // directory (which exists) to resolve any symlinks, verify it is still
-        // inside root_dir, then rebuild the path from the canonical parent.
+        // actually resolving outside the workspace. Canonicalize the deepest
+        // existing ancestor (which exists and resolves symlinks), verify it
+        // is still inside root_dir, then rebuild the path from it.
         Err(_) => {
-            if let Some(parent) = resolved.parent() {
-                if let Ok(canonical_parent) = parent.canonicalize() {
-                    let canonical_root = root_dir
-                        .canonicalize()
-                        .unwrap_or_else(|_| root_dir.to_path_buf());
-                    if !canonical_parent.starts_with(&canonical_root) {
-                        return Err("Path escapes workspace directory".to_string());
-                    }
-                    if let Some(file_name) = resolved.file_name() {
-                        return Ok(canonical_parent.join(file_name));
-                    }
+            if let Some(canonical_resolved) = canonicalize_lenient(&resolved) {
+                let canonical_root = root_dir
+                    .canonicalize()
+                    .unwrap_or_else(|_| root_dir.to_path_buf());
+                if !canonical_resolved.starts_with(&canonical_root) {
+                    return Err("Path escapes workspace directory".to_string());
                 }
+                return Ok(canonical_resolved);
             }
             if !resolved.starts_with(root_dir) {
                 return Err("Path escapes workspace directory".to_string());
@@ -100,18 +97,63 @@ pub(crate) fn resolve_safe_path(root_dir: &Path, rel_path: &str) -> Result<PathB
     }
 }
 
-fn path_is_within(path: &Path, root: &Path) -> bool {
-    path.canonicalize()
-        .map(|p| p.starts_with(root.canonicalize().unwrap_or_else(|_| root.to_path_buf())))
-        .unwrap_or(false)
+/// Canonicalize `path` even when it does not exist yet.
+///
+/// `Path::canonicalize` fails for a missing path, so a plain containment check
+/// would reject every *new* file — exactly the operation self-evolution needs
+/// (creating a skill folder). This canonicalizes the deepest existing
+/// ancestor (which resolves symlinks) and re-appends the remaining
+/// components, so a symlinked parent that escapes the root is still caught.
+fn canonicalize_lenient(path: &Path) -> Option<PathBuf> {
+    let mut ancestor = path.to_path_buf();
+    let mut tail: Vec<OsString> = Vec::new();
+    loop {
+        if let Ok(canonical) = ancestor.canonicalize() {
+            let mut rebuilt = canonical;
+            for name in tail.iter().rev() {
+                rebuilt.push(name);
+            }
+            return Some(rebuilt);
+        }
+        let name = ancestor.file_name().map(|n| n.to_os_string())?;
+        tail.push(name);
+        if !ancestor.pop() {
+            return None;
+        }
+    }
 }
 
-fn path_is_within_any_root(path: &Path, roots: &[PathBuf]) -> bool {
-    roots.iter().any(|root| path_is_within(path, root))
+/// Containment check that also holds for paths that do not exist yet.
+fn path_is_within_lenient(path: &Path, root: &Path) -> bool {
+    match (canonicalize_lenient(path), canonicalize_lenient(root)) {
+        (Some(path), Some(root)) => path.starts_with(&root),
+        _ => false,
+    }
 }
 
-fn workspace_skills_root(workspace_dir: &Path) -> PathBuf {
-    crate::workspace::skills_root(workspace_dir)
+/// True for the workspace SQLite database and its journal sidecars.
+///
+/// `file_actions` can only truncate or delete these — it can never rewrite
+/// them — so they stay protected while the rest of `.data` is reachable.
+fn is_workspace_database(path: &Path, workspace_dir: &Path) -> bool {
+    let db_path = crate::workspace::db_path(workspace_dir);
+    let canonical_path =
+        canonicalize_lenient(path).unwrap_or_else(|| path.to_path_buf());
+    let canonical_db =
+        canonicalize_lenient(&db_path).unwrap_or_else(|| db_path.to_path_buf());
+    if canonical_path == canonical_db {
+        return true;
+    }
+
+    // SQLite sidecars: `chat.db-journal`, `chat.db-wal`, `chat.db-shm`.
+    let file_name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+    let db_name = db_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("chat.db");
+    file_name.len() > db_name.len()
+        && file_name.starts_with(db_name)
+        && file_name.as_bytes()[db_name.len()] == b'-'
 }
 
 pub(super) fn with_root_header(body: String) -> String {
@@ -125,37 +167,52 @@ pub(super) fn with_root_header(body: String) -> String {
 pub(super) fn ensure_mutation_target_allowed(
     path: &Path,
     workspace_dir: &Path,
-    writable_skill_roots: &[PathBuf],
+    writable_skill_root: Option<&Path>,
+    action: &str,
 ) -> Result<(), String> {
     // Never allow mutating the workspace root itself (e.g. `delete` on `.` or
     // `./` would otherwise wipe the entire workspace via remove_dir_all).
     let canonical_workspace = workspace_dir
         .canonicalize()
         .unwrap_or_else(|_| workspace_dir.to_path_buf());
-    let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let canonical_path =
+        canonicalize_lenient(path).unwrap_or_else(|| path.to_path_buf());
     if canonical_path == canonical_workspace {
         return Err("The workspace root itself cannot be modified or deleted.".to_string());
     }
 
-    // The hidden `.data` directory holds application-managed workspace state:
-    // the SQLite database, the memory store, todo lists and the skill status
-    // file. Only the skills root is writable, and only when the caller passes
-    // it as a writable root (self-evolution mode) — direct mutation of the
-    // database or the memory/todo files would corrupt or wipe user data.
-    let data_root = crate::workspace::data_root(workspace_dir);
-    if path_is_within(path, &data_root) || path.starts_with(&data_root) {
-        if !path_is_within_any_root(path, writable_skill_roots) {
-            let skills_root = workspace_skills_root(workspace_dir);
-            if path_is_within(path, &skills_root) || path.starts_with(&skills_root) {
+    // The SQLite database is the one file inside `.data` that `file_actions`
+    // cannot recreate: `write` truncates it and `delete` removes it, which
+    // would destroy the chat history, the API monitor, the interaction log and
+    // the agent missions. Everything else under `.data` (memory, todos, skill
+    // status, skills) is part of the workspace and stays reachable.
+    if is_workspace_database(path, workspace_dir) {
+        return Err(
+            "The workspace database (.data/chat.db) is managed by the application and cannot be modified or deleted."
+                .to_string(),
+        );
+    }
+
+    // The one writable skill root wins over every other rule: in self-evolution mode
+    // the assistant owns `<workspace>/.data/skills` and may create, edit, move
+    // and delete skills there. The check runs before the `.data` guard below so
+    // a *new* skill folder (a path that does not exist yet) is accepted too.
+    if let Some(root) = writable_skill_root {
+        if path_is_within_lenient(path, root) {
+            // An *existing* skills root is never a mutation target: wiping it
+            // would destroy every skill in the workspace. Only its children
+            // are. The root itself may still be created — it is created on
+            // demand, and `mkdir` on an existing folder is a harmless no-op.
+            if path.exists()
+                && canonical_path == canonicalize_lenient(root).unwrap_or_default()
+                && action != "mkdir"
+            {
                 return Err(
-                    "Skill directories are read-only. Only .data/skills is writable in self-evolution mode."
+                    "The skills root itself cannot be modified or deleted; target a skill folder instead."
                         .to_string(),
                 );
             }
-            return Err(
-                "The workspace .data directory is managed by the application and cannot be modified directly."
-                    .to_string(),
-            );
+            return Ok(());
         }
     }
 

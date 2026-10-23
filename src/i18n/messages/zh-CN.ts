@@ -213,7 +213,7 @@ const zhCN: Messages = {
             resetTitle: "使用默认工作区目录",
             resetAria: "将工作区目录重置为默认值",
             selfEvolution: "启用自我进化模式",
-            selfEvolutionHint: "允许助手在工作区内自行演进技能与工具。",
+            selfEvolutionHint: "允许助手在工作区内自行演进技能。开启期间“文件操作”和“记忆”工具会强制启用并锁定，助手还会把已验证的关键事实（运行环境、正确的工具用法、常用文件位置）记录到专属的自进化记忆区。",
             profilesTitle: "配置方案",
             profileNamePlaceholder: "配置名称",
             saveCurrent: "保存当前配置",
@@ -350,24 +350,32 @@ const zhCN: Messages = {
         serveCwd: "工作目录：{path}",
         serveOutput: "最近输出",
         autoAccept: "自动确认模式",
+        lockedBadge: "必需",
+        lockedBySelfEvolution: "自进化模式需要，无法关闭。",
         items: {
             fileActions: {
                 name: "文件操作",
                 description: [
-                    "仅在当前工作区根目录内读取、写入、列出、搜索、修补、重命名、移动、创建和删除文件。",
+                    "仅在当前工作区根目录内读取、写入、列出、搜索、修补、重命名、移动、创建和删除文件——`.data` 状态目录（技能、记忆、待办）也在其中。",
                     "使用 `./...` 形式的路径，例如 `./src/App.tsx`、`./.data/skills/demo/skill.md`，或用 `.` 表示工作区根目录。",
-                    "`workspace/...`、`../...` 等路径会被拒绝。访问工作区之外的绝对路径需要先通过显式确认对话框。",
+                    "`workspace/...`、`../...` 等路径会被拒绝。工作区数据库（`.data/chat.db`）由应用管理，不能通过此工具修改。",
                 ].join("\n"),
             },
             runCmd: {
                 name: "运行命令",
-                description:
-                    "直接运行可执行程序（不经过 shell）。进程在工作区根目录启动。推荐用于 curl、git、wget 等简单命令。特权操作和危险命令需要显式确认。",
+                description: [
+                    "直接运行程序（不经过 shell）。进程在工作区根目录启动。",
+                    "程序必须是不带路径的裸名称，由系统通过 PATH 环境变量解析——例如 `python`、`python3`、`git`、`curl`、`wget`。绝对路径和相对路径会被拒绝；确实需要路径时请使用“运行脚本”。",
+                    "特权操作和危险命令需要显式确认。",
+                ].join("\n"),
             },
             runShell: {
                 name: "运行脚本",
-                description:
-                    "在 shell（PowerShell 或 Bash）中执行脚本。shell 在工作区根目录启动，切换目录必须保持在该工作区内。支持管道、循环、变量等 shell 特性。`direct` 模式等待脚本结束并返回输出；`serve` 模式在后台启动长期进程（例如 HTTP 服务）并立即返回进程 ID，可随时 list / stop，退出应用时自动清理。特权操作和危险命令需要显式确认。",
+                description: [
+                    "在 shell（PowerShell 或 Bash）中执行脚本。脚本拥有完全的自由：在工作区根目录启动，但可以切换到任意目录、执行任意内容，每个脚本执行前都会经过风险引擎审计。",
+                    "支持管道、循环、变量等 shell 特性。`direct` 模式等待脚本结束并返回输出；`serve` 模式在后台启动长期进程（例如 HTTP 服务）并立即返回进程 ID，可随时 list / stop，退出应用时自动清理。",
+                    "特权操作和危险命令需要显式确认。",
+                ].join("\n"),
             },
             memory: {
                 name: "记忆",
@@ -377,6 +385,7 @@ const zhCN: Messages = {
                     "**session** —— 短期，仅存于内存，在当前聊天会话中有效。用于任务相关的上下文和进行中的笔记。",
                     "**user** —— 长期，基于文件，跨会话持久。用于用户偏好、常用模式与通用经验。",
                     "**repo** —— 长期，基于文件，限定于当前仓库。用于代码库约定、构建命令与项目事实。",
+                    "**evolution** —— 长期，基于文件。自进化专属区域，开启自进化模式后可用。用于必须跨会话保留的已验证事实：默认解释器与运行环境、正确的工具操作方式、常用的文件位置。",
                     "",
                     "支持添加、获取、列出、搜索和删除操作。",
                 ].join("\n"),

@@ -802,6 +802,11 @@ fn format_memory_excerpt(messages: &[Value]) -> String {
 /// Static part of the sub-agent prompt — computed once per mission and reused
 /// across iterations so the LLM prompt cache keeps hitting on the prefix.
 fn build_agent_static_system_prompt(agent: &SubAgent, self_evolution_context: &str) -> String {
+    let self_evolution_block = if self_evolution_context.trim().is_empty() {
+        String::new()
+    } else {
+        format!("\n\n{}", self_evolution_context)
+    };
     format!(
         "{}\n\nAutonomous execution sub-agent. External mission state is authoritative for task tracking.\n\
          Rules: track tasks via add_task/update_task_status/get_active_tasks/mark_mission_accomplished \
@@ -809,7 +814,7 @@ fn build_agent_static_system_prompt(agent: &SubAgent, self_evolution_context: &s
          clear active tasks before finishing. \
          The latest mission snapshot is appended as the final system message every turn — \
          always treat it as authoritative.{}",
-        agent.system_prompt, self_evolution_context,
+        agent.system_prompt, self_evolution_block,
     )
 }
 
@@ -1308,7 +1313,7 @@ pub async fn orchestrate(
     // Step 3: Execute
     let use_parallel = orchestration.mode != "sequential" && plan.execution_mode != "sequential";
     let workspace_dir = state.workspace_dir.lock().unwrap().clone();
-    let skill_access_roots = crate::skills::collect_self_evolution_roots(
+    let skill_access_root = crate::skills::self_evolution_skill_root(
         Some(&workspace_dir),
         config.self_evolution_mode,
     );
@@ -1321,7 +1326,7 @@ pub async fn orchestrate(
         &working_agents,
         plan.tasks,
         workspace_dir,
-        skill_access_roots,
+        skill_access_root,
         use_parallel,
         orchestration.max_concurrent,
         &cancelled,
@@ -1524,7 +1529,7 @@ async fn execute_tasks(
     agents: &[SubAgent],
     tasks: Vec<Task>,
     workspace_dir: PathBuf,
-    skill_access_roots: Vec<PathBuf>,
+    skill_access_root: Option<PathBuf>,
     use_parallel: bool,
     max_concurrent: usize,
     cancelled: &Arc<AtomicBool>,
@@ -1539,7 +1544,7 @@ async fn execute_tasks(
             agents,
             tasks,
             workspace_dir,
-            skill_access_roots,
+            skill_access_root,
             max_concurrent,
             cancelled,
         )
@@ -1554,7 +1559,7 @@ async fn execute_tasks(
             agents,
             tasks,
             workspace_dir,
-            skill_access_roots,
+            skill_access_root,
             cancelled,
         )
         .await
@@ -1570,7 +1575,7 @@ async fn execute_parallel(
     agents: &[SubAgent],
     tasks: Vec<Task>,
     workspace_dir: PathBuf,
-    skill_access_roots: Vec<PathBuf>,
+    skill_access_root: Option<PathBuf>,
     max_concurrent: usize,
     cancelled: &Arc<AtomicBool>,
 ) -> Vec<TaskResult> {
@@ -1625,7 +1630,7 @@ async fn execute_parallel(
                 let session_id_c = session_id.to_string();
                 let task_c = task.clone();
                 let wd_c = workspace_dir.clone();
-                let skill_roots_c = skill_access_roots.clone();
+                let skill_roots_c = skill_access_root.clone();
                 // Arc snapshot of the app-global cancel flag: the spawned job
                 // and every sub-agent inside it observe the same flag, so Stop
                 // tears down mid-flight agents instead of only skipping future
@@ -1726,7 +1731,7 @@ async fn execute_sequential(
     agents: &[SubAgent],
     tasks: Vec<Task>,
     workspace_dir: PathBuf,
-    skill_access_roots: Vec<PathBuf>,
+    skill_access_root: Option<PathBuf>,
     cancelled: &Arc<AtomicBool>,
 ) -> Vec<TaskResult> {
     let mut results = Vec::new();
@@ -1747,7 +1752,7 @@ async fn execute_sequential(
             agent,
             &task,
             workspace_dir.clone(),
-            skill_access_roots.clone(),
+            skill_access_root.clone(),
             cancelled.clone(),
         )
         .await;
@@ -1767,7 +1772,7 @@ pub async fn run_sub_agent(
     agent: &SubAgent,
     task: &Task,
     workspace_dir: PathBuf,
-    skill_access_roots: Vec<PathBuf>,
+    skill_access_root: Option<PathBuf>,
     cancelled: Arc<AtomicBool>,
 ) -> TaskResult {
     let mission_id = mission_id_for_task(task).to_string();
@@ -1791,7 +1796,7 @@ pub async fn run_sub_agent(
                 agent,
                 task,
                 workspace_dir,
-                skill_access_roots,
+                skill_access_root,
                 &cancelled,
             )
             .await
@@ -2131,7 +2136,7 @@ async fn run_sub_agent_inner(
     agent: &SubAgent,
     task: &Task,
     workspace_dir: PathBuf,
-    skill_access_roots: Vec<PathBuf>,
+    skill_access_root: Option<PathBuf>,
     cancelled: &AtomicBool,
 ) -> TaskResult {
     let _ = app.emit(
@@ -2150,13 +2155,23 @@ async fn run_sub_agent_inner(
         .unwrap_or(LLM_DEFAULT_MAX_COMLETE_TOKENS);
     // `timer` is a chat-session tool (it resumes the conversation later), so it
     // is never handed to a sub-agent even if an agent config lists it.
-    let agent_tool_ids: Vec<String> = agent
+    let mut agent_tool_ids: Vec<String> = agent
         .allowed_tools
         .iter()
         .filter(|tool| tool.as_str() != "timer")
         .cloned()
         .collect();
-    let mut tools_list = tools::get_all_tools(&agent_tool_ids);
+    // Self-evolution mode owns `file_actions` and `memory`: a sub-agent that
+    // may evolve skills must also be able to read and write them, and to
+    // remember what it learned.
+    if config.self_evolution_mode {
+        for required in crate::SELF_EVOLUTION_REQUIRED_TOOLS {
+            if !agent_tool_ids.iter().any(|tool| tool == required) {
+                agent_tool_ids.push(required.to_string());
+            }
+        }
+    }
+    let mut tools_list = tools::get_all_tools(&agent_tool_ids, config.self_evolution_mode);
     tools_list.extend(tools::get_agent_task_tools());
     // `cancelled` is the caller's flag — the turn's own cancel flag when the
     // agent runs inside a chat turn, so pressing Stop in the chat tears the
@@ -2185,22 +2200,24 @@ async fn run_sub_agent_inner(
         })
         .unwrap_or(AGENT_DEFAULT_CONTEXT_WINDOW);
 
-    let self_evolution_context = if skill_access_roots.is_empty() {
-        String::new()
-    } else {
-        let roots = skill_access_roots
-            .iter()
-            .map(|root| format!("- {}", root.display()))
-            .collect::<Vec<_>>()
-            .join("\n");
-        format!(
-            "\n\nSelf-evolution: skill roots available:\n{roots}\n\
-             Use `file_actions` only with workspace-relative paths. \
-             Skill edits are limited to `./.data/skills/...` under the workspace and create `.bak.<n>` backups automatically. \
-             Do not reference app-data skill paths or any path outside the workspace root. \
-             Reuse exact paths returned by tools."
-        )
-    };
+    let mut self_evolution_context =
+        crate::skills::self_evolution_prompt(skill_access_root.as_deref());
+
+    // The verified facts the assistant recorded in earlier sessions (the
+    // default interpreter and runtime environment, the correct way to operate a
+    // tool, the file locations it uses often) are injected here so a
+    // sub-agent reuses them instead of rediscovering them.
+    if !self_evolution_context.is_empty() {
+        let evolution_facts =
+            crate::tools::memory::render_evolution_context(&workspace_dir, 4_000);
+        if !evolution_facts.is_empty() {
+            self_evolution_context.push_str(
+                "\n\nVERIFIED FACTS (self-evolution memory, already known — reuse them, do not \
+                 rediscover):\n",
+            );
+            self_evolution_context.push_str(&evolution_facts);
+        }
+    }
 
     let task_system = format!(
         "Execute this mission.\nPrimary task: {}\nContext: {}\nTreat the external mission snapshot as authoritative and keep the explicit task list updated through tools.",
@@ -2569,7 +2586,7 @@ async fn run_sub_agent_inner(
                         workspace_dir.clone(),
                         config,
                         &[],
-                        &skill_access_roots,
+                        skill_access_root.as_deref(),
                         Some(&mission_id),
                         Some(session_id),
                         &[], // sub-agents don't track active skill dirs for skill_read
