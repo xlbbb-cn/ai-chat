@@ -68,6 +68,17 @@
   --c-accent: #3E6AE1;
   --c-accent-hover: #3457C4;
   --c-accent-soft: rgba(62, 106, 225, 0.10);
+  /* The same hue in its legible form: text, icons and hairlines. A pastel
+     accent (see the Fig palette) needs this darker twin — a light fill
+     cannot carry a label, or a 1px line, on a light surface. */
+  --c-accent-text: var(--c-accent);
+  /* Label colour that sits ON an accent fill. */
+  --c-on-accent: #FFFFFF;
+  /* Optional surface washes. `none` everywhere by default; the Cream
+     palette fills them with the oklab gradients of its adjacent group. */
+  --c-bg-image: none;
+  --c-code-image: none;
+  --c-reason-image: none;
   --c-danger: #C0392B;
   --c-danger-soft: rgba(192, 57, 43, 0.10);
   --c-success: #1F8A3B;
@@ -98,6 +109,31 @@
   /* Layout — height of the custom window chrome. Fullscreen portals and the
      sidebar start below it so the drag region stays reachable. */
   --titlebar-h: 32px;
+
+  /* Palette swatch samples — the Settings palette picker shows each
+     palette's own colours. They live here so that no component stylesheet
+     ever has to carry a literal hex. */
+  --sw-default-1: #FFFFFF;
+  --sw-default-2: #3E6AE1;
+  --sw-default-3: #171A20;
+  --sw-default-4: #F4F4F4;
+  --sw-fig-1: #B8A5D2;
+  /* 霜紫 — base */
+  --sw-fig-2: #EFAFAD;
+  /* 无花果红 — primary */
+  --sw-fig-3: #DFECD5;
+  /* 艾背绿 — secondary */
+  --sw-fig-4: #C6E6E8;
+  /* 海天蓝 — emphasis */
+  --sw-cream-1: #F9F1DB;
+  /* 蚌肉白 */
+  --sw-cream-2: #F9F4DC;
+  /* 乳白 */
+  --sw-cream-3: #FFF8E7;
+  /* 奶油白 */
+  --sw-cream-4: #FBF2E3;
+  /* 粉白 */
+  --sw-cream-strip: linear-gradient(90deg in oklab, #F9F1DB 0%, #F9F4DC 33%, #FFF8E7 67%, #FBF2E3 100%);
 }
 
 [data-theme="dark"] {
@@ -137,6 +173,8 @@
   --c-accent: #5B7EF0;
   --c-accent-hover: #6F8DF3;
   --c-accent-soft: rgba(91, 126, 240, 0.16);
+  --c-accent-text: var(--c-accent);
+  --c-on-accent: #FFFFFF;
   --c-danger: #E5655C;
   --c-danger-soft: rgba(229, 101, 92, 0.14);
   --c-success: #3BB55C;
@@ -150,8 +188,210 @@
   --shadow-panel: none;
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   Palettes
+
+   A palette is an independent colour scheme that rides on top of the
+   light / dark mode: `data-palette` on <html> selects it, `data-theme`
+   still decides which half of it wins. Each block below defines the FULL
+   token set — a palette never inherits from another one, so a missing
+   token can never leak a neighbouring scheme's colour into the UI.
+
+     Fig   无花果 — a pastel scheme on a frost-purple canvas.
+     Cream 乳白   — the adjacent warm-white group, washed with oklab
+                    gradients instead of flat fills.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Fig (无花果) — light ────────────────────────────────────────────────── */
+[data-palette="fig"] {
+  /* 霜紫 590 — the canvas */
+  --c-bg: #B8A5D2;
+  /* panels, popups, cards */
+  --c-surface: #F5F0FA;
+  /* alternate surface */
+  --c-surface-2: #E9E1F2;
+  --c-hover: rgba(43, 36, 56, 0.07);
+  --c-active: rgba(43, 36, 56, 0.13);
+
+  --c-text: #2B2438;
+  --c-body: #3A3348;
+  --c-muted: #5C5375;
+  --c-placeholder: #8F87A6;
+  --c-text-secondary: #5C5375;
+
+  --c-border: rgba(43, 36, 56, 0.16);
+  --c-border-s: rgba(43, 36, 56, 0.09);
+  --c-border-i: rgba(43, 36, 56, 0.26);
+  --c-bg-secondary: #E9E1F2;
+  /* 艾背绿 498 — code blocks */
+  --c-code: #DFECD5;
+  /* 海天蓝 425 — reasoning blocks */
+  --c-reason: #C6E6E8;
+  --c-reason-b: rgba(43, 36, 56, 0.22);
+  --c-toolbar: rgba(245, 240, 250, 0.80);
+
+  /* 无花果红 210 — the primary action */
+  --c-accent: #EFAFAD;
+  --c-accent-hover: #E79C9A;
+  --c-accent-soft: rgba(239, 175, 173, 0.30);
+  /* the same hue, darkened so it can carry a label on the canvas */
+  --c-accent-text: #6E2826;
+  --c-on-accent: #3A2121;
+
+  --c-danger: #7A231C;
+  --c-danger-soft: rgba(122, 35, 28, 0.12);
+  --c-success: #1C4A23;
+  --c-success-soft: rgba(28, 74, 35, 0.12);
+  --c-warning: #5C3A05;
+  --c-warning-soft: rgba(92, 58, 5, 0.12);
+
+  --c-bg-image: none;
+  --c-code-image: none;
+  --c-reason-image: none;
+}
+
+/* ── Fig (无花果) — dark ─────────────────────────────────────────────────── */
+[data-theme="dark"][data-palette="fig"] {
+  /* 霜紫, deepened for the dark canvas */
+  --c-bg: #241E33;
+  --c-surface: #2E2742;
+  --c-surface-2: #38304E;
+  --c-hover: rgba(255, 255, 255, 0.06);
+  --c-active: rgba(255, 255, 255, 0.10);
+
+  --c-text: #F0EAF8;
+  --c-body: #D8D0E6;
+  --c-muted: #A79EC0;
+  --c-placeholder: #7E7599;
+  --c-text-secondary: #A79EC0;
+
+  --c-border: rgba(255, 255, 255, 0.10);
+  --c-border-s: rgba(255, 255, 255, 0.06);
+  --c-border-i: rgba(255, 255, 255, 0.18);
+  --c-bg-secondary: #38304E;
+  /* 艾背绿, washed over the dark canvas */
+  --c-code: rgba(223, 236, 213, 0.13);
+  /* 海天蓝, washed over the dark canvas */
+  --c-reason: rgba(198, 230, 232, 0.12);
+  --c-reason-b: rgba(255, 255, 255, 0.14);
+  --c-toolbar: rgba(46, 39, 66, 0.80);
+
+  /* 无花果红, lifted so the pastel still reads on a dark ground */
+  --c-accent: #F0B4B2;
+  --c-accent-hover: #F5C4C2;
+  --c-accent-soft: rgba(240, 180, 178, 0.20);
+  --c-accent-text: #F3C6C4;
+  --c-on-accent: #2A1420;
+
+  --c-danger: #E5796F;
+  --c-danger-soft: rgba(229, 121, 111, 0.16);
+  --c-success: #7FC98D;
+  --c-success-soft: rgba(127, 201, 141, 0.16);
+  --c-warning: #E0A94F;
+  --c-warning-soft: rgba(224, 169, 79, 0.16);
+
+  --c-bg-image: none;
+  --c-code-image: none;
+  --c-reason-image: none;
+}
+
+/* ── Cream (乳白) — light ────────────────────────────────────────────────── */
+[data-palette="cream"] {
+  /* 蚌肉白 — the canvas */
+  --c-bg: #F9F1DB;
+  /* 乳白 — panels, popups, cards */
+  --c-surface: #F9F4DC;
+  /* 奶油白 — alternate surface */
+  --c-surface-2: #FFF8E7;
+  /* 粉白 — secondary surface */
+  --c-bg-secondary: #FBF2E3;
+  /* 蚌肉白 — code blocks */
+  --c-code: #F9F1DB;
+  /* 粉白 — reasoning blocks */
+  --c-reason: #FBF2E3;
+
+  --c-hover: rgba(96, 80, 48, 0.06);
+  --c-active: rgba(96, 80, 48, 0.12);
+
+  --c-text: #3A3226;
+  --c-body: #4A4234;
+  --c-muted: #6E6453;
+  --c-placeholder: #8C8375;
+  --c-text-secondary: #6E6453;
+
+  --c-border: rgba(96, 80, 48, 0.16);
+  --c-border-s: rgba(96, 80, 48, 0.09);
+  --c-border-i: rgba(96, 80, 48, 0.26);
+  --c-reason-b: rgba(96, 80, 48, 0.22);
+  /* 乳白 → 奶油白, frosted */
+  --c-toolbar: linear-gradient(90deg in oklab, rgba(249, 244, 220, 0.82) 0%, rgba(255, 248, 231, 0.82) 100%);
+
+  /* Electric Blue stays the accent — this palette is about the neutrals. */
+  --c-accent: #3E6AE1;
+  --c-accent-hover: #3457C4;
+  --c-accent-soft: rgba(62, 106, 225, 0.10);
+  --c-accent-text: #3457C4;
+  --c-on-accent: #FFFFFF;
+
+  --c-danger: #C0392B;
+  --c-danger-soft: rgba(192, 57, 43, 0.10);
+  --c-success: #1F8A3B;
+  --c-success-soft: rgba(31, 138, 59, 0.10);
+  --c-warning: #B07500;
+  --c-warning-soft: rgba(176, 117, 0, 0.10);
+
+  /* The adjacent group, washed in oklab instead of flat fills. */
+  --c-bg-image: linear-gradient(90deg in oklab, #F9F1DB 0%, #FBF2E3 100%);
+  --c-code-image: linear-gradient(90deg in oklab, #F9F1DB 0%, #F9F4DC 100%);
+  --c-reason-image: linear-gradient(90deg in oklab, #FBF2E3 0%, #FFF8E7 100%);
+}
+
+/* ── Cream (乳白) — dark ─────────────────────────────────────────────────── */
+[data-theme="dark"][data-palette="cream"] {
+  /* the warm group, turned down to a deep umber ground */
+  --c-bg: #1E1A14;
+  --c-surface: #262119;
+  --c-surface-2: #2F291F;
+  --c-bg-secondary: #2F291F;
+  --c-code: rgba(249, 241, 219, 0.07);
+  --c-reason: rgba(251, 242, 227, 0.05);
+
+  --c-hover: rgba(249, 241, 219, 0.06);
+  --c-active: rgba(249, 241, 219, 0.11);
+
+  --c-text: #F7F0DC;
+  --c-body: #E0D7C0;
+  --c-muted: #B0A48A;
+  --c-placeholder: #857B68;
+  --c-text-secondary: #B0A48A;
+
+  --c-border: rgba(249, 241, 219, 0.10);
+  --c-border-s: rgba(249, 241, 219, 0.06);
+  --c-border-i: rgba(249, 241, 219, 0.18);
+  --c-reason-b: rgba(249, 241, 219, 0.14);
+  --c-toolbar: rgba(38, 33, 25, 0.80);
+
+  --c-accent: #5B7EF0;
+  --c-accent-hover: #6F8DF3;
+  --c-accent-soft: rgba(91, 126, 240, 0.16);
+  --c-accent-text: #7E9BF3;
+  --c-on-accent: #FFFFFF;
+
+  --c-danger: #E5655C;
+  --c-danger-soft: rgba(229, 101, 92, 0.14);
+  --c-success: #3BB55C;
+  --c-success-soft: rgba(59, 181, 92, 0.14);
+  --c-warning: #E0A33C;
+  --c-warning-soft: rgba(224, 163, 60, 0.14);
+
+  --c-bg-image: none;
+  --c-code-image: none;
+  --c-reason-image: none;
+}
+
 body {
-  background: var(--c-bg);
+  background-color: var(--c-bg);
+  background-image: var(--c-bg-image);
   color: var(--c-body);
   height: 100vh;
   overflow: hidden;
@@ -388,7 +628,8 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--c-bg);
+  background-color: var(--c-bg);
+  background-image: var(--c-bg-image);
   position: relative;
   z-index: 1;
 }
@@ -463,7 +704,7 @@ body {
   padding: 0 4px;
   border-radius: 4px;
   background: var(--c-accent);
-  color: #FFFFFF;
+  color: var(--c-on-accent);
   font-size: 10px;
   line-height: 16px;
   text-align: center;
@@ -606,7 +847,7 @@ body {
 .timer-chip-countdown {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 11px;
-  color: var(--c-accent);
+  color: var(--c-accent-text);
   flex-shrink: 0;
 }
 
@@ -858,7 +1099,7 @@ body {
    other kinds are told apart by their icon alone. */
 .attachment-pill.attachment-kind-image {
   padding: 2px 8px 2px 2px;
-  border-color: var(--c-accent);
+  border-color: var(--c-accent-text);
 }
 
 .attachment-pill.attachment-kind-file,
@@ -1081,7 +1322,7 @@ body {
 }
 
 .chat-input:focus {
-  border-color: var(--c-accent);
+  border-color: var(--c-accent-text);
 }
 
 .chat-input:disabled {
@@ -1130,7 +1371,7 @@ body {
 }
 
 .reasoning-select:focus {
-  border-color: var(--c-accent);
+  border-color: var(--c-accent-text);
 }
 
 .reasoning-select:disabled {
@@ -1148,7 +1389,7 @@ body {
   align-items: center;
   justify-content: center;
   background: var(--c-accent);
-  color: #FFFFFF;
+  color: var(--c-on-accent);
   border: 3px solid transparent;
   border-radius: 4px;
   font-size: 14px;
@@ -1291,7 +1532,7 @@ body {
 }
 
 .confirm-panel-credentials input:focus {
-  border-color: var(--c-accent);
+  border-color: var(--c-accent-text);
 }
 
 .confirm-panel-hint {
@@ -1529,7 +1770,7 @@ body {
 }
 
 .markdown-editor-textarea:focus {
-  border-color: var(--c-accent);
+  border-color: var(--c-accent-text);
 }
 
 .markdown-editor-preview {
@@ -1626,7 +1867,7 @@ body {
   min-height: 36px;
   padding: 4px 16px;
   background: var(--c-accent);
-  color: #FFFFFF;
+  color: var(--c-on-accent);
   /* Transparent border reserves the space the active ring animates into. */
   border: 3px solid transparent;
   border-radius: 4px;

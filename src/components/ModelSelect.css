@@ -34,12 +34,12 @@
 }
 
 .model-select-trigger:focus-visible {
-    border-color: var(--c-accent);
+    border-color: var(--c-accent-text);
     box-shadow: 0 0 0 3px var(--c-accent-soft);
 }
 
 .model-select-trigger[aria-expanded="true"] {
-    border-color: var(--c-accent);
+    border-color: var(--c-accent-text);
 }
 
 .model-select-trigger:disabled {
@@ -158,7 +158,7 @@
 }
 
 .model-select-option.selected .model-select-option-name {
-    color: var(--c-accent);
+    color: var(--c-accent-text);
     font-weight: 600;
 }
 

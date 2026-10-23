@@ -46,7 +46,7 @@
 
 .profile-create input:focus {
     outline: none;
-    border-color: var(--c-accent);
+    border-color: var(--c-accent-text);
 }
 
 .profile-list {
@@ -74,7 +74,7 @@
 }
 
 .profile-item:hover {
-    border-color: var(--c-accent);
+    border-color: var(--c-accent-text);
 }
 
 .profile-info {

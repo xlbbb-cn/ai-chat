@@ -93,11 +93,11 @@
 }
 
 .tool-name:hover {
-    color: var(--c-accent);
+    color: var(--c-accent-text);
 }
 
 .tool-name.active {
-    color: var(--c-accent);
+    color: var(--c-accent-text);
 }
 
 .tool-transport {
@@ -157,7 +157,7 @@
 }
 
 .tool-toggle input:focus-visible+.tool-toggle-slider {
-    outline: 2px solid var(--c-accent);
+    outline: 2px solid var(--c-accent-text);
     outline-offset: 2px;
 }
 
@@ -230,7 +230,7 @@
 }
 
 .search-engine-select:focus {
-    border-color: var(--c-accent);
+    border-color: var(--c-accent-text);
 }
 
 .search-engine-select:disabled {
@@ -263,7 +263,7 @@
 }
 
 .tools-footer-toggle:focus-visible {
-    outline: 2px solid var(--c-accent);
+    outline: 2px solid var(--c-accent-text);
     outline-offset: 2px;
     border-radius: var(--r-sm);
 }
@@ -435,12 +435,12 @@
 
 /* Master "auto-approve everything" switch — emphasised over the per-kind rows. */
 .auto-accept-option-all {
-    border-color: var(--c-accent);
+    border-color: var(--c-accent-text);
 }
 
 .auto-accept-option-all .auto-accept-name {
     font-weight: 600;
-    color: var(--c-accent);
+    color: var(--c-accent-text);
 }
 
 .auto-accept-option {

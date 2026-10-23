@@ -17,7 +17,7 @@
     background: linear-gradient(90deg,
             var(--ts-carbon, var(--c-text)) 0%,
             var(--ts-carbon, var(--c-text)) 30%,
-            var(--ts-blue, var(--c-accent)) 50%,
+            var(--ts-blue, var(--c-accent-text)) 50%,
             var(--ts-carbon, var(--c-text)) 70%,
             var(--ts-carbon, var(--c-text)) 100%);
     background-size: 200% 100%;
@@ -88,7 +88,7 @@
     height: 10px;
     background: transparent;
     border: 2px solid transparent;
-    border-top-color: var(--ts-blue, var(--c-accent));
+    border-top-color: var(--ts-blue, var(--c-accent-text));
     opacity: 1;
     box-shadow: 0 0 0 1.5px var(--ts-cloud, transparent);
     animation: tool-dot-spin 1s linear infinite;
@@ -176,7 +176,7 @@
 /* The running icon is a Font Awesome spinner that animates itself — no CSS
    rotation here, or the glyph would be spun twice. */
 .tool-call-preview-icon--running {
-    color: var(--ts-blue, var(--c-accent));
+    color: var(--ts-blue, var(--c-accent-text));
 }
 
 .tool-call-preview-icon--error {
@@ -251,7 +251,7 @@
     background: linear-gradient(90deg,
             var(--ts-pewter, var(--c-muted)) 0%,
             var(--ts-pewter, var(--c-muted)) 35%,
-            var(--ts-blue, var(--c-accent)) 50%,
+            var(--ts-blue, var(--c-accent-text)) 50%,
             var(--ts-pewter, var(--c-muted)) 65%,
             var(--ts-pewter, var(--c-muted)) 100%);
     background-size: 200% 100%;

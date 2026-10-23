@@ -27,20 +27,22 @@
 }
 
 .update-panel {
-    /* Palette — a literal copy of the global tokens rather than aliases.
-       See DESIGN.md, "Known exception". */
-    --t-bg: #FFFFFF;
-    --t-bg-soft: #F4F4F4;
-    --t-text: #171A20;
-    --t-body: #393C41;
-    --t-muted: #5C5E62;
-    --t-border: #EEEEEE;
-    --t-border-i: #D0D1D2;
-    --t-accent: #3E6AE1;
-    --t-accent-hover: #3358C7;
-    --t-accent-soft: rgba(62, 106, 225, 0.10);
-    --t-danger: #C0392B;
-    --t-success: #1F8A3B;
+    /* Aliases of the global tokens, so the dialog follows the active
+       palette (light, dark, Fig, Cream) instead of carrying a copy of
+       it. See DESIGN.md, "Theme plumbing". */
+    --t-bg: var(--c-surface);
+    --t-bg-soft: var(--c-surface-2);
+    --t-text: var(--c-text);
+    --t-body: var(--c-body);
+    --t-muted: var(--c-muted);
+    --t-border: var(--c-border);
+    --t-border-i: var(--c-border-i);
+    --t-accent: var(--c-accent);
+    --t-accent-hover: var(--c-accent-hover);
+    --t-accent-soft: var(--c-accent-soft);
+    --t-accent-text: var(--c-accent-text);
+    --t-danger: var(--c-danger);
+    --t-success: var(--c-success);
 
     display: flex;
     flex-direction: column;
@@ -52,21 +54,6 @@
     overflow: hidden;
     font-size: 13px;
     line-height: 1.45;
-}
-
-[data-theme="dark"] .update-panel {
-    --t-bg: #171A20;
-    --t-bg-soft: #22262D;
-    --t-text: #F4F4F4;
-    --t-body: #D0D1D2;
-    --t-muted: #8E8E93;
-    --t-border: #2A2E35;
-    --t-border-i: #3A3F47;
-    --t-accent: #5A7FF0;
-    --t-accent-hover: #6C8DF3;
-    --t-accent-soft: rgba(90, 127, 240, 0.16);
-    --t-danger: #E0655A;
-    --t-success: #3BB55C;
 }
 
 .update-panel-head {
@@ -132,13 +119,13 @@
 
 .update-btn-primary {
     background: var(--t-accent);
-    border-color: var(--t-accent);
-    color: #FFFFFF;
+    border-color: var(--t-accent-text);
+    color: var(--c-on-accent);
 }
 
 .update-btn-primary:hover:not(:disabled) {
     background: var(--t-accent-hover);
-    border-color: var(--t-accent-hover);
+    border-color: var(--t-accent-text);
 }
 
 /* ---- status rows ---- */
@@ -182,7 +169,7 @@
     padding: 1px 8px;
     border-radius: 999px;
     background: var(--t-accent-soft);
-    color: var(--t-accent);
+    color: var(--t-accent-text);
     font-size: 11px;
     font-weight: 600;
 }

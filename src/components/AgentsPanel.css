@@ -66,7 +66,7 @@
 }
 
 .orch-select:focus {
-    border-color: var(--c-accent);
+    border-color: var(--c-accent-text);
     box-shadow: 0 0 0 3px var(--c-accent-soft);
 }
 
@@ -85,7 +85,7 @@
 }
 
 .orch-number:focus {
-    border-color: var(--c-accent);
+    border-color: var(--c-accent-text);
     box-shadow: 0 0 0 3px var(--c-accent-soft);
 }
 
@@ -128,7 +128,7 @@
 
 .agent-item.active {
     background: var(--c-surface);
-    border-color: var(--c-accent);
+    border-color: var(--c-accent-text);
     box-shadow: 0 0 0 3px var(--c-accent-soft);
 }
 
@@ -196,7 +196,7 @@
     font-size: 11px;
     padding: 1px 7px;
     background: var(--c-accent-soft);
-    color: var(--c-accent);
+    color: var(--c-accent-text);
     border-radius: var(--r-sm);
     border: 0.5px solid var(--c-accent-soft);
 }
@@ -287,7 +287,7 @@
 .agent-editor input:focus,
 .agent-editor textarea:focus,
 .agent-editor select:focus {
-    border-color: var(--c-accent);
+    border-color: var(--c-accent-text);
     box-shadow: 0 0 0 3px var(--c-accent-soft);
 }
 
@@ -330,7 +330,7 @@
 
 .agent-tool-checkbox:has(input:checked) {
     background: var(--c-accent-soft);
-    border-color: var(--c-accent);
+    border-color: var(--c-accent-text);
 }
 
 .agent-tool-checkbox input {
@@ -353,7 +353,7 @@
 }
 
 .agent-tool-checkbox:has(input:checked) .agent-tool-name {
-    color: var(--c-accent);
+    color: var(--c-accent-text);
 }
 
 .agent-tool-hint {
@@ -463,7 +463,7 @@
 }
 
 .prompt-editor-textarea:focus {
-    border-color: var(--c-accent);
+    border-color: var(--c-accent-text);
     box-shadow: 0 0 0 3px var(--c-accent-soft);
 }
 
@@ -563,7 +563,7 @@
 
 .agent-type-option.active {
     background: var(--c-accent-soft);
-    color: var(--c-accent);
+    color: var(--c-accent-text);
     font-weight: 500;
 }
 
@@ -580,7 +580,7 @@
 
 .agent-type-badge.cli {
     border-color: var(--c-accent-soft);
-    color: var(--c-accent);
+    color: var(--c-accent-text);
     background: var(--c-accent-soft);
 }
 
@@ -664,7 +664,7 @@
 }
 
 .cli-agent-item.active {
-    border-color: var(--c-accent);
+    border-color: var(--c-accent-text);
 }
 
 .cli-agent-info {

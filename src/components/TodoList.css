@@ -200,7 +200,7 @@
   background: linear-gradient(90deg,
       var(--ts-carbon, var(--c-text)) 0%,
       var(--ts-carbon, var(--c-text)) 30%,
-      var(--ts-blue, var(--c-accent)) 50%,
+      var(--ts-blue, var(--c-accent-text)) 50%,
       var(--ts-carbon, var(--c-text)) 70%,
       var(--ts-carbon, var(--c-text)) 100%);
   background-size: 200% 100%;
@@ -221,7 +221,7 @@
 }
 
 .todo-in-progress .todo-item-icon {
-  color: var(--c-accent);
+  color: var(--c-accent-text);
   animation: todo-pulse 1.5s ease-in-out infinite;
 }
 
@@ -238,7 +238,7 @@
 }
 
 .todo-in-progress .todo-item-title {
-  color: var(--c-accent);
+  color: var(--c-accent-text);
   font-weight: 500;
 }
 

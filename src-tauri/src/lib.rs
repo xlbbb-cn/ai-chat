@@ -337,6 +337,11 @@ pub struct AppConfig {
     pub auto_accept_confirm_kinds: Vec<String>,
     #[serde(default)]
     pub theme: Option<String>,
+    /// Colour scheme layered on top of the light / dark theme
+    /// (`default`, `fig`, `cream`). Persisted like `theme`; the backend never
+    /// interprets the value — the frontend turns it into `data-palette`.
+    #[serde(default)]
+    pub palette: Option<String>,
     /// UI language (`en`, `zh-CN`, `zh-TW`). Persisted so the frontend restores
     /// it on startup; the backend never interprets the value.
     #[serde(default)]
@@ -378,6 +383,7 @@ impl Default for AppConfig {
             logger_output: LoggerOutput::default(),
             auto_accept_confirm_kinds: vec![],
             theme: None,
+            palette: None,
             language: None,
             check_updates_on_startup: true,
             include_prerelease_updates: false,

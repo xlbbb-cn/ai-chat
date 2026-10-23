@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { fetchModels, fetchModelMetadata, getAppVersion, getConfig, getWorkspaceDir, saveConfig, listProfiles, saveProfile, deleteProfile, applyProfile, listMcpServers, listSubAgents, getAgentOrchestration } from "../api";
-import type { AppConfig, ModelMetadata, ModelSettings, Profile } from "../types";
+import type { AppConfig, ModelMetadata, ModelSettings, Palette, Profile } from "../types";
 import { LOCALE_LABELS, LOCALES, useI18n, type Locale, type MessageKey } from "../i18n";
 import { matchModelCatalog } from "../utils/modelMetadata";
-import { FontAwesomeIcon, faCaretDown, faXmark } from "../icons";
+import { FontAwesomeIcon, faCaretDown, faCheck, faXmark } from "../icons";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { MonitorPanel } from "./MonitorPanel";
 import { AgentMissionPanel } from "./AgentMissionPanel";
@@ -16,8 +16,19 @@ interface Props {
   onClose: () => void;
   onConfigSaved?: (config: AppConfig) => void;
   onThemePreview?: (theme: "auto" | "light" | "dark" | undefined) => void;
+  onPalettePreview?: (palette: Palette) => void;
   sessionId?: string;
 }
+
+/**
+ * Colour schemes offered next to the light / dark mode. Each one ships a
+ * light and a dark token set — the swatch shows its light variant.
+ */
+const PALETTES: { id: Palette; labelKey: MessageKey }[] = [
+  { id: "default", labelKey: "settings.appearance.paletteDefault" },
+  { id: "fig", labelKey: "settings.appearance.paletteFig" },
+  { id: "cream", labelKey: "settings.appearance.paletteCream" },
+];
 
 const defaultConfig: AppConfig = {
   api_base_url: "https://api.openai.com/v1",
@@ -75,7 +86,7 @@ function formatTokenCount(tokens: number): string {
   return String(tokens);
 }
 
-export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionId }: Props) {
+export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalettePreview, sessionId }: Props) {
   const { t, locale, setLocale } = useI18n();
   const [config, setConfig] = useState<AppConfig>(defaultConfig);
   const [saving, setSaving] = useState(false);
@@ -438,6 +449,39 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, sessionI
                     </button>
                   ))}
                 </div>
+              </div>
+
+              <div className="settings-field-row settings-field-row-stacked">
+                <span className="settings-field-label">{t("settings.appearance.palette")}</span>
+                <div className="palette-grid" role="radiogroup" aria-label={t("settings.appearance.palette")}>
+                  {PALETTES.map((palette) => {
+                    const active = (config.palette ?? "default") === palette.id;
+                    return (
+                      <button
+                        key={palette.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={active}
+                        className={`palette-option${active ? " active" : ""}`}
+                        onClick={() => {
+                          setConfig((prev) => ({ ...prev, palette: palette.id }));
+                          // Apply immediately so the switch is visible in real time.
+                          onPalettePreview?.(palette.id);
+                        }}
+                      >
+                        <span className={`palette-swatch palette-swatch-${palette.id}`} aria-hidden="true">
+                          <span className="palette-chip" />
+                          <span className="palette-chip" />
+                          <span className="palette-chip" />
+                          <span className="palette-chip" />
+                        </span>
+                        <span className="palette-option-label">{t(palette.labelKey)}</span>
+                        {active && <FontAwesomeIcon icon={faCheck} className="palette-option-check" />}
+                      </button>
+                    );
+                  })}
+                </div>
+                <small className="settings-field-hint">{t("settings.appearance.paletteHint")}</small>
               </div>
 
               <div className="settings-field-row settings-field-row-stacked">

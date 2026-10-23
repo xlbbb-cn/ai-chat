@@ -188,12 +188,12 @@
 }
 
 .mission-monitor-item:hover {
-    border-color: var(--c-accent);
+    border-color: var(--c-accent-text);
     background: var(--c-hover);
 }
 
 .mission-monitor-item.selected {
-    border-color: var(--c-accent);
+    border-color: var(--c-accent-text);
     background: var(--c-accent-soft);
     box-shadow: 0 0 0 3px var(--c-accent-soft);
 }
@@ -232,7 +232,7 @@
 
 .mission-pending {
     background: var(--c-accent-soft);
-    color: var(--c-accent);
+    color: var(--c-accent-text);
 }
 
 .mission-monitor-agent,

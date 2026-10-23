@@ -25,8 +25,10 @@ import type {
   ContentPart,
   MessageContent,
   ModelMetadata,
+  Palette,
   SkillsStatus,
   SleepLockState,
+  ThemeMode,
   TimerEntry,
   UpdateInfo,
 } from "./types";
@@ -54,10 +56,18 @@ import "./App.css";
 
 type Sidebar = "settings" | "skills" | "history" | "tools" | "mcp" | "agents" | null;
 
-function applyTheme(theme: "auto" | "light" | "dark" | undefined) {
+/**
+ * Paint the current theme + palette on `<html>`.
+ *
+ * The two are independent dimensions: `data-theme` resolves the light /
+ * dark half (with `auto` following the OS), `data-palette` selects the
+ * colour scheme. Both are read by the token blocks in `src/App.css`.
+ */
+function applyTheme(theme: ThemeMode | undefined, palette: Palette | undefined) {
   const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
   const resolved = theme === "dark" || (theme !== "light" && prefersDark) ? "dark" : "light";
   document.documentElement.setAttribute("data-theme", resolved);
+  document.documentElement.setAttribute("data-palette", palette ?? "default");
 }
 
 // ─── Delay timers ────────────────────────────────────────────────────────────
@@ -397,7 +407,8 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
   const sidebarMotionTimerRef = useRef<number | null>(null);
-  const themeRef = useRef<"auto" | "light" | "dark">("auto");
+  const themeRef = useRef<ThemeMode>("auto");
+  const paletteRef = useRef<Palette>("default");
   const currentAssistantMessageIdRef = useRef<string | null>(null);
   const hasRunningToolCallRef = useRef(false);
   const currentToolCallsRef = useRef<ToolCallEntry[]>([]);
@@ -782,7 +793,8 @@ export default function App() {
     applyConfigToUi()
       .then((cfg) => {
         themeRef.current = cfg.theme ?? "auto";
-        applyTheme(cfg.theme);
+        paletteRef.current = cfg.palette ?? "default";
+        applyTheme(cfg.theme, cfg.palette);
       })
       .catch(console.error);
     // The skill selection is workspace-scoped, so it is loaded from the
@@ -792,7 +804,7 @@ export default function App() {
 
   useEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const handler = () => { if (themeRef.current === "auto") applyTheme("auto"); };
+    const handler = () => { if (themeRef.current === "auto") applyTheme("auto", paletteRef.current); };
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
   }, []);
@@ -1849,7 +1861,11 @@ export default function App() {
               onClose={closeSidebar}
               onThemePreview={(theme) => {
                 themeRef.current = theme ?? "auto";
-                applyTheme(theme);
+                applyTheme(theme, paletteRef.current);
+              }}
+              onPalettePreview={(palette) => {
+                paletteRef.current = palette;
+                applyTheme(themeRef.current, palette);
               }}
               onConfigSaved={(cfg) => {
                 const catalog = Array.from(new Set([...(cfg.model_catalog ?? []), cfg.model].filter(Boolean)));
@@ -1861,7 +1877,8 @@ export default function App() {
                 setModelMetadata(cfg.model_metadata ?? {});
                 setReasoningEfforts(cfg.model_reasoning_effort ?? {});
                 themeRef.current = cfg.theme ?? "auto";
-                applyTheme(cfg.theme);
+                paletteRef.current = cfg.palette ?? "default";
+                applyTheme(cfg.theme, cfg.palette);
                 if (isLocale(cfg.language)) setLocale(cfg.language);
               }}
             />

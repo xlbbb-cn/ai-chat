@@ -16,9 +16,10 @@ motion curve. Everything below is written against this codebase — the tokens i
 
 1. **Never hardcode a colour, radius, shadow, duration or easing.** Use the tokens
    declared in `src/App.css`. A literal hex outside `:root` / `[data-theme="dark"]`
-   is a bug.
+   / the palette blocks is a bug.
 2. **One accent colour.** Electric Blue (`--c-accent`) marks the primary action of
    a view. Never use it decoratively and never add a second chromatic accent.
+   A palette may re-hue it, but it stays the only accent of that view.
 3. **No elevation.** `--shadow-*` resolve to `none`. Layering is z-index, opacity
    and the frosted `--c-toolbar` surface — nothing else.
 4. **4px radius on interactive elements.** No pills, no large radii, no circles
@@ -37,13 +38,51 @@ motion curve. Everything below is written against this codebase — the tokens i
 
 ---
 
+## Two dimensions: mode and palette
+
+The interface has **two independent colour dimensions**, both set on `<html>`:
+
+| Attribute | Values | Meaning |
+|---|---|---|
+| `data-theme` | `light` / `dark` | Light vs. dark resolution. `auto` follows the OS and resolves to one of the two. |
+| `data-palette` | `default` / `fig` / `cream` | The colour scheme: which hues the surfaces, the accent and the semantic states wear. |
+
+Both are written by `applyTheme()` in `src/App.tsx` from `config.theme` and
+`config.palette`. Every palette therefore needs a **light *and* a dark token
+set** — the two dimensions are orthogonal, so `cream` + `dark` must look as
+finished as `cream` + `light`.
+
+| Palette | Light | Dark | Character |
+|---|---|---|---|
+| `default` | Pure White canvas, Electric Blue accent | Carbon Dark canvas, lifted Electric Blue | The monochrome-plus-one baseline. |
+| `fig` (无花果) | Frost-purple canvas `#B8A5D2`, panels in lavender-white, fig-red accent `#EFAFAD`, 艾背绿 code `#DFECD5`, 海天蓝 reasoning `#C6E6E8` | Deep plum canvas `#241E33`, lifted pastels | A pastel scheme. |
+| `cream` (乳白) | The adjacent warm-white group — 蚌肉白 `#F9F1DB` canvas, 乳白 `#F9F4DC` panels, 奶油白 `#FFF8E7` alternate surface, 粉白 `#FBF2E3` secondary — washed with oklab gradients instead of flat fills | Deep umber canvas, the same tones as warm greys | Paper. The accent stays Electric Blue: this palette is about the neutrals. |
+
+### Rules for a palette block
+
+- A palette block defines the **complete** token set. It never inherits from
+  another palette, and it never inherits a token it forgot — otherwise a missing
+  line leaks the neighbouring scheme's colour into the UI.
+- `[data-palette="x"]` holds the light set; `[data-theme="dark"][data-palette="x"]`
+  overrides it for dark mode. Both blocks sit **after** `[data-theme="dark"]` in
+  `src/App.css`, so the dark+palette selector (specificity 0-2-0) wins.
+- A pastel accent cannot carry a label. That is what `--c-accent-text` is for:
+  the same hue, darkened, used for **text, icons, hairlines and focus rings**.
+  Fills (buttons, chips, toggles) keep `--c-accent` and take `--c-on-accent` as
+  their label colour.
+- The Cream palette is the sanctioned place for gradients on a surface: its
+  `--c-bg-image` / `--c-code-image` / `--c-reason-image` are oklab washes of its
+  own adjacent group. Everywhere else, surfaces stay flat.
+
+---
+
 ## Design tokens
 
 All tokens live in `src/App.css`. Nothing else may define colour/radius/motion.
 
-> **Known exception:** `UpdatePanel.css` still carries its own literal `--t-*`
-> palette — a near-copy of the values below, with slightly different dark-mode
-> borders. Treat it as debt: new work aliases `--c-*` instead.
+> **Known exception:** none. `UpdatePanel.css` used to carry its own literal
+> `--t-*` palette; it now aliases the global tokens like every other panel, so
+> it follows the active palette.
 
 ### Surfaces
 
@@ -77,15 +116,34 @@ All tokens live in `src/App.css`. Nothing else may define colour/radius/motion.
 
 | Token | Light | Dark | Role |
 |---|---|---|---|
-| `--c-accent` | `#3E6AE1` | `#5B7EF0` | **Primary CTA only** |
+| `--c-accent` | `#3E6AE1` | `#5B7EF0` | **Primary CTA only** — the fill of the primary action |
 | `--c-accent-hover` | `#3457C4` | `#6F8DF3` | Primary CTA hover |
 | `--c-accent-soft` | `rgba(62,106,225,.10)` | `rgba(91,126,240,.16)` | Focus ring, selected/active tint |
+| `--c-accent-text` | = `--c-accent` | = `--c-accent` | The accent as **text / icon / hairline / focus ring**. A palette with a pastel accent re-hues this darker twin so it stays legible. |
+| `--c-on-accent` | `#FFFFFF` | `#FFFFFF` | The label colour that sits **on** an accent fill (dark on a pastel accent) |
 | `--c-danger` / `--c-danger-soft` | `#C0392B` / `rgba(192,57,43,.10)` | `#E5655C` / `rgba(229,101,92,.14)` | Errors, destructive actions |
 | `--c-success` / `--c-success-soft` | `#1F8A3B` / `rgba(31,138,59,.10)` | `#3BB55C` / `rgba(59,181,92,.14)` | Success, running/done state |
 | `--c-warning` / `--c-warning-soft` | `#B07500` / `rgba(176,117,0,.10)` | `#E0A33C` / `rgba(224,163,60,.14)` | Warnings, elevated risk |
 
 Semantic colours are functional (status, risk level, attachment kind) and are the
 only sanctioned exception to "one accent". Never use them decoratively.
+
+> **Split rule:** a rule that paints an accent **fill** uses `--c-accent`; a rule
+> that paints an accent **line or label** uses `--c-accent-text`. Mixing them up
+> is what makes a pastel palette unreadable.
+
+### Surface washes
+
+| Token | Default | Role |
+|---|---|---|
+| `--c-bg-image` | `none` | Optional wash over the canvas (`body`, `.chat-area`) |
+| `--c-code-image` | `none` | Optional wash over code blocks |
+| `--c-reason-image` | `none` | Optional wash over reasoning / quote surfaces |
+
+`none` everywhere but in the Cream palette, which fills them with the oklab
+gradients of its adjacent group. A rule that uses them must set
+`background-color` first and `background-image` after — the `background`
+shorthand resets the image.
 
 ### Code and reasoning surfaces
 
@@ -341,11 +399,14 @@ too. True modal dialogs (9999 layer) still cover the titlebar on purpose.
 
 - Don't add a box-shadow for depth. Layering is z-index, opacity, frosted glass.
 - Don't introduce a gradient on a UI surface (progress bars and streaming sweeps
-  are the only sanctioned uses).
+  are the only sanctioned uses; the Cream palette's own oklab washes are the one
+  deliberate exception, and they live in its `--c-*-image` tokens).
 - Don't use `scale()` / `translate()` on hover or press.
 - Don't use `text-transform: uppercase` or negative letter-spacing.
 - Don't use radius above 4px, and never a `border-radius: 50%` on a button.
 - Don't add a second chromatic accent colour.
+- Don't paint an accent-coloured label with `--c-accent` — that is `--c-accent-text`'s
+  job, and a pastel accent makes it unreadable.
 - Don't declare `--t-*` / `--ts-*` aliases as `var(--t-…)` of themselves — a CSS
   custom property cannot self-reference and resolves to nothing.
 - Don't duplicate a primitive into a component stylesheet; that is how the panels
@@ -370,10 +431,16 @@ too. True modal dialogs (9999 layer) still cover the titlebar on purpose.
 
 ### Theme plumbing
 
-`data-theme` on `<html>` is set by `applyTheme()` in `src/App.tsx` from
-`config.theme` (`auto` / `light` / `dark`). Everything must work through the token
-layer — no component should branch on the theme itself except where a literal is
-unavoidable (currently: the toggle knob in dark mode, and the monitor terminal).
+`data-theme` and `data-palette` on `<html>` are set by `applyTheme()` in
+`src/App.tsx` from `config.theme` (`auto` / `light` / `dark`) and
+`config.palette` (`default` / `fig` / `cream`). Everything must work through the
+token layer — no component should branch on the theme or the palette itself
+except where a literal is unavoidable (currently: the toggle knob in dark mode,
+and the monitor terminal).
+
+The Settings picker previews a change immediately but persists it with the
+form's **Save Changes**; `config.palette` rides along with `config.theme` in
+the same save.
 
 ### Verification
 

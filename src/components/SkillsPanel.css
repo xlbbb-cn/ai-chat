@@ -83,11 +83,11 @@
 }
 
 .skill-name:hover {
-  color: var(--c-accent);
+  color: var(--c-accent-text);
 }
 
 .skill-name.active {
-  color: var(--c-accent);
+  color: var(--c-accent-text);
 }
 
 .skill-transport {
@@ -147,7 +147,7 @@
 }
 
 .skill-toggle input:focus-visible+.skill-toggle-slider {
-  outline: 2px solid var(--c-accent);
+  outline: 2px solid var(--c-accent-text);
   outline-offset: 2px;
 }
 
@@ -228,7 +228,7 @@
 
 .skill-editor input:focus,
 .skill-editor textarea:focus {
-  border-color: var(--c-accent);
+  border-color: var(--c-accent-text);
 }
 
 .editor-actions {
@@ -320,7 +320,7 @@
 }
 
 .prompt-editor-textarea:focus {
-  border-color: var(--c-accent);
+  border-color: var(--c-accent-text);
 }
 
 .prompt-preview {

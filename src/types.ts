@@ -175,6 +175,19 @@ export type AutoAcceptKind = ConfirmKind | "*";
 /** UI languages bundled with the frontend (see `src/i18n`). */
 export type Language = "en" | "zh-CN" | "zh-TW";
 
+/**
+ * Light / dark resolution of the interface. `auto` follows the OS setting.
+ * Applied as `data-theme` on `<html>`.
+ */
+export type ThemeMode = "auto" | "light" | "dark";
+
+/**
+ * Colour scheme, applied as `data-palette` on `<html>` on top of the
+ * light / dark mode. Each palette ships a light *and* a dark token set,
+ * so the two dimensions are independent.
+ */
+export type Palette = "default" | "fig" | "cream";
+
 export interface AppConfig {
   api_base_url: string;
   api_key: string;
@@ -216,7 +229,17 @@ export interface AppConfig {
   neo4j_password?: string;
   workspace_dir?: string;
   logger_output?: "file" | "println";
-  theme?: "auto" | "light" | "dark";
+  /**
+   * Light / dark resolution of the interface. `auto` follows the OS.
+   */
+  theme?: ThemeMode;
+  /**
+   * Colour scheme layered on top of the light / dark mode: `default`
+   * (Pure White + Electric Blue), `fig` (无花果, a pastel scheme on a
+   * frost-purple canvas) or `cream` (乳白, the adjacent warm-white group
+   * washed with oklab gradients).
+   */
+  palette?: Palette;
   /**
    * UI language. Kept in the config so it survives restarts and travels with
    * exported profiles; the frontend also caches it in `localStorage` so the

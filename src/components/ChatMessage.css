@@ -4,8 +4,9 @@
      messages behind; routing them through the shared tokens keeps the whole
      surface on one source of truth (dark mode included, since the global
      tokens already switch). */
-  --ts-blue: var(--c-accent);
+  --ts-blue: var(--c-accent-text);
   --ts-blue-hover: var(--c-accent-hover);
+  --ts-blue-fill: var(--c-accent);
   --ts-carbon: var(--c-text);
   --ts-graphite: var(--c-body);
   --ts-pewter: var(--c-muted);
@@ -367,6 +368,7 @@
   max-width: 100%;
   box-sizing: border-box;
   background: var(--c-code);
+  background-image: var(--c-code-image);
   border: 1px solid var(--c-border-s);
 }
 
@@ -451,6 +453,8 @@
   max-width: 100%;
   box-sizing: border-box;
   background: var(--c-code);
+  /* The Cream palette washes this surface with an oklab gradient. */
+  background-image: var(--c-code-image);
   border: 1px solid var(--c-border-s);
   font-size: 13px;
 }
@@ -536,6 +540,7 @@
 
 .message-content tbody tr:nth-child(even) {
   background: var(--c-reason);
+  background-image: var(--c-reason-image);
 }
 
 .message-content tbody tr:hover {
@@ -675,8 +680,8 @@
 
 .message-retry-btn {
   border: 0;
-  background: var(--ts-blue);
-  color: #FFFFFF;
+  background: var(--ts-blue-fill);
+  color: var(--c-on-accent);
   border-radius: 4px;
   min-height: 32px;
   padding: 6px 16px;

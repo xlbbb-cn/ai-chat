@@ -48,7 +48,7 @@
 }
 
 .history-search-input:focus {
-  border-color: var(--c-accent);
+  border-color: var(--c-accent-text);
   box-shadow: 0 0 0 3px var(--c-accent-soft);
 }
 
@@ -86,8 +86,8 @@
 
 .history-tab.active {
   background: var(--c-accent-soft);
-  border-color: var(--c-accent);
-  color: var(--c-accent);
+  border-color: var(--c-accent-text);
+  color: var(--c-accent-text);
 }
 
 .history-list {
@@ -184,7 +184,7 @@
   width: 10px;
   height: 10px;
   border: 2px solid transparent;
-  border-top-color: var(--c-accent);
+  border-top-color: var(--c-accent-text);
   border-radius: 50%;
   animation: history-spin 0.8s linear infinite;
 }
@@ -265,7 +265,7 @@
 .history-rename-input {
   width: 100%;
   box-sizing: border-box;
-  border: 0.5px solid var(--c-accent);
+  border: 0.5px solid var(--c-accent-text);
   border-radius: var(--r-sm);
   padding: 3px 7px;
   font-size: 13px;
@@ -278,7 +278,7 @@
 .history-item.active {
   background: var(--c-surface);
   cursor: default;
-  border: 0.5px solid var(--c-accent);
+  border: 0.5px solid var(--c-accent-text);
   box-shadow: 0 0 0 3px var(--c-accent-soft);
 }
 

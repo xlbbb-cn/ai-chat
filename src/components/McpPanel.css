@@ -97,11 +97,11 @@
 }
 
 .mcp-server-name:hover {
-    color: var(--c-accent);
+    color: var(--c-accent-text);
 }
 
 .mcp-server-name.active {
-    color: var(--c-accent);
+    color: var(--c-accent-text);
 }
 
 .mcp-server-transport {
@@ -179,7 +179,7 @@
     margin-left: 6px;
     font-size: 11px;
     font-weight: 400;
-    color: var(--c-accent);
+    color: var(--c-accent-text);
     vertical-align: middle;
     animation: mcp-testing-fade 1.2s ease-in-out infinite;
 }
@@ -188,7 +188,7 @@
     display: inline-block;
     width: 10px;
     height: 10px;
-    border: 1.5px solid var(--c-accent);
+    border: 1.5px solid var(--c-accent-text);
     border-top-color: transparent;
     border-radius: 50%;
     animation: mcp-spin 0.7s linear infinite;
@@ -216,7 +216,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    color: var(--c-accent);
+    color: var(--c-accent-text);
     font-weight: 500;
 }
 
@@ -278,7 +278,7 @@
 }
 
 .mcp-toggle input:focus-visible+.mcp-toggle-slider {
-    outline: 2px solid var(--c-accent);
+    outline: 2px solid var(--c-accent-text);
     outline-offset: 2px;
 }
 
@@ -328,7 +328,7 @@
 
 .mcp-input:focus,
 .mcp-select:focus {
-    border-color: var(--c-accent);
+    border-color: var(--c-accent-text);
 }
 
 .mcp-select {
@@ -357,7 +357,7 @@
 }
 
 .mcp-textarea:focus {
-    border-color: var(--c-accent);
+    border-color: var(--c-accent-text);
 }
 
 .mcp-form-actions {

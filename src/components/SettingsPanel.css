@@ -41,6 +41,7 @@
   --t-border-i: var(--c-border-i);
   --t-accent: var(--c-accent);
   --t-accent-hover: var(--c-accent-hover);
+  --t-accent-text: var(--c-accent-text);
   --t-danger: var(--c-danger);
 }
 
@@ -319,7 +320,7 @@
 .settings-page input:focus,
 .settings-page textarea:focus,
 .settings-page select:focus {
-  border-color: var(--t-accent);
+  border-color: var(--t-accent-text);
 }
 
 .settings-page input::placeholder,
@@ -525,13 +526,13 @@
 
 .settings-btn-primary {
   background: var(--t-accent);
-  color: #FFFFFF;
+  color: var(--c-on-accent);
   min-width: 110px;
 }
 
 .settings-btn-primary:hover:not(:disabled) {
   background: var(--t-accent-hover);
-  color: #FFFFFF;
+  color: var(--c-on-accent);
 }
 
 .settings-btn-danger {
@@ -652,11 +653,124 @@
 
 .theme-seg-btn.active {
   background: var(--t-accent);
-  color: #FFFFFF;
+  color: var(--c-on-accent);
 }
 
 .theme-seg-btn:hover:not(.active) {
   background: var(--t-bg-soft);
+}
+
+/* ===================================================================
+   Palette picker
+   =================================================================== */
+
+.palette-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.palette-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 4px 10px 4px 6px;
+  background: var(--t-bg);
+  color: var(--t-body);
+  border: 1px solid var(--t-border-i);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: normal;
+  cursor: pointer;
+  transition: background-color var(--t-dur) var(--t-ease),
+    border-color var(--t-dur) var(--t-ease),
+    color var(--t-dur) var(--t-ease);
+}
+
+.palette-option:hover:not(.active) {
+  background: var(--t-bg-soft);
+}
+
+.palette-option.active {
+  border-color: var(--t-accent-text);
+  color: var(--t-text);
+}
+
+.palette-option-label {
+  white-space: nowrap;
+}
+
+.palette-option-check {
+  font-size: 11px;
+  color: var(--t-accent-text);
+}
+
+/* The swatch is a colour sample, not a UI surface: four chips in the
+   palette's own order, so the picker can show a scheme that is not
+   currently applied. */
+.palette-swatch {
+  display: inline-flex;
+  flex-shrink: 0;
+  width: 32px;
+  height: 20px;
+  overflow: hidden;
+  border: 1px solid var(--t-border-i);
+  border-radius: 4px;
+}
+
+.palette-chip {
+  flex: 1;
+}
+
+.palette-swatch-default .palette-chip:nth-child(1) {
+  background: var(--sw-default-1);
+}
+
+.palette-swatch-default .palette-chip:nth-child(2) {
+  background: var(--sw-default-2);
+}
+
+.palette-swatch-default .palette-chip:nth-child(3) {
+  background: var(--sw-default-3);
+}
+
+.palette-swatch-default .palette-chip:nth-child(4) {
+  background: var(--sw-default-4);
+}
+
+.palette-swatch-fig .palette-chip:nth-child(1) {
+  background: var(--sw-fig-1);
+}
+
+.palette-swatch-fig .palette-chip:nth-child(2) {
+  background: var(--sw-fig-2);
+}
+
+.palette-swatch-fig .palette-chip:nth-child(3) {
+  background: var(--sw-fig-3);
+}
+
+.palette-swatch-fig .palette-chip:nth-child(4) {
+  background: var(--sw-fig-4);
+}
+
+.palette-swatch-cream .palette-chip:nth-child(1) {
+  background: var(--sw-cream-1);
+}
+
+.palette-swatch-cream .palette-chip:nth-child(2) {
+  background: var(--sw-cream-2);
+}
+
+.palette-swatch-cream .palette-chip:nth-child(3) {
+  background: var(--sw-cream-3);
+}
+
+.palette-swatch-cream .palette-chip:nth-child(4) {
+  background: var(--sw-cream-4);
 }
 
 /* ===================================================================
@@ -746,7 +860,7 @@
 }
 
 .prompt-editor-textarea:focus {
-  border-color: var(--c-accent);
+  border-color: var(--c-accent-text);
 }
 
 .prompt-preview {
