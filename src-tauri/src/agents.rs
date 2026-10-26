@@ -1823,6 +1823,35 @@ pub async fn run_sub_agent(
 
 // ─── External agents (cli / cloud) ───────────────────────────────────────────
 
+/// Identity of a resumable CLI session: the directory the CLI ran in, the chat
+/// session that owns it and the agent id. Kept in memory only — an app restart
+/// starts fresh CLI sessions.
+pub type CliSessionKey = (PathBuf, String, String);
+
+/// What a `cli` run needs beyond the agent settings: where it starts and whether
+/// it resumes the session a previous run in this chat created.
+struct CliRunContext {
+    cwd: PathBuf,
+    session_key: CliSessionKey,
+    session_continue: bool,
+}
+
+/// `true` once this CLI agent completed a successful run in this chat/cwd, i.e.
+/// the next run may append its `continue_args`.
+fn cli_session_is_resumable(app: &AppHandle, key: &CliSessionKey) -> bool {
+    app.state::<AppState>()
+        .cli_sessions
+        .lock()
+        .map(|sessions| sessions.contains(key))
+        .unwrap_or(false)
+}
+
+fn remember_cli_session(app: &AppHandle, key: CliSessionKey) {
+    if let Ok(mut sessions) = app.state::<AppState>().cli_sessions.lock() {
+        sessions.insert(key);
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExternalBackend {
     Cli,
@@ -1906,27 +1935,11 @@ async fn run_external_agent(
 
     let prompt = build_external_prompt(agent, task);
 
-    if agent.require_approval {
-        if let Some(rejection) =
-            request_external_agent_approval(app, agent, &prompt, &workspace_dir, backend).await
-        {
-            let _ = app.emit(
-                "agent-task-error",
-                json!({ "task_id": task.id, "agent_id": agent.id, "error": rejection.clone() }),
-            );
-            return TaskResult {
-                task_id: task.id.clone(),
-                agent_id: agent.id.clone(),
-                agent_name: agent.name.clone(),
-                status: "error".to_string(),
-                content: rejection,
-                tool_calls_count: 0,
-                tokens_used: 0,
-            };
-        }
-    }
-
-    let outcome: Result<(&'static str, String, String), String> = match backend {
+    // CLI agents keep their own session on disk. A successful run is remembered
+    // per (working directory, chat session, agent) so the next call in the same
+    // chat can resume it through the agent's `continue_args` (`--continue`, …).
+    // A new chat, another cwd or an app restart starts a fresh session.
+    let cli_run = match backend {
         ExternalBackend::Cli => {
             let cwd = match resolve_agent_cwd(agent, &workspace_dir) {
                 Ok(cwd) => cwd,
@@ -1946,12 +1959,55 @@ async fn run_external_agent(
                     };
                 }
             };
-            cli::run(app, agent, &task.id, &prompt, cwd, cancelled)
-                .await
-                // The run status distinguishes "user stopped it" from a real
-                // success so the mission is not marked accomplished on cancel.
-                .map(|run| (run.status, run.output, run.summary))
-                .map_err(|err| format!("CLI agent \"{}\" failed: {err}", agent.name))
+            let session_key = (cwd.clone(), session_id.to_string(), agent.id.clone());
+            let session_continue = !agent.cli.continue_args.is_empty()
+                && cli_session_is_resumable(app, &session_key);
+            Some(CliRunContext {
+                cwd,
+                session_key,
+                session_continue,
+            })
+        }
+        ExternalBackend::Cloud => None,
+    };
+
+    if agent.require_approval {
+        if let Some(rejection) =
+            request_external_agent_approval(app, agent, &prompt, backend, cli_run.as_ref()).await
+        {
+            let _ = app.emit(
+                "agent-task-error",
+                json!({ "task_id": task.id, "agent_id": agent.id, "error": rejection.clone() }),
+            );
+            return TaskResult {
+                task_id: task.id.clone(),
+                agent_id: agent.id.clone(),
+                agent_name: agent.name.clone(),
+                status: "error".to_string(),
+                content: rejection,
+                tool_calls_count: 0,
+                tokens_used: 0,
+            };
+        }
+    }
+
+    let outcome: Result<(&'static str, String, String), String> = match backend {
+        ExternalBackend::Cli => {
+            let cli_run = cli_run.as_ref().expect("CLI run context");
+            cli::run(
+                app,
+                agent,
+                &task.id,
+                &prompt,
+                cli_run.cwd.clone(),
+                cli_run.session_continue,
+                cancelled,
+            )
+            .await
+            // The run status distinguishes "user stopped it" from a real
+            // success so the mission is not marked accomplished on cancel.
+            .map(|run| (run.status, run.output, run.summary))
+            .map_err(|err| format!("CLI agent \"{}\" failed: {err}", agent.name))
         }
         ExternalBackend::Cloud => cloud::run(app, agent, &task.id, &prompt, &workspace_dir, cancelled)
             .await
@@ -1961,6 +2017,13 @@ async fn run_external_agent(
 
     match outcome {
         Ok((run_status, content, summary)) => {
+            // Only a run that actually succeeded can be resumed: a failed,
+            // timed-out or cancelled process may not have created a session.
+            if run_status == "success" {
+                if let Some(cli_run) = &cli_run {
+                    remember_cli_session(app, cli_run.session_key.clone());
+                }
+            }
             // A run the user stopped is not a success: the mission closes as
             // "stopped" (via run_sub_agent) instead of "accomplished".
             let status = if run_status == "cancelled" {
@@ -2055,8 +2118,8 @@ async fn request_external_agent_approval(
     app: &AppHandle,
     agent: &SubAgent,
     prompt: &str,
-    workspace_dir: &Path,
     backend: ExternalBackend,
+    cli_run: Option<&CliRunContext>,
 ) -> Option<String> {
     let state = app.state::<AppState>();
     if state
@@ -2083,15 +2146,19 @@ async fn request_external_agent_approval(
     }
 
     let target = match backend {
-        ExternalBackend::Cli => {
-            // The approval text must show `{cwd}` as the directory the agent
-            // will actually start in, not the workspace root.
-            let cwd = resolve_agent_cwd(agent, workspace_dir)
-                .unwrap_or_else(|_| workspace_dir.to_path_buf());
-            cli::describe_run(agent, prompt, &cwd)
-                .map(|command| format!("It runs with your user permissions and can read and write files in the workspace.\n\n{}", command))
-                .unwrap_or_else(|err| format!("Its command could not be resolved yet: {err}"))
-        }
+        ExternalBackend::Cli => match cli_run {
+            // The approval text must show the directory the agent will actually
+            // start in and the same `--continue` decision the run will use.
+            Some(cli_run) => cli::describe_run(
+                agent,
+                prompt,
+                &cli_run.cwd,
+                cli_run.session_continue,
+            )
+            .map(|command| format!("It runs with your user permissions and can read and write files in the workspace.\n\n{}", command))
+            .unwrap_or_else(|err| format!("Its command could not be resolved yet: {err}")),
+            None => "Its working directory could not be resolved yet.".to_string(),
+        },
         ExternalBackend::Cloud => format!(
             "It sends the task to a remote endpoint and can read and write files there.\n\nPOST {}",
             agent.cloud.endpoint.trim()

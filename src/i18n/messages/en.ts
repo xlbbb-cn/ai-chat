@@ -534,8 +534,7 @@ const en = {
         modelLimits: "Model & limits",
         model: "Model (optional, overrides main config)",
         modelPlaceholder: "Leave empty to inherit the main model",
-        cliModelArgsModelHint:
-            "Used as the `{model}` placeholder in the CLI model arguments, and ignored otherwise.",
+        modelHint: "Overrides the main model for this agent's LLM requests.",
         maxTokens: "Max completion tokens",
         maxTokensPlaceholder: "Default completion limit 8192",
         temperature: "Temperature",
@@ -579,10 +578,14 @@ const en = {
             "Use stdin for CLIs that read piped input, and on Windows when a prompt could contain %VAR% text.",
         cliContinueArgs: "Continue-session arguments — one per line",
         cliContinueArgsHint:
-            "Appended when a later run continues this CLI's previous session, e.g. --continue.",
+            "Appended when this agent runs again in the same chat after a successful run, so the CLI resumes its previous session (e.g. `--continue`). A new chat starts a fresh session.",
+        cliModel: "Model",
+        cliModelPlaceholder: "e.g. opencode-go/deepseek-v4.1-flash",
+        cliModelHint:
+            "Passed to the CLI through the model arguments below. Leave it empty when the model id is written there literally.",
         cliModelArgs: "Model arguments — one per line",
         cliModelArgsHint:
-            "Appended when the agent has a model configured. Include the {model} placeholder, e.g. --model then {model}.",
+            "Appended to every run, after the arguments above. One argument per line; `{model}` is replaced by the model above. Example: `-m` then `{model}`. Entries that use `{model}` are skipped while the model is empty.",
         cliEnv: "Environment — KEY=VALUE per line",
         cliEnvHint:
             "ANSI colour codes are stripped from captured output. Children start with NO_COLOR=1, CLICOLOR=0, CLICOLOR_FORCE=0, FORCE_COLOR=0 and TERM=dumb; entries above override those defaults.",

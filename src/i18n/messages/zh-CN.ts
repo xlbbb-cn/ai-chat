@@ -497,7 +497,7 @@ const zhCN: Messages = {
         modelLimits: "模型与限制",
         model: "模型（可选，覆盖主配置）",
         modelPlaceholder: "留空则继承主模型",
-        cliModelArgsModelHint: "作为 CLI 模型参数里的 {model} 占位符使用，其他类型忽略此项。",
+        modelHint: "仅用于 LLM 类型：覆盖该智能体请求时使用的主模型。",
         maxTokens: "最大补全 tokens",
         maxTokensPlaceholder: "默认补全上限 8192",
         temperature: "温度",
@@ -539,10 +539,15 @@ const zhCN: Messages = {
         cliPromptViaHint:
             "适合从管道读取输入的 CLI；在 Windows 上，当提示词可能包含 %VAR% 形式的内容时也建议使用。",
         cliContinueArgs: "续接会话参数 —— 每行一个",
-        cliContinueArgsHint: "当后续运行需要续接该 CLI 的会话时追加，例如 --continue。",
+        cliContinueArgsHint:
+            "在同一会话中再次调用该智能体时追加（首次成功运行之后），用于续接该 CLI 上一次的会话，例如 --continue。新建会话会重新开始。",
+        cliModel: "模型",
+        cliModelPlaceholder: "例如 opencode-go/deepseek-v4.1-flash",
+        cliModelHint:
+            "通过下方的模型参数传给 CLI；若模型 id 已直接写在参数里，这里可以留空。",
         cliModelArgs: "模型参数 —— 每行一个",
         cliModelArgsHint:
-            "当该智能体配置了模型时追加；请在需要的位置使用 {model} 占位符，例如一行 --model、一行 {model}。",
+            "每次运行都会追加到上面的参数之后。每行一个参数；{model} 会替换为上面的模型。示例：一行 -m、一行 {model}。模型留空时，含 {model} 的条目会被跳过。",
         cliEnv: "环境变量 —— 每行一个 KEY=VALUE",
         cliEnvHint:
             "捕获的输出会自动移除 ANSI 颜色控制符。子进程默认带有 NO_COLOR=1、CLICOLOR=0、CLICOLOR_FORCE=0、FORCE_COLOR=0 和 TERM=dumb，此处填写同名变量可覆盖。",

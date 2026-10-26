@@ -523,6 +523,12 @@ pub struct AppState {
     /// app run. Each such agent asks once, then runs without prompting until
     /// restart — unless its `require_approval` switch is off.
     pub external_agent_confirmed: Mutex<std::collections::HashSet<String>>,
+    /// `cli` agents that already completed a successful run, keyed by
+    /// `(working directory, chat session, agent id)`. Later runs in the same
+    /// chat append the agent's `continue_args` (`--continue`, …) so the CLI
+    /// resumes its own session instead of starting over. In-memory on purpose:
+    /// an app restart (and a new chat) starts fresh sessions.
+    pub cli_sessions: Mutex<std::collections::HashSet<agents::CliSessionKey>>,
     /// Serializes external-agent approval requests: `confirm_sender` holds one
     /// pending request at a time, so parallel agents must queue here instead of
     /// overwriting each other's dialog.
@@ -1130,6 +1136,7 @@ pub fn run() {
                 serve_processes: Default::default(),
                 session_memories: Mutex::new(Default::default()),
                 external_agent_confirmed: Mutex::new(Default::default()),
+                cli_sessions: Mutex::new(Default::default()),
                 external_agent_confirm_lock: tokio::sync::Mutex::new(()),
             });
 

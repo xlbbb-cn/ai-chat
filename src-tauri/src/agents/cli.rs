@@ -652,6 +652,9 @@ fn render_arguments(
 ) -> (Vec<String>, bool) {
     let use_stdin = settings.prompt_via.eq_ignore_ascii_case("stdin");
     let prompt_for_args = if use_stdin { None } else { Some(prompt) };
+    // A blank model is the same as none: `{model}` must never expand to an
+    // empty argv entry (`--model ""`), which most CLIs reject.
+    let model = model.map(str::trim).filter(|value| !value.is_empty());
 
     let mut placeholder_used = false;
     let mut args: Vec<String> = Vec::new();
@@ -682,7 +685,14 @@ fn render_arguments(
                 push(template, &mut args, &mut placeholder_used);
             }
         }
-        if model.is_some() {
+        // Model arguments are appended on every run — a CLI agent's model is
+        // configured here (or written literally, e.g. `-m` + `opencode-go/…`),
+        // not inherited from the main config. Only a `{model}` template needs a
+        // configured model: without one the whole block is skipped instead of
+        // handing the CLI a dangling flag followed by an empty value.
+        let model_args_usable =
+            model.is_some() || !settings.model_args.iter().any(|t| t.contains("{model}"));
+        if model_args_usable {
             for template in &settings.model_args {
                 push(template, &mut args, &mut placeholder_used);
             }
@@ -722,11 +732,24 @@ fn quote_cli_display(value: &str) -> String {
 
 /// The command line an agent would run for `prompt` (used for the approval
 /// dialog text and panel previews). Returns an error when the executable
-/// cannot be resolved.
-pub fn describe_run(agent: &SubAgent, prompt: &str, cwd: &Path) -> Result<String, String> {
+/// cannot be resolved. `session_continue` mirrors the flag of the run that will
+/// follow, so the approved command is the one that actually executes.
+pub fn describe_run(
+    agent: &SubAgent,
+    prompt: &str,
+    cwd: &Path,
+    session_continue: bool,
+) -> Result<String, String> {
     let resolved = resolve_executable(&agent.cli.command)?;
     let model = agent.model.as_deref();
-    let (args, _) = render_arguments(&agent.cli, &agent.name, prompt, model, cwd, false);
+    let (args, _) = render_arguments(
+        &agent.cli,
+        &agent.name,
+        prompt,
+        model,
+        cwd,
+        session_continue,
+    );
     Ok(render_preview(&resolved, &args))
 }
 
@@ -838,12 +861,17 @@ fn misdirected_prompt_hint(settings: &CliAgentSettings, output: &str) -> Option<
 /// Runs a `cli`-type agent for `prompt` inside `cwd` (already sandbox-checked by
 /// the caller) and returns its outcome. Output is streamed as `agent-task-token`
 /// events keyed by `task_id`.
+///
+/// `session_continue` appends the agent's `continue_args` (`--continue`, …) so
+/// the CLI resumes its previous session; the caller decides it from the
+/// per-chat session registry.
 pub async fn run(
     app: &AppHandle,
     agent: &SubAgent,
     task_id: &str,
     prompt: &str,
     cwd: PathBuf,
+    session_continue: bool,
     cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<CliRunOutcome, String> {
     let settings = &agent.cli;
@@ -852,7 +880,7 @@ pub async fn run(
     let timeout_seconds = (settings.default_timeout_seconds as u64).clamp(1, MAX_TIMEOUT_SECS);
     let model = agent.model.as_deref();
     let (rendered_args, use_stdin) =
-        render_arguments(settings, &agent.name, prompt, model, &cwd, false);
+        render_arguments(settings, &agent.name, prompt, model, &cwd, session_continue);
     let preview = render_preview(&resolved, &rendered_args);
 
     // Windows CreateProcess rejects command lines over 32767 chars, and cmd.exe
@@ -1202,13 +1230,87 @@ mod tests {
     }
 
     #[test]
+    fn literal_model_arguments_apply_without_a_configured_model() {
+        // A CLI agent pins its model through the arguments themselves
+        // (`-m <id>`); the LLM-only `model` field is usually empty.
+        let mut settings = settings(vec!["run", "{prompt}"], "arg");
+        settings.model_args = vec![
+            "-m".to_string(),
+            "opencode-go/deepseek-v4.1-flash".to_string(),
+        ];
+        let (args, _) = render_arguments(
+            &settings,
+            "opencode",
+            "say hello",
+            None,
+            Path::new("."),
+            false,
+        );
+        assert_eq!(
+            args,
+            vec![
+                "run".to_string(),
+                "say hello".to_string(),
+                "-m".to_string(),
+                "opencode-go/deepseek-v4.1-flash".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn model_placeholder_arguments_need_a_real_model() {
+        let settings = settings(vec!["run", "{prompt}"], "arg");
+        for model in [None, Some(""), Some("   ")] {
+            let (args, _) =
+                render_arguments(&settings, "opencode", "hi", model, Path::new("."), false);
+            assert_eq!(
+                args,
+                vec!["run".to_string(), "hi".to_string()],
+                "a missing/blank model must not produce `--model \"\"`"
+            );
+        }
+
+        let (args, _) = render_arguments(
+            &settings,
+            "opencode",
+            "hi",
+            Some(" opencode-go/deepseek-v4.1-flash "),
+            Path::new("."),
+            false,
+        );
+        assert_eq!(
+            args,
+            vec![
+                "run".to_string(),
+                "hi".to_string(),
+                "--model".to_string(),
+                "opencode-go/deepseek-v4.1-flash".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn describe_run_shows_the_resume_flag() {
+        let mut agent = agent(settings(vec!["run", "{prompt}"], "arg"));
+        agent.cli.command = std::env::current_exe()
+            .expect("test exe")
+            .to_string_lossy()
+            .to_string();
+        let fresh = describe_run(&agent, "hello", Path::new("."), false).expect("preview");
+        assert!(!fresh.contains("--continue"));
+        // The approval dialog must show the same command the run will use.
+        let resumed = describe_run(&agent, "hello", Path::new("."), true).expect("preview");
+        assert!(resumed.contains("--continue"));
+    }
+
+    #[test]
     fn describe_run_renders_the_command_line() {
         let mut agent = agent(settings(vec!["run", "{prompt}"], "arg"));
         agent.cli.command = std::env::current_exe()
             .expect("test exe")
             .to_string_lossy()
             .to_string();
-        let preview = describe_run(&agent, "hello", Path::new(".")).expect("preview");
+        let preview = describe_run(&agent, "hello", Path::new("."), false).expect("preview");
         assert!(preview.contains("run"));
         assert!(preview.contains("hello"));
     }

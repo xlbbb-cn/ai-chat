@@ -357,7 +357,20 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
   /** Compact one-line summary of what the agent runs. */
   const agentTarget = (agent: SubAgent): string => {
     if (agent.agent_type === "cli") {
-      return [agent.cli.command, ...agent.cli.args].join(" ").trim() || t("agents.noCommand");
+      const model = agent.model?.trim();
+      // Mirror the backend: `{model}` templates only render once a model is
+      // configured, and a literal `-m <id>` applies either way.
+      const needsModel = agent.cli.model_args.some((arg) => arg.includes("{model}"));
+      const modelArgs =
+        needsModel && !model
+          ? []
+          : agent.cli.model_args.map((arg) =>
+              model ? arg.replace(/\{model\}/g, model) : arg
+            );
+      return (
+        [agent.cli.command, ...agent.cli.args, ...modelArgs].join(" ").trim() ||
+        t("agents.noCommand")
+      );
     }
     if (agent.agent_type === "cloud") {
       return agent.cloud.endpoint.trim() || t("agents.noEndpoint");
@@ -414,12 +427,21 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
             <small className="agent-field-hint">{t("agents.cliContinueArgsHint")}</small>
           </label>
           <label>
+            {t("agents.cliModel")}
+            <input
+              value={agent.model ?? ""}
+              onChange={(e) => updateAgent({ model: e.target.value || undefined })}
+              placeholder={t("agents.cliModelPlaceholder")}
+            />
+            <small className="agent-field-hint">{t("agents.cliModelHint")}</small>
+          </label>
+          <label>
             {t("agents.cliModelArgs")}
             <textarea
               rows={2}
               value={draft.modelArgsText}
               onChange={(e) => updateDraft({ modelArgsText: e.target.value })}
-              placeholder={"--model\n{model}"}
+              placeholder={"-m\n{model}"}
             />
             <small className="agent-field-hint">{t("agents.cliModelArgsHint")}</small>
           </label>
@@ -614,7 +636,7 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
             onChange={(e) => updateAgent({ model: e.target.value || undefined })}
             placeholder={t("agents.modelPlaceholder")}
           />
-          <small className="agent-field-hint">{t("agents.cliModelArgsModelHint")}</small>
+          <small className="agent-field-hint">{t("agents.modelHint")}</small>
         </label>
         <div className="agent-editor-row">
           <label style={{ flex: 1 }}>

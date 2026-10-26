@@ -497,7 +497,7 @@ const zhTW: Messages = {
         modelLimits: "模型與限制",
         model: "模型（選填，會覆寫主設定）",
         modelPlaceholder: "留空則繼承主模型",
-        cliModelArgsModelHint: "作為 CLI 模型參數中的 {model} 佔位符使用，其他類型會忽略。",
+        modelHint: "僅用於 LLM 類型：覆寫此代理請求時使用的主模型。",
         maxTokens: "最大補完 tokens",
         maxTokensPlaceholder: "預設補完上限 8192",
         temperature: "溫度",
@@ -539,10 +539,15 @@ const zhTW: Messages = {
         cliPromptViaHint:
             "適合從管線讀取輸入的 CLI；在 Windows 上，當提示詞可能包含 %VAR% 形式的內容時也建議使用。",
         cliContinueArgs: "續接工作階段參數 —— 每行一個",
-        cliContinueArgsHint: "當後續執行需要續接該 CLI 的工作階段時附加，例如 --continue。",
+        cliContinueArgsHint:
+            "在同一工作階段中再次呼叫此代理時附加（首次成功執行之後），用於續接該 CLI 上一次的工作階段，例如 --continue。新建工作階段會重新開始。",
+        cliModel: "模型",
+        cliModelPlaceholder: "例如 opencode-go/deepseek-v4.1-flash",
+        cliModelHint:
+            "透過下方的模型參數傳給 CLI；若模型 id 已直接寫在參數裡，此處可以留空。",
         cliModelArgs: "模型參數 —— 每行一個",
         cliModelArgsHint:
-            "當此代理設定了模型時附加；請在需要的位置使用 {model} 佔位符，例如一行 --model、一行 {model}。",
+            "每次執行都會附加在上面的參數之後。每行一個參數；{model} 會替換為上方的模型。範例：一行 -m、一行 {model}。模型留空時，含 {model} 的項目會被跳過。",
         cliEnv: "環境變數 —— 每行一個 KEY=VALUE",
         cliEnvHint:
             "擷取的輸出會自動移除 ANSI 顏色控制符。子行程預設帶有 NO_COLOR=1、CLICOLOR=0、CLICOLOR_FORCE=0、FORCE_COLOR=0 和 TERM=dumb，此處填寫同名變數可覆寫。",
