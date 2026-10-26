@@ -705,6 +705,8 @@ const zhTW: Messages = {
         selectPrompt: "選擇一個任務以檢視其外部狀態。",
         statusCompleted: "已完成",
         statusRunning: "執行中",
+        statusFailed: "失敗",
+        statusStopped: "已停止",
     },
 
     profile: {

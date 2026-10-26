@@ -1836,6 +1836,17 @@ struct CliRunContext {
     session_continue: bool,
 }
 
+/// Maps a finished run to the task/mission status. Only an exit-0 run is a
+/// success: a user stop closes the mission as "stopped", while a non-zero exit
+/// or a timeout is an "error" (it must not mark the mission accomplished).
+fn task_status_for_run(run_status: &str) -> &'static str {
+    match run_status {
+        "success" => "success",
+        "cancelled" => "stopped",
+        _ => "error",
+    }
+}
+
 /// `true` once this CLI agent completed a successful run in this chat/cwd, i.e.
 /// the next run may append its `continue_args`.
 fn cli_session_is_resumable(app: &AppHandle, key: &CliSessionKey) -> bool {
@@ -2017,20 +2028,18 @@ async fn run_external_agent(
 
     match outcome {
         Ok((run_status, content, summary)) => {
+            let status = task_status_for_run(run_status);
             // Only a run that actually succeeded can be resumed: a failed,
             // timed-out or cancelled process may not have created a session.
-            if run_status == "success" {
+            if status == "success" {
                 if let Some(cli_run) = &cli_run {
                     remember_cli_session(app, cli_run.session_key.clone());
                 }
             }
             // A run the user stopped is not a success: the mission closes as
-            // "stopped" (via run_sub_agent) instead of "accomplished".
-            let status = if run_status == "cancelled" {
-                "stopped"
-            } else {
-                "success"
-            };
+            // "stopped" (via run_sub_agent) instead of "accomplished". The same
+            // holds for a non-zero exit or a timeout, which close it as
+            // "failed" — only a real success records an accomplishment.
             if status == "success" {
                 let state = app.state::<AppState>();
                 let db = state.db.lock();
@@ -2038,15 +2047,29 @@ async fn run_external_agent(
                     let _ = mark_mission_accomplished(&db, &mission_id, Some(&content));
                 }
             }
-            let _ = app.emit(
-                "agent-task-done",
-                json!({
-                    "task_id": task.id,
-                    "agent_id": agent.id,
-                    "agent_name": agent.name,
-                    "summary": summary.chars().take(200).collect::<String>(),
-                }),
-            );
+            // A failed/timeout run must show as an error in the agent panel and
+            // the chat's tool-call group; the captured output still travels back
+            // to the caller in `content`.
+            if status == "error" {
+                let _ = app.emit(
+                    "agent-task-error",
+                    json!({
+                        "task_id": task.id,
+                        "agent_id": agent.id,
+                        "error": summary.chars().take(200).collect::<String>(),
+                    }),
+                );
+            } else {
+                let _ = app.emit(
+                    "agent-task-done",
+                    json!({
+                        "task_id": task.id,
+                        "agent_id": agent.id,
+                        "agent_name": agent.name,
+                        "summary": summary.chars().take(200).collect::<String>(),
+                    }),
+                );
+            }
             TaskResult {
                 task_id: task.id.clone(),
                 agent_id: agent.id.clone(),
@@ -2800,6 +2823,17 @@ mod tests {
         // The legacy array must not come back when the config is serialized.
         let serialized = serde_json::to_string(&config).expect("serializes");
         assert!(!serialized.contains("\"cli_agents\""));
+    }
+
+    #[test]
+    fn failed_and_timed_out_runs_are_not_successes() {
+        assert_eq!(task_status_for_run("success"), "success");
+        assert_eq!(task_status_for_run("cancelled"), "stopped");
+        // A non-zero exit or a timeout must not be reported as "success": the
+        // mission would be marked accomplished and the panel would show a
+        // green "done" badge for a failed run.
+        assert_eq!(task_status_for_run("failed"), "error");
+        assert_eq!(task_status_for_run("timeout"), "error");
     }
 
     #[test]

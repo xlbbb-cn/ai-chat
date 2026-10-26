@@ -748,6 +748,8 @@ const en = {
         selectPrompt: "Select a mission to inspect its external state.",
         statusCompleted: "completed",
         statusRunning: "running",
+        statusFailed: "failed",
+        statusStopped: "stopped",
     },
 
     profile: {

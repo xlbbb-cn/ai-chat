@@ -705,6 +705,8 @@ const zhCN: Messages = {
         selectPrompt: "选择一个任务以查看其外部状态。",
         statusCompleted: "已完成",
         statusRunning: "运行中",
+        statusFailed: "失败",
+        statusStopped: "已停止",
     },
 
     profile: {

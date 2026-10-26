@@ -33,6 +33,8 @@ function statusLabel(mission: AgentMissionSnapshot, t: (key: MessageKey, vars?: 
     const status = rawStatus(mission);
     if (status === "completed") return t("mission.statusCompleted");
     if (status === "running") return t("mission.statusRunning");
+    if (status === "failed") return t("mission.statusFailed");
+    if (status === "stopped") return t("mission.statusStopped");
     return status;
 }
 
