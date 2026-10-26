@@ -315,6 +315,28 @@ mod tests {
         ensure_reasoning_passthrough(&mut body, false);
         assert!(body["messages"][1].get("reasoning_content").is_none());
     }
+
+    #[test]
+    fn missing_tool_call_ids_are_generated_and_unique() {
+        // Some relays stream the first tool call with an empty id (the real
+        // failing session had `["", "call_92fd…"]`), which DashScope rejects on
+        // the follow-up request as "tool_call_id does not match".
+        let mut calls = vec![
+            (String::new(), "file_actions".to_string(), "{}".to_string()),
+            ("call_known".to_string(), "file_actions".to_string(), "{}".to_string()),
+            ("   ".to_string(), "file_actions".to_string(), "{}".to_string()),
+            ("call_known".to_string(), "file_actions".to_string(), "{}".to_string()),
+        ];
+        ensure_tool_call_ids(&mut calls);
+
+        assert!(!calls[0].0.trim().is_empty());
+        assert_eq!(calls[1].0, "call_known");
+        assert!(!calls[2].0.trim().is_empty());
+        assert_ne!(calls[3].0, "call_known", "duplicate ids are replaced");
+        let ids: std::collections::HashSet<&str> =
+            calls.iter().map(|call| call.0.as_str()).collect();
+        assert_eq!(ids.len(), calls.len(), "ids must stay unique");
+    }
 }
 
 pub struct StreamResult {
@@ -564,7 +586,12 @@ fn process_stream_chunk(
                 tool_calls.push((String::new(), String::new(), String::new()));
             }
             if let Some(id) = tc["id"].as_str() {
-                tool_calls[idx].0 = id.to_string();
+                // Keep the first non-empty id: some relays repeat `id: ""` on
+                // the deltas after the first one, which would otherwise erase a
+                // valid id and break the tool round on the next request.
+                if !id.trim().is_empty() && tool_calls[idx].0.trim().is_empty() {
+                    tool_calls[idx].0 = id.to_string();
+                }
             }
             if let Some(name) = tc["function"]["name"].as_str() {
                 tool_calls[idx].1 = name.to_string();
@@ -584,6 +611,27 @@ fn process_stream_chunk(
             );
         } else {
             let _ = app.emit(opts.token_event, token.to_string());
+        }
+    }
+}
+
+/// Guarantee every accumulated tool call has a non-empty, unique id.
+///
+/// Some OpenAI-compatible relays omit `id` in the streamed `tool_calls` deltas
+/// (or repeat one). Echoing an empty/duplicate id back in the assistant message
+/// and the matching `tool` message makes strict providers (e.g. DashScope)
+/// reject the next request with "The tool_call_id in the response message does
+/// not match the tool_call_id in the tool_call". Generating a stable id here
+/// keeps both sides in sync.
+fn ensure_tool_call_ids(tool_calls: &mut [(String, String, String)]) {
+    let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (id, _, _) in tool_calls.iter_mut() {
+        if id.trim().is_empty() || used.contains(id.as_str()) {
+            let generated = format!("call_{}", uuid::Uuid::new_v4().simple());
+            *id = generated.clone();
+            used.insert(generated);
+        } else {
+            used.insert(id.clone());
         }
     }
 }
@@ -1072,6 +1120,10 @@ pub async fn stream_llm_request(
         if !got_tool_calls && opts.task_id.is_some() {
             tool_calls.clear();
         }
+
+        // Providers that stream tool calls without ids must still get a valid
+        // round back on the next request; see `ensure_tool_call_ids`.
+        ensure_tool_call_ids(&mut tool_calls);
 
         return Ok(StreamResult {
             finish_reason,
