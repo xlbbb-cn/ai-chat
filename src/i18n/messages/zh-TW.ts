@@ -532,7 +532,7 @@ const zhTW: Messages = {
             "可執行檔名稱（在 PATH 中尋找）或完整路徑。Windows 的 .cmd/.bat/.ps1 啟動器會自動處理。",
         cliArgs: "參數 —— 每行一個",
         cliArgsHint:
-            "每行一個參數；可用佔位符：{prompt}、{model}、{cwd}、{agent_name}。範例：一行寫 `run`，下一行寫 `{prompt}`，等同於 `opencode run \"…\"`。若沒有任何位置使用 {prompt}，提示詞會附加為最後一個參數。留空會自動使用內建的無頭呼叫形式（opencode：`run`，claude/gemini/cursor-agent/copilot：`-p`，codex/droid：`exec`，crush：`run`，amp：`-x`）。",
+            "每行一個參數；可用佔位符：{prompt}、{cwd}、{agent_name}。範例：一行寫 `run`，下一行寫 `{prompt}`，等同於 `opencode run \"…\"`。若沒有任何位置使用 {prompt}，提示詞會附加為最後一個參數。留空會自動使用內建的無頭呼叫形式（opencode：`run`，claude/gemini/cursor-agent/copilot：`-p`，codex/droid：`exec`，crush：`run`，amp：`-x`）。",
         cliPromptVia: "提示詞傳遞方式",
         cliPromptViaArg: "作為參數（{prompt}）",
         cliPromptViaStdin: "透過 stdin",
@@ -541,13 +541,9 @@ const zhTW: Messages = {
         cliContinueArgs: "續接工作階段參數 —— 每行一個",
         cliContinueArgsHint:
             "在同一工作階段中再次呼叫此代理時附加（首次成功執行之後），用於續接該 CLI 上一次的工作階段，例如 --continue。新建工作階段會重新開始。",
-        cliModel: "模型",
-        cliModelPlaceholder: "例如 opencode-go/deepseek-v4.1-flash",
-        cliModelHint:
-            "透過下方的模型參數傳給 CLI；若模型 id 已直接寫在參數裡，此處可以留空。",
         cliModelArgs: "模型參數 —— 每行一個",
         cliModelArgsHint:
-            "每次執行都會附加在上面的參數之後。每行一個參數；{model} 會替換為上方的模型。範例：一行 -m、一行 {model}。模型留空時，含 {model} 的項目會被跳過。",
+            "每次執行都會附加在上面的參數之後。每行一個參數——把開關和值分成兩行，例如一行 -m、一行 opencode-go/deepseek-v4.1-flash。模型不會從主設定繼承。",
         cliEnv: "環境變數 —— 每行一個 KEY=VALUE",
         cliEnvHint:
             "擷取的輸出會自動移除 ANSI 顏色控制符。子行程預設帶有 NO_COLOR=1、CLICOLOR=0、CLICOLOR_FORCE=0、FORCE_COLOR=0 和 TERM=dumb，此處填寫同名變數可覆寫。",

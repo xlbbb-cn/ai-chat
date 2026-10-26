@@ -570,7 +570,7 @@ const en = {
             "Executable name (searched on PATH) or a full path. Windows .cmd/.bat/.ps1 launchers are handled automatically.",
         cliArgs: "Arguments — one per line",
         cliArgsHint:
-            "One argument per line; placeholders: {prompt}, {model}, {cwd}, {agent_name}. Example: `run` + `{prompt}` runs `opencode run \"…\"`. If {prompt} is missing, the prompt is appended as the last argument. Leave empty to use the built-in headless form (opencode: `run`, claude/gemini/cursor-agent/copilot: `-p`, codex/droid: `exec`, crush: `run`, amp: `-x`).",
+            "One argument per line; placeholders: {prompt}, {cwd}, {agent_name}. Example: `run` + `{prompt}` runs `opencode run \"…\"`. If {prompt} is missing, the prompt is appended as the last argument. Leave empty to use the built-in headless form (opencode: `run`, claude/gemini/cursor-agent/copilot: `-p`, codex/droid: `exec`, crush: `run`, amp: `-x`).",
         cliPromptVia: "Prompt delivery",
         cliPromptViaArg: "As an argument ({prompt})",
         cliPromptViaStdin: "Through stdin",
@@ -579,13 +579,9 @@ const en = {
         cliContinueArgs: "Continue-session arguments — one per line",
         cliContinueArgsHint:
             "Appended when this agent runs again in the same chat after a successful run, so the CLI resumes its previous session (e.g. `--continue`). A new chat starts a fresh session.",
-        cliModel: "Model",
-        cliModelPlaceholder: "e.g. opencode-go/deepseek-v4.1-flash",
-        cliModelHint:
-            "Passed to the CLI through the model arguments below. Leave it empty when the model id is written there literally.",
         cliModelArgs: "Model arguments — one per line",
         cliModelArgsHint:
-            "Appended to every run, after the arguments above. One argument per line; `{model}` is replaced by the model above. Example: `-m` then `{model}`. Entries that use `{model}` are skipped while the model is empty.",
+            "Appended to every run, after the arguments above. One argument per line — put the flag and its value on separate lines, e.g. `-m` then `opencode-go/deepseek-v4.1-flash`. The model is not inherited from the main config.",
         cliEnv: "Environment — KEY=VALUE per line",
         cliEnvHint:
             "ANSI colour codes are stripped from captured output. Children start with NO_COLOR=1, CLICOLOR=0, CLICOLOR_FORCE=0, FORCE_COLOR=0 and TERM=dumb; entries above override those defaults.",

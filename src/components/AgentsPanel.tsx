@@ -427,21 +427,12 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
             <small className="agent-field-hint">{t("agents.cliContinueArgsHint")}</small>
           </label>
           <label>
-            {t("agents.cliModel")}
-            <input
-              value={agent.model ?? ""}
-              onChange={(e) => updateAgent({ model: e.target.value || undefined })}
-              placeholder={t("agents.cliModelPlaceholder")}
-            />
-            <small className="agent-field-hint">{t("agents.cliModelHint")}</small>
-          </label>
-          <label>
             {t("agents.cliModelArgs")}
             <textarea
               rows={2}
               value={draft.modelArgsText}
               onChange={(e) => updateDraft({ modelArgsText: e.target.value })}
-              placeholder={"-m\n{model}"}
+              placeholder={"-m\nopencode-go/deepseek-v4.1-flash"}
             />
             <small className="agent-field-hint">{t("agents.cliModelArgsHint")}</small>
           </label>

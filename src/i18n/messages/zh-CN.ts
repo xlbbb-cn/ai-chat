@@ -532,7 +532,7 @@ const zhCN: Messages = {
             "可执行文件名（在 PATH 中查找）或完整路径。Windows 的 .cmd/.bat/.ps1 启动器会自动处理。",
         cliArgs: "参数 —— 每行一个",
         cliArgsHint:
-            "每行一个参数；可用占位符：{prompt}、{model}、{cwd}、{agent_name}。示例：一行写 `run`，下一行写 `{prompt}`，等价于 `opencode run \"…\"`。若没有任何位置使用 {prompt}，提示词会追加为最后一个参数。留空会自动使用内置的无头调用形式（opencode：`run`，claude/gemini/cursor-agent/copilot：`-p`，codex/droid：`exec`，crush：`run`，amp：`-x`）。",
+            "每行一个参数；可用占位符：{prompt}、{cwd}、{agent_name}。示例：一行写 `run`，下一行写 `{prompt}`，等价于 `opencode run \"…\"`。若没有任何位置使用 {prompt}，提示词会追加为最后一个参数。留空会自动使用内置的无头调用形式（opencode：`run`，claude/gemini/cursor-agent/copilot：`-p`，codex/droid：`exec`，crush：`run`，amp：`-x`）。",
         cliPromptVia: "提示词传递方式",
         cliPromptViaArg: "作为参数（{prompt}）",
         cliPromptViaStdin: "通过 stdin",
@@ -541,13 +541,9 @@ const zhCN: Messages = {
         cliContinueArgs: "续接会话参数 —— 每行一个",
         cliContinueArgsHint:
             "在同一会话中再次调用该智能体时追加（首次成功运行之后），用于续接该 CLI 上一次的会话，例如 --continue。新建会话会重新开始。",
-        cliModel: "模型",
-        cliModelPlaceholder: "例如 opencode-go/deepseek-v4.1-flash",
-        cliModelHint:
-            "通过下方的模型参数传给 CLI；若模型 id 已直接写在参数里，这里可以留空。",
         cliModelArgs: "模型参数 —— 每行一个",
         cliModelArgsHint:
-            "每次运行都会追加到上面的参数之后。每行一个参数；{model} 会替换为上面的模型。示例：一行 -m、一行 {model}。模型留空时，含 {model} 的条目会被跳过。",
+            "每次运行都会追加到上面的参数之后。每行一个参数——把开关和值分成两行，例如一行 -m、一行 opencode-go/deepseek-v4.1-flash。模型不会从主配置继承。",
         cliEnv: "环境变量 —— 每行一个 KEY=VALUE",
         cliEnvHint:
             "捕获的输出会自动移除 ANSI 颜色控制符。子进程默认带有 NO_COLOR=1、CLICOLOR=0、CLICOLOR_FORCE=0、FORCE_COLOR=0 和 TERM=dumb，此处填写同名变量可覆盖。",
