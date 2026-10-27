@@ -6,33 +6,115 @@ use tauri::State;
 
 use crate::AppState;
 
+/// Turn a YAML scalar into its text form. Non-scalars (mappings, sequences,
+/// null) yield `None`.
+fn yaml_scalar_to_string(value: &serde_yaml::Value) -> Option<String> {
+    match value {
+        serde_yaml::Value::String(text) => Some(text.clone()),
+        serde_yaml::Value::Number(number) => Some(number.to_string()),
+        serde_yaml::Value::Bool(flag) => Some(flag.to_string()),
+        _ => None,
+    }
+}
+
+/// Split the scalar shorthand for a list: `Read, Write, Edit` or `a;b`.
+///
+/// Whitespace is deliberately *not* a separator: an `allowed-commands` entry
+/// may be a program with arguments, and splitting it would break the allowlist
+/// check in the tool layer.
+fn split_list_scalar(raw: &str) -> Vec<String> {
+    raw.split(|c| c == ',' || c == ';')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// Accept both list spellings for the list-valued frontmatter fields.
+///
+/// Skill authors (and imports from other skill ecosystems) write
+/// `allowed-tools: Read, Write, Edit`, which is a valid YAML *string*, not a
+/// sequence. A strict `Vec<String>` field rejected the whole frontmatter, and
+/// because the scan skips unparsable files the skill simply disappeared from
+/// the panel and from the model's skill listing — no error shown anywhere.
+fn deserialize_string_list<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_yaml::Value::deserialize(deserializer)?;
+    Ok(match value {
+        serde_yaml::Value::Null => Vec::new(),
+        serde_yaml::Value::String(raw) => split_list_scalar(&raw),
+        serde_yaml::Value::Sequence(items) => {
+            items.iter().filter_map(yaml_scalar_to_string).collect()
+        }
+        other => yaml_scalar_to_string(&other)
+            .map(|raw| split_list_scalar(&raw))
+            .unwrap_or_default(),
+    })
+}
+
+/// Accept any scalar for the optional text fields: `version: 1.0` (a number)
+/// or `author: 2024` would otherwise reject the whole frontmatter as well.
+fn deserialize_optional_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_yaml::Value::deserialize(deserializer)?;
+    Ok(yaml_scalar_to_string(&value)
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty()))
+}
+
 /// YAML frontmatter parsed from a SKILL.md file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillMeta {
     pub name: String,
     pub description: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_string",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub version: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_string",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub author: Option<String>,
     /// Allowlist of executable names the skill may run (empty = unrestricted).
     #[serde(
         rename = "allowed-commands",
         default,
+        deserialize_with = "deserialize_string_list",
         skip_serializing_if = "Vec::is_empty"
     )]
     pub allowed_commands: Vec<String>,
     #[serde(
         rename = "allowed-tools",
         default,
+        deserialize_with = "deserialize_string_list",
         skip_serializing_if = "Vec::is_empty"
     )]
     pub allowed_tools: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_string",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub context: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_string",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub agent: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_string",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub license: Option<String>,
 }
 
@@ -533,13 +615,23 @@ pub fn list_skills(state: State<'_, AppState>) -> Vec<Skill> {
 
     // `.data/skills` is created on demand (Skills panel, self-evolution), so a
     // missing directory simply means there are no workspace skills yet.
-    scan_skill_dirs(&skills_root)
-        .into_iter()
-        .filter_map(|(_, skill_file)| {
-            let content = fs::read_to_string(skill_file).ok()?;
-            parse_skill_md(&content).ok()
-        })
-        .collect()
+    let mut skills = Vec::new();
+    for (folder, skill_file) in scan_skill_dirs(&skills_root) {
+        match fs::read_to_string(&skill_file)
+            .map_err(|err| format!("cannot read {}: {err}", skill_file.display()))
+            .and_then(|content| parse_skill_md(&content))
+        {
+            Ok(skill) => skills.push(skill),
+            // A broken frontmatter must not vanish without a trace — that is
+            // undiagnosable from the UI (the skill just does not exist).
+            Err(err) => state
+                .logger
+                .lock()
+                .unwrap()
+                .log("WARN", &format!("Skill '{folder}' skipped: {err}")),
+        }
+    }
+    skills
 }
 
 #[tauri::command]
@@ -701,6 +793,68 @@ mod tests {
             .get("code-reviewer")
             .unwrap()
             .enabled, "newly discovered skills start disabled");
+    }
+
+    /// Frontmatter as written by hand / copied from an imported skill: the
+    /// tool list is a comma-separated scalar (valid YAML, but not a sequence)
+    /// and the Claude-skill keys `user-invocable` / `argument-hint` are present.
+    /// It must parse, otherwise the skill is silently invisible everywhere.
+    #[test]
+    fn parses_frontmatter_with_comma_separated_allowed_tools() {
+        let content = r#"---
+name: patent-disclosure-skill
+description: "中国专利技能：挖掘专利点 | China patents: mine patent points"
+version: "5.1.0"
+user-invocable: true
+argument-hint: "[可选：项目路径 / 交底书]"
+allowed-tools: Read, Write, Edit, Grep, Glob, WebSearch, Bash
+---
+
+# 正文
+"#;
+        let skill = parse_skill_md(content).expect("frontmatter must parse");
+        assert_eq!(skill.name, "patent-disclosure-skill");
+        assert_eq!(
+            skill.allowed_tools,
+            vec!["Read", "Write", "Edit", "Grep", "Glob", "WebSearch", "Bash"]
+        );
+        assert_eq!(skill.version.as_deref(), Some("5.1.0"));
+
+        // The panel rewrites the frontmatter on save; the list must survive the
+        // round-trip in the canonical (sequence) form.
+        let rewritten = skill_to_md(&skill).unwrap();
+        let reparsed = parse_skill_md(&rewritten).unwrap();
+        assert_eq!(reparsed.allowed_tools, skill.allowed_tools);
+
+        // And a real scan of the folder must advertise it.
+        let root = TempSkillsRoot::new("patent-skill");
+        let dir = root.0.join("patent-disclosure-skill");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("SKILL.md"), content).unwrap();
+        assert!(resolve_skill_by_name(&root.0, "patent-disclosure-skill").is_ok());
+        let mut status = SkillsStatus::default();
+        refresh_skill_status(&mut status, &root.0);
+        assert!(status.skills.contains_key("patent-disclosure-skill"));
+    }
+
+    /// The sequence form, unquoted numeric `version` and single-entry
+    /// `allowed-commands` (a program with arguments) are all accepted.
+    #[test]
+    fn parses_sequence_lists_and_scalar_versions() {
+        let content = r#"---
+name: mixed-forms
+description: seq form
+version: 1.0
+allowed-tools: ["Read", "Write"]
+allowed-commands: python3 -m pytest
+---
+
+body
+"#;
+        let skill = parse_skill_md(content).expect("frontmatter must parse");
+        assert_eq!(skill.allowed_tools, vec!["Read", "Write"]);
+        assert_eq!(skill.version.as_deref(), Some("1.0"));
+        assert_eq!(skill.allowed_commands, vec!["python3 -m pytest"]);
     }
 
     /// Deleting a skill in self-evolution mode leaves a `demo.bak.1` folder
