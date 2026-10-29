@@ -477,6 +477,8 @@ const zhCN: Messages = {
         enableModeHint:
             "开启后，编排器会为一次请求自动规划并并行执行多个智能体，主智能体也可以使用 `call_subagent` 把任务委派给子智能体。关闭时主智能体直接作答，不提供 `call_subagent`。",
         autoConfigure: "自动配置模式",
+        autoConfigureHint:
+            "规划前先多调用一次模型，为本次请求挑选智能体：可能只用已启用智能体中的一部分，或临时定义只在本次运行有效的智能体（不会保存到面板）。关闭时把所有已启用智能体交给规划器。",
         executionMode: "执行方式",
         modeParallel: "并行",
         modeSequential: "串行",

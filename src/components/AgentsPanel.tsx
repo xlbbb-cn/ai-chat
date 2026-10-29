@@ -925,6 +925,7 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
                 <span className="toggle-switch-slider" />
               </label>
             </div>
+            <small className="agent-field-hint">{t("agents.autoConfigureHint")}</small>
 
             <div className="orch-row">
               <span>{t("agents.executionMode")}</span>

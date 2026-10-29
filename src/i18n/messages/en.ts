@@ -514,6 +514,8 @@ const en = {
         enableModeHint:
             "When on, an orchestrator plans and runs several agents for one request, and the main agent can delegate through `call_subagent`. When off, the main agent answers directly and `call_subagent` is not offered.",
         autoConfigure: "Auto-configure mode",
+        autoConfigureHint:
+            "Before planning, one extra model call picks the agents for this request: only a subset of your enabled agents, or temporary ones defined for this run alone (never saved). Off = every enabled agent goes to the planner.",
         executionMode: "Execution mode",
         modeParallel: "Parallel",
         modeSequential: "Sequential",
