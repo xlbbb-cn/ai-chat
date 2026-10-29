@@ -410,6 +410,11 @@ export default function App() {
   /** `true` while the transcript follows new content at the bottom; cleared
    *  when the user scrolls up, re-armed when they come back down. */
   const followBottomRef = useRef(true);
+  /** `scrollTop` last applied by the tail-follow effect above. The scrollbar
+   *  logic needs to tell that automatic pin-to-bottom apart from a scroll the
+   *  user actually made (wheel / thumb drag), otherwise the bar would stay
+   *  visible for the whole duration of a streaming reply. */
+  const programmaticScrollRef = useRef<number | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -524,6 +529,8 @@ export default function App() {
     const el = messagesRef.current;
     if (!el || !followBottomRef.current) return;
     el.scrollTop = el.scrollHeight;
+    // Read back immediately: the browser clamps to the real maximum.
+    programmaticScrollRef.current = el.scrollTop;
   }, [messages]);
 
   /** Re-arm the follow once the user scrolls back to (near) the bottom. */
@@ -589,6 +596,7 @@ export default function App() {
 
   useEffect(() => {
     const panelScrollableSelector = [
+      ".messages",
       ".history-list",
       ".settings-body",
       ".skills-list",
@@ -641,6 +649,19 @@ export default function App() {
       const previousTop = lastScrollTop.get(target) ?? target.scrollTop;
       const delta = Math.abs(target.scrollTop - previousTop);
       lastScrollTop.set(target, target.scrollTop);
+
+      // The transcript pins itself to the newest content while a reply
+      // streams. That follow is not the user scrolling, so it never reveals
+      // the bar — only a real wheel / drag (a position the effect did not
+      // write) counts as activity. The marker belongs to `.messages` alone,
+      // so a panel scrolling first cannot swallow it.
+      if (target === messagesRef.current) {
+        const programmaticTop = programmaticScrollRef.current;
+        programmaticScrollRef.current = null;
+        if (programmaticTop !== null && Math.abs(target.scrollTop - programmaticTop) < 2) {
+          return;
+        }
+      }
 
       const isActive = target.classList.contains("scrolling-active");
       if (!isActive && delta < minScrollDelta) return;

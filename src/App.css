@@ -1189,7 +1189,9 @@ body {
   position: absolute;
 }
 
-/* Panel vertical scrollbar: show while scrolling, auto-hide when idle */
+/* Panel / transcript vertical scrollbar: show while scrolling, auto-hide when
+   idle (2px thin bar, transparent until `.scrolling-active` is applied). */
+.messages,
 .history-list,
 .settings-body,
 .skills-list,
@@ -1204,6 +1206,7 @@ body {
   scrollbar-color: transparent transparent;
 }
 
+.messages::-webkit-scrollbar,
 .history-list::-webkit-scrollbar,
 .settings-body::-webkit-scrollbar,
 .skills-list::-webkit-scrollbar,
@@ -1217,6 +1220,7 @@ body {
   height: 0;
 }
 
+.messages::-webkit-scrollbar-thumb,
 .history-list::-webkit-scrollbar-thumb,
 .settings-body::-webkit-scrollbar-thumb,
 .skills-list::-webkit-scrollbar-thumb,
@@ -1230,6 +1234,7 @@ body {
   border-radius: 999px;
 }
 
+.messages.scrolling-active,
 .history-list.scrolling-active,
 .settings-body.scrolling-active,
 .skills-list.scrolling-active,
@@ -1244,6 +1249,7 @@ body {
   scrollbar-color: var(--c-muted) transparent;
 }
 
+.messages.scrolling-active::-webkit-scrollbar,
 .history-list.scrolling-active::-webkit-scrollbar,
 .settings-body.scrolling-active::-webkit-scrollbar,
 .skills-list.scrolling-active::-webkit-scrollbar,
@@ -1256,6 +1262,7 @@ body {
   width: 2px;
 }
 
+.messages.scrolling-active::-webkit-scrollbar-track,
 .history-list.scrolling-active::-webkit-scrollbar-track,
 .settings-body.scrolling-active::-webkit-scrollbar-track,
 .skills-list.scrolling-active::-webkit-scrollbar-track,
@@ -1268,6 +1275,7 @@ body {
   background: transparent;
 }
 
+.messages.scrolling-active::-webkit-scrollbar-thumb,
 .history-list.scrolling-active::-webkit-scrollbar-thumb,
 .settings-body.scrolling-active::-webkit-scrollbar-thumb,
 .skills-list.scrolling-active::-webkit-scrollbar-thumb,
