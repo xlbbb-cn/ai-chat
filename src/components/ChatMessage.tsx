@@ -19,6 +19,7 @@ import {
   faFileLines,
   faPaperclip,
   faPenToSquare,
+  faRotateRight,
   faTrash,
   faVolumeHigh,
   faWandSparkles,
@@ -493,16 +494,11 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
           </div>
         )}
 
-        {isUser && showRetry && (
-          <div className="message-actions">
-            <button className="message-retry-btn" onClick={onRetry} title={t("chat.retryTitle")}>
-              {t("common.retry")}
-            </button>
-          </div>
-        )}
       </div>
 
-      {/* Message action buttons (delete / fork / export) */}
+      {/* Message action buttons (delete / fork / export).
+          The user's retry lives in the same outside-the-bubble row, aligned
+          to its own edge — the card stays a pure content block. */}
       {isAssistant && showActions && !message.streaming && (
         <div className="message-action-buttons">
           {isAssistant && (
@@ -536,6 +532,19 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
               <FontAwesomeIcon icon={faCodeBranch} />
             </button>
           )}
+        </div>
+      )}
+      {isUser && showRetry && (
+        <div className="message-action-buttons">
+          <button
+            type="button"
+            className="message-action-btn"
+            onClick={onRetry}
+            title={t("chat.retryTitle")}
+          >
+            <FontAwesomeIcon icon={faRotateRight} />
+            {t("common.retry")}
+          </button>
         </div>
       )}
     </div>
