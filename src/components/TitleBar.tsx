@@ -8,6 +8,7 @@ import {
 } from "@tauri-apps/plugin-dialog";
 import {
     FontAwesomeIcon,
+    faBolt,
     faEllipsis,
     faWindowMaximize,
     faWindowMinimize,
@@ -23,6 +24,8 @@ import {
     openMarkdownFile,
 } from "../api";
 import { useI18n } from "../i18n";
+import { formatCountdown } from "../utils/time";
+import type { SleepLockState } from "../types";
 
 /**
  * The app ships frameless (`decorations: false`), so the drag region and the
@@ -44,14 +47,24 @@ function workspaceLabel(dir: string): string {
     return dir.split(/[\\/]/).filter(Boolean).pop() || dir;
 }
 
-export function TitleBar() {
+interface Props {
+    /** Backend "keep the machine awake" lock. The titlebar badge is its only
+     *  surface: it is informational, not a control. */
+    sleepLock: SleepLockState;
+    /** Wall-clock start of the running turn (`null` while the chat is idle),
+     *  so the badge counts the turn up instead of showing a static label. */
+    turnStartedAt: number | null;
+    /** 1 s heartbeat owned by the app shell (the delay timers use it too). */
+    now: number;
+}
+
+export function TitleBar({ sleepLock, turnStartedAt, now }: Props) {
     const { t } = useI18n();
     const [maximized, setMaximized] = useState(false);
     const [menuOpen, setMenuOpen] = useState(false);
     const [workspace, setWorkspace] = useState("");
     const menuRef = useRef<HTMLDivElement>(null);
     const triggerRef = useRef<HTMLButtonElement>(null);
-
     // The maximize glyph must follow the real window state — it also changes
     // when the user double-clicks the drag region or uses the OS shortcut.
     useEffect(() => {
@@ -221,6 +234,20 @@ export function TitleBar() {
                 {workspace && (
                     <span className="titlebar-workspace" title={workspace} data-tauri-drag-region>
                         {workspaceLabel(workspace)}
+                    </span>
+                )}
+                {sleepLock.active && (
+                    <span
+                        className="sleep-lock-badge"
+                        title={t("app.timers.sleepLockHint")}
+                        data-tauri-drag-region
+                    >
+                        <FontAwesomeIcon icon={faBolt} />
+                        {turnStartedAt !== null
+                            ? t("app.timers.sleepLockRunning", {
+                                  time: formatCountdown(now - turnStartedAt),
+                              })
+                            : t("app.timers.sleepLock")}
                     </span>
                 )}
             </div>

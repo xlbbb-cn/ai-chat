@@ -21,7 +21,10 @@ motion curve. Everything below is written against this codebase — the tokens i
    a view. Never use it decoratively and never add a second chromatic accent.
    A palette may re-hue it, but it stays the only accent of that view.
 3. **No elevation.** `--shadow-*` resolve to `none`. Layering is z-index, opacity
-   and the frosted `--c-toolbar` surface — nothing else.
+   and the frosted `--c-toolbar` surface — nothing else. The **one** exception is
+   the functional scroll-edge shade (`--shadow-scroll-top` /
+   `--shadow-scroll-bottom`): it never lifts a surface, it only says “the
+   transcript continues past this bar”, and it is toggled by scroll position.
 4. **4px radius on interactive elements.** No pills, no large radii, no circles
    (except the deliberate dot/spinner indicators).
 5. **One motion curve.** `--t-dur` + `--t-ease` for every state change. Colour and
@@ -160,6 +163,20 @@ shorthand resets the image.
 ```
 
 The names are kept as no-ops so legacy rules still parse.
+
+**Scroll-edge shade — the one sanctioned shadow.** Two extra tokens exist beside
+the no-ops, for the transcript's top and bottom boundary only:
+
+```css
+--c-scroll-shade: rgba(0, 0, 0, 0.18);            /* light; dark: 0.55 black */
+--shadow-scroll-top: 0 12px 18px -12px var(--c-scroll-shade);
+--shadow-scroll-bottom: 0 -12px 18px -12px var(--c-scroll-shade);
+```
+
+They are applied by `.toolbar.is-scrolled` / `.input-area.is-scrolled`, toggled
+from the transcript's scroll handler whenever content is hidden past that bar —
+the shade is a scroll cue, not depth. Never reuse them on anything else, and
+never give a panel or popup a shadow of its own.
 
 > **Gotcha:** `box-shadow: 0 1px 3px rgba(...), var(--shadow-sm)` is **invalid CSS**
 > once the token is `none` — the whole declaration is dropped silently. Never mix a

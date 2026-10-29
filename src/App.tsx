@@ -34,9 +34,9 @@ import type {
   UpdateInfo,
 } from "./types";
 import { isGenerationStopped, isLocale, useI18n } from "./i18n";
+import { formatCountdown } from "./utils/time";
 import {
   FontAwesomeIcon,
-  faBolt,
   faBrain,
   faClockRotateLeft,
   faFileLines,
@@ -73,21 +73,6 @@ function applyTheme(theme: ThemeMode | undefined, palette: Palette | undefined) 
 }
 
 // ─── Delay timers ────────────────────────────────────────────────────────────
-
-/**
- * Countdown label for the timer bar: `mm:ss`, or `h:mm:ss` past an hour.
- * Clamped at zero; the row disappears as soon as the timer fires.
- */
-function formatCountdown(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const seconds = total % 60;
-  const minutes = Math.floor(total / 60) % 60;
-  const hours = Math.floor(total / 3600);
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return hours > 0
-    ? `${hours}:${pad(minutes)}:${pad(seconds)}`
-    : `${pad(minutes)}:${pad(seconds)}`;
-}
 
 /**
  * The user turn a fired timer produces. The prefix makes an automatic resume
@@ -415,6 +400,11 @@ export default function App() {
    *  user actually made (wheel / thumb drag), otherwise the bar would stay
    *  visible for the whole duration of a streaming reply. */
   const programmaticScrollRef = useRef<number | null>(null);
+  /** The two bars the transcript can scroll under. Their edge shade is
+   *  toggled imperatively — it tracks scroll position, not render state, so a
+   *  class flip beats re-rendering the whole tree on every scroll event. */
+  const toolbarRef = useRef<HTMLElement>(null);
+  const inputAreaRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -517,6 +507,22 @@ export default function App() {
   }, []);
 
   /**
+   * Paint the scroll-edge shade on a boundary only while the transcript hides
+   * content past it — top shade when the first message has scrolled out above,
+   * bottom shade when more messages remain below. At the very top / bottom the
+   * corresponding shade is gone, so the edges "rest" against the bars.
+   */
+  const syncScrollEdges = useCallback(() => {
+    const el = messagesRef.current;
+    if (!el) return;
+    const scrollable = el.scrollHeight - el.clientHeight > 1;
+    const atTop = el.scrollTop <= 0;
+    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
+    toolbarRef.current?.classList.toggle("is-scrolled", scrollable && !atTop);
+    inputAreaRef.current?.classList.toggle("is-scrolled", scrollable && !atBottom);
+  }, []);
+
+  /**
    * Follow the tail only while the transcript is already at the bottom.
    * Streaming updates `messages` many times per second; a view the user
    * scrolled up to re-read must not be yanked back down by incoming tokens.
@@ -527,17 +533,31 @@ export default function App() {
    */
   useEffect(() => {
     const el = messagesRef.current;
-    if (!el || !followBottomRef.current) return;
-    el.scrollTop = el.scrollHeight;
-    // Read back immediately: the browser clamps to the real maximum.
-    programmaticScrollRef.current = el.scrollTop;
-  }, [messages]);
+    if (!el) return;
+    if (followBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
+      // Read back immediately: the browser clamps to the real maximum.
+      programmaticScrollRef.current = el.scrollTop;
+    }
+    syncScrollEdges();
+  }, [messages, syncScrollEdges]);
 
   /** Re-arm the follow once the user scrolls back to (near) the bottom. */
   const handleMessagesScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     const el = event.currentTarget;
     followBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 48;
-  }, []);
+    syncScrollEdges();
+  }, [syncScrollEdges]);
+
+  // A resize (window, banner, sidebar) changes how much of the transcript fits
+  // without scrolling, so the edge shades must be re-evaluated too.
+  useEffect(() => {
+    const el = messagesRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => syncScrollEdges());
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [syncScrollEdges]);
 
   useEffect(() => {
     return () => {
@@ -1985,7 +2005,11 @@ export default function App() {
 
   return (
     <div className="app-layout">
-      <TitleBar />
+      <TitleBar
+        sleepLock={sleepLock}
+        turnStartedAt={turnStartedAt}
+        now={timerTick}
+      />
       {markdownEditorOpen && (
         <Portal>
           <div className="markdown-editor-overlay" role="dialog" aria-modal="true" aria-label={t("app.markdownEditorAria")}>
@@ -2167,7 +2191,7 @@ export default function App() {
       {/* Main chat area */}
       <div className="chat-area" onClick={handleChatAreaClick}>
         {/* Toolbar */}
-        <header className="toolbar">
+        <header className="toolbar" ref={toolbarRef}>
           <span className="app-title">
             <button
               className="toolbar-btn"
@@ -2350,61 +2374,44 @@ export default function App() {
         </div>
 
         {/* Input */}
-        <div className="input-area" style={{ position: "relative", flexDirection: "column", alignItems: "stretch" }}>
-          {(timers.length > 0 || sleepLock.active) && (
+        <div className="input-area" ref={inputAreaRef} style={{ position: "relative", flexDirection: "column", alignItems: "stretch" }}>
+          {timers.length > 0 && (
             <div className="timer-bar" role="status" aria-live="polite">
-              {timers.length > 0 && (
-                <>
-                  <span className="timer-bar-title">
-                    <FontAwesomeIcon icon={faStopwatch} />
-                    {t("app.timers.title")}
-                  </span>
-                  <div className="timer-bar-chips">
-                    {timers.map((timer) => {
-                      const otherSession =
-                        Boolean(timer.session_id) && timer.session_id !== sessionId;
-                      return (
-                        <div
-                          key={timer.id}
-                          className={`timer-chip${otherSession ? " other-session" : ""}`}
-                          title={timer.message}
-                        >
-                          <span className="timer-chip-label">
-                            {timer.label || t("app.timers.untitled")}
-                          </span>
-                          <span className="timer-chip-countdown">
-                            {t("app.timers.firesIn", {
-                              time: formatCountdown(timer.fire_at - timerTick),
-                            })}
-                          </span>
-                          <button
-                            type="button"
-                            className="timer-chip-cancel"
-                            title={t("app.timers.cancel")}
-                            aria-label={t("app.timers.cancel")}
-                            onClick={() => void handleCancelTimer(timer.id)}
-                          >
-                            <FontAwesomeIcon icon={faXmark} />
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              )}
-              {sleepLock.active && (
-                <span
-                  className="sleep-lock-badge"
-                  title={t("app.timers.sleepLockHint")}
-                >
-                  <FontAwesomeIcon icon={faBolt} />
-                  {turnStartedAt !== null
-                    ? t("app.timers.sleepLockRunning", {
-                        time: formatCountdown(timerTick - turnStartedAt),
-                      })
-                    : t("app.timers.sleepLock")}
-                </span>
-              )}
+              <span className="timer-bar-title">
+                <FontAwesomeIcon icon={faStopwatch} />
+                {t("app.timers.title")}
+              </span>
+              <div className="timer-bar-chips">
+                {timers.map((timer) => {
+                  const otherSession =
+                    Boolean(timer.session_id) && timer.session_id !== sessionId;
+                  return (
+                    <div
+                      key={timer.id}
+                      className={`timer-chip${otherSession ? " other-session" : ""}`}
+                      title={timer.message}
+                    >
+                      <span className="timer-chip-label">
+                        {timer.label || t("app.timers.untitled")}
+                      </span>
+                      <span className="timer-chip-countdown">
+                        {t("app.timers.firesIn", {
+                          time: formatCountdown(timer.fire_at - timerTick),
+                        })}
+                      </span>
+                      <button
+                        type="button"
+                        className="timer-chip-cancel"
+                        title={t("app.timers.cancel")}
+                        aria-label={t("app.timers.cancel")}
+                        onClick={() => void handleCancelTimer(timer.id)}
+                      >
+                        <FontAwesomeIcon icon={faXmark} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
           {(usage || streaming) && (

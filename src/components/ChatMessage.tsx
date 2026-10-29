@@ -442,7 +442,13 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
             }
           }}
         />
-        {message.streaming && <span className="cursor">_</span>}
+        {/* The caret marks live text, not the wait: while the turn is still
+            waiting for its first token (or is off running tools / reasoning)
+            the bubble stays clean. It re-appears the moment the answer body
+            starts streaming, at the end of that text. */}
+        {isAssistant && message.streaming && mainContent.trim().length > 0 && (
+          <span className="cursor">_</span>
+        )}
         {/* Information the user pushed into this turn while it was running.
             One turn stays one bubble, so the block sits under the reply and
             states when the model actually received it. */}
