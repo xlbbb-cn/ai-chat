@@ -76,6 +76,7 @@ const zhCN: Messages = {
             insert: "填入输入框",
             dismiss: "忽略",
             sleepLock: "已阻止休眠",
+            sleepLockRunning: "已阻止休眠 · 本轮 {time}",
             sleepLockHint: "有定时器在等待或本轮对话仍在运行，系统将保持唤醒。",
         },
 

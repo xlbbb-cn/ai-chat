@@ -86,6 +86,7 @@ const en = {
             insert: "Insert into input",
             dismiss: "Dismiss",
             sleepLock: "Sleep blocked",
+            sleepLockRunning: "Sleep blocked · turn {time}",
             sleepLockHint:
                 "A timer is pending or this turn is still running, so the system is kept awake.",
         },

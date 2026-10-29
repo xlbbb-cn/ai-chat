@@ -76,6 +76,7 @@ const zhTW: Messages = {
             insert: "填入輸入框",
             dismiss: "略過",
             sleepLock: "已阻止休眠",
+            sleepLockRunning: "已阻止休眠 · 本輪 {time}",
             sleepLockHint: "有計時器在等待或本輪對話仍在執行，系統將保持喚醒。",
         },
 

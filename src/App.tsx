@@ -395,6 +395,11 @@ export default function App() {
   const [timers, setTimers] = useState<TimerEntry[]>([]);
   /** Cross-platform "system awake" lock, shown as a badge above the input. */
   const [sleepLock, setSleepLock] = useState<SleepLockState>({ active: false, holders: 0 });
+  /**
+   * Wall-clock start of the running turn, so the sleep-lock badge can also
+   * show how long this turn has been going. `null` while the chat is idle.
+   */
+  const [turnStartedAt, setTurnStartedAt] = useState<number | null>(null);
   /** 1 s heartbeat that drives the countdowns in the timer bar. */
   const [timerTick, setTimerTick] = useState(() => Date.now());
   /** Timer that fired for a session the user is not currently in. */
@@ -1133,12 +1138,26 @@ export default function App() {
     };
   }, []);
 
-  // Tick the countdowns — only while something is actually pending.
+  // Remember when the running turn started, so the sleep-lock badge can count
+  // it up. `streaming` flips false→true at the start of a turn (send / retry)
+  // and back to false only when the turn ends, is stopped, or the chat is
+  // switched — one transition is one turn, so a chain of mid-turn requests
+  // keeps its original start.
   useEffect(() => {
-    if (timers.length === 0) return;
+    if (streaming) {
+      setTurnStartedAt((prev) => prev ?? Date.now());
+    } else {
+      setTurnStartedAt(null);
+    }
+  }, [streaming]);
+
+  // Tick the countdowns — only while something is actually pending (or a turn
+  // is running, which is what the badge's elapsed time follows).
+  useEffect(() => {
+    if (timers.length === 0 && !streaming) return;
     const id = window.setInterval(() => setTimerTick(Date.now()), 1000);
     return () => window.clearInterval(id);
-  }, [timers.length]);
+  }, [timers.length, streaming]);
 
   const handleCancelTimer = useCallback(async (id: string) => {
     try {
@@ -2358,7 +2377,11 @@ export default function App() {
                   title={t("app.timers.sleepLockHint")}
                 >
                   <FontAwesomeIcon icon={faBolt} />
-                  {t("app.timers.sleepLock")}
+                  {turnStartedAt !== null
+                    ? t("app.timers.sleepLockRunning", {
+                        time: formatCountdown(timerTick - turnStartedAt),
+                      })
+                    : t("app.timers.sleepLock")}
                 </span>
               )}
             </div>
