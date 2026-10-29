@@ -1,6 +1,6 @@
 [package]
 name = "ai-chat"
-version = "2.2.0"
+version = "2.3.0"
 description = "OpenAI-compatible chat client with skills"
 authors = []
 license = "GPL-2.0-only"
