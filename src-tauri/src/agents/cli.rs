@@ -20,7 +20,7 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 use crate::process_guard::{kill_process_tree, track_child};
 use crate::tools::{decode_process_bytes, truncate_tool_output, OutputDecodeHint};
 
-use super::{CliAgentSettings, KeyValue, SubAgent};
+use super::{resolve_agent_timeout, CliAgentSettings, KeyValue, SubAgent};
 
 /// Head/tail character budget kept for the tool result. The middle of a long
 /// transcript is dropped first: the prompt echo at the top and the final
@@ -34,8 +34,6 @@ const EMIT_CHUNK_CHARS: usize = 4_000;
 const EMIT_INTERVAL_MS: u64 = 300;
 /// Timeout for the "probe" command (resolve + optional --version).
 const PROBE_TIMEOUT_SECS: u64 = 15;
-/// Upper bound for a run's timeout.
-pub const MAX_TIMEOUT_SECS: u64 = 7_200;
 /// Cancellation/timeout poll interval while waiting for the child process.
 const WAIT_POLL_MS: u64 = 250;
 /// How long to wait for the output pumps after the child exited. A grandchild
@@ -858,6 +856,15 @@ fn misdirected_prompt_hint(settings: &CliAgentSettings, output: &str) -> Option<
     ))
 }
 
+/// Waits for a run's deadline. `None` means the timeout is disabled, so the
+/// future never completes and only process exit / `Stop` end the wait loop.
+async fn wait_for_deadline(deadline: Option<tokio::time::Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(deadline).await,
+        None => std::future::pending::<()>().await,
+    }
+}
+
 /// Runs a `cli`-type agent for `prompt` inside `cwd` (already sandbox-checked by
 /// the caller) and returns its outcome. Output is streamed as `agent-task-token`
 /// events keyed by `task_id`.
@@ -877,7 +884,7 @@ pub async fn run(
     let settings = &agent.cli;
     let resolved = resolve_executable(&settings.command)?;
 
-    let timeout_seconds = (settings.default_timeout_seconds as u64).clamp(1, MAX_TIMEOUT_SECS);
+    let timeout = resolve_agent_timeout(settings.default_timeout_seconds);
     let model = agent.model.as_deref();
     let (rendered_args, use_stdin) =
         render_arguments(settings, &agent.name, prompt, model, &cwd, session_continue);
@@ -928,7 +935,7 @@ pub async fn run(
 
     let pid = child.id();
     let started = std::time::Instant::now();
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_seconds);
+    let deadline = timeout.map(|timeout| tokio::time::Instant::now() + timeout);
     let mut poll = tokio::time::interval(Duration::from_millis(WAIT_POLL_MS));
     poll.tick().await; // the first tick is immediate
 
@@ -951,7 +958,7 @@ pub async fn run(
                 }
                 break;
             }
-            _ = tokio::time::sleep_until(deadline) => {
+            _ = wait_for_deadline(deadline) => {
                 stop_reason = Some("timeout");
                 break;
             }
@@ -1003,7 +1010,8 @@ pub async fn run(
         ),
         "timeout" => format!(
             "CLI agent \"{}\" hit its {}s timeout and its process tree was terminated.",
-            agent.name, timeout_seconds
+            agent.name,
+            timeout.map(|timeout| timeout.as_secs()).unwrap_or(0)
         ),
         "cancelled" => format!(
             "CLI agent \"{}\" was cancelled by the user after {} and its process tree was terminated.",

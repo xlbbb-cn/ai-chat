@@ -550,7 +550,9 @@ const zhTW: Messages = {
         cliCwd: "工作目錄",
         cliCwdPlaceholder: "工作區根目錄",
         cliCwdHint: "相對於工作區的目錄；留空表示工作區根目錄。",
-        timeout: "預設逾時（秒）",
+        timeout: "逾時（秒）",
+        timeoutHint:
+            "0 = 不限制逾時；正數上限 7200 秒。執行會在完成、手動停止目前回合或結束應用程式時結束。",
         noCommand: "尚未設定命令",
         inheritModel: "繼承主模型",
 

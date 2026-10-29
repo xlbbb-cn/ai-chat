@@ -588,7 +588,9 @@ const en = {
         cliCwd: "Working directory",
         cliCwdPlaceholder: "workspace root",
         cliCwdHint: "Workspace-relative directory to run in. Leave empty for the workspace root.",
-        timeout: "Default timeout (seconds)",
+        timeout: "Timeout (seconds)",
+        timeoutHint:
+            "0 = no timeout. Positive values are capped at 7200 seconds; the run ends when it finishes, the turn is stopped, or the app exits.",
         noCommand: "No command configured",
         inheritModel: "Inherits the main model",
 

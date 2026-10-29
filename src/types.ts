@@ -443,6 +443,7 @@ export interface CliAgentSettings {
   continue_args: string[];
   model_args: string[];
   env: KeyValue[];
+  /** Run timeout in seconds; 0 = no timeout. */
   default_timeout_seconds: number;
   /** Workspace-relative directory to run in (empty = workspace root). */
   cwd: string;
@@ -460,6 +461,7 @@ export interface CloudAgentSettings {
   body_template: string;
   /** Dot path into the response holding the text (e.g. `choices.0.message.content`). */
   result_path: string;
+  /** Overall timeout in seconds covering polling; 0 = no timeout. */
   timeout_seconds: number;
   /** Async mode: poll this URL (`{id}` placeholder). Empty = single response. */
   poll_url: string;

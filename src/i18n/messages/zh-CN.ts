@@ -550,7 +550,9 @@ const zhCN: Messages = {
         cliCwd: "工作目录",
         cliCwdPlaceholder: "工作区根目录",
         cliCwdHint: "相对于工作区的目录；留空表示工作区根目录。",
-        timeout: "默认超时（秒）",
+        timeout: "超时（秒）",
+        timeoutHint:
+            "0 = 不限制超时；正数上限 7200 秒。运行会在完成、手动停止当前回合或退出应用时结束。",
         noCommand: "未配置命令",
         inheritModel: "继承主模型",
 

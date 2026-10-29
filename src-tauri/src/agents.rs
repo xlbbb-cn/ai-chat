@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tiktoken_rs::cl100k_base;
 use uuid::Uuid;
@@ -128,6 +129,7 @@ pub struct CliAgentSettings {
     pub model_args: Vec<String>,
     #[serde(default)]
     pub env: Vec<KeyValue>,
+    /// Run timeout in seconds. `0` means no timeout.
     #[serde(default = "default_cli_timeout_seconds")]
     pub default_timeout_seconds: u32,
     /// Optional workspace-relative directory to run in (default: workspace root).
@@ -179,7 +181,7 @@ pub struct CloudAgentSettings {
     /// (e.g. `choices.0.message.content`, `result.output`).
     #[serde(default = "default_cloud_result_path")]
     pub result_path: String,
-    /// Overall timeout in seconds, covering polling.
+    /// Overall timeout in seconds, covering polling. `0` means no timeout.
     #[serde(default = "default_cloud_timeout_seconds")]
     pub timeout_seconds: u32,
     /// Async mode: poll this URL (supports the `{id}` placeholder) until the
@@ -1026,9 +1028,6 @@ pub fn save_sub_agent(state: State<'_, AppState>, agent: SubAgent) -> Result<(),
             if a.cloud.endpoint.is_empty() {
                 return Err("A cloud agent needs an endpoint URL.".to_string());
             }
-            if a.cloud.timeout_seconds == 0 {
-                a.cloud.timeout_seconds = default_cloud_timeout_seconds();
-            }
             if a.cloud.poll_interval_seconds == 0 {
                 a.cloud.poll_interval_seconds = default_poll_interval_seconds();
             }
@@ -1834,6 +1833,16 @@ struct CliRunContext {
     cwd: PathBuf,
     session_key: CliSessionKey,
     session_continue: bool,
+}
+
+/// Upper bound for any external agent run's timeout.
+pub(crate) const MAX_AGENT_TIMEOUT_SECS: u64 = 7_200;
+
+/// Resolves a configured agent timeout: `0` disables it, while positive values
+/// are capped at [`MAX_AGENT_TIMEOUT_SECS`].
+pub(crate) fn resolve_agent_timeout(configured: u32) -> Option<Duration> {
+    let seconds = (configured as u64).min(MAX_AGENT_TIMEOUT_SECS);
+    (seconds > 0).then(|| Duration::from_secs(seconds))
 }
 
 /// Maps a finished run to the task/mission status. Only an exit-0 run is a
@@ -2842,6 +2851,18 @@ mod tests {
         assert_eq!(normalize_agent_type(" cloud "), AGENT_TYPE_CLOUD);
         assert_eq!(normalize_agent_type("banana"), AGENT_TYPE_LLM);
         assert_eq!(normalize_agent_type(""), AGENT_TYPE_LLM);
+    }
+
+    #[test]
+    fn zero_timeout_means_no_timeout() {
+        // `0` disables the deadline for CLI and cloud agents.
+        assert!(resolve_agent_timeout(0).is_none());
+        assert_eq!(resolve_agent_timeout(600), Some(Duration::from_secs(600)));
+        // Positive values stay capped at the documented maximum.
+        assert_eq!(
+            resolve_agent_timeout(u32::MAX),
+            Some(Duration::from_secs(MAX_AGENT_TIMEOUT_SECS))
+        );
     }
 }
 

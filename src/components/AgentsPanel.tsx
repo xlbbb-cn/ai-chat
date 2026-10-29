@@ -144,6 +144,13 @@ const linesToValues = (text: string): string[] =>
 const pairsToText = (pairs: KeyValue[]): string =>
   pairs.map((pair) => `${pair.key}=${pair.value}`).join("\n");
 
+/** Timeout input: `0` means no timeout; positive values are capped at 7200s. */
+function parseTimeoutSeconds(raw: string): number {
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(7200, Math.trunc(value)));
+}
+
 function textToPairs(text: string): KeyValue[] {
   return text
     .split("\n")
@@ -459,15 +466,16 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
             {t("agents.timeout")}
             <input
               type="number"
-              min={1}
+              min={0}
               max={7200}
               value={agent.cli.default_timeout_seconds}
               onChange={(e) =>
                 updateCli({
-                  default_timeout_seconds: Math.max(1, Math.min(7200, Number(e.target.value) || 600)),
+                  default_timeout_seconds: parseTimeoutSeconds(e.target.value),
                 })
               }
             />
+            <small className="agent-field-hint">{t("agents.timeoutHint")}</small>
           </label>
         </>
       );
@@ -588,15 +596,16 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
             {t("agents.timeout")}
             <input
               type="number"
-              min={1}
+              min={0}
               max={7200}
               value={agent.cloud.timeout_seconds}
               onChange={(e) =>
                 updateCloud({
-                  timeout_seconds: Math.max(1, Math.min(7200, Number(e.target.value) || 1800)),
+                  timeout_seconds: parseTimeoutSeconds(e.target.value),
                 })
               }
             />
+            <small className="agent-field-hint">{t("agents.timeoutHint")}</small>
           </label>
         </>
       );

@@ -15,12 +15,10 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
-use super::{KeyValue, SubAgent};
+use super::{resolve_agent_timeout, KeyValue, SubAgent};
 
 /// Timeout for the panel's connectivity probe.
 const PROBE_TIMEOUT_SECS: u64 = 30;
-/// Upper bound for a run's overall timeout.
-const MAX_TIMEOUT_SECS: u64 = 7_200;
 /// Longest a single HTTP call may take.
 const REQUEST_TIMEOUT_SECS: u64 = 300;
 
@@ -195,9 +193,9 @@ pub async fn run(
         return Err("the endpoint must start with http:// or https://".to_string());
     }
 
-    let overall_timeout = (settings.timeout_seconds as u64).clamp(1, MAX_TIMEOUT_SECS);
+    let overall_timeout = resolve_agent_timeout(settings.timeout_seconds);
     let started = std::time::Instant::now();
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(overall_timeout);
+    let deadline = overall_timeout.map(|timeout| tokio::time::Instant::now() + timeout);
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
@@ -264,15 +262,18 @@ pub async fn run(
         if cancelled.load(Ordering::SeqCst) {
             return Err("cancelled by the user".to_string());
         }
-        if tokio::time::Instant::now() >= deadline {
-            return Err(format!(
-                "the job did not finish within {overall_timeout}s (last status: {})",
-                if last_status.trim().is_empty() {
-                    "unknown"
-                } else {
-                    last_status.trim()
-                }
-            ));
+        if let Some(deadline) = deadline {
+            if tokio::time::Instant::now() >= deadline {
+                return Err(format!(
+                    "the job did not finish within {}s (last status: {})",
+                    overall_timeout.map(|timeout| timeout.as_secs()).unwrap_or(0),
+                    if last_status.trim().is_empty() {
+                        "unknown"
+                    } else {
+                        last_status.trim()
+                    }
+                ));
+            }
         }
         tokio::time::sleep(interval).await;
         attempt += 1;
