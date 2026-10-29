@@ -1349,6 +1349,24 @@ pub async fn orchestrate(
 
 // ─── Auto-configure ───────────────────────────────────────────────────────────
 
+/// Applies the orchestrator's `strategy: "existing"` selection. An id list
+/// that matches nothing (a hallucinated or simply missing `ids` array) must
+/// not empty the roster: the planner would then see zero agents, produce no
+/// tasks and abort the whole mission. Falling back to every enabled agent
+/// keeps one bad model answer from wasting the orchestration.
+fn select_existing_agents(existing: &[SubAgent], ids: &[&str]) -> Vec<SubAgent> {
+    let selected: Vec<SubAgent> = existing
+        .iter()
+        .filter(|agent| ids.contains(&agent.id.as_str()))
+        .cloned()
+        .collect();
+    if selected.is_empty() {
+        existing.to_vec()
+    } else {
+        selected
+    }
+}
+
 async fn auto_configure_agents(
     client: &Client,
     url: &str,
@@ -1416,11 +1434,7 @@ async fn auto_configure_agents(
                 .as_array()
                 .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
                 .unwrap_or_default();
-            Ok(existing
-                .iter()
-                .filter(|a| ids.contains(&a.id.as_str()))
-                .cloned()
-                .collect())
+            Ok(select_existing_agents(existing, &ids))
         }
         Some("new") => {
             let agents: Vec<SubAgent> = parsed["agents"]
@@ -2863,6 +2877,21 @@ mod tests {
             resolve_agent_timeout(u32::MAX),
             Some(Duration::from_secs(MAX_AGENT_TIMEOUT_SECS))
         );
+    }
+
+    #[test]
+    fn auto_configure_selection_never_empties_the_roster() {
+        let roster: Vec<SubAgent> = serde_json::from_str(
+            r#"[{"id":"a","name":"a","description":""},{"id":"b","name":"b","description":""}]"#,
+        )
+        .expect("roster parses");
+
+        // Known ids narrow the roster down to just the relevant agents …
+        assert_eq!(select_existing_agents(&roster, &["b"]).len(), 1);
+        // … but unknown or missing ids fall back to every enabled agent
+        // instead of an empty set, which would stall the planner.
+        assert_eq!(select_existing_agents(&roster, &["nope"]).len(), 2);
+        assert_eq!(select_existing_agents(&roster, &[]).len(), 2);
     }
 }
 
