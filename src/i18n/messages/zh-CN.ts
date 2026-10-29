@@ -552,7 +552,7 @@ const zhCN: Messages = {
         cliCwdHint: "相对于工作区的目录；留空表示工作区根目录。",
         timeout: "超时（秒）",
         timeoutHint:
-            "0 = 不限制超时；正数上限 7200 秒。运行会在完成、手动停止当前回合或退出应用时结束。",
+            "0 = 不限制超时：运行会持续到完成、手动停止当前回合或退出应用。正数上限 7200 秒；留空保持默认值 600。",
         noCommand: "未配置命令",
         inheritModel: "继承主模型",
 
@@ -579,6 +579,8 @@ const zhCN: Messages = {
         cloudPollDoneValues: "完成状态值 —— 每行一个",
         cloudPollFailedValues: "失败状态值 —— 每行一个",
         cloudUnreachable: "无法连接",
+        cloudTimeoutHint:
+            "0 = 不限制总超时：轮询会持续到任务完成或手动停止。单次 HTTP 请求仍受 300 秒限制，正数上限 7200 秒；留空保持默认值 1800。",
 
         // ── 通用 ──
         requireApproval: "运行前需确认",

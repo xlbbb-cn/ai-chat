@@ -73,6 +73,10 @@ interface Props {
   agentStatuses: Record<string, AgentStatus>;
 }
 
+/** Default timeouts kept in sync with the Rust `serde` defaults. */
+const DEFAULT_CLI_TIMEOUT_SECONDS = 600;
+const DEFAULT_CLOUD_TIMEOUT_SECONDS = 1800;
+
 function emptyCliSettings(): CliAgentSettings {
   return {
     command: "",
@@ -81,7 +85,7 @@ function emptyCliSettings(): CliAgentSettings {
     continue_args: [],
     model_args: [],
     env: [],
-    default_timeout_seconds: 600,
+    default_timeout_seconds: DEFAULT_CLI_TIMEOUT_SECONDS,
     cwd: "",
   };
 }
@@ -93,7 +97,7 @@ function emptyCloudSettings(): CloudAgentSettings {
     headers: [],
     body_template: '{"messages":[{"role":"user","content":"{prompt}"}]}',
     result_path: "choices.0.message.content",
-    timeout_seconds: 1800,
+    timeout_seconds: DEFAULT_CLOUD_TIMEOUT_SECONDS,
     poll_url: "",
     poll_id_path: "id",
     poll_status_path: "status",
@@ -144,10 +148,16 @@ const linesToValues = (text: string): string[] =>
 const pairsToText = (pairs: KeyValue[]): string =>
   pairs.map((pair) => `${pair.key}=${pair.value}`).join("\n");
 
-/** Timeout input: `0` means no timeout; positive values are capped at 7200s. */
-function parseTimeoutSeconds(raw: string): number {
-  const value = Number(raw);
-  if (!Number.isFinite(value)) return 0;
+/**
+ * Timeout input: `0` means no timeout; positive values are capped at 7200s.
+ * An empty (or not-yet-valid) field falls back to `fallback` instead of `0` —
+ * clearing the box must not silently turn the run into "no timeout".
+ */
+function parseTimeoutSeconds(raw: string, fallback: number): number {
+  const trimmed = raw.trim();
+  if (trimmed === "") return fallback;
+  const value = Number(trimmed);
+  if (!Number.isFinite(value)) return fallback;
   return Math.max(0, Math.min(7200, Math.trunc(value)));
 }
 
@@ -471,7 +481,10 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
               value={agent.cli.default_timeout_seconds}
               onChange={(e) =>
                 updateCli({
-                  default_timeout_seconds: parseTimeoutSeconds(e.target.value),
+                  default_timeout_seconds: parseTimeoutSeconds(
+                    e.target.value,
+                    DEFAULT_CLI_TIMEOUT_SECONDS,
+                  ),
                 })
               }
             />
@@ -601,11 +614,14 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
               value={agent.cloud.timeout_seconds}
               onChange={(e) =>
                 updateCloud({
-                  timeout_seconds: parseTimeoutSeconds(e.target.value),
+                  timeout_seconds: parseTimeoutSeconds(
+                    e.target.value,
+                    DEFAULT_CLOUD_TIMEOUT_SECONDS,
+                  ),
                 })
               }
             />
-            <small className="agent-field-hint">{t("agents.timeoutHint")}</small>
+            <small className="agent-field-hint">{t("agents.cloudTimeoutHint")}</small>
           </label>
         </>
       );

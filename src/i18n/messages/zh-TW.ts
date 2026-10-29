@@ -552,7 +552,7 @@ const zhTW: Messages = {
         cliCwdHint: "相對於工作區的目錄；留空表示工作區根目錄。",
         timeout: "逾時（秒）",
         timeoutHint:
-            "0 = 不限制逾時；正數上限 7200 秒。執行會在完成、手動停止目前回合或結束應用程式時結束。",
+            "0 = 不限制逾時：執行會持續到完成、手動停止目前回合或結束應用程式。正數上限 7200 秒；留空維持預設值 600。",
         noCommand: "尚未設定命令",
         inheritModel: "繼承主模型",
 
@@ -579,6 +579,8 @@ const zhTW: Messages = {
         cloudPollDoneValues: "完成狀態值 —— 每行一個",
         cloudPollFailedValues: "失敗狀態值 —— 每行一個",
         cloudUnreachable: "無法連線",
+        cloudTimeoutHint:
+            "0 = 不限制總逾時：輪詢會持續到工作完成或手動停止。單次 HTTP 請求仍受 300 秒限制，正數上限 7200 秒；留空維持預設值 1800。",
 
         // ── 共用 ──
         requireApproval: "執行前需確認",

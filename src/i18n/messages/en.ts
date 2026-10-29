@@ -590,7 +590,7 @@ const en = {
         cliCwdHint: "Workspace-relative directory to run in. Leave empty for the workspace root.",
         timeout: "Timeout (seconds)",
         timeoutHint:
-            "0 = no timeout. Positive values are capped at 7200 seconds; the run ends when it finishes, the turn is stopped, or the app exits.",
+            "0 = no timeout: the run keeps going until it finishes, the turn is stopped, or the app exits. Positive values are capped at 7200 seconds. Leaving the field empty keeps the default (600).",
         noCommand: "No command configured",
         inheritModel: "Inherits the main model",
 
@@ -617,6 +617,8 @@ const en = {
         cloudPollDoneValues: "Done status values — one per line",
         cloudPollFailedValues: "Failed status values — one per line",
         cloudUnreachable: "unreachable",
+        cloudTimeoutHint:
+            "0 = no overall timeout: polling continues until the job finishes or the turn is stopped. Each HTTP request is still capped at 300 seconds, positive values at 7200. Leaving the field empty keeps the default (1800).",
 
         // ── shared ──
         requireApproval: "Ask before running",
