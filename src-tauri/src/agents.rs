@@ -2533,7 +2533,7 @@ async fn run_sub_agent_inner(
                 emit_reasoning: false,
                 emit_usage: false,
                 usage_max_tokens: None,
-                ds_format: config.ds_format,
+                ds_format: config.ds_format_for(model),
                 conversation_id: Some(session_id),
             },
         )

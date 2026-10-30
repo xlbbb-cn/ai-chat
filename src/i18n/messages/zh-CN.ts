@@ -270,7 +270,8 @@ const zhCN: Messages = {
             placeholderDefault: "默认",
             placeholderDefaultLimit: "默认上限",
             dsFormat: "DS-Format（DeepSeek 格式）",
-            dsFormatHint: "按 DeepSeek 系思考模式模型的要求，在回传 assistant 消息时携带 reasoning_content。仅在使用此类模型时开启，其他服务商请保持关闭。",
+            dsFormatHint: "按 DeepSeek 系思考模式模型的要求，在回传 assistant 消息时携带 reasoning_content。DeepSeek 系模型会自动开启；仅当其他服务商同样需要时才手动打开。",
+            dsFormatAuto: "{model} 已自动开启：DeepSeek 系模型始终使用 DS-Format，reasoning_content 会自动回传。",
         },
 
         runtime: {

@@ -317,6 +317,22 @@ mod tests {
     }
 
     #[test]
+    fn deepseek_model_ids_are_detected_regardless_of_vendor_prefix_and_case() {
+        for id in [
+            "deepseek-chat",
+            "deepseek-reasoner",
+            "DeepSeek-V3.1",
+            "deepseek-ai/DeepSeek-R1",
+            "  deepseek/deepseek-chat  ",
+        ] {
+            assert!(is_deepseek_model(id), "{id} should be treated as DeepSeek");
+        }
+        for id in ["gpt-4o-mini", "qwen3-max", "", "  "] {
+            assert!(!is_deepseek_model(id), "{id} should not be treated as DeepSeek");
+        }
+    }
+
+    #[test]
     fn missing_tool_call_ids_are_generated_and_unique() {
         // Some relays stream the first tool call with an empty id (the real
         // failing session had `["", "call_92fd…"]`), which DashScope rejects on
@@ -926,9 +942,20 @@ fn message_has_reasoning(msg: &Value) -> bool {
         .unwrap_or(false)
 }
 
-/// DeepSeek-format ("DS-Format") request normalization, toggled via
-/// `ds_format` in Settings. Thinking-mode DeepSeek-family APIs reject
-/// assistant messages that come back without their `reasoning_content`:
+/// Is this a DeepSeek-family model id?
+///
+/// DS-Format applies to them automatically (see `AppConfig::ds_format_for`),
+/// because their thinking mode rejects replayed assistant messages that omit
+/// `reasoning_content`. Matching is deliberately loose: providers prefix the
+/// vendor (`deepseek/deepseek-chat`, `deepseek-ai/DeepSeek-V3.1`) and append
+/// date stamps, so a case-insensitive substring check is the stable signal.
+pub(crate) fn is_deepseek_model(model: &str) -> bool {
+    model.trim().to_ascii_lowercase().contains("deepseek")
+}
+
+/// DeepSeek-format ("DS-Format") request normalization. Thinking-mode
+/// DeepSeek-family APIs reject assistant messages that come back without
+/// their `reasoning_content`:
 /// `400 invalid_request_error: The "reasoning_content" in the thinking mode
 /// must be passed back to the API` — typically on tool-call continuation
 /// rounds where the model produced no new reasoning, or when history is
@@ -936,6 +963,10 @@ fn message_has_reasoning(msg: &Value) -> bool {
 /// guaranteed to carry the field (empty string when the original trace is
 /// unavailable); existing traces are always preserved unmodified. When
 /// disabled, request messages are sent untouched.
+///
+/// The flag is the *effective* DS-Format state for the request's model:
+/// `AppConfig::ds_format_for` turns it on automatically for DeepSeek-family
+/// models, so this guard is not tied to the manual Settings switch alone.
 pub(crate) fn ensure_reasoning_passthrough(req_body: &mut Value, ds_format: bool) {
     if !ds_format {
         return;
@@ -2012,7 +2043,7 @@ if !skill_ids.is_empty() || skill_evolution_root.is_some() {
             req_body,
             &turn_cancelled,
             Some(effective_max_tokens),
-            config.ds_format,
+            config.ds_format_for(&active_model),
             &session_id,
         )
         .await;

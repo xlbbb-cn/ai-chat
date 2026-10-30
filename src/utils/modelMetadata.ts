@@ -296,3 +296,19 @@ export function matchModelCatalog(
     }
     return matched;
 }
+
+/**
+ * Is this a DeepSeek-family model? Mirrors `is_deepseek_model` in
+ * `src-tauri/src/llm_complete.rs`: such models always get DS-Format, so the
+ * Settings switch is shown locked-on for them. Gateways prefix the vendor
+ * (`deepseek/deepseek-chat`) and change the casing, hence the loose match;
+ * the catalogue vendor catches renamed ids.
+ */
+export function isDeepSeekModel(
+    modelId: string | undefined,
+    metadata?: ModelMetadata,
+): boolean {
+    if ((modelId ?? "").toLowerCase().includes("deepseek")) return true;
+    return (metadata?.vendor ?? "").toLowerCase().includes("deepseek");
+}
+

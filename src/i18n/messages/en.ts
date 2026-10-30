@@ -294,7 +294,8 @@ const en = {
             placeholderDefault: "default",
             placeholderDefaultLimit: "default limit",
             dsFormat: "DS-Format (DeepSeek)",
-            dsFormatHint: "Pass reasoning_content back on assistant messages as DeepSeek-family thinking models require. Enable only for such models; leave off for other providers.",
+            dsFormatHint: "Pass reasoning_content back on assistant messages as DeepSeek-family thinking models require. DeepSeek-family models enable this automatically; turn it on only for other endpoints that need the same pass-through.",
+            dsFormatAuto: "Always on for {model}: DeepSeek-family models get DS-Format automatically, so reasoning_content is always passed back.",
         },
 
         runtime: {

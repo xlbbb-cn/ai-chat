@@ -311,8 +311,9 @@ pub struct AppConfig {
     #[serde(default)]
     pub model_settings: ModelSettings,
     /// DS-Format (DeepSeek format): pass `reasoning_content` back on assistant
-    /// messages as DeepSeek-family thinking models require. Off by default —
-    /// other providers receive plain messages.
+    /// messages as DeepSeek-family thinking models require. DeepSeek-family
+    /// models always get it (see `ds_format_for`); the switch only forces it
+    /// for other providers.
     #[serde(default)]
     pub ds_format: bool,
     /// Per-model context window (tokens). Auto-filled from `/models` when the
@@ -442,6 +443,24 @@ impl AppConfig {
             }
         }
         tools
+    }
+
+    /// Effective DS-Format state for a request against `model`.
+    ///
+    /// The manual switch covers every provider, but DeepSeek-family models
+    /// always get the normalization: their thinking mode rejects assistant
+    /// messages that do not carry `reasoning_content`, so asking the user to
+    /// flip a switch per model is a needless failure mode. The catalogue
+    /// vendor is checked as well, for gateways that expose a DeepSeek model
+    /// under a renamed id.
+    pub fn ds_format_for(&self, model: &str) -> bool {
+        self.ds_format
+            || llm_complete::is_deepseek_model(model)
+            || self
+                .model_metadata
+                .get(model)
+                .map(|meta| meta.vendor.to_ascii_lowercase().contains("deepseek"))
+                .unwrap_or(false)
     }
 }
 
@@ -1316,6 +1335,31 @@ mod tests {
         let tools = config.effective_tools();
         assert!(!tools.contains(&"file_actions".to_string()));
         assert!(!tools.contains(&"memory".to_string()));
+    }
+
+    /// DeepSeek-family models get DS-Format without the manual switch; the
+    /// catalogue vendor is the fallback for renamed gateway ids.
+    #[test]
+    fn ds_format_is_automatic_for_deepseek_models() {
+        let mut config = AppConfig::default();
+
+        assert!(!config.ds_format_for("gpt-4o-mini"));
+        assert!(config.ds_format_for("deepseek-chat"));
+        assert!(config.ds_format_for("deepseek-ai/DeepSeek-V3.1"));
+
+        config.ds_format = true;
+        assert!(config.ds_format_for("gpt-4o-mini"));
+
+        config.ds_format = false;
+        config.model_metadata.insert(
+            "renamed-v3".to_string(),
+            serde_json::from_value(serde_json::json!({
+                "model_name": "DeepSeek-V3",
+                "vendor": "DeepSeek",
+            }))
+            .unwrap(),
+        );
+        assert!(config.ds_format_for("renamed-v3"));
     }
 
     /// Duplicates in the persisted selection are collapsed.

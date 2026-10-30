@@ -232,8 +232,9 @@ export interface AppConfig {
   model_settings?: ModelSettings;
   /**
    * DS-Format (DeepSeek format): pass `reasoning_content` back on assistant
-   * messages as DeepSeek-family thinking models require. Off by default —
-   * other providers receive plain messages.
+   * messages as DeepSeek-family thinking models require. DeepSeek-family
+   * models always get it automatically; the switch only forces it for other
+   * providers.
    */
   ds_format?: boolean;
   system_message?: string;

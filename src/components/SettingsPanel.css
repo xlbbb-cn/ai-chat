@@ -358,6 +358,13 @@
   cursor: pointer;
 }
 
+/* Auto-managed settings (e.g. DS-Format for DeepSeek models) stay readable
+   but read as locked rather than merely inert. */
+.settings-checkbox input[type="checkbox"]:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
 .settings-checkbox-copy {
   display: flex;
   flex-direction: column;

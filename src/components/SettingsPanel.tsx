@@ -3,7 +3,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { fetchModels, fetchModelMetadata, getAppVersion, getConfig, getWorkspaceDir, saveConfig, listProfiles, saveProfile, deleteProfile, applyProfile, listMcpServers, listSubAgents, getAgentOrchestration } from "../api";
 import type { AppConfig, ModelMetadata, ModelSettings, Palette, Profile } from "../types";
 import { LOCALE_LABELS, LOCALES, useI18n, type Locale, type MessageKey } from "../i18n";
-import { matchModelCatalog } from "../utils/modelMetadata";
+import { matchModelCatalog, isDeepSeekModel } from "../utils/modelMetadata";
 import { FontAwesomeIcon, faCaretDown, faCheck, faXmark } from "../icons";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { MonitorPanel } from "./MonitorPanel";
@@ -184,6 +184,12 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
   if (currentMetadata?.deprecated) {
     capabilityBadges.push({ key: "deprecated", label: t("settings.api.capabilityDeprecated") });
   }
+  /**
+   * DS-Format is forced on for DeepSeek-family models by the backend
+   * (`AppConfig::ds_format_for`), so the switch mirrors that state instead of
+   * pretending the user can turn it off.
+   */
+  const dsFormatAuto = isDeepSeekModel(config.model, currentMetadata);
 
   async function handlePickWorkspace() {
     if (pickingWorkspace) return;
@@ -933,7 +939,8 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
                 <label className="settings-checkbox">
                   <input
                     type="checkbox"
-                    checked={config.ds_format ?? false}
+                    checked={dsFormatAuto || (config.ds_format ?? false)}
+                    disabled={dsFormatAuto}
                     onChange={(e) =>
                       setConfig((prev) => ({
                         ...prev,
@@ -943,7 +950,11 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
                   />
                   <div className="settings-checkbox-copy">
                     <span>{t("settings.advanced.dsFormat")}</span>
-                    <small>{t("settings.advanced.dsFormatHint")}</small>
+                    <small>
+                      {dsFormatAuto
+                        ? t("settings.advanced.dsFormatAuto", { model: config.model })
+                        : t("settings.advanced.dsFormatHint")}
+                    </small>
                   </div>
                 </label>
               </div>

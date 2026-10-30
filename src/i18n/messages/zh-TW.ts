@@ -270,7 +270,8 @@ const zhTW: Messages = {
             placeholderDefault: "預設",
             placeholderDefaultLimit: "預設上限",
             dsFormat: "DS-Format（DeepSeek 格式）",
-            dsFormatHint: "按 DeepSeek 系思考模式模型的要求，在回傳 assistant 訊息時攜帶 reasoning_content。僅在使用此類模型時開啟，其他供應商請保持關閉。",
+            dsFormatHint: "按 DeepSeek 系思考模式模型的要求，在回傳 assistant 訊息時攜帶 reasoning_content。DeepSeek 系模型會自動開啟；僅當其他供應商同樣需要時才手動開啟。",
+            dsFormatAuto: "{model} 已自動開啟：DeepSeek 系模型一律使用 DS-Format，reasoning_content 會自動回傳。",
         },
 
         runtime: {
