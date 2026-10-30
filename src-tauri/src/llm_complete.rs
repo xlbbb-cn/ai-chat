@@ -226,6 +226,66 @@ mod tests {
     }
 
     #[test]
+    fn conversation_id_header_name_uses_the_default_when_blank_or_missing() {
+        let mut config = crate::AppConfig::default();
+        assert_eq!(conversation_id_header_name(&config), CONVERSATION_ID_HEADER);
+
+        // Clearing the field in Settings must keep the default, never disable
+        // the correlation header by accident.
+        config.conversation_id_header = Some("   ".to_string());
+        assert_eq!(conversation_id_header_name(&config), CONVERSATION_ID_HEADER);
+
+        // A custom name is trimmed before use.
+        config.conversation_id_header = Some(" X-Session-Id  ".to_string());
+        assert_eq!(conversation_id_header_name(&config), "X-Session-Id");
+    }
+
+    #[test]
+    fn upstream_headers_put_the_conversation_id_before_custom_headers() {
+        let mut config = crate::AppConfig::default();
+        config.conversation_id_header = Some("x-chat-id".to_string());
+        config.custom_headers = vec![
+            crate::RequestHeader {
+                name: " x-route ".to_string(),
+                value: "fast".to_string(),
+            },
+            // A blank name is a half-typed row, never a real header.
+            crate::RequestHeader {
+                name: "   ".to_string(),
+                value: "ignored".to_string(),
+            },
+            // A custom row can never shadow the conversation-id header.
+            crate::RequestHeader {
+                name: "X-Chat-Id".to_string(),
+                value: "shadow".to_string(),
+            },
+        ];
+
+        let session_id = "01234567-89ab-4cde-8f01-23456789abcd";
+        let headers = upstream_request_headers(&config, session_id);
+        assert_eq!(
+            headers,
+            vec![
+                ("x-chat-id".to_string(), session_id.to_string()),
+                ("x-route".to_string(), "fast".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn custom_authorization_headers_are_detected_case_insensitively() {
+        assert!(has_authorization_header(&[(
+            "Authorization".to_string(),
+            "Basic abc".to_string()
+        )]));
+        assert!(!has_authorization_header(&[(
+            "x-route".to_string(),
+            "fast".to_string()
+        )]));
+        assert!(!has_authorization_header(&[]));
+    }
+
+    #[test]
     fn collect_loaded_skills_unions_messages_in_first_seen_order() {
         let messages = vec![
             ChatMessage {
@@ -382,9 +442,11 @@ pub struct StreamOptions<'a> {
     /// messages carry `reasoning_content` back, as DeepSeek-family thinking
     /// models require.
     pub ds_format: bool,
-    /// Chat session id, forwarded as the `x-conversation-id` header (UUID v4)
-    /// so upstreams can correlate every request of one conversation.
-    pub conversation_id: Option<&'a str>,
+    /// Extra HTTP headers attached to every attempt: the conversation-id
+    /// header (`AppConfig::conversation_id_header`, default
+    /// `x-conversation-id`) plus the user-configured custom headers. Built once
+    /// per call with `upstream_request_headers`.
+    pub headers: &'a [(String, String)],
 }
 
 const CONTEXT_COMPRESSION_THRESHOLD: f32 = 0.8;
@@ -453,10 +515,95 @@ pub(crate) fn build_http_client() -> Result<Client, String> {
         .map_err(|e| format!("Failed to build HTTP client: {e}"))
 }
 
-/// Header correlating every upstream request with the chat session it belongs to.
+/// Default header correlating every upstream request with the chat session it belongs to.
 pub(crate) const CONVERSATION_ID_HEADER: &str = "x-conversation-id";
 
-/// Value for the `x-conversation-id` header, derived from the chat session id.
+/// Resolve the conversation-id header name configured in Settings.
+///
+/// A missing or blank value means "use the default", so clearing the field can
+/// never silently stop sending the correlation header.
+pub(crate) fn conversation_id_header_name(config: &crate::AppConfig) -> &str {
+    config
+        .conversation_id_header
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .unwrap_or(CONVERSATION_ID_HEADER)
+}
+
+/// Extra headers configured in Settings (Settings → API → Custom headers).
+///
+/// Entries with a blank name are dropped; when the same name appears twice the
+/// first one wins (HTTP header names are case-insensitive). Invalid names and
+/// values are rejected later by `apply_request_headers`, so one bad row cannot
+/// break a request.
+pub(crate) fn custom_request_headers(config: &crate::AppConfig) -> Vec<(String, String)> {
+    let mut headers: Vec<(String, String)> = Vec::with_capacity(config.custom_headers.len());
+    for header in &config.custom_headers {
+        let name = header.name.trim();
+        if name.is_empty()
+            || headers
+                .iter()
+                .any(|(existing, _)| existing.eq_ignore_ascii_case(name))
+        {
+            continue;
+        }
+        headers.push((name.to_string(), header.value.clone()));
+    }
+    headers
+}
+
+/// Every header attached to an upstream chat request for `session_id`: the
+/// conversation id first, then the user-configured custom headers (which may
+/// not shadow it).
+pub(crate) fn upstream_request_headers(
+    config: &crate::AppConfig,
+    session_id: &str,
+) -> Vec<(String, String)> {
+    let conversation_header = conversation_id_header_name(config).to_string();
+    let mut headers = Vec::with_capacity(config.custom_headers.len() + 1);
+    headers.push((
+        conversation_header.clone(),
+        conversation_id_header_value(session_id),
+    ));
+    for header in custom_request_headers(config) {
+        if header.0.eq_ignore_ascii_case(&conversation_header) {
+            continue;
+        }
+        headers.push(header);
+    }
+    headers
+}
+
+/// `true` when the resolved headers already carry `Authorization` (for
+/// example a custom row in Settings). Callers then skip `bearer_auth` so the
+/// configured value wins instead of being sent twice.
+pub(crate) fn has_authorization_header(headers: &[(String, String)]) -> bool {
+    headers
+        .iter()
+        .any(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+}
+
+/// Apply pre-resolved headers to a request. Names or values `reqwest` rejects
+/// are skipped rather than failing the whole turn.
+pub(crate) fn apply_request_headers(
+    mut request: reqwest::RequestBuilder,
+    headers: &[(String, String)],
+) -> reqwest::RequestBuilder {
+    use reqwest::header::{HeaderName, HeaderValue};
+    for (name, value) in headers {
+        let (Ok(name), Ok(value)) = (
+            HeaderName::from_bytes(name.as_bytes()),
+            HeaderValue::from_str(value),
+        ) else {
+            continue;
+        };
+        request = request.header(name, value);
+    }
+    request
+}
+
+/// Value for the conversation-id header, derived from the chat session id.
 ///
 /// Session ids are UUID v4 strings — the UI creates them with
 /// `crypto.randomUUID()`. A valid UUID is forwarded in canonical form, so the
@@ -999,19 +1146,16 @@ pub async fn stream_llm_request(
     // Single choke point for every streaming request (main agent + sub-agents):
     // DS-Format guard, see `ensure_reasoning_passthrough`.
     ensure_reasoning_passthrough(&mut req_body, opts.ds_format);
-    // Resolved once per call (not per attempt) so every retry and every round
-    // of the same session carries the same conversation id.
-    let conversation_id = opts.conversation_id.map(conversation_id_header_value);
     let mut last_err: Option<String> = None;
 
     for attempt in 1..=STREAM_MAX_RETRIES {
         let mut request = client
             .post(url)
-            .header(reqwest::header::ACCEPT, "text/event-stream")
-            .bearer_auth(api_key);
-        if let Some(conversation_id) = conversation_id.as_deref() {
-            request = request.header(CONVERSATION_ID_HEADER, conversation_id);
+            .header(reqwest::header::ACCEPT, "text/event-stream");
+        if !has_authorization_header(opts.headers) {
+            request = request.bearer_auth(api_key);
         }
+        request = apply_request_headers(request, opts.headers);
         let res = match request.json(&req_body).send().await {
             Ok(res) => res,
             Err(err) => {
@@ -1179,7 +1323,7 @@ async fn stream_request(
     cancelled: &AtomicBool,
     usage_max_tokens: Option<u32>,
     ds_format: bool,
-    session_id: &str,
+    headers: &[(String, String)],
 ) -> Result<StreamResult, String> {
     stream_llm_request(
         app,
@@ -1195,7 +1339,7 @@ async fn stream_request(
             emit_usage: true,
             usage_max_tokens,
             ds_format,
-            conversation_id: Some(session_id),
+            headers,
         },
     )
     .await
@@ -1817,6 +1961,9 @@ async fn run_chat_turn(
         config.api_base_url.trim_end_matches('/')
     );
     let client = build_http_client()?;
+    // Resolved once per turn so every round and retry of this session carries
+    // the same conversation id (and the same custom headers).
+    let request_headers = upstream_request_headers(&config, &session_id);
 
     let mut tools_list =
         tools::get_all_tools(&config.effective_tools(), config.self_evolution_mode);
@@ -2044,7 +2191,7 @@ if !skill_ids.is_empty() || skill_evolution_root.is_some() {
             &turn_cancelled,
             Some(effective_max_tokens),
             config.ds_format_for(&active_model),
-            &session_id,
+            &request_headers,
         )
         .await;
 

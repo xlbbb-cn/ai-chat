@@ -252,6 +252,16 @@ const zhCN: Messages = {
             capabilityOpenWeights: "开源权重",
             capabilityDeprecated: "已弃用",
             capabilityContext: "{tokens} 上下文",
+            conversationHeader: "会话 ID 请求头",
+            conversationHeaderHint:
+                "每个请求中携带聊天会话 ID 的请求头名称。留空则使用默认的 “x-conversation-id”。",
+            customHeaders: "自定义请求头",
+            customHeadersHint:
+                "附加到每个模型请求的额外请求头 —— 对话、子智能体规划与模型列表。空行会被忽略，非法的名称或值会被跳过；设置 “Authorization” 会替代 API 密钥。",
+            customHeaderName: "请求头名称",
+            customHeaderValue: "值",
+            addHeader: "添加请求头",
+            removeHeader: "删除请求头",
         },
 
         system: {

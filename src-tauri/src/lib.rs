@@ -275,6 +275,18 @@ pub(crate) fn apply_config(
 
 // ─── App State ───────────────────────────────────────────────────────────────
 
+/// One extra HTTP header sent with every upstream model request.
+///
+/// Header names are case-insensitive; the value is forwarded verbatim (after
+/// validation in `llm_complete::apply_request_headers`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RequestHeader {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub value: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelSettings {
     #[serde(default)]
@@ -316,6 +328,14 @@ pub struct AppConfig {
     /// for other providers.
     #[serde(default)]
     pub ds_format: bool,
+    /// Per-request correlation: the chat session id is forwarded under this
+    /// name on every upstream request. Blank/absent → `x-conversation-id`.
+    #[serde(default)]
+    pub conversation_id_header: Option<String>,
+    /// Extra HTTP headers attached to every upstream model request (chat,
+    /// sub-agents, model listing) — e.g. gateway routing or auth headers.
+    #[serde(default)]
+    pub custom_headers: Vec<RequestHeader>,
     /// Per-model context window (tokens). Auto-filled from `/models` when the
     /// provider reports one; otherwise set manually in Settings as a fallback.
     #[serde(default)]
@@ -384,6 +404,8 @@ impl Default for AppConfig {
             model_catalog: vec!["gpt-4o-mini".to_string()],
             model_settings: ModelSettings::default(),
             ds_format: false,
+            conversation_id_header: None,
+            custom_headers: vec![],
             model_context_lengths: HashMap::new(),
             model_metadata: HashMap::new(),
             model_reasoning_effort: HashMap::new(),
@@ -658,10 +680,14 @@ async fn fetch_models(state: State<'_, AppState>) -> Result<Vec<RemoteModel>, St
     let url = format!("{}/models", config.api_base_url.trim_end_matches('/'));
 
     let client = llm_complete::build_http_client()?;
-    let res = client
+    let headers = llm_complete::custom_request_headers(&config);
+    let mut request = client
         .get(&url)
-        .header(reqwest::header::ACCEPT, "application/json")
-        .bearer_auth(config.api_key)
+        .header(reqwest::header::ACCEPT, "application/json");
+    if !llm_complete::has_authorization_header(&headers) {
+        request = request.bearer_auth(&config.api_key);
+    }
+    let res = llm_complete::apply_request_headers(request, &headers)
         .send()
         .await
         .map_err(|e| e.to_string())?;

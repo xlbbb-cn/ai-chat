@@ -252,6 +252,16 @@ const zhTW: Messages = {
             capabilityOpenWeights: "開源權重",
             capabilityDeprecated: "已棄用",
             capabilityContext: "{tokens} 上下文",
+            conversationHeader: "工作階段 ID 標頭",
+            conversationHeaderHint:
+                "每個請求中攜帶聊天工作階段 ID 的標頭名稱。留空則使用預設的「x-conversation-id」。",
+            customHeaders: "自訂請求標頭",
+            customHeadersHint:
+                "附加到每個模型請求的額外標頭 —— 對話、子代理規劃與模型清單。空白列會被忽略，無效的名稱或值會被略過；設定「Authorization」會取代 API 金鑰。",
+            customHeaderName: "標頭名稱",
+            customHeaderValue: "值",
+            addHeader: "新增標頭",
+            removeHeader: "移除標頭",
         },
 
         system: {

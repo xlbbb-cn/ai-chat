@@ -407,6 +407,26 @@
   min-width: 0;
 }
 
+/* ---- Custom header rows (Settings → API) ---- */
+
+.settings-header-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-header-row {
+  display: grid;
+  /* Header names are usually short (`X-Route`), values can be long. */
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.settings-header-row input {
+  min-width: 0;
+}
+
 /* ---- Error text ---- */
 
 .settings-error {

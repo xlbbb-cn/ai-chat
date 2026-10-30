@@ -14,9 +14,9 @@ const LLM_DEFAULT_MAX_COMLETE_TOKENS: u32 = 4_096;
 
 use crate::{
     llm_complete::{
-        apply_completion_token_limit, content_to_text, conversation_id_header_value,
-        extract_upstream_error_message, resolve_reasoning_effort, sanitize_tool_pairs,
-        stream_llm_request, StreamOptions, CONVERSATION_ID_HEADER,
+        apply_completion_token_limit, apply_request_headers, content_to_text,
+        extract_upstream_error_message, has_authorization_header, resolve_reasoning_effort,
+        sanitize_tool_pairs, stream_llm_request, upstream_request_headers, StreamOptions,
     },
     tools, AppConfig, AppState,
 };
@@ -882,7 +882,7 @@ async fn summarize_agent_memory(
     client: &Client,
     url: &str,
     api_key: &str,
-    session_id: &str,
+    headers: &[(String, String)],
     model: &str,
     current_summary: &str,
     messages_to_compress: &[Value],
@@ -896,7 +896,7 @@ async fn summarize_agent_memory(
         client,
         url,
         api_key,
-        session_id,
+        headers,
         vec![
             json!({
                 "role": "system",
@@ -927,7 +927,7 @@ async fn compress_working_memory_if_needed(
     client: &Client,
     url: &str,
     api_key: &str,
-    session_id: &str,
+    headers: &[(String, String)],
     model: &str,
     static_system_prompt: &str,
     snapshot_prompt: &str,
@@ -964,7 +964,7 @@ async fn compress_working_memory_if_needed(
         client,
         url,
         api_key,
-        session_id,
+        headers,
         model,
         episodic_summary,
         &older_messages,
@@ -1190,7 +1190,7 @@ async fn call_llm_once(
     client: &Client,
     url: &str,
     api_key: &str,
-    session_id: &str,
+    headers: &[(String, String)],
     mut messages: Vec<Value>,
     model: &str,
     max_complete_tokens: u32,
@@ -1207,13 +1207,11 @@ async fn call_llm_once(
         Some(max_complete_tokens),
         Some(LLM_DEFAULT_MAX_TOKENS),
     );
-    let res = client
-        .post(url)
-        .header(
-            CONVERSATION_ID_HEADER,
-            conversation_id_header_value(session_id),
-        )
-        .bearer_auth(api_key)
+    let mut request = client.post(url);
+    if !has_authorization_header(headers) {
+        request = request.bearer_auth(api_key);
+    }
+    let res = apply_request_headers(request, headers)
         .json(&body)
         .send()
         .await
@@ -1263,6 +1261,9 @@ pub async fn orchestrate(
     );
     let model = config.model.clone();
     let orchestration = agents_config.orchestration.clone();
+    // Same headers as the main chat: configured conversation-id header plus
+    // the user's custom headers, so planning calls reach the same gateway.
+    let headers = upstream_request_headers(config, session_id);
 
     // Step 1: Optionally auto-configure temporary agents
     let working_agents: Vec<SubAgent> = if orchestration.auto_configure {
@@ -1270,7 +1271,7 @@ pub async fn orchestrate(
             &client,
             &url,
             &config.api_key,
-            session_id,
+            &headers,
             &model,
             messages,
             &enabled,
@@ -1291,7 +1292,7 @@ pub async fn orchestrate(
         &client,
         &url,
         &config.api_key,
-        session_id,
+        &headers,
         &model,
         messages,
         &working_agents,
@@ -1371,7 +1372,7 @@ async fn auto_configure_agents(
     client: &Client,
     url: &str,
     api_key: &str,
-    session_id: &str,
+    headers: &[(String, String)],
     model: &str,
     messages: &[crate::llm_complete::ChatMessage],
     existing: &[SubAgent],
@@ -1408,7 +1409,7 @@ async fn auto_configure_agents(
         client,
         url,
         api_key,
-        session_id,
+        headers,
         vec![
             json!({"role":"system","content": system}),
             json!({"role":"user","content": user_query}),
@@ -1461,7 +1462,7 @@ async fn plan_tasks(
     client: &Client,
     url: &str,
     api_key: &str,
-    session_id: &str,
+    headers: &[(String, String)],
     model: &str,
     messages: &[crate::llm_complete::ChatMessage],
     agents: &[SubAgent],
@@ -1511,7 +1512,7 @@ async fn plan_tasks(
     );
 
     let raw = call_llm_once(
-        client, url, api_key, session_id,
+        client, url, api_key, headers,
         vec![
             json!({"role":"system","content": system}),
             json!({"role":"user","content": format!("Conversation:\n{conversation}\n\nCreate a task plan.")}),
@@ -2263,6 +2264,9 @@ async fn run_sub_agent_inner(
     );
 
     let model = agent.model.as_deref().unwrap_or(&config.model);
+    // Same configured conversation-id header and custom headers as the main
+    // chat: a sub-agent is still part of the same gateway conversation.
+    let headers = upstream_request_headers(config, session_id);
     let max_complete_tokens = agent
         .max_complete_tokens
         .unwrap_or(LLM_DEFAULT_MAX_COMLETE_TOKENS);
@@ -2450,7 +2454,7 @@ async fn run_sub_agent_inner(
             client,
             url,
             &config.api_key,
-            session_id,
+            &headers,
             model,
             &static_system_prompt,
             &snapshot_prompt,
@@ -2534,7 +2538,7 @@ async fn run_sub_agent_inner(
                 emit_usage: false,
                 usage_max_tokens: None,
                 ds_format: config.ds_format_for(model),
-                conversation_id: Some(session_id),
+                headers: &headers,
             },
         )
         .await

@@ -276,6 +276,16 @@ const en = {
             capabilityOpenWeights: "Open weights",
             capabilityDeprecated: "Deprecated",
             capabilityContext: "{tokens} context",
+            conversationHeader: "Conversation ID header",
+            conversationHeaderHint:
+                "Header name that carries the chat session id in every request. Leave empty to use the default “x-conversation-id”.",
+            customHeaders: "Custom request headers",
+            customHeadersHint:
+                "Extra headers sent with every model request — chat turns, sub-agent planning and the model listing. Blank rows are ignored, invalid names or values are skipped, and an “Authorization” row replaces the API key.",
+            customHeaderName: "Header name",
+            customHeaderValue: "Value",
+            addHeader: "Add header",
+            removeHeader: "Remove header",
         },
 
         system: {

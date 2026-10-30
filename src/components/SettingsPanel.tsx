@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { fetchModels, fetchModelMetadata, getAppVersion, getConfig, getWorkspaceDir, saveConfig, listProfiles, saveProfile, deleteProfile, applyProfile, listMcpServers, listSubAgents, getAgentOrchestration } from "../api";
-import type { AppConfig, ModelMetadata, ModelSettings, Palette, Profile } from "../types";
+import type { AppConfig, ModelMetadata, ModelSettings, Palette, Profile, RequestHeader } from "../types";
 import { LOCALE_LABELS, LOCALES, useI18n, type Locale, type MessageKey } from "../i18n";
 import { matchModelCatalog, isDeepSeekModel } from "../utils/modelMetadata";
 import { FontAwesomeIcon, faCaretDown, faCheck, faXmark } from "../icons";
@@ -80,6 +80,22 @@ function updateModelSettings(
   patch: Partial<ModelSettings>
 ): ModelSettings {
   return { ...(settings ?? {}), ...patch };
+}
+
+/**
+ * Header rows are edited as a list; blank rows are dropped and names trimmed
+ * on save, so a half-typed entry never reaches the backend.
+ */
+function normalizeCustomHeaders(headers: RequestHeader[] | undefined): RequestHeader[] {
+  return (headers ?? [])
+    .map((header) => ({ name: header.name.trim(), value: header.value }))
+    .filter((header) => header.name.length > 0);
+}
+
+/** A blank conversation-id header name means "use the default". */
+function normalizeConversationHeader(name: string | undefined): string | undefined {
+  const trimmed = name?.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 const SETTINGS_SECTIONS: { id: string; labelKey: MessageKey }[] = [
@@ -219,6 +235,29 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
     });
   }
 
+  function addCustomHeader() {
+    setConfig((prev) => ({
+      ...prev,
+      custom_headers: [...(prev.custom_headers ?? []), { name: "", value: "" }],
+    }));
+  }
+
+  function updateCustomHeader(index: number, patch: Partial<RequestHeader>) {
+    setConfig((prev) => {
+      const headers = [...(prev.custom_headers ?? [])];
+      if (!headers[index]) return prev;
+      headers[index] = { ...headers[index], ...patch };
+      return { ...prev, custom_headers: headers };
+    });
+  }
+
+  function removeCustomHeader(index: number) {
+    setConfig((prev) => ({
+      ...prev,
+      custom_headers: (prev.custom_headers ?? []).filter((_, i) => i !== index),
+    }));
+  }
+
   async function handleFetchModels() {
     setLoadingModels(true);
     setModelsError(null);
@@ -292,6 +331,8 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
       const persisted = await getConfig();
       const normalized: AppConfig = {
         ...config,
+        conversation_id_header: normalizeConversationHeader(config.conversation_id_header),
+        custom_headers: normalizeCustomHeaders(config.custom_headers),
         model_catalog: modelCatalog,
         selected_tools: withSelfEvolutionTools(
           persisted.selected_tools ?? [],
@@ -299,6 +340,7 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
         ),
       };
       await saveConfig(normalized);
+      setConfig(normalized);
       setSaved(true);
       onConfigSaved?.(normalized);
       setTimeout(() => setSaved(false), 2000);
@@ -328,6 +370,8 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
       const normalized: AppConfig = {
         ...config,
         language: next,
+        conversation_id_header: normalizeConversationHeader(config.conversation_id_header),
+        custom_headers: normalizeCustomHeaders(config.custom_headers),
         // Owned by the tools panel — never roll those back.
         selected_tools: persisted.selected_tools ?? [],
       };
@@ -348,6 +392,8 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
   async function applyMessageEditor() {
     const normalized: AppConfig = {
       ...config,
+      conversation_id_header: normalizeConversationHeader(config.conversation_id_header),
+      custom_headers: normalizeCustomHeaders(config.custom_headers),
       system_message: messageDraft,
       model_catalog: modelCatalog,
     };
@@ -821,6 +867,64 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
                     {t("settings.api.capabilitiesEmpty", { model: config.model })}
                   </small>
                 )}
+              </div>
+
+              <div className="settings-divider" />
+
+              <div className="settings-field-row settings-field-row-stacked">
+                <span className="settings-field-label">{t("settings.api.conversationHeader")}</span>
+                <input
+                  type="text"
+                  value={config.conversation_id_header ?? ""}
+                  onChange={(e) =>
+                    setConfig((prev) => ({ ...prev, conversation_id_header: e.target.value }))
+                  }
+                  placeholder="x-conversation-id"
+                />
+                <small className="settings-field-hint">
+                  {t("settings.api.conversationHeaderHint")}
+                </small>
+              </div>
+
+              <div className="settings-field-row settings-field-row-stacked">
+                <span className="settings-field-label">{t("settings.api.customHeaders")}</span>
+                <small className="settings-field-hint">{t("settings.api.customHeadersHint")}</small>
+                {(config.custom_headers ?? []).length > 0 && (
+                  <div className="settings-header-list">
+                    {(config.custom_headers ?? []).map((header, index) => (
+                      <div key={index} className="settings-header-row">
+                        <input
+                          type="text"
+                          value={header.name}
+                          placeholder={t("settings.api.customHeaderName")}
+                          aria-label={t("settings.api.customHeaderName")}
+                          onChange={(e) => updateCustomHeader(index, { name: e.target.value })}
+                        />
+                        <input
+                          type="text"
+                          value={header.value}
+                          placeholder={t("settings.api.customHeaderValue")}
+                          aria-label={t("settings.api.customHeaderValue")}
+                          onChange={(e) => updateCustomHeader(index, { value: e.target.value })}
+                        />
+                        <button
+                          type="button"
+                          className="settings-btn settings-btn-danger"
+                          onClick={() => removeCustomHeader(index)}
+                          title={t("settings.api.removeHeader")}
+                          aria-label={t("settings.api.removeHeader")}
+                        >
+                          <FontAwesomeIcon icon={faXmark} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div>
+                  <button type="button" className="settings-btn" onClick={addCustomHeader}>
+                    {t("settings.api.addHeader")}
+                  </button>
+                </div>
               </div>
             </div>
           </section>

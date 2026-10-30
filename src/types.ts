@@ -204,11 +204,30 @@ export type ThemeMode = "auto" | "light" | "dark";
  */
 export type Palette = "default" | "fig" | "cream";
 
+/**
+ * One extra HTTP header attached to every upstream model request
+ * (Settings → API → Custom request headers).
+ */
+export interface RequestHeader {
+  name: string;
+  value: string;
+}
+
 export interface AppConfig {
   api_base_url: string;
   api_key: string;
   model: string;
   model_catalog?: string[];
+  /**
+   * Header name that carries the chat session id on every upstream request.
+   * Blank / missing = the default `x-conversation-id`.
+   */
+  conversation_id_header?: string;
+  /**
+   * Extra HTTP headers attached to every request this app sends to the model
+   * endpoint (chat turns, sub-agent planning calls and the model listing).
+   */
+  custom_headers?: RequestHeader[];
   /**
    * Per-model context window (tokens). Auto-filled from `/models` when the
    * provider reports it (OpenRouter / Groq / vLLM…); otherwise set manually
