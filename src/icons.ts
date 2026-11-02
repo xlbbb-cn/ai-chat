@@ -37,6 +37,7 @@ export {
     faFileArrowDown,
     faFileLines,
     faFilePen,
+    faFolderOpen,
     faGear,
     faListCheck,
     faPaperclip,

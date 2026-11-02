@@ -46,7 +46,12 @@ export function ProfilePanel({ onClose, onProfileApplied }: Props) {
             const profile: Profile = {
                 name: newProfileName.trim(),
                 selected_tools: config.selected_tools || [],
-                agents: agents,
+                // Discovered-but-untouched `llm` agents are library entries,
+                // not profile state: snapshotting all of them would pin every
+                // file on disk. Explicit cli/cloud agents stay in full.
+                agents: agents.filter(
+                    (agent) => agent.agent_type !== "llm" || agent.configured || agent.enabled,
+                ),
                 orchestration: orchestration,
                 mcp_servers: mcpServers,
                 created_at: new Date().toISOString(),

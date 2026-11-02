@@ -1580,7 +1580,7 @@ async fn run_chat_turn(
     // the main agent defines the final result, sub-agents never write it.
     let mut mission_results: Option<String> = None;
     if multi_agent_enabled {
-        let agents_cfg = agents::load_agents_config(&state.agents_config_path);
+        let agents_cfg = agents::load_resolved_agents(&state.agents_config_path);
         let has_enabled = agents_cfg.agents.iter().any(|a| a.enabled);
         if has_enabled {
             match agents::orchestrate(
@@ -1768,7 +1768,7 @@ async fn run_chat_turn(
     // agent answers directly: `call_subagent` is neither advertised in the
     // system prompt nor exposed in the tool list.
     let enabled_agents: Vec<agents::SubAgent> = if multi_agent_enabled {
-        agents::load_agents_config(&state.agents_config_path)
+        agents::load_resolved_agents(&state.agents_config_path)
             .agents
             .into_iter()
             .filter(|a| a.enabled)

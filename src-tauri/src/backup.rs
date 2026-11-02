@@ -6,7 +6,8 @@
 //! config.json             AppConfig
 //! profiles.json           named profiles (copy of the app-data profiles.json)
 //! mcp_servers.json        MCP server definitions
-//! sub_agents.json         sub-agents + orchestration
+//! sub_agents.json         sub-agent runtime config + orchestration
+//! agents/...              `llm` agent definitions (md, app-wide)
 //! workspace/memory/...    workspace-scoped memory notes
 //! workspace/todos/...     workspace-scoped todo lists
 //! workspace/skills/...    workspace skills (the one skills root)
@@ -97,6 +98,34 @@ fn add_path_to_zip(
     Ok(())
 }
 
+/// Append the agent definition tree (`agents/`), skipping backups and hidden
+/// entries exactly like `agents::files::scan` does.
+fn add_agent_files_to_zip(
+    zip: &mut ZipWriter<fs::File>,
+    base_dir: &Path,
+    dir: &Path,
+) -> Result<(), String> {
+    for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') || name.contains(".bak.") {
+            continue;
+        }
+        if path.is_dir() {
+            add_agent_files_to_zip(zip, base_dir, &path)?;
+        } else if path.is_file() {
+            let relative = path.strip_prefix(base_dir).map_err(|e| e.to_string())?;
+            let entry_name = format!("agents/{}", relative.to_string_lossy().replace('\\', "/"));
+            zip.start_file(entry_name, zip_options())
+                .map_err(|e| e.to_string())?;
+            let mut file = fs::File::open(&path).map_err(|e| e.to_string())?;
+            std::io::copy(&mut file, zip).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 /// Resolve `relative` inside `root`, rejecting absolute paths, drive prefixes
 /// and `..` components (zip-slip protection). Returns `None` when nothing is
 /// left to resolve.
@@ -176,6 +205,17 @@ fn export_profile(app: &AppHandle, profile_path: &Path) -> Result<(), String> {
         serde_json::to_string_pretty(&agents::AgentsConfig::default()).map_err(|e| e.to_string())?
     };
     write_text_entry(&mut zip, "sub_agents.json", &sub_agents_json)?;
+
+    // `llm` agent definitions live next to `sub_agents.json` in `agents/`.
+    // Backups and hidden entries are skipped: the scanner ignores them too, so
+    // copying them would only create duplicate definitions on restore.
+    let agents_dir = agents::files::agents_root(&state.agents_config_path);
+    if agents_dir.is_dir() {
+        emit_profile_export_status(app, "Packing agents directory");
+        zip.add_directory("agents/", zip_options())
+            .map_err(|e| e.to_string())?;
+        add_agent_files_to_zip(&mut zip, &agents_dir, &agents_dir)?;
+    }
 
     // Workspace-scoped state lives in the hidden `<workspace>/.data`
     // directory, so it is packed as `workspace/<name>/...`.
@@ -319,6 +359,59 @@ fn restore_workspace_dirs(
     Ok(())
 }
 
+/// Restore `agents/**/*.md` from the archive into `<app_data>/agents`.
+///
+/// The tree is merged (same-named files are overwritten, everything else is
+/// kept) because agents are app-wide state, not a workspace snapshot. Entry
+/// paths are sanitized with `safe_join`; backups are skipped because the
+/// scanner ignores them.
+fn restore_agent_files(
+    state: &AppState,
+    archive: &mut ZipArchive<fs::File>,
+) -> Result<(), String> {
+    let root = agents::files::agents_root(&state.agents_config_path);
+    let entry_names: Vec<String> = (0..archive.len())
+        .filter_map(|index| {
+            archive
+                .by_index(index)
+                .ok()
+                .map(|entry| entry.name().to_string())
+        })
+        .filter(|name| name.starts_with("agents/"))
+        .collect();
+    if entry_names.is_empty() {
+        return Ok(());
+    }
+
+    fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    for name in entry_names {
+        let relative = &name["agents/".len()..];
+        if relative.is_empty() || relative.contains(".bak.") {
+            continue;
+        }
+        let Some(target_path) = safe_join(&root, relative) else {
+            continue;
+        };
+        if relative.ends_with('/') {
+            fs::create_dir_all(&target_path).map_err(|e| e.to_string())?;
+            continue;
+        }
+        if let Some(parent) = target_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let mut entry = archive.by_name(&name).map_err(|e| e.to_string())?;
+        let mut out = fs::File::create(&target_path).map_err(|e| e.to_string())?;
+        std::io::copy(&mut entry, &mut out).map_err(|e| e.to_string())?;
+    }
+
+    state
+        .logger
+        .lock()
+        .unwrap()
+        .log("INFO", "Restored agents/ from profile archive");
+    Ok(())
+}
+
 pub(crate) fn import_profile(app: &AppHandle, profile_path: &Path) -> Result<(), String> {
     let state = app.state::<AppState>();
     let file = fs::File::open(profile_path).map_err(|e| e.to_string())?;
@@ -345,6 +438,10 @@ pub(crate) fn import_profile(app: &AppHandle, profile_path: &Path) -> Result<(),
         fs::write(&state.agents_config_path, sub_agents_json).map_err(|e| e.to_string())?;
     }
 
+    // Agent definitions travel in `agents/`; merge them before the next load
+    // so inline prompts from old archives can still be migrated.
+    restore_agent_files(&state, &mut archive)?;
+
     if let Ok(mut profiles_file) = archive.by_name("profiles.json") {
         let mut profiles_json = String::new();
         profiles_file
@@ -362,6 +459,10 @@ pub(crate) fn import_profile(app: &AppHandle, profile_path: &Path) -> Result<(),
     }
 
     restore_workspace_dirs(&state, &mut archive)?;
+
+    // Fold legacy inline prompts into `agents/custom/` and discover any
+    // definitions that are new to this machine.
+    let _ = agents::load_resolved_agents(&state.agents_config_path);
 
     let _ = app.emit(PROFILE_RESTORED_EVENT, ());
     state.logger.lock().unwrap().log(

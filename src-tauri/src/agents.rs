@@ -23,6 +23,7 @@ use crate::{
 
 pub mod cli;
 pub mod cloud;
+pub mod files;
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -38,20 +39,22 @@ pub mod cloud;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubAgent {
     pub id: String,
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub description: String,
     #[serde(default = "default_agent_type")]
     pub agent_type: String,
     // ── `llm` backend ────────────────────────────────────────────────────────
     #[serde(default)]
     pub system_prompt: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_complete_tokens: Option<u32>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f32>,
     #[serde(default)]
     pub allowed_tools: Vec<String>,
@@ -59,6 +62,27 @@ pub struct SubAgent {
     pub allowed_skills: Vec<String>,
     #[serde(default = "default_max_iterations")]
     pub max_iterations: u32,
+    // ── file-backed definition (`llm` only) ─────────────────────────────────
+    /// Display emoji from the md frontmatter (content, not a UI icon).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emoji: Option<String>,
+    /// Author color from the md frontmatter. Stored, never painted as a second
+    /// accent (see DESIGN.md).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// Relative path under `<app_data>/agents` that holds this agent's
+    /// definition. `None` for cli/cloud agents and temporary planner agents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    /// Set when a discovered file exists but its frontmatter is broken.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parse_error: Option<String>,
+    /// Runtime-only: whether `sub_agents.json` already has a config entry for
+    /// this agent. A discovered-but-unconfigured file is returned with
+    /// `configured = false` and defaults; it is never persisted until the user
+    /// enables or edits it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub configured: bool,
     // ── `cli` backend ────────────────────────────────────────────────────────
     #[serde(default)]
     pub cli: CliAgentSettings,
@@ -96,6 +120,10 @@ fn default_max_iterations() -> u32 {
 }
 fn default_true() -> bool {
     true
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// A key/value pair: an environment variable for `cli` agents, or an extra
@@ -279,8 +307,12 @@ pub struct LegacyCliAgent {
     pub enabled: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentsConfig {
+    /// Schema version. Version 2 moved `llm` agent definitions to
+    /// `<app_data>/agents/**/*.md`; this file is configuration only.
+    #[serde(default = "default_config_version")]
+    pub version: u32,
     #[serde(default)]
     pub agents: Vec<SubAgent>,
     #[serde(default)]
@@ -289,6 +321,21 @@ pub struct AgentsConfig {
     /// load and never written back.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cli_agents: Vec<LegacyCliAgent>,
+}
+
+fn default_config_version() -> u32 {
+    2
+}
+
+impl Default for AgentsConfig {
+    fn default() -> Self {
+        Self {
+            version: default_config_version(),
+            agents: Vec::new(),
+            orchestration: AgentOrchestration::default(),
+            cli_agents: Vec::new(),
+        }
+    }
 }
 
 /// Normalizes a loaded config in place: agent types are canonicalized and any
@@ -321,6 +368,11 @@ pub fn normalize_config(config: &mut AgentsConfig) {
             allowed_tools: Vec::new(),
             allowed_skills: Vec::new(),
             max_iterations: default_max_iterations(),
+            emoji: None,
+            color: None,
+            file: None,
+            parse_error: None,
+            configured: true,
             cli: CliAgentSettings {
                 command: entry.command,
                 args: entry.args,
@@ -986,13 +1038,91 @@ pub fn load_agents_config(path: &Path) -> AgentsConfig {
         .and_then(|s| serde_json::from_str::<AgentsConfig>(&s).ok())
         .unwrap_or_default();
     normalize_config(&mut config);
+    // Everything read from the file is, by definition, configured. The
+    // resolver marks discovered-but-unconfigured agents with `false`.
+    for agent in &mut config.agents {
+        agent.configured = true;
+    }
+    config
+}
+
+/// Load the roster with the markdown definitions applied.
+///
+/// `sub_agents.json` stays configuration-only: `llm` agents read name,
+/// description, emoji, color and system prompt from `<app_data>/agents/*.md`,
+/// and every file without a config entry is returned as a disabled virtual
+/// agent (`configured = false`) that is never persisted until the user touches
+/// it. Legacy inline prompts are migrated to `agents/custom/` here.
+pub fn load_resolved_agents(path: &Path) -> AgentsConfig {
+    let mut config = load_agents_config(path);
+    let report = files::synchronize(&mut config, &files::agents_root(path));
+    if report.changed {
+        let _ = save_agents_config_file(path, &config);
+    }
     config
 }
 
 pub(crate) fn save_agents_config_file(path: &Path, config: &AgentsConfig) -> Result<(), String> {
     let mut config = config.clone();
     normalize_config(&mut config);
-    let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    config.version = default_config_version();
+
+    // Virtual agents exist only in the resolved view: they have a file but no
+    // config entry yet. A legacy inline entry (no file) is kept until it can
+    // be migrated, so a read-only agents directory never loses the prompt.
+    config.agents.retain(|agent| {
+        if agent.agent_type != AGENT_TYPE_LLM {
+            return true;
+        }
+        !(agent.file.is_some() && !agent.configured)
+    });
+
+    for agent in &mut config.agents {
+        agent.configured = false;
+        agent.parse_error = None;
+        if agent.agent_type == AGENT_TYPE_LLM && agent.file.is_some() {
+            // The definition lives in the markdown file. Only the runtime
+            // configuration and the file reference belong in this file.
+            agent.name.clear();
+            agent.description.clear();
+            agent.system_prompt.clear();
+            agent.emoji = None;
+            agent.color = None;
+        }
+    }
+
+    let json = serde_json::to_value(&config).map_err(|e| e.to_string())?;
+    let mut json = json;
+    // Empty definition fields are not config: strip them from `llm` entries so
+    // the file stays readable. The frontend keeps receiving real strings from
+    // the resolved view, which is why this is done here and not in a serde
+    // `skip_serializing_if` (that would omit `description: ""` from the panel
+    // payloads too).
+    if let Some(agents) = json.get_mut("agents").and_then(|value| value.as_array_mut()) {
+        for agent in agents {
+            let Some(object) = agent.as_object_mut() else {
+                continue;
+            };
+            if object.get("agent_type").and_then(|value| value.as_str()) != Some(AGENT_TYPE_LLM) {
+                continue;
+            }
+            for key in ["name", "description", "system_prompt"] {
+                if object
+                    .get(key)
+                    .and_then(|value| value.as_str())
+                    .map(str::is_empty)
+                    .unwrap_or(false)
+                {
+                    object.remove(key);
+                }
+            }
+            // Backend settings that only exist for cli/cloud agents.
+            for key in ["cli", "cloud", "require_approval"] {
+                object.remove(key);
+            }
+        }
+    }
+    let json = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
     std::fs::write(path, json).map_err(|e| e.to_string())
 }
 
@@ -1000,18 +1130,96 @@ pub(crate) fn save_agents_config_file(path: &Path, config: &AgentsConfig) -> Res
 
 #[tauri::command]
 pub fn list_sub_agents(state: State<'_, AppState>) -> Vec<SubAgent> {
-    load_agents_config(&state.agents_config_path).agents
+    load_resolved_agents(&state.agents_config_path).agents
 }
 
 #[tauri::command]
-pub fn save_sub_agent(state: State<'_, AppState>, agent: SubAgent) -> Result<(), String> {
-    let mut config = load_agents_config(&state.agents_config_path);
+pub fn save_sub_agent(state: State<'_, AppState>, agent: SubAgent) -> Result<SubAgent, String> {
+    let path = state.agents_config_path.clone();
+    let mut config = load_agents_config(&path);
     let mut a = agent;
     if a.name.trim().is_empty() {
         return Err("The agent name cannot be empty.".to_string());
     }
+    a.name = a.name.trim().to_string();
+    a.description = a.description.trim().to_string();
     a.agent_type = normalize_agent_type(&a.agent_type);
+
+    // A file-backed `llm` agent must not be converted: the markdown file would
+    // be stranded as a second, disabled agent. cli/cloud agents have no file,
+    // so their type can still be changed.
+    if !a.id.is_empty() {
+        if let Some(existing) = config.agents.iter().find(|x| x.id == a.id) {
+            let existing_type = normalize_agent_type(&existing.agent_type);
+            if existing_type == AGENT_TYPE_LLM && existing_type != a.agent_type {
+                return Err(
+                    "The agent type cannot be changed after the agent is created.".to_string()
+                );
+            }
+        }
+    }
+
     match a.agent_type.as_str() {
+        AGENT_TYPE_LLM => {
+            let root = files::agents_root(&path);
+            let existing_file = config
+                .agents
+                .iter()
+                .find(|x| x.id == a.id)
+                .and_then(|x| x.file.clone());
+            // A configured agent's file is stable: prefer the path recorded in
+            // the config so a stale client cannot strand the old markdown file.
+            let relative = match existing_file {
+                Some(value) => files::normalize_relative(&value)?,
+                None => match a
+                    .file
+                    .clone()
+                    .filter(|value| !value.trim().is_empty())
+                {
+                    Some(value) => files::normalize_relative(&value)?,
+                    None => files::unique_agent_path(&root, files::CUSTOM_CATEGORY, &a.name),
+                },
+            };
+
+            if let Some(other) = config
+                .agents
+                .iter()
+                .find(|x| x.id != a.id && x.file.as_deref() == Some(relative.as_str()))
+            {
+                let label = if other.name.trim().is_empty() {
+                    other.id.as_str()
+                } else {
+                    other.name.as_str()
+                };
+                return Err(format!("Another agent ('{}') already uses {}.", label, relative));
+            }
+
+            let definition = files::AgentDefinition {
+                name: a.name.clone(),
+                description: a.description.clone(),
+                emoji: a
+                    .emoji
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string),
+                color: a
+                    .color
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string),
+                prompt: a.system_prompt.clone(),
+            };
+            files::write_definition(&root, &relative, &definition)?;
+
+            a.file = Some(relative.clone());
+            a.configured = true;
+            a.parse_error = None;
+            if a.id.trim().is_empty() {
+                a.id = files::id_for_relative(&relative);
+            }
+        }
         AGENT_TYPE_CLI => {
             a.cli.command = a.cli.command.trim().to_string();
             if a.cli.command.is_empty() {
@@ -1022,6 +1230,11 @@ pub fn save_sub_agent(state: State<'_, AppState>, agent: SubAgent) -> Result<(),
             } else {
                 "arg".to_string()
             };
+            a.file = None;
+            a.emoji = None;
+            a.color = None;
+            a.parse_error = None;
+            a.configured = true;
         }
         AGENT_TYPE_CLOUD => {
             a.cloud.endpoint = a.cloud.endpoint.trim().to_string();
@@ -1031,6 +1244,11 @@ pub fn save_sub_agent(state: State<'_, AppState>, agent: SubAgent) -> Result<(),
             if a.cloud.poll_interval_seconds == 0 {
                 a.cloud.poll_interval_seconds = default_poll_interval_seconds();
             }
+            a.file = None;
+            a.emoji = None;
+            a.color = None;
+            a.parse_error = None;
+            a.configured = true;
         }
         _ => {}
     }
@@ -1038,18 +1256,39 @@ pub fn save_sub_agent(state: State<'_, AppState>, agent: SubAgent) -> Result<(),
         a.id = Uuid::new_v4().to_string();
     }
     if let Some(pos) = config.agents.iter().position(|x| x.id == a.id) {
-        config.agents[pos] = a;
+        config.agents[pos] = a.clone();
     } else {
-        config.agents.push(a);
+        config.agents.push(a.clone());
     }
-    save_agents_config_file(&state.agents_config_path, &config)
+    save_agents_config_file(&path, &config)?;
+    Ok(a)
 }
 
 #[tauri::command]
 pub fn delete_sub_agent(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    let mut config = load_agents_config(&state.agents_config_path);
+    let path = state.agents_config_path.clone();
+    // Resolve first: a discovered (virtual) custom agent has no config entry
+    // but still owns a file the user may want to remove.
+    let resolved = load_resolved_agents(&path);
+    let found = resolved.agents.iter().find(|agent| agent.id == id).cloned();
+
+    if let Some(agent) = found {
+        if agent.agent_type == AGENT_TYPE_LLM {
+            if let Some(relative) = agent.file.clone() {
+                if !files::is_custom_path(&relative) {
+                    return Err(
+                        "Library agent files cannot be deleted. Disable the agent instead."
+                            .to_string(),
+                    );
+                }
+                files::delete_definition(&files::agents_root(&path), &relative)?;
+            }
+        }
+    }
+
+    let mut config = load_agents_config(&path);
     config.agents.retain(|a| a.id != id);
-    save_agents_config_file(&state.agents_config_path, &config)
+    save_agents_config_file(&path, &config)
 }
 
 #[tauri::command]
@@ -1114,7 +1353,7 @@ pub fn list_agent_missions(
         updated_at: String,
     }
 
-    let agent_names = load_agents_config(&state.agents_config_path)
+    let agent_names = load_resolved_agents(&state.agents_config_path)
         .agents
         .into_iter()
         .map(|agent| (agent.id, agent.name))
@@ -1242,7 +1481,7 @@ pub async fn orchestrate(
     session_id: &str,
     cancelled: Arc<AtomicBool>,
 ) -> Result<String, String> {
-    let agents_config = load_agents_config(&state.agents_config_path);
+    let agents_config = load_resolved_agents(&state.agents_config_path);
     let enabled: Vec<SubAgent> = agents_config
         .agents
         .iter()
@@ -2896,6 +3135,196 @@ mod tests {
         // instead of an empty set, which would stall the planner.
         assert_eq!(select_existing_agents(&roster, &["nope"]).len(), 2);
         assert_eq!(select_existing_agents(&roster, &[]).len(), 2);
+    }
+
+    fn temp_agents_dir(label: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "ai-chat-agents-{label}-{}",
+            Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        dir
+    }
+
+    fn llm_agent(id: &str, name: &str) -> SubAgent {
+        SubAgent {
+            id: id.to_string(),
+            name: name.to_string(),
+            description: String::new(),
+            agent_type: AGENT_TYPE_LLM.to_string(),
+            system_prompt: String::new(),
+            model: None,
+            max_complete_tokens: None,
+            max_tokens: None,
+            temperature: None,
+            allowed_tools: Vec::new(),
+            allowed_skills: Vec::new(),
+            max_iterations: 10,
+            emoji: None,
+            color: None,
+            file: None,
+            parse_error: None,
+            configured: true,
+            cli: Default::default(),
+            cloud: Default::default(),
+            require_approval: true,
+            enabled: false,
+        }
+    }
+
+    #[test]
+    fn saving_config_keeps_only_runtime_config_for_file_backed_agents() {
+        let dir = temp_agents_dir("save");
+        let path = dir.join("sub_agents.json");
+
+        let mut virtual_agent = llm_agent("engineering/virtual", "Virtual");
+        virtual_agent.file = Some("engineering/virtual.md".to_string());
+        virtual_agent.configured = false;
+
+        let mut configured = llm_agent("custom/configured", "Configured");
+        configured.file = Some("custom/configured.md".to_string());
+        configured.system_prompt = "be precise".to_string();
+        configured.description = "reviews code".to_string();
+        configured.emoji = Some("🤖".to_string());
+
+        let mut cli: SubAgent =
+            serde_json::from_str(r#"{"id":"cli","name":"OpenCode","description":"","agent_type":"cli","cli":{"command":"opencode"}}"#)
+                .expect("cli agent parses");
+        cli.configured = true;
+
+        let config = AgentsConfig {
+            version: 99,
+            agents: vec![virtual_agent, configured, cli],
+            orchestration: AgentOrchestration::default(),
+            cli_agents: Vec::new(),
+        };
+        save_agents_config_file(&path, &config).expect("save");
+
+        let saved: Value = serde_json::from_str(
+            &std::fs::read_to_string(&path).expect("read config"),
+        )
+        .expect("json");
+        assert_eq!(saved["version"], 2);
+        let agents = saved["agents"].as_array().expect("agents array");
+        assert_eq!(agents.len(), 2, "virtual agents are never persisted");
+
+        let llm = agents
+            .iter()
+            .find(|agent| agent["id"] == "custom/configured")
+            .expect("configured llm agent");
+        assert!(llm.get("name").is_none());
+        assert!(llm.get("description").is_none());
+        assert!(llm.get("system_prompt").is_none());
+        assert!(llm.get("emoji").is_none());
+        assert!(llm.get("cli").is_none());
+        assert!(llm.get("cloud").is_none());
+        assert!(llm.get("require_approval").is_none());
+        assert_eq!(llm["file"], "custom/configured.md");
+        assert!(llm.get("configured").is_none());
+
+        let cli = agents
+            .iter()
+            .find(|agent| agent["id"] == "cli")
+            .expect("cli agent");
+        assert_eq!(cli["name"], "OpenCode");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn resolved_agents_serialize_with_the_fields_the_panel_reads() {
+        let dir = temp_agents_dir("serialize");
+        let path = dir.join("sub_agents.json");
+        std::fs::write(&path, r#"{ "agents": [] }"#).expect("write config");
+        std::fs::create_dir_all(dir.join("agents/custom")).expect("agents dir");
+        std::fs::write(
+            dir.join("agents/custom/reviewer.md"),
+            "---\nname: Reviewer\ndescription: reviews code\nemoji: 👀\n---\n\nbe precise\n",
+        )
+        .expect("write agent");
+
+        let resolved = load_resolved_agents(&path);
+        let value = serde_json::to_value(
+            resolved
+                .agents
+                .iter()
+                .find(|agent| agent.file.as_deref() == Some("custom/reviewer.md"))
+                .expect("discovered agent"),
+        )
+        .expect("serialize");
+
+        // The panel's draft conversion reads `cli`/`cloud` for every type and
+        // the enable checkbox reads `require_approval`, so these must stay in
+        // the API payload even though the config file omits them.
+        assert_eq!(value["name"], "Reviewer");
+        assert_eq!(value["description"], "reviews code");
+        assert_eq!(value["emoji"], "👀");
+        assert!(value["cli"].is_object());
+        assert!(value["cloud"].is_object());
+        assert_eq!(value["require_approval"], true);
+        assert_eq!(value["allowed_skills"], serde_json::json!([]));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn resolved_load_migrates_inline_prompts_and_discovers_files() {
+        let dir = temp_agents_dir("resolved");
+        let path = dir.join("sub_agents.json");
+        std::fs::write(
+            &path,
+            r#"{
+                "agents": [{
+                    "id": "legacy",
+                    "name": "Legacy",
+                    "description": "old",
+                    "system_prompt": "be precise",
+                    "enabled": true
+                }],
+                "orchestration": { "use_agents": false }
+            }"#,
+        )
+        .expect("write config");
+
+        std::fs::create_dir_all(dir.join("agents/engineering")).expect("agents dir");
+        std::fs::write(
+            dir.join("agents/engineering/library.md"),
+            "---\nname: Library\ndescription: from disk\nemoji: 📚\n---\n\nlibrary prompt\n",
+        )
+        .expect("write library agent");
+
+        let resolved = load_resolved_agents(&path);
+        let legacy = resolved
+            .agents
+            .iter()
+            .find(|agent| agent.id == "legacy")
+            .expect("legacy agent");
+        assert_eq!(legacy.file.as_deref(), Some("custom/legacy.md"));
+        assert!(legacy.system_prompt.is_empty());
+        assert!(dir.join("agents/custom/legacy.md").is_file());
+
+        let library = resolved
+            .agents
+            .iter()
+            .find(|agent| agent.file.as_deref() == Some("engineering/library.md"))
+            .expect("discovered library agent");
+        assert!(!library.configured);
+        assert!(!library.enabled);
+        assert_eq!(library.name, "Library");
+        assert_eq!(library.emoji.as_deref(), Some("📚"));
+        assert_eq!(library.allowed_tools, vec!["file_actions".to_string()]);
+
+        let saved: Value = serde_json::from_str(
+            &std::fs::read_to_string(&path).expect("read config"),
+        )
+        .expect("json");
+        let agents = saved["agents"].as_array().expect("agents array");
+        assert_eq!(agents.len(), 1, "only the migrated config entry is persisted");
+        assert_eq!(agents[0]["id"], "legacy");
+        assert_eq!(agents[0]["file"], "custom/legacy.md");
+        assert!(agents[0].get("system_prompt").is_none());
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
 

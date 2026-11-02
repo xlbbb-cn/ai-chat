@@ -418,6 +418,17 @@ export interface SubAgent {
   allowed_tools: string[];
   allowed_skills: string[];
   max_iterations: number;
+  // ── `llm` file-backed definition ──
+  /** Display emoji from the md frontmatter (content, not a UI icon). */
+  emoji?: string;
+  /** Author color from the md frontmatter; stored, never painted as a UI accent. */
+  color?: string;
+  /** Relative path under `<app_data>/agents` holding the definition. */
+  file?: string;
+  /** Frontmatter parse error for a discovered file. */
+  parse_error?: string;
+  /** Whether `sub_agents.json` already has a config entry for this agent. */
+  configured?: boolean;
   // ── `cli` backend ──
   cli: CliAgentSettings;
   // ── `cloud` backend ──

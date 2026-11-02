@@ -512,7 +512,7 @@ export async function listSubAgents(): Promise<SubAgent[]> {
   return invoke("list_sub_agents");
 }
 
-export async function saveSubAgent(agent: SubAgent): Promise<void> {
+export async function saveSubAgent(agent: SubAgent): Promise<SubAgent> {
   return invoke("save_sub_agent", { agent });
 }
 
@@ -608,6 +608,11 @@ export async function saveMarkdownFile(path: string, content: string): Promise<v
 /** Open the app data directory in the OS file manager. */
 export async function openAppDataDir(): Promise<void> {
   return invoke("app_open_data_dir");
+}
+
+/** Open `<app_data>/agents` (the `llm` agent definition folder). */
+export async function openAgentsDir(): Promise<void> {
+  return invoke("app_open_agents_dir");
 }
 
 /**

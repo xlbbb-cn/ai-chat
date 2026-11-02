@@ -120,6 +120,20 @@ fn app_open_data_dir(app: AppHandle) {
     open_app_data_dir(&app);
 }
 
+/// Open `<app_data>/agents` — the folder holding every `llm` agent definition.
+#[tauri::command]
+fn app_open_agents_dir(app: AppHandle) -> Result<(), String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("agents");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    app.opener()
+        .open_path(dir.to_string_lossy().into_owned(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn app_open_markdown(app: AppHandle, path: String) {
     read_markdown_into_editor(&app, Path::new(&path));
@@ -959,9 +973,19 @@ fn apply_profile_config(
     apply_config(&app, &state, config)?;
 
     // Save agents config (legacy standalone CLI agents are folded into the
-    // typed agent list by the normalizing save).
+    // typed agent list by the normalizing save). An `llm` agent's definition
+    // lives in `agents/**/*.md`, so the profile snapshot is materialized on
+    // disk first; identical files are left untouched.
+    let agents_root = agents::files::agents_root(&state.agents_config_path);
+    let mut profile_agents = profile.agents;
+    for agent in &mut profile_agents {
+        if agents::normalize_agent_type(&agent.agent_type) == agents::AGENT_TYPE_LLM {
+            agents::files::materialize_agent(&agents_root, agent)?;
+        }
+    }
     let agents_config = agents::AgentsConfig {
-        agents: profile.agents,
+        version: 2,
+        agents: profile_agents,
         orchestration: profile.orchestration,
         cli_agents: profile.cli_agents,
     };
@@ -1286,6 +1310,7 @@ pub fn run() {
             agents::list_agent_missions,
             agents::probe_agent_cli,
             agents::probe_agent_cloud,
+            app_open_agents_dir,
             timer::list_timers,
             timer::cancel_timer,
             timer::get_sleep_lock_state,

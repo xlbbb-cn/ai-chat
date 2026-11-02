@@ -539,6 +539,26 @@ const en = {
         typeCloud: "Cloud",
         typeHint:
             "LLM runs an autonomous tool-using loop inside the app. CLI launches a headless coding CLI installed on this machine. Cloud sends the task to a remote HTTP endpoint.",
+        searchPlaceholder: "Search agents by name, role or category",
+        enabledCount: "{enabled} of {total} enabled",
+        groupCustom: "Custom",
+        groupUncategorized: "Uncategorized",
+        rescan: "Rescan agent files",
+        openFolder: "Open agents folder",
+        noResults: "No agents match this search.",
+        sourceFile: "Definition file: agents/{file}",
+        definitionStorageHint:
+            "LLM agent definitions live in app_data/agents — name, description, emoji, color and the prompt are read from the .md file; runtime settings stay in sub_agents.json.",
+        emoji: "Emoji",
+        emojiHint:
+            "Stored in the frontmatter and shown next to the name (content, not a UI icon).",
+        color: "Color",
+        colorHint: "Stored in the frontmatter; not painted as a UI accent.",
+        typeLockedHint:
+            "The agent type is fixed after creation; create a new agent to use another backend.",
+        deleteCustomConfirm:
+            'Delete agent "{name}"? Its markdown file is removed from agents/custom (a .bak copy is kept).',
+        parseError: "Definition error: {error}",
         name: "Name",
         namePlaceholder: "e.g. code-analyzer",
         description: "Description",

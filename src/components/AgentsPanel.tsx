@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import {
   listSubAgents, saveSubAgent, deleteSubAgent,
   getAgentOrchestration, saveAgentOrchestration,
-  probeAgentCli, probeAgentCloud,
+  probeAgentCli, probeAgentCloud, openAgentsDir,
 } from "../api";
 import type {
   AgentType,
@@ -13,7 +13,16 @@ import type {
   AgentOrchestration,
 } from "../types";
 import { useI18n, type MessageKey } from "../i18n";
-import { FontAwesomeIcon, faCheck, faGear, faPen, faXmark } from "../icons";
+import {
+  FontAwesomeIcon,
+  faCheck,
+  faFolderOpen,
+  faGear,
+  faPen,
+  faRotateRight,
+  faTriangleExclamation,
+  faXmark,
+} from "../icons";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { Portal } from "./Portal";
 import "./AgentsPanel.css";
@@ -107,16 +116,22 @@ function emptyCloudSettings(): CloudAgentSettings {
   };
 }
 
+/** Tools a newly created `llm` agent starts with (matches discovered agents). */
+const DEFAULT_LLM_TOOLS = ["file_actions"];
+
 const emptyAgent = (agentType: AgentType = "llm"): SubAgent => ({
   id: "",
   name: "",
   description: "",
   agent_type: agentType,
   system_prompt: "",
+  emoji: undefined,
+  color: undefined,
+  file: undefined,
   model: undefined,
   max_tokens: undefined,
   temperature: undefined,
-  allowed_tools: [],
+  allowed_tools: agentType === "llm" ? [...DEFAULT_LLM_TOOLS] : [],
   allowed_skills: [],
   max_iterations: 10,
   cli: emptyCliSettings(),
@@ -128,6 +143,8 @@ const emptyAgent = (agentType: AgentType = "llm"): SubAgent => ({
 /** Draft wrapper: array fields are edited as one entry per line. */
 interface AgentDraft {
   agent: SubAgent;
+  /** Type switching is fixed for an existing file-backed `llm` agent. */
+  typeLocked: boolean;
   argsText: string;
   continueArgsText: string;
   modelArgsText: string;
@@ -176,6 +193,7 @@ function textToPairs(text: string): KeyValue[] {
 function toDraft(agent: SubAgent): AgentDraft {
   return {
     agent,
+    typeLocked: agent.agent_type === "llm" && agent.id.trim().length > 0,
     argsText: valuesToLines(agent.cli.args),
     continueArgsText: valuesToLines(agent.cli.continue_args),
     modelArgsText: valuesToLines(agent.cli.model_args),
@@ -206,6 +224,36 @@ function draftToAgent(draft: AgentDraft): SubAgent {
   };
 }
 
+/** Normalize an agent's definition path (md files always use forward slashes). */
+function agentFile(agent: SubAgent): string {
+  return (agent.file ?? "").replace(/\\/g, "/");
+}
+
+/**
+ * Sidebar grouping: the first folder under `agents/`, `custom` for agents the
+ * panel created, and an empty string (uncategorized) for cli/cloud agents and
+ * top-level markdown files.
+ */
+function agentCategory(agent: SubAgent): string {
+  const file = agentFile(agent);
+  if (file) {
+    const parts = file.split("/");
+    return parts.length > 1 ? parts[0] : "";
+  }
+  return agent.agent_type === "llm" ? "custom" : "";
+}
+
+/**
+ * Only `agents/custom/**` files may be deleted from the panel. Library agents
+ * (`engineering/…` and other imported collections) are read-only: disabling
+ * them removes them from the roster, the original file stays untouched.
+ */
+function canDeleteAgent(agent: SubAgent): boolean {
+  if (agent.agent_type !== "llm") return true;
+  const file = agentFile(agent);
+  return file === "" || file.startsWith("custom/");
+}
+
 interface ProbeState {
   status: "running" | "ok" | "error";
   text: string;
@@ -226,11 +274,8 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isPromptEditorOpen, setIsPromptEditorOpen] = useState(false);
   const [promptDraft, setPromptDraft] = useState("");
-
-  useEffect(() => {
-    listSubAgents().then(setAgents).catch(console.error);
-    getAgentOrchestration().then(setOrchestration).catch(console.error);
-  }, []);
+  const [search, setSearch] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
 
   const refreshAgents = async () => {
     const updated = await listSubAgents();
@@ -238,12 +283,35 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
     onAgentsChange(updated.filter((a) => a.enabled).length);
   };
 
+  useEffect(() => {
+    refreshAgents().catch(console.error);
+    getAgentOrchestration().then(setOrchestration).catch(console.error);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    try {
+      await refreshAgents();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   async function handleToggleAgent(agent: SubAgent) {
-    const updated = { ...agent, enabled: !agent.enabled };
-    await saveSubAgent(updated).catch(console.error);
-    const newList = agents.map((a) => (a.id === agent.id ? updated : a));
-    setAgents(newList);
-    onAgentsChange(newList.filter((a) => a.enabled).length);
+    // A broken definition has no prompt to run; repairing (or deleting) it is
+    // the only meaningful action until the file parses again.
+    if (agent.parse_error) return;
+    try {
+      const saved = await saveSubAgent({ ...agent, enabled: !agent.enabled });
+      const newList = agents.map((a) => (a.id === agent.id ? saved : a));
+      setAgents(newList);
+      onAgentsChange(newList.filter((a) => a.enabled).length);
+    } catch (e) {
+      console.error(e);
+    }
   }
 
   async function handleSaveAgent() {
@@ -262,11 +330,20 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
     }
   }
 
-  async function handleDeleteAgent(id: string) {
-    await deleteSubAgent(id).catch(console.error);
-    const updated = agents.filter((a) => a.id !== id);
-    setAgents(updated);
-    onAgentsChange(updated.filter((a) => a.enabled).length);
+  async function handleDeleteAgent(agent: SubAgent) {
+    if (!canDeleteAgent(agent)) return;
+    const file = agentFile(agent);
+    if (file.startsWith("custom/") && !window.confirm(t("agents.deleteCustomConfirm", { name: agent.name }))) {
+      return;
+    }
+    try {
+      await deleteSubAgent(agent.id);
+      const updated = agents.filter((a) => a.id !== agent.id);
+      setAgents(updated);
+      onAgentsChange(updated.filter((a) => a.enabled).length);
+    } catch (e) {
+      window.alert(String(e));
+    }
   }
 
   async function handleSaveOrchestration(updated: AgentOrchestration) {
@@ -745,6 +822,43 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
     );
   };
 
+  const query = search.trim().toLowerCase();
+  const visibleAgents = query
+    ? agents.filter((agent) =>
+        [agent.name, agent.description, agent.id, agentFile(agent), agentCategory(agent)].some(
+          (value) => value.toLowerCase().includes(query),
+        ),
+      )
+    : agents;
+
+  const groups: Array<{ category: string; agents: SubAgent[] }> = [];
+  for (const agent of visibleAgents) {
+    const category = agentCategory(agent);
+    let group = groups.find((entry) => entry.category === category);
+    if (!group) {
+      group = { category, agents: [] };
+      groups.push(group);
+    }
+    group.agents.push(agent);
+  }
+  groups.sort((left, right) => {
+    const rank = (category: string) => (category === "custom" ? 0 : category === "" ? 2 : 1);
+    return rank(left.category) - rank(right.category) || left.category.localeCompare(right.category);
+  });
+  for (const group of groups) {
+    group.agents.sort(
+      (left, right) =>
+        Number(right.enabled) - Number(left.enabled) || left.name.localeCompare(right.name),
+    );
+  }
+  const enabledCount = agents.filter((agent) => agent.enabled).length;
+
+  const groupLabel = (category: string): string => {
+    if (category === "custom") return t("agents.groupCustom");
+    if (category === "") return t("agents.groupUncategorized");
+    return category;
+  };
+
   return (
     <div className="agents-panel">
       <div className="agents-header">
@@ -767,13 +881,23 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
                   key={type}
                   type="button"
                   className={`agent-type-option${draft.agent.agent_type === type ? " active" : ""}`}
-                  onClick={() => updateAgent({ agent_type: type })}
+                  onClick={() =>
+                    updateAgent({
+                      agent_type: type,
+                      ...(type === "llm" && draft.agent.allowed_tools.length === 0
+                        ? { allowed_tools: [...DEFAULT_LLM_TOOLS] }
+                        : {}),
+                    })
+                  }
+                  disabled={draft.typeLocked}
                 >
                   {t(TYPE_LABEL_KEYS[type])}
                 </button>
               ))}
             </div>
-            <small className="agent-field-hint">{t("agents.typeHint")}</small>
+            <small className="agent-field-hint">
+              {draft.typeLocked ? t("agents.typeLockedHint") : t("agents.typeHint")}
+            </small>
           </label>
 
           <label>
@@ -792,6 +916,38 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
               placeholder={t("agents.descriptionPlaceholder")}
             />
           </label>
+
+          {draft.agent.agent_type === "llm" && (
+            <div className="agent-editor-row">
+              <label className="agent-emoji-field">
+                {t("agents.emoji")}
+                <input
+                  value={draft.agent.emoji ?? ""}
+                  maxLength={16}
+                  onChange={(e) => updateAgent({ emoji: e.target.value || undefined })}
+                  placeholder="🤖"
+                />
+                <small className="agent-field-hint">{t("agents.emojiHint")}</small>
+              </label>
+              <label style={{ flex: 1 }}>
+                {t("agents.color")}
+                <input
+                  value={draft.agent.color ?? ""}
+                  onChange={(e) => updateAgent({ color: e.target.value || undefined })}
+                  placeholder="purple"
+                />
+                <small className="agent-field-hint">{t("agents.colorHint")}</small>
+              </label>
+            </div>
+          )}
+
+          {draft.agent.agent_type === "llm" && (
+            <small className="agent-field-hint agent-source-file">
+              {draft.agent.file
+                ? t("agents.sourceFile", { file: draft.agent.file })
+                : t("agents.definitionStorageHint")}
+            </small>
+          )}
 
           {renderTypeSpecificForms()}
 
@@ -956,86 +1112,156 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
             </div>
           </div>
 
+          {/* ── Filter ── */}
+          <div className="agents-filter">
+            <input
+              className="panel-search-input"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t("agents.searchPlaceholder")}
+              aria-label={t("agents.searchPlaceholder")}
+            />
+            <div className="agents-filter-row">
+              <span className="agents-count">
+                {t("agents.enabledCount", { enabled: enabledCount, total: agents.length })}
+              </span>
+              <div className="agents-filter-actions">
+                <button
+                  type="button"
+                  className="mcp-action-btn"
+                  title={t("agents.rescan")}
+                  onClick={handleRefresh}
+                  disabled={refreshing}
+                >
+                  <FontAwesomeIcon icon={faRotateRight} spin={refreshing} />
+                </button>
+                <button
+                  type="button"
+                  className="mcp-action-btn"
+                  title={t("agents.openFolder")}
+                  onClick={() => openAgentsDir().catch(console.error)}
+                >
+                  <FontAwesomeIcon icon={faFolderOpen} />
+                </button>
+              </div>
+            </div>
+          </div>
+
           {/* ── Agent List ── */}
           <div className="agents-list">
             {agents.length === 0 && (
               <div className="agents-empty">{t("agents.empty")}</div>
             )}
-            {agents.map((agent) => {
-              const st = agentStatuses[agent.id];
-              return (
-                <div
-                  key={agent.id}
-                  className={`agent-item ${agent.enabled ? "active" : ""}`}
-                  onClick={() => handleToggleAgent(agent)}
-                >
-                  <div className="agent-content">
-                    <div className="agent-title-row">
-                      <label className="toggle-switch" onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          checked={agent.enabled}
-                          onChange={() => handleToggleAgent(agent)}
-                        />
-                        <span className="toggle-switch-slider" />
-                      </label>
-                      <span className="agent-name">{agent.name}</span>
-                      <span className={`agent-type-badge ${agent.agent_type}`}>
-                        {t(TYPE_LABEL_KEYS[agent.agent_type] ?? "agents.typeLlm")}
-                      </span>
-                      {statusIcon(agent.id)}
-                      <div className="skill-actions" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          className="mcp-action-btn"
-                          title={t("common.edit")}
-                          onClick={() => {
-                            setProbe(null);
-                            setSaveError(null);
-                            setDraft(toDraft({ ...agent }));
-                          }}
-                        >
-                          <FontAwesomeIcon icon={faPen} />
-                        </button>
-                        <button
-                          className="mcp-action-btn danger"
-                          title={t("common.delete")}
-                          onClick={() => handleDeleteAgent(agent.id)}
-                        >
-                          <FontAwesomeIcon icon={faXmark} />
-                        </button>
-                      </div>
-                    </div>
-                    <span className="agent-desc">{agent.description}</span>
-                    <span className="agent-target">{agentTarget(agent)}</span>
-                    {st && st.status === "done" && st.summary && (
-                      <span className="agent-summary">
-                        <FontAwesomeIcon icon={faCheck} />
-                        {st.summary}
-                      </span>
-                    )}
-                    {st && st.status === "error" && st.error && (
-                      <span className="agent-summary error">
-                        <FontAwesomeIcon icon={faXmark} />
-                        {st.error}
-                      </span>
-                    )}
-                    {st && st.tokens && (
-                      <span className="agent-tokens">{st.tokens} tokens</span>
-                    )}
-                    {agent.agent_type === "llm" && (
-                      <div className="agent-tools-row">
-                        {agent.allowed_tools.map((tool) => (
-                          <span key={tool} className="agent-tool-tag">{tool}</span>
-                        ))}
-                        {agent.model && (
-                          <span className="agent-tool-tag model">{agent.model}</span>
+            {agents.length > 0 && visibleAgents.length === 0 && (
+              <div className="agents-empty">{t("agents.noResults")}</div>
+            )}
+            {groups.map((group) => (
+              <div key={group.category || "__uncategorized"} className="agent-group">
+                <div className="agent-group-title">
+                  <span>{groupLabel(group.category)}</span>
+                  <span className="agent-group-count">{group.agents.length}</span>
+                </div>
+                {group.agents.map((agent) => {
+                  const st = agentStatuses[agent.id];
+                  return (
+                    <div
+                      key={agent.id}
+                      className={`agent-item ${agent.enabled ? "active" : ""}`}
+                      onClick={() => {
+                        if (!agent.parse_error) handleToggleAgent(agent);
+                      }}
+                    >
+                      <div className="agent-content">
+                        <div className="agent-title-row">
+                          <label className="toggle-switch" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={agent.enabled}
+                              disabled={Boolean(agent.parse_error)}
+                              onChange={() => handleToggleAgent(agent)}
+                            />
+                            <span className="toggle-switch-slider" />
+                          </label>
+                          {agent.emoji && (
+                            <span className="agent-emoji" aria-hidden="true">
+                              {agent.emoji}
+                            </span>
+                          )}
+                          <span className="agent-name">{agent.name}</span>
+                          <span className={`agent-type-badge ${agent.agent_type}`}>
+                            {t(TYPE_LABEL_KEYS[agent.agent_type] ?? "agents.typeLlm")}
+                          </span>
+                          {agent.parse_error && (
+                            <span className="agent-status-badge error">
+                              <FontAwesomeIcon icon={faTriangleExclamation} />
+                              {t("agents.statusError")}
+                            </span>
+                          )}
+                          {statusIcon(agent.id)}
+                          <div className="skill-actions" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              className="mcp-action-btn"
+                              title={t("common.edit")}
+                              onClick={() => {
+                                setProbe(null);
+                                setSaveError(null);
+                                setDraft(toDraft({ ...agent }));
+                              }}
+                            >
+                              <FontAwesomeIcon icon={faPen} />
+                            </button>
+                            {canDeleteAgent(agent) && (
+                              <button
+                                className="mcp-action-btn danger"
+                                title={t("common.delete")}
+                                onClick={() => handleDeleteAgent(agent)}
+                              >
+                                <FontAwesomeIcon icon={faXmark} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <span className="agent-desc">{agent.description}</span>
+                        {agent.parse_error && (
+                          <span className="agent-summary error">
+                            {t("agents.parseError", { error: agent.parse_error })}
+                          </span>
+                        )}
+                        <span className="agent-target">{agentTarget(agent)}</span>
+                        {st && st.status === "done" && st.summary && (
+                          <span className="agent-summary">
+                            <FontAwesomeIcon icon={faCheck} />
+                            {st.summary}
+                          </span>
+                        )}
+                        {st && st.status === "error" && st.error && (
+                          <span className="agent-summary error">
+                            <FontAwesomeIcon icon={faXmark} />
+                            {st.error}
+                          </span>
+                        )}
+                        {st && st.tokens && (
+                          <span className="agent-tokens">{st.tokens} tokens</span>
+                        )}
+                        {agent.agent_type === "llm" && (
+                          <div className="agent-tools-row">
+                            {agent.allowed_tools.map((tool) => (
+                              <span key={tool} className="agent-tool-tag">{tool}</span>
+                            ))}
+                            {agent.model && (
+                              <span className="agent-tool-tag model">{agent.model}</span>
+                            )}
+                            {agent.file && (
+                              <span className="agent-tool-tag file">{agent.file}</span>
+                            )}
+                          </div>
                         )}
                       </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
           </div>
 
           <div className="agents-footer">

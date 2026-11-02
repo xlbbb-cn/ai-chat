@@ -2041,6 +2041,31 @@ body {
   color: var(--c-text);
 }
 
+/* Shared compact search field used by side panels. */
+.panel-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--c-border-i);
+  border-radius: var(--r-sm);
+  padding: 7px 11px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--c-text);
+  background: var(--c-surface);
+  outline: none;
+  transition: border-color var(--t-dur) var(--t-ease),
+    box-shadow var(--t-dur) var(--t-ease);
+}
+
+.panel-search-input:focus {
+  border-color: var(--c-accent-text);
+  box-shadow: 0 0 0 3px var(--c-accent-soft);
+}
+
+.panel-search-input::placeholder {
+  color: var(--c-placeholder);
+}
+
 /* Label on the left, control on the right. */
 .field-title-row {
   display: flex;
