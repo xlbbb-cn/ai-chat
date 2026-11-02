@@ -124,14 +124,98 @@ pub struct StdioProcessHandle {
     pub tracked: crate::process_guard::TrackedProcess,
 }
 
-/// Start a stdio MCP process: validate → spawn → initialize handshake → store in pool.
+/// Per-task stdio pool for an `llm` sub-agent.
+///
+/// The main agent's processes live in `AppState.mcp_children` and are shared
+/// across chat turns. A sub-agent must never share those: each task owns its
+/// own server processes and kills them when the task ends (success, error,
+/// max iterations or Stop). `Drop` is the safety net for unwinding paths.
+pub struct AgentMcpSession {
+    pub(crate) children: HashMap<String, StdioProcessHandle>,
+}
+
+impl Default for AgentMcpSession {
+    fn default() -> Self {
+        Self {
+            children: HashMap::new(),
+        }
+    }
+}
+
+impl AgentMcpSession {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Stop every process still running for this task.
+    pub fn shutdown(&mut self, state: &AppState) {
+        let children = std::mem::take(&mut self.children);
+        for (server_id, handle) in children {
+            kill_stdio_handle(handle);
+            append_mcp_log(
+                state,
+                &server_id,
+                McpLogLevel::Info,
+                "Sub-agent stdio process stopped".to_string(),
+            );
+        }
+    }
+}
+
+impl Drop for AgentMcpSession {
+    fn drop(&mut self) {
+        for (_, handle) in self.children.drain() {
+            kill_stdio_handle(handle);
+        }
+    }
+}
+
+/// Kill a process tree, but only when the child is still running: `try_wait`
+/// reaps an already-exited child first, so a recycled pid can never be killed.
+fn kill_stdio_handle(mut handle: StdioProcessHandle) {
+    let alive = handle
+        .child
+        .try_wait()
+        .map(|status| status.is_none())
+        .unwrap_or(true);
+    if alive {
+        process_guard::kill_process_tree(handle.tracked.pid());
+        let _ = handle.child.start_kill();
+    }
+}
+
+fn owner_prefix(owner: Option<&str>) -> String {
+    owner
+        .map(|value| format!("[{value}] "))
+        .unwrap_or_default()
+}
+
+/// Start a stdio MCP process for the main agent: validate → spawn →
+/// initialize handshake → store in the shared pool.
 pub async fn start_stdio_process(
     state: &AppState,
     server: &McpServer,
 ) -> Result<(), String> {
+    let handle = spawn_stdio_process(state, server, None).await?;
+    state
+        .mcp_children
+        .lock()
+        .await
+        .insert(server.id.clone(), handle);
+    Ok(())
+}
+
+/// Spawn and initialize one stdio process, without deciding which pool it
+/// belongs to. `owner` is only a log prefix (e.g. `agent:reviewer`).
+async fn spawn_stdio_process(
+    state: &AppState,
+    server: &McpServer,
+    owner: Option<&str>,
+) -> Result<StdioProcessHandle, String> {
     let id = server.id.clone();
     let name = server.name.clone();
     let logs = state.mcp_logs.clone();
+    let prefix = owner_prefix(owner);
     // Children must start in the active workspace, never in the app's own
     // launch directory (see `build_stdio_cmd`).
     let workspace_dir = state.workspace_dir.lock().unwrap().clone();
@@ -142,16 +226,16 @@ pub async fn start_stdio_process(
             "Command not found in PATH: {}. Make sure it is installed.",
             server.command
         );
-        append_mcp_log(&state, &id, McpLogLevel::Error, msg.clone());
+        append_mcp_log(state, &id, McpLogLevel::Error, format!("{prefix}{msg}"));
         return Err(msg);
     }
 
     append_mcp_log(
-        &state,
+        state,
         &id,
         McpLogLevel::Info,
         format!(
-            "Starting stdio process: {} {}",
+            "{prefix}Starting stdio process: {} {}",
             server.command,
             server.args.join(" ")
         ),
@@ -159,7 +243,7 @@ pub async fn start_stdio_process(
 
     let (mut child, stdin_handle, stdout_reader, tracked) =
         stdio_init(server, &workspace_dir, |stderr| {
-            spawn_stderr_drain(logs, id.clone(), name.clone(), stderr);
+            spawn_stderr_drain(logs, id.clone(), name.clone(), prefix.clone(), stderr);
         })
         .await?;
 
@@ -175,31 +259,23 @@ pub async fn start_stdio_process(
         tracked,
     };
 
-    state
-        .mcp_children
-        .lock()
-        .await
-        .insert(server.id.clone(), handle);
-
     append_mcp_log(
-        &state,
+        state,
         &id,
         McpLogLevel::Info,
-        "Stdio process started and initialized".to_string(),
+        format!("{prefix}Stdio process started and initialized"),
     );
 
-    Ok(())
+    Ok(handle)
 }
 
 /// Kill a running stdio process and remove it from the pool.
 pub async fn stop_stdio_process(state: &AppState, server_id: &str) {
     let mut pool = state.mcp_children.lock().await;
-    if let Some(mut handle) = pool.remove(server_id) {
+    if let Some(handle) = pool.remove(server_id) {
         // Kill the whole tree, not just the shim (`npx`/`uvx`/`node` spawn
-        // grandchildren). Dropping `handle.tracked` then unregisters the pid.
-        process_guard::kill_process_tree(handle.tracked.pid());
-        let _ = handle.child.start_kill();
-        drop(handle);
+        // grandchildren). Dropping the handle unregisters the pid.
+        kill_stdio_handle(handle);
         append_mcp_log(
             state,
             server_id,
@@ -218,46 +294,54 @@ fn is_process_alive(handle: &mut StdioProcessHandle) -> bool {
         .unwrap_or(true)
 }
 
-/// Ensure a stdio process is running for the given server. Returns true if
-/// a process was (re)started. The caller should then call `with_stdio_handle`
-/// to use the process.
+/// Ensure the main agent's stdio process is running for the given server.
 pub async fn ensure_stdio_process(state: &AppState, server: &McpServer) -> bool {
-    // Check if already alive
-    {
-        let mut pool = state.mcp_children.lock().await;
-        if let Some(handle) = pool.get_mut(&server.id) {
-            if is_process_alive(handle) {
-                return false; // Already running
-            }
-            // Dead process — remove (unregisters its pid) and restart.
-            pool.remove(&server.id);
-            append_mcp_log(
-                state,
-                &server.id,
-                McpLogLevel::Warn,
-                "Previous process had exited; restarting".to_string(),
-            );
+    let mut pool = state.mcp_children.lock().await;
+    ensure_stdio_process_in(state, &mut pool, server, None).await
+}
+
+/// Ensure a process exists in `pool`, restarting it if it had exited.
+/// Returns true if a process was (re)started.
+async fn ensure_stdio_process_in(
+    state: &AppState,
+    pool: &mut HashMap<String, StdioProcessHandle>,
+    server: &McpServer,
+    owner: Option<&str>,
+) -> bool {
+    let prefix = owner_prefix(owner);
+    if let Some(handle) = pool.get_mut(&server.id) {
+        if is_process_alive(handle) {
+            return false; // Already running
         }
+        // Dead process — remove (unregisters its pid) and restart.
+        pool.remove(&server.id);
+        append_mcp_log(
+            state,
+            &server.id,
+            McpLogLevel::Warn,
+            format!("{prefix}Previous process had exited; restarting"),
+        );
     }
 
     // Start fresh
-    match start_stdio_process(state, server).await {
-        Ok(()) => true,
+    match spawn_stdio_process(state, server, owner).await {
+        Ok(handle) => {
+            pool.insert(server.id.clone(), handle);
+            true
+        }
         Err(e) => {
             append_mcp_log(
                 state,
                 &server.id,
                 McpLogLevel::Error,
-                format!("Failed to start process: {e}"),
+                format!("{prefix}Failed to start process: {e}"),
             );
             false
         }
     }
 }
 
-/// Send a JSON-RPC request on the persistent stdio process and wait for
-/// the matching response. Locks the pool for the duration, serializing
-/// requests through the process.
+/// Send a JSON-RPC request on the main agent's persistent stdio process.
 pub async fn stdio_request_persistent(
     state: &AppState,
     server_id: &str,
@@ -265,6 +349,16 @@ pub async fn stdio_request_persistent(
     params: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
     let mut pool = state.mcp_children.lock().await;
+    stdio_request_in(&mut pool, server_id, method, params).await
+}
+
+/// Send a JSON-RPC request through the handle in `pool`.
+async fn stdio_request_in(
+    pool: &mut HashMap<String, StdioProcessHandle>,
+    server_id: &str,
+    method: &str,
+    params: serde_json::Value,
+) -> Result<serde_json::Value, String> {
     let handle = pool
         .get_mut(server_id)
         .ok_or_else(|| "Process not running".to_string())?;
@@ -803,6 +897,7 @@ fn spawn_stderr_drain<R: tokio::io::AsyncRead + Unpin + Send + 'static>(
     state: std::sync::Arc<std::sync::Mutex<HashMap<String, VecDeque<McpLogEntry>>>>,
     id: String,
     name: String,
+    prefix: String,
     stderr: R,
 ) {
     use tokio::io::BufReader;
@@ -828,7 +923,7 @@ fn spawn_stderr_drain<R: tokio::io::AsyncRead + Unpin + Send + 'static>(
                     buf.push_back(McpLogEntry {
                         ts: now_ms(),
                         level: McpLogLevel::Warn,
-                        message: format!("[{name} stderr] {trimmed}"),
+                        message: format!("{prefix}[{name} stderr] {trimmed}"),
                     });
                 }
             }
@@ -1484,38 +1579,78 @@ pub async fn get_server_tools(
         "LLM requested tools/list".to_string(),
     );
     let result = match server.transport {
-        McpTransport::Stdio => get_tools_stdio(state, server).await,
+        McpTransport::Stdio => {
+            let mut pool = state.mcp_children.lock().await;
+            get_tools_stdio_in(state, &mut pool, server, None).await
+        }
         McpTransport::Sse => get_tools_sse(server).await,
         McpTransport::Http => get_tools_http(server).await,
         McpTransport::StreamHttp => get_tools_stream_http(server).await,
     };
-    if let Err(ref err) = result {
-        append_mcp_log(
-            state,
-            &server.id,
-            McpLogLevel::Error,
-            format!("tools/list failed: {err}"),
-        );
-    } else {
-        let count = result.as_ref().map(|t| t.len()).unwrap_or(0);
-        append_mcp_log(
-            state,
-            &server.id,
-            McpLogLevel::Info,
-            format!("tools/list returned {count} tools"),
-        );
-    }
+    log_tools_list_result(state, server, &result, None);
     result
 }
 
-async fn get_tools_stdio(
+/// `get_server_tools` for an `llm` sub-agent task: stdio servers use the
+/// task's private pool, so the main agent's processes are never shared.
+pub async fn get_server_tools_for_agent(
+    state: &AppState,
+    session: &mut AgentMcpSession,
+    server: &McpServer,
+    owner: &str,
+) -> Result<Vec<serde_json::Value>, String> {
+    let prefix = format!("[{owner}] ");
+    append_mcp_log(
+        state,
+        &server.id,
+        McpLogLevel::Info,
+        format!("{prefix}Requested tools/list"),
+    );
+    let result = match server.transport {
+        McpTransport::Stdio => {
+            get_tools_stdio_in(state, &mut session.children, server, Some(owner)).await
+        }
+        McpTransport::Sse => get_tools_sse(server).await,
+        McpTransport::Http => get_tools_http(server).await,
+        McpTransport::StreamHttp => get_tools_stream_http(server).await,
+    };
+    log_tools_list_result(state, server, &result, Some(owner));
+    result
+}
+
+fn log_tools_list_result(
     state: &AppState,
     server: &McpServer,
+    result: &Result<Vec<serde_json::Value>, String>,
+    owner: Option<&str>,
+) {
+    let prefix = owner_prefix(owner);
+    match result {
+        Ok(tools) => append_mcp_log(
+            state,
+            &server.id,
+            McpLogLevel::Info,
+            format!("{prefix}tools/list returned {} tools", tools.len()),
+        ),
+        Err(err) => append_mcp_log(
+            state,
+            &server.id,
+            McpLogLevel::Error,
+            format!("{prefix}tools/list failed: {err}"),
+        ),
+    }
+}
+
+async fn get_tools_stdio_in(
+    state: &AppState,
+    pool: &mut HashMap<String, StdioProcessHandle>,
+    server: &McpServer,
+    owner: Option<&str>,
 ) -> Result<Vec<serde_json::Value>, String> {
     // Ensure the persistent process is running
-    ensure_stdio_process(state, server).await;
+    ensure_stdio_process_in(state, pool, server, owner).await;
 
-    let resp = stdio_request_persistent(state, &server.id, "tools/list", serde_json::json!({})).await?;
+    let resp = stdio_request_in(pool, &server.id, "tools/list", serde_json::json!({})).await?;
 
     if let Some(err) = resp.get("error") {
         return Err(format!("MCP tools/list error: {err}"));
@@ -1623,6 +1758,42 @@ fn convert_mcp_tools(mcp_tools: Vec<serde_json::Value>) -> Vec<serde_json::Value
         .collect()
 }
 
+/// Turn one converted MCP tool into the function schema advertised to the
+/// model: a stable `mcp_<server-hash>_<name>` function name (at most 64
+/// characters, the provider limit) and a description that names the server.
+///
+/// Both the main agent and `llm` sub-agents use this, so a tool keeps the same
+/// name wherever it is injected.
+pub fn adapt_tool_for_llm(
+    server: &McpServer,
+    tool: &serde_json::Value,
+) -> Option<(String, String, serde_json::Value)> {
+    let actual_name = tool["function"]["name"].as_str()?.to_string();
+    let safe_name = sanitize_fn_name(&actual_name);
+    // Use a stable short hash of the server id instead of the array index, so
+    // tool names don't drift when the server list is reordered or a server is
+    // disabled.
+    let server_hash = {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        server.id.hash(&mut hasher);
+        format!("{:x}", hasher.finish())
+    };
+    let raw_fn = format!("mcp_{server_hash}_{safe_name}");
+    let fn_name: String = raw_fn.chars().take(64).collect();
+
+    let mut openai_tool = tool.clone();
+    openai_tool["function"]["name"] = serde_json::json!(fn_name);
+    let description = tool["function"]["description"]
+        .as_str()
+        .unwrap_or("");
+    openai_tool["function"]["description"] =
+        serde_json::json!(format!("[MCP: {}] {}", server.name, description));
+
+    Some((fn_name, actual_name, openai_tool))
+}
+
 /// Call a tool on an MCP server and return its text result.
 pub async fn invoke_mcp_tool(
     state: &AppState,
@@ -1637,33 +1808,92 @@ pub async fn invoke_mcp_tool(
         format!("LLM tools/call: {tool_name}"),
     );
     let result = match server.transport {
-        McpTransport::Stdio => invoke_tool_stdio(state, server, tool_name, arguments).await,
+        McpTransport::Stdio => {
+            let mut pool = state.mcp_children.lock().await;
+            invoke_tool_stdio_in(state, &mut pool, server, tool_name, arguments, None).await
+        }
         McpTransport::Sse => invoke_tool_sse(server, tool_name, arguments).await,
         McpTransport::Http => invoke_tool_http(server, tool_name, arguments).await,
-        McpTransport::StreamHttp => invoke_tool_stream_http(server, tool_name, arguments).await,
+        McpTransport::StreamHttp => {
+            invoke_tool_stream_http(server, tool_name, arguments).await
+        }
     };
-    if let Err(ref err) = result {
+    log_mcp_call_result(state, server, tool_name, &result, None);
+    result
+}
+
+/// `invoke_mcp_tool` for an `llm` sub-agent task: stdio calls go through the
+/// task's private process pool.
+pub async fn invoke_mcp_tool_for_agent(
+    state: &AppState,
+    session: &mut AgentMcpSession,
+    server: &McpServer,
+    tool_name: &str,
+    arguments: serde_json::Value,
+    owner: &str,
+) -> Result<String, String> {
+    append_mcp_log(
+        state,
+        &server.id,
+        McpLogLevel::Info,
+        format!("[{owner}] tools/call: {tool_name}"),
+    );
+    let result = match server.transport {
+        McpTransport::Stdio => {
+            invoke_tool_stdio_in(
+                state,
+                &mut session.children,
+                server,
+                tool_name,
+                arguments,
+                Some(owner),
+            )
+            .await
+        }
+        McpTransport::Sse => invoke_tool_sse(server, tool_name, arguments).await,
+        McpTransport::Http => invoke_tool_http(server, tool_name, arguments).await,
+        McpTransport::StreamHttp => {
+            invoke_tool_stream_http(server, tool_name, arguments).await
+        }
+    };
+    log_mcp_call_result(state, server, tool_name, &result, Some(owner));
+    result
+}
+
+fn log_mcp_call_result(
+    state: &AppState,
+    server: &McpServer,
+    tool_name: &str,
+    result: &Result<String, String>,
+    owner: Option<&str>,
+) {
+    if let Err(err) = result {
         append_mcp_log(
             state,
             &server.id,
             McpLogLevel::Error,
-            format!("tools/call failed: {err}"),
+            format!(
+                "{}tools/call '{}' failed: {err}",
+                owner_prefix(owner),
+                tool_name
+            ),
         );
     }
-    result
 }
 
-async fn invoke_tool_stdio(
+async fn invoke_tool_stdio_in(
     state: &AppState,
+    pool: &mut HashMap<String, StdioProcessHandle>,
     server: &McpServer,
     tool_name: &str,
     arguments: serde_json::Value,
+    owner: Option<&str>,
 ) -> Result<String, String> {
     // Ensure the persistent process is running
-    ensure_stdio_process(state, server).await;
+    ensure_stdio_process_in(state, pool, server, owner).await;
 
-    let resp = stdio_request_persistent(
-        state,
+    let resp = stdio_request_in(
+        pool,
         &server.id,
         "tools/call",
         serde_json::json!({
@@ -1773,3 +2003,46 @@ fn extract_tool_result(result: &serde_json::Value) -> String {
 }
 
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_server() -> McpServer {
+        McpServer {
+            id: "server-1".to_string(),
+            name: "Files".to_string(),
+            transport: McpTransport::Stdio,
+            command: String::new(),
+            args: Vec::new(),
+            env: HashMap::new(),
+            url: String::new(),
+            auth_token: String::new(),
+            enabled: true,
+        }
+    }
+
+    #[test]
+    fn mcp_tool_names_are_stable_and_prefixed() {
+        let server = test_server();
+        let tool = serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "read file",
+                "description": "Reads a file",
+                "parameters": { "type": "object", "properties": {} }
+            }
+        });
+
+        let (name, actual, adapted) = adapt_tool_for_llm(&server, &tool).expect("adapts");
+        assert_eq!(actual, "read file");
+        assert!(name.starts_with("mcp_"));
+        assert!(name.len() <= 64);
+        assert_eq!(adapted["function"]["name"], name);
+        assert_eq!(adapted["function"]["description"], "[MCP: Files] Reads a file");
+
+        // The same server + tool always yields the same advertised name.
+        let (again, _, _) = adapt_tool_for_llm(&server, &tool).expect("adapts twice");
+        assert_eq!(name, again);
+    }
+}

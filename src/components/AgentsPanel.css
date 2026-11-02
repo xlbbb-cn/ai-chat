@@ -274,6 +274,12 @@
     white-space: nowrap;
 }
 
+.agent-tool-tag.mcp {
+    background: var(--c-surface-2);
+    color: var(--c-text);
+    border-color: var(--c-border);
+}
+
 .agent-status-badge {
     display: inline-flex;
     align-items: center;

@@ -134,6 +134,7 @@ const emptyAgent = (agentType: AgentType = "llm"): SubAgent => ({
   allowed_tools: agentType === "llm" ? [...DEFAULT_LLM_TOOLS] : [],
   allowed_skills: [],
   max_iterations: 10,
+  enable_mcp: false,
   cli: emptyCliSettings(),
   cloud: emptyCloudSettings(),
   require_approval: true,
@@ -776,6 +777,18 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
           </label>
         </div>
         <div className="agent-editor-section-title">{t("agents.capabilities")}</div>
+        <div className="orch-row">
+          <span>{t("agents.enableMcp")}</span>
+          <label className="toggle-switch">
+            <input
+              type="checkbox"
+              checked={agent.enable_mcp ?? false}
+              onChange={(e) => updateAgent({ enable_mcp: e.target.checked })}
+            />
+            <span className="toggle-switch-slider" />
+          </label>
+        </div>
+        <small className="agent-field-hint">{t("agents.enableMcpHint")}</small>
         <label>
           <div className="field-title-row">
             <span>{t("agents.allowedTools")}</span>
@@ -1248,6 +1261,9 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
                             {agent.allowed_tools.map((tool) => (
                               <span key={tool} className="agent-tool-tag">{tool}</span>
                             ))}
+                            {agent.enable_mcp && (
+                              <span className="agent-tool-tag mcp">MCP</span>
+                            )}
                             {agent.model && (
                               <span className="agent-tool-tag model">{agent.model}</span>
                             )}

@@ -102,7 +102,9 @@ Full usage guides live in the GitHub Wiki:
 ### 2) Sub-Agent Orchestration
 
 - Three runtimes: `llm` (built-in autonomous loop), `cli` (headless coding CLI on this machine), `cloud` (remote HTTP endpoint)
-- Per-agent model, system prompt, tool/skill allowlist and iteration budget
+- **File-backed `llm` definitions**: `agents/<category>/<slug>.md` (YAML frontmatter + prompt). `sub_agents.json` is configuration only; new files are discovered automatically, disabled by default, and only `agents/custom/` can be deleted from the panel
+- Per-agent model, system prompt, tool/skill allowlist, iteration budget and **MCP opt-in**
+- **MCP for `llm` agents** (`enable_mcp`): inject every enabled MCP server's tools using the same names and descriptions as the main agent. Each task starts its own MCP server processes and stops them when the task ends
 - Create, edit, enable, and delete sub-agents
 - Configure agent orchestration (parallel / sequential, concurrency) and toggle sub-agent mode
 - Task-level orchestration events in the chat flow
@@ -134,6 +136,8 @@ Three execution tools with deliberately different scopes:
 
 - Add, edit, delete MCP servers
 - Supports stdio / SSE / HTTP / Streamable HTTP transports, with relative path handling improvements
+- `llm` sub-agents can opt in with `enable_mcp`: their tools come from every enabled server and keep the main agent's tool names/descriptions
+- Each sub-agent task owns its MCP server processes (isolated from the main agent's pool) and stops them when the task ends — success, error, max iterations or Stop
 - Connectivity testing
 
 ### 6) Local Persistence & Operations
@@ -142,7 +146,7 @@ Three execution tools with deliberately different scopes:
 - Per-workspace state in a hidden `<workspace>/.data` directory: SQLite database, memory, todos, skills and skill status
 - SQLite for chat history and API request monitoring data (switches with the workspace)
 - Request monitoring panel for listing, details, and deletion
-- Profile export/import via zip archives (config, tools, agents, MCP servers, workspace memory/todos/skills)
+- Profile export/import via zip archives (config, tools, agents and their `agents/` definitions, MCP servers, workspace memory/todos/skills)
 - Workspace directory setting in the UI
 
 ---
@@ -327,10 +331,12 @@ ai-chat/
 ├─ src-tauri/           # Rust + Tauri backend
 │  ├─ src/lib.rs        # App entry and command registration
 │  ├─ src/llm_complete.rs
+│  ├─ src/agents.rs     # sub-agent types, runtime config, missions, orchestration
+│  ├─ src/agents/       #   cli.rs, cloud.rs, files.rs (`llm` markdown definitions)
 │  ├─ src/skills.rs     # skills + workspace skill status
 │  ├─ src/workspace.rs  # hidden `<workspace>/.data` layout
 │  ├─ src/tools/        # tools module (memory, file_actions, patch, risk, ...)
-│  ├─ src/mcp.rs
+│  ├─ src/mcp.rs        # MCP transports; main pool + per-agent AgentMcpSession
 │  └─ src/db.rs
 └─ README.md
 ```
@@ -339,7 +345,8 @@ Runtime layout — app data holds the application files, the workspace holds its
 
 ```text
 <app data>/                 config.json, app.log, mcp_servers.json, sub_agents.json,
-                            profiles.json, timers.json, workspace/ (default workspace)
+                            profiles.json, timers.json, agents/ (llm definitions),
+                            workspace/ (default workspace)
 <workspace>/.data/          chat.db, memory/{user,repo,evolution}/, todos/, skills/,
                             skills.status                                              (hidden)
 ```
@@ -360,6 +367,7 @@ Other boundaries:
 
 - Skills live in exactly one root per workspace; the skill folder is pinned to its own `SKILL.md`
 - Self-evolution mode lets the assistant rewrite its own instructions — use it briefly, in a controlled workspace, and inspect the `.bak` files afterwards
+- MCP tool arguments are forwarded to the MCP server verbatim and are not sandboxed; `llm` sub-agents only receive MCP tools when `enable_mcp` is on for that agent
 - Validate MCP external services with minimal privileges and connectivity tests before integration
 - Use separate configuration files and API credentials for development and production
 

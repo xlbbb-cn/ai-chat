@@ -18,7 +18,7 @@ use crate::{
         extract_upstream_error_message, has_authorization_header, resolve_reasoning_effort,
         sanitize_tool_pairs, stream_llm_request, upstream_request_headers, StreamOptions,
     },
-    tools, AppConfig, AppState,
+    tools, AppConfig, AppState, mcp,
 };
 
 pub mod cli;
@@ -62,6 +62,10 @@ pub struct SubAgent {
     pub allowed_skills: Vec<String>,
     #[serde(default = "default_max_iterations")]
     pub max_iterations: u32,
+    /// `llm` backend only: inject the tools of every enabled MCP server.
+    /// Each task owns its own server processes and stops them when it ends.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub enable_mcp: bool,
     // ── file-backed definition (`llm` only) ─────────────────────────────────
     /// Display emoji from the md frontmatter (content, not a UI icon).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -368,6 +372,7 @@ pub fn normalize_config(config: &mut AgentsConfig) {
             allowed_tools: Vec::new(),
             allowed_skills: Vec::new(),
             max_iterations: default_max_iterations(),
+            enable_mcp: false,
             emoji: None,
             color: None,
             file: None,
@@ -1088,6 +1093,9 @@ pub(crate) fn save_agents_config_file(path: &Path, config: &AgentsConfig) -> Res
             agent.system_prompt.clear();
             agent.emoji = None;
             agent.color = None;
+        } else if agent.agent_type != AGENT_TYPE_LLM {
+            // MCP injection is an `llm` capability.
+            agent.enable_mcp = false;
         }
     }
 
@@ -1234,6 +1242,7 @@ pub fn save_sub_agent(state: State<'_, AppState>, agent: SubAgent) -> Result<Sub
             a.emoji = None;
             a.color = None;
             a.parse_error = None;
+            a.enable_mcp = false;
             a.configured = true;
         }
         AGENT_TYPE_CLOUD => {
@@ -1248,6 +1257,7 @@ pub fn save_sub_agent(state: State<'_, AppState>, agent: SubAgent) -> Result<Sub
             a.emoji = None;
             a.color = None;
             a.parse_error = None;
+            a.enable_mcp = false;
             a.configured = true;
         }
         _ => {}
@@ -2492,6 +2502,42 @@ async fn run_sub_agent_inner(
     skill_access_root: Option<PathBuf>,
     cancelled: &AtomicBool,
 ) -> TaskResult {
+    // Every task gets a private MCP process pool. The pool is shut down before
+    // the task result leaves this function, so a finished/stopped/failed task
+    // never leaves an MCP server behind. `Drop` covers unwind paths.
+    let state = app.state::<AppState>();
+    let mut mcp_session = mcp::AgentMcpSession::new();
+    let result = run_llm_agent_body(
+        app,
+        client,
+        url,
+        config,
+        session_id,
+        agent,
+        task,
+        workspace_dir,
+        skill_access_root,
+        cancelled,
+        &mut mcp_session,
+    )
+    .await;
+    mcp_session.shutdown(&state);
+    result
+}
+
+async fn run_llm_agent_body(
+    app: &AppHandle,
+    client: &Client,
+    url: &str,
+    config: &AppConfig,
+    session_id: &str,
+    agent: &SubAgent,
+    task: &Task,
+    workspace_dir: PathBuf,
+    skill_access_root: Option<PathBuf>,
+    cancelled: &AtomicBool,
+    mcp_session: &mut mcp::AgentMcpSession,
+) -> TaskResult {
     let _ = app.emit(
         "agent-task-start",
         json!({
@@ -2529,6 +2575,46 @@ async fn run_sub_agent_inner(
     }
     let mut tools_list = tools::get_all_tools(&agent_tool_ids, config.self_evolution_mode);
     tools_list.extend(tools::get_agent_task_tools());
+
+    // ── MCP tools (`enable_mcp`) ─────────────────────────────────────────────
+    // The agent gets the same enabled MCP servers as the main agent, but its
+    // stdio processes live in this task's private session — never the shared
+    // `AppState` pool — and the wrapper kills them when the task ends.
+    let mut mcp_tool_map: std::collections::HashMap<String, (mcp::McpServer, String)> =
+        std::collections::HashMap::new();
+    if agent.enable_mcp {
+        let state = app.state::<AppState>();
+        let owner = format!("agent:{}", agent.name);
+        let enabled_servers: Vec<mcp::McpServer> = mcp::load_servers(&state.mcp_servers_path)
+            .into_iter()
+            .filter(|server| server.enabled)
+            .collect();
+        for server in enabled_servers {
+            match mcp::get_server_tools_for_agent(&state, mcp_session, &server, &owner).await {
+                Ok(server_tools) => {
+                    for tool in server_tools {
+                        if let Some((fn_name, actual_name, openai_tool)) =
+                            mcp::adapt_tool_for_llm(&server, &tool)
+                        {
+                            tools_list.push(openai_tool);
+                            mcp_tool_map.insert(fn_name, (server.clone(), actual_name));
+                        }
+                    }
+                }
+                Err(err) => {
+                    if let Ok(logger) = state.logger.lock() {
+                        logger.log(
+                            "ERROR",
+                            &format!(
+                                "MCP server '{}' tools/list failed for agent '{}': {err}",
+                                server.name, agent.name
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+    }
     // `cancelled` is the caller's flag — the turn's own cancel flag when the
     // agent runs inside a chat turn, so pressing Stop in the chat tears the
     // autonomous loop down as well. It is never a fresh local flag: a detached
@@ -2935,19 +3021,44 @@ async fn run_sub_agent_inner(
                 // Execute each tool call
                 for (id, name, args) in &agent_tool_calls {
                     tool_calls_count += 1;
-                    let result = tools::execute_tool(
-                        app,
-                        name,
-                        args,
-                        workspace_dir.clone(),
-                        config,
-                        &[],
-                        skill_access_root.as_deref(),
-                        Some(&mission_id),
-                        Some(session_id),
-                        &[], // sub-agents don't track active skill dirs for skill_read
-                    )
-                    .await;
+                    let result = if let Some((mcp_server, actual_tool_name)) =
+                        mcp_tool_map.get(name)
+                    {
+                        let state = app.state::<AppState>();
+                        let arguments: Value =
+                            serde_json::from_str(args).unwrap_or_else(|_| json!({}));
+                        let owner = format!("agent:{}", agent.name);
+                        match mcp::invoke_mcp_tool_for_agent(
+                            &state,
+                            mcp_session,
+                            mcp_server,
+                            actual_tool_name,
+                            arguments,
+                            &owner,
+                        )
+                        .await
+                        {
+                            Ok(text) => format!(
+                                "MCP [{}] {} result:\n{}",
+                                mcp_server.name, actual_tool_name, text
+                            ),
+                            Err(err) => format!("MCP tool error: {err}"),
+                        }
+                    } else {
+                        tools::execute_tool(
+                            app,
+                            name,
+                            args,
+                            workspace_dir.clone(),
+                            config,
+                            &[],
+                            skill_access_root.as_deref(),
+                            Some(&mission_id),
+                            Some(session_id),
+                            &[], // sub-agents don't track active skill dirs for skill_read
+                        )
+                        .await
+                    };
                     working_memory
                         .push(json!({ "role": "tool", "tool_call_id": id, "content": result }));
                 }
@@ -3160,6 +3271,7 @@ mod tests {
             allowed_tools: Vec::new(),
             allowed_skills: Vec::new(),
             max_iterations: 10,
+            enable_mcp: false,
             emoji: None,
             color: None,
             file: None,
@@ -3186,6 +3298,7 @@ mod tests {
         configured.system_prompt = "be precise".to_string();
         configured.description = "reviews code".to_string();
         configured.emoji = Some("🤖".to_string());
+        configured.enable_mcp = true;
 
         let mut cli: SubAgent =
             serde_json::from_str(r#"{"id":"cli","name":"OpenCode","description":"","agent_type":"cli","cli":{"command":"opencode"}}"#)
@@ -3220,6 +3333,7 @@ mod tests {
         assert!(llm.get("cloud").is_none());
         assert!(llm.get("require_approval").is_none());
         assert_eq!(llm["file"], "custom/configured.md");
+        assert_eq!(llm["enable_mcp"], true);
         assert!(llm.get("configured").is_none());
 
         let cli = agents
@@ -3227,6 +3341,7 @@ mod tests {
             .find(|agent| agent["id"] == "cli")
             .expect("cli agent");
         assert_eq!(cli["name"], "OpenCode");
+        assert!(cli.get("enable_mcp").is_none());
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -3313,6 +3428,7 @@ mod tests {
         assert_eq!(library.name, "Library");
         assert_eq!(library.emoji.as_deref(), Some("📚"));
         assert_eq!(library.allowed_tools, vec!["file_actions".to_string()]);
+        assert!(!library.enable_mcp);
 
         let saved: Value = serde_json::from_str(
             &std::fs::read_to_string(&path).expect("read config"),

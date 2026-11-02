@@ -519,6 +519,9 @@ const zhTW: Messages = {
         emojiHint: "保存在 md frontmatter 中，作為內容顯示在名稱旁（不是介面圖示）。",
         color: "顏色標記",
         colorHint: "保存在 md frontmatter 中，不用作介面強調色。",
+        enableMcp: "MCP 工具",
+        enableMcpHint:
+            "注入所有已啟用 MCP server 的工具。此代理會為目前任務啟動獨立的 MCP server 程序，任務結束後自動結束（不與主代理共用程序）。",
         typeLockedHint: "代理建立後無法變更類型；如需其他後端請新建代理。",
         deleteCustomConfirm:
             "刪除代理「{name}」？將移除 agents/custom 下的定義檔案（會保留 .bak 備份）。",

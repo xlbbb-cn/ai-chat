@@ -557,6 +557,9 @@ const en = {
             "Stored in the frontmatter and shown next to the name (content, not a UI icon).",
         color: "Color",
         colorHint: "Stored in the frontmatter; not painted as a UI accent.",
+        enableMcp: "MCP tools",
+        enableMcpHint:
+            "Inject the tools of every enabled MCP server. This agent starts its own server processes for the task and stops them when the task ends (never shared with the main agent).",
         typeLockedHint:
             "The agent type is fixed after creation; create a new agent to use another backend.",
         deleteCustomConfirm:

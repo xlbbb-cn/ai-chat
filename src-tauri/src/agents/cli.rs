@@ -1091,6 +1091,7 @@ mod tests {
             allowed_tools: Vec::new(),
             allowed_skills: Vec::new(),
             max_iterations: 10,
+            enable_mcp: false,
             emoji: None,
             color: None,
             file: None,

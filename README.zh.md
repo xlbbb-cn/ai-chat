@@ -102,7 +102,9 @@ AI Chat 是一个桌面端 AI 助手应用，支持接入任意 OpenAI 兼容模
 ### 2) 子代理编排（Sub-Agents）
 
 - 三种运行时：`llm`（内置自主循环）、`cli`（本机无头编码 CLI）、`cloud`（远程 HTTP 端点）
-- 每个 Agent 可单独配置模型、系统提示词、工具/技能白名单与迭代预算
+- **文件化的 `llm` 定义**：`agents/<分类>/<slug>.md`（YAML frontmatter + 提示词）。`sub_agents.json` 只作为配置；新文件自动发现、默认禁用，面板只允许删除 `agents/custom/` 下的文件
+- 每个 Agent 可单独配置模型、系统提示词、工具/技能白名单、迭代预算与 **MCP 开关**
+- **llm Agent 的 MCP**（`enable_mcp`）：注入所有已启用 MCP server 的工具，工具名与描述和主 Agent 完全一致；每个任务启动自己的 MCP server 进程，任务结束后退出
 - 支持子代理新增、编辑、启用与删除
 - 支持编排配置（并行 / 串行、并发数）与子代理模式开关
 - 对话中支持任务级编排事件
@@ -134,6 +136,8 @@ AI Chat 是一个桌面端 AI 助手应用，支持接入任意 OpenAI 兼容模
 
 - 支持 MCP Server 的增删改查
 - 支持 stdio / SSE / HTTP / Streamable HTTP 四种传输模式，并改进相对路径处理
+- llm 子代理可通过 `enable_mcp` 开启：工具来自所有已启用的 server，名称/描述与主 Agent 一致
+- 每个子代理任务独立维护 MCP server 进程（与主 Agent 进程池隔离），任务结束（成功 / 失败 / 达到迭代上限 / Stop）后自动退出
 - 支持连通性测试
 
 ### 6) 本地持久化与运维
@@ -142,7 +146,7 @@ AI Chat 是一个桌面端 AI 助手应用，支持接入任意 OpenAI 兼容模
 - 工作区状态存放在隐藏目录 `<workspace>/.data`：SQLite 数据库、记忆、待办、技能与技能状态
 - SQLite 保存聊天历史与 API 请求监控数据（随工作区切换）
 - 请求监控面板支持列表、详情与删除
-- 支持通过 zip 导出/恢复 Profile（配置、工具、智能体、MCP 服务、工作区记忆/待办/技能）
+- 支持通过 zip 导出/恢复 Profile（配置、工具、智能体及其 `agents/` 定义、MCP 服务、工作区记忆/待办/技能）
 - 支持在设置中管理工作目录
 
 ---
@@ -327,10 +331,12 @@ ai-chat/
 ├─ src-tauri/           # Rust + Tauri 后端
 │  ├─ src/lib.rs        # 应用入口与命令注册
 │  ├─ src/llm_complete.rs
+│  ├─ src/agents.rs     # 子代理类型、运行配置、任务状态与编排
+│  ├─ src/agents/       #   cli.rs、cloud.rs、files.rs（llm 的 Markdown 定义）
 │  ├─ src/skills.rs     # 技能解析 + 工作区技能状态
 │  ├─ src/workspace.rs  # 隐藏目录 `<workspace>/.data` 布局
 │  ├─ src/tools/        # 工具模块（memory / file_actions / patch / risk 等）
-│  ├─ src/mcp.rs
+│  ├─ src/mcp.rs        # MCP 传输；主进程池 + 每个任务的 AgentMcpSession
 │  └─ src/db.rs
 └─ README.md
 ```
@@ -339,7 +345,8 @@ ai-chat/
 
 ```text
 <应用数据目录>/            config.json、app.log、mcp_servers.json、sub_agents.json、
-                          profiles.json、timers.json、workspace/（默认工作区）
+                          profiles.json、timers.json、agents/（llm 定义）、
+                          workspace/（默认工作区）
 <workspace>/.data/         chat.db、memory/{user,repo,evolution}/、todos/、skills/、
                           skills.status                                          （隐藏）
 ```
@@ -360,6 +367,7 @@ ai-chat/
 
 - 技能每个工作区只有一个根目录，技能目录锁定在自身 `SKILL.md`
 - 自我进化模式允许助手改写自己的指令——请短时、在受控工作区使用，事后检查 `.bak` 文件
+- MCP 工具参数会原样转发给 MCP server，不受工作区沙箱限制；llm 子代理只有在 `enable_mcp` 开启时才会获得 MCP 工具
 - MCP 外部服务接入前应先做最小权限与连通性验证
 - 建议在开发与生产中使用不同配置文件与 API 凭据
 

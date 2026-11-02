@@ -519,6 +519,9 @@ const zhCN: Messages = {
         emojiHint: "保存在 md frontmatter 中，作为内容显示在名称旁（不是界面图标）。",
         color: "颜色标记",
         colorHint: "保存在 md frontmatter 中，不用作界面强调色。",
+        enableMcp: "MCP 工具",
+        enableMcpHint:
+            "注入所有已启用 MCP server 的工具。该智能体会为当前任务启动独立的 MCP server 进程，任务结束后自动退出（不与主智能体共用进程）。",
         typeLockedHint: "智能体创建后不能修改类型；如需其他后端请新建智能体。",
         deleteCustomConfirm:
             "删除智能体“{name}”？将移除 agents/custom 下的定义文件（会保留 .bak 备份）。",

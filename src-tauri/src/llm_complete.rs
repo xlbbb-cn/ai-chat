@@ -1784,7 +1784,17 @@ async fn run_chat_turn(
             let detail = match kind.as_str() {
                 agents::AGENT_TYPE_CLI => format!(" (CLI: {})", agent.cli.command.trim()),
                 agents::AGENT_TYPE_CLOUD => format!(" (Cloud: {})", agent.cloud.endpoint.trim()),
-                _ => format!(" (Model: {})", agent.model.clone().unwrap_or_else(|| "inherits the main model".to_string())),
+                _ => {
+                    let mcp = if agent.enable_mcp { ", MCP tools" } else { "" };
+                    format!(
+                        " (Model: {}{})",
+                        agent
+                            .model
+                            .clone()
+                            .unwrap_or_else(|| "inherits the main model".to_string()),
+                        mcp
+                    )
+                }
             };
             available_agents_info.push_str(&format!(
                 "- ID: {}\n  Name: {} [{}]{}\n  Description: {}\n",
@@ -1992,34 +2002,14 @@ async fn run_chat_turn(
             match mcp::get_server_tools(&state, server).await {
                 Ok(server_tools) => {
                     for tool in server_tools {
-                        let Some(actual_name) = tool["function"]["name"].as_str() else {
-                            continue;
-                        };
-                        let safe_name = mcp::sanitize_fn_name(actual_name);
-                        // Use a stable short hash of the server id instead of
-                        // the array index, so tool names don't drift when the
-                        // server list is reordered or a server is disabled.
-                        let server_hash = {
-                            use std::collections::hash_map::DefaultHasher;
-                            use std::hash::{Hash, Hasher};
-                            let mut h = DefaultHasher::new();
-                            server.id.hash(&mut h);
-                            format!("{:x}", h.finish())
-                        };
-                        let raw_fn = format!("mcp_{server_hash}_{safe_name}");
-                        let fn_name: String = raw_fn.chars().take(64).collect();
-
-                        let mut openai_tool = tool.clone();
-                        openai_tool["function"]["name"] = serde_json::json!(fn_name);
-                        let desc = tool["function"]["description"]
-                            .as_str()
-                            .unwrap_or("")
-                            .to_string();
-                        openai_tool["function"]["description"] =
-                            serde_json::json!(format!("[MCP: {}] {}", server.name, desc));
-
-                        tools_list.push(openai_tool);
-                        mcp_tool_map.insert(fn_name, (server.clone(), actual_name.to_string()));
+                        // Stable `mcp_<server-hash>_<name>` function name and
+                        // a description that names the server.
+                        if let Some((fn_name, actual_name, openai_tool)) =
+                            mcp::adapt_tool_for_llm(server, &tool)
+                        {
+                            tools_list.push(openai_tool);
+                            mcp_tool_map.insert(fn_name, (server.clone(), actual_name));
+                        }
                     }
                 }
                 Err(e) => {

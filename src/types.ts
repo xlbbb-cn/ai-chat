@@ -425,6 +425,11 @@ export interface SubAgent {
   allowed_tools: string[];
   allowed_skills: string[];
   max_iterations: number;
+  /**
+   * `llm` only: inject the tools of every enabled MCP server. The task owns
+   * its own MCP server processes and stops them when it ends.
+   */
+  enable_mcp?: boolean;
   // ── `llm` file-backed definition ──
   /** Display emoji from the md frontmatter (content, not a UI icon). */
   emoji?: string;
