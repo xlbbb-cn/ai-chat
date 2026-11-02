@@ -293,6 +293,9 @@ const zhTW: Messages = {
             retention: "日誌保留天數",
             retentionHint:
                 "早於此期限的請求日誌與互動日誌會在啟動時以及由互動監視器執行「壓縮資料庫」時刪除。0 表示永久保留。聊天歷史不會被清理。修改後請按儲存以生效。",
+            singleInstance: "單實例執行",
+            singleInstanceHint:
+                "再次啟動時聚焦已執行的視窗，而不是開啟第二個實例。重新啟動應用程式後生效。",
             interactionMonitor: "互動監視器",
             agentMissions: "代理任務監視器",
             launchMonitor: "開啟監視器",

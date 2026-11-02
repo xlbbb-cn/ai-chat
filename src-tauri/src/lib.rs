@@ -407,6 +407,14 @@ pub struct AppConfig {
     /// Also consider releases flagged as pre-release in the update check.
     #[serde(default)]
     pub include_prerelease_updates: bool,
+    /// Keep a single running instance: launching the app again focuses the
+    /// window that is already open instead of starting a second process.
+    ///
+    /// The plugin that enforces this is registered before the Tauri builder
+    /// exists (it must run first), so this value is read straight from
+    /// `config.json` at process start and a change applies on the next launch.
+    #[serde(default = "update::default_true")]
+    pub single_instance: bool,
 }
 
 impl Default for AppConfig {
@@ -439,6 +447,7 @@ impl Default for AppConfig {
             check_updates_on_startup: true,
             include_prerelease_updates: false,
             log_retention_days: db::default_log_retention_days(),
+            single_instance: true,
         }
     }
 }
@@ -1004,9 +1013,80 @@ fn apply_profile_config(
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
 
+/// Just the one field the plugin wiring needs, so a config that is missing,
+/// half-written, or from an older version falls back to the default instead of
+/// failing to parse.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[derive(Deserialize)]
+struct SingleInstanceProbe {
+    #[serde(default = "update::default_true")]
+    single_instance: bool,
+}
+
+/// The persisted `single_instance` switch, readable *before* Tauri exists.
+///
+/// The plugin decides at registration time whether a second process is
+/// terminated, so the flag cannot come from `AppState` (managed in `setup`,
+/// after the builder). `dirs::data_local_dir()/identifier` is the same path
+/// `app.path().app_data_dir()` resolves to.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[allow(dead_code)] // release-only: debug builds never register the plugin
+fn persisted_single_instance(identifier: &str) -> bool {
+    let Some(data_dir) = dirs::data_local_dir() else {
+        return true;
+    };
+    fs::read_to_string(data_dir.join(identifier).join("config.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<SingleInstanceProbe>(&raw).ok())
+        .map(|probe| probe.single_instance)
+        .unwrap_or(true)
+}
+
+/// Bring the window of the already-running instance back to the front.
+///
+/// Only setters are sent, with no state probe (`unminimize` runs
+/// unconditionally): on Windows the plugin invokes this callback on the main
+/// thread from a `WM_COPYDATA` handler, where Tauri dispatches window messages
+/// inline. Windows lets `set_focus` succeed because the second instance hands
+/// over the foreground right (`AllowSetForegroundWindow`) before the plugin
+/// exits it.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[allow(dead_code)] // release-only: debug builds never register the plugin
+fn focus_main_window(app: &AppHandle) {
+    #[cfg(target_os = "macos")]
+    let _ = app.show();
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let context = tauri::generate_context!();
+
+    #[allow(unused_mut)]
+    let mut builder = tauri::Builder::default();
+
+    // Must stay the first plugin: a second instance has to be detected before
+    // any other setup runs. The switch is read from disk here because the
+    // plugin is installed before `setup` (and therefore before `AppState`).
+    //
+    // Release builds only: a debug build shares the bundle identifier with the
+    // installed app, so registering the plugin there would make `tauri dev`
+    // exit (and focus the packaged app) whenever it is already running.
+    #[cfg(all(
+        not(debug_assertions),
+        not(any(target_os = "android", target_os = "ios"))
+    ))]
+    if persisted_single_instance(context.config().identifier.as_str()) {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            focus_main_window(app);
+        }));
+    }
+
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -1327,7 +1407,7 @@ pub fn run() {
             update::open_release_page,
             update::get_app_version,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application")
         .run(|_app_handle, event| {
             // Normal quit path. `kill_all` is idempotent, so running it after
@@ -1342,6 +1422,20 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The single-instance switch is read from `config.json` before Tauri
+    /// starts, so the probe must tolerate a config that predates the field.
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[test]
+    fn single_instance_probe_defaults_on_and_reads_the_switch() {
+        let legacy: SingleInstanceProbe = serde_json::from_str(r#"{"model":"gpt-4o-mini"}"#)
+            .expect("a partial config still parses");
+        assert!(legacy.single_instance, "a missing field means enabled");
+
+        let off: SingleInstanceProbe =
+            serde_json::from_str(r#"{"single_instance":false}"#).expect("the switch parses");
+        assert!(!off.single_instance);
+    }
 
     /// Self-evolution mode owns `file_actions` and `memory`: the assistant
     /// must be able to edit its own skills and to remember what it learned.

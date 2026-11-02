@@ -317,6 +317,9 @@ const en = {
             retention: "Log retention (days)",
             retentionHint:
                 "Request and interaction logs older than this are deleted at startup and by the Interaction Monitor's “Compact DB”. 0 keeps logs forever. Chat history is never pruned. Change it and press Save to apply.",
+            singleInstance: "Run a single instance",
+            singleInstanceHint:
+                "Launching AI Chat again brings the running window to the front instead of opening a second copy. Applies after restarting the app.",
             interactionMonitor: "Interaction monitor",
             agentMissions: "Agent missions monitor",
             launchMonitor: "Launch Monitor",

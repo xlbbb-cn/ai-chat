@@ -1106,6 +1106,22 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
                   {t("settings.runtime.retentionHint")}
                 </small>
               </label>
+              <label className="settings-checkbox">
+                <input
+                  type="checkbox"
+                  checked={config.single_instance ?? true}
+                  onChange={(e) =>
+                    setConfig((prev) => ({
+                      ...prev,
+                      single_instance: e.target.checked,
+                    }))
+                  }
+                />
+                <div className="settings-checkbox-copy">
+                  <span>{t("settings.runtime.singleInstance")}</span>
+                  <small>{t("settings.runtime.singleInstanceHint")}</small>
+                </div>
+              </label>
               {sessionId && (
                 <>
                   <div className="settings-field-row">

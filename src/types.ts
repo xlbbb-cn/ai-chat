@@ -286,6 +286,13 @@ export interface AppConfig {
   check_updates_on_startup?: boolean;
   include_prerelease_updates?: boolean;
   /**
+   * Keep a single running instance: launching the app again focuses the
+   * window that is already open instead of starting a second process.
+   * Read from `config.json` at process start, so a change applies after the
+   * app is restarted.
+   */
+  single_instance?: boolean;
+  /**
    * Retention window (days) for the request / interaction log tables. Older
    * rows are dropped at startup and when the monitor compacts the database.
    * 0 keeps logs forever; chat history is never pruned.

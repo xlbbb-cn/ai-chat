@@ -293,6 +293,9 @@ const zhCN: Messages = {
             retention: "日志保留天数",
             retentionHint:
                 "早于该时限的请求日志与交互日志会在启动时以及由交互监视器执行“压缩数据库”时删除。0 表示永久保留。聊天历史不会被清理。修改后请点击保存生效。",
+            singleInstance: "单实例运行",
+            singleInstanceHint:
+                "再次启动时聚焦已运行的窗口，而不是打开第二个实例。重启应用后生效。",
             interactionMonitor: "交互监视器",
             agentMissions: "智能体任务监视器",
             launchMonitor: "打开监视器",
