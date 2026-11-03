@@ -91,7 +91,6 @@ function emptyCliSettings(): CliAgentSettings {
     command: "",
     args: [],
     prompt_via: "arg",
-    continue_args: [],
     model_args: [],
     env: [],
     default_timeout_seconds: DEFAULT_CLI_TIMEOUT_SECONDS,
@@ -147,7 +146,6 @@ interface AgentDraft {
   /** Type switching is fixed for an existing file-backed `llm` agent. */
   typeLocked: boolean;
   argsText: string;
-  continueArgsText: string;
   modelArgsText: string;
   envText: string;
   headersText: string;
@@ -196,7 +194,6 @@ function toDraft(agent: SubAgent): AgentDraft {
     agent,
     typeLocked: agent.agent_type === "llm" && agent.id.trim().length > 0,
     argsText: valuesToLines(agent.cli.args),
-    continueArgsText: valuesToLines(agent.cli.continue_args),
     modelArgsText: valuesToLines(agent.cli.model_args),
     envText: pairsToText(agent.cli.env),
     headersText: pairsToText(agent.cloud.headers),
@@ -212,7 +209,6 @@ function draftToAgent(draft: AgentDraft): SubAgent {
     cli: {
       ...draft.agent.cli,
       args: linesToValues(draft.argsText),
-      continue_args: linesToValues(draft.continueArgsText),
       model_args: linesToValues(draft.modelArgsText),
       env: textToPairs(draft.envText),
     },
@@ -514,16 +510,6 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
               <option value="stdin">{t("agents.cliPromptViaStdin")}</option>
             </select>
             <small className="agent-field-hint">{t("agents.cliPromptViaHint")}</small>
-          </label>
-          <label>
-            {t("agents.cliContinueArgs")}
-            <textarea
-              rows={2}
-              value={draft.continueArgsText}
-              onChange={(e) => updateDraft({ continueArgsText: e.target.value })}
-              placeholder={"--continue"}
-            />
-            <small className="agent-field-hint">{t("agents.cliContinueArgsHint")}</small>
           </label>
           <label>
             {t("agents.cliModelArgs")}

@@ -612,9 +612,6 @@ const en = {
         cliPromptViaStdin: "Through stdin",
         cliPromptViaHint:
             "Use stdin for CLIs that read piped input, and on Windows when a prompt could contain %VAR% text.",
-        cliContinueArgs: "Continue-session arguments — one per line",
-        cliContinueArgsHint:
-            "Appended when this agent runs again in the same chat after a successful run, so the CLI resumes its previous session (e.g. `--continue`). A new chat starts a fresh session.",
         cliModelArgs: "Model arguments — one per line",
         cliModelArgsHint:
             "Appended to every run, after the arguments above. One argument per line — put the flag and its value on separate lines, e.g. `-m` then `opencode-go/deepseek-v4.1-flash`. The model is not inherited from the main config.",

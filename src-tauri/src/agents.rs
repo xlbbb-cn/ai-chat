@@ -156,8 +156,6 @@ pub struct CliAgentSettings {
     #[serde(default = "default_prompt_via")]
     pub prompt_via: String,
     #[serde(default)]
-    pub continue_args: Vec<String>,
-    #[serde(default)]
     pub model_args: Vec<String>,
     #[serde(default)]
     pub env: Vec<KeyValue>,
@@ -175,7 +173,6 @@ impl Default for CliAgentSettings {
             command: String::new(),
             args: Vec::new(),
             prompt_via: default_prompt_via(),
-            continue_args: Vec::new(),
             model_args: Vec::new(),
             env: Vec::new(),
             default_timeout_seconds: default_cli_timeout_seconds(),
@@ -300,8 +297,6 @@ pub struct LegacyCliAgent {
     #[serde(default = "default_prompt_via")]
     pub prompt_via: String,
     #[serde(default)]
-    pub continue_args: Vec<String>,
-    #[serde(default)]
     pub model_args: Vec<String>,
     #[serde(default)]
     pub env: Vec<KeyValue>,
@@ -382,7 +377,6 @@ pub fn normalize_config(config: &mut AgentsConfig) {
                 command: entry.command,
                 args: entry.args,
                 prompt_via: entry.prompt_via,
-                continue_args: entry.continue_args,
                 model_args: entry.model_args,
                 env: entry.env,
                 default_timeout_seconds: entry.default_timeout_seconds,
@@ -2120,17 +2114,9 @@ pub async fn run_sub_agent(
 
 // ─── External agents (cli / cloud) ───────────────────────────────────────────
 
-/// Identity of a resumable CLI session: the directory the CLI ran in, the chat
-/// session that owns it and the agent id. Kept in memory only — an app restart
-/// starts fresh CLI sessions.
-pub type CliSessionKey = (PathBuf, String, String);
-
-/// What a `cli` run needs beyond the agent settings: where it starts and whether
-/// it resumes the session a previous run in this chat created.
+/// What a `cli` run needs beyond the agent settings: where it starts.
 struct CliRunContext {
     cwd: PathBuf,
-    session_key: CliSessionKey,
-    session_continue: bool,
 }
 
 /// Upper bound for any external agent run's timeout.
@@ -2151,22 +2137,6 @@ fn task_status_for_run(run_status: &str) -> &'static str {
         "success" => "success",
         "cancelled" => "stopped",
         _ => "error",
-    }
-}
-
-/// `true` once this CLI agent completed a successful run in this chat/cwd, i.e.
-/// the next run may append its `continue_args`.
-fn cli_session_is_resumable(app: &AppHandle, key: &CliSessionKey) -> bool {
-    app.state::<AppState>()
-        .cli_sessions
-        .lock()
-        .map(|sessions| sessions.contains(key))
-        .unwrap_or(false)
-}
-
-fn remember_cli_session(app: &AppHandle, key: CliSessionKey) {
-    if let Ok(mut sessions) = app.state::<AppState>().cli_sessions.lock() {
-        sessions.insert(key);
     }
 }
 
@@ -2253,10 +2223,8 @@ async fn run_external_agent(
 
     let prompt = build_external_prompt(agent, task);
 
-    // CLI agents keep their own session on disk. A successful run is remembered
-    // per (working directory, chat session, agent) so the next call in the same
-    // chat can resume it through the agent's `continue_args` (`--continue`, …).
-    // A new chat, another cwd or an app restart starts a fresh session.
+    // CLI agents run in the resolved working directory. Each run starts a
+    // fresh CLI session; no session state is carried across agent calls.
     let cli_run = match backend {
         ExternalBackend::Cli => {
             let cwd = match resolve_agent_cwd(agent, &workspace_dir) {
@@ -2277,14 +2245,7 @@ async fn run_external_agent(
                     };
                 }
             };
-            let session_key = (cwd.clone(), session_id.to_string(), agent.id.clone());
-            let session_continue = !agent.cli.continue_args.is_empty()
-                && cli_session_is_resumable(app, &session_key);
-            Some(CliRunContext {
-                cwd,
-                session_key,
-                session_continue,
-            })
+            Some(CliRunContext { cwd })
         }
         ExternalBackend::Cloud => None,
     };
@@ -2318,7 +2279,6 @@ async fn run_external_agent(
                 &task.id,
                 &prompt,
                 cli_run.cwd.clone(),
-                cli_run.session_continue,
                 cancelled,
             )
             .await
@@ -2336,13 +2296,6 @@ async fn run_external_agent(
     match outcome {
         Ok((run_status, content, summary)) => {
             let status = task_status_for_run(run_status);
-            // Only a run that actually succeeded can be resumed: a failed,
-            // timed-out or cancelled process may not have created a session.
-            if status == "success" {
-                if let Some(cli_run) = &cli_run {
-                    remember_cli_session(app, cli_run.session_key.clone());
-                }
-            }
             // A run the user stopped is not a success: the mission closes as
             // "stopped" (via run_sub_agent) instead of "accomplished". The same
             // holds for a non-zero exit or a timeout, which close it as
@@ -2478,15 +2431,10 @@ async fn request_external_agent_approval(
     let target = match backend {
         ExternalBackend::Cli => match cli_run {
             // The approval text must show the directory the agent will actually
-            // start in and the same `--continue` decision the run will use.
-            Some(cli_run) => cli::describe_run(
-                agent,
-                prompt,
-                &cli_run.cwd,
-                cli_run.session_continue,
-            )
-            .map(|command| format!("It runs with your user permissions and can read and write files in the workspace.\n\n{}", command))
-            .unwrap_or_else(|err| format!("Its command could not be resolved yet: {err}")),
+            // start in.
+            Some(cli_run) => cli::describe_run(agent, prompt, &cli_run.cwd)
+                .map(|command| format!("It runs with your user permissions and can read and write files in the workspace.\n\n{}", command))
+                .unwrap_or_else(|err| format!("Its command could not be resolved yet: {err}")),
             None => "Its working directory could not be resolved yet.".to_string(),
         },
         ExternalBackend::Cloud => format!(
@@ -3198,7 +3146,6 @@ mod tests {
                     "command": "C:\\Users\\x\\AppData\\Roaming\\npm\\opencode2.ps1",
                     "args": ["run", "{prompt}"],
                     "prompt_via": "arg",
-                    "continue_args": [],
                     "model_args": [],
                     "env": [],
                     "default_timeout_seconds": 600,

@@ -483,7 +483,6 @@ export interface CliAgentSettings {
   command: string;
   args: string[];
   prompt_via: "arg" | "stdin" | string;
-  continue_args: string[];
   model_args: string[];
   env: KeyValue[];
   /** Run timeout in seconds; 0 = no timeout. */
@@ -545,7 +544,6 @@ export interface LegacyCliAgent {
   command: string;
   args: string[];
   prompt_via: string;
-  continue_args: string[];
   model_args: string[];
   env: KeyValue[];
   default_timeout_seconds: number;

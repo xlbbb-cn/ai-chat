@@ -572,9 +572,6 @@ const zhCN: Messages = {
         cliPromptViaStdin: "通过 stdin",
         cliPromptViaHint:
             "适合从管道读取输入的 CLI；在 Windows 上，当提示词可能包含 %VAR% 形式的内容时也建议使用。",
-        cliContinueArgs: "续接会话参数 —— 每行一个",
-        cliContinueArgsHint:
-            "在同一会话中再次调用该智能体时追加（首次成功运行之后），用于续接该 CLI 上一次的会话，例如 --continue。新建会话会重新开始。",
         cliModelArgs: "模型参数 —— 每行一个",
         cliModelArgsHint:
             "每次运行都会追加到上面的参数之后。每行一个参数——把开关和值分成两行，例如一行 -m、一行 opencode-go/deepseek-v4.1-flash。模型不会从主配置继承。",

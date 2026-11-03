@@ -572,9 +572,6 @@ const zhTW: Messages = {
         cliPromptViaStdin: "透過 stdin",
         cliPromptViaHint:
             "適合從管線讀取輸入的 CLI；在 Windows 上，當提示詞可能包含 %VAR% 形式的內容時也建議使用。",
-        cliContinueArgs: "續接工作階段參數 —— 每行一個",
-        cliContinueArgsHint:
-            "在同一工作階段中再次呼叫此代理時附加（首次成功執行之後），用於續接該 CLI 上一次的工作階段，例如 --continue。新建工作階段會重新開始。",
         cliModelArgs: "模型參數 —— 每行一個",
         cliModelArgsHint:
             "每次執行都會附加在上面的參數之後。每行一個參數——把開關和值分成兩行，例如一行 -m、一行 opencode-go/deepseek-v4.1-flash。模型不會從主設定繼承。",
