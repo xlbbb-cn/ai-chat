@@ -362,7 +362,13 @@ async fn stdio_request_in(
     let handle = pool
         .get_mut(server_id)
         .ok_or_else(|| "Process not running".to_string())?;
-    stdio_request(handle, method, params).await
+    stdio_request(
+        handle,
+        method,
+        params,
+        std::time::Duration::from_secs(STDIO_REQUEST_TIMEOUT_SECS),
+    )
+    .await
 }
 
 /// Send a JSON-RPC request on an existing stdio process and wait for the
@@ -371,6 +377,7 @@ async fn stdio_request(
     handle: &mut StdioProcessHandle,
     method: &str,
     params: serde_json::Value,
+    timeout: std::time::Duration,
 ) -> Result<serde_json::Value, String> {
     let id = handle.next_id;
     handle.next_id += 1;
@@ -382,7 +389,7 @@ async fn stdio_request(
         "id": id,
     });
     stdio_write_json(&mut handle.stdin, &req).await?;
-    stdio_read_response(&mut handle.stdout_reader, id).await
+    stdio_read_response(&mut handle.stdout_reader, id, timeout).await
 }
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
@@ -975,14 +982,21 @@ async fn stdio_write_json(
         .map_err(|e| format!("stdin write: {e}"))
 }
 
+/// Timeout for a single JSON-RPC round trip on the shared stdio pool. A
+/// background task does not use this pool (see `invoke_mcp_tool_isolated`), so
+/// this stays short: a stuck server must not block the chat.
+const STDIO_REQUEST_TIMEOUT_SECS: u64 = 10;
+
 /// Read lines from stdout until we get a JSON object whose `id` matches `expected_id`.
 /// Notifications (messages without an `id` field, or with `method`) are skipped.
 async fn stdio_read_response(
     reader: &mut tokio::io::BufReader<tokio::process::ChildStdout>,
     expected_id: u64,
+    timeout: std::time::Duration,
 ) -> Result<serde_json::Value, String> {
-    use tokio::time::{timeout, Duration};
-    timeout(Duration::from_secs(10), async {
+    use tokio::time::timeout as with_timeout;
+
+    with_timeout(timeout, async {
         let mut line = String::new();
         loop {
             line.clear();
@@ -1067,7 +1081,12 @@ async fn stdio_init(
             "id": 1
         });
         stdio_write_json(&mut stdin, &init_req).await?;
-        stdio_read_response(&mut reader, 1).await?;
+        stdio_read_response(
+            &mut reader,
+            1,
+            std::time::Duration::from_secs(STDIO_REQUEST_TIMEOUT_SECS),
+        )
+        .await?;
 
         // send initialized notification (no response expected)
         let notif = serde_json::json!({
@@ -1767,6 +1786,7 @@ fn convert_mcp_tools(mcp_tools: Vec<serde_json::Value>) -> Vec<serde_json::Value
 pub fn adapt_tool_for_llm(
     server: &McpServer,
     tool: &serde_json::Value,
+    background: bool,
 ) -> Option<(String, String, serde_json::Value)> {
     let actual_name = tool["function"]["name"].as_str()?.to_string();
     let safe_name = sanitize_fn_name(&actual_name);
@@ -1790,6 +1810,27 @@ pub fn adapt_tool_for_llm(
         .unwrap_or("");
     openai_tool["function"]["description"] =
         serde_json::json!(format!("[MCP: {}] {}", server.name, description));
+
+    // Background execution is opt-in per call. Never clobber a property the
+    // server itself defines under the same name (the flag is stripped before
+    // the arguments are forwarded).
+    if background {
+        let parameters = &mut openai_tool["function"]["parameters"];
+        if !parameters.is_object() {
+            *parameters = serde_json::json!({ "type": "object", "properties": {} });
+        }
+        if parameters.get("properties").is_none() {
+            parameters["properties"] = serde_json::json!({});
+        }
+        if let Some(properties) = parameters["properties"].as_object_mut() {
+            properties.entry("run_in_background").or_insert_with(|| {
+                serde_json::json!({
+                    "type": "boolean",
+                    "description": "Run this MCP tool as a background task: return a task id immediately instead of blocking the turn. The result is delivered automatically before your next request. Use it only when the call is expected to take a long time and you have other work to do meanwhile."
+                })
+            });
+        }
+    }
 
     Some((fn_name, actual_name, openai_tool))
 }
@@ -1820,6 +1861,133 @@ pub async fn invoke_mcp_tool(
     };
     log_mcp_call_result(state, server, tool_name, &result, None);
     result
+}
+
+/// Call an MCP tool for a background task, isolated from the shared stdio pool.
+///
+/// The shared pool holds `AppState.mcp_children` for the whole round trip and
+/// caps it at 10 s. A slow *background* call on it would block the next
+/// request's `tools/list` — exactly the stall background execution exists to
+/// avoid. A stdio background call therefore gets its own short-lived process;
+/// SSE / HTTP transports already open a connection per call. The process tree
+/// is killed on success, error, timeout and cancellation.
+pub async fn invoke_mcp_tool_isolated(
+    state: &AppState,
+    server: &McpServer,
+    tool_name: &str,
+    arguments: serde_json::Value,
+    timeout_secs: u64,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> Result<String, String> {
+    append_mcp_log(
+        state,
+        &server.id,
+        McpLogLevel::Info,
+        format!("LLM tools/call (background): {tool_name}"),
+    );
+    let timeout_secs = timeout_secs.max(1);
+    let timeout = std::time::Duration::from_secs(timeout_secs);
+    let workspace_dir = state.workspace_dir.lock().unwrap().clone();
+
+    let work = async {
+        match server.transport {
+            McpTransport::Stdio => {
+                invoke_tool_stdio_isolated(state, server, tool_name, arguments, &workspace_dir, timeout)
+                    .await
+            }
+            McpTransport::Sse => invoke_tool_sse(server, tool_name, arguments).await,
+            McpTransport::Http => invoke_tool_http(server, tool_name, arguments).await,
+            McpTransport::StreamHttp => {
+                invoke_tool_stream_http(server, tool_name, arguments).await
+            }
+        }
+    };
+
+    let result = tokio::select! {
+        res = tokio::time::timeout(timeout, work) => match res {
+            Ok(result) => result,
+            Err(_) => Err(format!(
+                "MCP tool timed out after {timeout_secs}s (background task)."
+            )),
+        },
+        _ = wait_cancelled(&cancel) => Err(
+            "⛔ Background task cancelled — the MCP request was abandoned.".to_string()
+        ),
+    };
+    log_mcp_call_result(state, server, tool_name, &result, None);
+    result
+}
+
+/// Kill-on-drop owner for the isolated process, so cancellation or a timeout
+/// cannot leave a server child behind (dropping the future skips the normal
+/// cleanup path).
+struct IsolatedStdio {
+    handle: Option<StdioProcessHandle>,
+}
+
+impl Drop for IsolatedStdio {
+    fn drop(&mut self) {
+        if let Some(handle) = self.handle.take() {
+            kill_stdio_handle(handle);
+        }
+    }
+}
+
+async fn invoke_tool_stdio_isolated(
+    state: &AppState,
+    server: &McpServer,
+    tool_name: &str,
+    arguments: serde_json::Value,
+    workspace_dir: &Path,
+    timeout: std::time::Duration,
+) -> Result<String, String> {
+    let logs = state.mcp_logs.clone();
+    let server_id = server.id.clone();
+    let server_name = server.name.clone();
+    let (child, stdin, reader, tracked) = stdio_init(server, workspace_dir, move |stderr| {
+        spawn_stderr_drain(
+            logs,
+            server_id,
+            server_name,
+            "[background] ".to_string(),
+            stderr,
+        );
+    })
+    .await?;
+
+    let mut guard = IsolatedStdio {
+        handle: Some(StdioProcessHandle {
+            child,
+            stdin,
+            stdout_reader: reader,
+            next_id: 2, // initialize used id 1
+            tracked,
+        }),
+    };
+    let handle = guard.handle.as_mut().ok_or("isolated MCP handle missing")?;
+    let resp = stdio_request(
+        handle,
+        "tools/call",
+        serde_json::json!({
+            "name": tool_name,
+            "arguments": arguments
+        }),
+        timeout,
+    )
+    .await?;
+
+    if let Some(err) = resp.get("error") {
+        return Err(format!("MCP tool error: {err}"));
+    }
+    Ok(extract_tool_result(&resp["result"]))
+}
+
+/// Resolve once `flag` is set; used to abandon an in-flight MCP request.
+async fn wait_cancelled(flag: &std::sync::atomic::AtomicBool) {
+    use std::sync::atomic::Ordering;
+    while !flag.load(Ordering::SeqCst) {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
 }
 
 /// `invoke_mcp_tool` for an `llm` sub-agent task: stdio calls go through the
@@ -2034,7 +2202,7 @@ mod tests {
             }
         });
 
-        let (name, actual, adapted) = adapt_tool_for_llm(&server, &tool).expect("adapts");
+        let (name, actual, adapted) = adapt_tool_for_llm(&server, &tool, false).expect("adapts");
         assert_eq!(actual, "read file");
         assert!(name.starts_with("mcp_"));
         assert!(name.len() <= 64);
@@ -2042,7 +2210,42 @@ mod tests {
         assert_eq!(adapted["function"]["description"], "[MCP: Files] Reads a file");
 
         // The same server + tool always yields the same advertised name.
-        let (again, _, _) = adapt_tool_for_llm(&server, &tool).expect("adapts twice");
+        let (again, _, _) = adapt_tool_for_llm(&server, &tool, false).expect("adapts twice");
         assert_eq!(name, again);
+    }
+
+    #[test]
+    fn background_flag_is_added_per_call_and_never_clobbers_a_server_property() {
+        let server = test_server();
+        let tool = serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "slow_search",
+                "description": "Searches slowly",
+                "parameters": { "type": "object", "properties": {} }
+            }
+        });
+
+        let (_, _, background) = adapt_tool_for_llm(&server, &tool, true).expect("adapts");
+        assert_eq!(
+            background["function"]["parameters"]["properties"]["run_in_background"]["type"],
+            "boolean"
+        );
+
+        let (_, _, foreground) = adapt_tool_for_llm(&server, &tool, false).expect("adapts");
+        assert!(
+            foreground["function"]["parameters"]["properties"]["run_in_background"].is_null(),
+            "the flag must only be advertised while background tools are enabled"
+        );
+
+        // A server that already defines the key keeps its own schema.
+        let mut owned = tool.clone();
+        owned["function"]["parameters"]["properties"]["run_in_background"] =
+            serde_json::json!({ "type": "string", "description": "server-owned" });
+        let (_, _, adapted) = adapt_tool_for_llm(&server, &owned, true).expect("adapts");
+        assert_eq!(
+            adapted["function"]["parameters"]["properties"]["run_in_background"]["type"],
+            "string"
+        );
     }
 }

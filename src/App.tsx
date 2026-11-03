@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState } from "./api";
+import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask } from "./api";
 
 import { ChatMessage } from "./components/ChatMessage";
 import { ToolCallGroup } from "./components/ToolCallGroup";
@@ -31,6 +31,7 @@ import type {
   SleepLockState,
   ThemeMode,
   TimerEntry,
+  BackgroundTaskState,
   UpdateInfo,
 } from "./types";
 import { isGenerationStopped, isLocale, useI18n } from "./i18n";
@@ -48,6 +49,7 @@ import {
   faRobot,
   faRotateRight,
   faScrewdriverWrench,
+  faSpinner,
   faStopwatch,
   faTriangleExclamation,
   faVolumeHigh,
@@ -389,6 +391,10 @@ export default function App() {
   const [timerTick, setTimerTick] = useState(() => Date.now());
   /** Timer that fired for a session the user is not currently in. */
   const [timerNotice, setTimerNotice] = useState<TimerEntry | null>(null);
+  /** Background tool tasks of the active turn (`run_in_background`). */
+  const [backgroundTasks, setBackgroundTasks] = useState<BackgroundTaskState[]>([]);
+  /** >0 while the backend is holding the turn open for background results. */
+  const [backgroundWaiting, setBackgroundWaiting] = useState(0);
   /** Transcript scroll container; its position decides whether the view
    *  follows incoming content or stays where the user left it. */
   const messagesRef = useRef<HTMLDivElement>(null);
@@ -1100,6 +1106,55 @@ export default function App() {
           )
         );
       }),
+      // Background tool task lifecycle. The entry is upserted by the `bg-…`
+      // task id, so a task keeps one row from start to finish and the cancel
+      // button can target it.
+      listen<BackgroundTaskState>("background-task-state", (e) => {
+        const task = e.payload;
+        if (!task) return;
+        // A late event from a previous session must not leak into this one.
+        if (task.session_id && task.session_id !== sessionIdRef.current) return;
+        setBackgroundTasks((prev) => {
+          const next = [...prev];
+          const index = next.findIndex((item) => item.id === task.id);
+          if (index >= 0) next[index] = task;
+          else next.push(task);
+          return next;
+        });
+
+        const status: ToolCallEntry["status"] =
+          task.status === "running"
+            ? "running"
+            : task.status === "failed"
+              ? "error"
+              : "done";
+        const entry: ToolCallEntry = {
+          task_id: task.id,
+          agent_name: t("app.background.toolName"),
+          description: task.label,
+          status,
+          summary: task.preview,
+          background: true,
+        };
+        const exists = currentToolCallsRef.current.some(
+          (item) => item.task_id === task.id
+        );
+        currentToolCallsRef.current = exists
+          ? currentToolCallsRef.current.map((item) =>
+              item.task_id === task.id ? { ...item, ...entry } : item
+            )
+          : [...currentToolCallsRef.current, entry];
+        updateActiveAssistantToolCalls(currentToolCallsRef.current);
+      }),
+      listen<{ pending?: number; session_id?: string }>("background-waiting", (e) => {
+        if (
+          e.payload?.session_id &&
+          e.payload.session_id !== sessionIdRef.current
+        ) {
+          return;
+        }
+        setBackgroundWaiting(e.payload?.pending ?? 0);
+      }),
     );
     return () => {
       unlisteners.forEach((p) => p.then((fn) => fn()));
@@ -1140,6 +1195,17 @@ export default function App() {
   // a ref instead of re-subscribing whenever the user switches chats.
   useEffect(() => {
     sessionIdRef.current = sessionId;
+  }, [sessionId]);
+
+  // Background tool tasks are turn-scoped, but a session switch (or a reloaded
+  // window) must never show another chat's tasks.
+  useEffect(() => {
+    setBackgroundTasks([]);
+    setBackgroundWaiting(0);
+    if (!sessionId) return;
+    listBackgroundTasks(sessionId)
+      .then(setBackgroundTasks)
+      .catch((err) => console.error("Failed to load background tasks", err));
   }, [sessionId]);
 
   // Delay timers: initial list, live updates, and the resume hook.
@@ -1208,6 +1274,30 @@ export default function App() {
       setError(String(err));
     }
   }, []);
+
+  /** Stop one background tool task (its process tree is terminated). */
+  const handleCancelBackgroundTask = useCallback(
+    async (taskId: string) => {
+      try {
+        const updated = await cancelBackgroundTask(taskId);
+        setBackgroundTasks((prev) => {
+          const next = [...prev];
+          const index = next.findIndex((task) => task.id === updated.id);
+          if (index >= 0) next[index] = updated;
+          return next;
+        });
+        currentToolCallsRef.current = currentToolCallsRef.current.map((entry) =>
+          entry.task_id === updated.id
+            ? { ...entry, status: "done" as const, summary: updated.preview }
+            : entry
+        );
+        updateActiveAssistantToolCalls(currentToolCallsRef.current);
+      } catch (err) {
+        setError(String(err));
+      }
+    },
+    [updateActiveAssistantToolCalls]
+  );
 
   /**
    * Push the composed text into the turn that is currently running.
@@ -1295,6 +1385,8 @@ export default function App() {
     currentToolCallsRef.current = [];
     currentInjectionsRef.current = [];
     hasRunningToolCallRef.current = false;
+    setBackgroundTasks([]);
+    setBackgroundWaiting(0);
 
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
     // An auto-resume must not discard a draft or attachments the user is
@@ -1355,6 +1447,7 @@ export default function App() {
         accumulatedContent += token;
         const shouldMarkDone = hasRunningToolCallRef.current;
         if (shouldMarkDone) hasRunningToolCallRef.current = false;
+        setBackgroundWaiting(0);
         setMessages((prev) =>
           prev.map((m) => {
             if (m.id !== assistantId) return m;
@@ -1382,6 +1475,7 @@ export default function App() {
         );
       },
       onDone() {
+        setBackgroundWaiting(0);
         // Settle the still-running steps before persisting: the transcript
         // must never carry a "running" entry into the history (it would spin
         // forever once the chat is reloaded).
@@ -1480,6 +1574,8 @@ export default function App() {
     currentToolCallsRef.current = [];
     currentInjectionsRef.current = [];
     hasRunningToolCallRef.current = false;
+    setBackgroundTasks([]);
+    setBackgroundWaiting(0);
 
     followBottomRef.current = true;
     setMessages((prev) => [...prev, assistantMsg]);
@@ -1518,6 +1614,7 @@ export default function App() {
         accumulatedContent += token;
         const shouldMarkDone = hasRunningToolCallRef.current;
         if (shouldMarkDone) hasRunningToolCallRef.current = false;
+        setBackgroundWaiting(0);
         setMessages((prev) =>
           prev.map((m) => {
             if (m.id !== assistantId) return m;
@@ -1545,6 +1642,7 @@ export default function App() {
         );
       },
       onDone() {
+        setBackgroundWaiting(0);
         const finalToolCalls = currentToolCallsRef.current.map((e) =>
           e.status === "running" ? { ...e, status: "done" as const } : e
         );
@@ -2357,7 +2455,7 @@ export default function App() {
           )}
           {messages.map((m) =>
             m.role === "tool_group" ? (
-              <ToolCallGroup key={m.id} message={m} onConfirm={respondToolCallConfirm} />
+              <ToolCallGroup key={m.id} message={m} onConfirm={respondToolCallConfirm} onCancelBackground={handleCancelBackgroundTask} />
             ) : (
               <ChatMessage
                 key={m.id}
@@ -2368,6 +2466,7 @@ export default function App() {
                 onFork={handleForkMessage}
                 dbId={m.dbId}
                 onConfirm={respondToolCallConfirm}
+                onCancelBackground={handleCancelBackgroundTask}
               />
             )
           )}
@@ -2412,6 +2511,38 @@ export default function App() {
                     </div>
                   );
                 })}
+              </div>
+            </div>
+          )}
+          {(backgroundTasks.some((task) => task.status === "running") ||
+            backgroundWaiting > 0) && (
+            <div className="timer-bar" role="status" aria-live="polite">
+              <span className="timer-bar-title">
+                <FontAwesomeIcon icon={faSpinner} spin />
+                {backgroundWaiting > 0
+                  ? t("app.background.waiting", { count: backgroundWaiting })
+                  : t("app.background.title")}
+              </span>
+              <div className="timer-bar-chips">
+                {backgroundTasks
+                  .filter((task) => task.status === "running")
+                  .map((task) => (
+                    <div key={task.id} className="timer-chip" title={task.label}>
+                      <span className="timer-chip-label">{task.label}</span>
+                      <span className="timer-chip-countdown">
+                        {formatCountdown(timerTick - task.started_at_ms)}
+                      </span>
+                      <button
+                        type="button"
+                        className="timer-chip-cancel"
+                        title={t("app.background.cancel")}
+                        aria-label={t("app.background.cancel")}
+                        onClick={() => void handleCancelBackgroundTask(task.id)}
+                      >
+                        <FontAwesomeIcon icon={faXmark} />
+                      </button>
+                    </div>
+                  ))}
               </div>
             </div>
           )}

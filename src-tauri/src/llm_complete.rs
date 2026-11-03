@@ -471,6 +471,413 @@ const STREAM_RETRY_BACKOFF_MS: [u64; 2] = [300, 900];
 const MID_TURN_INJECTION_PREFIX: &str =
     "[User update received while you were working — treat this as a new user message and adjust the current work if it changes anything]";
 
+// ── Background tool tasks ───────────────────────────────────────────────────
+
+/// Control tool the model uses to list / wait for / fetch / cancel tasks.
+const BACKGROUND_TOOL_NAME: &str = "background_task";
+/// Upper bound on simultaneously running background tasks per session. Beyond
+/// this the model is told to wait or cancel instead of piling up processes.
+const BACKGROUND_MAX_CONCURRENT: usize = 4;
+/// `run_cmd` / `run_shell` default to 30 s in the foreground; a background task
+/// is, by definition, the slow case, so it gets a much larger default.
+const BACKGROUND_DEFAULT_TIMEOUT_SECS: i64 = 600;
+/// One hold round waits at most this long for results.
+const BACKGROUND_HOLD_WAIT_SECS: u64 = 120;
+/// How many times a turn may be held open for background results before the
+/// remaining tasks are cancelled and the answer is delivered as-is.
+const BACKGROUND_HOLD_MAX_ROUNDS: u32 = 3;
+/// Prefix of an injected result. It must read as tool output, not as a new
+/// user request, or the model starts answering a message nobody wrote.
+const BACKGROUND_RESULT_PREFIX: &str =
+    "[BACKGROUND TASK RESULT — delivered automatically. This is the output of a tool you started earlier, NOT a new user request.]";
+
+fn background_requested(args: &Value) -> bool {
+    args.get("run_in_background")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+/// Only the long-running, read-mostly tools may be backgrounded. A background
+/// mutation could race a second edit the model starts while it waits.
+fn background_supported(name: &str, args: &Value) -> bool {
+    match name {
+        "run_cmd" => true,
+        "run_shell" => args["run_type"].as_str().unwrap_or("direct") != "serve",
+        "file_actions" => args["action"].as_str().unwrap_or("") == "search",
+        _ => false,
+    }
+}
+
+/// One-line label for the UI and for the result header.
+fn background_label(name: &str, args: &Value) -> String {
+    let detail = match name {
+        "run_cmd" => args["command"].as_str().unwrap_or("").to_string(),
+        "run_shell" => {
+            let shell = args["type"].as_str().unwrap_or("shell");
+            let code = args["code"].as_str().unwrap_or("");
+            format!("{shell}: {code}")
+        }
+        "file_actions" => {
+            let path = args["path"].as_str().unwrap_or(".");
+            let query = args["query"].as_str().unwrap_or("");
+            format!("search {query:?} in {path}")
+        }
+        _ => args.to_string(),
+    };
+    let detail: String = detail.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut label: String = detail.chars().take(120).collect();
+    if detail.chars().count() > 120 {
+        label.push('…');
+    }
+    format!("{name} · {label}")
+}
+
+fn format_background_delivery(delivery: &tools::background::Delivery) -> String {
+    format!(
+        "{BACKGROUND_RESULT_PREFIX}\n\n{}",
+        delivery.render()
+    )
+}
+
+/// Start one background task and return the placeholder the model sees as the
+/// tool result. The runner is a closure that owns everything it needs: the
+/// caller's borrows (config, workspace, skill dirs) do not outlive the turn's
+/// stack, and the task must not depend on them.
+fn start_background_task<F, Fut>(
+    app: &AppHandle,
+    session_id: &str,
+    tool_name: &str,
+    label: &str,
+    args_preview: &str,
+    work: F,
+) -> Result<String, String>
+where
+    F: FnOnce(Arc<AtomicBool>) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = String> + Send + 'static,
+{
+    let state = app.state::<AppState>();
+    if state.background_tasks.pending(session_id) >= BACKGROUND_MAX_CONCURRENT {
+        return Err(format!(
+            "too many background tasks are already running (limit {BACKGROUND_MAX_CONCURRENT}). \
+             Wait for one with `background_task` action \"wait\", or cancel one first."
+        ));
+    }
+
+    let (task_id, cancel) = state.background_tasks.insert(session_id, tool_name, label);
+    if let Some(snapshot) = state.background_tasks.get(&task_id) {
+        let _ = app.emit(tools::background::BACKGROUND_TASK_STATE_EVENT, snapshot);
+    }
+
+    let args_preview = args_preview.to_string();
+    let app_for_task = app.clone();
+    let session_for_task = session_id.to_string();
+    let tool_for_task = tool_name.to_string();
+    let id_for_task = task_id.clone();
+    let cancel_for_task = cancel.clone();
+
+    tauri::async_runtime::spawn(async move {
+        let started_at = std::time::Instant::now();
+        let result = work(cancel_for_task.clone()).await;
+        let elapsed_ms = started_at.elapsed().as_millis() as i64;
+
+        let status = if cancel_for_task.load(Ordering::SeqCst) {
+            tools::background::BgStatus::Cancelled
+        } else if result.starts_with('⛔')
+            || result.starts_with("Error")
+            || result.contains("timed out after")
+            || result.contains("⏱ timeout")
+        {
+            tools::background::BgStatus::Failed
+        } else {
+            tools::background::BgStatus::Done
+        };
+
+        let app_state = app_for_task.state::<AppState>();
+        // Mirror the foreground path into the interaction log so the Monitor
+        // panel shows background tool calls too.
+        if let Ok(db) = app_state.db.lock() {
+            let is_error = status == tools::background::BgStatus::Failed;
+            log_interaction(
+                &db,
+                &session_for_task,
+                if is_error { "tool_error" } else { "tool_output" },
+                "background_tool",
+                &tool_for_task,
+                args_preview,
+                result.clone(),
+                if is_error {
+                    Some(result.clone())
+                } else {
+                    None
+                },
+                elapsed_ms,
+            );
+        }
+
+        if let Some(snapshot) = app_state
+            .background_tasks
+            .finish(&id_for_task, status, Some(result))
+        {
+            log_event(
+                &app_state,
+                "INFO",
+                format!(
+                    "background task finished: id={}, tool={}, status={}, elapsed_ms={}",
+                    snapshot.id,
+                    snapshot.tool,
+                    snapshot.status.as_str(),
+                    snapshot.elapsed_ms
+                ),
+            );
+            let _ = app_for_task.emit(tools::background::BACKGROUND_TASK_STATE_EVENT, snapshot);
+        }
+    });
+
+    Ok(format!(
+        "⏳ Background task started: {task_id} ({tool_name})\n\n\
+         The call is running in the background. Continue with independent work; do NOT poll it.\n\
+         - Its result is delivered automatically before your next request when it finishes.\n\
+         - If you need it sooner: background_task {{\"action\":\"wait\",\"task_ids\":[\"{task_id}\"],\"timeout_seconds\":60}}\n\
+         - If you no longer need it: background_task {{\"action\":\"cancel\",\"task_id\":\"{task_id}\"}}\n\
+         - Do not produce your final answer while a task you still need is running — the turn stays open for it.\n\
+         - The delivered result is tool output, not a new user request."
+    ))
+}
+
+/// Background `run_cmd` / `run_shell` / `file_actions search`.
+#[allow(clippy::too_many_arguments)]
+fn start_background_tool_call(
+    app: &AppHandle,
+    session_id: &str,
+    tool_name: &str,
+    mut args: Value,
+    label: &str,
+    workspace_dir: PathBuf,
+    config: &crate::AppConfig,
+    allowed_commands: &[String],
+    protected_skill_root: Option<PathBuf>,
+    active_skill_dirs: &[(String, PathBuf)],
+) -> Result<String, String> {
+    if matches!(tool_name, "run_cmd" | "run_shell") {
+        if !args.is_object() {
+            args = json!({});
+        }
+        if args.get("timeout_seconds").is_none() {
+            args["timeout_seconds"] = json!(BACKGROUND_DEFAULT_TIMEOUT_SECS);
+        }
+    }
+    let args_str = args.to_string();
+    let args_preview: String = args_str.chars().take(300).collect();
+
+    let app_for_task = app.clone();
+    let tool = tool_name.to_string();
+    let session = session_id.to_string();
+    let config_for_task = config.clone();
+    let allowed = allowed_commands.to_vec();
+    let skill_root = protected_skill_root;
+    let dirs = active_skill_dirs.to_vec();
+
+    start_background_task(
+        app,
+        session_id,
+        tool_name,
+        label,
+        &args_preview,
+        move |cancel| async move {
+            tools::execute_tool(
+                &app_for_task,
+                &tool,
+                &args_str,
+                workspace_dir,
+                &config_for_task,
+                &allowed,
+                skill_root.as_deref(),
+                None,
+                Some(&session),
+                &dirs,
+                Some(&cancel),
+            )
+            .await
+        },
+    )
+}
+
+/// Background MCP tool call. Stdio uses its own short-lived process (the shared
+/// pool is globally serialised and capped at 10 s, so a slow call there would
+/// stall the next request's `tools/list`).
+fn start_background_mcp_call(
+    app: &AppHandle,
+    session_id: &str,
+    server: mcp::McpServer,
+    actual_tool_name: String,
+    fn_name: &str,
+    mut args: Value,
+    label: &str,
+) -> Result<String, String> {
+    if let Some(object) = args.as_object_mut() {
+        object.remove("run_in_background");
+    }
+    let args_preview: String = args.to_string().chars().take(300).collect();
+
+    let app_for_task = app.clone();
+    let timeout_secs = BACKGROUND_DEFAULT_TIMEOUT_SECS as u64;
+
+    start_background_task(
+        app,
+        session_id,
+        fn_name,
+        label,
+        &args_preview,
+        move |cancel| async move {
+            let state = app_for_task.state::<AppState>();
+            let result = mcp::invoke_mcp_tool_isolated(
+                &state,
+                &server,
+                &actual_tool_name,
+                args,
+                timeout_secs,
+                cancel,
+            )
+            .await;
+
+            match result {
+                Ok(text) => text,
+                Err(err) => format!("Error: {err}"),
+            }
+        },
+    )
+}
+
+/// `background_task` control tool: list / wait / get / cancel.
+async fn handle_background_task_tool(state: &State<'_, AppState>, session_id: &str, args: &Value) -> String {
+    let action = args["action"]
+        .as_str()
+        .unwrap_or("list")
+        .trim()
+        .to_ascii_lowercase();
+
+    match action.as_str() {
+        "list" => {
+            let tasks = state.background_tasks.list(session_id);
+            if tasks.is_empty() {
+                "No background tasks in this session.".to_string()
+            } else {
+                serde_json::to_string_pretty(&tasks)
+                    .unwrap_or_else(|_| "[]".to_string())
+            }
+        }
+        "wait" => {
+            let timeout = args["timeout_seconds"]
+                .as_u64()
+                .unwrap_or(60)
+                .clamp(1, 300);
+            let ids: Option<Vec<String>> = args["task_ids"].as_array().map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(str::to_string))
+                    .collect()
+            });
+            if let Some(ids) = &ids {
+                if ids.is_empty() {
+                    return "Error: task_ids must not be empty (omit it to wait for every task)."
+                        .to_string();
+                }
+                if let Some(unknown) = ids
+                    .iter()
+                    .find(|id| state.background_tasks.get(id).is_none())
+                {
+                    return format!("Error: unknown background task '{unknown}'.");
+                }
+                state
+                    .background_tasks
+                    .wait_for_tasks(ids, Duration::from_secs(timeout))
+                    .await;
+            } else {
+                state
+                    .background_tasks
+                    .wait_until_idle(session_id, Duration::from_secs(timeout))
+                    .await;
+            }
+
+            let deliveries = state
+                .background_tasks
+                .take_results(session_id, ids.as_deref());
+            if deliveries.is_empty() {
+                let running: Vec<String> = state
+                    .background_tasks
+                    .list(session_id)
+                    .into_iter()
+                    .filter(|task| task.status == tools::background::BgStatus::Running)
+                    .map(|task| format!("{} ({})", task.id, task.tool))
+                    .collect();
+                return format!(
+                    "No task finished within {timeout}s. Still running: {}",
+                    if running.is_empty() {
+                        "none".to_string()
+                    } else {
+                        running.join(", ")
+                    }
+                );
+            }
+            format!(
+                "Background task results:\n\n{}",
+                deliveries
+                    .iter()
+                    .map(tools::background::Delivery::render)
+                    .collect::<Vec<_>>()
+                    .join("\n\n---\n\n")
+            )
+        }
+        "get" => {
+            let id = args["task_id"].as_str().unwrap_or("").trim();
+            if id.is_empty() {
+                return "Error: task_id is required for action 'get'.".to_string();
+            }
+            let deliveries = state
+                .background_tasks
+                .take_results(session_id, Some(&[id.to_string()]));
+            if let Some(delivery) = deliveries.first() {
+                return delivery.render();
+            }
+            match state.background_tasks.get(id) {
+                Some(snapshot) if snapshot.status == tools::background::BgStatus::Running => {
+                    format!("Task {id} is still running ({}).", snapshot.tool)
+                }
+                Some(snapshot) => format!(
+                    "Task {id} is {} and has no deliverable result.",
+                    snapshot.status.as_str()
+                ),
+                None => format!("Error: unknown background task '{id}'."),
+            }
+        }
+        "cancel" => {
+            let id = args["task_id"].as_str().unwrap_or("").trim();
+            if id.is_empty() || id == "all" {
+                let cancelled = state.background_tasks.cancel_session(session_id);
+                return if cancelled == 0 {
+                    "No running background tasks.".to_string()
+                } else {
+                    format!(
+                        "Cancelled {cancelled} background task(s). Their process trees are being terminated."
+                    )
+                };
+            }
+            match state.background_tasks.cancel(id) {
+                Some(snapshot) => format!(
+                    "Task {} ({}) is {} — its process tree is being terminated.",
+                    snapshot.id,
+                    snapshot.tool,
+                    snapshot.status.as_str()
+                ),
+                None => format!("Error: unknown background task '{id}'."),
+            }
+        }
+        other => format!(
+            "Error: unsupported action '{other}'. Supported: list, wait, get, cancel."
+        ),
+    }
+}
+
 fn retry_backoff_ms(attempt: usize) -> u64 {
     STREAM_RETRY_BACKOFF_MS
         .get(attempt.saturating_sub(1))
@@ -2013,8 +2420,11 @@ async fn run_chat_turn(
     // the same conversation id (and the same custom headers).
     let request_headers = upstream_request_headers(&config, &session_id);
 
-    let mut tools_list =
-        tools::get_all_tools(&config.effective_tools(), config.self_evolution_mode);
+    let mut tools_list = tools::get_all_tools(
+        &config.effective_tools(),
+        config.self_evolution_mode,
+        config.background_tools,
+    );
 
     // ── Skill-read tool ─────────────────────────────────────────────────────
     // Auto-inject skill_read when one or more skills are active.
@@ -2043,7 +2453,7 @@ async fn run_chat_turn(
                         // Stable `mcp_<server-hash>_<name>` function name and
                         // a description that names the server.
                         if let Some((fn_name, actual_name, openai_tool)) =
-                            mcp::adapt_tool_for_llm(server, &tool)
+                            mcp::adapt_tool_for_llm(server, &tool, config.background_tools)
                         {
                             tools_list.push(openai_tool);
                             mcp_tool_map.insert(fn_name, (server.clone(), actual_name));
@@ -2082,7 +2492,7 @@ if !skill_ids.is_empty() || skill_evolution_root.is_some() {
     }
 
     if !enabled_agents.is_empty() {
-        tools_list.push(json!({
+        let mut subagent_tool = json!({
             "type": "function",
             "function": {
                 "name": "call_subagent",
@@ -2106,7 +2516,15 @@ if !skill_ids.is_empty() || skill_evolution_root.is_some() {
                     "required": ["agent_id", "task_description"]
                 }
             }
-        }));
+        });
+        if config.background_tools {
+            subagent_tool["function"]["parameters"]["properties"]["run_in_background"] =
+                json!({
+                    "type": "boolean",
+                    "description": "Delegate as a background task: return a task id immediately instead of waiting. The agent's result is delivered automatically before your next request; the turn stays open until it arrives. Use it when the delegated work is long and you can do something else meanwhile."
+                });
+        }
+        tools_list.push(subagent_tool);
     }
 
     // Track the final answer and whether the LLM already persisted memory via
@@ -2117,6 +2535,8 @@ if !skill_ids.is_empty() || skill_evolution_root.is_some() {
     // Skills loaded dynamically during this turn (the model can request the
     // same skill again in a later tool-call round of the same turn).
     let mut loaded_this_turn: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // How many times this turn has been held open for background results.
+    let mut background_hold_rounds: u32 = 0;
 
     loop {
         // Sanitize tool call pairs before each request to prevent the API error:
@@ -2167,6 +2587,44 @@ if !skill_ids.is_empty() || skill_evolution_root.is_some() {
                         .collect::<Vec<_>>(),
                 }),
             );
+        }
+
+        // ── Background task results ──────────────────────────────────────────
+        // A background tool call returned a placeholder immediately (the
+        // protocol has no slot for a late `tool` message). Its real output is
+        // delivered here, at a request boundary, as a `user` message — and
+        // announced with `chat-injected` so the UI stores it on the assistant
+        // row and replays it in later turns exactly like a mid-turn injection.
+        let background_results = state.background_tasks.take_deliverable(&session_id);
+        if !background_results.is_empty() {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_millis() as i64)
+                .unwrap_or(0);
+            let mut items = Vec::with_capacity(background_results.len());
+            for delivery in &background_results {
+                let text = format_background_delivery(delivery);
+                all_messages.push(json!({
+                    "role": "user",
+                    "content": text.clone(),
+                }));
+                items.push(json!({
+                    "id": delivery.id,
+                    "text": text,
+                    "created_at_ms": now_ms,
+                    "kind": "background_result",
+                }));
+            }
+            log_event(
+                &state,
+                "INFO",
+                format!(
+                    "background results delivered: session_id={}, count={}",
+                    session_id,
+                    background_results.len()
+                ),
+            );
+            let _ = app.emit("chat-injected", json!({ "items": items }));
         }
 
         // Context window used for the usage gauge (`Tokens: X / Y`).
@@ -2390,6 +2848,65 @@ if !skill_ids.is_empty() || skill_evolution_root.is_some() {
         }
 
         if sr.finish_reason != "tool_calls" || sr.tool_calls.is_empty() {
+            // A background task started earlier in this turn may produce its
+            // result only after this answer was generated. Delivering a final
+            // answer that ignores that output would be wrong, so the turn is
+            // held open: the text is kept as an interim assistant message, the
+            // results are drained at the top of the next iteration and the
+            // model gets one more request to incorporate them.
+            if background_hold_rounds < BACKGROUND_HOLD_MAX_ROUNDS
+                && !turn_cancelled.load(Ordering::SeqCst)
+                && state.background_tasks.unsettled(&session_id) > 0
+            {
+                let pending = state.background_tasks.unsettled(&session_id);
+                if !sr.content.is_empty() {
+                    let mut assistant_msg = json!({
+                        "role": "assistant",
+                        "content": sr.content,
+                    });
+                    if !sr.reasoning_content.is_empty() {
+                        assistant_msg["reasoning_content"] = json!(sr.reasoning_content);
+                    }
+                    all_messages.push(assistant_msg);
+                }
+                background_hold_rounds += 1;
+                log_event(
+                    &state,
+                    "INFO",
+                    format!(
+                        "holding turn for background tasks: session_id={}, pending={}, round={}",
+                        session_id, pending, background_hold_rounds
+                    ),
+                );
+                let _ = app.emit(
+                    tools::background::BACKGROUND_WAITING_EVENT,
+                    json!({
+                        "session_id": session_id,
+                        "pending": pending,
+                        "round": background_hold_rounds,
+                    }),
+                );
+                state
+                    .background_tasks
+                    .wait_until_idle(&session_id, Duration::from_secs(BACKGROUND_HOLD_WAIT_SECS))
+                    .await;
+                continue;
+            }
+
+            if state.background_tasks.unsettled(&session_id) > 0 {
+                // Held as long as allowed: drop the rest instead of hanging
+                // the turn forever.
+                let cancelled = state.background_tasks.cancel_session(&session_id);
+                log_event(
+                    &state,
+                    "WARN",
+                    format!(
+                        "background hold budget exhausted: session_id={}, cancelled={}",
+                        session_id, cancelled
+                    ),
+                );
+            }
+
             final_answer = Some(sr.content.clone());
             break;
         }
@@ -2424,7 +2941,71 @@ if !skill_ids.is_empty() || skill_evolution_root.is_some() {
             if name == "memory" {
                 memory_tool_called = true;
             }
-            let result = if name == "use_skill" {
+            let background_args: Value = serde_json::from_str(args).unwrap_or_default();
+            let result = if name == BACKGROUND_TOOL_NAME {
+                handle_background_task_tool(&state, &session_id, &background_args).await
+            } else if config.background_tools
+                && background_requested(&background_args)
+                && name != "call_subagent"
+            {
+                if let Some((mcp_server, actual_tool_name)) = mcp_tool_map.get(name) {
+                    let mut mcp_args = background_args.clone();
+                    if let Some(object) = mcp_args.as_object_mut() {
+                        object.remove("run_in_background");
+                    }
+                    let label = format!(
+                        "MCP [{}] {} · {}",
+                        mcp_server.name,
+                        actual_tool_name,
+                        serde_json::to_string(&mcp_args)
+                            .unwrap_or_default()
+                            .chars()
+                            .take(100)
+                            .collect::<String>()
+                    );
+                    match start_background_mcp_call(
+                        &app,
+                        &session_id,
+                        mcp_server.clone(),
+                        actual_tool_name.clone(),
+                        name,
+                        mcp_args,
+                        &label,
+                    ) {
+                        Ok(placeholder) => placeholder,
+                        Err(err) => format!("Error: {err}"),
+                    }
+                } else if background_supported(name, &background_args) {
+                    let mut bg_args = background_args.clone();
+                    if let Some(object) = bg_args.as_object_mut() {
+                        // The real tool must never see the routing flag.
+                        object.remove("run_in_background");
+                    }
+                    let label = background_label(name, &bg_args);
+                    let workspace_dir = state.workspace_dir.lock().unwrap().clone();
+                    match start_background_tool_call(
+                        &app,
+                        &session_id,
+                        name,
+                        bg_args,
+                        &label,
+                        workspace_dir,
+                        &config,
+                        &skill_allowed_commands,
+                        skill_evolution_root.clone(),
+                        &active_skill_dirs,
+                    ) {
+                        Ok(placeholder) => placeholder,
+                        Err(err) => format!("Error: {err}"),
+                    }
+                } else {
+                    format!(
+                        "Error: `run_in_background` is not supported by the tool '{name}'. \
+                         Use it only with `run_cmd`, `run_shell` (run_type \"direct\"), \
+                         `file_actions` action \"search\", MCP tools and `call_subagent`."
+                    )
+                }
+            } else if name == "use_skill" {
                 let args_json: Value = serde_json::from_str(args).unwrap_or_default();
                 let skill_name = args_json["skill_name"].as_str().unwrap_or("");
                 let ws_skills_dir = crate::workspace::skills_root(&workspace_dir_for_roots);
@@ -2510,22 +3091,64 @@ if !skill_ids.is_empty() || skill_evolution_root.is_some() {
                     );
                     match build_http_client() {
                         Ok(client) => {
-                            let res = agents::run_sub_agent(
-                                &app,
-                                &client,
-                                &url,
-                                &config,
-                                &session_id,
-                                agent,
-                                &task,
-                                workspace_dir,
-                                skill_evolution_root.clone(),
-                                turn_cancelled.clone(),
-                            )
-                            .await;
+                            if config.background_tools && background_requested(&background_args) {
+                                let agent = agent.clone();
+                                let app_for_task = app.clone();
+                                let session_for_task = session_id.clone();
+                                let config_for_task = config.clone();
+                                let skill_root_for_task = skill_evolution_root.clone();
+                                let label = format!(
+                                    "{} · {}",
+                                    agent.name,
+                                    task_desc.chars().take(100).collect::<String>()
+                                );
+                                let preview: String =
+                                    args_json.to_string().chars().take(300).collect();
+                                start_background_task(
+                                    &app,
+                                    &session_id,
+                                    "call_subagent",
+                                    &label,
+                                    &preview,
+                                    move |cancel| async move {
+                                        let res = agents::run_sub_agent(
+                                            &app_for_task,
+                                            &client,
+                                            &url,
+                                            &config_for_task,
+                                            &session_for_task,
+                                            &agent,
+                                            &task,
+                                            workspace_dir,
+                                            skill_root_for_task,
+                                            cancel,
+                                        )
+                                        .await;
+                                        format!(
+                                            "Task execution finished with status: {}\nTokens used: {}\nTool calls made: {}\n\nResult:\n{}",
+                                            res.status, res.tokens_used, res.tool_calls_count, res.content
+                                        )
+                                    },
+                                )
+                                .unwrap_or_else(|err| format!("Error: {err}"))
+                            } else {
+                                let res = agents::run_sub_agent(
+                                    &app,
+                                    &client,
+                                    &url,
+                                    &config,
+                                    &session_id,
+                                    agent,
+                                    &task,
+                                    workspace_dir,
+                                    skill_evolution_root.clone(),
+                                    turn_cancelled.clone(),
+                                )
+                                .await;
 
-                            format!("Task execution finished with status: {}\nTokens used: {}\nTool calls made: {}\n\nResult:\n{}", 
-                                res.status, res.tokens_used, res.tool_calls_count, res.content)
+                                format!("Task execution finished with status: {}\nTokens used: {}\nTool calls made: {}\n\nResult:\n{}", 
+                                    res.status, res.tokens_used, res.tool_calls_count, res.content)
+                            }
                         }
                         Err(err) => format!("Error: {err}"),
                     }
@@ -2536,7 +3159,11 @@ if !skill_ids.is_empty() || skill_evolution_root.is_some() {
                     )
                 }
             } else if let Some((mcp_server, actual_tool_name)) = mcp_tool_map.get(name) {
-                let args_json: Value = serde_json::from_str(args).unwrap_or_default();
+                let mut args_json: Value = serde_json::from_str(args).unwrap_or_default();
+                // The background routing flag is ours, never the server's.
+                if let Some(object) = args_json.as_object_mut() {
+                    object.remove("run_in_background");
+                }
                 // MCP tools are NOT sandboxed — path arguments are forwarded
                 // verbatim to the MCP server. The server itself decides what
                 // paths it can access.
@@ -2603,6 +3230,7 @@ if !skill_ids.is_empty() || skill_evolution_root.is_some() {
                     None,
                     Some(&session_id),
                     &active_skill_dirs,
+                    None,
                 )
                 .await;
                 let duration_ms = start_time.elapsed().as_millis() as i64;
@@ -2727,6 +3355,23 @@ pub async fn chat_completion(
 /// for up to a few seconds in the pathological case, which must not stall the
 /// async runtime. Silent when no serve process ever existed.
 async fn end_turn_cleanup(app: &AppHandle, session_id: &str) {
+    // Background tool tasks are turn-scoped, exactly like serve processes: a
+    // turn that ends (final answer, error or Stop) must not leave a runner
+    // alive. `shutdown_session` sets every cancel flag — each runner then kills
+    // its process tree — and drops the entries so nothing is injected into the
+    // next turn.
+    let removed = app
+        .state::<AppState>()
+        .background_tasks
+        .shutdown_session(session_id);
+    if removed > 0 {
+        log_event(
+            &app.state::<AppState>(),
+            "INFO",
+            format!("turn ended (session {session_id}): shut down {removed} background task(s)"),
+        );
+    }
+
     let session_id = session_id.to_string();
     let summary = tauri::async_runtime::spawn_blocking({
         let app = app.clone();

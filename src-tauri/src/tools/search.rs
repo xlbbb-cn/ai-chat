@@ -103,6 +103,10 @@ pub(super) struct SearchOptions {
     pub(super) glob: Option<String>,
     /// Hard cap on collected `path:line:text` rows.
     pub(super) max_matches: usize,
+    /// Set by a background task that was cancelled. The parallel walker checks
+    /// it on every entry (a relaxed atomic load) and stops descending; the
+    /// footer reports the early stop. `None` never aborts.
+    pub(super) abort: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl Default for SearchOptions {
@@ -116,6 +120,7 @@ impl Default for SearchOptions {
             respect_gitignore: false,
             glob: None,
             max_matches: SEARCH_MAX_MATCHES,
+            abort: None,
         }
     }
 }
@@ -229,6 +234,8 @@ struct SearchAccumulator {
     files_skipped_binary: usize,
     match_budget_left: usize,
     exhausted: bool,
+    /// The background task behind this search was cancelled.
+    cancelled: bool,
 }
 
 impl SearchAccumulator {
@@ -296,6 +303,9 @@ fn render_search_output(acc: &SearchAccumulator, max_matches: usize) -> String {
     // window always keeps it: the model learns *why* the list is short and can
     // narrow the query instead of retrying the same search.
     let mut notes: Vec<String> = Vec::new();
+    if acc.cancelled {
+        notes.push("search cancelled before completion — results are partial".to_string());
+    }
     if acc.exhausted {
         notes.push(format!(
             "stopped early at the {max_matches}-match limit — narrow the path, add a `glob`, or raise `max_results`"
@@ -378,6 +388,7 @@ pub(super) fn run_integrated_search(
     let glob_matcher = glob_matcher.as_ref();
     let acc_ref = &acc;
     let exhausted_ref = &exhausted;
+    let abort_ref = options.abort.as_ref();
 
     // Directory traversal dominates the cost of a search over a few thousand
     // files (one `stat` + one `open` + one `read` per file, all IO-bound), so
@@ -385,7 +396,9 @@ pub(super) fn run_integrated_search(
     // `available_parallelism().min(12)` worker threads.
     walker.build_parallel().run(|| {
         Box::new(move |entry| {
-            if exhausted_ref.load(Ordering::Relaxed) {
+            if exhausted_ref.load(Ordering::Relaxed)
+                || abort_ref.is_some_and(|flag| flag.load(Ordering::Relaxed))
+            {
                 return WalkState::Quit;
             }
 
@@ -421,6 +434,13 @@ pub(super) fn run_integrated_search(
     let mut acc = acc
         .into_inner()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if options
+        .abort
+        .as_ref()
+        .is_some_and(|flag| flag.load(Ordering::Relaxed))
+    {
+        acc.cancelled = true;
+    }
     // Parallel traversal returns rows in nondeterministic order; sort so the
     // same tree always produces byte-identical output.
     acc.results.sort();

@@ -23,6 +23,7 @@ import type {
   ServeProcessInfo,
   SleepLockState,
   TimerEntry,
+  BackgroundTaskState,
   UpdateInfo,
   UpdateDownloadProgress,
 } from "./types";
@@ -191,6 +192,22 @@ export async function listTimers(): Promise<TimerEntry[]> {
 /** Cancel a pending timer so it never resumes the conversation. */
 export async function cancelTimer(id: string): Promise<TimerEntry> {
   return invoke("cancel_timer", { id });
+}
+
+// ─── Background tool tasks ───────────────────────────────────────────────────
+
+/** Background tasks of one chat session (used on mount / session switch). */
+export async function listBackgroundTasks(
+  sessionId: string,
+): Promise<BackgroundTaskState[]> {
+  return invoke("list_background_tasks", { sessionId });
+}
+
+/** Stop one background task; its whole process tree is terminated. */
+export async function cancelBackgroundTask(
+  taskId: string,
+): Promise<BackgroundTaskState> {
+  return invoke("cancel_background_task", { taskId });
 }
 
 /**

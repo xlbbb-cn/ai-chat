@@ -80,6 +80,13 @@ const zhCN: Messages = {
             sleepLockHint: "有定时器在等待或本轮对话仍在运行，系统将保持唤醒。",
         },
 
+        background: {
+            title: "后台任务",
+            waiting: "等待 {count} 个后台任务完成…",
+            cancel: "取消任务",
+            toolName: "后台",
+        },
+
         attachFiles: "添加附件",
         attachmentUnsupported: "已跳过 {names}：“{model}” 无法读取该文件类型。",
         inputPlaceholder: "输入消息…（Enter 发送，Shift+Enter 换行）",
@@ -162,6 +169,7 @@ const zhCN: Messages = {
         deleteTitle: "删除这条消息",
         forkTitle: "从这条消息创建分支会话",
         injected: "本轮内追加",
+        backgroundResult: "后台任务结果",
     },
 
     toolGroup: {
@@ -286,7 +294,7 @@ const zhCN: Messages = {
 
         runtime: {
             title: "运行与调试",
-            subtitle: "日志写入位置、保留时长，以及请求的监控方式。",
+            subtitle: "执行行为、日志写入位置与保留时长，以及请求的监控方式。",
             loggerOutput: "日志输出（仅调试构建）",
             loggerFile: "写入 app.log",
             loggerPrintln: "输出到终端（println）",
@@ -296,6 +304,9 @@ const zhCN: Messages = {
             singleInstance: "单实例运行",
             singleInstanceHint:
                 "再次启动时聚焦已运行的窗口，而不是打开第二个实例。重启应用后生效。",
+            backgroundTools: "后台执行",
+            backgroundToolsHint:
+                "允许助手把耗时工具放到后台运行（`run_in_background: true`）：`run_cmd`、`run_shell`、`file_actions` 搜索、所有 MCP 工具和 `call_subagent`。结果会在下一个请求前自动送达，本轮保持开启直到结果到齐；子代理不会收到该参数。",
             interactionMonitor: "交互监视器",
             agentMissions: "智能体任务监视器",
             evolutionMemory: "自进化记忆",

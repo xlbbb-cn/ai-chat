@@ -80,6 +80,13 @@ const zhTW: Messages = {
             sleepLockHint: "有計時器在等待或本輪對話仍在執行，系統將保持喚醒。",
         },
 
+        background: {
+            title: "背景任務",
+            waiting: "等待 {count} 個背景任務完成…",
+            cancel: "取消任務",
+            toolName: "背景",
+        },
+
         attachFiles: "附加檔案",
         attachmentUnsupported: "已跳過 {names}：「{model}」無法讀取該檔案類型。",
         inputPlaceholder: "輸入訊息…（Enter 送出，Shift+Enter 換行）",
@@ -162,6 +169,7 @@ const zhTW: Messages = {
         deleteTitle: "刪除這則訊息",
         forkTitle: "從這則訊息建立分支工作階段",
         injected: "本輪內追加",
+        backgroundResult: "背景任務結果",
     },
 
     toolGroup: {
@@ -286,7 +294,7 @@ const zhTW: Messages = {
 
         runtime: {
             title: "執行與偵錯",
-            subtitle: "日誌的寫入位置、保留時間，以及請求的監控方式。",
+            subtitle: "執行行為、日誌寫入位置與保留時間，以及請求的監控方式。",
             loggerOutput: "日誌輸出（僅偵錯組建）",
             loggerFile: "寫入 app.log",
             loggerPrintln: "輸出到終端機（println）",
@@ -296,6 +304,9 @@ const zhTW: Messages = {
             singleInstance: "單實例執行",
             singleInstanceHint:
                 "再次啟動時聚焦已執行的視窗，而不是開啟第二個實例。重新啟動應用程式後生效。",
+            backgroundTools: "背景執行",
+            backgroundToolsHint:
+                "允許助手把耗時工具放到背景執行（`run_in_background: true`）：`run_cmd`、`run_shell`、`file_actions` 搜尋、所有 MCP 工具和 `call_subagent`。結果會在下一個請求前自動送達，本輪保持開啟直到結果到齊；子代理不會收到該參數。",
             interactionMonitor: "互動監視器",
             agentMissions: "代理任務監視器",
             evolutionMemory: "自我演化記憶",

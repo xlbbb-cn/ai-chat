@@ -20,6 +20,9 @@ pub(super) async fn handle_file_actions(
     args: &Value,
     workspace_dir: &Path,
     protected_skill_root: Option<&Path>,
+    // Background-task cancel flag. Only `search` observes it; every other
+    // action is short enough to run to completion.
+    cancel: Option<&std::sync::Arc<std::sync::atomic::AtomicBool>>,
 ) -> String {
     let action = args["action"].as_str().unwrap_or("");
     let path_str = args["path"].as_str().unwrap_or("");
@@ -210,6 +213,7 @@ pub(super) async fn handle_file_actions(
                     .as_u64()
                     .map(|value| value.clamp(1, 20_000) as usize)
                     .unwrap_or(SEARCH_MAX_MATCHES),
+                abort: cancel.cloned(),
             };
 
             if query.is_empty() {

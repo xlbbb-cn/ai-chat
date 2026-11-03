@@ -1073,6 +1073,41 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
               <p>{t("settings.runtime.subtitle")}</p>
             </div>
             <div className="settings-section-body">
+              <label className="settings-checkbox">
+                <input
+                  type="checkbox"
+                  checked={config.background_tools ?? true}
+                  onChange={(e) =>
+                    setConfig((prev) => ({
+                      ...prev,
+                      background_tools: e.target.checked,
+                    }))
+                  }
+                />
+                <div className="settings-checkbox-copy">
+                  <span>{t("settings.runtime.backgroundTools")}</span>
+                  <small>{t("settings.runtime.backgroundToolsHint")}</small>
+                </div>
+              </label>
+              <label className="settings-checkbox">
+                <input
+                  type="checkbox"
+                  checked={config.single_instance ?? true}
+                  onChange={(e) =>
+                    setConfig((prev) => ({
+                      ...prev,
+                      single_instance: e.target.checked,
+                    }))
+                  }
+                />
+                <div className="settings-checkbox-copy">
+                  <span>{t("settings.runtime.singleInstance")}</span>
+                  <small>{t("settings.runtime.singleInstanceHint")}</small>
+                </div>
+              </label>
+
+              <div className="settings-divider" />
+
               <label className="settings-field-row settings-field-row-stacked">
                 <span className="settings-field-label">{t("settings.runtime.loggerOutput")}</span>
                 <select
@@ -1108,22 +1143,9 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
                   {t("settings.runtime.retentionHint")}
                 </small>
               </label>
-              <label className="settings-checkbox">
-                <input
-                  type="checkbox"
-                  checked={config.single_instance ?? true}
-                  onChange={(e) =>
-                    setConfig((prev) => ({
-                      ...prev,
-                      single_instance: e.target.checked,
-                    }))
-                  }
-                />
-                <div className="settings-checkbox-copy">
-                  <span>{t("settings.runtime.singleInstance")}</span>
-                  <small>{t("settings.runtime.singleInstanceHint")}</small>
-                </div>
-              </label>
+
+              {(sessionId || config.self_evolution_mode) && <div className="settings-divider" />}
+
               {sessionId && (
                 <>
                   <div className="settings-field-row">

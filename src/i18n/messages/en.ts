@@ -91,6 +91,13 @@ const en = {
                 "A timer is pending or this turn is still running, so the system is kept awake.",
         },
 
+        background: {
+            title: "Background tasks",
+            waiting: "Waiting for {count} background task(s)…",
+            cancel: "Cancel task",
+            toolName: "Background",
+        },
+
         attachFiles: "Attach files",
         attachmentUnsupported:
             "Skipped {names}: “{model}” cannot read that file type.",
@@ -181,6 +188,7 @@ const en = {
         deleteTitle: "Delete this message",
         forkTitle: "Fork conversation from this message",
         injected: "Added mid-turn",
+        backgroundResult: "Background task result",
     },
 
     toolGroup: {
@@ -310,7 +318,7 @@ const en = {
 
         runtime: {
             title: "Runtime & Debug",
-            subtitle: "Where logs are written, how long they are kept, and how requests are monitored.",
+            subtitle: "Execution behavior, where logs are written, how long they are kept, and how requests are monitored.",
             loggerOutput: "Logger Output (debug build only)",
             loggerFile: "Write to app.log",
             loggerPrintln: "Print to terminal (println)",
@@ -320,6 +328,9 @@ const en = {
             singleInstance: "Run a single instance",
             singleInstanceHint:
                 "Launching AI Chat again brings the running window to the front instead of opening a second copy. Applies after restarting the app.",
+            backgroundTools: "Background execution",
+            backgroundToolsHint:
+                "Let the assistant run slow tools as background tasks (`run_in_background: true`): `run_cmd`, `run_shell`, `file_actions` search, every MCP tool and `call_subagent`. The result is delivered automatically before the next request and the turn stays open until it arrives. Sub-agents never receive the flag.",
             interactionMonitor: "Interaction monitor",
             agentMissions: "Agent missions monitor",
             evolutionMemory: "Evolution memory",

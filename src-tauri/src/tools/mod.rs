@@ -19,8 +19,7 @@ mod search;
 pub(crate) mod serve;
 pub(crate) mod timer;
 pub(crate) mod todos;
-
-pub use self::process::run_command;
+pub(crate) mod background;
 
 // Re-exports for the agent runners (`crate::agents::cli` / `cloud`) and tests.
 pub(crate) use self::paths::resolve_safe_path;
@@ -95,7 +94,12 @@ pub(crate) async fn request_tool_confirmation(
     code: String,
     confirm_kind: &'static str,
     requires_auth: &'static str,
+    // Cancel flag of the background task this call belongs to. A cancelled
+    // task must not keep holding the (serialized) confirmation slot.
+    cancel: Option<&std::sync::Arc<std::sync::atomic::AtomicBool>>,
 ) -> crate::ToolConfirmation {
+    use std::sync::atomic::Ordering;
+
     // `confirm_kind` comes from `RiskLevel::confirm_kind()` and is matched
     // against the kinds the Tools panel persisted in
     // `auto_accept_confirm_kinds` — which may also hold the `"*"` wildcard
@@ -132,9 +136,23 @@ pub(crate) async fn request_tool_confirmation(
         };
     }
 
+    // `confirm_sender` is a single slot, so two concurrent `execute_tool` calls
+    // (main agent + a background task, or two background tasks) would overwrite
+    // each other's dialog. Serialize here; the lock is held while the user
+    // decides, which is exactly the intended one-at-a-time behaviour.
+    let state = app.state::<crate::AppState>();
+    let _confirm_guard = state.tool_confirm_lock.lock().await;
+
     // Unique id ties the frontend's confirm/deny response back to THIS pending
     // request, so a stale response cannot approve a different command.
     let request_id = format!("confirm-{}", uuid::Uuid::new_v4());
+
+    // Register the reply slot *before* emitting, so an immediate click cannot
+    // find an empty slot and be dropped.
+    let (tx, rx) = tokio::sync::oneshot::channel::<crate::ToolConfirmation>();
+    {
+        *state.confirm_sender.lock().unwrap() = Some((request_id.clone(), tx));
+    }
 
     let _ = app.emit(
         "confirm-required",
@@ -148,21 +166,44 @@ pub(crate) async fn request_tool_confirmation(
         }),
     );
 
-    let (tx, rx) = tokio::sync::oneshot::channel::<crate::ToolConfirmation>();
-    {
-        let state = app.state::<crate::AppState>();
-        *state.confirm_sender.lock().unwrap() = Some((request_id, tx));
-    }
+    let await_reply = async {
+        match cancel {
+            Some(flag) => {
+                tokio::select! {
+                    reply = rx => reply.ok(),
+                    _ = async {
+                        loop {
+                            if flag.load(Ordering::SeqCst) {
+                                break;
+                            }
+                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                        }
+                    } => None,
+                }
+            }
+            None => rx.await.ok(),
+        }
+    };
 
-    tokio::time::timeout(std::time::Duration::from_secs(120), rx)
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(120), await_reply)
         .await
         .ok()
-        .and_then(|r| r.ok())
-        .unwrap_or(crate::ToolConfirmation {
-            confirmed: false,
-            username: None,
-            password: None,
-        })
+        .flatten();
+
+    // Drop our own slot entry (timeout / cancellation). A late click then hits
+    // an unknown request id and is ignored by `confirm_command`.
+    {
+        let mut slot = state.confirm_sender.lock().unwrap();
+        if matches!(slot.as_ref(), Some((id, _)) if id == &request_id) {
+            *slot = None;
+        }
+    }
+
+    outcome.unwrap_or(crate::ToolConfirmation {
+        confirmed: false,
+        username: None,
+        password: None,
+    })
 }
 
 /// Hard cap on tool result text fed back into the LLM context. Huge outputs
@@ -194,7 +235,11 @@ pub(crate) fn truncate_tool_output(output: String) -> String {
 ///
 /// `self_evolution` adds the dedicated `evolution` memory scope to the memory
 /// tool — it only exists while self-evolution mode is on.
-pub fn get_all_tools(selected_tools: &[String], self_evolution: bool) -> Vec<Value> {
+pub fn get_all_tools(
+    selected_tools: &[String],
+    self_evolution: bool,
+    background_tools: bool,
+) -> Vec<Value> {
     let mut tools = vec![];
 
     let want_run_cmd = selected_tools.iter().any(|t| t == "run_cmd");
@@ -598,6 +643,57 @@ pub fn get_all_tools(selected_tools: &[String], self_evolution: bool) -> Vec<Val
         }));
     }
 
+    // ── Background execution ────────────────────────────────────────────────
+    // Only the long-running, read-mostly tools accept the flag: a background
+    // mutation could race an unrelated edit the model starts while it waits.
+    // The control tool is advertised whenever the feature is on — MCP tools and
+    // sub-agents can be backgrounded even when none of the local tools is
+    // selected.
+    if background_tools {
+        for tool in tools.iter_mut() {
+            let name = tool["function"]["name"].as_str().unwrap_or("");
+            if matches!(name, "run_cmd" | "run_shell" | "file_actions") {
+                tool["function"]["parameters"]["properties"]["run_in_background"] = json!({
+                    "type": "boolean",
+                    "description": "Run this tool as a background task: return a task id immediately instead of blocking the turn. The real result is delivered automatically before your next request, and the turn stays open until it arrives. Use it for slow work (large searches, builds, long commands) that you can do something else while waiting for. Do NOT use it for a quick command, and do not start one and then produce your final answer: call `background_task` with action `wait` first, or the turn will simply wait for you."
+                });
+            }
+        }
+        tools.push(json!({
+            "type": "function",
+            "function": {
+                "name": "background_task",
+                "description": "Manage background tasks started with `run_in_background`.\n\n- `list`: running and finished tasks of this session (id, tool, status, elapsed).\n- `wait`: block until the given tasks (or every task of the session) finish, up to `timeout_seconds`; returns the results that became available.\n- `get`: fetch the full result of one finished task.\n- `cancel`: stop a task (or all of them) — the process tree is terminated and its result is discarded.\n\nA finished task's result is also delivered automatically before your next request, so `wait` is only needed when you cannot proceed without it. Cancel tasks you no longer need: they keep the turn open until they finish.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["list", "wait", "get", "cancel"],
+                            "description": "The management action to perform."
+                        },
+                        "task_id": {
+                            "type": "string",
+                            "description": "Single task id (for `get` / `cancel`). Use `\"all\"` with `cancel` to stop every task of this session."
+                        },
+                        "task_ids": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Optional list of task ids (for `wait`). Omit to wait for every task of this session."
+                        },
+                        "timeout_seconds": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 300,
+                            "description": "Maximum time to wait, in seconds. Defaults to 60."
+                        }
+                    },
+                    "required": ["action"]
+                }
+            }
+        }));
+    }
+
     tools
 }
 
@@ -770,7 +866,7 @@ mod tests {
     #[test]
     fn memory_schema_advertises_consolidate_only_in_self_evolution_mode() {
         let memory_tool = |self_evolution: bool| {
-            super::get_all_tools(&["memory".to_string()], self_evolution)
+            super::get_all_tools(&["memory".to_string()], self_evolution, false)
                 .into_iter()
                 .find(|tool| tool["function"]["name"] == "memory")
                 .expect("memory tool must be advertised")
@@ -787,6 +883,45 @@ mod tests {
 
         assert!(actions(&memory_tool(true)).contains(&"consolidate".to_string()));
         assert!(!actions(&memory_tool(false)).contains(&"consolidate".to_string()));
+    }
+
+    #[test]
+    fn background_flag_and_control_tool_are_only_advertised_when_enabled() {
+        let tools = super::get_all_tools(
+            &["run_cmd".to_string(), "run_shell".to_string()],
+            false,
+            true,
+        );
+        assert!(
+            tools
+                .iter()
+                .any(|tool| tool["function"]["name"] == "background_task"),
+            "the control tool must be advertised while background execution is on"
+        );
+        let run_cmd = tools
+            .iter()
+            .find(|tool| tool["function"]["name"] == "run_cmd")
+            .expect("run_cmd advertised");
+        assert_eq!(
+            run_cmd["function"]["parameters"]["properties"]["run_in_background"]["type"],
+            "boolean"
+        );
+
+        let disabled = super::get_all_tools(&["run_cmd".to_string()], false, false);
+        assert!(
+            !disabled
+                .iter()
+                .any(|tool| tool["function"]["name"] == "background_task"),
+            "the control tool must disappear when background execution is off"
+        );
+        let run_cmd = disabled
+            .iter()
+            .find(|tool| tool["function"]["name"] == "run_cmd")
+            .expect("run_cmd advertised");
+        assert!(
+            run_cmd["function"]["parameters"]["properties"]["run_in_background"].is_null(),
+            "the per-call flag must disappear when background execution is off"
+        );
     }
 
     #[test]
@@ -2083,6 +2218,9 @@ pub async fn execute_tool(
     session_id: Option<&str>,
     // Active skill directories accessible via skill_read tool (empty = tool not available).
     active_skill_dirs: &[(String, PathBuf)],
+    // Cancel flag of the background task this call belongs to (`None` for a
+    // normal foreground call). Only the long-running tools observe it.
+    cancel: Option<&std::sync::Arc<std::sync::atomic::AtomicBool>>,
 ) -> String {
     let args: Value = serde_json::from_str(args_str).unwrap_or_default();
     let tool_output = match name {
@@ -2465,6 +2603,7 @@ pub async fn execute_tool(
                             .as_u64()
                             .map(|value| value.clamp(1, 20_000) as usize)
                             .unwrap_or(SEARCH_MAX_MATCHES),
+                        abort: None,
                     };
 
                     if query.is_empty() {
@@ -2628,15 +2767,14 @@ pub async fn execute_tool(
                     .unwrap_or(30)
                     .clamp(1, 3600) as u64;
 
-                return tokio::time::timeout(
-                    std::time::Duration::from_secs(timeout_secs),
-                    run_command("direct".to_string(), command, Some(command_cwd)),
+                return process::run_command_timed(
+                    "direct".to_string(),
+                    command,
+                    Some(command_cwd),
+                    timeout_secs,
+                    cancel.cloned(),
                 )
-                .await
-                .unwrap_or_else(|_| {
-                    Ok(format!("Command timed out after {} seconds.", timeout_secs))
-                })
-                .unwrap_or_else(|e| format!("Error: {}", e));
+                .await;
             }
 
             // ── L0-L4: require frontend confirmation ─────────────────────────
@@ -2660,6 +2798,7 @@ pub async fn execute_tool(
                 command.clone(),
                 risk_level.confirm_kind(),
                 "none",
+                cancel,
             )
             .await;
 
@@ -2691,13 +2830,14 @@ pub async fn execute_tool(
                 .unwrap_or(30)
                 .clamp(1, 3600) as u64;
 
-            tokio::time::timeout(
-                std::time::Duration::from_secs(timeout_secs),
-                run_command("direct".to_string(), command, Some(command_cwd)),
+            process::run_command_timed(
+                "direct".to_string(),
+                command,
+                Some(command_cwd),
+                timeout_secs,
+                cancel.cloned(),
             )
             .await
-            .unwrap_or_else(|_| Ok(format!("Command timed out after {} seconds.", timeout_secs)))
-            .unwrap_or_else(|e| format!("Error: {}", e))
         }
         "run_shell" => {
             let shell_type = args["type"].as_str().unwrap_or("powershell").to_string();
@@ -2862,15 +3002,14 @@ pub async fn execute_tool(
                     return serve::start(app, &shell_type, &code, scoped_code, command_cwd).await;
                 }
 
-                return tokio::time::timeout(
-                    std::time::Duration::from_secs(timeout_secs),
-                    run_command(shell_type, scoped_code, Some(command_cwd)),
+                return process::run_command_timed(
+                    shell_type,
+                    scoped_code,
+                    Some(command_cwd),
+                    timeout_secs,
+                    cancel.cloned(),
                 )
-                .await
-                .unwrap_or_else(|_| {
-                    Ok(format!("Command timed out after {} seconds.", timeout_secs))
-                })
-                .unwrap_or_else(|e| format!("Error: {}", e));
+                .await;
             }
 
             // ── L0-L4: require frontend confirmation ─────────────────────────
@@ -2894,6 +3033,7 @@ pub async fn execute_tool(
                 code.clone(),
                 risk_level.confirm_kind(),
                 "none",
+                cancel,
             )
             .await;
 
@@ -2929,17 +3069,24 @@ pub async fn execute_tool(
                 return serve::start(app, &shell_type, &code, scoped_code, command_cwd).await;
             }
 
-            tokio::time::timeout(
-                std::time::Duration::from_secs(timeout_secs),
-                run_command(shell_type, scoped_code, Some(command_cwd)),
+            process::run_command_timed(
+                shell_type,
+                scoped_code,
+                Some(command_cwd),
+                timeout_secs,
+                cancel.cloned(),
             )
             .await
-            .unwrap_or_else(|_| Ok(format!("Command timed out after {} seconds.", timeout_secs)))
-            .unwrap_or_else(|e| format!("Error: {}", e))
         }
         "file_actions" => {
-            file_actions::handle_file_actions(app, &args, &workspace_dir, protected_skill_root)
-                .await
+            file_actions::handle_file_actions(
+                app,
+                &args,
+                &workspace_dir,
+                protected_skill_root,
+                cancel,
+            )
+            .await
         }
         "knowledge_graph" => {
             let query = args["query"].as_str().unwrap_or("").to_string();

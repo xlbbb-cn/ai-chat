@@ -235,6 +235,8 @@ interface Props {
   dbId?: number;
   /** Inline allow/deny for a pending `run_shell` confirmation in the tool-call group. */
   onConfirm?: (requestId: string, allowed: boolean) => void;
+  /** Stop a running background tool task (its process tree is terminated). */
+  onCancelBackground?: (taskId: string) => void;
 }
 
 function extractAttachmentNames(content: string): string[] {
@@ -295,7 +297,7 @@ function formatInjectionTime(createdAtMs: number): string {
   });
 }
 
-export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onFork, dbId, onConfirm }: Props) {
+export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onFork, dbId, onConfirm, onCancelBackground }: Props) {
   const { t } = useI18n();
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
@@ -403,7 +405,7 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
             />
           </details>
         )}
-        {isAssistant && <ToolCallGroup message={message} onConfirm={onConfirm} />}
+        {isAssistant && <ToolCallGroup message={message} onConfirm={onConfirm} onCancelBackground={onCancelBackground} />}
         {isAssistant && <TodoList />}
         <div
           className="message-content"
@@ -454,18 +456,28 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
             states when the model actually received it. */}
         {isAssistant && message.injections && message.injections.length > 0 && (
           <div className="message-injections">
-            {message.injections.map((injection) => (
-              <div key={injection.id} className="message-injection">
-                <span className="message-injection-head">
-                  <FontAwesomeIcon icon={faPenToSquare} aria-hidden="true" />
-                  {t("chat.injected")}
-                  <span className="message-injection-time">
-                    {formatInjectionTime(injection.created_at_ms)}
+            {message.injections.map((injection) => {
+              const isBackground = injection.kind === "background_result";
+              // The stored text is the full result (it is replayed into the
+              // model's history); the bubble shows a clamped preview so a
+              // multi-thousand-line search does not swallow the transcript.
+              const displayText =
+                isBackground && injection.text.length > 480
+                  ? `${injection.text.slice(0, 480)}…`
+                  : injection.text;
+              return (
+                <div key={injection.id} className="message-injection">
+                  <span className="message-injection-head">
+                    <FontAwesomeIcon icon={faPenToSquare} aria-hidden="true" />
+                    {t(isBackground ? "chat.backgroundResult" : "chat.injected")}
+                    <span className="message-injection-time">
+                      {formatInjectionTime(injection.created_at_ms)}
+                    </span>
                   </span>
-                </span>
-                <span className="message-injection-text">{injection.text}</span>
-              </div>
-            ))}
+                  <span className="message-injection-text">{displayText}</span>
+                </div>
+              );
+            })}
           </div>
         )}
         {attachmentNames.length > 0 && (

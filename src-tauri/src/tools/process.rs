@@ -2,6 +2,9 @@
 // Windows code-page aware decoding of child stdout/stderr.
 
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 
 use super::split_command_line;
 use super::truncate_tool_output;
@@ -362,6 +365,105 @@ pub async fn run_command(
     Ok(format_process_output(output, decode_hint))
 }
 
+/// Run a command with a timeout, optionally in a cancellable background-task
+/// mode.
+///
+/// The foreground path keeps the historical `tokio::time::timeout` wrapper
+/// (dropping the future + `kill_on_drop`). The background path must actually
+/// kill the whole process tree: a `powershell` script routinely spawns
+/// grandchildren, and dropping the future only terminates the direct child on
+/// Windows. It therefore polls the task's cancel flag and calls
+/// `process_guard::kill_process_tree`, which is also what the Stop button and
+/// app exit use.
+pub(crate) async fn run_command_timed(
+    cmd_type: String,
+    code: String,
+    cwd: Option<PathBuf>,
+    timeout_secs: u64,
+    cancel: Option<Arc<AtomicBool>>,
+) -> String {
+    match cancel {
+        Some(flag) => run_command_cancellable(cmd_type, code, cwd, timeout_secs, flag).await,
+        None => tokio::time::timeout(
+            Duration::from_secs(timeout_secs),
+            run_command(cmd_type, code, cwd),
+        )
+        .await
+        .unwrap_or_else(|_| Ok(format!("Command timed out after {} seconds.", timeout_secs)))
+        .unwrap_or_else(|e| format!("Error: {}", e)),
+    }
+}
+
+/// Cancellable, tree-killing variant used by background tasks.
+async fn run_command_cancellable(
+    cmd_type: String,
+    code: String,
+    cwd: Option<PathBuf>,
+    timeout_secs: u64,
+    cancel: Arc<AtomicBool>,
+) -> String {
+    let decode_hint = decode_hint_for_shell(&cmd_type);
+    let mut cmd = match build_command(&cmd_type, &code, cwd) {
+        Ok(cmd) => cmd,
+        Err(err) => return format!("Error: {err}"),
+    };
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    let child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(err) => return format!("Error: failed to start command: {err}"),
+    };
+    let pid = child.id();
+    // Registered for app-exit cleanup even though this task is turn-scoped:
+    // a crash must not leave the child running.
+    let tracked = crate::process_guard::track_child(&child, format!("background {cmd_type} tool"));
+
+    // `wait_with_output` drains both pipes concurrently and reaps the child.
+    // The select below only decides whether to kill it first; the inner task
+    // stays responsible for the actual wait, so a kill cannot deadlock on a
+    // full pipe buffer.
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        let outcome = child.wait_with_output().await;
+        let _ = tx.send(outcome);
+    });
+
+    let outcome = tokio::select! {
+        received = rx => Some(received.ok().and_then(|res| res.ok())),
+        _ = tokio::time::sleep(Duration::from_secs(timeout_secs)) => {
+            crate::process_guard::kill_process_tree(pid);
+            None
+        }
+        _ = wait_cancelled(&cancel) => {
+            crate::process_guard::kill_process_tree(pid);
+            None
+        }
+    };
+    drop(tracked);
+
+    match outcome {
+        Some(Some(output)) => format_process_output(output, decode_hint),
+        Some(None) => "Error: the command could not be awaited (process handle lost).".to_string(),
+        None if cancel.load(Ordering::SeqCst) => {
+            "⛔ Background task cancelled — the process tree was terminated.".to_string()
+        }
+        None => format!("Command timed out after {timeout_secs} seconds."),
+    }
+}
+
+/// Resolve once `flag` is set. Never completes otherwise, so `select!` uses it
+/// purely as an interrupt.
+async fn wait_cancelled(flag: &Arc<AtomicBool>) {
+    loop {
+        if flag.load(Ordering::SeqCst) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::validate_path_resolved_program;
@@ -406,6 +508,40 @@ mod tests {
     #[test]
     fn drive_relative_paths_are_refused() {
         assert!(validate_path_resolved_program("C:tool.exe").is_err());
+    }
+
+    /// The background runner must react to the task's cancel flag: the whole
+    /// process tree is killed and a cancellation marker is returned instead of
+    /// the command's normal output.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn cancelled_background_command_reports_cancellation() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let flag = Arc::new(AtomicBool::new(false));
+        let trigger = flag.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            trigger.store(true, Ordering::SeqCst);
+        });
+
+        let started = std::time::Instant::now();
+        let output = super::run_command_cancellable(
+            "powershell".to_string(),
+            "Start-Sleep -Seconds 30".to_string(),
+            None,
+            60,
+            flag,
+        )
+        .await;
+
+        assert!(output.contains("cancelled"), "unexpected output: {output}");
+        assert!(
+            started.elapsed() < Duration::from_secs(20),
+            "cancellation did not interrupt the command"
+        );
     }
 
     /// An empty program name is not a program at all.

@@ -11,6 +11,8 @@ interface Props {
    * Absent for persisted history — the buttons only render for live turns.
    */
   onConfirm?: (requestId: string, allowed: boolean) => void;
+  /** Stop a running background tool task (`run_in_background`). */
+  onCancelBackground?: (taskId: string) => void;
 }
 
 /** Per-status glyph; the running spinner is the only animated one. */
@@ -60,7 +62,7 @@ function FlipRow({ flipKey, className, children }: FlipRowProps) {
   );
 }
 
-export function ToolCallGroup({ message, onConfirm }: Props) {
+export function ToolCallGroup({ message, onConfirm, onCancelBackground }: Props) {
   const { t } = useI18n();
   const entries = message.tool_calls ?? [];
   const [open, setOpen] = useState(false);
@@ -143,6 +145,16 @@ export function ToolCallGroup({ message, onConfirm }: Props) {
               )}
               {entry.error && (
                 <span className="tool-call-entry-error">{entry.error}</span>
+              )}
+              {entry.background && entry.status === "running" && onCancelBackground && (
+                <button
+                  type="button"
+                  className="inline-edit-btn tool-call-entry-cancel"
+                  title={t("app.background.cancel")}
+                  onClick={() => onCancelBackground(entry.task_id)}
+                >
+                  {t("app.background.cancel")}
+                </button>
               )}
             </li>
           ))}

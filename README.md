@@ -126,6 +126,7 @@ Three execution tools with deliberately different scopes:
 - `run_cmd`: runs one program the OS resolves through `PATH` (`python`, `python3`, `git`, …) — absolute and relative paths are refused
 - `run_shell`: full freedom — the script may `cd` anywhere and run anything, and every script is audited by the risk engine before it runs
 - `run_shell` serve: Background processes for the current turn; the whole process tree is stopped and its exit verified when the turn ends
+- Background tool tasks: `run_cmd` / `run_shell` / `file_actions` search / MCP tools / `call_subagent` accept `run_in_background: true` — the model gets a task id immediately, keeps working, and the result is injected automatically at the next request boundary; the turn stays open until it arrives and the task can be cancelled from the UI or by the model (`background_task`). Global switch: Settings → Runtime & Debug → Background execution.
 - `file_actions`: read/write/edit/patch/diff plus mkdir/rename/move/delete, strictly inside the workspace (including the hidden `.data` state folder; the workspace database stays protected)
 - `memory`: Four scopes (`session` / `user` / `repo` / `evolution`) for searching and persisting conclusions
 - `todos`: Per-session task lists the model can plan, update and close

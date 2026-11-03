@@ -374,6 +374,11 @@ pub struct AppConfig {
     pub selected_tools: Vec<String>,
     #[serde(default)]
     pub self_evolution_mode: bool,
+    /// Allow the model to run `run_cmd` / `run_shell` / `file_actions search`
+    /// as background tasks (`run_in_background: true`). The turn stays open
+    /// until a started task delivers its result or is cancelled.
+    #[serde(default = "update::default_true")]
+    pub background_tools: bool,
     pub kg_engine: Option<String>,
     pub neo4j_uri: Option<String>,
     pub neo4j_user: Option<String>,
@@ -434,6 +439,7 @@ impl Default for AppConfig {
             system_message: String::new(),
             selected_tools: vec![],
             self_evolution_mode: false,
+            background_tools: true,
             kg_engine: None,
             neo4j_uri: Some("bolt://localhost:7687".to_string()),
             neo4j_user: Some("neo4j".to_string()),
@@ -563,6 +569,10 @@ pub struct AppState {
     /// back to a waiting `execute_tool` call. Stores the request_id alongside
     /// the sender so a stale confirmation can never approve the wrong command.
     pub confirm_sender: Mutex<Option<(String, tokio::sync::oneshot::Sender<ToolConfirmation>)>>,
+    /// Serializes tool confirmation dialogs: `confirm_sender` is one slot, so
+    /// the main agent and background tasks must queue instead of overwriting
+    /// each other's pending request.
+    pub tool_confirm_lock: tokio::sync::Mutex<()>,
     /// Per-server diagnostic log buffer (in-memory ring buffer, last
     /// `MAX_MCP_LOG_ENTRIES` entries per server). Populated by mcp.rs at
     /// every save / test / tool call so the UI can show what happened.
@@ -579,6 +589,10 @@ pub struct AppState {
     /// Long-lived background children started by `run_shell run_type="serve"`.
     /// Killed on demand by the tool and automatically at app exit.
     pub serve_processes: tools::serve::ServeRegistry,
+    /// Turn-scoped background tool tasks (`run_in_background: true`). Their
+    /// finished results are injected into the conversation at the next request
+    /// boundary; the whole session is torn down when the turn ends.
+    pub background_tasks: tools::background::BackgroundRegistry,
     /// Session-scoped memories: session_id -> key -> JSON entry.
     pub session_memories: Mutex<
         std::collections::HashMap<String, std::collections::HashMap<String, serde_json::Value>>,
@@ -792,6 +806,49 @@ fn stop_chat_completion(state: State<'_, AppState>) {
     if let Ok(flag) = state.chat_cancelled.lock() {
         flag.store(true, std::sync::atomic::Ordering::SeqCst);
     }
+    // Background tasks must die immediately, not at the next loop iteration:
+    // a foreground tool may still be blocking the turn. The active turn carries
+    // the session id, so only this session's tasks are touched.
+    if let Ok(active) = state.active_turn.lock() {
+        if let Some((_, session_id)) = active.as_ref() {
+            let cancelled = state.background_tasks.cancel_session(session_id);
+            if cancelled > 0 {
+                let _ = state.logger.lock().map(|logger| {
+                    logger.log(
+                        "INFO",
+                        &format!(
+                            "Stop pressed: cancelled {cancelled} background task(s) of session {session_id}"
+                        ),
+                    );
+                });
+            }
+        }
+    }
+}
+
+/// Snapshot of the background tasks of one chat session (UI management).
+#[tauri::command]
+fn list_background_tasks(
+    session_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Vec<tools::background::BackgroundTaskSnapshot> {
+    match session_id {
+        Some(session_id) => state.background_tasks.list(&session_id),
+        None => Vec::new(),
+    }
+}
+
+/// Cancel one background task (the UI's cancel button). Returns the updated
+/// snapshot so the caller can update its entry without waiting for an event.
+#[tauri::command]
+fn cancel_background_task(
+    task_id: String,
+    state: State<'_, AppState>,
+) -> Result<tools::background::BackgroundTaskSnapshot, String> {
+    state
+        .background_tasks
+        .cancel(&task_id)
+        .ok_or_else(|| format!("Unknown background task '{task_id}'"))
 }
 
 /// Push a message into the turn that is currently running, so it reaches the
@@ -1273,10 +1330,12 @@ pub fn run() {
                 active_turn: Mutex::new(None),
                 turn_inbox: Mutex::new(Vec::new()),
                 confirm_sender: Mutex::new(None),
+                tool_confirm_lock: tokio::sync::Mutex::new(()),
                 mcp_logs: std::sync::Arc::new(Mutex::new(Default::default())),
                 mcp_cancelled_tests: std::sync::Arc::new(Mutex::new(Default::default())),
                 mcp_children: std::sync::Arc::new(tokio::sync::Mutex::new(Default::default())),
                 serve_processes: Default::default(),
+                background_tasks: Default::default(),
                 session_memories: Mutex::new(Default::default()),
                 external_agent_confirmed: Mutex::new(Default::default()),
                 external_agent_confirm_lock: tokio::sync::Mutex::new(()),
@@ -1332,6 +1391,8 @@ pub fn run() {
             llm_complete::chat_completion,
             stop_chat_completion,
             inject_user_message,
+            list_background_tasks,
+            cancel_background_task,
             confirm_command,
             get_config,
             save_config,

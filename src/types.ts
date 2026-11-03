@@ -22,6 +22,27 @@ export interface ToolCallEntry {
     code: string;
     reason: string;
   };
+  /**
+   * Set while this entry tracks a background tool task (`run_in_background`).
+   * The id is the backend `bg-…` task id, so the cancel button can stop it and
+   * `background-task-state` events update the same row.
+   */
+  background?: boolean;
+}
+
+/**
+ * One background tool task, mirrored from the Rust `BackgroundTaskSnapshot`
+ * (`background-task-state` events, `list_background_tasks` command).
+ */
+export interface BackgroundTaskState {
+  id: string;
+  session_id: string;
+  tool: string;
+  label: string;
+  status: "running" | "done" | "failed" | "cancelled";
+  started_at_ms: number;
+  elapsed_ms: number;
+  preview?: string;
 }
 
 /**
@@ -161,6 +182,12 @@ export interface ChatInjection {
   text: string;
   /** Unix milliseconds, rendered as the "added at" clock label. */
   created_at_ms: number;
+  /**
+   * `background_result` marks the automatic delivery of a background tool
+   * task's output. The UI labels it differently and clamps the preview; the
+   * full text still travels into the conversation history.
+   */
+  kind?: "background_result";
 }
 
 /**
@@ -259,6 +286,12 @@ export interface AppConfig {
   system_message?: string;
   selected_tools?: string[];
   self_evolution_mode?: boolean;
+  /**
+   * Allow `run_cmd` / `run_shell` / `file_actions search` to run as background
+   * tasks (`run_in_background: true`). The turn stays open until their results
+   * are delivered or the tasks are cancelled. Defaults to on.
+   */
+  background_tools?: boolean;
   kg_engine?: string;
   neo4j_uri?: string;
   neo4j_user?: string;

@@ -283,7 +283,7 @@
 
 .tool-call-entry {
     display: grid;
-    grid-template-columns: 16px auto 1fr;
+    grid-template-columns: 16px auto 1fr auto;
     grid-template-rows: auto auto;
     column-gap: 6px;
     row-gap: 1px;
@@ -350,6 +350,18 @@
 
 .tool-call-entry-error {
     color: var(--c-danger);
+}
+
+/* Cancel affordance for a running background task. Reuses the shared
+   .inline-edit-btn primitive; only the grid placement and compact size are
+   local. */
+.tool-call-entry-cancel {
+    grid-row: 1;
+    grid-column: 4;
+    align-self: center;
+    min-height: 22px;
+    padding: 1px 8px;
+    font-size: 11px;
 }
 
 /* ── Inline run_shell confirmation ─────────────────────────────────────

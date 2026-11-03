@@ -2455,6 +2455,7 @@ async fn request_external_agent_approval(
         target.clone(),
         "external_agent",
         "none",
+        None,
     )
     .await;
 
@@ -2555,7 +2556,8 @@ async fn run_llm_agent_body(
             }
         }
     }
-    let mut tools_list = tools::get_all_tools(&agent_tool_ids, config.self_evolution_mode);
+    let mut tools_list =
+        tools::get_all_tools(&agent_tool_ids, config.self_evolution_mode, false);
     tools_list.extend(tools::get_agent_task_tools());
 
     // ── MCP tools (`enable_mcp`) ─────────────────────────────────────────────
@@ -2576,7 +2578,7 @@ async fn run_llm_agent_body(
                 Ok(server_tools) => {
                     for tool in server_tools {
                         if let Some((fn_name, actual_name, openai_tool)) =
-                            mcp::adapt_tool_for_llm(&server, &tool)
+                            mcp::adapt_tool_for_llm(&server, &tool, false)
                         {
                             tools_list.push(openai_tool);
                             mcp_tool_map.insert(fn_name, (server.clone(), actual_name));
@@ -3041,6 +3043,7 @@ async fn run_llm_agent_body(
                             Some(&mission_id),
                             Some(session_id),
                             &[], // sub-agents don't track active skill dirs for skill_read
+                            None, // background tasks are never advertised to sub-agents
                         )
                         .await
                     };
