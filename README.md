@@ -41,6 +41,7 @@ Chat is the easy part. AI Chat gives the agent a workspace, real utilities (memo
 | **Agent runtime** — LLM, local CLI or remote cloud, configured in-app | ✅ | ◐ LLM agents | — | — |
 | **Prompt ownership** — no default persona or hidden rewrite; your system message is the base, tool/skill guidance is appended | ✅ | ◐ assistant prompts | ◐ prompt library | ◐ per-model prompt |
 | **Local request audit** — body, tokens, latency, status, errors | ✅ | ◐ history only | ◐ history only | ◐ history + server log |
+| **Background execution** — slow tools, MCP calls and sub-agents keep running while the model works | ✅ | — | — | — |
 | **Knowledge graph** — Neo4j-backed tool | ✅ | — | — | — |
 
 <sub>✅ built in · ◐ partial or adjacent · — not offered. Based on public documentation as of October 2026.</sub>
@@ -97,6 +98,7 @@ Full usage guides live in the GitHub Wiki:
 - Interruptible generation
 - File attachment support in messages
 - Model switching and parameter configuration (temperature, top_p, max_tokens, etc.)
+- **Mid-turn updates**: the composer stays usable while a turn streams — Enter appends your message to the running turn at its next request boundary instead of starting a new one
 - No default persona: your system message stays the base; only tool/skill guidance and OS/invocation hints are appended
 
 ### 2) Sub-Agent Orchestration
@@ -108,6 +110,7 @@ Full usage guides live in the GitHub Wiki:
 - Create, edit, enable, and delete sub-agents
 - Configure agent orchestration (parallel / sequential, concurrency) and toggle sub-agent mode
 - Task-level orchestration events in the chat flow
+- With background execution on, `call_subagent` can be dispatched as a background task: the main agent keeps working and the sub-agent report arrives before its next request
 
 ### 3) Skill System
 
@@ -118,6 +121,7 @@ Full usage guides live in the GitHub Wiki:
 - Skill path isolation for safer file and command scope
 - Skill command allowlist merging across multiple selected skills
 - **Self-evolution mode** lets the assistant install, extend, edit and delete skills itself, with `.bak.n` backups, while forcing the file-actions and memory tools on
+- **Memory consolidation** (self-evolution mode): `memory action=consolidate` clusters the hottest `evolution` entries, the model writes one skill from them, and the originals move to `.data/memory/evolution/archive/<skill>/` — the skill is enabled automatically and `phase: restore` brings entries back
 
 ### 4) Tool System
 
@@ -126,7 +130,7 @@ Three execution tools with deliberately different scopes:
 - `run_cmd`: runs one program the OS resolves through `PATH` (`python`, `python3`, `git`, …) — absolute and relative paths are refused
 - `run_shell`: full freedom — the script may `cd` anywhere and run anything, and every script is audited by the risk engine before it runs
 - `run_shell` serve: Background processes for the current turn; the whole process tree is stopped and its exit verified when the turn ends
-- Background tool tasks: `run_cmd` / `run_shell` / `file_actions` search / MCP tools / `call_subagent` accept `run_in_background: true` — the model gets a task id immediately, keeps working, and the result is injected automatically at the next request boundary; the turn stays open until it arrives and the task can be cancelled from the UI or by the model (`background_task`). Global switch: Settings → Runtime & Debug → Background execution.
+- **Background tool tasks**: `run_cmd`, `run_shell` (`direct`), `file_actions` search, every MCP tool and `call_subagent` accept `run_in_background: true` — the call returns a `bg-…` id immediately, the model keeps working, and the real output is injected as a user message before its next request. The turn is held open until every task settles; the task bar above the composer shows progress with a cancel button, and the model manages them with `background_task` (`list` / `wait` / `get` / `cancel`). Tasks are turn-scoped: Stop or the end of the turn kills their process trees. Global switch: Settings → Runtime & Debug → Background execution (sub-agents never get the flag)
 - `file_actions`: read/write/edit/patch/diff plus mkdir/rename/move/delete, strictly inside the workspace (including the hidden `.data` state folder; the workspace database stays protected)
 - `memory`: Four scopes (`session` / `user` / `repo` / `evolution`) for searching and persisting conclusions
 - `todos`: Per-session task lists the model can plan, update and close
@@ -305,6 +309,8 @@ After running, a config.json file will be generated in the system app data direc
   },
   "selected_tools": ["run_cmd", "file_actions", "knowledge_graph"],
   "self_evolution_mode": false,
+  "background_tools": false,
+  "single_instance": true,
   "workspace_dir": "D:/projects/my-repo",
   "kg_engine": "neo4j",
   "neo4j_uri": "bolt://localhost:7687",
@@ -367,6 +373,7 @@ The three execution tools have deliberately different scopes:
 Other boundaries:
 
 - Skills live in exactly one root per workspace; the skill folder is pinned to its own `SKILL.md`
+- Background tool tasks keep every check: risk assessment and confirmation still happen before the task starts, and its output arrives as a user message rather than a tool result
 - Self-evolution mode lets the assistant rewrite its own instructions — use it briefly, in a controlled workspace, and inspect the `.bak` files afterwards
 - MCP tool arguments are forwarded to the MCP server verbatim and are not sandboxed; `llm` sub-agents only receive MCP tools when `enable_mcp` is on for that agent
 - Validate MCP external services with minimal privileges and connectivity tests before integration

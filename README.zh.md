@@ -41,6 +41,7 @@
 | **Agent 运行时** —— LLM、本地 CLI 或远程 cloud，界面内自由配置 | ✅ | ◐ LLM Agent | — | — |
 | **提示词自主** —— 无默认人设、无隐藏改写；你的 system message 是基底，只追加工具/技能说明 | ✅ | ◐ 助手提示词 | ◐ 提示词库 | ◐ 按模型提示词 |
 | **本地请求审计** —— 请求体、token、耗时、状态、错误 | ✅ | ◐ 仅历史记录 | ◐ 仅历史记录 | ◐ 历史 + 服务端日志 |
+| **后台执行** —— 慢工具、MCP 调用与子智能体在模型继续工作时运行 | ✅ | — | — | — |
 | **知识图谱** —— Neo4j 工具 | ✅ | — | — | — |
 
 <sub>✅ 原生 · ◐ 部分/相近 · — 未提供；基于 2026 年 10 月的公开文档。</sub>
@@ -97,17 +98,19 @@ AI Chat 是一个桌面端 AI 助手应用，支持接入任意 OpenAI 兼容模
 - 支持中断生成
 - 支持消息文件附件展示
 - 支持模型切换与模型参数配置（temperature、top_p、max_tokens 等）
+- **回合内追加**：生成过程中输入框保持可用，回车会把你的消息追加到正在进行的回合，在下一个请求边界送达，而不是另起一轮
 - 无默认人设：system message 作为基底，只追加工具/技能说明与系统/调用提示
 
 ### 2) 子代理编排（Sub-Agents）
 
 - 三种运行时：`llm`（内置自主循环）、`cli`（本机无头编码 CLI）、`cloud`（远程 HTTP 端点）
-- **File-backed `llm` definitions**：`agents/<分类>/<slug>.md`（YAML frontmatter + 提示词）。`sub_agents.json` 只作为配置。**只有点击 Refresh 时才会发现新文件**：扫描 `agents/` 并替换 `agents/index.yaml`，面板读取该清单；新文件需要下次刷新后才出现。面板只允许删除 `agents/custom/` 下的文件
+- **文件化的 `llm` 定义**：`agents/<分类>/<slug>.md`（YAML frontmatter + 提示词）。`sub_agents.json` 只作为配置。**只有点击 Refresh 时才会发现新文件**：扫描 `agents/` 并替换 `agents/index.yaml`，面板读取该清单；新文件需要下次刷新后才出现。面板只允许删除 `agents/custom/` 下的文件
 - 每个 Agent 可单独配置模型、系统提示词、工具/技能白名单、迭代预算与 **MCP 开关**
 - **llm Agent 的 MCP**（`enable_mcp`）：注入所有已启用 MCP server 的工具，工具名与描述和主 Agent 完全一致；每个任务启动自己的 MCP server 进程，任务结束后退出
 - 支持子代理新增、编辑、启用与删除
 - 支持编排配置（并行 / 串行、并发数）与子代理模式开关
 - 对话中支持任务级编排事件
+- 开启后台执行后，`call_subagent` 也可以作为后台任务派发：主 Agent 继续工作，子 Agent 的报告在其下一次请求前送达
 
 ### 3) 技能系统（Skills）
 
@@ -118,6 +121,7 @@ AI Chat 是一个桌面端 AI 助手应用，支持接入任意 OpenAI 兼容模
 - 技能目录隔离，约束文件与命令作用范围
 - 多技能下命令白名单可合并
 - **自我进化模式**允许助手自行安装、扩展、修改和删除技能（自动生成 `.bak.n` 备份），同时强制打开文件操作与记忆工具
+- **记忆整合**（自我进化模式）：`memory action=consolidate` 把占用上下文最多的 `evolution` 条目聚类，由模型写成一个技能，原条目移入 `.data/memory/evolution/archive/<skill>/`；技能自动启用，`phase: restore` 可把条目移回
 
 ### 4) 工具系统（Tools）
 
@@ -126,6 +130,7 @@ AI Chat 是一个桌面端 AI 助手应用，支持接入任意 OpenAI 兼容模
 - run_cmd：只运行由系统通过 `PATH` 解析的程序（`python`、`python3`、`git` 等），绝对路径与相对路径一律拒绝
 - run_shell：完全自由——脚本可以 `cd` 到任何地方执行任何内容，但每个脚本执行前都会经过风险引擎审计
 - run_shell serve：当前回合的后台进程；回合结束时整棵进程树会被停止并核验退出
+- **后台工具任务**：`run_cmd`、`run_shell`（`direct`）、`file_actions` 搜索、所有 MCP 工具与 `call_subagent` 都支持 `run_in_background: true`——调用立即返回 `bg-…` 任务 id，模型继续工作，真实结果会在其下一次请求前以 user 消息送达。回合会一直保持到所有任务结束；输入框上方的任务条显示进度并可取消，模型侧用 `background_task`（`list` / `wait` / `get` / `cancel`）管理。任务属于当前回合：Stop 或回合结束会杀掉它们的进程树。总开关：设置 → 运行时与调试 → 后台执行（子智能体不会收到该参数）
 - file_actions：文件读写、编辑、补丁、比对（diff），支持 mkdir / rename / move / delete；严格限制在工作区内（包含隐藏的 `.data` 状态目录，工作区数据库受保护）
 - memory：`session` / `user` / `repo` / `evolution` 四级记忆，可检索与沉淀结论
 - todos：按会话维护任务清单，模型可规划、更新与关闭
@@ -304,6 +309,8 @@ git push origin v2.0.0
   },
   "selected_tools": ["run_cmd", "file_actions", "knowledge_graph"],
   "self_evolution_mode": false,
+  "background_tools": false,
+  "single_instance": true,
   "workspace_dir": "D:/projects/my-repo",
   "kg_engine": "neo4j",
   "neo4j_uri": "bolt://localhost:7687",
@@ -366,6 +373,7 @@ ai-chat/
 其他边界：
 
 - 技能每个工作区只有一个根目录，技能目录锁定在自身 `SKILL.md`
+- 后台工具任务保留全部检查：任务启动前仍会做风险评估与确认，结果以 user 消息而不是工具结果的形式送达
 - 自我进化模式允许助手改写自己的指令——请短时、在受控工作区使用，事后检查 `.bak` 文件
 - MCP 工具参数会原样转发给 MCP server，不受工作区沙箱限制；llm 子代理只有在 `enable_mcp` 开启时才会获得 MCP 工具
 - MCP 外部服务接入前应先做最小权限与连通性验证
