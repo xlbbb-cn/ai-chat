@@ -418,6 +418,32 @@ mod tests {
             calls.iter().map(|call| call.0.as_str()).collect();
         assert_eq!(ids.len(), calls.len(), "ids must stay unique");
     }
+
+    #[test]
+    fn tool_args_block_skips_empty_arguments() {
+        // No arguments must not add an empty detail row to the tool entry.
+        assert_eq!(tool_args_block(&json!({})), "");
+        assert_eq!(tool_args_block(&Value::Null), "");
+    }
+
+    #[test]
+    fn tool_args_block_renders_a_single_line_fence() {
+        let block = tool_args_block(&json!({ "path": "a.txt", "query": "x\ny" }));
+        assert!(block.starts_with("```json\n"));
+        assert!(block.ends_with("\n```\n"));
+        // Newlines inside values stay escaped, so the UI's one-line detail row
+        // never receives a real line break.
+        assert_eq!(block.matches('\n').count(), 3);
+        assert!(block.contains(r#""query":"x\ny""#));
+    }
+
+    #[test]
+    fn tool_args_block_truncates_long_arguments() {
+        let block = tool_args_block(&json!({ "content": "a".repeat(2000) }));
+        assert!(block.contains('…'));
+        // 400 characters of payload plus the fence characters.
+        assert!(block.chars().count() < 450);
+    }
 }
 
 pub struct StreamResult {
@@ -506,6 +532,30 @@ fn background_supported(name: &str, args: &Value) -> bool {
         "file_actions" => args["action"].as_str().unwrap_or("") == "search",
         _ => false,
     }
+}
+
+/// Fenced block with a tool call's input arguments, appended to the
+/// `tool-call` message so the UI can show what was actually sent.
+///
+/// The frontend renders this block as the entry's one-line detail (`summary`),
+/// so the JSON stays on a single line and is cut short; the complete value is
+/// still written to the interaction log. Empty arguments produce an empty
+/// string, which keeps the entry at its original two-line shape.
+fn tool_args_block(args: &Value) -> String {
+    const MAX_CHARS: usize = 400;
+    let empty_object = args
+        .as_object()
+        .map(|object| object.is_empty())
+        .unwrap_or(false);
+    if args.is_null() || empty_object {
+        return String::new();
+    }
+    let raw = serde_json::to_string(args).unwrap_or_else(|_| args.to_string());
+    let mut preview: String = raw.chars().take(MAX_CHARS).collect();
+    if raw.chars().count() > MAX_CHARS {
+        preview.push('…');
+    }
+    format!("```json\n{preview}\n```\n")
 }
 
 /// One-line label for the UI and for the result header.
@@ -3248,7 +3298,12 @@ if !skill_ids.is_empty() || skill_evolution_root.is_some() {
                 );
                 let _ = app.emit(
                     "tool-call",
-                    format!("🔌 *MCP [{}]: {}*\n\n", mcp_server.name, actual_tool_name),
+                    format!(
+                        "🔌 *MCP [{}]: {}*\n\n{}",
+                        mcp_server.name,
+                        actual_tool_name,
+                        tool_args_block(&args_json)
+                    ),
                 );
                 let start_time = std::time::Instant::now();
                 let mcp_result =
