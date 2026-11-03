@@ -168,9 +168,14 @@ const en = {
 
         agents: {
             planner: "Planner",
+            selector: "Selector",
             aggregator: "Aggregator",
             tool: "Tool",
             planDone: "Plan completed — {count} tasks total",
+            selectionDone: {
+                one: "Selected {count} agent — {names}",
+                other: "Selected {count} agents — {names}",
+            },
             aggregated: {
                 one: "Aggregated {count} subtask result",
                 other: "Aggregated {count} subtask results",
@@ -196,6 +201,10 @@ const en = {
         completedWithErrors: {
             one: "{count} step: {done} completed, {errors} failed",
             other: "{count} steps: {done} completed, {errors} failed",
+        },
+        completedWithSkipped: {
+            one: "{count} step: {done} completed, {skipped} skipped",
+            other: "{count} steps: {done} completed, {skipped} skipped",
         },
         steps: { one: "{count} step", other: "{count} steps" },
         confirmTitle: "Allow this shell command?",
@@ -554,7 +563,7 @@ const en = {
         title: "Sub Agents",
         orchestration: "Orchestration settings",
         enableMode: "Automatic orchestration",
-        autoConfigure: "Auto-configure mode",
+        autoConfigure: "Smart agent selection",
         executionMode: "Execution mode",
         modeParallel: "Parallel",
         modeSequential: "Sequential",

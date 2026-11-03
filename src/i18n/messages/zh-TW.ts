@@ -152,9 +152,11 @@ const zhTW: Messages = {
 
         agents: {
             planner: "規劃器",
+            selector: "選擇器",
             aggregator: "彙總器",
             tool: "工具",
             planDone: "規劃完成 —— 共 {count} 個任務",
+            selectionDone: "已選擇 {count} 個 agent —— {names}",
             aggregated: "已彙總 {count} 個子任務結果",
             loadingSkill: "正在載入技能：{name}",
         },
@@ -175,6 +177,7 @@ const zhTW: Messages = {
     toolGroup: {
         completed: "已完成 {count} 次工具呼叫",
         completedWithErrors: "{count} 個步驟：{done} 個成功，{errors} 個失敗",
+        completedWithSkipped: "{count} 個步驟：{done} 個成功，{skipped} 個跳過",
         steps: "{count} 個步驟",
         confirmTitle: "允許執行此 Shell 命令？",
         rejected: "使用者已拒絕",
@@ -517,7 +520,7 @@ const zhTW: Messages = {
         title: "子代理",
         orchestration: "協調設定",
         enableMode: "自動協調",
-        autoConfigure: "自動設定模式",
+        autoConfigure: "智慧選擇 agent",
         executionMode: "執行方式",
         modeParallel: "平行",
         modeSequential: "循序",

@@ -1,7 +1,7 @@
 import type { Message, ToolCallEntry } from "../types";
 import { useRef, useState, type ReactNode } from "react";
 import { useI18n } from "../i18n";
-import { FontAwesomeIcon, faCheck, faChevronRight, faSpinner, faTriangleExclamation, faXmark } from "../icons";
+import { FontAwesomeIcon, faCheck, faChevronRight, faMinus, faSpinner, faTriangleExclamation, faXmark } from "../icons";
 import "./ToolCallGroup.css";
 
 interface Props {
@@ -19,6 +19,8 @@ interface Props {
 function StatusIcon({ status }: { status: ToolCallEntry["status"] }) {
   if (status === "running") return <FontAwesomeIcon icon={faSpinner} spin />;
   if (status === "done") return <FontAwesomeIcon icon={faCheck} />;
+  // Skipped is neutral: the task never ran, which is not a failure.
+  if (status === "skipped") return <FontAwesomeIcon icon={faMinus} />;
   return <FontAwesomeIcon icon={faXmark} />;
 }
 
@@ -71,6 +73,7 @@ export function ToolCallGroup({ message, onConfirm, onCancelBackground }: Props)
   const isRunning = runningEntry !== undefined;
   const doneCount = entries.filter((e) => e.status === "done").length;
   const errorCount = entries.filter((e) => e.status === "error").length;
+  const skippedCount = entries.filter((e) => e.status === "skipped").length;
   // At most one confirmation can be pending at a time (the backend blocks the
   // tool call until it is answered), so the first entry that carries one wins.
   const confirmEntry = entries.find((e) => e.confirm !== undefined);
@@ -86,11 +89,14 @@ export function ToolCallGroup({ message, onConfirm, onCancelBackground }: Props)
     ? "tool-call-preview-row tool-call-preview-sub"
     : "tool-call-preview-row tool-call-preview-sub tool-call-preview-sub--empty";
 
-  // Row 1 of the collapsed state: completion title.
+  // Row 1 of the collapsed state: completion title. Failures dominate, then
+  // skipped steps (they explain a report that is smaller than the plan).
   const titleLabel =
     errorCount > 0
       ? t("toolGroup.completedWithErrors", { count: entries.length, done: doneCount, errors: errorCount })
-      : t("toolGroup.completed", { count: doneCount });
+      : skippedCount > 0
+        ? t("toolGroup.completedWithSkipped", { count: entries.length, done: doneCount, skipped: skippedCount })
+        : t("toolGroup.completed", { count: doneCount });
 
   return (
     <div className={`tool-call-group${isRunning ? " tool-call-group--running" : ""}`}>

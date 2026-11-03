@@ -19,6 +19,7 @@ import type {
   AppConfig,
   Message,
   AgentTaskEvent,
+  AgentSelectionEvent,
   AgentTaskTokenEvent,
   ChatInjection,
   ToolCallEntry,
@@ -993,6 +994,53 @@ export default function App() {
             ? { ...entry, status: "error" as const, error: error ?? undefined }
             : entry
         );
+        updateActiveAssistantToolCalls(currentToolCallsRef.current);
+      }),
+      // A planned task that never ran (unknown agent, unmet dependency, user
+      // stop). No `agent-task-start` was emitted for it, so the row is created
+      // here; otherwise the report would silently be shorter than the plan.
+      listen<AgentTaskEvent>("agent-task-skipped", (e) => {
+        const { agent_id, agent_name, task_id, reason } = e.payload;
+        const text = reason ?? "";
+        setAgentStatuses((prev) => ({
+          ...prev,
+          [agent_id]: { status: "idle" },
+        }));
+        const exists = currentToolCallsRef.current.some(
+          (entry) => entry.task_id === task_id
+        );
+        currentToolCallsRef.current = exists
+          ? currentToolCallsRef.current.map((entry) =>
+              entry.task_id === task_id
+                ? { ...entry, status: "skipped" as const, description: entry.description || text }
+                : entry
+            )
+          : [
+              ...currentToolCallsRef.current,
+              {
+                task_id,
+                agent_name,
+                description: text,
+                status: "skipped" as const,
+              },
+            ];
+        updateActiveAssistantToolCalls(currentToolCallsRef.current);
+      }),
+      // Selector chip: which agents were chosen for this turn (soft narrowing,
+      // the main agent can still call any enabled agent).
+      listen<AgentSelectionEvent>("agent-selection", (e) => {
+        const { delegate, agents } = e.payload;
+        if (!delegate || !agents?.length) return;
+        const entry: ToolCallEntry = {
+          task_id: `selection-${Date.now()}`,
+          agent_name: t("app.agents.selector"),
+          description: t("app.agents.selectionDone", {
+            count: agents.length,
+            names: agents.map((agent) => agent.name).join(", "),
+          }),
+          status: "done",
+        };
+        currentToolCallsRef.current = [...currentToolCallsRef.current, entry];
         updateActiveAssistantToolCalls(currentToolCallsRef.current);
       }),
       listen("agent-plan-start", (e: { payload: { task_count: number } }) => {

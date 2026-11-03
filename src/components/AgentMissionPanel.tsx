@@ -87,7 +87,8 @@ export function AgentMissionPanel({ sessionId, onClose }: Props) {
             listen("agent-task-state", refresh),
             listen("agent-task-start", refresh),
             listen("agent-task-done", refresh),
-            listen("agent-task-error", refresh)
+            listen("agent-task-error", refresh),
+            listen("agent-task-skipped", refresh)
         );
 
         return () => {

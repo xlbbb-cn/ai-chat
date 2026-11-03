@@ -183,6 +183,11 @@
     color: var(--c-danger);
 }
 
+/* A skipped step is neutral: the task never ran, it did not fail. */
+.tool-call-preview-icon--skipped {
+    color: var(--c-muted);
+}
+
 .tool-call-preview-name {
     flex-shrink: 0;
 }
@@ -319,6 +324,10 @@
 
 .tool-call-entry--error .tool-call-entry-icon {
     color: var(--c-danger);
+}
+
+.tool-call-entry--skipped .tool-call-entry-icon {
+    color: var(--c-muted);
 }
 
 .tool-call-entry-name {

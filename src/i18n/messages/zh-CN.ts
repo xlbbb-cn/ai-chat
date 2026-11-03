@@ -152,9 +152,11 @@ const zhCN: Messages = {
 
         agents: {
             planner: "规划器",
+            selector: "选择器",
             aggregator: "汇总器",
             tool: "工具",
             planDone: "规划完成 —— 共 {count} 个任务",
+            selectionDone: "已选择 {count} 个 agent —— {names}",
             aggregated: "已汇总 {count} 个子任务结果",
             loadingSkill: "正在加载技能：{name}",
         },
@@ -175,6 +177,7 @@ const zhCN: Messages = {
     toolGroup: {
         completed: "已完成 {count} 次工具调用",
         completedWithErrors: "{count} 个步骤：{done} 个成功，{errors} 个失败",
+        completedWithSkipped: "{count} 个步骤：{done} 个成功，{skipped} 个跳过",
         steps: "{count} 个步骤",
         confirmTitle: "允许执行此 Shell 命令？",
         rejected: "用户已拒绝",
@@ -517,7 +520,7 @@ const zhCN: Messages = {
         title: "子智能体",
         orchestration: "编排设置",
         enableMode: "自动编排",
-        autoConfigure: "自动配置模式",
+        autoConfigure: "智能选择 agent",
         executionMode: "执行方式",
         modeParallel: "并行",
         modeSequential: "串行",

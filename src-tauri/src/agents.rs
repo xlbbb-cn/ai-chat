@@ -323,7 +323,7 @@ pub struct AgentsConfig {
 }
 
 fn default_config_version() -> u32 {
-    2
+    3
 }
 
 impl Default for AgentsConfig {
@@ -340,6 +340,15 @@ impl Default for AgentsConfig {
 /// Normalizes a loaded config in place: agent types are canonicalized and any
 /// legacy standalone CLI agents become `cli`-type agents.
 pub fn normalize_config(config: &mut AgentsConfig) {
+    // v3 turned the one-call agent selection (`auto_configure`) on by default.
+    // Older files always carried an explicit `false` because the panel saves the
+    // whole orchestration object, and the old default was off — adopt the new
+    // default exactly once, then persist v3 so a later "off" sticks.
+    if config.version < 3 {
+        config.orchestration.auto_configure = true;
+        config.version = 3;
+    }
+
     for agent in &mut config.agents {
         agent.agent_type = normalize_agent_type(&agent.agent_type);
     }
@@ -393,7 +402,9 @@ pub fn normalize_config(config: &mut AgentsConfig) {
 pub struct AgentOrchestration {
     #[serde(default)]
     pub use_agents: bool,
-    #[serde(default)]
+    /// Run the one-call selection step before planning (default on). Turning it
+    /// off means every enabled agent takes part in the mission.
+    #[serde(default = "default_true")]
     pub auto_configure: bool,
     #[serde(default = "default_max_concurrent")]
     pub max_concurrent: usize,
@@ -412,12 +423,81 @@ impl Default for AgentOrchestration {
     fn default() -> Self {
         Self {
             use_agents: false,
-            auto_configure: false,
+            auto_configure: true,
             max_concurrent: 3,
             mode: "parallel".to_string(),
         }
     }
 }
+
+// ─── Selection & orchestration outcome ────────────────────────────────────────
+
+/// Why one agent was picked for this turn. Serialized straight into the
+/// `agent-selection` event so the UI chip and the main session agree.
+#[derive(Debug, Clone, Serialize)]
+pub struct AgentChoice {
+    pub id: String,
+    pub name: String,
+    /// Short role label ("code changes", "research", …).
+    pub role: String,
+    /// One-sentence justification produced by the selector.
+    pub why: String,
+}
+
+/// The selector's decision for the current turn.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct AgentSelection {
+    /// `false` means the request needs no sub-agents: the planner is skipped
+    /// and the main agent answers directly.
+    pub delegate: bool,
+    /// Selector confidence in `0.0..=1.0`.
+    pub confidence: f32,
+    pub choices: Vec<AgentChoice>,
+}
+
+/// Everything `orchestrate` hands back to the chat turn.
+#[derive(Debug, Clone, Default)]
+pub struct OrchestrationOutcome {
+    /// Markdown mission report; `None` when no sub-agent ran.
+    pub report: Option<String>,
+    /// Selection details for the main session's system prompt and the UI chip.
+    pub selection: Option<AgentSelection>,
+}
+
+/// Internal: the subset handed to the planner plus its public description.
+struct SelectionResult {
+    agents: Vec<SubAgent>,
+    selection: AgentSelection,
+}
+
+/// Upper bound for a single plan. A runaway planner must not spawn hundreds of
+/// missions (each one has its own mission row, MCP session and process tree).
+const MAX_PLAN_TASKS: usize = 16;
+/// Upper bound for the selected roster; the planner is told 0–4 as well, but a
+/// model answer is not a contract.
+const MAX_SELECTED_AGENTS: usize = 4;
+
+// ─── Prompt budgets ───────────────────────────────────────────────────────────
+// Every byte below is re-sent on every request, so the prompts clip what the
+// model does not need. The limits are deliberately generous: they only bite on
+// pathological input (a 10 KB user prompt, a planner that writes essays into
+// `context`), never on normal usage.
+
+/// User text handed to the selector. It only decides *who*, not *how*, so a
+/// very long request can be shortened without losing the routing signal.
+const SELECTION_QUERY_MAX_BYTES: usize = 2_000;
+/// One-line capability summary per agent in the selector catalogue.
+const ROSTER_DESC_MAX_BYTES: usize = 120;
+/// Tools/skills listed per agent in the selector catalogue.
+const ROSTER_LIST_MAX_ITEMS: usize = 6;
+/// Conversation preview handed to the planner (per message).
+const PLANNER_CONVERSATION_MAX_BYTES: usize = 400;
+/// Root task context repeated in every sub-agent mission snapshot.
+const SNAPSHOT_CONTEXT_MAX_CHARS: usize = 2_000;
+/// Per-task description repeated in every sub-agent mission snapshot.
+const SNAPSHOT_TASK_DESC_MAX_CHARS: usize = 300;
+/// Tasks rendered in the snapshot; the rest stay reachable via `get_active_tasks`.
+const SNAPSHOT_MAX_TASKS: usize = 30;
 
 // ─── Internal planning types ──────────────────────────────────────────────────
 
@@ -434,6 +514,7 @@ pub struct Task {
 
 #[derive(Debug, Clone, Deserialize)]
 struct TaskPlan {
+    #[serde(default)]
     tasks: Vec<Task>,
     #[serde(default)]
     execution_mode: String,
@@ -448,6 +529,23 @@ pub struct TaskResult {
     pub content: String,
     pub tool_calls_count: u32,
     pub tokens_used: u32,
+}
+
+impl TaskResult {
+    /// A task that never ran (unknown agent, unmet dependency, user stop).
+    /// Reported instead of dropped so the mission report and the UI can show
+    /// *why* a planned task produced nothing.
+    fn skipped(task: &Task, agent_name: &str, reason: impl Into<String>) -> Self {
+        Self {
+            task_id: task.id.clone(),
+            agent_id: task.agent_id.clone(),
+            agent_name: agent_name.to_string(),
+            status: "skipped".to_string(),
+            content: reason.into(),
+            tool_calls_count: 0,
+            tokens_used: 0,
+        }
+    }
 }
 
 const AGENT_CONTEXT_COMPRESSION_THRESHOLD: f32 = 0.8;
@@ -790,16 +888,28 @@ fn build_active_tasks_snapshot(tasks: &[MissionTaskRecord]) -> String {
         return "- none".to_string();
     }
 
-    tasks
+    let mut lines: Vec<String> = tasks
         .iter()
+        .take(SNAPSHOT_MAX_TASKS)
         .map(|task| {
             format!(
-                "- [{}] {} (id: {})\\n  {}",
-                task.status, task.name, task.task_id, task.description
+                "- [{}] {} (id: {})\n  {}",
+                task.status,
+                task.name,
+                task.task_id,
+                preview_text(&task.description, SNAPSHOT_TASK_DESC_MAX_CHARS)
             )
         })
-        .collect::<Vec<_>>()
-        .join("\n")
+        .collect();
+    if tasks.len() > SNAPSHOT_MAX_TASKS {
+        // The snapshot is re-sent every iteration; a long list is pure weight.
+        // The full list stays one `get_active_tasks` call away.
+        lines.push(format!(
+            "- … {} more task(s) — call get_active_tasks for the full list",
+            tasks.len() - SNAPSHOT_MAX_TASKS
+        ));
+    }
+    lines.join("\n")
 }
 
 fn truncate_for_summary(text: &str, max_chars: usize) -> String {
@@ -892,7 +1002,7 @@ fn build_mission_snapshot_prompt(mission: &MissionStateSnapshot) -> String {
          Active tasks:\n{}\nEpisodic memory:\n{}",
         mission.mission_id,
         mission.root_task_description,
-        mission.root_task_context,
+        preview_text(&mission.root_task_context, SNAPSHOT_CONTEXT_MAX_CHARS),
         completion_state,
         build_active_tasks_snapshot(&mission.active_tasks),
         episodic_summary,
@@ -968,6 +1078,7 @@ async fn summarize_agent_memory(
         ],
         model,
         AGENT_SUMMARY_MAX_TOKENS,
+        None,
     )
     .await?;
 
@@ -1471,14 +1582,21 @@ async fn call_llm_once(
     mut messages: Vec<Value>,
     model: &str,
     max_complete_tokens: u32,
+    temperature: Option<f32>,
 ) -> Result<String, String> {
     sanitize_tool_pairs(&mut messages);
     let mut body = json!({
         "model": model,
         "messages": messages,
     });
+    if let Some(temperature) = temperature {
+        // Planner/selector calls want the same answer every time. Some
+        // OpenAI-compatible gateways ignore this field; harmless when they do.
+        body["temperature"] = json!(temperature);
+    }
     // No DS-Format normalization needed here: these prompts only ever carry
-    // system/user messages, never replayed assistant turns.
+    // system/user messages plus (for a repair retry) the model's own previous
+    // text, never a streamed assistant turn with tool calls.
     apply_completion_token_limit(
         &mut body,
         Some(max_complete_tokens),
@@ -1505,6 +1623,329 @@ async fn call_llm_once(
         .to_string())
 }
 
+// ─── Planning helpers (pure, unit-tested) ─────────────────────────────────────
+
+/// App-log writer for orchestration diagnostics. `plan_tasks` and the selector
+/// run outside the chat turn, so they cannot use `llm_complete::log_event`.
+fn log_agent_event(app: &AppHandle, level: &str, message: String) {
+    let state = app.state::<AppState>();
+    let logger = state.logger.lock();
+    if let Ok(logger) = logger {
+        logger.log(level, &message);
+    }
+}
+
+/// UTF-8-safe preview for log lines and prompts (`limit` is bytes).
+fn preview_text(text: &str, limit: usize) -> String {
+    let mut out = String::new();
+    for c in text.chars() {
+        if out.len() + c.len_utf8() > limit {
+            out.push('…');
+            break;
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Joins a capability list for the selector catalogue. Only the first few
+/// entries matter for routing; the rest would be pure prompt weight.
+fn compact_list(items: &[String]) -> String {
+    if items.is_empty() {
+        return "-".to_string();
+    }
+    let mut text = items
+        .iter()
+        .take(ROSTER_LIST_MAX_ITEMS)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(",");
+    if items.len() > ROSTER_LIST_MAX_ITEMS {
+        text.push_str(",…");
+    }
+    text
+}
+
+/// Returns the first balanced `{…}` object in `raw`, ignoring braces inside
+/// JSON strings. Models routinely wrap the payload in a markdown fence, a
+/// preamble or a trailing sentence; a strict `from_str` would throw all of that
+/// away and waste the whole mission.
+fn extract_json_object(raw: &str) -> Option<&str> {
+    let trimmed = raw.trim();
+    let body = trimmed
+        .strip_prefix("```json")
+        .or_else(|| trimmed.strip_prefix("```JSON"))
+        .or_else(|| trimmed.strip_prefix("```"))
+        .unwrap_or(trimmed);
+
+    let start = body.find('{')?;
+    let bytes = body.as_bytes();
+    let mut depth: usize = 0;
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for (offset, &byte) in bytes.iter().enumerate().skip(start) {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'{' => depth += 1,
+            b'}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return body.get(start..offset + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Conservative repair of the near-JSON models actually emit: trailing commas,
+/// typographic quotes and `//` line comments. Characters inside string literals
+/// are preserved (except a typographic closing quote, which is normalized).
+fn repair_json(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    let mut in_string = false;
+    let mut escaped = false;
+
+    while let Some(c) = chars.next() {
+        if in_string {
+            match c {
+                '\\' if !escaped => {
+                    escaped = true;
+                    out.push(c);
+                }
+                '"' if !escaped => {
+                    in_string = false;
+                    out.push(c);
+                }
+                '”' if !escaped => {
+                    in_string = false;
+                    out.push('"');
+                }
+                _ => {
+                    escaped = false;
+                    out.push(c);
+                }
+            }
+            continue;
+        }
+
+        match c {
+            '"' | '“' => {
+                in_string = true;
+                out.push('"');
+            }
+            '”' => out.push('"'),
+            '/' if chars.peek() == Some(&'/') => {
+                // Drop the comment but keep its newline so tokens stay apart.
+                for next in chars.by_ref() {
+                    if next == '\n' {
+                        out.push('\n');
+                        break;
+                    }
+                }
+            }
+            ',' => {
+                // A trailing comma: only whitespace may follow before a closer.
+                let mut look = chars.clone();
+                while matches!(look.peek(), Some(next) if next.is_whitespace()) {
+                    look.next();
+                }
+                if matches!(look.peek(), Some('}') | Some(']')) {
+                    continue;
+                }
+                out.push(',');
+            }
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// Finds one dependency edge that closes a cycle, if any: `(task, dependency)`.
+/// Removing that edge (repeatedly) guarantees the executor can make progress.
+fn find_cycle_edge(tasks: &[Task]) -> Option<(String, String)> {
+    use std::collections::HashMap;
+
+    let index: HashMap<&str, usize> = tasks
+        .iter()
+        .enumerate()
+        .map(|(i, task)| (task.id.as_str(), i))
+        .collect();
+    // 0 = unvisited, 1 = on the current DFS stack, 2 = finished.
+    let mut state = vec![0u8; tasks.len()];
+
+    fn dfs(
+        i: usize,
+        tasks: &[Task],
+        index: &std::collections::HashMap<&str, usize>,
+        state: &mut [u8],
+    ) -> Option<(String, String)> {
+        state[i] = 1;
+        for dep in &tasks[i].dependencies {
+            let Some(&j) = index.get(dep.as_str()) else {
+                continue;
+            };
+            if state[j] == 1 {
+                return Some((tasks[i].id.clone(), dep.clone()));
+            }
+            if state[j] == 0 {
+                if let Some(edge) = dfs(j, tasks, index, state) {
+                    return Some(edge);
+                }
+            }
+        }
+        state[i] = 2;
+        None
+    }
+
+    for i in 0..tasks.len() {
+        if state[i] == 0 {
+            if let Some(edge) = dfs(i, tasks, &index, &mut state) {
+                return Some(edge);
+            }
+        }
+    }
+    None
+}
+
+/// Turns raw planner output into an executable plan.
+///
+/// Models return fences, preambles, trailing commas, hallucinated agent ids,
+/// duplicate task ids and cyclic dependencies. None of those should waste the
+/// turn: the plan is extracted, repaired and sanitized here, and every fix is
+/// reported back as an issue for the log. Only an unusable answer fails.
+fn parse_task_plan(raw: &str, roster: &[String]) -> Result<(TaskPlan, Vec<String>), String> {
+    use std::collections::HashSet;
+
+    let json =
+        extract_json_object(raw).ok_or_else(|| "no JSON object in the planner output".to_string())?;
+    let plan: TaskPlan = serde_json::from_str(&repair_json(json)).map_err(|e| e.to_string())?;
+
+    let mut issues: Vec<String> = Vec::new();
+    let mut tasks: Vec<Task> = Vec::new();
+    let mut used_ids: HashSet<String> = HashSet::new();
+
+    for mut task in plan.tasks {
+        if task.description.trim().is_empty() {
+            issues.push(format!("dropped task '{}': empty description", task.id));
+            continue;
+        }
+        if !roster.iter().any(|id| id == &task.agent_id) {
+            issues.push(format!(
+                "dropped task '{}': unknown agent '{}'",
+                task.id, task.agent_id
+            ));
+            continue;
+        }
+
+        // `mission_id == task.id`, so duplicates would corrupt mission rows and
+        // dependency bookkeeping. Rename instead of dropping the work.
+        let base = task.id.trim();
+        let base = if base.is_empty() { "task" } else { base }.to_string();
+        let mut unique = base.clone();
+        let mut suffix = 1usize;
+        while used_ids.contains(&unique) {
+            suffix += 1;
+            unique = format!("{base}-{suffix}");
+        }
+        if unique != base {
+            issues.push(format!(
+                "renamed duplicate task id '{base}' to '{unique}'"
+            ));
+        }
+        used_ids.insert(unique.clone());
+        task.id = unique;
+        task.description = task.description.trim().to_string();
+        task.context = task.context.trim().to_string();
+        tasks.push(task);
+    }
+
+    if tasks.len() > MAX_PLAN_TASKS {
+        issues.push(format!(
+            "truncated plan from {} to {} tasks",
+            tasks.len(),
+            MAX_PLAN_TASKS
+        ));
+        tasks.truncate(MAX_PLAN_TASKS);
+    }
+
+    let known: HashSet<String> = tasks.iter().map(|t| t.id.clone()).collect();
+
+    // Dependencies: only ids that actually exist, never self-references.
+    for task in &mut tasks {
+        let before = task.dependencies.len();
+        let mut seen = HashSet::new();
+        task.dependencies.retain(|dep| {
+            dep != &task.id && known.contains(dep) && seen.insert(dep.clone())
+        });
+        if task.dependencies.len() != before {
+            issues.push(format!(
+                "dropped {} invalid dependency(ies) from task '{}'",
+                before - task.dependencies.len(),
+                task.id
+            ));
+        }
+    }
+
+    // Cycles: break one edge at a time so every remaining task stays reachable
+    // by the wave scheduler instead of hanging it on an empty ready set.
+    for _ in 0..=known.len() {
+        let Some((task_id, dep_id)) = find_cycle_edge(&tasks) else {
+            break;
+        };
+        if let Some(task) = tasks.iter_mut().find(|t| t.id == task_id) {
+            task.dependencies.retain(|dep| dep != &dep_id);
+        }
+        issues.push(format!(
+            "dropped dependency '{task_id}' -> '{dep_id}' to break a cycle"
+        ));
+    }
+
+    if tasks.is_empty() {
+        return Err(if issues.is_empty() {
+            "the planner produced no tasks".to_string()
+        } else {
+            format!(
+                "the planner produced no usable tasks: {}",
+                issues.join("; ")
+            )
+        });
+    }
+
+    Ok((
+        TaskPlan {
+            tasks,
+            execution_mode: plan.execution_mode,
+        },
+        issues,
+    ))
+}
+
+/// Announces the selector's decision to the UI (chip above the answer).
+fn emit_agent_selection(app: &AppHandle, selection: &AgentSelection) {
+    let _ = app.emit(
+        "agent-selection",
+        json!({
+            "delegate": selection.delegate,
+            "confidence": selection.confidence,
+            "agents": &selection.choices,
+        }),
+    );
+}
+
 // ─── Orchestration entry point ────────────────────────────────────────────────
 
 /// Main orchestration entry point called from llm_complete.rs.
@@ -1518,7 +1959,7 @@ pub async fn orchestrate(
     messages: &[crate::llm_complete::ChatMessage],
     session_id: &str,
     cancelled: Arc<AtomicBool>,
-) -> Result<String, String> {
+) -> Result<OrchestrationOutcome, String> {
     let agents_config = load_configured_agents(&state.agents_config_path);
     let enabled: Vec<SubAgent> = agents_config
         .agents
@@ -1542,9 +1983,11 @@ pub async fn orchestrate(
     // the user's custom headers, so planning calls reach the same gateway.
     let headers = upstream_request_headers(config, session_id);
 
-    // Step 1: Optionally auto-configure temporary agents
-    let working_agents: Vec<SubAgent> = if orchestration.auto_configure {
-        auto_configure_agents(
+    // Step 1: one selection call decides who takes part in this turn. With the
+    // switch off every enabled agent takes part, exactly like before.
+    let (working_agents, selection) = if orchestration.auto_configure {
+        match select_agents(
+            app,
             &client,
             &url,
             &config.api_key,
@@ -1554,10 +1997,40 @@ pub async fn orchestrate(
             &enabled,
         )
         .await
-        .unwrap_or(enabled)
+        {
+            Ok(result) => (result.agents, Some(result.selection)),
+            Err(err) => {
+                // A failed selection must never lose the mission: fall back to
+                // the full roster and let the planner decide.
+                log_agent_event(
+                    app,
+                    "WARN",
+                    format!("agent selection failed, using every enabled agent: {err}"),
+                );
+                (enabled.clone(), None)
+            }
+        }
     } else {
-        enabled
+        (enabled.clone(), None)
     };
+
+    // A single-agent roster is not a decision worth a UI chip; the selection
+    // still narrows the planner (it is already the whole roster).
+    if let Some(selection) = &selection {
+        if enabled.len() > 1 {
+            emit_agent_selection(app, selection);
+        }
+    }
+
+    // The selector can decide the request needs no sub-agents at all. Skipping
+    // planning here saves a full LLM round trip and keeps simple questions on
+    // the direct-answer path.
+    if matches!(&selection, Some(selection) if !selection.delegate) {
+        return Ok(OrchestrationOutcome {
+            report: None,
+            selection,
+        });
+    }
 
     // Step 2: Plan. Stop pressed between steps aborts the mission here, before
     // any sub-agent is launched.
@@ -1566,6 +2039,7 @@ pub async fn orchestrate(
         return Err("stopped by the user".to_string());
     }
     let plan = plan_tasks(
+        app,
         &client,
         &url,
         &config.api_key,
@@ -1578,9 +2052,6 @@ pub async fn orchestrate(
 
     if cancelled.load(Ordering::SeqCst) {
         return Err("stopped by the user".to_string());
-    }
-    if plan.tasks.is_empty() {
-        return Err("Planner produced no tasks".to_string());
     }
     let _ = app.emit(
         "agent-plan-start",
@@ -1622,30 +2093,76 @@ pub async fn orchestrate(
         "agent-aggregate-done",
         json!({ "task_count": results.len() }),
     );
-    Ok(build_mission_results_block(&results))
+    Ok(OrchestrationOutcome {
+        report: Some(build_mission_results_block(&results)),
+        selection,
+    })
 }
 
-// ─── Auto-configure ───────────────────────────────────────────────────────────
+// ─── Selection ────────────────────────────────────────────────────────────────
 
-/// Applies the orchestrator's `strategy: "existing"` selection. An id list
-/// that matches nothing (a hallucinated or simply missing `ids` array) must
-/// not empty the roster: the planner would then see zero agents, produce no
-/// tasks and abort the whole mission. Falling back to every enabled agent
-/// keeps one bad model answer from wasting the orchestration.
-fn select_existing_agents(existing: &[SubAgent], ids: &[&str]) -> Vec<SubAgent> {
-    let selected: Vec<SubAgent> = existing
-        .iter()
-        .filter(|agent| ids.contains(&agent.id.as_str()))
-        .cloned()
-        .collect();
-    if selected.is_empty() {
-        existing.to_vec()
-    } else {
-        selected
+#[derive(Debug, Deserialize)]
+struct SelectionResponse {
+    #[serde(default)]
+    delegate: Option<bool>,
+    #[serde(default)]
+    confidence: Option<f32>,
+    #[serde(default)]
+    agents: Vec<SelectionChoice>,
+    #[serde(default)]
+    why: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SelectionChoice {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    role: String,
+    #[serde(default)]
+    why: String,
+}
+
+impl SelectionChoice {
+    fn role_or(&self, fallback: &str) -> String {
+        let role = self.role.trim();
+        if role.is_empty() {
+            fallback.chars().take(60).collect()
+        } else {
+            role.to_string()
+        }
     }
 }
 
-async fn auto_configure_agents(
+/// Every enabled agent takes part. Used both by the deterministic single-agent
+/// path and by every "the model answer cannot be trusted" fallback.
+fn full_roster_selection(existing: &[SubAgent], confidence: f32, why: &str) -> SelectionResult {
+    SelectionResult {
+        agents: existing.to_vec(),
+        selection: AgentSelection {
+            delegate: !existing.is_empty(),
+            confidence,
+            choices: existing
+                .iter()
+                .map(|agent| AgentChoice {
+                    id: agent.id.clone(),
+                    name: agent.name.clone(),
+                    role: agent.description.chars().take(60).collect(),
+                    why: why.to_string(),
+                })
+                .collect(),
+        },
+    }
+}
+
+/// One non-streaming LLM call that decides which agents take part in this turn.
+///
+/// The answer is a *proposal*: ids are validated against the live roster, the
+/// list is capped, and every failure widens back to the full roster instead of
+/// failing the mission. `delegate: false` is a first-class outcome — it skips
+/// planning entirely.
+async fn select_agents(
+    app: &AppHandle,
     client: &Client,
     url: &str,
     api_key: &str,
@@ -1653,33 +2170,61 @@ async fn auto_configure_agents(
     model: &str,
     messages: &[crate::llm_complete::ChatMessage],
     existing: &[SubAgent],
-) -> Result<Vec<SubAgent>, String> {
-    let existing_desc = existing
+) -> Result<SelectionResult, String> {
+    // One agent means there is nothing to choose: skip the request entirely.
+    if existing.len() <= 1 {
+        return Ok(full_roster_selection(
+            existing,
+            1.0,
+            "the only enabled agent",
+        ));
+    }
+
+    let catalogue = existing
         .iter()
-        .map(|a| {
+        .map(|agent| {
             format!(
-                "  - id={} name={} description={}",
-                a.id, a.name, a.description
+                "- id={} name={} type={} tools={} skills={} desc={}",
+                agent.id,
+                agent.name,
+                normalize_agent_type(&agent.agent_type),
+                compact_list(&agent.allowed_tools),
+                compact_list(&agent.allowed_skills),
+                preview_text(&agent.description, ROSTER_DESC_MAX_BYTES)
             )
         })
         .collect::<Vec<_>>()
         .join("\n");
 
-    let user_query = messages
-        .last()
-        .map(|m| content_to_text(&m.content))
-        .unwrap_or_default();
+    let user_query = preview_text(
+        &messages
+            .last()
+            .map(|m| content_to_text(&m.content))
+            .unwrap_or_default(),
+        SELECTION_QUERY_MAX_BYTES,
+    );
+
+    // An attachment-only turn has no text for the selector to judge. Narrowing
+    // on an empty query would wrongly decline delegation, so skip the call.
+    if user_query.trim().is_empty() {
+        return Ok(full_roster_selection(
+            existing,
+            1.0,
+            "no text to analyse",
+        ));
+    }
+
     let system = format!(
-        "You are an AI orchestrator. Based on the user request, decide which agents to use.\n\
-        Existing agents:\n{existing_desc}\n\n\
-        Option A — use existing: return JSON: {{\"strategy\":\"existing\",\"ids\":[\"id1\",\"id2\"]}}\n\
-        Option B — define new temporary agents: return JSON:\n\
-        {{\"strategy\":\"new\",\"agents\":[\
-          {{\"id\":\"tmp-1\",\"name\":\"...\",\"description\":\"...\",\"system_prompt\":\"...\",\
-            \"allowed_tools\":[\"file_actions\"],\"max_iterations\":5,\"enabled\":true}}\
-        ]}}\n\
-        allowed_tools values must be a subset of: [\"file_actions\",\"run_cmd\",\"run_shell\"].\n\
-        Return ONLY the JSON object, no markdown, no extra text.",
+        "You are an AI orchestrator. Decide which sub-agents should work on the user's request.\n\
+         Existing agents:\n{catalogue}\n\n\
+         Rules:\n\
+         - Pick the smallest set that can do the job: 0 to {MAX_SELECTED_AGENTS} agents.\n\
+         - Use `llm` agents for reasoning, analysis and writing; `cli` agents for large code changes in the workspace; `cloud` agents for long remote jobs.\n\
+         - If no agent fits, or the request can be answered directly, return delegate=false.\n\
+         - Copy every id exactly from the list above. Never invent ids.\n\n\
+         Return ONLY one JSON object — no markdown, no commentary:\n\
+         {{\"delegate\":true,\"confidence\":0.0,\"agents\":[{{\"id\":\"<id>\",\"role\":\"<short role>\",\"why\":\"<one short sentence>\"}}]}}\n\
+         or {{\"delegate\":false,\"confidence\":0.0,\"why\":\"<one short sentence>\"}}",
     );
 
     let raw = call_llm_once(
@@ -1692,50 +2237,101 @@ async fn auto_configure_agents(
             json!({"role":"user","content": user_query}),
         ],
         model,
-        2048,
+        1024,
+        Some(0.0),
     )
     .await?;
 
-    // Strip markdown fences if present
-    let json_str = raw.trim();
-    let json_str = json_str
-        .strip_prefix("```json")
-        .or_else(|| json_str.strip_prefix("```"))
-        .unwrap_or(json_str)
-        .trim();
-    let json_str = json_str.strip_suffix("```").unwrap_or(json_str).trim();
+    let json = extract_json_object(&raw)
+        .ok_or_else(|| format!("no JSON in the selection output: {}", preview_text(&raw, 300)))?;
+    let parsed: SelectionResponse = serde_json::from_str(&repair_json(json))
+        .map_err(|e| format!("selection parse error: {e}"))?;
+    // A model that lists agents but forgets `delegate` still meant to delegate;
+    // an explicit `false` always wins. A missing confidence is treated as
+    // "reasonably sure" — otherwise every terse answer would widen the roster.
+    let delegate = parsed.delegate.unwrap_or(!parsed.agents.is_empty());
+    let confidence = parsed.confidence.unwrap_or(0.7).clamp(0.0, 1.0);
 
-    let parsed: Value = serde_json::from_str(json_str).map_err(|e| e.to_string())?;
-    match parsed["strategy"].as_str() {
-        Some("existing") => {
-            let ids: Vec<&str> = parsed["ids"]
-                .as_array()
-                .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
-                .unwrap_or_default();
-            Ok(select_existing_agents(existing, &ids))
-        }
-        Some("new") => {
-            let agents: Vec<SubAgent> = parsed["agents"]
-                .as_array()
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| serde_json::from_value::<SubAgent>(v.clone()).ok())
-                        .collect()
-                })
-                .unwrap_or_default();
-            if agents.is_empty() {
-                Ok(existing.to_vec())
-            } else {
-                Ok(agents)
-            }
-        }
-        _ => Ok(existing.to_vec()),
+    if !delegate {
+        log_agent_event(
+            app,
+            "INFO",
+            format!(
+                "agent selection declined delegation (confidence {confidence:.2}): {}",
+                preview_text(parsed.why.trim(), 200)
+            ),
+        );
+        return Ok(SelectionResult {
+            agents: Vec::new(),
+            selection: AgentSelection {
+                delegate: false,
+                confidence,
+                choices: Vec::new(),
+            },
+        });
     }
+
+    let mut choices: Vec<AgentChoice> = Vec::new();
+    let mut agents: Vec<SubAgent> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for choice in parsed.agents {
+        let id = choice.id.trim();
+        if id.is_empty() || !seen.insert(id.to_string()) {
+            continue;
+        }
+        let Some(agent) = existing.iter().find(|agent| agent.id == id) else {
+            // Hallucinated id: never hand it to the planner.
+            log_agent_event(
+                app,
+                "WARN",
+                format!("agent selection named unknown agent id '{id}'"),
+            );
+            continue;
+        };
+        choices.push(AgentChoice {
+            id: agent.id.clone(),
+            name: agent.name.clone(),
+            role: choice.role_or(&agent.description),
+            why: choice.why.trim().to_string(),
+        });
+        agents.push(agent.clone());
+        if agents.len() == MAX_SELECTED_AGENTS {
+            break;
+        }
+    }
+
+    // A selection that matches nothing, or one the model is not confident
+    // about, is worse than no narrowing at all: widen to the full roster so the
+    // planner still sees every option.
+    if agents.is_empty() || confidence < 0.5 {
+        let reason = if agents.is_empty() {
+            "matched no known agent"
+        } else {
+            "confidence below 0.5"
+        };
+        log_agent_event(
+            app,
+            "WARN",
+            format!("agent selection {reason}; falling back to every enabled agent"),
+        );
+        return Ok(full_roster_selection(existing, confidence, "fallback: full roster"));
+    }
+
+    Ok(SelectionResult {
+        agents,
+        selection: AgentSelection {
+            delegate: true,
+            confidence,
+            choices,
+        },
+    })
 }
 
 // ─── Planning ─────────────────────────────────────────────────────────────────
 
 async fn plan_tasks(
+    app: &AppHandle,
     client: &Client,
     url: &str,
     api_key: &str,
@@ -1748,14 +2344,23 @@ async fn plan_tasks(
         .iter()
         .map(|a| {
             format!(
-                "  - id={} name={} description={}",
-                a.id, a.name, a.description
+                "  - id={} name={} type={} desc={}",
+                a.id,
+                a.name,
+                normalize_agent_type(&a.agent_type),
+                preview_text(&a.description, ROSTER_DESC_MAX_BYTES)
             )
         })
         .collect::<Vec<_>>()
         .join("\n");
+    let roster = agents
+        .iter()
+        .map(|a| a.id.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
 
-    // Build a short conversation summary (last 3 messages, max 600 chars each)
+    // Build a short conversation summary (last 3 messages, budgeted per
+    // message): the planner only needs the intent and recent corrections.
     let conversation = messages
         .iter()
         .rev()
@@ -1763,13 +2368,11 @@ async fn plan_tasks(
         .rev()
         .map(|m| {
             let text = content_to_text(&m.content);
-            let limit = text.len().min(600);
-            let mut end = limit;
-            while end > 0 && !text.is_char_boundary(end) {
-                end -= 1;
-            }
-            let preview = &text[..end];
-            format!("[{}]: {}", m.role, preview)
+            format!(
+                "[{}]: {}",
+                m.role,
+                preview_text(&text, PLANNER_CONVERSATION_MAX_BYTES)
+            )
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -1784,29 +2387,66 @@ async fn plan_tasks(
         Rules:\n\
         - execution_mode: \"parallel\" when tasks are independent, \"sequential\" when order matters\n\
         - dependencies: list of task ids that must finish before this one\n\
-        - Every agent_id must match one of the available agent ids above\n\
+        - Every agent_id must be exactly one of: {roster}\n\
         - Keep descriptions brief and actionable"
     );
+    let user_prompt = format!("Conversation:\n{conversation}\n\nCreate a task plan.");
+    let roster_ids: Vec<String> = agents.iter().map(|a| a.id.clone()).collect();
 
-    let raw = call_llm_once(
-        client, url, api_key, headers,
-        vec![
+    let mut last_error = String::new();
+    let mut last_raw = String::new();
+
+    // Two attempts: the second one hands the model its own broken answer plus
+    // the parse error. A malformed plan must not waste the whole mission, and
+    // one repair round is enough — anything beyond that is a model problem.
+    for attempt in 0..2 {
+        let mut request = vec![
             json!({"role":"system","content": system}),
-            json!({"role":"user","content": format!("Conversation:\n{conversation}\n\nCreate a task plan.")}),
-        ],
-        model, 2048,
-    ).await?;
+            json!({"role":"user","content": user_prompt}),
+        ];
+        if attempt > 0 {
+            request.push(json!({"role":"assistant","content": last_raw}));
+            request.push(json!({"role":"user","content": format!(
+                "Your previous answer could not be used: {last_error}\nReturn ONLY the JSON object described above — no markdown fence, no commentary."
+            )}));
+        }
 
-    let json_str = raw.trim();
-    let json_str = json_str
-        .strip_prefix("```json")
-        .or_else(|| json_str.strip_prefix("```"))
-        .unwrap_or(json_str)
-        .trim();
-    let json_str = json_str.strip_suffix("```").unwrap_or(json_str).trim();
+        let raw = call_llm_once(
+            client,
+            url,
+            api_key,
+            headers,
+            request,
+            model,
+            2048,
+            Some(0.0),
+        )
+        .await?;
 
-    serde_json::from_str::<TaskPlan>(json_str)
-        .map_err(|e| format!("Plan parse error: {e}\nRaw: {raw}"))
+        match parse_task_plan(&raw, &roster_ids) {
+            Ok((plan, issues)) => {
+                for issue in issues {
+                    log_agent_event(app, "WARN", format!("planner: {issue}"));
+                }
+                return Ok(plan);
+            }
+            Err(err) => {
+                log_agent_event(
+                    app,
+                    "WARN",
+                    format!(
+                        "planner attempt {} failed: {err}; output={}",
+                        attempt + 1,
+                        preview_text(&raw, 500)
+                    ),
+                );
+                last_error = err;
+                last_raw = raw;
+            }
+        }
+    }
+
+    Err(format!("Plan parse error after 2 attempts: {last_error}"))
 }
 
 // ─── Execution ────────────────────────────────────────────────────────────────
@@ -1857,6 +2497,22 @@ async fn execute_tasks(
     }
 }
 
+/// Reports a task that never ran. The mission row (if any) is closed so the
+/// monitor cannot keep showing it as running, and the UI gets a neutral event
+/// instead of a silent gap.
+fn finish_skipped(app: &AppHandle, result: &TaskResult) {
+    close_mission(app, &result.task_id, "stopped");
+    let _ = app.emit(
+        "agent-task-skipped",
+        json!({
+            "task_id": &result.task_id,
+            "agent_id": &result.agent_id,
+            "agent_name": &result.agent_name,
+            "reason": &result.content,
+        }),
+    );
+}
+
 async fn execute_parallel(
     app: &AppHandle,
     client: &Client,
@@ -1870,37 +2526,111 @@ async fn execute_parallel(
     max_concurrent: usize,
     cancelled: &Arc<AtomicBool>,
 ) -> Vec<TaskResult> {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use tokio::task::JoinSet;
 
-    let mut completed: HashMap<String, ()> = HashMap::new();
-    let mut pending = tasks;
+    // `settled` = a result exists (success or error, the latter still lets
+    // dependents run, as before). `blocked` = the task never produced a result,
+    // so every task depending on it is skipped instead of waiting forever.
+    let mut settled: HashSet<String> = HashSet::new();
+    let mut blocked: HashSet<String> = HashSet::new();
+    let mut pending: Vec<Task> = Vec::new();
     let mut results: Vec<TaskResult> = Vec::new();
+
+    // Whole-batch pre-flight: an unknown agent can never run. Report it here
+    // rather than letting its dependents deadlock on a missing result.
+    for task in tasks {
+        if agents.iter().any(|agent| agent.id == task.agent_id) {
+            pending.push(task);
+        } else {
+            let result = TaskResult::skipped(
+                &task,
+                &task.agent_id,
+                format!("agent '{}' is not available", task.agent_id),
+            );
+            finish_skipped(app, &result);
+            blocked.insert(result.task_id.clone());
+            results.push(result);
+        }
+    }
 
     while !pending.is_empty() {
         if cancelled.load(Ordering::SeqCst) {
             break;
         }
 
-        // Collect tasks whose dependencies are all satisfied
+        // Cascade skips to a fixpoint: skipping one task can invalidate a whole
+        // dependency chain, and those tasks must not be scheduled at all.
+        loop {
+            let newly: Vec<Task> = pending
+                .iter()
+                .filter(|task| task.dependencies.iter().any(|dep| blocked.contains(dep)))
+                .cloned()
+                .collect();
+            if newly.is_empty() {
+                break;
+            }
+            for task in newly {
+                let missing: Vec<&str> = task
+                    .dependencies
+                    .iter()
+                    .filter(|dep| blocked.contains(*dep))
+                    .map(|dep| dep.as_str())
+                    .collect();
+                let result = TaskResult::skipped(
+                    &task,
+                    &task.agent_id,
+                    format!("skipped because {} did not run", missing.join(", ")),
+                );
+                finish_skipped(app, &result);
+                blocked.insert(result.task_id.clone());
+                results.push(result);
+                pending.retain(|candidate| candidate.id != task.id);
+            }
+        }
+
         let ready: Vec<Task> = pending
             .iter()
-            .filter(|t| t.dependencies.iter().all(|dep| completed.contains_key(dep)))
+            .filter(|task| task.dependencies.iter().all(|dep| settled.contains(dep)))
             .cloned()
             .collect();
 
         if ready.is_empty() {
-            // Dependency deadlock — run all remaining to avoid hanging
+            // Only reachable with a cycle the planner validation missed: never
+            // hang the mission and never drop tasks silently.
+            for task in pending.drain(..) {
+                let missing: Vec<&str> = task
+                    .dependencies
+                    .iter()
+                    .filter(|dep| !settled.contains(*dep))
+                    .map(|dep| dep.as_str())
+                    .collect();
+                let reason = if missing.is_empty() {
+                    "dependencies could not be satisfied".to_string()
+                } else {
+                    format!("dependencies could not be satisfied: {}", missing.join(", "))
+                };
+                let result = TaskResult::skipped(&task, &task.agent_id, reason);
+                finish_skipped(app, &result);
+                results.push(result);
+            }
             break;
         }
 
-        pending.retain(|t| !ready.iter().any(|r| r.id == t.id));
+        pending.retain(|task| !ready.iter().any(|candidate| candidate.id == task.id));
 
-        // Process ready tasks in batches of max_concurrent
-        for batch in ready.chunks(max_concurrent.max(1)) {
+        // Process ready tasks in batches of max_concurrent. `next` tracks how
+        // far the batch window got, so a Stop between batches can put the
+        // unscheduled remainder back into `pending` for the tail below.
+        let limit = max_concurrent.max(1);
+        let mut next = 0;
+        while next < ready.len() {
             if cancelled.load(Ordering::SeqCst) {
                 break;
             }
+            let end = (next + limit).min(ready.len());
+            let batch = ready[next..end].to_vec();
+            next = end;
 
             let mut join_set: JoinSet<TaskResult> = JoinSet::new();
             // Maps each spawned job to its task so an aborted or panicked job can
@@ -1909,9 +2639,9 @@ async fn execute_parallel(
                 HashMap::new();
 
             for task in batch {
-                let agent = match agents.iter().find(|a| a.id == task.agent_id) {
-                    Some(a) => a.clone(),
-                    None => continue,
+                let Some(agent) = agents.iter().find(|a| a.id == task.agent_id).cloned() else {
+                    // Pre-flight already handled this; keep the guard cheap.
+                    continue;
                 };
 
                 let app_c = app.clone();
@@ -1932,15 +2662,7 @@ async fn execute_parallel(
 
                 let handle = join_set.spawn(async move {
                     if is_cancelled {
-                        return TaskResult {
-                            task_id: task_c.id,
-                            agent_id: task_c.agent_id,
-                            agent_name: agent.name,
-                            status: "skipped".to_string(),
-                            content: "Cancelled".to_string(),
-                            tool_calls_count: 0,
-                            tokens_used: 0,
-                        };
+                        return TaskResult::skipped(&task_c, &agent.name, "cancelled by user");
                     }
                     run_sub_agent(
                         &app_c,
@@ -1962,7 +2684,19 @@ async fn execute_parallel(
             while let Some(joined) = join_set.join_next().await {
                 match joined {
                     Ok(res) => {
-                        completed.insert(res.task_id.clone(), ());
+                        // Only a real outcome satisfies a dependency; a stopped
+                        // or skipped run must cascade instead.
+                        if matches!(res.status.as_str(), "success" | "error") {
+                            settled.insert(res.task_id.clone());
+                        } else {
+                            // A pre-cancelled batch slot returns "skipped" without
+                            // going through `run_sub_agent`, so it still needs its
+                            // UI event.
+                            if res.status == "skipped" {
+                                finish_skipped(app, &res);
+                            }
+                            blocked.insert(res.task_id.clone());
+                        }
                         results.push(res);
                     }
                     Err(err) => {
@@ -2002,11 +2736,24 @@ async fn execute_parallel(
                                 "error": &result.content,
                             }),
                         );
-                        completed.insert(result.task_id.clone(), ());
+                        settled.insert(result.task_id.clone());
                         results.push(result);
                     }
                 }
             }
+        }
+
+        if next < ready.len() {
+            pending.extend(ready[next..].iter().cloned());
+        }
+    }
+
+    // Stop pressed: everything that never started is still reported.
+    if cancelled.load(Ordering::SeqCst) {
+        for task in pending {
+            let result = TaskResult::skipped(&task, &task.agent_id, "cancelled by user");
+            finish_skipped(app, &result);
+            results.push(result);
         }
     }
 
@@ -2025,15 +2772,54 @@ async fn execute_sequential(
     skill_access_root: Option<PathBuf>,
     cancelled: &Arc<AtomicBool>,
 ) -> Vec<TaskResult> {
+    use std::collections::HashSet;
+
     let mut results = Vec::new();
+    // Sequential mode never reorders by dependency, but a task whose dependency
+    // was skipped still cannot produce a correct result.
+    let mut blocked: HashSet<String> = HashSet::new();
+
     for task in tasks {
         if cancelled.load(Ordering::SeqCst) {
-            break;
+            let result = TaskResult::skipped(&task, &task.agent_id, "cancelled by user");
+            finish_skipped(app, &result);
+            results.push(result);
+            continue;
         }
+
+        let missing: Vec<&str> = task
+            .dependencies
+            .iter()
+            .filter(|dep| blocked.contains(*dep))
+            .map(|dep| dep.as_str())
+            .collect();
+        if !missing.is_empty() {
+            let result = TaskResult::skipped(
+                &task,
+                &task.agent_id,
+                format!("skipped because {} did not run", missing.join(", ")),
+            );
+            finish_skipped(app, &result);
+            blocked.insert(task.id.clone());
+            results.push(result);
+            continue;
+        }
+
         let agent = match agents.iter().find(|a| a.id == task.agent_id) {
-            Some(a) => a,
-            None => continue,
+            Some(agent) => agent,
+            None => {
+                let result = TaskResult::skipped(
+                    &task,
+                    &task.agent_id,
+                    format!("agent '{}' is not available", task.agent_id),
+                );
+                finish_skipped(app, &result);
+                blocked.insert(task.id.clone());
+                results.push(result);
+                continue;
+            }
         };
+
         let res = run_sub_agent(
             app,
             client,
@@ -2047,6 +2833,9 @@ async fn execute_sequential(
             cancelled.clone(),
         )
         .await;
+        if !matches!(res.status.as_str(), "success" | "error") {
+            blocked.insert(res.task_id.clone());
+        }
         results.push(res);
     }
     results
@@ -3221,18 +4010,184 @@ mod tests {
     }
 
     #[test]
-    fn auto_configure_selection_never_empties_the_roster() {
-        let roster: Vec<SubAgent> = serde_json::from_str(
-            r#"[{"id":"a","name":"a","description":""},{"id":"b","name":"b","description":""}]"#,
+    fn v2_config_adopts_smart_selection_once() {
+        // A v2 file always carried an explicit `false` (old default): adopt the
+        // new default once …
+        let mut config: AgentsConfig = serde_json::from_str(
+            r#"{"version":2,"agents":[],"orchestration":{"use_agents":true,"auto_configure":false}}"#,
         )
-        .expect("roster parses");
+        .expect("config parses");
+        normalize_config(&mut config);
+        assert!(config.orchestration.auto_configure);
+        assert_eq!(config.version, 3);
 
-        // Known ids narrow the roster down to just the relevant agents …
-        assert_eq!(select_existing_agents(&roster, &["b"]).len(), 1);
-        // … but unknown or missing ids fall back to every enabled agent
-        // instead of an empty set, which would stall the planner.
-        assert_eq!(select_existing_agents(&roster, &["nope"]).len(), 2);
-        assert_eq!(select_existing_agents(&roster, &[]).len(), 2);
+        // … while a v3 file keeps whatever the user chose.
+        let mut config: AgentsConfig = serde_json::from_str(
+            r#"{"version":3,"agents":[],"orchestration":{"use_agents":true,"auto_configure":false}}"#,
+        )
+        .expect("config parses");
+        normalize_config(&mut config);
+        assert!(!config.orchestration.auto_configure);
+    }
+
+    fn roster_ids(ids: &[&str]) -> Vec<String> {
+        ids.iter().map(|id| id.to_string()).collect()
+    }
+
+    #[test]
+    fn plan_parser_strips_fences_and_preamble() {
+        let raw = "Here is the plan you asked for:\n```json\n{\"tasks\":[{\"id\":\"t1\",\
+                   \"agent_id\":\"a\",\"description\":\"do it\"}],\"execution_mode\":\"parallel\"}\n```\nEnjoy!";
+        let (plan, issues) = parse_task_plan(raw, &roster_ids(&["a"])).expect("plan parses");
+        assert_eq!(plan.tasks.len(), 1);
+        assert_eq!(plan.tasks[0].id, "t1");
+        assert_eq!(plan.execution_mode, "parallel");
+        assert!(issues.is_empty(), "unexpected issues: {issues:?}");
+    }
+
+    #[test]
+    fn plan_parser_repairs_near_json() {
+        let raw = r#"{
+            "tasks": [
+                { "id": "t1", "agent_id": "a", "description": "one", }, // trailing comma
+                { "id": "t2", "agent_id": "a", "description": "two" }
+            ],
+        }"#;
+        let (plan, _) = parse_task_plan(raw, &roster_ids(&["a"])).expect("plan parses");
+        assert_eq!(plan.tasks.len(), 2);
+    }
+
+    #[test]
+    fn plan_parser_drops_unknown_agents_and_renames_duplicates() {
+        let raw = r#"{"tasks":[
+            {"id":"t1","agent_id":"a","description":"keep me"},
+            {"id":"t1","agent_id":"a","description":"duplicate id"},
+            {"id":"t2","agent_id":"ghost","description":"unknown agent"},
+            {"id":"t3","agent_id":"a","description":"   "}
+        ]}"#;
+        let (plan, issues) = parse_task_plan(raw, &roster_ids(&["a"])).expect("plan parses");
+        // t2 (unknown agent) and t3 (empty description) are dropped; the
+        // duplicate t1 is renamed so mission ids stay unique.
+        assert_eq!(plan.tasks.len(), 2);
+        assert_eq!(plan.tasks[0].id, "t1");
+        assert_eq!(plan.tasks[1].id, "t1-2");
+        assert!(issues.iter().any(|issue| issue.contains("ghost")));
+        assert!(issues.iter().any(|issue| issue.contains("duplicate")));
+    }
+
+    #[test]
+    fn plan_parser_breaks_dependency_cycles() {
+        let raw = r#"{"tasks":[
+            {"id":"a1","agent_id":"a","description":"first","dependencies":["b1"]},
+            {"id":"b1","agent_id":"a","description":"second","dependencies":["a1"]}
+        ],"execution_mode":"parallel"}"#;
+        let (plan, issues) = parse_task_plan(raw, &roster_ids(&["a"])).expect("plan parses");
+        assert_eq!(plan.tasks.len(), 2);
+        // At least one edge is gone, so the wave scheduler can start somewhere.
+        assert!(
+            plan.tasks.iter().any(|task| task.dependencies.is_empty()),
+            "cycle was not broken: {plan:?}"
+        );
+        assert!(issues.iter().any(|issue| issue.contains("cycle")));
+    }
+
+    #[test]
+    fn plan_parser_drops_dangling_dependencies() {
+        let raw = r#"{"tasks":[
+            {"id":"t1","agent_id":"a","description":"only task","dependencies":["missing","t1"]}
+        ]}"#;
+        let (plan, issues) = parse_task_plan(raw, &roster_ids(&["a"])).expect("plan parses");
+        assert!(plan.tasks[0].dependencies.is_empty());
+        assert!(issues.iter().any(|issue| issue.contains("dependency")));
+    }
+
+    #[test]
+    fn plan_parser_rejects_unusable_plans() {
+        // Not JSON at all.
+        assert!(parse_task_plan("no plan here", &roster_ids(&["a"])).is_err());
+        // Valid JSON, but every task is unusable.
+        let raw = r#"{"tasks":[{"id":"t1","agent_id":"ghost","description":"x"}]}"#;
+        let err = parse_task_plan(raw, &roster_ids(&["a"])).expect_err("no usable tasks");
+        assert!(err.contains("ghost"), "unexpected error: {err}");
+        // Missing the tasks array entirely.
+        assert!(parse_task_plan(r#"{"execution_mode":"parallel"}"#, &roster_ids(&["a"])).is_err());
+    }
+
+    #[test]
+    fn json_extraction_handles_braces_inside_strings() {
+        let raw = r#"prefix {"tasks":[{"id":"t1","agent_id":"a","description":"a } brace"}]} suffix"#;
+        let extracted = extract_json_object(raw).expect("object found");
+        assert!(extracted.starts_with('{'));
+        assert!(extracted.ends_with('}'));
+        assert!(extracted.contains("a } brace"));
+    }
+
+    #[test]
+    fn repaired_json_roundtrips_through_serde() {
+        let raw = r#"{"tasks":[{"id":"t1","agent_id":"a","description":"x",}],}"#;
+        let repaired = repair_json(raw);
+        let _: Value = serde_json::from_str(&repaired).expect("repaired JSON parses");
+    }
+
+    #[test]
+    fn task_result_skipped_carries_reason() {
+        let task = Task {
+            id: "t1".to_string(),
+            agent_id: "a".to_string(),
+            description: "x".to_string(),
+            context: String::new(),
+            dependencies: Vec::new(),
+        };
+        let result = TaskResult::skipped(&task, "agent a", "agent 'a' is not available");
+        assert_eq!(result.status, "skipped");
+        assert_eq!(result.task_id, "t1");
+        assert!(result.content.contains("not available"));
+    }
+
+    #[test]
+    fn compact_list_caps_long_capability_lists() {
+        let items: Vec<String> = (0..10).map(|i| format!("tool{i}")).collect();
+        let text = compact_list(&items);
+        assert!(text.ends_with(",…"), "unexpected list: {text}");
+        assert!(text.len() < items.join(",").len());
+        assert_eq!(compact_list(&[]), "-");
+    }
+
+    #[test]
+    fn mission_snapshot_clips_pathological_task_lists() {
+        let tasks: Vec<MissionTaskRecord> = (0..SNAPSHOT_MAX_TASKS + 5)
+            .map(|i| MissionTaskRecord {
+                task_id: format!("t{i}"),
+                name: format!("task {i}"),
+                description: "x".repeat(2_000),
+                status: "pending".to_string(),
+            })
+            .collect();
+        let snapshot = build_active_tasks_snapshot(&tasks);
+        assert!(snapshot.contains("more task(s)"));
+        for line in snapshot.lines() {
+            assert!(
+                line.chars().count() <= SNAPSHOT_TASK_DESC_MAX_CHARS + 10,
+                "line not clipped: {} chars",
+                line.chars().count()
+            );
+        }
+
+        let mission = MissionStateSnapshot {
+            mission_id: "m1".to_string(),
+            root_task_description: "root".to_string(),
+            root_task_context: "c".repeat(10_000),
+            episodic_summary: String::new(),
+            mission_accomplished: false,
+            final_report: String::new(),
+            active_tasks: Vec::new(),
+        };
+        let prompt = build_mission_snapshot_prompt(&mission);
+        assert!(
+            prompt.chars().count() < SNAPSHOT_CONTEXT_MAX_CHARS + 400,
+            "snapshot not clipped: {} chars",
+            prompt.chars().count()
+        );
     }
 
     fn temp_agents_dir(label: &str) -> std::path::PathBuf {
@@ -3304,7 +4259,7 @@ mod tests {
             &std::fs::read_to_string(&path).expect("read config"),
         )
         .expect("json");
-        assert_eq!(saved["version"], 2);
+        assert_eq!(saved["version"], 3);
         let agents = saved["agents"].as_array().expect("agents array");
         assert_eq!(agents.len(), 2, "virtual agents are never persisted");
 
@@ -3449,7 +4404,9 @@ fn build_mission_results_block(results: &[TaskResult]) -> String {
         "All sub-agent tasks have finished. Sub-agents are execution workers and do not \
          write the user-facing answer: define and deliver the final result yourself. \
          Verify the reports below, reconcile conflicting findings, flag anything that \
-         failed or looks incomplete, and answer the original request completely.\n\n",
+         failed or looks incomplete, and answer the original request completely. \
+         Tasks marked `skipped` produced no work at all: never present them as completed — \
+         either do that part yourself or state clearly what was not done.\n\n",
     );
 
     if results.is_empty() {

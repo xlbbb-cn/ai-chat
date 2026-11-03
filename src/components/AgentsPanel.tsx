@@ -261,7 +261,7 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
   const [agents, setAgents] = useState<SubAgent[]>([]);
   const [orchestration, setOrchestration] = useState<AgentOrchestration>({
     use_agents: false,
-    auto_configure: false,
+    auto_configure: true,
     max_concurrent: 3,
     mode: "parallel",
   });

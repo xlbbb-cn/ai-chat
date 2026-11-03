@@ -40,6 +40,7 @@ export {
     faFolderOpen,
     faGear,
     faListCheck,
+    faMinus,
     faPaperclip,
     faPen,
     faPenToSquare,

@@ -2,7 +2,7 @@ export interface ToolCallEntry {
   task_id: string;
   agent_name: string;
   description: string;
-  status: "running" | "done" | "error";
+  status: "running" | "done" | "error" | "skipped";
   summary?: string;
   error?: string;
   /**
@@ -620,6 +620,18 @@ export interface AgentTaskEvent {
   description?: string;
   summary?: string;
   error?: string;
+  /** Why a planned task never ran (unknown agent, unmet dependency, stop). */
+  reason?: string;
+}
+
+/**
+ * Selector decision for one turn (`agent-selection` event). `delegate: false`
+ * means the request is answered without sub-agents.
+ */
+export interface AgentSelectionEvent {
+  delegate: boolean;
+  confidence: number;
+  agents: Array<{ id: string; name: string; role: string; why: string }>;
 }
 
 export interface AgentMissionTask {

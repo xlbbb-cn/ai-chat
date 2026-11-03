@@ -2010,7 +2010,10 @@ async fn run_chat_turn(
     // Sub-agent missions run first. Their reports are injected into the main
     // agent's context below and the NORMAL completion flow answers the user:
     // the main agent defines the final result, sub-agents never write it.
-    let mut mission_results: Option<String> = None;
+    // The outcome also carries the selector's choice, so the main session
+    // advertises the agents picked for this turn (soft narrowing: every enabled
+    // agent stays callable through `call_subagent`).
+    let mut orchestration: Option<agents::OrchestrationOutcome> = None;
     if multi_agent_enabled {
         let agents_cfg = agents::load_configured_agents(&state.agents_config_path);
         let has_enabled = agents_cfg.agents.iter().any(|a| a.enabled);
@@ -2025,7 +2028,7 @@ async fn run_chat_turn(
             )
             .await
             {
-                Ok(report) => mission_results = Some(report),
+                Ok(outcome) => orchestration = Some(outcome),
                 Err(err) => log_event(
                     &state,
                     "WARN",
@@ -2221,9 +2224,37 @@ async fn run_chat_turn(
         Vec::new()
     };
 
-    if !enabled_agents.is_empty() {
+    // Soft narrowing: the system prompt lists only the agents the selector
+    // picked for this turn. The `call_subagent` executor still accepts any
+    // enabled agent id below, so one bad pick cannot lock the right agent out.
+    let advertised_agents: Vec<agents::SubAgent> = {
+        let selected_ids: Vec<&str> = orchestration
+            .as_ref()
+            .and_then(|outcome| outcome.selection.as_ref())
+            .filter(|selection| selection.delegate)
+            .map(|selection| {
+                selection
+                    .choices
+                    .iter()
+                    .map(|choice| choice.id.as_str())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let narrowed: Vec<agents::SubAgent> = enabled_agents
+            .iter()
+            .filter(|agent| selected_ids.iter().any(|id| *id == agent.id))
+            .cloned()
+            .collect();
+        if narrowed.is_empty() {
+            enabled_agents.clone()
+        } else {
+            narrowed
+        }
+    };
+
+    if !advertised_agents.is_empty() {
         let mut available_agents_info = String::new();
-        for agent in &enabled_agents {
+        for agent in &advertised_agents {
             let kind = agents::normalize_agent_type(&agent.agent_type);
             let detail = match kind.as_str() {
                 agents::AGENT_TYPE_CLI => format!(" (CLI: {})", agent.cli.command.trim()),
@@ -2245,16 +2276,56 @@ async fn run_chat_turn(
                 agent.id, agent.name, kind, detail, agent.description
             ));
         }
-        let agents_sys_msg = format!(
+        let mut agents_sys_msg = format!(
         "You have access to the following agents. To delegate a task to one of them, use the `call_subagent` tool with the corresponding `agent_id` and a self-contained `task_description` (they never see this conversation).\n\
         Agent types: `llm` agents run an autonomous tool-using loop inside the app; `cli` agents are headless coding CLIs installed on this machine (they edit files in the workspace directly); `cloud` agents run the task on a remote endpoint. Prefer `llm` for reasoning/reporting, `cli`/`cloud` for large end-to-end coding work. The first run of a `cli`/`cloud` agent may require the user's approval.\n\n\
         Available agents:\n{}",
         available_agents_info
     );
+
+        // Explain the selection so the main agent writes task descriptions that
+        // match the picked agents' purpose instead of guessing.
+        if let Some(selection) = orchestration
+            .as_ref()
+            .and_then(|outcome| outcome.selection.as_ref())
+            .filter(|selection| selection.delegate && !selection.choices.is_empty())
+        {
+            agents_sys_msg.push_str(
+                "\n<agent-selection>\nSelected for this turn; the other enabled agents stay available through `call_subagent` if the work really needs them.\n",
+            );
+            for choice in &selection.choices {
+                if choice.why.is_empty() {
+                    agents_sys_msg.push_str(&format!("- {} ({})\n", choice.name, choice.role));
+                } else {
+                    agents_sys_msg.push_str(&format!(
+                        "- {} ({}): {}\n",
+                        choice.name, choice.role, choice.why
+                    ));
+                }
+            }
+            agents_sys_msg.push_str("</agent-selection>");
+        }
+
         if !system_content.is_empty() {
             system_content.push_str("\n\n");
         }
         system_content.push_str(&agents_sys_msg);
+    }
+
+    // A declined selection is not a ban — just a hint that the cheap path is to
+    // answer directly. Keep it short so it does not become a second policy.
+    if matches!(
+        orchestration
+            .as_ref()
+            .and_then(|outcome| outcome.selection.as_ref()),
+        Some(selection) if !selection.delegate
+    ) {
+        if !system_content.is_empty() {
+            system_content.push_str("\n\n");
+        }
+        system_content.push_str(
+            "The orchestrator decided this request needs no sub-agents. Answer directly; delegate only if the request clearly requires it.",
+        );
     }
 
     // ── Memory guidance ─────────────────────────────────────────────────────
@@ -2400,7 +2471,10 @@ async fn run_chat_turn(
 
     // Inject the finished multi-agent mission report so the main agent can
     // define the final answer with its full context and tools.
-    if let Some(report) = &mission_results {
+    if let Some(report) = orchestration
+        .as_ref()
+        .and_then(|outcome| outcome.report.as_ref())
+    {
         all_messages.push(json!({
             "role": "system",
             "content": format!("{CONTEXT_MISSION_MARKER}\n{report}")
