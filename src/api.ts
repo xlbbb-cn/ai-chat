@@ -3,6 +3,8 @@ import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AppConfig,
   Attachment,
+  ArchivedSkill,
+  EvolutionMemoryEntry,
   Message,
   MessageContent,
   ModelMetadata,
@@ -111,6 +113,26 @@ export async function getSkillsStatus(): Promise<SkillsStatus> {
 /** Persist the workspace skill status (enablement + metadata). */
 export async function saveSkillsStatus(status: SkillsStatus): Promise<void> {
   return invoke("save_skills_status", { status });
+}
+
+// ─── Self-evolution memory ───────────────────────────────────────────────────
+
+/**
+ * Ranked evolution memory entries, in exactly the order the prompt injects
+ * them. Read-only: the panel never mutates memory.
+ */
+export async function listEvolutionMemory(): Promise<EvolutionMemoryEntry[]> {
+  return invoke("list_evolution_memory");
+}
+
+/** Full markdown of one entry (front matter + body), hot or archived. */
+export async function readEvolutionEntry(key: string): Promise<string> {
+  return invoke("read_evolution_entry", { key });
+}
+
+/** Skills that currently own an archive of consolidated memory entries. */
+export async function listArchivedSkills(): Promise<ArchivedSkill[]> {
+  return invoke("list_archived_skills");
 }
 
 // ─── Update check (GitHub Releases) ──────────────────────────────────────────

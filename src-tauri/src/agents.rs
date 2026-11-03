@@ -2633,7 +2633,10 @@ async fn run_llm_agent_body(
     // sub-agent reuses them instead of rediscovering them.
     if !self_evolution_context.is_empty() {
         let evolution_facts =
-            crate::tools::memory::render_evolution_context(&workspace_dir, 4_000);
+            crate::tools::memory::render_evolution_context(
+                &workspace_dir,
+                crate::tools::memory::EVOLUTION_CONTEXT_BUDGET_CHARS,
+            );
         if !evolution_facts.is_empty() {
             self_evolution_context.push_str(
                 "\n\nVERIFIED FACTS (self-evolution memory, already known — reuse them, do not \

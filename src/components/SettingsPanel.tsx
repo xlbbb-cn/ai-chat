@@ -8,6 +8,7 @@ import { FontAwesomeIcon, faCaretDown, faCheck, faXmark } from "../icons";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { MonitorPanel } from "./MonitorPanel";
 import { AgentMissionPanel } from "./AgentMissionPanel";
+import { MemoryPanel } from "./MemoryPanel";
 import { Portal } from "./Portal";
 import { UpdatePanel } from "./UpdatePanel";
 import "./SettingsPanel.css";
@@ -146,6 +147,7 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
   const [messageSaving, setMessageSaving] = useState(false);
   const [showMonitor, setShowMonitor] = useState(false);
   const [showAgentMonitor, setShowAgentMonitor] = useState(false);
+  const [showMemoryMonitor, setShowMemoryMonitor] = useState(false);
   const [showUpdatePanel, setShowUpdatePanel] = useState(false);
   const [appVersion, setAppVersion] = useState("");
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -1138,6 +1140,14 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
                   </div>
                 </>
               )}
+              {config.self_evolution_mode && (
+                <div className="settings-field-row">
+                  <span className="settings-field-label">{t("settings.runtime.evolutionMemory")}</span>
+                  <button type="button" className="settings-btn" onClick={() => setShowMemoryMonitor(true)}>
+                    {t("settings.runtime.launchMonitor")}
+                  </button>
+                </div>
+              )}
             </div>
           </section>
 
@@ -1253,6 +1263,16 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
           <div className="mission-monitor-overlay" role="dialog" aria-modal="true" aria-label={t("settings.agentMissionsMonitorAria")}>
             <div className="mission-monitor-modal">
               <AgentMissionPanel sessionId={sessionId!} onClose={() => setShowAgentMonitor(false)} />
+            </div>
+          </div>
+        </Portal>
+      )}
+
+      {showMemoryMonitor && (
+        <Portal>
+          <div className="mission-monitor-overlay" role="dialog" aria-modal="true" aria-label={t("settings.evolutionMemoryMonitorAria")}>
+            <div className="mission-monitor-modal memory-monitor-modal">
+              <MemoryPanel onClose={() => setShowMemoryMonitor(false)} />
             </div>
           </div>
         </Portal>

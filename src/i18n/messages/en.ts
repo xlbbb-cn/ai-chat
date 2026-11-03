@@ -322,6 +322,7 @@ const en = {
                 "Launching AI Chat again brings the running window to the front instead of opening a second copy. Applies after restarting the app.",
             interactionMonitor: "Interaction monitor",
             agentMissions: "Agent missions monitor",
+            evolutionMemory: "Evolution memory",
             launchMonitor: "Launch Monitor",
         },
 
@@ -346,6 +347,23 @@ const en = {
         },
 
         agentMissionsMonitorAria: "Agent missions monitor",
+        evolutionMemoryMonitorAria: "Evolution memory monitor",
+    },
+
+    memoryPanel: {
+        title: "Evolution memory",
+        summary: "{count} entries · {injected} in prompt",
+        budget: "{chars} / {budget} chars in ranked facts",
+        loading: "Loading…",
+        empty: "No evolution memories yet. They are recorded while self-evolution mode is on.",
+        pinned: "pinned",
+        auto: "auto",
+        evidence: "{count}× confirmed",
+        uses: "{count}× used",
+        archivedTitle: "Archived into skills ({count} entries)",
+        archivedMeta: "{entries} entries · {chars} chars",
+        archivedMissing: " · skill file missing",
+        detailFailed: "Could not load the entry.",
     },
 
     skills: {
@@ -428,9 +446,9 @@ const en = {
                     "**session** — Short-term, in-memory only. Survives for the current chat session. Use for task-specific context and in-progress notes.",
                     "**user** — Long-term, file-backed. Cross-session persistent. Use for user preferences, patterns, and general insights.",
                     "**repo** — Long-term, file-backed. Repository-scoped. Use for codebase conventions, build commands, and project facts.",
-                    "**evolution** — Long-term, file-backed. The self-evolution area, available while self-evolution mode is on. Use for verified facts that must survive across sessions: the default interpreter and runtime environment, the correct way to operate a tool, the file locations you use often.",
+                    "**evolution** — Long-term, file-backed. The self-evolution area, available while self-evolution mode is on. Use for verified facts that must survive across sessions: the default interpreter and runtime environment, the correct way to operate a tool, the file locations you use often. Each entry carries a title, kind, tags, importance and an evidence count, and the scope is injected into the prompt in ranked order — keep each entry to one dense fact.",
                     "",
-                    "Supports add, get, list, search, and delete operations.",
+                    "Supports add, get, list, search, delete, and consolidate. `consolidate` folds a large related cluster of evolution entries into a skill archive (plan first, then apply with the full skill markdown and the same keys).",
                 ].join("\n"),
             },
             todoList: {

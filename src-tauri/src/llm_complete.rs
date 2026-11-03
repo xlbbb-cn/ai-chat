@@ -12,11 +12,6 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::{agents, db, mcp, skills, todos, tools, AppState};
 
-/// How much of the self-evolution memory area is injected into the system
-/// prompt. The facts are short (one line each), so a few thousand characters
-/// cover a large library without bloating the cached prompt prefix.
-const EVOLUTION_CONTEXT_BUDGET_CHARS: usize = 4_000;
-
 fn log_event(state: &State<'_, AppState>, level: &str, message: String) {
     if let Ok(logger) = state.logger.lock() {
         logger.log(level, &message);
@@ -121,6 +116,16 @@ pub(crate) fn content_to_text(value: &Value) -> String {
         }
         _ => String::new(),
     }
+}
+
+/// The most recent user message as plain text (empty when there is none).
+fn last_user_text(messages: &[ChatMessage]) -> String {
+    messages
+        .iter()
+        .rev()
+        .find(|message| message.role == "user")
+        .map(|message| content_to_text(&message.content))
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -1446,8 +1451,10 @@ fn looks_like_conclusion(content: &str) -> bool {
 /// Persist a conclusion to a file-backed memory scope (workspace
 /// `.data/memory/<scope>/`).
 ///
-/// Mirrors the `memory` tool's file layout so entries are discoverable by the
-/// same search/list paths.
+/// In self-evolution mode the conclusion goes through the evolution recorder,
+/// which distils it into one dense fact (first sentence + up to three bullets),
+/// deduplicates it against what is already stored, and caps the number of
+/// automatic notes. The legacy `repo` scope keeps the original verbatim dump.
 fn record_conclusion_to_memory(
     state: &State<'_, AppState>,
     app: &AppHandle,
@@ -1456,6 +1463,24 @@ fn record_conclusion_to_memory(
     scope: &str,
     content: &str,
 ) {
+    if scope == crate::tools::memory::EVOLUTION_SCOPE {
+        match crate::tools::memory::record_auto_conclusion(workspace_dir, session_id, content) {
+            Some(key) => {
+                log_event(
+                    state,
+                    "INFO",
+                    format!("conclusion distilled into evolution memory: {key}"),
+                );
+                let _ = app.emit(
+                    "tool-call",
+                    format!("🧠 *Conclusion distilled into evolution memory: {}*\n", key),
+                );
+            }
+            None => {}
+        }
+        return;
+    }
+
     let memory_root = crate::workspace::memory_root(workspace_dir).join(scope);
     if let Err(e) = fs::create_dir_all(&memory_root) {
         log_event(state, "ERROR", format!("failed to create memory dir: {e}"));
@@ -1748,10 +1773,12 @@ async fn run_chat_turn(
         // The facts the assistant verified in earlier sessions — the default
         // interpreter and runtime environment, the correct way to operate a
         // tool, the file locations it uses often — are injected here so they
-        // are reused instead of rediscovered every session.
+        // are reused instead of rediscovered every session. The budget constant
+        // lives in the memory module because the renderer, the consolidation
+        // planner and the panel all share it.
         let evolution_facts = crate::tools::memory::render_evolution_context(
             &workspace_dir_for_roots,
-            EVOLUTION_CONTEXT_BUDGET_CHARS,
+            crate::tools::memory::EVOLUTION_CONTEXT_BUDGET_CHARS,
         );
         if !evolution_facts.is_empty() {
             system_content.push_str("\n\n");
@@ -1760,6 +1787,16 @@ async fn run_chat_turn(
                  rediscover):\n",
             );
             system_content.push_str(&evolution_facts);
+        }
+
+        // The user may explicitly ask for a memory tidy-up. Point the model at
+        // the consolidation flow instead of letting it delete entries by hand.
+        if crate::tools::memory::wants_memory_consolidation(&last_user_text(&messages)) {
+            system_content.push_str(
+                "\n\nThe user explicitly asked to consolidate memory: call `memory` with \
+                 action `consolidate` and phase `plan` first, review the clusters, then call \
+                 `apply` with the full `skill_md` and the same `keys`. Never delete entries by hand.",
+            );
         }
     }
 
@@ -1819,7 +1856,8 @@ async fn run_chat_turn(
     if config.effective_tools().iter().any(|t| t == "memory") {
         let evolution_hint = if config.self_evolution_mode {
             " `evolution` for verified facts that must survive across sessions \
-             (runtime environment, correct tool usage, file locations)."
+             (runtime environment, correct tool usage, file locations) — one dense \
+             sentence per entry, never a transcript."
         } else {
             ""
         };

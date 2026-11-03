@@ -298,6 +298,7 @@ const zhCN: Messages = {
                 "再次启动时聚焦已运行的窗口，而不是打开第二个实例。重启应用后生效。",
             interactionMonitor: "交互监视器",
             agentMissions: "智能体任务监视器",
+            evolutionMemory: "自进化记忆",
             launchMonitor: "打开监视器",
         },
 
@@ -320,6 +321,23 @@ const zhCN: Messages = {
         },
 
         agentMissionsMonitorAria: "智能体任务监视器",
+        evolutionMemoryMonitorAria: "自进化记忆监视器",
+    },
+
+    memoryPanel: {
+        title: "自进化记忆",
+        summary: "{count} 条经验 · {injected} 条进入提示词",
+        budget: "注入 {chars} / {budget} 字符",
+        loading: "正在读取…",
+        empty: "还没有自进化记忆。开启自进化模式后会自动记录。",
+        pinned: "常驻",
+        auto: "自动",
+        evidence: "确认 {count} 次",
+        uses: "使用 {count} 次",
+        archivedTitle: "已归档到技能（{count} 条）",
+        archivedMeta: "{entries} 条 · {chars} 字符",
+        archivedMissing: " · 技能文件缺失",
+        detailFailed: "无法读取该条目。",
     },
 
     skills: {
@@ -400,9 +418,9 @@ const zhCN: Messages = {
                     "**session** —— 短期，仅存于内存，在当前聊天会话中有效。用于任务相关的上下文和进行中的笔记。",
                     "**user** —— 长期，基于文件，跨会话持久。用于用户偏好、常用模式与通用经验。",
                     "**repo** —— 长期，基于文件，限定于当前仓库。用于代码库约定、构建命令与项目事实。",
-                    "**evolution** —— 长期，基于文件。自进化专属区域，开启自进化模式后可用。用于必须跨会话保留的已验证事实：默认解释器与运行环境、正确的工具操作方式、常用的文件位置。",
+                    "**evolution** —— 长期，基于文件。自进化专属区域，开启自进化模式后可用。用于必须跨会话保留的已验证事实：默认解释器与运行环境、正确的工具操作方式、常用的文件位置。每条记录带有标题、类别、标签、重要度和证据次数，并按其排名注入提示词——请保持每条只表达一个高密度事实。",
                     "",
-                    "支持添加、获取、列出、搜索和删除操作。",
+                    "支持添加、获取、列出、搜索、删除和整理归档。`consolidate` 会把一大簇相关的自进化记忆凝聚成一个技能归档（先 plan，再带上完整技能 markdown 与相同 keys 执行 apply）。",
                 ].join("\n"),
             },
             todoList: {

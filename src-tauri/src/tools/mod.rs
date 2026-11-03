@@ -404,14 +404,18 @@ pub fn get_all_tools(selected_tools: &[String], self_evolution: bool) -> Vec<Val
             "type": "function",
             "function": {
                 "name": "memory",
-                "description": format!("Manage a persistent memory system with three scopes:\n- `session`: Short-term, in-memory only. Survives for the current chat session. Use for task-specific context and in-progress notes.\n- `user`: Long-term, file-backed. Cross-session persistent. Use for user preferences, patterns, and general insights.\n- `repo`: Long-term, file-backed. Repository-scoped. Use for codebase conventions, build commands, and project facts.{evolution_scope}\n\nPass `scope: \"all\"` to run get/list/search across every scope at once (read-only); add/delete need one concrete scope. Session memories are automatically discarded when the app restarts. User and repo memories persist as markdown files in the workspace memory directory (`.data/memory`, app-managed — never edit it with file tools)."),
+                "description": format!("Manage a persistent memory system with three scopes:\n- `session`: Short-term, in-memory only. Survives for the current chat session. Use for task-specific context and in-progress notes.\n- `user`: Long-term, file-backed. Cross-session persistent. Use for user preferences, patterns, and general insights.\n- `repo`: Long-term, file-backed. Repository-scoped. Use for codebase conventions, build commands, and project facts.{evolution_scope}\n\nPass `scope: \"all\"` to run get/list/search across every scope at once (read-only); add/delete need one concrete scope. Session memories are automatically discarded when the app restarts. User and repo memories persist as markdown files in the workspace memory directory (`.data/memory`, app-managed — never edit it with file tools). Evolution entries are structured (key, title, kind, tags, importance, evidence) and injected into the system prompt in ranked order, so keep each one to a single dense fact. `action: \"consolidate\"` folds a large cluster of evolution entries into a skill archive — call it with `phase: \"plan\"` first, then `phase: \"apply\"` with the full `skill_md` and the same `keys`."),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["add", "get", "list", "search", "delete"],
-                            "description": "The memory operation: 'add' to store a new entry, 'get' to retrieve by key, 'list' to list all entries in a scope, 'search' to find entries by content, 'delete' to remove an entry."
+                            "enum": if self_evolution {
+                                json!(["add", "get", "list", "search", "delete", "consolidate"])
+                            } else {
+                                json!(["add", "get", "list", "search", "delete"])
+                            },
+                            "description": "The memory operation: 'add' to store/update an entry, 'get' to retrieve by key, 'list' to list entries (ranked), 'search' to find entries by content, 'delete' to remove an entry, 'consolidate' to fold a large evolution-memory cluster into a skill archive."
                         },
                         "scope": {
                             "type": "string",
@@ -428,11 +432,34 @@ pub fn get_all_tools(selected_tools: &[String], self_evolution: bool) -> Vec<Val
                         },
                         "key": {
                             "type": "string",
-                            "description": "Unique key for the memory entry (required for add/get/delete). Use a short, descriptive slug like 'api-keys' or 'project-setup'."
+                            "description": "Unique key for the memory entry (required for add/get/delete). Use a short, descriptive slug like 'api-keys' or 'project-setup'. Re-adding the same key updates the entry and raises its evidence count."
                         },
                         "content": {
                             "type": "string",
-                            "description": "The content to store (required for 'add'). Markdown is supported."
+                            "description": "The fact to store (required for 'add'). Markdown is supported, but for the evolution scope keep it to one dense sentence — never paste a whole conversation or a long answer."
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "Evolution scope only: one-line title used when the entry is rendered in compact form (max ~100 chars)."
+                        },
+                        "kind": {
+                            "type": "string",
+                            "enum": ["fact", "recipe", "location", "pitfall"],
+                            "description": "Evolution scope only: category of the entry. Grouped into sections when a cluster becomes a skill."
+                        },
+                        "importance": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 5,
+                            "description": "Evolution scope only: 1-5. 5 (or pinned) means the fact always survives the prompt budget. Use it for cross-project environment facts only."
+                        },
+                        "pinned": {
+                            "type": "boolean",
+                            "description": "Evolution scope only: always inject this entry, regardless of ranking."
+                        },
+                        "merge": {
+                            "type": "boolean",
+                            "description": "Evolution scope only: when a similar entry already exists, merge into it instead of creating a second file. Defaults to true."
                         },
                         "tags": {
                             "type": "array",
@@ -442,6 +469,24 @@ pub fn get_all_tools(selected_tools: &[String], self_evolution: bool) -> Vec<Val
                         "query": {
                             "type": "string",
                             "description": "Search query text (required for 'search'). Searches across keys and content."
+                        },
+                        "phase": {
+                            "type": "string",
+                            "enum": ["plan", "apply", "restore", "list"],
+                            "description": "Consolidate only: 'plan' returns the large related clusters (start here), 'apply' writes the skill and archives its keys, 'restore' moves archived entries back, 'list' shows archived skills."
+                        },
+                        "keys": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Consolidate/apply only: the evolution memory keys being archived. Copy them verbatim from the plan; every key must also appear in the skill's `source-memory` front matter."
+                        },
+                        "skill_md": {
+                            "type": "string",
+                            "description": "Consolidate/apply only: the complete skill document (YAML frontmatter with name, description and source-memory, then the grouped runbook body)."
+                        },
+                        "skill": {
+                            "type": "string",
+                            "description": "Consolidate/restore only: the skill name whose archived memory entries should be moved back."
                         }
                     },
                     "required": ["action"]
@@ -717,6 +762,31 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ai-chat-tools-{label}-{}", Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// The `consolidate` action is only advertised while self-evolution mode is
+    /// on: with the mode off the `evolution` scope does not exist, so a
+    /// consolidation call would be unanswerable.
+    #[test]
+    fn memory_schema_advertises_consolidate_only_in_self_evolution_mode() {
+        let memory_tool = |self_evolution: bool| {
+            super::get_all_tools(&["memory".to_string()], self_evolution)
+                .into_iter()
+                .find(|tool| tool["function"]["name"] == "memory")
+                .expect("memory tool must be advertised")
+        };
+
+        let actions = |tool: &serde_json::Value| -> Vec<String> {
+            tool["function"]["parameters"]["properties"]["action"]["enum"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|value| value.as_str().unwrap().to_string())
+                .collect()
+        };
+
+        assert!(actions(&memory_tool(true)).contains(&"consolidate".to_string()));
+        assert!(!actions(&memory_tool(false)).contains(&"consolidate".to_string()));
     }
 
     #[test]

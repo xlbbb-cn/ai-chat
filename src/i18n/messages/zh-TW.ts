@@ -298,6 +298,7 @@ const zhTW: Messages = {
                 "再次啟動時聚焦已執行的視窗，而不是開啟第二個實例。重新啟動應用程式後生效。",
             interactionMonitor: "互動監視器",
             agentMissions: "代理任務監視器",
+            evolutionMemory: "自我演化記憶",
             launchMonitor: "開啟監視器",
         },
 
@@ -320,6 +321,23 @@ const zhTW: Messages = {
         },
 
         agentMissionsMonitorAria: "代理任務監視器",
+        evolutionMemoryMonitorAria: "自我演化記憶監視器",
+    },
+
+    memoryPanel: {
+        title: "自我演化記憶",
+        summary: "{count} 條經驗 · {injected} 條進入提示詞",
+        budget: "注入 {chars} / {budget} 字元",
+        loading: "正在讀取…",
+        empty: "尚無自我演化記憶。開啟自我演化模式後會自動記錄。",
+        pinned: "常駐",
+        auto: "自動",
+        evidence: "確認 {count} 次",
+        uses: "使用 {count} 次",
+        archivedTitle: "已歸檔到技能（{count} 條）",
+        archivedMeta: "{entries} 條 · {chars} 字元",
+        archivedMissing: " · 技能檔案缺失",
+        detailFailed: "無法讀取該條目。",
     },
 
     skills: {
@@ -400,9 +418,9 @@ const zhTW: Messages = {
                     "**session** —— 短期，僅存於記憶體，在目前聊天工作階段中有效。用於任務相關的上下文與進行中的筆記。",
                     "**user** —— 長期，以檔案為後端，跨工作階段持久。用於使用者偏好、常用模式與通用經驗。",
                     "**repo** —— 長期，以檔案為後端，限定於目前儲存庫。用於程式庫慣例、建置命令與專案事實。",
-                    "**evolution** —— 長期，以檔案為後端。自我演化專屬區域，開啟自我演化模式後可用。用於必須跨工作階段保留的已驗證事實：預設直譯器與執行環境、正確的工具操作方式、常用的檔案位置。",
+                    "**evolution** —— 長期，以檔案為後端。自我演化專屬區域，開啟自我演化模式後可用。用於必須跨工作階段保留的已驗證事實：預設直譯器與執行環境、正確的工具操作方式、常用的檔案位置。每條記錄帶有標題、類別、標籤、重要度與證據次數，並依其排名注入提示詞——請讓每條只表達一個高密度事實。",
                     "",
-                    "支援新增、取得、列出、搜尋與刪除操作。",
+                    "支援新增、取得、列出、搜尋、刪除與整理歸檔。`consolidate` 會把一大簇相關的自我演化記憶凝聚成一個技能歸檔（先 plan，再帶上完整技能 markdown 與相同 keys 執行 apply）。",
                 ].join("\n"),
             },
             todoList: {

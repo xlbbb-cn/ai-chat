@@ -1,0 +1,210 @@
+.memory-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--c-bg);
+  color: var(--c-body);
+}
+
+/* Opened from Settings → Runtime & Debug, directly below the agent missions
+   monitor. The base modal shell is the shared `.mission-monitor-modal`; this
+   only narrows it to a list. */
+.mission-monitor-modal.memory-monitor-modal {
+  width: min(620px, 100%);
+  height: min(760px, 100%);
+}
+
+.memory-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--c-border);
+  flex-shrink: 0;
+}
+
+.memory-header h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--c-text);
+  letter-spacing: normal;
+}
+
+/* Two dense facts per line, no boxes — the hairline under the header is the
+   only separation the summary needs. */
+.memory-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--c-border);
+  font-size: 12px;
+  color: var(--c-muted);
+  flex-shrink: 0;
+}
+
+.memory-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.memory-empty {
+  margin: 0;
+  padding: 16px 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--c-muted);
+}
+
+.memory-item {
+  border-bottom: 1px solid var(--c-border);
+}
+
+/* Entries that do not fit the prompt budget stay listed but recede: the order
+   is the message, not a hidden filter. */
+.memory-item.is-omitted {
+  opacity: 0.55;
+}
+
+.memory-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: calc(100% - 12px);
+  margin: 0 6px;
+  min-height: 34px;
+  padding: 7px 6px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--t-dur) var(--t-ease);
+}
+
+.memory-row:hover {
+  background: var(--c-hover);
+}
+
+.memory-row:focus-visible {
+  outline: 2px solid var(--c-accent-soft);
+  outline-offset: -2px;
+}
+
+.memory-row > svg {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--c-muted);
+  flex-shrink: 0;
+}
+
+.memory-rank {
+  flex-shrink: 0;
+  min-width: 24px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-placeholder);
+  padding-top: 1px;
+}
+
+.memory-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.memory-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--c-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--c-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.memory-badge {
+  padding: 1px 5px;
+  border: 1px solid var(--c-border-i);
+  border-radius: 4px;
+  background: var(--c-surface-2);
+  color: var(--c-text);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.memory-tag {
+  color: var(--c-placeholder);
+}
+
+.memory-detail {
+  margin: 0;
+  padding: 0 12px 12px 44px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--c-body);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+.memory-archive {
+  flex-shrink: 0;
+  max-height: 35%;
+  overflow-y: auto;
+  border-top: 1px solid var(--c-border);
+  padding: 8px 12px 12px;
+}
+
+.memory-archive-header {
+  font-size: 12px;
+  color: var(--c-muted);
+  padding-bottom: 6px;
+}
+
+.memory-archive-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  font-size: 12px;
+  color: var(--c-body);
+}
+
+.memory-archive-row > svg {
+  font-size: 11px;
+  color: var(--c-muted);
+  flex-shrink: 0;
+}
+
+.memory-archive-name {
+  font-weight: 500;
+  color: var(--c-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-archive-meta {
+  color: var(--c-muted);
+  margin-left: auto;
+  flex-shrink: 0;
+}

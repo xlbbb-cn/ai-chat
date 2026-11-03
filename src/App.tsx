@@ -2091,6 +2091,7 @@ export default function App() {
                 setMaxTokens(cfg.model_context_lengths?.[cfg.model] ?? cfg.model_settings?.max_tokens ?? null);
                 // A "Fetch Models From API" in Settings refreshes the capability
                 // metadata (and with it the badges in the input row).
+                setActiveToolCount((cfg.selected_tools ?? []).length);
                 setModelMetadata(cfg.model_metadata ?? {});
                 setReasoningEfforts(cfg.model_reasoning_effort ?? {});
                 themeRef.current = cfg.theme ?? "auto";

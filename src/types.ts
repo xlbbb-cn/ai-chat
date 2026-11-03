@@ -383,6 +383,36 @@ export interface Skill {
   license?: string;
   version?: string;
   author?: string;
+  /** Evolution memory keys this skill archives (written by `memory consolidate`). */
+  source_memory?: string[];
+}
+
+/** One ranked row of the read-only self-evolution memory panel. */
+export interface EvolutionMemoryEntry {
+  rank: number;
+  key: string;
+  title: string;
+  kind: string;
+  tags: string[];
+  importance: number;
+  confidence: number;
+  evidence: number;
+  uses: number;
+  pinned: boolean;
+  source: string;
+  updated_at: string;
+  chars: number;
+  score: number;
+  /** Whether the entry fits the prompt budget on the current ranking. */
+  injected: boolean;
+}
+
+/** A skill that archives consolidated evolution-memory entries. */
+export interface ArchivedSkill {
+  name: string;
+  entries: number;
+  chars: number;
+  skill_exists: boolean;
 }
 
 export type McpTransport = "stdio" | "sse" | "http" | "stream-http";

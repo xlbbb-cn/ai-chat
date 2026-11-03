@@ -116,6 +116,16 @@ pub struct SkillMeta {
         skip_serializing_if = "Option::is_none"
     )]
     pub license: Option<String>,
+    /// Memory keys a consolidated skill was built from. Written by
+    /// `memory consolidate`, read by a later `restore`; empty for every other
+    /// skill.
+    #[serde(
+        rename = "source-memory",
+        default,
+        deserialize_with = "deserialize_string_list",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub source_memory: Vec<String>,
 }
 
 /// Full skill representation passed to/from the frontend.
@@ -138,6 +148,9 @@ pub struct Skill {
     pub agent: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
+    /// Memory keys this skill archives (see `memory consolidate`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_memory: Vec<String>,
     pub system_prompt: String,
 }
 
@@ -171,6 +184,7 @@ pub fn parse_skill_md(content: &str) -> Result<Skill, String> {
         context: meta.context,
         agent: meta.agent,
         license: meta.license,
+        source_memory: meta.source_memory,
         system_prompt: body.to_string(),
     })
 }
@@ -186,6 +200,7 @@ pub fn skill_to_md(skill: &Skill) -> Result<String, String> {
         context: skill.context.clone(),
         agent: skill.agent.clone(),
         license: skill.license.clone(),
+        source_memory: skill.source_memory.clone(),
     };
     let frontmatter = serde_yaml::to_string(&meta).map_err(|e| e.to_string())?;
     Ok(format!(
@@ -303,10 +318,27 @@ pub fn self_evolution_prompt(root: Option<&Path>) -> String {
          - the correct way to operate a tool: how to drive the browser, how to run the \
          project's tests, the exact command that works;\n\
          - the file locations you use often: important paths, output directories, config files.\n\
+         Density contract (this is what keeps memory useful):\n\
+         - one fact per entry, one sentence of body — never a transcript, never a whole answer;\n\
+         - a stable, descriptive `key` and a one-line `title` (for example `python-default`, \
+         `idc-shanghai-bastion`, `build-tag-first`);\n\
+         - `kind` is one of `fact` / `recipe` / `location` / `pitfall`;\n\
+         - `importance` 1-5 (5 = always keep), and re-adding a fact you just verified again \
+         raises its evidence count — do that instead of writing a second entry for the same fact.\n\
          Store such a fact with `memory add`, scope `evolution`, and a short descriptive key \
          as soon as you have confirmed it — and read the scope (`memory list` / `get` / \
          `search`) before starting work so you reuse what you already learned. \
-         Record only facts you verified; never store guesses.",
+         Record only facts you verified; never store guesses.\n\n\
+         ARCHIVING MEMORY INTO A SKILL: when the user explicitly asks to tidy / consolidate / \
+         archive memory (for example 「整理记忆」, \"consolidate memory\", \"tidy memory\"), do \
+         NOT delete entries by hand. Call `memory` action `consolidate` phase `plan` first; it \
+         returns the large related clusters (for example everything about one data centre or one \
+         service). Then write one skill that covers a cluster — frontmatter `source-memory` must \
+         list every key you are archiving, the body must keep the exact commands, hosts, paths and \
+         procedures grouped by kind (`环境与入口` / `常用操作` / `处置流程` / `坑与禁忌` / `校验`) — \
+         and call `memory consolidate` with phase `apply`, `keys` and the full `skill_md`. The tool \
+         writes and enables the skill first and only then moves the entries out of the hot memory \
+         area into the archive. Never call `apply` before `plan`.",
         root.display()
     )
 }
@@ -324,7 +356,7 @@ pub fn self_evolution_prompt(root: Option<&Path>) -> String {
 /// Status-file schema version.
 const SKILL_STATUS_VERSION: u32 = 1;
 /// The skill was created or last edited through the Skills panel.
-const SKILL_SOURCE_USER: &str = "user";
+pub const SKILL_SOURCE_USER: &str = "user";
 /// The skill directory was found without a matching panel record (typically
 /// written by the assistant in self-evolution mode, or copied in by hand).
 const SKILL_SOURCE_SELF_EVOLUTION: &str = "self-evolution";
@@ -648,6 +680,112 @@ pub fn save_skill(state: State<'_, AppState>, skill: Skill) -> Result<(), String
     Ok(())
 }
 
+/// Reject a skill name that would escape the skills root or collide with a
+/// backup artifact. The name doubles as the folder name, so this is the only
+/// path-safety gate for programmatic skill writes (the panel validates too).
+pub fn validate_skill_name(name: &str) -> Result<(), String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("skill name cannot be empty".to_string());
+    }
+    if trimmed != name {
+        return Err("skill name cannot have leading or trailing whitespace".to_string());
+    }
+    if trimmed.starts_with('.') {
+        return Err("skill name cannot start with a dot".to_string());
+    }
+    if trimmed.contains("..")
+        || trimmed.contains('/')
+        || trimmed.contains('\\')
+        || trimmed.contains(':')
+    {
+        return Err(format!("invalid skill name '{name}': path separators are not allowed"));
+    }
+    if is_backup_artifact(trimmed) {
+        return Err(format!("invalid skill name '{name}': backup artifact"));
+    }
+    if !trimmed
+        .chars()
+        .all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    {
+        return Err(format!(
+            "invalid skill name '{name}': use letters, digits, '-', '_' or '.'"
+        ));
+    }
+    Ok(())
+}
+
+/// Write a skill document on behalf of `memory consolidate`, keeping a
+/// `.bak.<n>` copy of the previous version and stamping its origin.
+pub fn write_skill_with_backup(
+    workspace_dir: &Path,
+    skill: &Skill,
+) -> Result<PathBuf, String> {
+    validate_skill_name(&skill.name)?;
+    let md = skill_to_md(skill)?;
+    let skill_dir = crate::workspace::skills_root(workspace_dir).join(&skill.name);
+    fs::create_dir_all(&skill_dir).map_err(|error| error.to_string())?;
+    let skill_file = skill_dir.join("skill.md");
+
+    if skill_file.is_file() {
+        let mut index = 1;
+        loop {
+            let candidate = skill_dir.join(format!("skill.md.bak.{index}"));
+            if !candidate.exists() {
+                fs::copy(&skill_file, &candidate).map_err(|error| error.to_string())?;
+                break;
+            }
+            index += 1;
+        }
+    }
+
+    fs::write(&skill_file, md).map_err(|error| error.to_string())?;
+    mark_skill_source(workspace_dir, &skill.name, SKILL_SOURCE_SELF_EVOLUTION);
+    Ok(skill_file)
+}
+
+/// Where a skill came from (`user` | `self-evolution`), when the status file
+/// records it. `None` means the skill was never observed by the panel.
+pub fn skill_source(workspace_dir: &Path, name: &str) -> Option<String> {
+    let status = load_status_file(&crate::workspace::skills_status_path(workspace_dir));
+    status
+        .skills
+        .get(name)
+        .map(|entry| entry.source.clone())
+        .filter(|source| !source.is_empty())
+}
+
+/// Turn a skill on in the workspace status file.
+///
+/// A consolidated archive must be enabled, otherwise it is not part of
+/// `skill_ids` and its description never reaches the prompt — the entries
+/// would silently vanish from the model's world.
+pub fn enable_skill_for_workspace(workspace_dir: &Path, name: &str) -> Result<(), String> {
+    validate_skill_name(name)?;
+    let status_path = crate::workspace::skills_status_path(workspace_dir);
+    let mut status = load_status_file(&status_path);
+    let skills_root = crate::workspace::skills_root(workspace_dir);
+
+    // Fold in the skill that was just written so it has a status entry.
+    let _ = refresh_skill_status(&mut status, &skills_root);
+
+    let now = now_rfc3339();
+    let entry = status.skills.entry(name.to_string()).or_default();
+    if !entry.enabled {
+        entry.enabled = true;
+        entry.enabled_at = Some(now.clone());
+    }
+    entry.updated_at = Some(now.clone());
+    if entry.source.is_empty() {
+        entry.source = SKILL_SOURCE_SELF_EVOLUTION.to_string();
+    }
+    entry.last_seen_at = Some(now);
+
+    status.version = SKILL_STATUS_VERSION;
+    status.updated_at = Some(now_rfc3339());
+    write_status_file(&status_path, &status)
+}
+
 #[tauri::command]
 pub fn delete_skill(state: State<'_, AppState>, name: String) -> Result<(), String> {
     let workspace_dir = state.workspace_dir.lock().unwrap().clone();
@@ -874,5 +1012,75 @@ body
         refresh_skill_status(&mut status, &root.0);
         assert_eq!(status.skills.len(), 1);
         assert!(status.skills.contains_key("demo"));
+    }
+
+    /// `source-memory` is what makes a consolidated skill reversible: it must
+    /// survive the frontmatter round-trip performed by the Skills panel.
+    #[test]
+    fn source_memory_round_trips_through_frontmatter() {
+        let content = r#"---
+name: idc-archive
+description: 上海机房运维归档
+source-memory: [idc-shanghai-ssh, idc-shanghai-deploy]
+---
+
+# 上海机房
+"#;
+        let skill = parse_skill_md(content).expect("frontmatter must parse");
+        assert_eq!(
+            skill.source_memory,
+            vec!["idc-shanghai-ssh", "idc-shanghai-deploy"]
+        );
+
+        let rewritten = skill_to_md(&skill).unwrap();
+        assert!(rewritten.contains("source-memory"));
+        let reparsed = parse_skill_md(&rewritten).unwrap();
+        assert_eq!(reparsed.source_memory, skill.source_memory);
+    }
+
+    /// A skill name doubles as a folder name, so traversal must be refused
+    /// before anything is written.
+    #[test]
+    fn skill_names_reject_traversal_and_backup_artifacts() {
+        assert!(validate_skill_name("idc-archive").is_ok());
+        assert!(validate_skill_name("demo.bak.2").is_err());
+        assert!(validate_skill_name("../escape").is_err());
+        assert!(validate_skill_name("a/b").is_err());
+        assert!(validate_skill_name("a\\b").is_err());
+        assert!(validate_skill_name(".hidden").is_err());
+        assert!(validate_skill_name("").is_err());
+    }
+
+    /// A consolidated skill is written *and* enabled: an enabled skill is the
+    /// only way its description reaches the prompt.
+    #[test]
+    fn write_and_enable_a_consolidated_skill() {
+        let root = TempSkillsRoot::new("consolidate-write");
+        // `write_skill_with_backup` needs a workspace layout, so build one.
+        let workspace = root.0.clone();
+        let skill = Skill {
+            name: "idc-archive".to_string(),
+            description: "上海机房运维归档".to_string(),
+            version: None,
+            author: None,
+            allowed_commands: Vec::new(),
+            allowed_tools: Vec::new(),
+            context: None,
+            agent: None,
+            license: None,
+            source_memory: vec!["idc-ssh".to_string()],
+            system_prompt: "# 上海机房\n\n10.0.0.1\n".to_string(),
+        };
+
+        let file = write_skill_with_backup(&workspace, &skill).unwrap();
+        assert!(file.is_file());
+        assert!(file.ends_with("idc-archive/skill.md"));
+
+        enable_skill_for_workspace(&workspace, "idc-archive").unwrap();
+        let status: SkillsStatus = serde_json::from_str(
+            &fs::read_to_string(crate::workspace::skills_status_path(&workspace)).unwrap(),
+        )
+        .unwrap();
+        assert!(status.skills.get("idc-archive").unwrap().enabled);
     }
 }

@@ -9,6 +9,7 @@
 //!   .data/
 //!     chat.db                  SQLite: history / API monitor / missions
 //!     memory/{user,repo}/...   memory tool file backend
+//!     memory/evolution/...     self-evolution entries (front matter) + archive/
 //!     todos/<session>/...      todos tool
 //!     skills/<name>/skill.md   workspace skills (the only skills root)
 //!     skills.status            per-workspace skill enablement + metadata
