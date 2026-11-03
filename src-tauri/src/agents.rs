@@ -1051,20 +1051,29 @@ pub fn load_agents_config(path: &Path) -> AgentsConfig {
     config
 }
 
-/// Load the roster with the markdown definitions applied.
-///
-/// `sub_agents.json` stays configuration-only: `llm` agents read name,
-/// description, emoji, color and system prompt from `<app_data>/agents/*.md`,
-/// and every file without a config entry is returned as a disabled virtual
-/// agent (`configured = false`) that is never persisted until the user touches
-/// it. Legacy inline prompts are migrated to `agents/custom/` here.
-pub fn load_resolved_agents(path: &Path) -> AgentsConfig {
+/// Load the **configured** roster with definitions from the files they
+/// reference. This never scans `agents/`: discovery happens only in
+/// `refresh_agent_index` (the panel's Refresh button), which writes
+/// `agents/index.yaml`.
+pub fn load_configured_agents(path: &Path) -> AgentsConfig {
     let mut config = load_agents_config(path);
-    let report = files::synchronize(&mut config, &files::agents_root(path));
+    let report = files::resolve_configured(&mut config, &files::agents_root(path));
     if report.changed {
         let _ = save_agents_config_file(path, &config);
     }
     config
+}
+
+/// Full panel roster: configured agents plus the discovered entries stored in
+/// `agents/index.yaml`. Reading one indexed file is not discovery; a missing
+/// index simply means only configured agents are shown until Refresh.
+pub fn load_sub_agent_list(path: &Path) -> Vec<SubAgent> {
+    let mut config = load_configured_agents(path);
+    let root = files::agents_root(path);
+    if let Some(index) = files::load_index(&root) {
+        files::append_index_agents(&mut config.agents, &index, &root);
+    }
+    config.agents
 }
 
 pub(crate) fn save_agents_config_file(path: &Path, config: &AgentsConfig) -> Result<(), String> {
@@ -1138,7 +1147,31 @@ pub(crate) fn save_agents_config_file(path: &Path, config: &AgentsConfig) -> Res
 
 #[tauri::command]
 pub fn list_sub_agents(state: State<'_, AppState>) -> Vec<SubAgent> {
-    load_resolved_agents(&state.agents_config_path).agents
+    load_sub_agent_list(&state.agents_config_path)
+}
+
+/// The panel's Refresh action: migrate configured inline prompts, scan
+/// `agents/**/*.md`, **replace** `agents/index.yaml`, and return the merged
+/// roster. This is the only path that performs discovery.
+#[tauri::command]
+pub fn refresh_agent_index(state: State<'_, AppState>) -> Result<Vec<SubAgent>, String> {
+    let path = state.agents_config_path.clone();
+    let root = files::agents_root(&path);
+
+    // Resolve configured entries first: a legacy inline prompt may create a
+    // new markdown file that this refresh should discover.
+    let mut config = load_agents_config(&path);
+    let report = files::resolve_configured(&mut config, &root);
+    if report.changed {
+        save_agents_config_file(&path, &config)?;
+    }
+
+    let index = files::build_index(&root);
+    files::write_index(&root, &index)?;
+
+    let mut agents = config.agents;
+    files::append_index_agents(&mut agents, &index, &root);
+    Ok(agents)
 }
 
 #[tauri::command]
@@ -1278,9 +1311,10 @@ pub fn save_sub_agent(state: State<'_, AppState>, agent: SubAgent) -> Result<Sub
 pub fn delete_sub_agent(state: State<'_, AppState>, id: String) -> Result<(), String> {
     let path = state.agents_config_path.clone();
     // Resolve first: a discovered (virtual) custom agent has no config entry
-    // but still owns a file the user may want to remove.
-    let resolved = load_resolved_agents(&path);
-    let found = resolved.agents.iter().find(|agent| agent.id == id).cloned();
+    // but still owns a file the user may want to remove. The panel list includes
+    // index.yaml entries, so the same merged view is used here.
+    let resolved = load_sub_agent_list(&path);
+    let found = resolved.iter().find(|agent| agent.id == id).cloned();
 
     if let Some(agent) = found {
         if agent.agent_type == AGENT_TYPE_LLM {
@@ -1363,7 +1397,7 @@ pub fn list_agent_missions(
         updated_at: String,
     }
 
-    let agent_names = load_resolved_agents(&state.agents_config_path)
+    let agent_names = load_configured_agents(&state.agents_config_path)
         .agents
         .into_iter()
         .map(|agent| (agent.id, agent.name))
@@ -1491,7 +1525,7 @@ pub async fn orchestrate(
     session_id: &str,
     cancelled: Arc<AtomicBool>,
 ) -> Result<String, String> {
-    let agents_config = load_resolved_agents(&state.agents_config_path);
+    let agents_config = load_configured_agents(&state.agents_config_path);
     let enabled: Vec<SubAgent> = agents_config
         .agents
         .iter()
@@ -3347,24 +3381,26 @@ mod tests {
     }
 
     #[test]
-    fn resolved_agents_serialize_with_the_fields_the_panel_reads() {
+    fn indexed_agents_serialize_with_the_fields_the_panel_reads() {
         let dir = temp_agents_dir("serialize");
         let path = dir.join("sub_agents.json");
+        let root = dir.join("agents");
         std::fs::write(&path, r#"{ "agents": [] }"#).expect("write config");
-        std::fs::create_dir_all(dir.join("agents/custom")).expect("agents dir");
+        std::fs::create_dir_all(root.join("custom")).expect("agents dir");
         std::fs::write(
-            dir.join("agents/custom/reviewer.md"),
+            root.join("custom/reviewer.md"),
             "---\nname: Reviewer\ndescription: reviews code\nemoji: 👀\n---\n\nbe precise\n",
         )
         .expect("write agent");
+        // The panel lists discovered agents from the manifest, not a scan.
+        super::files::write_index(&root, &super::files::build_index(&root)).expect("write index");
 
-        let resolved = load_resolved_agents(&path);
+        let resolved = load_sub_agent_list(&path);
         let value = serde_json::to_value(
             resolved
-                .agents
                 .iter()
                 .find(|agent| agent.file.as_deref() == Some("custom/reviewer.md"))
-                .expect("discovered agent"),
+                .expect("indexed agent"),
         )
         .expect("serialize");
 
@@ -3383,9 +3419,10 @@ mod tests {
     }
 
     #[test]
-    fn resolved_load_migrates_inline_prompts_and_discovers_files() {
+    fn configured_load_migrates_inline_prompts_and_panel_reads_the_index() {
         let dir = temp_agents_dir("resolved");
         let path = dir.join("sub_agents.json");
+        let root = dir.join("agents");
         std::fs::write(
             &path,
             r#"{
@@ -3401,28 +3438,33 @@ mod tests {
         )
         .expect("write config");
 
-        std::fs::create_dir_all(dir.join("agents/engineering")).expect("agents dir");
+        std::fs::create_dir_all(root.join("engineering")).expect("agents dir");
         std::fs::write(
-            dir.join("agents/engineering/library.md"),
+            root.join("engineering/library.md"),
             "---\nname: Library\ndescription: from disk\nemoji: 📚\n---\n\nlibrary prompt\n",
         )
         .expect("write library agent");
 
-        let resolved = load_resolved_agents(&path);
-        let legacy = resolved
+        // Runtime resolution sees configured agents only; the library file must
+        // not be discovered until Refresh writes the manifest.
+        let configured = load_configured_agents(&path);
+        assert_eq!(configured.agents.len(), 1);
+        let legacy = configured
             .agents
             .iter()
             .find(|agent| agent.id == "legacy")
             .expect("legacy agent");
         assert_eq!(legacy.file.as_deref(), Some("custom/legacy.md"));
         assert!(legacy.system_prompt.is_empty());
-        assert!(dir.join("agents/custom/legacy.md").is_file());
+        assert!(root.join("custom/legacy.md").is_file());
 
+        // Refresh (index build + replace) makes the file visible to the panel.
+        super::files::write_index(&root, &super::files::build_index(&root)).expect("write index");
+        let resolved = load_sub_agent_list(&path);
         let library = resolved
-            .agents
             .iter()
             .find(|agent| agent.file.as_deref() == Some("engineering/library.md"))
-            .expect("discovered library agent");
+            .expect("indexed library agent");
         assert!(!library.configured);
         assert!(!library.enabled);
         assert_eq!(library.name, "Library");

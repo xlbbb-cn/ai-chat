@@ -102,7 +102,7 @@ Full usage guides live in the GitHub Wiki:
 ### 2) Sub-Agent Orchestration
 
 - Three runtimes: `llm` (built-in autonomous loop), `cli` (headless coding CLI on this machine), `cloud` (remote HTTP endpoint)
-- **File-backed `llm` definitions**: `agents/<category>/<slug>.md` (YAML frontmatter + prompt). `sub_agents.json` is configuration only; new files are discovered automatically, disabled by default, and only `agents/custom/` can be deleted from the panel
+- **File-backed `llm` definitions**: `agents/<category>/<slug>.md` (YAML frontmatter + prompt). `sub_agents.json` is configuration only. Discovery runs only when you click **Refresh**, which rescans `agents/` and replaces `agents/index.yaml`; the panel reads that manifest, so new files appear after the next refresh. Only `agents/custom/` can be deleted from the panel
 - Per-agent model, system prompt, tool/skill allowlist, iteration budget and **MCP opt-in**
 - **MCP for `llm` agents** (`enable_mcp`): inject every enabled MCP server's tools using the same names and descriptions as the main agent. Each task starts its own MCP server processes and stops them when the task ends
 - Create, edit, enable, and delete sub-agents
@@ -345,8 +345,8 @@ Runtime layout — app data holds the application files, the workspace holds its
 
 ```text
 <app data>/                 config.json, app.log, mcp_servers.json, sub_agents.json,
-                            profiles.json, timers.json, agents/ (llm definitions),
-                            workspace/ (default workspace)
+                            profiles.json, timers.json, agents/ (llm definitions +
+                            index.yaml discovery manifest), workspace/ (default workspace)
 <workspace>/.data/          chat.db, memory/{user,repo,evolution}/, todos/, skills/,
                             skills.status                                              (hidden)
 ```

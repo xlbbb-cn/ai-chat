@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import {
   listSubAgents, saveSubAgent, deleteSubAgent,
   getAgentOrchestration, saveAgentOrchestration,
-  probeAgentCli, probeAgentCloud, openAgentsDir,
+  probeAgentCli, probeAgentCloud, openAgentsDir, refreshSubAgentIndex,
 } from "../api";
 import type {
   AgentType,
@@ -293,7 +293,11 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
   async function handleRefresh() {
     setRefreshing(true);
     try {
-      await refreshAgents();
+      // Refresh is the only discovery trigger: it rescans agents/ and replaces
+      // agents/index.yaml, then returns the merged roster.
+      const refreshed = await refreshSubAgentIndex();
+      setAgents(refreshed);
+      onAgentsChange(refreshed.filter((a) => a.enabled).length);
     } catch (e) {
       console.error(e);
     } finally {
@@ -1079,7 +1083,6 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
                 <span className="toggle-switch-slider" />
               </label>
             </div>
-            <small className="agent-field-hint">{t("agents.enableModeHint")}</small>
 
             <div className="orch-row">
               <span>{t("agents.autoConfigure")}</span>
@@ -1094,7 +1097,6 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
                 <span className="toggle-switch-slider" />
               </label>
             </div>
-            <small className="agent-field-hint">{t("agents.autoConfigureHint")}</small>
 
             <div className="orch-row">
               <span>{t("agents.executionMode")}</span>

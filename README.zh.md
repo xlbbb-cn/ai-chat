@@ -102,7 +102,7 @@ AI Chat 是一个桌面端 AI 助手应用，支持接入任意 OpenAI 兼容模
 ### 2) 子代理编排（Sub-Agents）
 
 - 三种运行时：`llm`（内置自主循环）、`cli`（本机无头编码 CLI）、`cloud`（远程 HTTP 端点）
-- **文件化的 `llm` 定义**：`agents/<分类>/<slug>.md`（YAML frontmatter + 提示词）。`sub_agents.json` 只作为配置；新文件自动发现、默认禁用，面板只允许删除 `agents/custom/` 下的文件
+- **File-backed `llm` definitions**：`agents/<分类>/<slug>.md`（YAML frontmatter + 提示词）。`sub_agents.json` 只作为配置。**只有点击 Refresh 时才会发现新文件**：扫描 `agents/` 并替换 `agents/index.yaml`，面板读取该清单；新文件需要下次刷新后才出现。面板只允许删除 `agents/custom/` 下的文件
 - 每个 Agent 可单独配置模型、系统提示词、工具/技能白名单、迭代预算与 **MCP 开关**
 - **llm Agent 的 MCP**（`enable_mcp`）：注入所有已启用 MCP server 的工具，工具名与描述和主 Agent 完全一致；每个任务启动自己的 MCP server 进程，任务结束后退出
 - 支持子代理新增、编辑、启用与删除
@@ -345,8 +345,8 @@ ai-chat/
 
 ```text
 <应用数据目录>/            config.json、app.log、mcp_servers.json、sub_agents.json、
-                          profiles.json、timers.json、agents/（llm 定义）、
-                          workspace/（默认工作区）
+                          profiles.json、timers.json、agents/（llm 定义 +
+                          index.yaml 发现清单）、workspace/（默认工作区）
 <workspace>/.data/         chat.db、memory/{user,repo,evolution}/、todos/、skills/、
                           skills.status                                          （隐藏）
 ```

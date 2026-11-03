@@ -488,11 +488,7 @@ const zhTW: Messages = {
         title: "子代理",
         orchestration: "協調設定",
         enableMode: "自動協調",
-        enableModeHint:
-            "開啟後，協調器會為單一請求自動規劃並平行執行多個代理，主代理也可以使用 `call_subagent` 將任務委派給子代理。關閉時主代理直接作答，不提供 `call_subagent`。",
         autoConfigure: "自動設定模式",
-        autoConfigureHint:
-            "規劃前先多呼叫一次模型，為本次請求挑選代理：可能只用已啟用代理中的一部分，或暫時定義只在本次執行有效的代理（不會儲存到面板）。關閉時把所有已啟用代理交給規劃器。",
         executionMode: "執行方式",
         modeParallel: "平行",
         modeSequential: "循序",
@@ -509,7 +505,7 @@ const zhTW: Messages = {
         enabledCount: "已啟用 {enabled} / 共 {total}",
         groupCustom: "自建",
         groupUncategorized: "未分類",
-        rescan: "重新掃描 agent 檔案",
+        rescan: "重新整理 agent 索引",
         openFolder: "開啟 agents 目錄",
         noResults: "沒有符合的代理。",
         sourceFile: "定義檔案：agents/{file}",

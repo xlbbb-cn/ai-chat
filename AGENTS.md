@@ -99,25 +99,27 @@ Application files live in the OS app data dir (`name` from `tauri.conf.json` ide
 - Linux: `~/.local/share/ai-chat/`
 - Windows: `%APPDATA%/../Local/ai-chat/`
 
-App-data contents: `config.json`, `mcp_servers.json`, `sub_agents.json`, `profiles.json`, `timers.json`, `app.log`, a `workspace/` dir (default — overridable via `workspace_dir` in config), and an `agents/` dir holding the `llm` sub-agent definitions.
+App-data contents: `config.json`, `mcp_servers.json`, `sub_agents.json`, `profiles.json`, `timers.json`, `app.log`, a `workspace/` dir (default — overridable via `workspace_dir` in config), and an `agents/` dir holding the `llm` sub-agent definitions plus the `index.yaml` discovery manifest.
 
 ```text
 <app_data>/agents/
   <category>/<slug>.md   # imported/library definitions (read-only from the panel)
   custom/<slug>.md       # agents created from the Sub Agents panel
+  index.yaml             # discovery manifest, replaced on Refresh
 ```
 
 ### Sub-agent definitions (`llm`)
 
 `sub_agents.json` is **configuration only**. For an `llm` agent it stores the runtime knobs (`enabled`, `model`, token limits, `allowed_tools`, `allowed_skills`, `max_iterations`) plus a `file` reference; `cli` / `cloud` agents keep their full definition there. An `llm` agent's `name`, `description`, `emoji`, `color` and system prompt live in its markdown file (YAML frontmatter + body), mirroring the skill format. `src-tauri/src/agents/files.rs` owns parsing, serialization (unknown frontmatter keys are preserved), scanning, path safety and write/delete.
 
-- Files under `agents/` are discovered recursively (`.md` only, `.bak.*` and hidden entries skipped). A discovered file with no config entry is returned as a disabled **virtual** agent (`configured: false`) and is never written to `sub_agents.json` until the user enables or edits it.
+- Discovery runs **only from the panel's Refresh** (`refresh_agent_index`): it scans the `agents/` tree for `.md` files (`.bak.*` and hidden entries skipped) and **replaces** `agents/index.yaml` with the list. Opening the panel reads that manifest instead of scanning, so a file added after the last refresh stays invisible until the next one. A discovered file with no config entry is returned as a disabled **virtual** agent (`configured: false`) and is never written to `sub_agents.json` until the user enables or edits it.
+- `agents/index.yaml` is a derived manifest (`version`, `refreshed_at`, `agents[]` with `id`, `file`, `name`, `description`, `emoji`, `color`, optional `error`). The markdown files stay authoritative for the prompt; the manifest decides which files are listed. Delete it (or press Refresh) to rebuild.
 - Only `agents/custom/**` may be deleted from the panel. Library files (`engineering/…`, other imported collections) are read-only there: disable the agent instead. A panel save rewrites a file only when its parsed definition actually changed, and keeps a `.bak.<n>` copy before overwriting.
 - `enable_mcp` is runtime config for `llm` agents (default off; panel toggle under Capabilities; ignored and never persisted for `cli` / `cloud`). When on, the agent receives the tools of every **enabled** MCP server in `mcp_servers.json`, using the same `mcp::adapt_tool_for_llm` adapter as the main agent — identical `mcp_<server-hash>_<name>` function names and `[MCP: server]` descriptions.
 - Each **task** owns an `mcp::AgentMcpSession` with its own stdio process pool. Agent processes never enter `AppState.mcp_children` (the main agent's warmup pool), so the main chat and every parallel task are isolated. SSE / HTTP / Streamable HTTP servers have no long-lived process.
 - `run_sub_agent_inner` creates the session, runs `run_llm_agent_body`, and calls `AgentMcpSession::shutdown` on every return path (success, error, max iterations, Stop); `Drop` kills anything left on unwind. Every child is also tracked by `process_guard`, so app exit kills it. MCP logs from an agent are prefixed `[agent:<name>]`.
 - MCP tools must be advertised before the agent's first request (`tools/list`), so enabling MCP spawns every enabled stdio server at task start. A server whose `tools/list` fails is logged and skipped; it does not block the task.
-- Legacy inline `llm` prompts (old `sub_agents.json` or old profiles) are migrated to `agents/custom/<slug>.md` on the first resolved load. `load_agents_config` reads the raw config; `load_resolved_agents` merges the markdown definitions and must be used by anything that runs or lists agents.
+- Legacy inline `llm` prompts (old `sub_agents.json` or old profiles) are migrated when configured agents are resolved and during Refresh. `load_agents_config` reads the raw config; `load_configured_agents` resolves only the files referenced by configured entries (no directory scan) and is what orchestration/chat use; `load_sub_agent_list` adds the manifest's virtual agents for the panel.
 
 Everything that belongs to the *current workspace* lives in a hidden `.data` directory inside it (see `src-tauri/src/workspace.rs`):
 

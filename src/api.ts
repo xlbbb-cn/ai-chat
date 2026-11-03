@@ -512,6 +512,15 @@ export async function listSubAgents(): Promise<SubAgent[]> {
   return invoke("list_sub_agents");
 }
 
+/**
+ * Re-scan the agents/ markdown tree, replace `agents/index.yaml`, and return
+ * the merged roster. The Sub Agents panel's Refresh button is the only
+ * discovery trigger.
+ */
+export async function refreshSubAgentIndex(): Promise<SubAgent[]> {
+  return invoke("refresh_agent_index");
+}
+
 export async function saveSubAgent(agent: SubAgent): Promise<SubAgent> {
   return invoke("save_sub_agent", { agent });
 }

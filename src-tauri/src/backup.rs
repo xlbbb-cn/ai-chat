@@ -462,7 +462,7 @@ pub(crate) fn import_profile(app: &AppHandle, profile_path: &Path) -> Result<(),
 
     // Fold legacy inline prompts into `agents/custom/` and discover any
     // definitions that are new to this machine.
-    let _ = agents::load_resolved_agents(&state.agents_config_path);
+    let _ = agents::load_configured_agents(&state.agents_config_path);
 
     let _ = app.emit(PROFILE_RESTORED_EVENT, ());
     state.logger.lock().unwrap().log(
