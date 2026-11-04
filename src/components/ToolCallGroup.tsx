@@ -146,8 +146,22 @@ export function ToolCallGroup({ message, onConfirm, onCancelBackground }: Props)
               <span className="tool-call-entry-icon"><StatusIcon status={entry.status} /></span>
               <span className="tool-call-entry-name">{entry.agent_name}</span>
               <span className="tool-call-entry-desc">{entry.description}</span>
-              {entry.summary && (
-                <span className="tool-call-entry-summary">{entry.summary}</span>
+              {(entry.cwd || entry.summary) && (
+                <span className="tool-call-entry-summary">
+                  {entry.cwd ? `in ${entry.cwd}` : ""}
+                  {entry.cwd && entry.summary ? " · " : ""}
+                  {entry.summary ?? ""}
+                </span>
+              )}
+              {entry.help && (
+                <span className={`tool-call-entry-help tool-call-entry-help--${entry.help.status}`}>
+                  {entry.help.status === "error"
+                    ? `${t("toolGroup.mainAgentHelpFailed")}: ${entry.help.error ?? ""}`
+                    : `${t("toolGroup.mainAgentHelp")}: ${entry.help.request}`}
+                  {entry.help.status === "done" && entry.help.answer_chars != null
+                    ? ` ${t("toolGroup.mainAgentHelpChars", { count: entry.help.answer_chars })}`
+                    : ""}
+                </span>
               )}
               {entry.error && (
                 <span className="tool-call-entry-error">{entry.error}</span>

@@ -554,6 +554,36 @@ pub fn get_skills_status(state: State<'_, AppState>) -> SkillsStatus {
     status
 }
 
+/// Skills enabled for this workspace, for contexts that cannot call the
+/// `get_skills_status` command (e.g. the sub-agent "main agent help" helper).
+///
+/// Status entries are keyed by the frontmatter `name` (see
+/// `refresh_skill_status`), so the file is parsed before the opt-in check.
+pub fn enabled_skills(workspace_dir: &Path) -> Vec<Skill> {
+    let status = load_status_file(&crate::workspace::skills_status_path(workspace_dir));
+    let skills_root = crate::workspace::skills_root(workspace_dir);
+    let mut skills = Vec::new();
+
+    for (_folder, skill_file) in scan_skill_dirs(&skills_root) {
+        let Ok(content) = fs::read_to_string(&skill_file) else {
+            continue;
+        };
+        let Ok(skill) = parse_skill_md(&content) else {
+            continue;
+        };
+        let enabled = status
+            .skills
+            .get(&skill.name)
+            .map(|entry| entry.enabled)
+            .unwrap_or(false);
+        if enabled {
+            skills.push(skill);
+        }
+    }
+
+    skills
+}
+
 /// Persist the workspace skill status (enablement + metadata).
 ///
 /// The stored file is the merge *base*: incoming entries are added/updated,
@@ -877,6 +907,39 @@ mod tests {
         // Unknown names still fail.
         assert!(resolve_skill_by_name(&root.0, "nope").is_err());
         assert!(resolve_skill_by_name(&root.0, "").is_err());
+    }
+
+    /// `enabled_skills` is the non-command entry point used by the sub-agent
+    /// main-agent helper: only skills switched on in the workspace status file
+    /// are returned, keyed by the frontmatter name.
+    #[test]
+    fn enabled_skills_filters_by_workspace_status() {
+        let workspace = TempSkillsRoot::new("enabled-skills");
+        let skills_root = crate::workspace::skills_root(&workspace.0);
+        fs::create_dir_all(&skills_root).unwrap();
+        write_skill(&skills_root, "alpha-folder", "alpha", "skill.md");
+        write_skill(&skills_root, "beta-folder", "beta", "skill.md");
+
+        let mut status = SkillsStatus::default();
+        status.skills.insert(
+            "alpha".to_string(),
+            SkillStatusEntry {
+                enabled: true,
+                ..Default::default()
+            },
+        );
+        status.skills.insert(
+            "beta".to_string(),
+            SkillStatusEntry {
+                enabled: false,
+                ..Default::default()
+            },
+        );
+        write_status_file(&crate::workspace::skills_status_path(&workspace.0), &status).unwrap();
+
+        let enabled = enabled_skills(&workspace.0);
+        assert_eq!(enabled.len(), 1);
+        assert_eq!(enabled[0].name, "alpha");
     }
 
     /// The reported bug: the panel toggles/status use the frontmatter `name`

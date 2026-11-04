@@ -28,6 +28,24 @@ export interface ToolCallEntry {
    * `background-task-state` events update the same row.
    */
   background?: boolean;
+  /**
+   * Workspace-relative directory the sub-agent was told to work in
+   * (`agent-task-start`). Absent when it ran in the workspace root.
+   */
+  cwd?: string;
+  /**
+   * Live `ask_main_agent` exchange for a sub-agent task. `request` is the
+   * sub-agent's question; `answer_chars` is the size of the material returned.
+   */
+  help?: ToolCallHelp;
+}
+
+/** One sub-agent → main-agent help exchange, mirrored from `agent-help-*`. */
+export interface ToolCallHelp {
+  request: string;
+  status: "running" | "done" | "error";
+  answer_chars?: number;
+  error?: string;
 }
 
 /**
@@ -292,6 +310,12 @@ export interface AppConfig {
    * are delivered or the tasks are cancelled. Defaults to on.
    */
   background_tools?: boolean;
+  /**
+   * Allow `llm` sub-agents to call `ask_main_agent` and have the main agent
+   * (main model, tools, skills, MCP and conversation history) collect material
+   * for them. Defaults to on.
+   */
+  sub_agent_main_help?: boolean;
   kg_engine?: string;
   neo4j_uri?: string;
   neo4j_user?: string;
@@ -550,8 +574,6 @@ export interface CliAgentSettings {
   env: KeyValue[];
   /** Run timeout in seconds; 0 = no timeout. */
   default_timeout_seconds: number;
-  /** Workspace-relative directory to run in (empty = workspace root). */
-  cwd: string;
 }
 
 /**
@@ -622,6 +644,25 @@ export interface AgentTaskEvent {
   error?: string;
   /** Why a planned task never ran (unknown agent, unmet dependency, stop). */
   reason?: string;
+  /**
+   * Workspace-relative directory the task was told to work in. `null` (or
+   * absent) means the workspace root.
+   */
+  cwd?: string | null;
+}
+
+/** `agent-help-start` / `agent-help-done` / `agent-help-error` payload. */
+export interface AgentHelpEvent {
+  task_id: string;
+  mission_id?: string;
+  agent_id: string;
+  agent_name?: string;
+  request?: string;
+  cwd?: string | null;
+  answer_chars?: number;
+  tokens?: number;
+  tool_calls?: number;
+  error?: string;
 }
 
 /**
@@ -652,6 +693,8 @@ export interface AgentMissionSnapshot {
   mission_accomplished: boolean;
   episodic_summary: string;
   final_report: string;
+  /** One line per `ask_main_agent` exchange, newest last. */
+  help_notes?: string;
   active_tasks: AgentMissionTask[];
   active_task_count: number;
   created_at: string;

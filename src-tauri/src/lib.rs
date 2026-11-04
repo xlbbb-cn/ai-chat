@@ -379,6 +379,12 @@ pub struct AppConfig {
     /// until a started task delivers its result or is cancelled.
     #[serde(default = "update::default_true")]
     pub background_tools: bool,
+    /// Allow `llm` sub-agents to call `ask_main_agent` and have the main agent
+    /// (main model, tools, skills, MCP and conversation history) collect
+    /// material for them. Disabled means the tool is neither advertised nor
+    /// executable.
+    #[serde(default = "update::default_true")]
+    pub sub_agent_main_help: bool,
     pub kg_engine: Option<String>,
     pub neo4j_uri: Option<String>,
     pub neo4j_user: Option<String>,
@@ -440,6 +446,7 @@ impl Default for AppConfig {
             selected_tools: vec![],
             self_evolution_mode: false,
             background_tools: true,
+            sub_agent_main_help: true,
             kg_engine: None,
             neo4j_uri: Some("bolt://localhost:7687".to_string()),
             neo4j_user: Some("neo4j".to_string()),

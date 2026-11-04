@@ -1058,7 +1058,6 @@ mod tests {
             model_args: vec!["--model".to_string(), "{model}".to_string()],
             env: Vec::new(),
             default_timeout_seconds: 600,
-            cwd: String::new(),
         }
     }
 

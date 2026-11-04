@@ -1737,6 +1737,7 @@ pub(super) async fn handle_memory_tool(
                 session_id,
                 active_skill_dirs,
                 None,
+                None,
             ))
             .await;
             sections.push(format!("### {}\n{}", sub_scope, result));

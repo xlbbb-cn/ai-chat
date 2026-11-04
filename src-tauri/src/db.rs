@@ -92,11 +92,18 @@ pub fn open_db(path: &Path) -> rusqlite::Result<Connection> {
             mission_accomplished INTEGER NOT NULL DEFAULT 0, \
             episodic_summary TEXT NOT NULL DEFAULT '', \
             final_report TEXT NOT NULL DEFAULT '', \
+            help_notes TEXT NOT NULL DEFAULT '', \
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP, \
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP\
         )",
         [],
     )?;
+    // Main-agent help log (one line per `ask_main_agent` exchange). Added
+    // lazily so databases created before the feature upgrade in place.
+    let _ = db.execute(
+        "ALTER TABLE agent_missions ADD COLUMN help_notes TEXT NOT NULL DEFAULT ''",
+        [],
+    );
     db.execute(
         "CREATE TABLE IF NOT EXISTS agent_tasks (\
             task_id TEXT PRIMARY KEY, \
@@ -266,23 +273,49 @@ pub(crate) fn query_session_messages(
     )?;
 
     let messages = stmt
-        .query_map(rusqlite::params![session_id], |row| {
-            Ok(HistoryRecord {
-                id: row.get(0)?,
-                session_id: row.get(1)?,
-                role: row.get(2)?,
-                content: row.get(3)?,
-                timestamp: row.get(4)?,
-                tool_calls: row.get(5)?,
-                reasoning_content: row.get(6)?,
-                attachments: row.get(7)?,
-                injections: row.get(8)?,
-            })
-        })?
+        .query_map(rusqlite::params![session_id], history_record_from_row)?
         .filter_map(Result::ok)
         .collect();
 
     Ok(messages)
+}
+
+/// Load the most recent `limit` messages of a session, oldest first. Used by
+/// the sub-agent main-agent helper, which only needs a bounded transcript and
+/// must not read a multi-thousand-message history just to drop it again.
+pub(crate) fn query_recent_session_messages(
+    conn: &Connection,
+    session_id: &str,
+    limit: usize,
+) -> rusqlite::Result<Vec<HistoryRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, session_id, role, content, COALESCE(timestamp, ''), tool_calls, reasoning_content, attachments, injections \
+         FROM history WHERE session_id = ?1 ORDER BY id DESC LIMIT ?2",
+    )?;
+
+    let mut messages: Vec<HistoryRecord> = stmt
+        .query_map(
+            rusqlite::params![session_id, limit as i64],
+            history_record_from_row,
+        )?
+        .filter_map(Result::ok)
+        .collect();
+    messages.reverse();
+    Ok(messages)
+}
+
+fn history_record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryRecord> {
+    Ok(HistoryRecord {
+        id: row.get(0)?,
+        session_id: row.get(1)?,
+        role: row.get(2)?,
+        content: row.get(3)?,
+        timestamp: row.get(4)?,
+        tool_calls: row.get(5)?,
+        reasoning_content: row.get(6)?,
+        attachments: row.get(7)?,
+        injections: row.get(8)?,
+    })
 }
 
 /// Lightweight session list for the history sidebar. `keyword` filters by

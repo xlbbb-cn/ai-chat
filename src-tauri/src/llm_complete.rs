@@ -746,6 +746,7 @@ fn start_background_tool_call(
                 Some(&session),
                 &dirs,
                 Some(&cancel),
+                None,
             )
             .await
         },
@@ -2328,8 +2329,10 @@ async fn run_chat_turn(
         }
         let mut agents_sys_msg = format!(
         "You have access to the following agents. To delegate a task to one of them, use the `call_subagent` tool with the corresponding `agent_id` and a self-contained `task_description` (they never see this conversation).\n\
-        Agent types: `llm` agents run an autonomous tool-using loop inside the app; `cli` agents are headless coding CLIs installed on this machine (they edit files in the workspace directly); `cloud` agents run the task on a remote endpoint. Prefer `llm` for reasoning/reporting, `cli`/`cloud` for large end-to-end coding work. The first run of a `cli`/`cloud` agent may require the user's approval.\n\n\
+        Agent types: `llm` agents run an autonomous tool-using loop inside the app; `cli` agents are headless coding CLIs installed on this machine (they edit files in the workspace directly); `cloud` agents run the task on a remote endpoint. Prefer `llm` for reasoning/reporting, `cli`/`cloud` for large end-to-end coding work. The first run of a `cli`/`cloud` agent may require the user's approval.\n\
+        Workspace root: {} — pass its workspace-relative path as `cwd` (for example \"./apps/web\") whenever the task targets a specific project or subfolder, so the agent starts there. Omit `cwd` for the workspace root.\n\n\
         Available agents:\n{}",
+        workspace_dir_for_roots.display(),
         available_agents_info
     );
 
@@ -2596,23 +2599,10 @@ async fn run_chat_turn(
     }
 
     // `use_skill` is advertised when the user has at least one enabled skill —
-// and always in self-evolution mode, where the assistant may have just written
-// a new skill that is not enabled yet but must still be loadable.
-if !skill_ids.is_empty() || skill_evolution_root.is_some() {
-        tools_list.push(json!({
-            "type": "function",
-            "function": {
-                "name": "use_skill",
-                "description": "Load detailed instructions for a specific skill. Call this only when the current request clearly requires that skill's domain knowledge or files. Do not load skills speculatively.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "skill_name": { "type": "string", "description": "The name of the skill to load details for" }
-                    },
-                    "required": ["skill_name"]
-                }
-            }
-        }));
+    // and always in self-evolution mode, where the assistant may have just written
+    // a new skill that is not enabled yet but must still be loadable.
+    if !skill_ids.is_empty() || skill_evolution_root.is_some() {
+        tools_list.push(tools::get_use_skill_tool());
     }
 
     if !enabled_agents.is_empty() {
@@ -2635,6 +2625,10 @@ if !skill_ids.is_empty() || skill_evolution_root.is_some() {
                         "context": {
                             "type": "string",
                             "description": "Optional extra context (file paths, findings, constraints) appended to the task description"
+                        },
+                        "cwd": {
+                            "type": "string",
+                            "description": "Working directory for this task, workspace-relative or absolute inside the workspace (for example \"./apps/web\"). The agent starts there, so pass it whenever the work targets a specific project or subfolder. Omit it to use the workspace root."
                         }
                     },
                     "required": ["agent_id", "task_description"]
@@ -3206,6 +3200,7 @@ if !skill_ids.is_empty() || skill_evolution_root.is_some() {
                         agent_id: agent_id.to_string(),
                         description: task_desc.to_string(),
                         context: task_context.to_string(),
+                        cwd: agents::normalize_task_cwd(args_json["cwd"].as_str()),
                         dependencies: vec![],
                     };
                     let workspace_dir = state.workspace_dir.lock().unwrap().clone();
@@ -3359,6 +3354,7 @@ if !skill_ids.is_empty() || skill_evolution_root.is_some() {
                     None,
                     Some(&session_id),
                     &active_skill_dirs,
+                    None,
                     None,
                 )
                 .await;

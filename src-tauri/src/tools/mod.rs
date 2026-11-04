@@ -276,7 +276,7 @@ pub fn get_all_tools(
             "type": "function",
             "function": {
                 "name": "run_shell",
-                "description": "Execute or manage a shell script with patent-compliant risk assessment. L5/L6 (safe/read-only) scripts execute directly. L0-L4 scripts require user confirmation with risk score display. Syntax errors are rejected with detailed error report.\n\nThe script has full freedom: it starts in the workspace but may change directory anywhere and run anything, and every script is audited by the risk engine before it runs. Use it when a PATH-resolved program is not enough (absolute paths, pipes, loops, redirections).\n\nUse `run_type: \"direct\"` (default) to run a script to completion and return its output. Use `run_type: \"serve\"` to start a long-lived background process (for example an HTTP service or a file watcher) and return immediately with a serve id; list running serve processes with `run_type: \"serve\", action: \"list\"`, and terminate one (or all, with `serve_id: \"all\"`) with `action: \"stop\"`. IMPORTANT: serve processes live only for the current chat turn — they are stopped (whole process tree, exit verified) as soon as this turn ends, and at app exit.",
+                "description": "Execute or manage a shell script with patent-compliant risk assessment. L5/L6 (safe/read-only) scripts execute directly. L0-L4 scripts require user confirmation with risk score display. Syntax errors are rejected with detailed error report.\n\nThe script has full freedom: it starts in the working directory (the workspace root for the main chat, the task's directory inside a sub-agent mission) but may change directory anywhere and run anything, and every script is audited by the risk engine before it runs. Use it when a PATH-resolved program is not enough (absolute paths, pipes, loops, redirections).\n\nUse `run_type: \"direct\"` (default) to run a script to completion and return its output. Use `run_type: \"serve\"` to start a long-lived background process (for example an HTTP service or a file watcher) and return immediately with a serve id; list running serve processes with `run_type: \"serve\", action: \"list\"`, and terminate one (or all, with `serve_id: \"all\"`) with `action: \"stop\"`. IMPORTANT: serve processes live only for the current chat turn — they are stopped (whole process tree, exit verified) as soon as this turn ends, and at app exit.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -759,6 +759,54 @@ pub fn get_skill_read_tool() -> Value {
                     }
                 },
                 "required": ["action", "skill_name"]
+            }
+        }
+    })
+}
+
+/// Build the `use_skill` tool definition. Advertised to the main chat (when the
+/// session has enabled skills) and to the main-agent helper, so both load skill
+/// bodies with the same protocol.
+pub fn get_use_skill_tool() -> Value {
+    json!({
+        "type": "function",
+        "function": {
+            "name": "use_skill",
+            "description": "Load detailed instructions for a specific skill. Call this only when the current request clearly requires that skill's domain knowledge or files. Do not load skills speculatively.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "skill_name": { "type": "string", "description": "The name of the skill to load details for" }
+                },
+                "required": ["skill_name"]
+            }
+        }
+    })
+}
+
+/// Build the `ask_main_agent` tool definition. Only `llm` sub-agents receive
+/// this tool (and only while `config.sub_agent_main_help` is on): it hands a
+/// self-contained material request to a helper run that has the main model,
+/// conversation history, skills, MCP servers and the full main tool set.
+pub fn get_main_agent_help_tool() -> Value {
+    json!({
+        "type": "function",
+        "function": {
+            "name": "ask_main_agent",
+            "description": "Ask the main agent to collect material you cannot obtain yourself (conversation context, skills, MCP servers, extra tools). The main agent sees the real conversation history and returns concrete material; you continue your task with the result. Use it for missing context or research, not for work you can already do with your own tools.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "request": {
+                        "type": "string",
+                        "description": "Exactly what you need the main agent to find or clarify. Be specific (paths, names, questions)."
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": "Optional: why you need it and what you already tried, so the main agent does not repeat your work."
+                    }
+                },
+                "required": ["request"]
             }
         }
     })
@@ -2221,6 +2269,10 @@ pub async fn execute_tool(
     // Cancel flag of the background task this call belongs to (`None` for a
     // normal foreground call). Only the long-running tools observe it.
     cancel: Option<&std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    // Working directory of the caller when it differs from the workspace root
+    // (a sub-agent mission's task directory). Only process launches use it —
+    // `file_actions` / memory / todos stay rooted at `workspace_dir`.
+    working_dir: Option<&Path>,
 ) -> String {
     let args: Value = serde_json::from_str(args_str).unwrap_or_default();
     let tool_output = match name {
@@ -2640,7 +2692,9 @@ pub async fn execute_tool(
         }
         "run_cmd" => {
             let command = args["command"].as_str().unwrap_or("").to_string();
-            let command_cwd = workspace_dir.clone();
+            let command_cwd = working_dir
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| workspace_dir.clone());
 
             if command.trim().is_empty() {
                 return "Error: run_cmd requires a non-empty 'command' argument.".to_string();
@@ -2851,7 +2905,9 @@ pub async fn execute_tool(
                 .unwrap_or("start")
                 .trim()
                 .to_ascii_lowercase();
-            let command_cwd = workspace_dir.clone();
+            let command_cwd = working_dir
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| workspace_dir.clone());
 
             if !matches!(run_type.as_str(), "direct" | "serve") {
                 return format!(
@@ -2963,7 +3019,8 @@ pub async fn execute_tool(
             }
 
             let risk_level = score_to_risk_level(report.risk_score);
-            let scoped_code = build_workspace_scoped_shell_code(&shell_type, &workspace_dir, &code);
+            let scoped_code =
+                build_workspace_scoped_shell_code(&shell_type, &command_cwd, &code);
 
             // ── Emit risk assessment event for frontend display ───────────────
             let _ = app.emit(

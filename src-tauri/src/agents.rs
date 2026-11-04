@@ -162,9 +162,6 @@ pub struct CliAgentSettings {
     /// Run timeout in seconds. `0` means no timeout.
     #[serde(default = "default_cli_timeout_seconds")]
     pub default_timeout_seconds: u32,
-    /// Optional workspace-relative directory to run in (default: workspace root).
-    #[serde(default)]
-    pub cwd: String,
 }
 
 impl Default for CliAgentSettings {
@@ -176,7 +173,6 @@ impl Default for CliAgentSettings {
             model_args: Vec::new(),
             env: Vec::new(),
             default_timeout_seconds: default_cli_timeout_seconds(),
-            cwd: String::new(),
         }
     }
 }
@@ -389,7 +385,6 @@ pub fn normalize_config(config: &mut AgentsConfig) {
                 model_args: entry.model_args,
                 env: entry.env,
                 default_timeout_seconds: entry.default_timeout_seconds,
-                cwd: String::new(),
             },
             cloud: CloudAgentSettings::default(),
             require_approval: true,
@@ -508,6 +503,12 @@ pub struct Task {
     pub description: String,
     #[serde(default)]
     pub context: String,
+    /// Workspace-relative directory the agent must start in. `None` (or an
+    /// empty/"." value) means the workspace root. Supplied per task by the
+    /// planner or by the main agent's `call_subagent` call — never by the
+    /// agent definition, so one agent can work on different projects.
+    #[serde(default)]
+    pub cwd: Option<String>,
     #[serde(default)]
     pub dependencies: Vec<String>,
 }
@@ -555,6 +556,23 @@ const AGENT_SUMMARY_MAX_TOKENS: u32 = 768;
 const AGENT_DEFAULT_CONTEXT_WINDOW: usize = 131_072;
 const AGENT_CONTINUE_PROMPT: &str = "Continue autonomously. Re-read the injected mission snapshot and active task list. Use the external task tools to add, update, or complete tasks, and only call mark_mission_accomplished when the mission is truly done.";
 
+// ─── Main-agent help (`ask_main_agent`) ──────────────────────────────────────
+/// Tool rounds the helper may run before it must answer.
+const MAIN_HELPER_MAX_ITERATIONS: u32 = 8;
+/// Wall-clock budget for one `ask_main_agent` exchange.
+const MAIN_HELPER_TIMEOUT_SECS: u64 = 180;
+/// How many times one sub-agent task may ask the main agent.
+const MAIN_HELPER_MAX_CALLS: u32 = 3;
+/// Session history handed to the helper: entries, per-entry bytes, total bytes.
+const MAIN_HELPER_HISTORY_MESSAGES: usize = 12;
+const MAIN_HELPER_HISTORY_MESSAGE_BYTES: usize = 2_000;
+const MAIN_HELPER_HISTORY_BUDGET_BYTES: usize = 12_000;
+/// Hard cap for the material returned to the sub-agent.
+const MAIN_HELPER_ANSWER_MAX_CHARS: usize = 20_000;
+/// Cap for one tool result inside the helper loop, so a huge file read or MCP
+/// response cannot blow up the helper's context before it answers.
+const MAIN_HELPER_TOOL_RESULT_MAX_BYTES: usize = 32_000;
+
 #[derive(Debug, Clone, Serialize)]
 pub struct MissionTaskRecord {
     pub task_id: String,
@@ -575,6 +593,8 @@ pub struct MissionStateView {
     pub mission_accomplished: bool,
     pub episodic_summary: String,
     pub final_report: String,
+    /// One line per `ask_main_agent` exchange, newest last.
+    pub help_notes: String,
     pub active_tasks: Vec<MissionTaskRecord>,
     pub active_task_count: usize,
     pub created_at: String,
@@ -624,6 +644,9 @@ pub fn initialize_mission_state(
     task: &Task,
 ) -> Result<(), String> {
     let mission_id = mission_id_for_task(task);
+    // Planner task ids (`t1`, `t2`, …) repeat across turns in one session, so
+    // the upsert must reset the previous run's state: otherwise a new task
+    // would start "accomplished" with the old final report and help log.
     db.execute(
         "INSERT INTO agent_missions (mission_id, session_id, agent_id, root_task_description, root_task_context) \
          VALUES (?1, ?2, ?3, ?4, ?5) \
@@ -632,6 +655,11 @@ pub fn initialize_mission_state(
            agent_id = excluded.agent_id, \
            root_task_description = excluded.root_task_description, \
            root_task_context = excluded.root_task_context, \
+           status = 'running', \
+           mission_accomplished = 0, \
+           episodic_summary = '', \
+           final_report = '', \
+           help_notes = '', \
            updated_at = CURRENT_TIMESTAMP",
         rusqlite::params![mission_id, session_id, agent.id, task.description, task.context],
     )
@@ -1498,6 +1526,7 @@ pub fn list_agent_missions(
         mission_accomplished: bool,
         episodic_summary: String,
         final_report: String,
+        help_notes: String,
         created_at: String,
         updated_at: String,
     }
@@ -1515,6 +1544,7 @@ pub fn list_agent_missions(
                 "SELECT mission_id, COALESCE(session_id, ''), agent_id, \
                         root_task_description, root_task_context, status, \
                         mission_accomplished, episodic_summary, final_report, \
+                        COALESCE(help_notes, ''), \
                         COALESCE(created_at, ''), COALESCE(updated_at, '') \
                  FROM agent_missions \
                  WHERE session_id = ?1 \
@@ -1534,8 +1564,9 @@ pub fn list_agent_missions(
                     mission_accomplished: row.get::<_, i64>(6)? != 0,
                     episodic_summary: row.get(7)?,
                     final_report: row.get(8)?,
-                    created_at: row.get(9)?,
-                    updated_at: row.get(10)?,
+                    help_notes: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -1562,6 +1593,7 @@ pub fn list_agent_missions(
                 mission_accomplished: row.mission_accomplished,
                 episodic_summary: row.episodic_summary,
                 final_report: row.final_report,
+                help_notes: row.help_notes,
                 active_task_count: active_tasks.len(),
                 active_tasks,
                 created_at: row.created_at,
@@ -1870,6 +1902,8 @@ fn parse_task_plan(raw: &str, roster: &[String]) -> Result<(TaskPlan, Vec<String
         task.id = unique;
         task.description = task.description.trim().to_string();
         task.context = task.context.trim().to_string();
+        // The planner may write "", "." or "./" for "the workspace root".
+        task.cwd = normalize_task_cwd(task.cwd.as_deref());
         tasks.push(task);
     }
 
@@ -2038,6 +2072,9 @@ pub async fn orchestrate(
     if cancelled.load(Ordering::SeqCst) {
         return Err("stopped by the user".to_string());
     }
+    // The planner needs the workspace root to name task directories: the main
+    // agent decides *where* each delegated task runs, not the agent definition.
+    let workspace_dir = state.workspace_dir.lock().unwrap().clone();
     let plan = plan_tasks(
         app,
         &client,
@@ -2047,6 +2084,7 @@ pub async fn orchestrate(
         &model,
         messages,
         &working_agents,
+        &workspace_dir,
     )
     .await?;
 
@@ -2060,7 +2098,6 @@ pub async fn orchestrate(
 
     // Step 3: Execute
     let use_parallel = orchestration.mode != "sequential" && plan.execution_mode != "sequential";
-    let workspace_dir = state.workspace_dir.lock().unwrap().clone();
     let skill_access_root = crate::skills::self_evolution_skill_root(
         Some(&workspace_dir),
         config.self_evolution_mode,
@@ -2339,6 +2376,7 @@ async fn plan_tasks(
     model: &str,
     messages: &[crate::llm_complete::ChatMessage],
     agents: &[SubAgent],
+    workspace_dir: &Path,
 ) -> Result<TaskPlan, String> {
     let agents_desc = agents
         .iter()
@@ -2380,15 +2418,21 @@ async fn plan_tasks(
     let system = format!(
         "You are a task planning expert. Decompose the user request into tasks for sub-agents.\n\
         Available agents:\n{agents_desc}\n\n\
+        Workspace root: {workspace_root}\n\
+        Every task may name one working directory with `cwd` (workspace-relative, for example \
+        \"apps/web\"). The sub-agent starts in that directory, so use it whenever the request \
+        names or clearly targets a specific project/folder; omit it (or use \".\") for the \
+        workspace root. Never invent a directory that the conversation does not mention.\n\n\
         Return ONLY valid JSON — no markdown, no extra text:\n\
         {{\"tasks\":[{{\"id\":\"t1\",\"agent_id\":\"<id>\",\"description\":\"...\",\
-          \"context\":\"...\",\"dependencies\":[]}}],\
+          \"context\":\"...\",\"cwd\":\"<workspace-relative dir, omit for root>\",\"dependencies\":[]}}],\
           \"execution_mode\":\"parallel\"}}\n\
         Rules:\n\
         - execution_mode: \"parallel\" when tasks are independent, \"sequential\" when order matters\n\
         - dependencies: list of task ids that must finish before this one\n\
         - Every agent_id must be exactly one of: {roster}\n\
-        - Keep descriptions brief and actionable"
+        - Keep descriptions brief and actionable",
+        workspace_root = workspace_dir.display(),
     );
     let user_prompt = format!("Conversation:\n{conversation}\n\nCreate a task plan.");
     let roster_ids: Vec<String> = agents.iter().map(|a| a.id.clone()).collect();
@@ -2857,14 +2901,66 @@ pub async fn run_sub_agent(
 ) -> TaskResult {
     let mission_id = mission_id_for_task(task).to_string();
     let agent_type = normalize_agent_type(&agent.agent_type);
+
+    // Resolve the task's working directory once, before anything starts. It is
+    // supplied per delegation (planner / `call_subagent`) and never by the
+    // agent definition, so one agent can work on different projects. The path
+    // is sandboxed to the workspace and created when it does not exist yet; a
+    // bad path fails the task with a message the caller can act on instead of
+    // silently running somewhere else.
+    let task_cwd = match resolve_task_cwd(task.cwd.as_deref(), &workspace_dir) {
+        Ok(cwd) => cwd,
+        Err(err) => {
+            let _ = app.emit(
+                "agent-task-start",
+                json!({
+                    "task_id": task.id,
+                    "agent_id": agent.id,
+                    "agent_name": agent.name,
+                    "description": task.description,
+                    "cwd": task.cwd,
+                }),
+            );
+            let _ = app.emit(
+                "agent-task-error",
+                json!({ "task_id": task.id, "agent_id": agent.id, "error": err }),
+            );
+            return TaskResult {
+                task_id: task.id.clone(),
+                agent_id: agent.id.clone(),
+                agent_name: agent.name.clone(),
+                status: "error".to_string(),
+                content: format!("Error: {err}"),
+                tool_calls_count: 0,
+                tokens_used: 0,
+            };
+        }
+    };
+
     let result = match agent_type.as_str() {
         AGENT_TYPE_CLI => {
-            run_external_agent(app, agent, task, session_id, workspace_dir, ExternalBackend::Cli, cancelled)
-                .await
+            run_external_agent(
+                app,
+                agent,
+                task,
+                session_id,
+                task_cwd,
+                ExternalBackend::Cli,
+                cancelled,
+            )
+            .await
         }
         AGENT_TYPE_CLOUD => {
-            run_external_agent(app, agent, task, session_id, workspace_dir, ExternalBackend::Cloud, cancelled)
-                .await
+            run_external_agent(
+                app,
+                agent,
+                task,
+                session_id,
+                task_cwd,
+                ExternalBackend::Cloud,
+                cancelled,
+            )
+            .await
         }
         _ => {
             run_sub_agent_inner(
@@ -2876,6 +2972,7 @@ pub async fn run_sub_agent(
                 agent,
                 task,
                 workspace_dir,
+                task_cwd,
                 skill_access_root,
                 &cancelled,
             )
@@ -2952,7 +3049,7 @@ async fn run_external_agent(
     agent: &SubAgent,
     task: &Task,
     session_id: &str,
-    workspace_dir: PathBuf,
+    task_cwd: PathBuf,
     backend: ExternalBackend,
     cancelled: Arc<AtomicBool>,
 ) -> TaskResult {
@@ -2964,6 +3061,7 @@ async fn run_external_agent(
             "agent_id": agent.id,
             "agent_name": agent.name,
             "description": task.description,
+            "cwd": task.cwd,
         }),
     );
 
@@ -3012,30 +3110,12 @@ async fn run_external_agent(
 
     let prompt = build_external_prompt(agent, task);
 
-    // CLI agents run in the resolved working directory. Each run starts a
+    // CLI agents run in the task's working directory. Each run starts a
     // fresh CLI session; no session state is carried across agent calls.
     let cli_run = match backend {
-        ExternalBackend::Cli => {
-            let cwd = match resolve_agent_cwd(agent, &workspace_dir) {
-                Ok(cwd) => cwd,
-                Err(err) => {
-                    let _ = app.emit(
-                        "agent-task-error",
-                        json!({ "task_id": task.id, "agent_id": agent.id, "error": err }),
-                    );
-                    return TaskResult {
-                        task_id: task.id.clone(),
-                        agent_id: agent.id.clone(),
-                        agent_name: agent.name.clone(),
-                        status: "error".to_string(),
-                        content: format!("Error: {err}"),
-                        tool_calls_count: 0,
-                        tokens_used: 0,
-                    };
-                }
-            };
-            Some(CliRunContext { cwd })
-        }
+        ExternalBackend::Cli => Some(CliRunContext {
+            cwd: task_cwd.clone(),
+        }),
         ExternalBackend::Cloud => None,
     };
 
@@ -3076,7 +3156,7 @@ async fn run_external_agent(
             .map(|run| (run.status, run.output, run.summary))
             .map_err(|err| format!("CLI agent \"{}\" failed: {err}", agent.name))
         }
-        ExternalBackend::Cloud => cloud::run(app, agent, &task.id, &prompt, &workspace_dir, cancelled)
+        ExternalBackend::Cloud => cloud::run(app, agent, &task.id, &prompt, &task_cwd, cancelled)
             .await
             .map(|run| ("success", run.result, run.summary))
             .map_err(|err| format!("Cloud agent \"{}\" failed: {err}", agent.name)),
@@ -3166,19 +3246,35 @@ fn build_external_prompt(agent: &SubAgent, task: &Task) -> String {
     prompt
 }
 
-/// Workspace-relative `cwd` configured on a CLI agent (defaults to the
-/// workspace root). The path is checked against the workspace sandbox.
-fn resolve_agent_cwd(agent: &SubAgent, workspace_dir: &Path) -> Result<PathBuf, String> {
-    let configured = agent.cli.cwd.trim();
-    if configured.is_empty() {
-        return Ok(workspace_dir.to_path_buf());
+/// Trims a task-level `cwd` and drops the "workspace root" spellings the
+/// planner may emit (`""`, `"."`, `"./"`, `".\\"`).
+pub(crate) fn normalize_task_cwd(cwd: Option<&str>) -> Option<String> {
+    let value = cwd?.trim();
+    let value = value.trim_end_matches(['/', '\\']);
+    if value.is_empty() || value == "." {
+        return None;
     }
-    let path = crate::tools::resolve_safe_path(workspace_dir, configured)?;
+    Some(value.to_string())
+}
+
+/// Resolves the task's workspace-relative working directory. An unset `cwd`
+/// means the workspace root; anything else is sandbox-checked with
+/// `resolve_safe_path` and created when it does not exist yet (a task may
+/// legitimately target a folder it is about to scaffold). This is the single
+/// source of truth for where a sub-agent starts — the agent definition never
+/// carries a directory of its own.
+fn resolve_task_cwd(cwd: Option<&str>, workspace_dir: &Path) -> Result<PathBuf, String> {
+    let Some(configured) = normalize_task_cwd(cwd) else {
+        return Ok(workspace_dir.to_path_buf());
+    };
+    let path = crate::tools::resolve_safe_path(workspace_dir, &configured)?;
     if !path.is_dir() {
-        return Err(format!(
-            "the agent's working directory '{}' does not exist",
-            path.display()
-        ));
+        std::fs::create_dir_all(&path).map_err(|err| {
+            format!(
+                "could not create the task's working directory '{}': {err}",
+                path.display()
+            )
+        })?;
     }
     Ok(path)
 }
@@ -3271,6 +3367,7 @@ async fn run_sub_agent_inner(
     agent: &SubAgent,
     task: &Task,
     workspace_dir: PathBuf,
+    task_cwd: PathBuf,
     skill_access_root: Option<PathBuf>,
     cancelled: &AtomicBool,
 ) -> TaskResult {
@@ -3288,6 +3385,7 @@ async fn run_sub_agent_inner(
         agent,
         task,
         workspace_dir,
+        task_cwd,
         skill_access_root,
         cancelled,
         &mut mcp_session,
@@ -3295,6 +3393,533 @@ async fn run_sub_agent_inner(
     .await;
     mcp_session.shutdown(&state);
     result
+}
+
+// ─── Main-agent help (`ask_main_agent`) ──────────────────────────────────────
+//
+// A sub-agent cannot ask the *live* main chat turn for help: `call_subagent`
+// awaits this whole function, so the main agent's loop is blocked. Instead the
+// request is answered by a self-contained helper run that has the main model,
+// the session history, the enabled skills, the main tool set and the enabled
+// MCP servers. From the sub-agent's point of view it is still an ordinary tool
+// call: the material comes back and the autonomous loop continues.
+
+struct MainHelperOutcome {
+    content: String,
+    tokens: u32,
+    tool_calls: u32,
+}
+
+/// Main-agent tools for the helper: the configured main selection minus
+/// `timer` (a chat-session tool that would resume a conversation later).
+fn main_helper_tool_ids(config: &AppConfig) -> Vec<String> {
+    config
+        .effective_tools()
+        .into_iter()
+        .filter(|tool| tool.as_str() != "timer")
+        .collect()
+}
+
+/// Compact transcript of the real conversation for the helper. Newest entries
+/// win when the budget is exhausted; tool-call rounds are skipped because only
+/// the user/assistant text is useful as context.
+fn build_main_helper_history(records: &[crate::db::HistoryRecord]) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    let mut used = 0usize;
+
+    for record in records.iter().rev() {
+        if lines.len() >= MAIN_HELPER_HISTORY_MESSAGES
+            || used >= MAIN_HELPER_HISTORY_BUDGET_BYTES
+        {
+            break;
+        }
+        let text = record.content.trim();
+        if text.is_empty() {
+            continue;
+        }
+        let text = preview_text(text, MAIN_HELPER_HISTORY_MESSAGE_BYTES);
+        let line = format!("[{}]: {}", record.role, text);
+        used += line.len();
+        lines.push(line);
+    }
+
+    lines.reverse();
+    lines.join("\n")
+}
+
+/// Keeps a single tool result within the helper's context budget.
+fn cap_helper_tool_result(result: String) -> String {
+    if result.len() <= MAIN_HELPER_TOOL_RESULT_MAX_BYTES {
+        return result;
+    }
+    let mut clipped = preview_text(&result, MAIN_HELPER_TOOL_RESULT_MAX_BYTES);
+    clipped.push_str("\n\n[truncated: tool output exceeded the helper limit]");
+    clipped
+}
+
+/// Appends one exchange to the mission's visible help log. Best effort: the
+/// helper must still answer when the database write fails.
+fn append_mission_help_note(app: &AppHandle, mission_id: &str, note: &str) {
+    let state = app.state::<AppState>();
+    let Ok(db) = state.db.lock() else {
+        return;
+    };
+    let stamp = chrono::Local::now().format("%H:%M:%S");
+    let line = format!("[{stamp}] {note}");
+    let _ = db.execute(
+        "UPDATE agent_missions SET help_notes = \
+         CASE WHEN help_notes = '' THEN ?2 ELSE help_notes || char(10) || ?2 END, \
+         updated_at = CURRENT_TIMESTAMP WHERE mission_id = ?1",
+        rusqlite::params![mission_id, line],
+    );
+}
+
+/// Loads every enabled MCP server into `session` and returns the OpenAI tool
+/// definitions plus the name → (server, actual tool) map. Shared by a task's own
+/// `enable_mcp` tools and its main-agent helper, so both reuse one process pool.
+async fn load_enabled_mcp_tools(
+    app: &AppHandle,
+    session: &mut mcp::AgentMcpSession,
+    owner: &str,
+) -> (
+    Vec<Value>,
+    std::collections::HashMap<String, (mcp::McpServer, String)>,
+) {
+    let state = app.state::<AppState>();
+    let mut tools_out: Vec<Value> = Vec::new();
+    let mut tool_map: std::collections::HashMap<String, (mcp::McpServer, String)> =
+        std::collections::HashMap::new();
+
+    let enabled_servers: Vec<mcp::McpServer> = mcp::load_servers(&state.mcp_servers_path)
+        .into_iter()
+        .filter(|server| server.enabled)
+        .collect();
+
+    for server in enabled_servers {
+        match mcp::get_server_tools_for_agent(&state, session, &server, owner).await {
+            Ok(server_tools) => {
+                for tool in server_tools {
+                    if let Some((fn_name, actual_name, openai_tool)) =
+                        mcp::adapt_tool_for_llm(&server, &tool, false)
+                    {
+                        tools_out.push(openai_tool);
+                        tool_map.insert(fn_name, (server.clone(), actual_name));
+                    }
+                }
+            }
+            Err(err) => {
+                if let Ok(logger) = state.logger.lock() {
+                    logger.log(
+                        "ERROR",
+                        &format!(
+                            "MCP server '{}' tools/list failed for {owner}: {err}",
+                            server.name
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
+    (tools_out, tool_map)
+}
+
+/// Answers one `ask_main_agent` request, bounded by [`MAIN_HELPER_TIMEOUT_SECS`].
+#[allow(clippy::too_many_arguments)]
+async fn run_main_agent_helper(
+    app: &AppHandle,
+    client: &Client,
+    url: &str,
+    config: &AppConfig,
+    agent: &SubAgent,
+    task: &Task,
+    session_id: &str,
+    workspace_dir: &Path,
+    task_cwd: &Path,
+    skill_access_root: Option<&Path>,
+    request: &str,
+    context: &str,
+    cancelled: &AtomicBool,
+    mcp_session: &mut mcp::AgentMcpSession,
+) -> Result<MainHelperOutcome, String> {
+    match tokio::time::timeout(
+        Duration::from_secs(MAIN_HELPER_TIMEOUT_SECS),
+        run_main_agent_helper_inner(
+            app,
+            client,
+            url,
+            config,
+            agent,
+            task,
+            session_id,
+            workspace_dir,
+            task_cwd,
+            skill_access_root,
+            request,
+            context,
+            cancelled,
+            mcp_session,
+        ),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => Err(format!(
+            "main-agent help timed out after {} seconds",
+            MAIN_HELPER_TIMEOUT_SECS
+        )),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_main_agent_helper_inner(
+    app: &AppHandle,
+    client: &Client,
+    url: &str,
+    config: &AppConfig,
+    agent: &SubAgent,
+    task: &Task,
+    session_id: &str,
+    workspace_dir: &Path,
+    task_cwd: &Path,
+    skill_access_root: Option<&Path>,
+    request: &str,
+    context: &str,
+    cancelled: &AtomicBool,
+    mcp_session: &mut mcp::AgentMcpSession,
+) -> Result<MainHelperOutcome, String> {
+    // ── Conversation history (locks the DB, so drop it before any await) ─────
+    let history = {
+        let state = app.state::<AppState>();
+        let db = state
+            .db
+            .lock()
+            .map_err(|_| "database lock poisoned".to_string())?;
+        crate::db::query_recent_session_messages(
+            &db,
+            session_id,
+            MAIN_HELPER_HISTORY_MESSAGES * 2,
+        )
+        .map_err(|e| e.to_string())?
+    };
+    let transcript = build_main_helper_history(&history);
+
+    // ── Enabled skills (main capability) ─────────────────────────────────────
+    let skills = crate::skills::enabled_skills(workspace_dir);
+    let mut skills_info = String::new();
+    for skill in &skills {
+        skills_info.push_str(&format!("- {}: {}\n", skill.name, skill.description));
+    }
+
+    // Self-evolution mode: the facts the main assistant verified in earlier
+    // sessions are part of its capability and belong in the helper context.
+    let verified_facts = if config.self_evolution_mode {
+        crate::tools::memory::render_evolution_context(
+            workspace_dir,
+            crate::tools::memory::EVOLUTION_CONTEXT_BUDGET_CHARS,
+        )
+    } else {
+        String::new()
+    };
+
+    // ── Tools: main selection + skills + enabled MCP ─────────────────────────
+    let tool_ids = main_helper_tool_ids(config);
+    let mut tools_list = tools::get_all_tools(&tool_ids, config.self_evolution_mode, false);
+    let has_skills = !skills.is_empty() || config.self_evolution_mode;
+    if has_skills {
+        tools_list.push(tools::get_use_skill_tool());
+        tools_list.push(tools::get_skill_read_tool());
+    }
+    let (mcp_tools, mcp_tool_map) =
+        load_enabled_mcp_tools(app, mcp_session, &format!("agent:{}:main-helper", agent.name))
+            .await;
+    tools_list.extend(mcp_tools);
+
+    // ── Prompt ───────────────────────────────────────────────────────────────
+    let os_info = os_info::get();
+    let base_prompt = config.system_message.trim();
+    let base_block = if base_prompt.is_empty() {
+        String::new()
+    } else {
+        format!("{base_prompt}\n\n")
+    };
+    let skills_block = if skills_info.is_empty() {
+        String::new()
+    } else {
+        format!("Enabled skills (call `use_skill` to load one):\n{skills_info}\n")
+    };
+    let facts_block = if verified_facts.trim().is_empty() {
+        String::new()
+    } else {
+        format!(
+            "VERIFIED FACTS (self-evolution memory, already known — reuse them):\n{verified_facts}\n\n"
+        )
+    };
+    let system = format!(
+        "{base}You are the MAIN assistant of this app, temporarily helping the sub-agent \"{agent_name}\" \
+         (id {agent_id}) with its autonomous mission. The sub-agent cannot see this conversation.\n\
+         Your only job is to collect and return material for its request: concrete findings, exact file \
+         paths, excerpts, command output or links. Do not write the final user-facing answer and do not \
+         ask the user questions. If the material cannot be obtained, state exactly what is missing.\n\
+         User's machine: {os} {os_version}\n\
+         Sub-agent working directory: {cwd} (`run_cmd` / `run_shell` start here)\n\
+         Workspace root: {workspace_root} (`file_actions` paths are relative to it)\n\n\
+         {skills}\
+         {facts}\
+         Main conversation (for context):\n{transcript}",
+        base = base_block,
+        agent_name = agent.name,
+        agent_id = agent.id,
+        os = os_info.os_type(),
+        os_version = os_info.version(),
+        cwd = task_cwd.display(),
+        workspace_root = workspace_dir.display(),
+        skills = skills_block,
+        facts = facts_block,
+        transcript = if transcript.is_empty() {
+            "(no prior conversation)"
+        } else {
+            transcript.as_str()
+        },
+    );
+
+    let mut messages: Vec<Value> = vec![
+        json!({ "role": "system", "content": system }),
+        json!({
+            "role": "user",
+            "content": format!(
+                "Sub-agent \"{}\" is executing this task:\n{}\n\nIts request:\n{}\n\nWhy it needs it:\n{}",
+                agent.name,
+                task.description.trim(),
+                request.trim(),
+                if context.trim().is_empty() { "(not specified)" } else { context.trim() },
+            ),
+        }),
+    ];
+
+    let model = config.model.trim();
+    if model.is_empty() {
+        return Err("no main model is configured".to_string());
+    }
+    let headers = upstream_request_headers(config, session_id);
+    let max_complete_tokens = config
+        .model_settings
+        .max_complete_tokens
+        .filter(|value| *value > 0)
+        .unwrap_or(LLM_DEFAULT_MAX_COMLETE_TOKENS);
+
+    let mut loaded_skills: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut active_skill_dirs: Vec<(String, PathBuf)> = Vec::new();
+    let mut allowed_commands: Vec<String> = Vec::new();
+    let mut tokens_used: u32 = 0;
+    let mut tool_calls_count: u32 = 0;
+    let mut last_content = String::new();
+
+    for _ in 0..MAIN_HELPER_MAX_ITERATIONS {
+        if cancelled.load(Ordering::SeqCst) {
+            return Err("cancelled by the user".to_string());
+        }
+
+        sanitize_tool_pairs(&mut messages);
+        let mut req_body = json!({
+            "model": model,
+            "messages": messages,
+            "stream": true,
+            "stream_options": { "include_usage": true },
+        });
+        apply_completion_token_limit(
+            &mut req_body,
+            Some(max_complete_tokens),
+            Some(LLM_DEFAULT_MAX_TOKENS),
+        );
+        if let Some(effort) = resolve_reasoning_effort(config, model) {
+            req_body["reasoning_effort"] = json!(effort);
+        }
+        if !tools_list.is_empty() {
+            req_body["tools"] = json!(tools_list);
+            req_body["tool_choice"] = json!("auto");
+        }
+
+        let stream = stream_llm_request(
+            app,
+            client,
+            url,
+            &config.api_key,
+            req_body,
+            cancelled,
+            StreamOptions {
+                token_event: "agent-help-token",
+                task_id: Some(&task.id),
+                emit_reasoning: false,
+                emit_usage: false,
+                usage_max_tokens: None,
+                ds_format: config.ds_format_for(model),
+                headers: &headers,
+            },
+        )
+        .await?;
+
+        tokens_used = tokens_used.saturating_add(stream.prompt_tokens + stream.completion_tokens);
+        let content = stream.content;
+        let reasoning_content = stream.reasoning_content;
+        let tool_calls = stream.tool_calls;
+
+        if tool_calls.is_empty() {
+            let content = content.trim().to_string();
+            let content = if content.is_empty() {
+                "(the main agent returned no material)".to_string()
+            } else if content.chars().count() > MAIN_HELPER_ANSWER_MAX_CHARS {
+                let clipped: String = content.chars().take(MAIN_HELPER_ANSWER_MAX_CHARS).collect();
+                format!("{clipped}\n\n[truncated: the material exceeded the size limit]")
+            } else {
+                content
+            };
+            return Ok(MainHelperOutcome {
+                content,
+                tokens: tokens_used,
+                tool_calls: tool_calls_count,
+            });
+        }
+
+        if !content.trim().is_empty() {
+            last_content = content.clone();
+        }
+        tool_calls_count = tool_calls_count.saturating_add(tool_calls.len() as u32);
+
+        let assistant_tcs: Vec<Value> = tool_calls
+            .iter()
+            .map(|(id, name, args)| {
+                json!({
+                    "id": id,
+                    "type": "function",
+                    "function": { "name": name, "arguments": args },
+                })
+            })
+            .collect();
+        let assistant_content = if content.trim().is_empty() {
+            Value::Null
+        } else {
+            Value::String(content)
+        };
+        let mut assistant_msg = json!({
+            "role": "assistant",
+            "content": assistant_content,
+            "tool_calls": assistant_tcs,
+        });
+        if !reasoning_content.is_empty() {
+            assistant_msg["reasoning_content"] = json!(reasoning_content);
+        }
+        messages.push(assistant_msg);
+
+        // Skill bodies are queued and appended AFTER all tool results of this
+        // round: an `assistant` message carrying tool_calls must stay adjacent
+        // to its `tool` results, or strict providers reject the next request.
+        let mut pending_skill_context: Vec<Value> = Vec::new();
+        for (id, name, args) in &tool_calls {
+            let result = if name == "use_skill" {
+                let args_json: Value = serde_json::from_str(args).unwrap_or_default();
+                let skill_name = args_json["skill_name"].as_str().unwrap_or("");
+                let skills_dir = crate::workspace::skills_root(workspace_dir);
+                match crate::skills::resolve_skill_by_name(&skills_dir, skill_name) {
+                    Ok(resolved) => {
+                        let skill = resolved.skill;
+                        if loaded_skills.insert(skill.name.clone()) {
+                            for command in &skill.allowed_commands {
+                                if !allowed_commands.iter().any(|existing| existing == command) {
+                                    allowed_commands.push(command.clone());
+                                }
+                            }
+                            if !active_skill_dirs.iter().any(|(name, _)| name == &skill.name) {
+                                active_skill_dirs
+                                    .push((skill.name.clone(), resolved.skill_dir.clone()));
+                            }
+                            let cmd_constraint = if skill.allowed_commands.is_empty() {
+                                String::new()
+                            } else {
+                                format!(
+                                    "\n[Allowed commands for this skill: {}]\n",
+                                    skill.allowed_commands.join(", ")
+                                )
+                            };
+                            pending_skill_context.push(json!({
+                                "role": "user",
+                                "content": format!(
+                                    "INTERNAL CONTEXT - DYNAMICALLY LOADED SKILL (not a user request):\n\
+                                     --- Skill: {} ---\n[Skill root: {}]\n{}{}",
+                                    skill.name,
+                                    resolved.skill_dir.display(),
+                                    cmd_constraint,
+                                    skill.system_prompt,
+                                ),
+                            }));
+                            format!("Skill '{}' loaded. Follow its instructions.", skill.name)
+                        } else {
+                            format!("Skill '{}' already loaded.", skill.name)
+                        }
+                    }
+                    Err(err) => format!("Error: {err}"),
+                }
+            } else if let Some((server, actual_name)) = mcp_tool_map.get(name) {
+                let state = app.state::<AppState>();
+                let arguments: Value = serde_json::from_str(args).unwrap_or_else(|_| json!({}));
+                let owner = format!("agent:{}:main-helper", agent.name);
+                match mcp::invoke_mcp_tool_for_agent(
+                    &state,
+                    mcp_session,
+                    server,
+                    actual_name,
+                    arguments,
+                    &owner,
+                )
+                .await
+                {
+                    Ok(text) => format!("MCP [{}] {} result:\n{}", server.name, actual_name, text),
+                    Err(err) => format!("MCP tool error: {err}"),
+                }
+            } else {
+                tools::execute_tool(
+                    app,
+                    name,
+                    args,
+                    workspace_dir.to_path_buf(),
+                    config,
+                    &allowed_commands,
+                    skill_access_root,
+                    None,
+                    Some(session_id),
+                    &active_skill_dirs,
+                    None,
+                    Some(task_cwd),
+                )
+                .await
+            };
+
+            messages.push(json!({
+                "role": "tool",
+                "tool_call_id": id,
+                "content": cap_helper_tool_result(result),
+            }));
+        }
+        messages.extend(pending_skill_context);
+    }
+
+    let fallback = if last_content.trim().is_empty() {
+        format!(
+            "Main-agent helper reached its {}-round tool limit without a final answer. Tighten the request or collect the material directly.",
+            MAIN_HELPER_MAX_ITERATIONS
+        )
+    } else {
+        format!(
+            "Main-agent helper reached its {}-round tool limit. Last partial material:\n{}",
+            MAIN_HELPER_MAX_ITERATIONS,
+            preview_text(&last_content, 4_000)
+        )
+    };
+    Ok(MainHelperOutcome {
+        content: fallback,
+        tokens: tokens_used,
+        tool_calls: tool_calls_count,
+    })
 }
 
 async fn run_llm_agent_body(
@@ -3306,6 +3931,7 @@ async fn run_llm_agent_body(
     agent: &SubAgent,
     task: &Task,
     workspace_dir: PathBuf,
+    task_cwd: PathBuf,
     skill_access_root: Option<PathBuf>,
     cancelled: &AtomicBool,
     mcp_session: &mut mcp::AgentMcpSession,
@@ -3317,6 +3943,7 @@ async fn run_llm_agent_body(
             "agent_id": agent.id,
             "agent_name": agent.name,
             "description": task.description,
+            "cwd": task.cwd,
         }),
     );
 
@@ -3348,52 +3975,29 @@ async fn run_llm_agent_body(
     let mut tools_list =
         tools::get_all_tools(&agent_tool_ids, config.self_evolution_mode, false);
     tools_list.extend(tools::get_agent_task_tools());
+    // Main-agent assistance: only `llm` sub-agents run an in-app loop, so only
+    // they can ask for it. The switch is global (Settings → Runtime & Debug).
+    if config.sub_agent_main_help {
+        tools_list.push(tools::get_main_agent_help_tool());
+    }
 
     // ── MCP tools (`enable_mcp`) ─────────────────────────────────────────────
     // The agent gets the same enabled MCP servers as the main agent, but its
     // stdio processes live in this task's private session — never the shared
     // `AppState` pool — and the wrapper kills them when the task ends.
-    let mut mcp_tool_map: std::collections::HashMap<String, (mcp::McpServer, String)> =
-        std::collections::HashMap::new();
-    if agent.enable_mcp {
-        let state = app.state::<AppState>();
-        let owner = format!("agent:{}", agent.name);
-        let enabled_servers: Vec<mcp::McpServer> = mcp::load_servers(&state.mcp_servers_path)
-            .into_iter()
-            .filter(|server| server.enabled)
-            .collect();
-        for server in enabled_servers {
-            match mcp::get_server_tools_for_agent(&state, mcp_session, &server, &owner).await {
-                Ok(server_tools) => {
-                    for tool in server_tools {
-                        if let Some((fn_name, actual_name, openai_tool)) =
-                            mcp::adapt_tool_for_llm(&server, &tool, false)
-                        {
-                            tools_list.push(openai_tool);
-                            mcp_tool_map.insert(fn_name, (server.clone(), actual_name));
-                        }
-                    }
-                }
-                Err(err) => {
-                    if let Ok(logger) = state.logger.lock() {
-                        logger.log(
-                            "ERROR",
-                            &format!(
-                                "MCP server '{}' tools/list failed for agent '{}': {err}",
-                                server.name, agent.name
-                            ),
-                        );
-                    }
-                }
-            }
-        }
-    }
+    let (mcp_tools, mcp_tool_map) = if agent.enable_mcp {
+        load_enabled_mcp_tools(app, mcp_session, &format!("agent:{}", agent.name)).await
+    } else {
+        (Vec::new(), std::collections::HashMap::new())
+    };
+    tools_list.extend(mcp_tools);
     // `cancelled` is the caller's flag — the turn's own cancel flag when the
     // agent runs inside a chat turn, so pressing Stop in the chat tears the
     // autonomous loop down as well. It is never a fresh local flag: a detached
     // flag can never become true, and Stop would be ignored.
     let mut total_tokens: u32 = 0;
     let mut tool_calls_count: u32 = 0;
+    let mut main_help_calls: u32 = 0;
     let mission_id = mission_id_for_task(task).to_string();
     // Context budget resolution order:
     // 1. Per-model context window from config (auto-detected from the
@@ -3490,7 +4094,17 @@ async fn run_llm_agent_body(
         "content": task_system,
     })];
     // Static system prompt: built once, reused every iteration (cache-friendly).
-    let static_system_prompt = build_agent_static_system_prompt(agent, &self_evolution_context);
+    // The working directory lives here rather than in the mission snapshot so it
+    // survives context compression (the static system message is re-sent on
+    // every request). `run_cmd` / `run_shell` / `serve` start there, while
+    // `file_actions` paths stay relative to the workspace root.
+    let static_system_prompt = format!(
+        "{}\n\nWorking directory: {}\n`run_cmd`, `run_shell` and `run_shell` serve processes start in this directory. \
+         `file_actions` paths are always relative to the workspace root ({}), not to the working directory.",
+        build_agent_static_system_prompt(agent, &self_evolution_context),
+        task_cwd.display(),
+        workspace_dir.display(),
+    );
     let max_iterations = (agent.max_iterations > 0).then_some(agent.max_iterations);
     let mut iterations: u32 = 0;
 
@@ -3797,7 +4411,116 @@ async fn run_llm_agent_body(
                 // Execute each tool call
                 for (id, name, args) in &agent_tool_calls {
                     tool_calls_count += 1;
-                    let result = if let Some((mcp_server, actual_tool_name)) =
+                    let result = if name == "ask_main_agent" {
+                        if !config.sub_agent_main_help {
+                            "Error: asking the main agent is disabled in Settings → Runtime & Debug.".to_string()
+                        } else if main_help_calls >= MAIN_HELPER_MAX_CALLS {
+                            format!(
+                                "Error: this task already used its {} main-agent help requests. Continue with the material you have.",
+                                MAIN_HELPER_MAX_CALLS
+                            )
+                        } else {
+                            let args_json: Value =
+                                serde_json::from_str(args).unwrap_or_default();
+                            let request = args_json["request"]
+                                .as_str()
+                                .unwrap_or("")
+                                .trim()
+                                .to_string();
+                            let context = args_json["context"]
+                                .as_str()
+                                .unwrap_or("")
+                                .trim()
+                                .to_string();
+
+                            if request.is_empty() {
+                                "Error: ask_main_agent requires a non-empty 'request'."
+                                    .to_string()
+                            } else {
+                                main_help_calls += 1;
+                                let _ = app.emit(
+                                    "agent-help-start",
+                                    json!({
+                                        "task_id": task.id,
+                                        "mission_id": mission_id,
+                                        "agent_id": agent.id,
+                                        "agent_name": agent.name,
+                                        "request": preview_text(&request, 300),
+                                        "cwd": task.cwd,
+                                    }),
+                                );
+
+                                match run_main_agent_helper(
+                                    app,
+                                    client,
+                                    url,
+                                    config,
+                                    agent,
+                                    task,
+                                    session_id,
+                                    &workspace_dir,
+                                    &task_cwd,
+                                    skill_access_root.as_deref(),
+                                    &request,
+                                    &context,
+                                    cancelled,
+                                    mcp_session,
+                                )
+                                .await
+                                {
+                                    Ok(outcome) => {
+                                        total_tokens =
+                                            total_tokens.saturating_add(outcome.tokens);
+                                        tool_calls_count =
+                                            tool_calls_count.saturating_add(outcome.tool_calls);
+                                        let answer_chars = outcome.content.chars().count();
+                                        append_mission_help_note(
+                                            app,
+                                            &mission_id,
+                                            &format!(
+                                                "asked main agent: {} → {} chars",
+                                                preview_text(&request, 160),
+                                                answer_chars
+                                            ),
+                                        );
+                                        let _ = app.emit(
+                                            "agent-help-done",
+                                            json!({
+                                                "task_id": task.id,
+                                                "mission_id": mission_id,
+                                                "agent_id": agent.id,
+                                                "answer_chars": answer_chars,
+                                                "tokens": outcome.tokens,
+                                                "tool_calls": outcome.tool_calls,
+                                            }),
+                                        );
+                                        outcome.content
+                                    }
+                                    Err(err) => {
+                                        append_mission_help_note(
+                                            app,
+                                            &mission_id,
+                                            &format!(
+                                                "asked main agent: {} → error: {}",
+                                                preview_text(&request, 160),
+                                                preview_text(&err, 200)
+                                            ),
+                                        );
+                                        let _ = app.emit(
+                                            "agent-help-error",
+                                            json!({
+                                                "task_id": task.id,
+                                                "mission_id": mission_id,
+                                                "agent_id": agent.id,
+                                                "error": err,
+                                            }),
+                                        );
+                                        format!("Error: main-agent help failed: {err}")
+                                    }
+                                }
+                            }
+                        }
+                    } else if let Some((mcp_server, actual_tool_name)) =
                         mcp_tool_map.get(name)
                     {
                         let state = app.state::<AppState>();
@@ -3833,6 +4556,7 @@ async fn run_llm_agent_body(
                             Some(session_id),
                             &[], // sub-agents don't track active skill dirs for skill_read
                             None, // background tasks are never advertised to sub-agents
+                            Some(task_cwd.as_path()),
                         )
                         .await
                     };
@@ -4102,6 +4826,52 @@ mod tests {
     }
 
     #[test]
+    fn plan_parser_keeps_and_normalizes_task_cwd() {
+        let raw = r#"{"tasks":[
+            {"id":"t1","agent_id":"a","description":"one","cwd":"  apps/web  "},
+            {"id":"t2","agent_id":"a","description":"two","cwd":"./"},
+            {"id":"t3","agent_id":"a","description":"three","cwd":null},
+            {"id":"t4","agent_id":"a","description":"four"}
+        ]}"#;
+        let (plan, _) = parse_task_plan(raw, &roster_ids(&["a"])).expect("plan parses");
+        assert_eq!(plan.tasks[0].cwd.as_deref(), Some("apps/web"));
+        assert_eq!(plan.tasks[1].cwd, None, "\"./\" means the workspace root");
+        assert_eq!(plan.tasks[2].cwd, None, "null means the workspace root");
+        assert_eq!(plan.tasks[3].cwd, None, "missing cwd means the workspace root");
+    }
+
+    #[test]
+    fn resolve_task_cwd_is_sandboxed_and_creates_missing_directories() {
+        let root = std::env::temp_dir().join(format!("ai-chat-cwd-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).expect("temp workspace");
+
+        // Unset / "." → the workspace root itself.
+        assert_eq!(resolve_task_cwd(None, &root).unwrap(), root);
+        assert_eq!(resolve_task_cwd(Some("."), &root).unwrap(), root);
+
+        // An existing subdirectory is returned as-is.
+        let existing = root.join("apps").join("web");
+        std::fs::create_dir_all(&existing).expect("existing task dir");
+        let resolved = resolve_task_cwd(Some("apps/web"), &root).expect("existing cwd");
+        assert_eq!(
+            resolved.canonicalize().unwrap(),
+            existing.canonicalize().unwrap()
+        );
+
+        // A directory that does not exist yet is created (scaffolding tasks).
+        let resolved = resolve_task_cwd(Some("./apps/new"), &root).expect("new cwd");
+        assert!(resolved.is_dir(), "missing task dir was not created");
+        assert!(resolved.ends_with("apps/new"));
+
+        // Escapes and outside absolute paths are rejected.
+        assert!(resolve_task_cwd(Some("../outside"), &root).is_err());
+        let outside = std::env::temp_dir().display().to_string();
+        assert!(resolve_task_cwd(Some(&outside), &root).is_err());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn plan_parser_rejects_unusable_plans() {
         // Not JSON at all.
         assert!(parse_task_plan("no plan here", &roster_ids(&["a"])).is_err());
@@ -4136,6 +4906,7 @@ mod tests {
             agent_id: "a".to_string(),
             description: "x".to_string(),
             context: String::new(),
+            cwd: None,
             dependencies: Vec::new(),
         };
         let result = TaskResult::skipped(&task, "agent a", "agent 'a' is not available");
@@ -4151,6 +4922,85 @@ mod tests {
         assert!(text.ends_with(",…"), "unexpected list: {text}");
         assert!(text.len() < items.join(",").len());
         assert_eq!(compact_list(&[]), "-");
+    }
+
+    #[test]
+    fn main_helper_tools_drop_chat_only_tools() {
+        let mut config = AppConfig::default();
+        config.selected_tools = vec![
+            "run_cmd".to_string(),
+            "file_actions".to_string(),
+            "timer".to_string(),
+        ];
+        let ids = main_helper_tool_ids(&config);
+        assert!(ids.iter().any(|id| id == "run_cmd"));
+        assert!(ids.iter().any(|id| id == "file_actions"));
+        assert!(
+            !ids.iter().any(|id| id == "timer"),
+            "timer is a chat-session tool and must not reach the helper"
+        );
+    }
+
+    #[test]
+    fn main_helper_history_is_budgeted_and_keeps_the_newest_entries() {
+        let records: Vec<crate::db::HistoryRecord> = (0..20)
+            .map(|i| crate::db::HistoryRecord {
+                id: i,
+                session_id: "s".to_string(),
+                role: if i % 2 == 0 {
+                    "user".to_string()
+                } else {
+                    "assistant".to_string()
+                },
+                content: format!("message {i}"),
+                timestamp: String::new(),
+                tool_calls: None,
+                reasoning_content: None,
+                attachments: None,
+                injections: None,
+            })
+            .collect();
+
+        let transcript = build_main_helper_history(&records);
+        assert!(transcript.starts_with("[user]: message 8"), "got: {transcript}");
+        assert!(transcript.ends_with("[assistant]: message 19"), "got: {transcript}");
+        assert!(!transcript.contains("message 7"), "older entry was not dropped");
+    }
+
+    #[test]
+    fn main_helper_history_respects_the_byte_budget() {
+        let records: Vec<crate::db::HistoryRecord> = (0..20)
+            .map(|i| crate::db::HistoryRecord {
+                id: i,
+                session_id: "s".to_string(),
+                role: "user".to_string(),
+                content: format!("{i}:{}", "x".repeat(5_000)),
+                timestamp: String::new(),
+                tool_calls: None,
+                reasoning_content: None,
+                attachments: None,
+                injections: None,
+            })
+            .collect();
+
+        let transcript = build_main_helper_history(&records);
+        let limit = MAIN_HELPER_HISTORY_BUDGET_BYTES + MAIN_HELPER_HISTORY_MESSAGE_BYTES + 20;
+        assert!(
+            transcript.len() <= limit,
+            "transcript exceeded the budget: {} bytes",
+            transcript.len()
+        );
+    }
+
+    #[test]
+    fn main_helper_tool_results_are_capped() {
+        let short = "ok".to_string();
+        assert_eq!(cap_helper_tool_result(short.clone()), short);
+
+        let long = "x".repeat(MAIN_HELPER_TOOL_RESULT_MAX_BYTES + 100);
+        let capped = cap_helper_tool_result(long);
+        assert!(capped.len() <= MAIN_HELPER_TOOL_RESULT_MAX_BYTES + 100);
+        assert!(capped.contains("truncated"));
     }
 
     #[test]

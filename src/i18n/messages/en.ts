@@ -209,6 +209,9 @@ const en = {
         steps: { one: "{count} step", other: "{count} steps" },
         confirmTitle: "Allow this shell command?",
         rejected: "Rejected by user",
+        mainAgentHelp: "Main agent",
+        mainAgentHelpChars: "→ {count} chars",
+        mainAgentHelpFailed: "Main-agent help failed",
     },
 
     settings: {
@@ -340,6 +343,9 @@ const en = {
             backgroundTools: "Background execution",
             backgroundToolsHint:
                 "Let the assistant run slow tools as background tasks (`run_in_background: true`): `run_cmd`, `run_shell`, `file_actions` search, every MCP tool and `call_subagent`. The result is delivered automatically before the next request and the turn stays open until it arrives. Sub-agents never receive the flag.",
+            subAgentMainHelp: "Sub-agent main-agent help",
+            subAgentMainHelpHint:
+                "Let `llm` sub-agents call `ask_main_agent` while they run. A bounded helper run with the main model, the real conversation history, enabled skills, MCP servers and the main tool set collects the material and hands it back, then the sub-agent continues its own task. `cli`/`cloud` agents cannot use it.",
             interactionMonitor: "Interaction monitor",
             agentMissions: "Agent missions monitor",
             evolutionMemory: "Evolution memory",
@@ -656,9 +662,6 @@ const en = {
         cliEnv: "Environment — KEY=VALUE per line",
         cliEnvHint:
             "ANSI colour codes are stripped from captured output. Children start with NO_COLOR=1, CLICOLOR=0, CLICOLOR_FORCE=0, FORCE_COLOR=0 and TERM=dumb; entries above override those defaults.",
-        cliCwd: "Working directory",
-        cliCwdPlaceholder: "workspace root",
-        cliCwdHint: "Workspace-relative directory to run in. Leave empty for the workspace root.",
         timeout: "Timeout (seconds)",
         timeoutHint:
             "0 = no timeout: the run keeps going until it finishes, the turn is stopped, or the app exits. Positive values are capped at 7200 seconds. Leaving the field empty keeps the default (600).",
@@ -813,6 +816,7 @@ const en = {
         updated: "Updated",
         context: "Context",
         activeTasksLabel: "Active Tasks",
+        mainAgentHelp: "Main-agent help",
         episodicSummary: "Episodic Summary",
         finalReport: "Final Report",
         noActiveTasks: "No active tasks.",

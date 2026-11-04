@@ -88,7 +88,10 @@ export function AgentMissionPanel({ sessionId, onClose }: Props) {
             listen("agent-task-start", refresh),
             listen("agent-task-done", refresh),
             listen("agent-task-error", refresh),
-            listen("agent-task-skipped", refresh)
+            listen("agent-task-skipped", refresh),
+            listen("agent-help-start", refresh),
+            listen("agent-help-done", refresh),
+            listen("agent-help-error", refresh)
         );
 
         return () => {
@@ -218,6 +221,13 @@ export function AgentMissionPanel({ sessionId, onClose }: Props) {
                                     </div>
                                 )}
                             </div>
+
+                            {selectedMission.help_notes && (
+                                <div className="mission-monitor-section">
+                                    <label>{t("mission.mainAgentHelp")}</label>
+                                    <pre className="mission-monitor-code">{selectedMission.help_notes}</pre>
+                                </div>
+                            )}
 
                             <div className="mission-monitor-section">
                                 <label>{t("mission.episodicSummary")}</label>

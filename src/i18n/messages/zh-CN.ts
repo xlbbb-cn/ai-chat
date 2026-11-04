@@ -181,6 +181,9 @@ const zhCN: Messages = {
         steps: "{count} 个步骤",
         confirmTitle: "允许执行此 Shell 命令？",
         rejected: "用户已拒绝",
+        mainAgentHelp: "主代理",
+        mainAgentHelpChars: "→ {count} 字符",
+        mainAgentHelpFailed: "主代理协助失败",
     },
 
     settings: {
@@ -310,6 +313,9 @@ const zhCN: Messages = {
             backgroundTools: "后台执行",
             backgroundToolsHint:
                 "允许助手把耗时工具放到后台运行（`run_in_background: true`）：`run_cmd`、`run_shell`、`file_actions` 搜索、所有 MCP 工具和 `call_subagent`。结果会在下一个请求前自动送达，本轮保持开启直到结果到齐；子代理不会收到该参数。",
+            subAgentMainHelp: "子代理请求主代理协助",
+            subAgentMainHelpHint:
+                "允许 `llm` 子代理在运行过程中调用 `ask_main_agent`。后端会用主模型、真实会话历史、已启用技能、MCP 和主工具集起一个有上限的协助者，收集资料后交还给子代理，子代理继续自己的任务。`cli`/`cloud` 子代理无法使用。",
             interactionMonitor: "交互监视器",
             agentMissions: "智能体任务监视器",
             evolutionMemory: "自进化记忆",
@@ -610,9 +616,6 @@ const zhCN: Messages = {
         cliEnv: "环境变量 —— 每行一个 KEY=VALUE",
         cliEnvHint:
             "捕获的输出会自动移除 ANSI 颜色控制符。子进程默认带有 NO_COLOR=1、CLICOLOR=0、CLICOLOR_FORCE=0、FORCE_COLOR=0 和 TERM=dumb，此处填写同名变量可覆盖。",
-        cliCwd: "工作目录",
-        cliCwdPlaceholder: "工作区根目录",
-        cliCwdHint: "相对于工作区的目录；留空表示工作区根目录。",
         timeout: "超时（秒）",
         timeoutHint:
             "0 = 不限制超时：运行会持续到完成、手动停止当前回合或退出应用。正数上限 7200 秒；留空保持默认值 600。",
@@ -762,6 +765,7 @@ const zhCN: Messages = {
         updated: "更新时间",
         context: "上下文",
         activeTasksLabel: "进行中的任务",
+        mainAgentHelp: "主代理协助",
         episodicSummary: "阶段性摘要",
         finalReport: "最终报告",
         noActiveTasks: "没有进行中的任务。",

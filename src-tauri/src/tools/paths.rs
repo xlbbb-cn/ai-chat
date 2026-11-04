@@ -233,28 +233,31 @@ fn quote_posix_literal(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
+/// Prefixes a shell script with a `cd` into `start_dir` so a `run_shell` call
+/// always begins where the caller works (the workspace root for the main chat,
+/// the task's working directory inside a sub-agent mission).
 pub(super) fn build_workspace_scoped_shell_code(
     shell_type: &str,
-    workspace_dir: &Path,
+    start_dir: &Path,
     code: &str,
 ) -> String {
     match shell_type {
         "powershell" => format!(
             "Set-Location -LiteralPath {};\n{}",
-            quote_powershell_literal(&workspace_dir.display().to_string()),
+            quote_powershell_literal(&start_dir.display().to_string()),
             code
         ),
         _ => {
             #[cfg(windows)]
             {
-                format!("cd /d {} && {}", quote_cmd_path(workspace_dir), code)
+                format!("cd /d {} && {}", quote_cmd_path(start_dir), code)
             }
 
             #[cfg(not(windows))]
             {
                 format!(
                     "cd {}\n{}",
-                    quote_posix_literal(&workspace_dir.display().to_string()),
+                    quote_posix_literal(&start_dir.display().to_string()),
                     code
                 )
             }

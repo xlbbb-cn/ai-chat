@@ -94,7 +94,6 @@ function emptyCliSettings(): CliAgentSettings {
     model_args: [],
     env: [],
     default_timeout_seconds: DEFAULT_CLI_TIMEOUT_SECONDS,
-    cwd: "",
   };
 }
 
@@ -530,15 +529,6 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
               placeholder={"KEY=VALUE"}
             />
             <small className="agent-field-hint">{t("agents.cliEnvHint")}</small>
-          </label>
-          <label>
-            {t("agents.cliCwd")}
-            <input
-              value={agent.cli.cwd}
-              onChange={(e) => updateCli({ cwd: e.target.value })}
-              placeholder={t("agents.cliCwdPlaceholder")}
-            />
-            <small className="agent-field-hint">{t("agents.cliCwdHint")}</small>
           </label>
           <label>
             {t("agents.timeout")}
