@@ -113,19 +113,27 @@
   cursor: pointer;
   border: 0.5px solid transparent;
   display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
   transition: background-color 0.2s, border-color 0.2s, box-shadow 0.2s;
 }
 
-.history-content {
+/* Row 1 — title on the left, action icons on the right. */
+.history-head {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  overflow: hidden;
-  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Row 2 — metadata against the left edge, timestamp against the right edge. */
+.history-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
 }
 
 .history-delete-btn {
@@ -263,7 +271,9 @@
 }
 
 .history-rename-input {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
+  width: auto;
   box-sizing: border-box;
   border: 0.5px solid var(--c-accent-text);
   border-radius: var(--r-sm);
@@ -283,6 +293,8 @@
 }
 
 .history-preview {
+  flex: 1;
+  min-width: 0;
   font-size: 13px;
   color: var(--c-text);
   overflow: hidden;
@@ -291,27 +303,18 @@
   letter-spacing: -0.005em;
 }
 
-/* Favorite marker on a history row. */
-.history-preview-star {
-  margin-right: 4px;
-  font-size: 11px;
-  color: #eab308;
-}
-
 .history-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 12px;
   color: var(--c-muted);
 }
 
-.history-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
 .history-created {
+  flex-shrink: 0;
+  white-space: nowrap;
   font-size: 12px;
   color: var(--c-placeholder);
 }

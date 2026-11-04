@@ -1492,7 +1492,7 @@ export default function App() {
     setUsageReady(false);
 
     const history = [...messages, userMsg]
-      .filter((m) => !m.streaming && !m.id.startsWith("agent-progress-") && m.role !== "tool_group")
+      .filter((m) => !m.streaming && !m.error && !m.id.startsWith("agent-progress-") && m.role !== "tool_group")
       .flatMap((m) => {
         const entry = {
           role: m.role,
@@ -1621,7 +1621,7 @@ export default function App() {
               m.id === assistantId
                 ? {
                     ...m,
-                    content: m.content || t("app.errorPrefix") + err,
+                    error: err,
                     streaming: false,
                     ...(settledToolCalls.length ? { tool_calls: settledToolCalls } : {}),
                   }
@@ -1676,7 +1676,7 @@ export default function App() {
     setUsageReady(false);
 
     const history = [...messages]
-      .filter((m) => !m.streaming && !m.id.startsWith("agent-progress-") && m.role !== "tool_group")
+      .filter((m) => !m.streaming && !m.error && !m.id.startsWith("agent-progress-") && m.role !== "tool_group")
       .flatMap((m) => {
         const entry = {
           role: m.role,
@@ -1783,7 +1783,7 @@ export default function App() {
               m.id === assistantId
                 ? {
                     ...m,
-                    content: m.content || t("app.errorPrefix") + err,
+                    error: err,
                     streaming: false,
                     ...(settledToolCalls.length ? { tool_calls: settledToolCalls } : {}),
                   }

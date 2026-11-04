@@ -107,7 +107,7 @@
   gap: 3px;
 }
 
-/* Row 1 — title + brain indicator. Fixed height: streaming text alternates
+/* Row 1 — title + pen indicator. Fixed height: streaming text alternates
    between Latin (RazerF5) and CJK fallback glyphs whose font metrics differ —
    without a pinned height the line box (and the whole card) would jitter
    while tokens arrive. */
@@ -124,73 +124,51 @@
   line-height: 22px;
 }
 
-/* Brain icon — muted monochrome at rest, full colour while the model is
-   thinking. It is re-mounted on every new reasoning line, which replays the
-   spark animation below so the icon blinks as the thinking content grows. */
-.message-reasoning-brain {
-  /* Hosts a Font Awesome SVG, so it needs flex centring instead of a
-     font-driven baseline. */
+/* Bézier "thought pulse" — a short accent segment travels along the curve
+   for the whole live reasoning window, so the thinking state stays visible
+   until the turn ends. The faint full curve keeps the shape readable while
+   the pulse moves. */
+.message-reasoning-curve {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   flex-shrink: 0;
-  font-size: 14px;
-  line-height: 22px;
-  transform-origin: center;
-  filter: grayscale(1);
-  opacity: 0.35;
-  transition: opacity 0.33s var(--ts-ease), filter 0.33s var(--ts-ease);
+  width: 26px;
+  height: 22px;
+  color: var(--ts-blue);
 }
 
-.message-reasoning-summary.reasoning-streaming .message-reasoning-brain {
-  filter: none;
-  opacity: 1;
-  animation: reasoning-brain-spark 0.62s var(--ts-ease);
+.message-reasoning-curve svg {
+  width: 26px;
+  height: 20px;
+  overflow: visible;
 }
 
-/* One blink per reasoning update: dim → bright pop → tiny bounce → still. */
-@keyframes reasoning-brain-spark {
-  0% {
-    opacity: 0.25;
-    transform: scale(1.35);
-  }
-
-  45% {
-    opacity: 1;
-    transform: scale(0.96);
-  }
-
-  70% {
-    transform: scale(1.06);
-  }
-
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
+.message-reasoning-curve path {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
 }
 
-/* Flowing shimmer across the title text while the model is thinking. */
-.message-reasoning-summary.reasoning-streaming .message-reasoning-title {
-  background: linear-gradient(90deg,
-      var(--ts-carbon) 0%,
-      var(--ts-carbon) 30%,
-      var(--ts-blue) 50%,
-      var(--ts-carbon) 70%,
-      var(--ts-carbon) 100%);
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: title-shimmer-flow 1.8s linear infinite;
+.message-reasoning-curve-base {
+  stroke-width: 1.2;
+  opacity: 0.28;
 }
 
-@keyframes title-shimmer-flow {
+.message-reasoning-curve-pulse {
+  stroke-width: 2;
+  stroke-dasharray: 20 80;
+  animation: reasoning-curve-flow 1.35s linear infinite;
+}
+
+/* `pathLength=100` makes the dash travel exactly one full curve per loop. */
+@keyframes reasoning-curve-flow {
   from {
-    background-position: 200% 50%;
+    stroke-dashoffset: 100;
   }
 
   to {
-    background-position: 0% 50%;
+    stroke-dashoffset: 0;
   }
 }
 
@@ -307,15 +285,9 @@
     animation: none;
   }
 
-  .message-reasoning-summary.reasoning-streaming .message-reasoning-brain {
+  .message-reasoning-curve-pulse {
     animation: none;
-  }
-
-  /* Keep the label readable instead of a frozen gradient slice. */
-  .message-reasoning-summary.reasoning-streaming .message-reasoning-title {
-    animation: none;
-    background: none;
-    -webkit-text-fill-color: currentColor;
+    stroke-dasharray: none;
   }
 }
 
@@ -398,6 +370,29 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Gradient typewriter: only the text that arrived in the latest token chunk
+   carries this class (see ChatMessage.tsx), so a live reply materialises chunk
+   by chunk while everything already on screen stays still. */
+.message-content .stream-ink {
+  animation: message-stream-ink 0.28s var(--ts-ease) both;
+}
+
+@keyframes message-stream-ink {
+  from {
+    opacity: 0.4;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message-content .stream-ink {
+    animation: none;
+  }
 }
 
 .message-content :lang(zh),
@@ -547,6 +542,35 @@
   background: var(--c-hover);
 }
 
+/* Failure notice for a turn that could not finish. Mirrors the app-level
+   error banner (alternate surface + danger rule) at message density. It is
+   UI-only: the failed message is excluded from the model context. */
+.message-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 10px;
+  border-left: 2px solid var(--c-danger);
+  border-radius: 4px;
+  background: var(--ts-ash);
+  color: var(--ts-graphite);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.message-error-icon {
+  flex-shrink: 0;
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--c-danger);
+}
+
+.message-error-text {
+  min-width: 0;
+}
+
 /* Mid-turn injections: real user input the model saw during this turn. They
    belong to the assistant bubble (one turn = one message), marked with a
    hairline rule instead of a second card so the transcript stays calm. */
@@ -673,8 +697,124 @@
   border-top: 1px solid var(--ts-cloud);
 }
 
-.cursor {
-  animation: blink 0.7s step-end infinite;
+/* Writing indicator — a pen nib riding at the end of the streamed text,
+   scribbling over a self-drawing stroke. Appended/removed imperatively by
+   ChatMessage.tsx; the inherited `--writing-delay` keeps its loop in phase
+   when the markdown subtree is rebuilt between tokens. */
+.message-writing {
+  position: relative;
+  display: inline-flex;
+  align-items: flex-end;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 18px;
+  margin-left: 3px;
+  vertical-align: text-bottom;
+  color: var(--ts-blue);
+  pointer-events: none;
+  user-select: none;
+}
+
+.message-writing-nib {
+  position: absolute;
+  top: 0;
+  left: 4px;
+  display: inline-flex;
+  line-height: 1;
+  transform-origin: 100% 100%;
+  animation: message-writing-nib 1.5s var(--ts-ease) infinite;
+  animation-delay: var(--writing-delay, 0ms);
+}
+
+.message-writing-nib svg {
+  width: 9px;
+  height: 9px;
+  fill: currentColor;
+}
+
+.message-writing-ink {
+  position: absolute;
+  left: 0;
+  bottom: 1px;
+  width: 14px;
+  height: 4px;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1;
+  stroke-linecap: round;
+  opacity: 0.55;
+}
+
+.message-writing-ink path {
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  animation: message-writing-ink 1.5s var(--ts-ease) infinite;
+  animation-delay: var(--writing-delay, 0ms);
+}
+
+/* Nib walks along the stroke with a small writing wobble. */
+@keyframes message-writing-nib {
+  0% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+
+  20% {
+    transform: translate(1px, -1px) rotate(-5deg);
+  }
+
+  45% {
+    transform: translate(4px, 0) rotate(4deg);
+  }
+
+  70% {
+    transform: translate(7px, -1px) rotate(-4deg);
+  }
+
+  88% {
+    transform: translate(8px, 0) rotate(2deg);
+  }
+
+  100% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+}
+
+/* Ink draws in behind the nib, lingers, then fades before the next stroke. */
+@keyframes message-writing-ink {
+  0% {
+    stroke-dashoffset: 100;
+    opacity: 0.15;
+  }
+
+  15% {
+    opacity: 0.7;
+  }
+
+  72% {
+    stroke-dashoffset: 0;
+    opacity: 0.7;
+  }
+
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0.15;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  .message-writing-nib,
+  .message-writing-ink path {
+    animation: none;
+  }
+
+  /* At rest the stroke is simply drawn in full. */
+  .message-writing-ink path {
+    stroke-dasharray: none;
+    stroke-dashoffset: 0;
+  }
 }
 
 .message-export-actions {
@@ -752,12 +892,6 @@
 
 .message-action-btn:active {
   background: var(--ts-cloud);
-}
-
-@keyframes blink {
-  50% {
-    opacity: 0;
-  }
 }
 
 [data-theme="dark"] .message-content .hljs,

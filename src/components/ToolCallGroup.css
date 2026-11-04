@@ -12,31 +12,6 @@
     background: var(--ts-ash, var(--c-reason));
 }
 
-/* Flowing shimmer across the title while a tool is executing. */
-.tool-call-group--running .tool-call-group-label {
-    background: linear-gradient(90deg,
-            var(--ts-carbon, var(--c-text)) 0%,
-            var(--ts-carbon, var(--c-text)) 30%,
-            var(--ts-blue, var(--c-accent-text)) 50%,
-            var(--ts-carbon, var(--c-text)) 70%,
-            var(--ts-carbon, var(--c-text)) 100%);
-    background-size: 200% 100%;
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
-    animation: title-shimmer-flow 1.8s linear infinite;
-}
-
-@keyframes title-shimmer-flow {
-    from {
-        background-position: 200% 50%;
-    }
-
-    to {
-        background-position: 0% 50%;
-    }
-}
-
 .tool-call-group-details {
     width: 100%;
 }
@@ -73,39 +48,44 @@
     gap: 6px;
 }
 
-.tool-call-group-indicator {
+/* Title group — takes the free row space so the running wrench sits directly
+   after the label instead of drifting toward the count badge. */
+.tool-call-group-title {
+    flex: 1;
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* Appears only while a tool is running: a small wrench that keeps turning as
+   if tightening a screw, and disappears the moment nothing is in flight. */
+.tool-call-group-wrench {
+    display: inline-flex;
+    align-items: center;
     flex-shrink: 0;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--ts-pewter, var(--c-muted));
-    opacity: 0.5;
-    transition: background 0.33s var(--ts-ease, ease), opacity 0.33s var(--ts-ease, ease);
+    font-size: 12px;
+    line-height: 1;
+    color: var(--ts-blue, var(--c-accent-text));
+    transform-origin: 50% 50%;
+    animation: tool-wrench-turn 1.1s var(--ts-ease, ease) infinite;
 }
 
-.tool-call-group-indicator.running {
-    width: 10px;
-    height: 10px;
-    background: transparent;
-    border: 2px solid transparent;
-    border-top-color: var(--ts-blue, var(--c-accent-text));
-    opacity: 1;
-    box-shadow: 0 0 0 1.5px var(--ts-cloud, transparent);
-    animation: tool-dot-spin 1s linear infinite;
-}
-
-@keyframes tool-dot-spin {
-    from {
-        transform: rotate(0deg);
+@keyframes tool-wrench-turn {
+    0% {
+        transform: rotate(-20deg);
     }
 
-    to {
-        transform: rotate(360deg);
+    50% {
+        transform: rotate(20deg);
+    }
+
+    100% {
+        transform: rotate(-20deg);
     }
 }
 
 .tool-call-group-label {
-    flex: 1;
     min-width: 0;
     font-size: 14px;
     font-weight: 500;
@@ -251,6 +231,16 @@
     transform: rotateX(180deg);
 }
 
+@keyframes title-shimmer-flow {
+    from {
+        background-position: 200% 50%;
+    }
+
+    to {
+        background-position: 0% 50%;
+    }
+}
+
 /* Flowing light across the concrete command that is executing. */
 .tool-call-group--running .tool-call-preview-desc {
     background: linear-gradient(90deg,
@@ -270,7 +260,8 @@
 
     /* No flip and no sweeping highlight — the preview just swaps content. */
     .tool-call-flip--live,
-    .tool-call-group--running .tool-call-preview-desc {
+    .tool-call-group--running .tool-call-preview-desc,
+    .tool-call-group-wrench {
         animation: none;
     }
 

@@ -345,7 +345,7 @@ export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, disable
                 className={`history-item ${isCurrent ? "active" : ""} ${disableSessionSwitch ? "disabled" : ""} ${isArchived ? "archived" : ""} ${isLoading ? "loading" : ""}`}
                 onClick={() => void handleLoad(sid)}
               >
-                <div className="history-content">
+                <div className="history-head">
                   {isRenaming ? (
                     <input
                       className="history-rename-input"
@@ -363,58 +363,55 @@ export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, disable
                     />
                   ) : (
                     <span className="history-preview" title={title}>
-                      {isFavorite && (
-                        <FontAwesomeIcon icon={faStar} className="history-preview-star" />
-                      )}
                       {title.length > 60 ? title.slice(0, 60) + "…" : title}
                     </span>
                   )}
-                  <div className="history-footer">
-                    <span className="history-meta">
-                      {isLoading ? t("history.loading") : t("history.messageCount", { count: summary.message_count })}
-                      {isCurrent ? t("history.current") : ""}{isArchived ? t("history.archived") : ""}
-                    </span>
-                    <span className="history-created">{t("history.created", { date: createdAt })}</span>
+                  <div className="history-actions">
+                    <button
+                      className={`history-action-btn ${isFavorite ? "fav" : ""}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void patchMeta(sid, { favorite: !isFavorite });
+                      }}
+                      title={isFavorite ? t("history.removeFavorite") : t("history.addFavorite")}
+                    >
+                      <FontAwesomeIcon icon={isFavorite ? faStar : faStarOutline} />
+                    </button>
+                    <button
+                      className="history-action-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!isRenaming) startRename(summary);
+                      }}
+                      title={t("history.rename")}
+                    >
+                      <FontAwesomeIcon icon={faPenToSquare} />
+                    </button>
+                    <button
+                      className={`history-action-btn ${isArchived ? "on" : ""}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void patchMeta(sid, { archived: !isArchived });
+                      }}
+                      title={isArchived ? t("history.unarchive") : t("history.archive")}
+                    >
+                      <FontAwesomeIcon icon={isArchived ? faBoxOpen : faBoxArchive} />
+                    </button>
+                    <button
+                      className="history-action-btn delete"
+                      onClick={(e) => handleDelete(e, sid)}
+                      title={t("history.delete")}
+                    >
+                      <FontAwesomeIcon icon={faTrash} />
+                    </button>
                   </div>
                 </div>
-                <div className="history-actions">
-                  <button
-                    className={`history-action-btn ${isFavorite ? "fav" : ""}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void patchMeta(sid, { favorite: !isFavorite });
-                    }}
-                    title={isFavorite ? t("history.removeFavorite") : t("history.addFavorite")}
-                  >
-                    <FontAwesomeIcon icon={isFavorite ? faStar : faStarOutline} />
-                  </button>
-                  <button
-                    className="history-action-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (!isRenaming) startRename(summary);
-                    }}
-                    title={t("history.rename")}
-                  >
-                    <FontAwesomeIcon icon={faPenToSquare} />
-                  </button>
-                  <button
-                    className={`history-action-btn ${isArchived ? "on" : ""}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void patchMeta(sid, { archived: !isArchived });
-                    }}
-                    title={isArchived ? t("history.unarchive") : t("history.archive")}
-                  >
-                    <FontAwesomeIcon icon={isArchived ? faBoxOpen : faBoxArchive} />
-                  </button>
-                  <button
-                    className="history-action-btn delete"
-                    onClick={(e) => handleDelete(e, sid)}
-                    title={t("history.delete")}
-                  >
-                    <FontAwesomeIcon icon={faTrash} />
-                  </button>
+                <div className="history-footer">
+                  <span className="history-meta">
+                    {isLoading ? t("history.loading") : t("history.messageCount", { count: summary.message_count })}
+                    {isCurrent ? t("history.current") : ""}{isArchived ? t("history.archived") : ""}
+                  </span>
+                  <span className="history-created">{t("history.created", { date: createdAt })}</span>
                 </div>
               </div>
             );

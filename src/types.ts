@@ -189,6 +189,13 @@ export interface Message {
    * seeing, so history replays them as user messages.
    */
   injections?: ChatInjection[];
+  /**
+   * UI-only failure text for an assistant turn that could not finish. It is
+   * rendered under the partial reply but never persisted, and the whole
+   * message is skipped when building the model context (send and retry), so
+   * provider errors / warnings never become conversation history.
+   */
+  error?: string;
   /** Database row id from history table (only for persisted messages). */
   dbId?: number;
 }

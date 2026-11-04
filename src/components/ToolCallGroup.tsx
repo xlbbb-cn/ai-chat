@@ -1,7 +1,7 @@
 import type { Message, ToolCallEntry } from "../types";
 import { useRef, useState, type ReactNode } from "react";
 import { useI18n } from "../i18n";
-import { FontAwesomeIcon, faCheck, faChevronRight, faMinus, faSpinner, faTriangleExclamation, faXmark } from "../icons";
+import { FontAwesomeIcon, faCheck, faChevronRight, faMinus, faSpinner, faTriangleExclamation, faWrench, faXmark } from "../icons";
 import "./ToolCallGroup.css";
 
 interface Props {
@@ -107,8 +107,14 @@ export function ToolCallGroup({ message, onConfirm, onCancelBackground }: Props)
       >
         <summary className="tool-call-group-summary">
           <span className="tool-call-group-head">
-            <span className={`tool-call-group-indicator${isRunning ? " running" : ""}`} />
-            <span className="tool-call-group-label">{titleLabel}</span>
+            <span className="tool-call-group-title">
+              <span className="tool-call-group-label">{titleLabel}</span>
+              {isRunning && (
+                <span className="tool-call-group-wrench" aria-hidden="true">
+                  <FontAwesomeIcon icon={faWrench} />
+                </span>
+              )}
+            </span>
             <span className="tool-call-group-count">{t("toolGroup.steps", { count: entries.length })}</span>
             <span className="tool-call-group-chevron">
               <FontAwesomeIcon icon={faChevronRight} />

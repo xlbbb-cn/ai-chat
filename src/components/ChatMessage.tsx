@@ -1,5 +1,5 @@
 import type { Message, MessageContent } from "../types";
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ToolCallGroup } from "./ToolCallGroup";
 import { TodoList } from "./TodoList";
 import MarkdownIt from "markdown-it";
@@ -18,11 +18,12 @@ import {
   faFileArrowDown,
   faFileLines,
   faPaperclip,
+  faPen,
   faPenToSquare,
   faRotateRight,
   faTrash,
+  faTriangleExclamation,
   faVolumeHigh,
-  faWandSparkles,
 } from "../icons";
 import "./ChatMessage.css";
 
@@ -297,6 +298,80 @@ function formatInjectionTime(createdAtMs: number): string {
   });
 }
 
+/**
+ * Upper bound on the text the streaming typewriter animates per commit. A
+ * mid-stream markdown rewrite (an opening `**` turning into real bold) changes
+ * a whole paragraph; without the cap that paragraph would re-fade at once.
+ */
+const STREAM_INK_MAX_CHARS = 400;
+
+/** One loop of the writing indicator's nib + ink animations, in ms. */
+const WRITING_LOOP_MS = 1500;
+
+/**
+ * Builds the inline "assistant is writing" indicator: a pen nib scribbling
+ * over a self-drawing ink stroke. Markdown arrives as raw HTML, so the
+ * indicator is created imperatively and appended to the last rendered block —
+ * the only way to place it exactly at the end of the typewriter text.
+ */
+function createWritingIndicator(): HTMLSpanElement {
+  const svgNs = "http://www.w3.org/2000/svg";
+  const indicator = document.createElement("span");
+  indicator.className = "message-writing";
+  indicator.setAttribute("aria-hidden", "true");
+
+  const nib = document.createElement("span");
+  nib.className = "message-writing-nib";
+  const [iconWidth, iconHeight, , , iconPathData] = faPen.icon;
+  const nibSvg = document.createElementNS(svgNs, "svg");
+  nibSvg.setAttribute("viewBox", `0 0 ${iconWidth} ${iconHeight}`);
+  nibSvg.setAttribute("aria-hidden", "true");
+  nibSvg.setAttribute("focusable", "false");
+  const nibPath = document.createElementNS(svgNs, "path");
+  nibPath.setAttribute("fill", "currentColor");
+  nibPath.setAttribute("d", Array.isArray(iconPathData) ? iconPathData.join(" ") : iconPathData);
+  nibSvg.appendChild(nibPath);
+  nib.appendChild(nibSvg);
+
+  const ink = document.createElementNS(svgNs, "svg");
+  ink.setAttribute("class", "message-writing-ink");
+  ink.setAttribute("viewBox", "0 0 18 5");
+  ink.setAttribute("aria-hidden", "true");
+  const inkPath = document.createElementNS(svgNs, "path");
+  inkPath.setAttribute("pathLength", "100");
+  inkPath.setAttribute("d", "M1 3.4C2.5 1.2 4 4.2 5.6 2.6S8.4 1.4 10 3.2 13.2 4.4 15 2.2 16.6 1.8 17 2.4");
+  ink.appendChild(inkPath);
+
+  indicator.append(nib, ink);
+  return indicator;
+}
+
+/** Block elements the writing indicator may sit inside (deepest wins). */
+const WRITING_TAIL_BLOCKS = new Set([
+  "P", "LI", "UL", "OL", "BLOCKQUOTE", "H1", "H2", "H3", "H4", "H5", "H6", "DIV", "DETAILS",
+]);
+
+/**
+ * Deepest block at the end of the rendered markdown that can host an inline
+ * indicator (last paragraph, list item or heading). Code, formulas and tables
+ * keep their own layout, so the indicator follows them instead of entering.
+ */
+function writingTailHost(content: HTMLElement): HTMLElement {
+  let host = content;
+  let child = host.lastElementChild as HTMLElement | null;
+  while (child) {
+    if (
+      !WRITING_TAIL_BLOCKS.has(child.tagName) ||
+      child.matches("pre, .code-block-wrapper, .katex-display, table")
+    ) {
+      break;
+    }
+    host = child;
+    child = host.lastElementChild as HTMLElement | null;
+  }
+  return host;
+}
+
 export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onFork, dbId, onConfirm, onCancelBackground }: Props) {
   const { t } = useI18n();
   const isUser = message.role === "user";
@@ -323,14 +398,6 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
   const renderedMainContent = md.render(mainContent);
   const [reasoningOpen, setReasoningOpen] = useState(false);
 
-  // Live thinking: the reply is still streaming, reasoning text has arrived
-  // and the answer body has not started yet. Mirrors the tool-call group,
-  // which shimmers for the whole run — so the title keeps its flowing light
-  // for as long as the model is thinking instead of flickering on and off
-  // between token chunks.
-  const reasoningStreaming =
-    message.streaming && reasoningContent.length > 0 && mainContent.trim().length === 0;
-
   // Collapsed-state live preview: the last three reasoning lines are rendered
   // into a 2-row viewport over a 3-row track. When a new line arrives the
   // track re-mounts (keyed by line count) and replays the scroll-up tick:
@@ -349,6 +416,97 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
     };
   }, [reasoningContent]);
 
+  // Live reply rendering. `dangerouslySetInnerHTML` rebuilds the markdown
+  // subtree on every token, so nothing can live inside that markup: each
+  // commit re-attaches the writing indicator to the end of the last rendered
+  // block and wraps only the freshly arrived text in `.stream-ink`. Earlier
+  // text is never wrapped, so the reply grows smoothly instead of re-flashing.
+  //
+  // Deliberately no dependency array: React re-applies the injected HTML even
+  // when an empty reply simply re-renders, which wipes the imperatively added
+  // pen. Running the check after every commit puts it back before paint; the
+  // text diff below is a no-op when nothing changed.
+  const contentRef = useRef<HTMLDivElement>(null);
+  const streamedTextRef = useRef("");
+  const writingPenRef = useRef<HTMLSpanElement | null>(null);
+  const writingStartRef = useRef(0);
+  useLayoutEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+
+    // Pen: visible for the whole live turn, pinned to the typewriter's tail.
+    if (!isAssistant || !message.streaming) {
+      writingPenRef.current?.remove();
+      writingPenRef.current = null;
+      writingStartRef.current = 0;
+    } else {
+      let pen = writingPenRef.current;
+      if (!pen) {
+        pen = createWritingIndicator();
+        writingPenRef.current = pen;
+        writingStartRef.current = performance.now();
+      }
+      const host = writingTailHost(el);
+      if (pen.parentNode !== host) host.appendChild(pen);
+      // The pen is re-attached after every innerHTML rebuild; a negative delay
+      // keeps the nib/ink loop where it was instead of restarting at zero.
+      const phase = (performance.now() - writingStartRef.current) % WRITING_LOOP_MS;
+      pen.style.setProperty("--writing-delay", `-${Math.round(phase)}ms`);
+    }
+
+    const current = el.textContent ?? "";
+    const previous = streamedTextRef.current;
+    streamedTextRef.current = current;
+    if (!message.streaming || current.length === 0 || current === previous) return;
+
+    // Longest shared prefix: everything past it is what just arrived. The
+    // prefix (not a plain `startsWith`) is what makes this work with markdown —
+    // every rendered block ends with a newline, so appending inside a paragraph
+    // moves that newline to the right.
+    let pivot = 0;
+    const shared = Math.min(previous.length, current.length);
+    while (pivot < shared && previous.charCodeAt(pivot) === current.charCodeAt(pivot)) {
+      pivot += 1;
+    }
+    // Cap a markdown rewrite (`**` turning into real bold) so it never fades a
+    // whole long reply at once.
+    pivot = Math.max(pivot, current.length - STREAM_INK_MAX_CHARS);
+    if (pivot >= current.length) return;
+
+    // Never split a surrogate pair (emoji) between two text nodes.
+    if (pivot > 0) {
+      const before = current.charCodeAt(pivot - 1);
+      const after = current.charCodeAt(pivot);
+      if (before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff) {
+        pivot -= 1;
+      }
+    }
+
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const textNodes: Array<{ node: Text; start: number }> = [];
+    let offset = 0;
+    while (walker.nextNode()) {
+      const node = walker.currentNode as Text;
+      textNodes.push({ node, start: offset });
+      offset += node.data.length;
+    }
+
+    for (const { node, start } of textNodes) {
+      if (start + node.data.length <= pivot) continue;
+      if (!node.data.trim()) continue;
+      // Code, formulas and controls already carry their own markup; a wrapper
+      // there would fight highlight.js / KaTeX or animate a button label.
+      if (node.parentElement?.closest("pre, svg, math, annotation, button, a, .katex")) continue;
+      const tail = start < pivot ? node.splitText(pivot - start) : node;
+      const parent = tail.parentNode;
+      if (!parent) continue;
+      const ink = document.createElement("span");
+      ink.className = "stream-ink";
+      parent.insertBefore(ink, tail);
+      ink.appendChild(tail);
+    }
+  });
+
   return (
     <div
       className={`chat-message-shell ${isUser ? "user" : "assistant"}`}
@@ -364,18 +522,28 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
             open={reasoningOpen}
             onToggle={(e) => setReasoningOpen((e.target as HTMLDetailsElement).open)}
           >
-            <summary className={`message-reasoning-summary${reasoningStreaming ? " reasoning-streaming" : ""}`}>
+            <summary className="message-reasoning-summary">
               <span className="message-reasoning-head">
                 <span className="message-reasoning-title">{t("chat.thoughtProcess")}</span>
-                {/* Re-keyed on each new reasoning line, so the remount replays
-                    the spark animation and the brain blinks as thinking grows. */}
-                <span
-                  className="message-reasoning-brain"
-                  key={reasoningPreview.lineCount}
-                  aria-hidden="true"
-                >
-                  <FontAwesomeIcon icon={faWandSparkles} />
-                </span>
+                {/* Bézier "thought pulse": a short accent segment travels
+                    along the curve for the whole live reasoning window, so
+                    the thinking state is visible until the turn ends. */}
+                {message.streaming && (
+                  <span className="message-reasoning-curve" aria-hidden="true">
+                    <svg viewBox="0 0 24 20">
+                      <path
+                        className="message-reasoning-curve-base"
+                        pathLength={100}
+                        d="M2 14C5.2 6 8.4 6 11.6 14S18 22 21.2 14"
+                      />
+                      <path
+                        className="message-reasoning-curve-pulse"
+                        pathLength={100}
+                        d="M2 14C5.2 6 8.4 6 11.6 14S18 22 21.2 14"
+                      />
+                    </svg>
+                  </span>
+                )}
               </span>
               {!reasoningOpen && reasoningPreview.current && (
                 <span
@@ -409,6 +577,7 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
         {isAssistant && <TodoList />}
         <div
           className="message-content"
+          ref={contentRef}
           dangerouslySetInnerHTML={{ __html: renderedMainContent }}
           onClick={(e) => {
             const target = e.target as HTMLElement;
@@ -444,12 +613,17 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
             }
           }}
         />
-        {/* The caret marks live text, not the wait: while the turn is still
-            waiting for its first token (or is off running tools / reasoning)
-            the bubble stays clean. It re-appears the moment the answer body
-            starts streaming, at the end of that text. */}
-        {isAssistant && message.streaming && mainContent.trim().length > 0 && (
-          <span className="cursor">_</span>
+        {/* Failure notice for a turn that never completed. It lives outside
+            `content` on purpose: the model context (including retries) skips
+            this message, so provider errors and warnings never become history. */}
+        {isAssistant && message.error && (
+          <div className="message-error" role="alert">
+            <FontAwesomeIcon icon={faTriangleExclamation} className="message-error-icon" aria-hidden="true" />
+            <span className="message-error-text">
+              {t("app.errorPrefix")}
+              {message.error}
+            </span>
+          </div>
         )}
         {/* Information the user pushed into this turn while it was running.
             One turn stays one bubble, so the block sits under the reply and
