@@ -114,6 +114,7 @@ const zhTW: Messages = {
         markdownPathEmpty: "Markdown 檔案路徑為空。",
         markdownSaveFailed: "儲存 Markdown 檔案失敗：{error}",
         errorPrefix: "錯誤：",
+        continueUnfinished: "繼續完成上一條未完成的回覆，不要重複已經生成的內容。",
 
         markdownEditorAria: "Markdown 編輯器",
         markdownEditorTitle: "Markdown 編輯",
@@ -172,6 +173,7 @@ const zhTW: Messages = {
         forkTitle: "從這則訊息建立分支工作階段",
         injected: "本輪內追加",
         backgroundResult: "背景任務結果",
+        continue: "繼續",
     },
 
     toolGroup: {

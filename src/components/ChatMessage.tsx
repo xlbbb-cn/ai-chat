@@ -238,6 +238,8 @@ interface Props {
   onConfirm?: (requestId: string, allowed: boolean) => void;
   /** Stop a running background tool task (its process tree is terminated). */
   onCancelBackground?: (taskId: string) => void;
+  /** Resume a partial reply that ended with an error. */
+  onContinue?: () => void;
 }
 
 function extractAttachmentNames(content: string): string[] {
@@ -372,7 +374,7 @@ function writingTailHost(content: HTMLElement): HTMLElement {
   return host;
 }
 
-export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onFork, dbId, onConfirm, onCancelBackground }: Props) {
+export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onFork, dbId, onConfirm, onCancelBackground, onContinue }: Props) {
   const { t } = useI18n();
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
@@ -396,6 +398,12 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
     : embeddedThought.mainContent;
   const renderedReasoningContent = reasoningContent ? md.render(reasoningContent) : "";
   const renderedMainContent = md.render(mainContent);
+  // A failed turn can only be resumed when it left something usable behind;
+  // an immediate rate limit with no tokens has nothing to continue.
+  const hasPartialReply =
+    mainContent.trim().length > 0 ||
+    reasoningContent.trim().length > 0 ||
+    (message.tool_calls?.length ?? 0) > 0;
   const [reasoningOpen, setReasoningOpen] = useState(false);
 
   // Collapsed-state live preview: the last three reasoning lines are rendered
@@ -623,6 +631,15 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
               {t("app.errorPrefix")}
               {message.error}
             </span>
+            {onContinue && hasPartialReply && (
+              <button
+                type="button"
+                className="inline-edit-btn message-error-continue"
+                onClick={onContinue}
+              >
+                {t("chat.continue")}
+              </button>
+            )}
           </div>
         )}
         {/* Information the user pushed into this turn while it was running.

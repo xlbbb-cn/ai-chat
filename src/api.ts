@@ -267,6 +267,21 @@ export async function chatCompletion(
     unlisteners.length = 0;
   };
 
+  // `chat_completion` can both emit `chat-error` and reject the invoke promise
+  // (the same failure travels through both paths). Callbacks must run once per
+  // turn — a doubled `onError` would persist the partial assistant row twice.
+  let settled = false;
+  const finish = (error?: string) => {
+    if (settled) return;
+    settled = true;
+    if (error === undefined) {
+      callbacks.onDone();
+    } else {
+      callbacks.onError(error);
+    }
+    cleanup();
+  };
+
   const unToken = await listen<string>("chat-token", (e) =>
     callbacks.onToken(e.payload)
   );
@@ -276,12 +291,10 @@ export async function chatCompletion(
     }
   });
   const unDone = await listen<void>("chat-done", () => {
-    callbacks.onDone();
-    cleanup();
+    finish();
   });
   const unError = await listen<string>("chat-error", (e) => {
-    callbacks.onError(e.payload);
-    cleanup();
+    finish(e.payload);
   });
   const unTaskStart = await listen<AgentTaskEvent>("agent-task-start", (e) => {
     callbacks.onAgentTaskStart?.(e.payload);
@@ -313,11 +326,15 @@ export async function chatCompletion(
     modelOverride,
     useAgents: useAgents ?? false,
   }).catch((err: string) => {
-    callbacks.onError(err);
-    cleanup();
+    finish(err);
   });
 
-  return cleanup;
+  // Mark the turn closed before removing listeners: a late invoke rejection
+  // after Stop must not run the error path (and persist a second partial row).
+  return () => {
+    settled = true;
+    cleanup();
+  };
 }
 
 export async function saveHistory(
@@ -329,6 +346,10 @@ export async function saveHistory(
   attachments?: Attachment[],
   /** JSON-serialized `ChatInjection[]` for an assistant turn. */
   injections?: string,
+  /** UI-only failure text; never part of the model context. */
+  error?: string,
+  /** `done` / `error` / `stopped`; omitted for a normal completed turn. */
+  status?: string,
 ): Promise<number> {
   // Serialise the attachments array as JSON so it can be stored in a
   // single TEXT column. Pass `null` (not `undefined`) when absent so the
@@ -344,6 +365,8 @@ export async function saveHistory(
     reasoningContent: reasoningContent ?? null,
     attachments: attachmentsJson,
     injections: injections ?? null,
+    error: error ?? null,
+    status: status ?? null,
   });
 }
 
@@ -374,6 +397,10 @@ export interface HistoryRecord {
   attachments?: string;
   /** JSON-serialized `ChatInjection[]` for assistant turns. */
   injections?: string;
+  /** UI-only failure text restored for display. */
+  error?: string;
+  /** `done` / `error` / `stopped` for partial assistant turns. */
+  status?: string;
 }
 
 /** One row of the history sidebar — no message bodies. */

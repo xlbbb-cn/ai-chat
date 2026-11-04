@@ -36,7 +36,7 @@ import type {
   BackgroundTaskState,
   UpdateInfo,
 } from "./types";
-import { isGenerationStopped, isLocale, useI18n } from "./i18n";
+import { isGenerationStopped, isLocale, stripGenerationStopped, useI18n } from "./i18n";
 import { formatCountdown } from "./utils/time";
 import {
   FontAwesomeIcon,
@@ -283,6 +283,36 @@ function loadedSkillsOfMessage(m: Message): string[] | undefined {
     .filter((n): n is string => typeof n === "string" && n.length > 0);
   if (names.length === 0) return undefined;
   return Array.from(new Set(names));
+}
+
+/**
+ * Content replayed to the model. The stop marker is a UI affordance, so it is
+ * stripped here instead of ever reaching the provider. User content may stay
+ * multimodal.
+ */
+function contextContent(m: Message): MessageContent {
+  return m.role === "assistant" && typeof m.content === "string"
+    ? stripGenerationStopped(m.content)
+    : m.content;
+}
+
+/**
+ * A failed/stopped assistant turn is still useful context when it produced
+ * visible text or reasoning. Empty interrupted turns (including rows that only
+ * carry an error notice) are skipped instead of becoming blank assistant turns.
+ */
+function hasContextContent(m: Message): boolean {
+  if (m.role !== "assistant") return true;
+  const content = typeof m.content === "string" ? stripGenerationStopped(m.content) : "";
+  return content.trim().length > 0 || Boolean(m.reasoning_content?.trim());
+}
+
+/** An assistant turn that ended with an error or a user stop. */
+function isInterruptedAssistant(m: Message): boolean {
+  return (
+    m.role === "assistant" &&
+    (Boolean(m.error) || m.status === "error" || m.status === "stopped")
+  );
 }
 
 interface AgentStatus {
@@ -1492,11 +1522,11 @@ export default function App() {
     setUsageReady(false);
 
     const history = [...messages, userMsg]
-      .filter((m) => !m.streaming && !m.error && !m.id.startsWith("agent-progress-") && m.role !== "tool_group")
+      .filter((m) => !m.streaming && !m.id.startsWith("agent-progress-") && m.role !== "tool_group" && hasContextContent(m))
       .flatMap((m) => {
         const entry = {
           role: m.role,
-          content: m.content,
+          content: contextContent(m),
           reasoning_content: m.reasoning_content,
           loaded_skills: loadedSkillsOfMessage(m),
         };
@@ -1622,12 +1652,36 @@ export default function App() {
                 ? {
                     ...m,
                     error: err,
+                    status: "error" as const,
                     streaming: false,
                     ...(settledToolCalls.length ? { tool_calls: settledToolCalls } : {}),
                   }
                 : m
             )
         );
+        // Persist the partial turn (if any) so refreshing or reopening the
+        // session does not discard what was already generated. The error text
+        // is stored separately and is never replayed as model content.
+        const deliveredInjections = currentInjectionsRef.current;
+        if (accumulatedContent.trim() || accumulatedReasoning.trim() || settledToolCalls.length > 0) {
+          saveHistory(
+            sessionId,
+            "assistant",
+            accumulatedContent,
+            settledToolCalls.length > 0 ? JSON.stringify(settledToolCalls) : undefined,
+            accumulatedReasoning || undefined,
+            undefined,
+            deliveredInjections.length > 0 ? JSON.stringify(deliveredInjections) : undefined,
+            err,
+            "error",
+          )
+            .then((dbId) => {
+              setMessages((prev) =>
+                prev.map((m) => (m.id === assistantId ? { ...m, dbId } : m))
+              );
+            })
+            .catch(console.error);
+        }
         setPendingRetryMessageId(userMsg.id);
         setAgentStatuses({});
         hasRunningToolCallRef.current = false;
@@ -1642,6 +1696,16 @@ export default function App() {
 
     cleanupRef.current = cleanup;
   }, [input, messages, streaming, profileExporting, activeSkillIds, sessionId, attachments, selectedModel, useAgentsEnabled, t, flushUndeliveredInjections]);
+
+  /**
+   * Resume a partial reply. The normal send path keeps interrupted assistant
+   * messages that still have visible output, so the model sees what it had
+   * already reasoned/generated and continues instead of starting over.
+   */
+  const continueUnfinishedReply = useCallback(() => {
+    if (streaming) return;
+    void sendMessage(t("app.continueUnfinished"));
+  }, [streaming, sendMessage, t]);
 
   // Continue the conversation from a fired timer — or deliver an injection
   // that arrived after the turn's last request — once the chat is idle. The
@@ -1675,12 +1739,29 @@ export default function App() {
     // input must sweep until this request's `chat-usage` arrives.
     setUsageReady(false);
 
-    const history = [...messages]
-      .filter((m) => !m.streaming && !m.error && !m.id.startsWith("agent-progress-") && m.role !== "tool_group")
+    // A retry regenerates the last answer: drop the trailing interrupted
+    // assistant turn(s), plus transient progress rows, so the request ends at
+    // the user message. Partial turns from earlier in the session stay.
+    const retryBase = [...messages];
+    while (retryBase.length > 0) {
+      const last = retryBase[retryBase.length - 1];
+      if (last.id.startsWith("agent-progress-") || last.role === "tool_group") {
+        retryBase.pop();
+        continue;
+      }
+      if (isInterruptedAssistant(last)) {
+        retryBase.pop();
+        continue;
+      }
+      break;
+    }
+
+    const history = retryBase
+      .filter((m) => !m.streaming && m.role !== "tool_group" && hasContextContent(m))
       .flatMap((m) => {
         const entry = {
           role: m.role,
-          content: m.content,
+          content: contextContent(m),
           reasoning_content: m.reasoning_content,
           loaded_skills: loadedSkillsOfMessage(m),
         };
@@ -1784,12 +1865,35 @@ export default function App() {
                 ? {
                     ...m,
                     error: err,
+                    status: "error" as const,
                     streaming: false,
                     ...(settledToolCalls.length ? { tool_calls: settledToolCalls } : {}),
                   }
                 : m
             )
         );
+        // Same as the first-turn handler: keep the partial reply on disk so a
+        // reload or continuation can use it; the error itself stays UI-only.
+        const deliveredInjections = currentInjectionsRef.current;
+        if (accumulatedContent.trim() || accumulatedReasoning.trim() || settledToolCalls.length > 0) {
+          saveHistory(
+            sessionId,
+            "assistant",
+            accumulatedContent,
+            settledToolCalls.length > 0 ? JSON.stringify(settledToolCalls) : undefined,
+            accumulatedReasoning || undefined,
+            undefined,
+            deliveredInjections.length > 0 ? JSON.stringify(deliveredInjections) : undefined,
+            err,
+            "error",
+          )
+            .then((dbId) => {
+              setMessages((prev) =>
+                prev.map((m) => (m.id === assistantId ? { ...m, dbId } : m))
+              );
+            })
+            .catch(console.error);
+        }
         setAgentStatuses({});
         hasRunningToolCallRef.current = false;
         // Whatever never reached a request is sent as the next user turn.
@@ -2102,6 +2206,10 @@ export default function App() {
     // A step that was still running when the user hit Stop never completed:
     // settle it so the group does not keep a spinner spinning forever.
     const assistantId = currentAssistantMessageIdRef.current;
+    const activeMessage = assistantId
+      ? messages.find((m) => m.id === assistantId)
+      : undefined;
+    const stopSuffix = "\n\n" + t("app.generationStopped");
     // A stopped turn also drops any pending inline confirmation: clear the
     // `confirm` payload so no stale allow/deny row survives the settle (the
     // 120 s backend timeout already answers it as "not confirmed").
@@ -2122,12 +2230,15 @@ export default function App() {
         .filter((m) => !m.id.startsWith("agent-progress-"))
         .map((m) => {
           if (!m.streaming) return m;
-          const stopSuffix = "\n\n" + t("app.generationStopped");
           // `content` may be a string OR a multimodal array — only mutate
           // string content (assistant streamed text). Leave other shapes
           // untouched.
           if (typeof m.content !== "string") {
-            return { ...m, streaming: false };
+            return {
+              ...m,
+              streaming: false,
+              ...(m.id === assistantId ? { status: "stopped" as const } : {}),
+            };
           }
           const content = isGenerationStopped(m.content)
             ? m.content
@@ -2136,12 +2247,43 @@ export default function App() {
             ...m,
             content,
             streaming: false,
-            ...(m.id === assistantId && settledToolCalls.length
-              ? { tool_calls: settledToolCalls }
+            ...(m.id === assistantId
+              ? {
+                  status: "stopped" as const,
+                  ...(settledToolCalls.length ? { tool_calls: settledToolCalls } : {}),
+                }
               : {}),
           };
         })
     );
+    // Keep the partial stopped reply on disk; the stop marker is UI-only and
+    // gets stripped from the model context when the turn is replayed.
+    if (assistantId && activeMessage) {
+      const rawContent = typeof activeMessage.content === "string" ? activeMessage.content : "";
+      const savedContent = rawContent
+        ? (isGenerationStopped(rawContent) ? rawContent : rawContent + stopSuffix)
+        : "";
+      const deliveredInjections = currentInjectionsRef.current;
+      if (savedContent.trim() || activeMessage.reasoning_content?.trim() || settledToolCalls.length > 0) {
+        saveHistory(
+          sessionId,
+          "assistant",
+          savedContent,
+          settledToolCalls.length > 0 ? JSON.stringify(settledToolCalls) : undefined,
+          activeMessage.reasoning_content || undefined,
+          undefined,
+          deliveredInjections.length > 0 ? JSON.stringify(deliveredInjections) : undefined,
+          undefined,
+          "stopped",
+        )
+          .then((dbId) => {
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantId ? { ...m, dbId } : m))
+            );
+          })
+          .catch(console.error);
+      }
+    }
     setStreaming(false);
   }
 
@@ -2557,6 +2699,11 @@ export default function App() {
                 dbId={m.dbId}
                 onConfirm={respondToolCallConfirm}
                 onCancelBackground={handleCancelBackgroundTask}
+                onContinue={
+                  !streaming && m.role === "assistant" && m.id === messages[messages.length - 1]?.id
+                    ? continueUnfinishedReply
+                    : undefined
+                }
               />
             )
           )}

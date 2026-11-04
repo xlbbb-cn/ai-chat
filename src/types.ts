@@ -191,11 +191,17 @@ export interface Message {
   injections?: ChatInjection[];
   /**
    * UI-only failure text for an assistant turn that could not finish. It is
-   * rendered under the partial reply but never persisted, and the whole
-   * message is skipped when building the model context (send and retry), so
-   * provider errors / warnings never become conversation history.
+   * rendered under the partial reply but never persisted as model content and
+   * never sent in the context; the partial `content`/`reasoning_content` can
+   * still be replayed so a continuation request picks up where it stopped.
    */
   error?: string;
+  /**
+   * Outcome of a persisted assistant turn. `error` / `stopped` mark partial
+   * turns whose visible output stays usable but which should not be treated
+   * as a completed reply. `undefined` means a normal completed turn.
+   */
+  status?: "done" | "error" | "stopped";
   /** Database row id from history table (only for persisted messages). */
   dbId?: number;
 }

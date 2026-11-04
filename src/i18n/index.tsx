@@ -142,6 +142,19 @@ export function isGenerationStopped(content: string): boolean {
     return LOCALES.some((locale) => content.includes(translate(locale, "app.generationStopped")));
 }
 
+/**
+ * Remove the UI-only "[Generation stopped]" marker before the reply is replayed
+ * as model context. The marker was added in whichever locale was active, so
+ * every wording is stripped.
+ */
+export function stripGenerationStopped(content: string): string {
+    let stripped = content;
+    for (const locale of LOCALES) {
+        stripped = stripped.split(translate(locale, "app.generationStopped")).join("");
+    }
+    return stripped.replace(/\s+$/, "");
+}
+
 // ─── React bindings ──────────────────────────────────────────────────────────
 
 export interface I18n {

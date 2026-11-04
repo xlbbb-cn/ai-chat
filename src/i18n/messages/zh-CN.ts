@@ -114,6 +114,7 @@ const zhCN: Messages = {
         markdownPathEmpty: "Markdown 文件路径为空。",
         markdownSaveFailed: "保存 Markdown 文件失败：{error}",
         errorPrefix: "错误：",
+        continueUnfinished: "继续完成上一条未完成的回复，不要重复已经生成的内容。",
 
         markdownEditorAria: "Markdown 编辑器",
         markdownEditorTitle: "Markdown 编辑",
@@ -172,6 +173,7 @@ const zhCN: Messages = {
         forkTitle: "从这条消息创建分支会话",
         injected: "本轮内追加",
         backgroundResult: "后台任务结果",
+        continue: "继续",
     },
 
     toolGroup: {

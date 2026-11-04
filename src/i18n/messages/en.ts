@@ -129,6 +129,8 @@ const en = {
         markdownPathEmpty: "Markdown file path is empty.",
         markdownSaveFailed: "Failed to save markdown file: {error}",
         errorPrefix: "Error: ",
+        continueUnfinished:
+            "Continue the unfinished reply above without repeating what you already generated.",
 
         markdownEditorAria: "Markdown editor",
         markdownEditorTitle: "Markdown Edit",
@@ -194,6 +196,7 @@ const en = {
         forkTitle: "Fork conversation from this message",
         injected: "Added mid-turn",
         backgroundResult: "Background task result",
+        continue: "Continue",
     },
 
     toolGroup: {

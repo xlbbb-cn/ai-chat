@@ -116,6 +116,8 @@ function recordsToMessages(sessionRecords: HistoryRecord[]): Message[] {
       ...(injections ? { injections } : {}),
       tool_calls: toolCalls,
       ...(r.reasoning_content ? { reasoning_content: r.reasoning_content } : {}),
+      ...(r.error ? { error: r.error } : {}),
+      ...(r.status ? { status: r.status as Message["status"] } : {}),
       dbId: r.id,
     });
   }

@@ -4958,6 +4958,8 @@ mod tests {
                 reasoning_content: None,
                 attachments: None,
                 injections: None,
+                error: None,
+                status: None,
             })
             .collect();
 
@@ -4980,6 +4982,8 @@ mod tests {
                 reasoning_content: None,
                 attachments: None,
                 injections: None,
+                error: None,
+                status: None,
             })
             .collect();
 
