@@ -38,6 +38,24 @@ export interface ToolCallEntry {
    * sub-agent's question; `answer_chars` is the size of the material returned.
    */
   help?: ToolCallHelp;
+  /**
+   * Mission-bus (mbus) activity for this task row. Counts are live; the full
+   * message log lives in the Agent Mission panel. `last.body` is clipped before
+   * it is persisted with the tool-call entry.
+   */
+  mbus?: ToolCallMbus;
+}
+
+/** One sub-agent ↔ planner / peer message summary shown on a task row. */
+export interface ToolCallMbus {
+  sent: number;
+  received: number;
+  last?: {
+    direction: "in" | "out";
+    /** Display label: "Planner", a peer agent name, or "#topic". */
+    label: string;
+    body: string;
+  };
 }
 
 /** One sub-agent → main-agent help exchange, mirrored from `agent-help-*`. */
@@ -558,6 +576,8 @@ export interface AgentOrchestration {
   auto_configure: boolean;
   max_concurrent: number;
   mode: "parallel" | "sequential";
+  /** Mission message bus + planner supervision (default true). */
+  mbus_enabled: boolean;
 }
 
 /** One key/value pair: a CLI agent's env var, or a cloud agent's header. */
@@ -678,6 +698,63 @@ export interface AgentHelpEvent {
   error?: string;
 }
 
+/** One live `agent-mbus-message` event (planner or sub-agent publish). */
+export interface AgentMbusMessageEvent {
+  bus_id: string;
+  session_id: string;
+  from_id: string;
+  from_name: string;
+  target_kind: "direct" | "topic";
+  /** Task id for direct, topic name for topic. */
+  target_id: string;
+  topic: string;
+  body: string;
+  recipients: Array<{ id: string; name: string }>;
+  created_at_ms: number;
+}
+
+/** `agent-mbus-delivered`: messages just injected at a sub-agent request boundary. */
+export interface AgentMbusDeliveredEvent {
+  bus_id: string;
+  session_id: string;
+  mission_id: string;
+  task_id: string;
+  count: number;
+  messages: Array<{
+    from_id: string;
+    from_name: string;
+    topic: string;
+    body: string;
+    created_at_ms: number;
+  }>;
+}
+
+/** `agent-planner-state`: live supervision status for the planner row. */
+export interface AgentPlannerStateEvent {
+  session_id: string;
+  bus_id: string;
+  task_id: string;
+  status: "thinking" | "monitoring" | "done" | "stopped" | "error";
+  activation: number;
+  task_count: number;
+  activity: string;
+}
+
+/** Persisted mission-bus message rendered in the Agent Mission panel. */
+export interface AgentBusMessage {
+  id: number;
+  bus_id: string;
+  from_id: string;
+  from_name: string;
+  target_kind: "direct" | "topic";
+  target_id: string;
+  to_name: string;
+  topic: string;
+  body: string;
+  recipient_count: number;
+  created_at: string;
+}
+
 /**
  * Selector decision for one turn (`agent-selection` event). `delegate: false`
  * means the request is answered without sub-agents.
@@ -700,6 +777,8 @@ export interface AgentMissionSnapshot {
   session_id: string;
   agent_id: string;
   agent_name: string;
+  /** Mission bus of the orchestration batch; null for direct call_subagent runs. */
+  bus_id?: string | null;
   root_task_description: string;
   root_task_context: string;
   status: string;

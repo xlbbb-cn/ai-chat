@@ -107,10 +107,10 @@
   gap: 3px;
 }
 
-/* Row 1 — title + pen indicator. Fixed height: streaming text alternates
-   between Latin (RazerF5) and CJK fallback glyphs whose font metrics differ —
-   without a pinned height the line box (and the whole card) would jitter
-   while tokens arrive. */
+/* Row 1 — title. Fixed height: streaming text alternates between Latin
+   (RazerF5) and CJK fallback glyphs whose font metrics differ — without a
+   pinned height the line box (and the whole card) would jitter while tokens
+   arrive. */
 .message-reasoning-head {
   display: inline-flex;
   align-items: center;
@@ -122,54 +122,6 @@
   flex-shrink: 0;
   height: 22px;
   line-height: 22px;
-}
-
-/* Bézier "thought pulse" — a short accent segment travels along the curve
-   for the whole live reasoning window, so the thinking state stays visible
-   until the turn ends. The faint full curve keeps the shape readable while
-   the pulse moves. */
-.message-reasoning-curve {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 26px;
-  height: 22px;
-  color: var(--ts-blue);
-}
-
-.message-reasoning-curve svg {
-  width: 26px;
-  height: 20px;
-  overflow: visible;
-}
-
-.message-reasoning-curve path {
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-}
-
-.message-reasoning-curve-base {
-  stroke-width: 1.2;
-  opacity: 0.28;
-}
-
-.message-reasoning-curve-pulse {
-  stroke-width: 2;
-  stroke-dasharray: 20 80;
-  animation: reasoning-curve-flow 1.35s linear infinite;
-}
-
-/* `pathLength=100` makes the dash travel exactly one full curve per loop. */
-@keyframes reasoning-curve-flow {
-  from {
-    stroke-dashoffset: 100;
-  }
-
-  to {
-    stroke-dashoffset: 0;
-  }
 }
 
 /* Rows 2–4 — collapsed live preview: a two-row viewport over a three-row
@@ -283,11 +235,6 @@
 
   .reasoning-preview-live .reasoning-preview-line {
     animation: none;
-  }
-
-  .message-reasoning-curve-pulse {
-    animation: none;
-    stroke-dasharray: none;
   }
 }
 

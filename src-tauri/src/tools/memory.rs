@@ -534,13 +534,21 @@ fn entry_age_days(entry: &EvolutionEntry) -> f64 {
 
 /// Ranking score: importance, confidence, how often it was confirmed and used,
 /// and how recently it proved useful. Pinned entries float above everything.
+///
+/// The recency term is bucketed to **whole days**: the ranked render lands in
+/// the system prompt (the head of the cached request prefix), so a
+/// fractional-day wall-clock drift would silently reorder entries between
+/// consecutive turns and invalidate that entire prefix. With whole-day
+/// buckets the order only changes at day boundaries or on explicit
+/// `uses`/`evidence` bumps — never click by click of the clock.
 pub fn score_evolution_entry(entry: &EvolutionEntry) -> f64 {
     let meta = &entry.meta;
+    let age_days = entry_age_days(entry).floor();
     let mut score = 2.0 * meta.importance as f64
         + meta.confidence as f64
         + 1.5 * ((1 + meta.evidence) as f64).ln()
         + 1.2 * ((1 + meta.uses) as f64).ln()
-        + 3.0 * (-entry_age_days(entry) / 30.0).exp();
+        + 3.0 * (-age_days / 30.0).exp();
     if meta.pinned || meta.importance >= 5 {
         score += 100.0;
     }
@@ -2674,6 +2682,54 @@ mod tests {
             .unwrap()
             .score;
         assert!(evidence_score > plain_score);
+    }
+
+    /// Build an in-memory entry whose `updated_at` sits exactly `days_ago`
+    /// behind the wall clock (no file involved).
+    fn entry_with_age(days_ago: f64) -> EvolutionEntry {
+        let stamp =
+            (chrono::Utc::now() - chrono::Duration::nanoseconds((days_ago * 86_400.0 * 1e9) as i64))
+                .to_rfc3339();
+        EvolutionEntry {
+            meta: EvolutionMeta {
+                key: "age-test".to_string(),
+                title: "age test".to_string(),
+                kind: "fact".to_string(),
+                importance: 2,
+                confidence: 3,
+                evidence: 2,
+                uses: 4,
+                pinned: false,
+                source: "verified".to_string(),
+                created_at: stamp.clone(),
+                updated_at: stamp,
+                ..Default::default()
+            },
+            summary: "age test summary".to_string(),
+            body: "age test body".to_string(),
+            path: None,
+        }
+    }
+
+    /// The recency term is bucketed to whole days: two entries whose exact
+    /// ages fall into the same day bucket score identically, so the injected
+    /// system-prompt render cannot drift within a day (prompt-cache
+    /// stability). Crossing a bucket boundary still drops the term.
+    #[test]
+    fn recency_score_is_bucketed_to_whole_days() {
+        // A quarter of a day apart, both floor into "day 0" — identical score.
+        let early_today = entry_with_age(0.05);
+        let late_today = entry_with_age(0.90);
+        assert_eq!(
+            score_evolution_entry(&early_today),
+            score_evolution_entry(&late_today)
+        );
+        // One bucket older: the exp term falls, the score drops.
+        let yesterday = entry_with_age(1.10);
+        assert!(
+            score_evolution_entry(&yesterday) < score_evolution_entry(&early_today),
+            "an older day bucket must score lower"
+        );
     }
 
     /// The budget is a hard cap, the tail line accounts for what was dropped,

@@ -202,6 +202,25 @@
     color: #888;
 }
 
+/* Prompt-cache chips: per-row hit of an `llm_api` request and the weighted
+   aggregate beside the list header. Token-only colours because both labels
+   describe a status, never a primary action. */
+.monitor-cache-chip {
+    margin-left: auto;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 11px;
+    background-color: var(--c-accent-soft);
+    color: var(--c-accent-text);
+    white-space: nowrap;
+}
+
+.monitor-cache-avg {
+    font-size: 11px;
+    color: var(--c-muted);
+    white-space: nowrap;
+}
+
 .monitor-item-title {
     font-size: 13px;
     color: #e0e0e0;

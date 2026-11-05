@@ -172,6 +172,42 @@ mod tests {
         assert_eq!(resolve_reasoning_effort(&config, "gpt-5"), Some("high"));
     }
 
+    /// All three cache dialects the usage parser supports, and the case where
+    /// the endpoint reports no caching figure at all (`None`, not `Some(0)`:
+    /// a reported zero-hit request must stay distinguishable).
+    #[test]
+    fn extract_cached_tokens_understands_every_provider_dialect() {
+        let openai = json!({
+            "prompt_tokens": 500,
+            "prompt_tokens_details": { "cached_tokens": 384 }
+        });
+        assert_eq!(extract_cached_tokens(&openai), Some(384));
+
+        let deepseek = json!({
+            "prompt_tokens": 500,
+            "prompt_cache_hit_tokens": 300,
+            "prompt_cache_miss_tokens": 200
+        });
+        assert_eq!(extract_cached_tokens(&deepseek), Some(300));
+
+        let anthropic_style = json!({
+            "prompt_tokens": 500,
+            "cache_read_input_tokens": 410
+        });
+        assert_eq!(extract_cached_tokens(&anthropic_style), Some(410));
+
+        assert_eq!(extract_cached_tokens(&json!({ "prompt_tokens": 500 })), None);
+        assert_eq!(extract_cached_tokens(&json!({ "prompt_tokens": 0 })), None);
+
+        // OpenAI wins when several dialects are present, and a reported
+        // zero-hit stays a real `Some(0)`.
+        let mixed = json!({
+            "prompt_tokens_details": { "cached_tokens": 0 },
+            "prompt_cache_hit_tokens": 999
+        });
+        assert_eq!(extract_cached_tokens(&mixed), Some(0));
+    }
+
     #[test]
     fn content_to_text_passthrough_for_string() {
         let v = json!("hello world");
@@ -453,6 +489,11 @@ pub struct StreamResult {
     pub reasoning_content: String,
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
+    /// Cached prompt-prefix tokens reported by the provider, or `None` when
+    /// the endpoint does not report caching at all. `Some(0)` is real data
+    /// (a guaranteed miss, e.g. the first request of a session) and keeps
+    /// cache-hit-rate metrics honest, so it must not collapse to `None`.
+    pub cached_tokens: Option<u32>,
 }
 
 /// Options controlling how a streaming LLM request behaves.
@@ -467,6 +508,13 @@ pub struct StreamOptions<'a> {
     pub emit_reasoning: bool,
     /// Emit `chat-usage` and populate prompt/completion token counts.
     pub emit_usage: bool,
+    /// Emit content deltas on `token_event`. The planner supervisor turns this
+    /// off so its internal reasoning never reaches the chat transcript.
+    pub emit_tokens: bool,
+    /// Emit `chat-error` for a terminal upstream error. Internal helper calls
+    /// (the planner supervisor) turn this off: a failed helper must not paint
+    /// the user's chat bubble as an error.
+    pub emit_errors: bool,
     /// Optional —— token ceiling used for usage ratio reporting.
     pub usage_max_tokens: Option<u32>,
     /// DS-Format (`config.ds_format`): normalize the request so assistant
@@ -661,6 +709,7 @@ where
                     None
                 },
                 elapsed_ms,
+                None,
             );
         }
 
@@ -1131,6 +1180,31 @@ pub(crate) fn resolve_reasoning_effort(
         .find(|effort| effort.eq_ignore_ascii_case(candidate))
         .copied()
 }
+/// Cached prompt-prefix token count reported in one of the OpenAI-compatible
+/// usage dialects. The three shapes are mutually exclusive per provider, so
+/// the first present wins:
+/// - OpenAI: `prompt_tokens_details.cached_tokens`
+/// - DeepSeek: `prompt_cache_hit_tokens`
+/// - Anthropic-style pass-throughs of OpenAI-compatible relays:
+///   `cache_read_input_tokens`
+///
+/// `None` when none is present — the endpoint does not report caching, which
+/// is different from reporting a zero-hit request.
+fn extract_cached_tokens(usage: &Value) -> Option<u32> {
+    let pick = |value: Option<&Value>| -> Option<u32> {
+        let number = value?;
+        Some(
+            number
+                .as_u64()
+                .or_else(|| number.as_f64().map(|f| f.round() as u64))?
+                .min(u32::MAX as u64) as u32,
+        )
+    };
+    pick(usage.pointer("/prompt_tokens_details/cached_tokens"))
+        .or_else(|| pick(usage.get("prompt_cache_hit_tokens")))
+        .or_else(|| pick(usage.get("cache_read_input_tokens")))
+}
+
 fn process_stream_chunk(
     app: &AppHandle,
     parsed: &Value,
@@ -1141,18 +1215,24 @@ fn process_stream_chunk(
     reasoning_content: &mut String,
     prompt_tokens: &mut u32,
     completion_tokens: &mut u32,
+    cached_tokens: &mut Option<u32>,
     got_tool_calls: &mut bool,
 ) {
-    if opts.emit_usage {
-        if let Some(usage) = parsed.get("usage").filter(|v| !v.is_null()) {
-            *prompt_tokens = usage
-                .get("prompt_tokens")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32;
-            *completion_tokens = usage
-                .get("completion_tokens")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32;
+    // Always parse usage so every caller (sub-agents, the main-agent helper and
+    // the planner supervisor) gets accurate token counts. Only the main chat
+    // paints the usage gauge, so `emit_usage` now controls just the event.
+    if let Some(usage) = parsed.get("usage").filter(|v| !v.is_null()) {
+        *prompt_tokens = usage
+            .get("prompt_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32;
+        *completion_tokens = usage
+            .get("completion_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32;
+        let cached_report = extract_cached_tokens(usage);
+        *cached_tokens = cached_report;
+        if opts.emit_usage {
             let total_tokens = usage
                 .get("total_tokens")
                 .and_then(|v| v.as_u64())
@@ -1163,16 +1243,25 @@ fn process_stream_chunk(
                 .filter(|max| *max > 0)
                 .map(|max| total_tokens as f64 / max as f64)
                 .unwrap_or(0.0);
-            let _ = app.emit(
-                "chat-usage",
-                json!({
-                    "prompt_tokens": *prompt_tokens,
-                    "completion_tokens": *completion_tokens,
-                    "total_tokens": total_tokens,
-                    "max_tokens": opts.usage_max_tokens,
-                    "usage_ratio": usage_ratio
-                }),
-            );
+            let mut event = json!({
+                "prompt_tokens": *prompt_tokens,
+                "completion_tokens": *completion_tokens,
+                "total_tokens": total_tokens,
+                "max_tokens": opts.usage_max_tokens,
+                "usage_ratio": usage_ratio
+            });
+            // Only reported when the provider exposes a cache dialect at all:
+            // without it a hard-coded `0%` would look like real data.
+            if let Some(cached) = cached_report {
+                let hit_ratio = if *prompt_tokens > 0 {
+                    ((cached as f64) / (*prompt_tokens as f64)).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                event["cached_tokens"] = json!(cached);
+                event["hit_ratio"] = json!(hit_ratio);
+            }
+            let _ = app.emit("chat-usage", event);
         }
     }
 
@@ -1230,13 +1319,15 @@ fn process_stream_chunk(
 
     if let Some(token) = delta["content"].as_str() {
         content.push_str(token);
-        if let Some(task_id) = opts.task_id {
-            let _ = app.emit(
-                opts.token_event,
-                json!({ "task_id": task_id, "token": token }),
-            );
-        } else {
-            let _ = app.emit(opts.token_event, token.to_string());
+        if opts.emit_tokens {
+            if let Some(task_id) = opts.task_id {
+                let _ = app.emit(
+                    opts.token_event,
+                    json!({ "task_id": task_id, "token": token }),
+                );
+            } else {
+                let _ = app.emit(opts.token_event, token.to_string());
+            }
         }
     }
 }
@@ -1642,7 +1733,9 @@ pub async fn stream_llm_request(
                 tokio::time::sleep(Duration::from_millis(retry_backoff_ms(attempt))).await;
                 continue;
             }
-            let _ = app.emit("chat-error", err.clone());
+            if opts.emit_errors {
+                let _ = app.emit("chat-error", err.clone());
+            }
             return Err(err);
         }
 
@@ -1652,6 +1745,7 @@ pub async fn stream_llm_request(
         let mut reasoning_content = String::new();
         let mut prompt_tokens: u32 = 0;
         let mut completion_tokens: u32 = 0;
+        let mut cached_tokens: Option<u32> = None;
         let mut got_tool_calls = false;
         let mut stream_error: Option<String> = None;
 
@@ -1667,6 +1761,7 @@ pub async fn stream_llm_request(
                     reasoning_content,
                     prompt_tokens,
                     completion_tokens,
+                    cached_tokens,
                 });
             }
             let bytes = match chunk {
@@ -1698,6 +1793,7 @@ pub async fn stream_llm_request(
                         reasoning_content,
                         prompt_tokens,
                         completion_tokens,
+                        cached_tokens,
                     });
                 }
                 let line = line.trim();
@@ -1723,6 +1819,7 @@ pub async fn stream_llm_request(
                     &mut reasoning_content,
                     &mut prompt_tokens,
                     &mut completion_tokens,
+                    &mut cached_tokens,
                     &mut got_tool_calls,
                 );
             }
@@ -1742,6 +1839,7 @@ pub async fn stream_llm_request(
                         &mut reasoning_content,
                         &mut prompt_tokens,
                         &mut completion_tokens,
+                        &mut cached_tokens,
                         &mut got_tool_calls,
                     );
                 }
@@ -1770,6 +1868,7 @@ pub async fn stream_llm_request(
             reasoning_content,
             prompt_tokens,
             completion_tokens,
+            cached_tokens,
         });
     }
 
@@ -1800,6 +1899,8 @@ async fn stream_request(
             task_id: None,
             emit_reasoning: true,
             emit_usage: true,
+            emit_tokens: true,
+            emit_errors: true,
             usage_max_tokens,
             ds_format,
             headers,
@@ -1819,6 +1920,7 @@ fn log_interaction(
     output_data: String,
     error_message: Option<String>,
     duration_ms: i64,
+    metadata: Option<String>,
 ) {
     let _ = db::save_interaction_log(
         db,
@@ -1830,7 +1932,7 @@ fn log_interaction(
         &output_data,
         error_message.as_deref(),
         duration_ms,
-        None,
+        metadata.as_deref(),
     );
 }
 
@@ -2573,6 +2675,10 @@ async fn run_chat_turn(
             .filter(|s| s.enabled)
             .collect();
 
+        // Sorting boundary: only the appended MCP segment is re-ordered — the
+        // built-in tools and the skill tools keep their layout.
+        let mcp_tools_start = tools_list.len();
+
         for server in enabled_servers.iter() {
             match mcp::get_server_tools(&state, server).await {
                 Ok(server_tools) => {
@@ -2596,6 +2702,11 @@ async fn run_chat_turn(
                 }
             }
         }
+
+        // The tools payload sits at the very top of the cached request prefix,
+        // so its order must not depend on enumeration order (see
+        // `mcp::sort_adapted_tools`).
+        mcp::sort_adapted_tools(&mut tools_list[mcp_tools_start..]);
     }
 
     // `use_skill` is advertised when the user has at least one enabled skill —
@@ -2825,8 +2936,8 @@ async fn run_chat_turn(
                 // storing a second copy doubled the database size
                 // (~92 KiB per request). This table keeps the metrics.
                 let _ = db.execute(
-                    "INSERT INTO api_requests (session_id, model, response_content, reasoning_content, tool_calls, finish_reason, prompt_tokens, completion_tokens, duration_ms) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    "INSERT INTO api_requests (session_id, model, response_content, reasoning_content, tool_calls, finish_reason, prompt_tokens, completion_tokens, cached_tokens, duration_ms) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                     rusqlite::params![
                         session_id,
                         active_model.as_str(),
@@ -2836,12 +2947,28 @@ async fn run_chat_turn(
                         sr.finish_reason,
                         sr.prompt_tokens,
                         sr.completion_tokens,
+                        sr.cached_tokens.map(i64::from),
                         duration_ms,
                     ],
                 );
                 // Log to interaction_log table
                 let request_body_display = request_snapshot.to_string();
                 let response_display = sr.content.clone();
+                // Cache-hit metrics travel in the interaction metadata so the
+                // Monitor detail view (and the list chip) can show them without
+                // touching the interaction schema.
+                let usage_metadata = sr.cached_tokens.map(|cached| {
+                    json!({
+                        "prompt_tokens": sr.prompt_tokens,
+                        "cached_tokens": cached,
+                        "hit_ratio": if sr.prompt_tokens > 0 {
+                            ((cached as f64) / (sr.prompt_tokens as f64)).clamp(0.0, 1.0)
+                        } else {
+                            0.0
+                        }
+                    })
+                    .to_string()
+                });
                 log_interaction(
                     &db,
                     &session_id,
@@ -2852,6 +2979,7 @@ async fn run_chat_turn(
                     response_display,
                     None,
                     duration_ms,
+                    usage_metadata,
                 );
                 drop(db);
                 log_event(
@@ -2889,6 +3017,7 @@ async fn run_chat_turn(
                     String::new(),
                     Some(err.clone()),
                     duration_ms,
+                    None,
                 );
                 drop(db);
                 log_event(
@@ -3241,6 +3370,7 @@ async fn run_chat_turn(
                                             workspace_dir,
                                             skill_root_for_task,
                                             cancel,
+                                            None,
                                         )
                                         .await;
                                         format!(
@@ -3262,6 +3392,7 @@ async fn run_chat_turn(
                                     workspace_dir,
                                     skill_evolution_root.clone(),
                                     turn_cancelled.clone(),
+                                    None,
                                 )
                                 .await;
 
@@ -3319,6 +3450,7 @@ async fn run_chat_turn(
                             result.clone(),
                             None,
                             duration_ms,
+                            None,
                         );
                         result.clone()
                     }
@@ -3335,6 +3467,7 @@ async fn run_chat_turn(
                             String::new(),
                             Some(e.clone()),
                             duration_ms,
+                            None,
                         );
                         format!("MCP tool error: {e}")
                     }
@@ -3382,6 +3515,7 @@ async fn run_chat_turn(
                         None
                     },
                     duration_ms,
+                    None,
                 );
                 drop(db);
                 tool_result

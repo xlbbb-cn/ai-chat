@@ -33,6 +33,13 @@ pub fn open_db(path: &Path) -> rusqlite::Result<Connection> {
         [],
     )?;
     let _ = db.execute("ALTER TABLE api_requests ADD COLUMN reasoning_content TEXT", []);
+    // Prompt-cache metrics (Phase 0): `cached_tokens` stays NULL when the
+    // provider does not report caching, so a reported zero-hit request differs
+    // from "no cache feedback" in every metric surface.
+    let _ = db.execute(
+        "ALTER TABLE api_requests ADD COLUMN cached_tokens INTEGER",
+        [],
+    );
     // Session meta: per-session title / favorite / archived flags.
     // Kept in a separate table so history rows stay append-only.
     db.execute(
@@ -109,6 +116,33 @@ pub fn open_db(path: &Path) -> rusqlite::Result<Connection> {
         "ALTER TABLE agent_missions ADD COLUMN help_notes TEXT NOT NULL DEFAULT ''",
         [],
     );
+    // Mission message bus of the orchestration batch (NULL for direct
+    // `call_subagent` runs and old rows). Added lazily like `help_notes`.
+    let _ = db.execute("ALTER TABLE agent_missions ADD COLUMN bus_id TEXT", []);
+    // Durable record of planner/agent bus traffic, shown in the Mission panel.
+    // One row per publish (topic fan-out is summarised by `recipient_count`).
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS agent_bus_messages (\
+            id INTEGER PRIMARY KEY AUTOINCREMENT, \
+            bus_id TEXT NOT NULL, \
+            session_id TEXT NOT NULL, \
+            from_id TEXT NOT NULL, \
+            from_name TEXT NOT NULL, \
+            target_kind TEXT NOT NULL, \
+            target_id TEXT NOT NULL, \
+            to_name TEXT NOT NULL DEFAULT '', \
+            topic TEXT NOT NULL DEFAULT '', \
+            body TEXT NOT NULL, \
+            recipient_count INTEGER NOT NULL DEFAULT 0, \
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP\
+        )",
+        [],
+    )?;
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agent_bus_messages_bus \
+         ON agent_bus_messages (bus_id, id)",
+        [],
+    )?;
     db.execute(
         "CREATE TABLE IF NOT EXISTS agent_tasks (\
             task_id TEXT PRIMARY KEY, \
@@ -682,6 +716,9 @@ pub struct ApiRequestRecord {
     pub finish_reason: String,
     pub prompt_tokens: i64,
     pub completion_tokens: i64,
+    /// Cached prompt-prefix tokens; `None` when the provider does not report
+    /// caching (see the migration comment on the column).
+    pub cached_tokens: Option<i64>,
     pub duration_ms: i64,
     pub error: String,
     // Truncated preview of response content (first 200 chars)
@@ -701,6 +738,9 @@ pub struct ApiRequestDetail {
     pub finish_reason: String,
     pub prompt_tokens: i64,
     pub completion_tokens: i64,
+    /// Cached prompt-prefix tokens; `None` when the provider does not report
+    /// caching.
+    pub cached_tokens: Option<i64>,
     pub duration_ms: i64,
     pub error: String,
 }
@@ -714,6 +754,7 @@ pub fn list_api_requests(
         .prepare(
             "SELECT id, COALESCE(session_id,''), COALESCE(timestamp,''), COALESCE(model,''), \
              COALESCE(finish_reason,''), COALESCE(prompt_tokens,0), COALESCE(completion_tokens,0), \
+             cached_tokens, \
              COALESCE(duration_ms,0), COALESCE(error,''), COALESCE(response_content,'') \
              FROM api_requests ORDER BY id DESC LIMIT 200",
         )
@@ -721,7 +762,7 @@ pub fn list_api_requests(
 
     let records = stmt
         .query_map([], |row| {
-            let full_response: String = row.get(9)?;
+            let full_response: String = row.get(10)?;
             let preview: String = full_response.chars().take(200).collect();
             Ok(ApiRequestRecord {
                 id: row.get(0)?,
@@ -731,8 +772,9 @@ pub fn list_api_requests(
                 finish_reason: row.get(4)?,
                 prompt_tokens: row.get(5)?,
                 completion_tokens: row.get(6)?,
-                duration_ms: row.get(7)?,
-                error: row.get(8)?,
+                cached_tokens: row.get(7)?,
+                duration_ms: row.get(8)?,
+                error: row.get(9)?,
                 response_preview: preview,
             })
         })
@@ -754,7 +796,7 @@ pub fn get_api_request(
             "SELECT id, COALESCE(session_id,''), COALESCE(timestamp,''), COALESCE(model,''), \
              COALESCE(request_body,''), COALESCE(response_content,''), COALESCE(reasoning_content,''), COALESCE(tool_calls,''), \
              COALESCE(finish_reason,''), COALESCE(prompt_tokens,0), COALESCE(completion_tokens,0), \
-             COALESCE(duration_ms,0), COALESCE(error,'') \
+             cached_tokens, COALESCE(duration_ms,0), COALESCE(error,'') \
              FROM api_requests WHERE id = ?1",
         )
         .map_err(|e| e.to_string())?;
@@ -772,8 +814,9 @@ pub fn get_api_request(
             finish_reason: row.get(8)?,
             prompt_tokens: row.get(9)?,
             completion_tokens: row.get(10)?,
-            duration_ms: row.get(11)?,
-            error: row.get(12)?,
+            cached_tokens: row.get(11)?,
+            duration_ms: row.get(12)?,
+            error: row.get(13)?,
         })
     })
     .map_err(|e| e.to_string())
@@ -923,6 +966,11 @@ pub struct InteractionLogRecord {
     // Truncated preview (first 150 chars)
     pub input_preview: String,
     pub output_preview: String,
+    /// Metadata JSON (`"{}"` when absent). `llm_api` rows carry the
+    /// prompt-cache metrics (`prompt_tokens` / `cached_tokens` / `hit_ratio`)
+    /// here, so the Monitor list can render a per-row hit chip and an
+    /// aggregate without re-fetching details.
+    pub metadata: String,
 }
 
 #[derive(Serialize)]
@@ -983,7 +1031,7 @@ pub fn list_interactions(
             "SELECT id, COALESCE(session_id,''), COALESCE(interaction_type,''), \
              COALESCE(timestamp,''), COALESCE(actor,''), COALESCE(action_name,''), \
              COALESCE(error_message,''), COALESCE(duration_ms,0), \
-             COALESCE(input_data,''), COALESCE(output_data,'') \
+             COALESCE(input_data,''), COALESCE(output_data,''), COALESCE(metadata,'{}') \
              FROM interaction_log \
              WHERE session_id = ?1 \
              ORDER BY id DESC LIMIT 500",
@@ -1007,6 +1055,7 @@ pub fn list_interactions(
                 duration_ms: row.get(7)?,
                 input_preview,
                 output_preview,
+                metadata: row.get(10)?,
             })
         })
         .map_err(|e| e.to_string())?

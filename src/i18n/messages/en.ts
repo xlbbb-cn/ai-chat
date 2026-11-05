@@ -119,6 +119,7 @@ const en = {
         send: "Send",
         stop: "Stop",
         contextUsage: "Context usage: {percent}%",
+        contextUsageWithCache: "Context usage: {percent}% · cache hit {cachePercent}%",
         attachedFiles: "Attached Files:",
 
         generationStopped: "[Generation stopped]",
@@ -174,6 +175,7 @@ const en = {
             aggregator: "Aggregator",
             tool: "Tool",
             planDone: "Plan completed — {count} tasks total",
+            plannerMonitoring: "Planner monitoring — {count} tasks",
             selectionDone: {
                 one: "Selected {count} agent — {names}",
                 other: "Selected {count} agents — {names}",
@@ -215,6 +217,7 @@ const en = {
         mainAgentHelp: "Main agent",
         mainAgentHelpChars: "→ {count} chars",
         mainAgentHelpFailed: "Main-agent help failed",
+        mbusCounts: "mbus · {sent} sent · {received} received",
     },
 
     settings: {
@@ -573,6 +576,9 @@ const en = {
         orchestration: "Orchestration settings",
         enableMode: "Automatic orchestration",
         autoConfigure: "Smart agent selection",
+        mbus: "Mission bus (mbus)",
+        mbusHint:
+            "Let the planner supervise dispatched sub-agents and let agents exchange messages. Adds planner model calls while tasks run.",
         executionMode: "Execution mode",
         modeParallel: "Parallel",
         modeSequential: "Sequential",
@@ -777,6 +783,8 @@ const en = {
             "Compact the database? Logs older than the retention window (Settings → Runtime & Debug) are deleted and the file is rewritten to reclaim space. Chat history is kept.",
         compacting2: "Compacting… this can take a few seconds",
         interactions: "Interactions ({count})",
+        cacheChip: "Cache {percent}%",
+        cacheAvg: "avg cache {percent}%",
         noInteractions: "No interactions recorded",
         selectPrompt: "Select an interaction to view details",
         details: "Details",
@@ -820,6 +828,8 @@ const en = {
         context: "Context",
         activeTasksLabel: "Active Tasks",
         mainAgentHelp: "Main-agent help",
+        messageBus: "Message bus (mbus)",
+        noBusMessages: "No bus messages recorded for this mission batch.",
         episodicSummary: "Episodic Summary",
         finalReport: "Final Report",
         noActiveTasks: "No active tasks.",

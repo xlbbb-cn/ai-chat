@@ -59,7 +59,6 @@ export {
     faWindowMaximize,
     faWindowMinimize,
     faWindowRestore,
-    faWrench,
     faXmark,
 } from "@fortawesome/free-solid-svg-icons";
 

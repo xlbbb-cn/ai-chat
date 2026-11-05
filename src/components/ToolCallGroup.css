@@ -48,44 +48,8 @@
     gap: 6px;
 }
 
-/* Title group — takes the free row space so the running wrench sits directly
-   after the label instead of drifting toward the count badge. */
-.tool-call-group-title {
-    flex: 1;
-    min-width: 0;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-}
-
-/* Appears only while a tool is running: a small wrench that keeps turning as
-   if tightening a screw, and disappears the moment nothing is in flight. */
-.tool-call-group-wrench {
-    display: inline-flex;
-    align-items: center;
-    flex-shrink: 0;
-    font-size: 12px;
-    line-height: 1;
-    color: var(--ts-blue, var(--c-accent-text));
-    transform-origin: 50% 50%;
-    animation: tool-wrench-turn 1.1s var(--ts-ease, ease) infinite;
-}
-
-@keyframes tool-wrench-turn {
-    0% {
-        transform: rotate(-20deg);
-    }
-
-    50% {
-        transform: rotate(20deg);
-    }
-
-    100% {
-        transform: rotate(-20deg);
-    }
-}
-
 .tool-call-group-label {
+    flex: 1;
     min-width: 0;
     font-size: 14px;
     font-weight: 500;
@@ -260,8 +224,7 @@
 
     /* No flip and no sweeping highlight — the preview just swaps content. */
     .tool-call-flip--live,
-    .tool-call-group--running .tool-call-preview-desc,
-    .tool-call-group-wrench {
+    .tool-call-group--running .tool-call-preview-desc {
         animation: none;
     }
 
@@ -279,8 +242,8 @@
 
 .tool-call-entry {
     display: grid;
-    grid-template-columns: 16px auto 1fr auto;
-    grid-template-rows: auto auto auto;
+    grid-template-columns: auto 1fr 16px auto;
+    grid-template-rows: auto auto auto auto;
     column-gap: 6px;
     row-gap: 1px;
     align-items: start;
@@ -293,9 +256,12 @@
     border-top: 1px solid var(--ts-cloud, var(--c-border));
 }
 
+/* Status glyphs sit at the right end of the row. */
 .tool-call-entry-icon {
     grid-row: 1;
-    grid-column: 1;
+    grid-column: 3;
+    justify-self: end;
+    align-self: center;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -323,14 +289,14 @@
 
 .tool-call-entry-name {
     grid-row: 1;
-    grid-column: 2;
+    grid-column: 1;
     color: var(--c-muted);
     white-space: nowrap;
 }
 
 .tool-call-entry-desc {
     grid-row: 1;
-    grid-column: 3;
+    grid-column: 2;
     color: var(--c-text);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -340,7 +306,7 @@
 .tool-call-entry-summary,
 .tool-call-entry-error {
     grid-row: 2;
-    grid-column: 2 / -1;
+    grid-column: 1 / -1;
     font-size: 11px;
     color: var(--c-muted);
     overflow: hidden;
@@ -355,7 +321,7 @@
 /* Sub-agent → main-agent help exchange (`ask_main_agent`). */
 .tool-call-entry-help {
     grid-row: 3;
-    grid-column: 2 / -1;
+    grid-column: 1 / -1;
     font-size: 11px;
     color: var(--c-muted);
     overflow: hidden;
@@ -365,6 +331,30 @@
 
 .tool-call-entry-help--error {
     color: var(--c-danger);
+}
+
+/* Mission-bus (mbus) activity for this task: counts + last note. */
+.tool-call-entry-mbus {
+    grid-row: 4;
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 6px;
+    min-width: 0;
+    font-size: 11px;
+    color: var(--c-muted);
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+.tool-call-entry-mbus-count {
+    flex: 0 0 auto;
+    color: var(--c-text);
+}
+
+.tool-call-entry-mbus-last {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* Cancel affordance for a running background task. Reuses the shared

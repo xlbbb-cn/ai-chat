@@ -533,25 +533,6 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
             <summary className="message-reasoning-summary">
               <span className="message-reasoning-head">
                 <span className="message-reasoning-title">{t("chat.thoughtProcess")}</span>
-                {/* Bézier "thought pulse": a short accent segment travels
-                    along the curve for the whole live reasoning window, so
-                    the thinking state is visible until the turn ends. */}
-                {message.streaming && (
-                  <span className="message-reasoning-curve" aria-hidden="true">
-                    <svg viewBox="0 0 24 20">
-                      <path
-                        className="message-reasoning-curve-base"
-                        pathLength={100}
-                        d="M2 14C5.2 6 8.4 6 11.6 14S18 22 21.2 14"
-                      />
-                      <path
-                        className="message-reasoning-curve-pulse"
-                        pathLength={100}
-                        d="M2 14C5.2 6 8.4 6 11.6 14S18 22 21.2 14"
-                      />
-                    </svg>
-                  </span>
-                )}
               </span>
               {!reasoningOpen && reasoningPreview.current && (
                 <span

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { listAgentMissions } from "../api";
-import type { AgentMissionSnapshot } from "../types";
+import { listAgentMissions, listMissionBusMessages } from "../api";
+import type { AgentBusMessage, AgentMissionSnapshot } from "../types";
 import { useI18n, type Locale, type MessageKey, type TranslateVars } from "../i18n";
 import { FontAwesomeIcon, faSpinner, faXmark } from "../icons";
 import "./AgentMissionPanel.css";
@@ -41,6 +41,7 @@ function statusLabel(mission: AgentMissionSnapshot, t: (key: MessageKey, vars?: 
 export function AgentMissionPanel({ sessionId, onClose }: Props) {
     const { t, locale } = useI18n();
     const [missions, setMissions] = useState<AgentMissionSnapshot[]>([]);
+    const [busMessages, setBusMessages] = useState<AgentBusMessage[]>([]);
     const [selectedMissionId, setSelectedMissionId] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [autoRefresh, setAutoRefresh] = useState(true);
@@ -63,24 +64,43 @@ export function AgentMissionPanel({ sessionId, onClose }: Props) {
         }
     }, [sessionId]);
 
+    const loadBusMessages = useCallback(async (missionId: string | null) => {
+        if (!missionId) {
+            setBusMessages([]);
+            return;
+        }
+        try {
+            setBusMessages(await listMissionBusMessages(missionId));
+        } catch (err) {
+            console.error("Failed to load mission bus messages:", err);
+            setBusMessages([]);
+        }
+    }, []);
+
     useEffect(() => {
         loadMissions();
     }, [loadMissions]);
+
+    useEffect(() => {
+        void loadBusMessages(selectedMissionId);
+    }, [loadBusMessages, selectedMissionId]);
 
     useEffect(() => {
         if (!autoRefresh) return;
 
         const interval = window.setInterval(() => {
             loadMissions();
+            void loadBusMessages(selectedMissionId);
         }, 2000);
 
         return () => window.clearInterval(interval);
-    }, [autoRefresh, loadMissions]);
+    }, [autoRefresh, loadMissions, loadBusMessages, selectedMissionId]);
 
     useEffect(() => {
         const unlisteners: Promise<() => void>[] = [];
         const refresh = () => {
             void loadMissions();
+            void loadBusMessages(selectedMissionId);
         };
 
         unlisteners.push(
@@ -91,13 +111,15 @@ export function AgentMissionPanel({ sessionId, onClose }: Props) {
             listen("agent-task-skipped", refresh),
             listen("agent-help-start", refresh),
             listen("agent-help-done", refresh),
-            listen("agent-help-error", refresh)
+            listen("agent-help-error", refresh),
+            listen("agent-mbus-message", refresh),
+            listen("agent-mbus-delivered", refresh)
         );
 
         return () => {
             unlisteners.forEach((promise) => promise.then((fn) => fn()));
         };
-    }, [loadMissions]);
+    }, [loadMissions, loadBusMessages, selectedMissionId]);
 
     const selectedMission = useMemo(
         () => missions.find((mission) => mission.mission_id === selectedMissionId) ?? null,
@@ -226,6 +248,41 @@ export function AgentMissionPanel({ sessionId, onClose }: Props) {
                                 <div className="mission-monitor-section">
                                     <label>{t("mission.mainAgentHelp")}</label>
                                     <pre className="mission-monitor-code">{selectedMission.help_notes}</pre>
+                                </div>
+                            )}
+
+                            {selectedMission.bus_id && (
+                                <div className="mission-monitor-section">
+                                    <label>{t("mission.messageBus")}</label>
+                                    {busMessages.length === 0 ? (
+                                        <div className="mission-monitor-value">{t("mission.noBusMessages")}</div>
+                                    ) : (
+                                        <div className="mission-bus-log">
+                                            {busMessages.map((message) => (
+                                                <div className="mission-bus-item" key={message.id}>
+                                                    <div className="mission-bus-head">
+                                                        <span className="mission-bus-from">
+                                                            {message.from_id === "planner"
+                                                                ? t("app.agents.planner")
+                                                                : message.from_name}
+                                                        </span>
+                                                        <span className="mission-bus-arrow">→</span>
+                                                        <span className="mission-bus-to">
+                                                            {message.target_kind === "topic"
+                                                                ? `#${message.topic}`
+                                                                : message.target_id === "planner"
+                                                                  ? t("app.agents.planner")
+                                                                  : message.to_name || message.target_id}
+                                                        </span>
+                                                        <span className="mission-bus-time">
+                                                            {formatTimestamp(message.created_at, locale)}
+                                                        </span>
+                                                    </div>
+                                                    <div className="mission-bus-body">{message.body}</div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                             )}
 

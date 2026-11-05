@@ -16,6 +16,51 @@ function formatBytes(bytes: number): string {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** Prompt-cache metrics carried in an `llm_api` row's metadata JSON. */
+interface CacheInfo {
+    cached: number;
+    prompt: number;
+    /** 0–100, computed from the weighted aggregate of the row itself. */
+    percent: number;
+}
+
+/**
+ * Parse the cache-hit metrics out of a row's metadata JSON. Rows with no
+ * reported caching (older rows, non-chat tools, endpoints without a cache
+ * dialect) return `null` instead of a fake `0%`.
+ */
+function cacheInfo(metadata: string | undefined): CacheInfo | null {
+    if (!metadata || metadata === "{}") return null;
+    try {
+        const parsed = JSON.parse(metadata) as {
+            cached_tokens?: unknown;
+            prompt_tokens?: unknown;
+            hit_ratio?: unknown;
+        };
+        const cached = typeof parsed.cached_tokens === "number" ? parsed.cached_tokens : null;
+        const prompt = typeof parsed.prompt_tokens === "number" ? parsed.prompt_tokens : null;
+        if (cached === null || prompt === null || prompt <= 0) return null;
+        return { cached, prompt, percent: Math.round((cached / prompt) * 100) };
+    } catch {
+        return null;
+    }
+}
+
+/** Weighted aggregate across the loaded rows that reported cache data. */
+function aggregateCacheInfo(interactions: { metadata: string; interaction_type: string }[]): CacheInfo | null {
+    let cached = 0;
+    let prompt = 0;
+    for (const interaction of interactions) {
+        if (interaction.interaction_type !== "llm_api") continue;
+        const info = cacheInfo(interaction.metadata);
+        if (!info) continue;
+        cached += info.cached;
+        prompt += info.prompt;
+    }
+    if (prompt <= 0) return null;
+    return { cached, prompt, percent: Math.round((cached / prompt) * 100) };
+}
+
 export function MonitorPanel({ sessionId, onClose }: Props) {
     const { t, locale } = useI18n();
     const [interactions, setInteractions] = useState<InteractionLogRecord[]>([]);
@@ -144,6 +189,9 @@ export function MonitorPanel({ sessionId, onClose }: Props) {
         }
     };
 
+    /** Weighted prompt-cache hit rate over the loaded `llm_api` rows. */
+    const cacheAggregate = aggregateCacheInfo(interactions);
+
     return (
         <div className="monitor-overlay" role="dialog" aria-modal="true" aria-label={t("monitor.aria")}>
             <div className="monitor-shell">
@@ -188,6 +236,14 @@ export function MonitorPanel({ sessionId, onClose }: Props) {
                     <div className="monitor-list-panel">
                         <div className="monitor-list-header">
                             <h3>{t("monitor.interactions", { count: interactions.length })}</h3>
+                            {cacheAggregate && (
+                                <span
+                                    className="monitor-cache-avg"
+                                    title={t("monitor.cacheAvg", { percent: cacheAggregate.percent })}
+                                >
+                                    {t("monitor.cacheAvg", { percent: cacheAggregate.percent })}
+                                </span>
+                            )}
                             {loading && (
                                 <span className="loading-spinner">
                                     <FontAwesomeIcon icon={faSpinner} spin />
@@ -198,7 +254,12 @@ export function MonitorPanel({ sessionId, onClose }: Props) {
                             {interactions.length === 0 ? (
                                 <div className="monitor-empty">{t("monitor.noInteractions")}</div>
                             ) : (
-                                interactions.map((interaction) => (
+                                interactions.map((interaction) => {
+                                    const rowCache =
+                                        interaction.interaction_type === "llm_api"
+                                            ? cacheInfo(interaction.metadata)
+                                            : null;
+                                    return (
                                     <div
                                         key={interaction.id}
                                         className={`monitor-item ${selectedInteraction?.id === interaction.id ? "selected" : ""
@@ -215,6 +276,14 @@ export function MonitorPanel({ sessionId, onClose }: Props) {
                                                 {interaction.interaction_type}
                                             </span>
                                             <span className="monitor-actor">{interaction.actor}</span>
+                                            {rowCache && (
+                                                <span
+                                                    className="monitor-cache-chip"
+                                                    title={`${rowCache.cached} / ${rowCache.prompt}`}
+                                                >
+                                                    {t("monitor.cacheChip", { percent: rowCache.percent })}
+                                                </span>
+                                            )}
                                         </div>
                                         <div className="monitor-item-title">{interaction.action_name}</div>
                                         <div className="monitor-item-time">{formatDate(interaction.timestamp)}</div>
@@ -223,7 +292,8 @@ export function MonitorPanel({ sessionId, onClose }: Props) {
                                         )}
                                         <div className="monitor-item-preview">{interaction.output_preview}</div>
                                     </div>
-                                ))
+                                    );
+                                })
                             )}
                         </div>
                     </div>

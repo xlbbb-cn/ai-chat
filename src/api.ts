@@ -15,6 +15,7 @@ import type {
   AgentOrchestration,
   AgentTaskEvent,
   AgentMissionSnapshot,
+  AgentBusMessage,
   CliProbe,
   CloudProbe,
   KeyValue,
@@ -509,6 +510,8 @@ export interface ApiRequestRecord {
   finish_reason: string;
   prompt_tokens: number;
   completion_tokens: number;
+  /** Cached prompt-prefix tokens; `null` when the provider does not report caching. */
+  cached_tokens: number | null;
   duration_ms: number;
   error: string;
   response_preview: string;
@@ -525,6 +528,8 @@ export interface ApiRequestDetail {
   finish_reason: string;
   prompt_tokens: number;
   completion_tokens: number;
+  /** Cached prompt-prefix tokens; `null` when the provider does not report caching. */
+  cached_tokens: number | null;
   duration_ms: number;
   error: string;
 }
@@ -607,6 +612,13 @@ export async function listAgentMissions(sessionId: string): Promise<AgentMission
   return invoke("list_agent_missions", { sessionId });
 }
 
+export async function listMissionBusMessages(
+  missionId: string,
+  limit = 200,
+): Promise<AgentBusMessage[]> {
+  return invoke("list_mission_bus_messages", { missionId, limit });
+}
+
 // ─── Agent probes (Sub Agents panel "Test" buttons) ──────────────────────────
 
 /**
@@ -646,6 +658,8 @@ export interface InteractionLogRecord {
   duration_ms: number;
   input_preview: string;
   output_preview: string;
+  /** Metadata JSON (`"{}"` when absent); `llm_api` rows carry the cache-hit metrics. */
+  metadata: string;
 }
 
 export interface InteractionLogDetail {

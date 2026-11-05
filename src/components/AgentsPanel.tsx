@@ -263,6 +263,7 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
     auto_configure: true,
     max_concurrent: 3,
     mode: "parallel",
+    mbus_enabled: true,
   });
   const [draft, setDraft] = useState<AgentDraft | null>(null);
   const [probe, setProbe] = useState<ProbeState | null>(null);
@@ -1073,6 +1074,21 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
                 <span className="toggle-switch-slider" />
               </label>
             </div>
+
+            <div className="orch-row">
+              <span>{t("agents.mbus")}</span>
+              <label className="toggle-switch">
+                <input
+                  type="checkbox"
+                  checked={orchestration.mbus_enabled}
+                  onChange={(e) =>
+                    handleSaveOrchestration({ ...orchestration, mbus_enabled: e.target.checked })
+                  }
+                />
+                <span className="toggle-switch-slider" />
+              </label>
+            </div>
+            <div className="agent-field-hint">{t("agents.mbusHint")}</div>
 
             <div className="orch-row">
               <span>{t("agents.executionMode")}</span>

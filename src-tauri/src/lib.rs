@@ -1453,6 +1453,7 @@ pub fn run() {
             agents::get_agent_orchestration,
             agents::save_agent_orchestration,
             agents::list_agent_missions,
+            agents::mbus::list_mission_bus_messages,
             agents::probe_agent_cli,
             agents::probe_agent_cloud,
             app_open_agents_dir,

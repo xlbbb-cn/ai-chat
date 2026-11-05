@@ -22,6 +22,8 @@ import type {
   AgentHelpEvent,
   AgentSelectionEvent,
   AgentTaskTokenEvent,
+  AgentMbusMessageEvent,
+  AgentPlannerStateEvent,
   ChatInjection,
   ToolCallEntry,
   Attachment,
@@ -360,6 +362,11 @@ export default function App() {
     total_tokens?: number;
     max_tokens?: number;
     usage_ratio?: number;
+    /** Cached prompt-prefix tokens of the current request (provider-reported). */
+    cached_tokens?: number;
+    /** Cached / prompt for the current request; absent when the endpoint
+     *  does not report caching at all, so `0` stays distinguishable. */
+    hit_ratio?: number;
   } | null>(null);
   /** True once `chat-usage` arrived for the request currently streaming. */
   const [usageReady, setUsageReady] = useState(false);
@@ -452,6 +459,8 @@ export default function App() {
   const currentAssistantMessageIdRef = useRef<string | null>(null);
   const hasRunningToolCallRef = useRef(false);
   const currentToolCallsRef = useRef<ToolCallEntry[]>([]);
+  /** Mission bus of the current turn; old bus events must not touch new rows. */
+  const currentMbusIdRef = useRef<string | null>(null);
   /** Buffered `agent-task-token` chunks per task, flushed on a timer. */
   const pendingAgentTokensRef = useRef<Map<string, string>>(new Map());
   /** Resume prompts from fired timers, plus mid-turn injections that arrived
@@ -619,6 +628,8 @@ export default function App() {
       total_tokens?: number;
       max_tokens?: number;
       usage_ratio?: number;
+      cached_tokens?: number;
+      hit_ratio?: number;
     }>("chat-usage", (e) => {
       // This request's token figures are known from here on; the usage bar
       // above the input switches from its indeterminate sweep to a real ratio.
@@ -642,6 +653,13 @@ export default function App() {
           // Keep the current request's usage_ratio (not accumulated)
           // This correctly reflects the current request's token usage within its max_tokens limit
           usage_ratio: e.payload.usage_ratio,
+          // Accumulated cache savings, plus the current request's hit ratio
+          // (like usage_ratio, hit_ratio describes this request only). It is
+          // overwritten, never kept from the previous request: an endpoint
+          // without cache reporting must drop the stale figure instead of
+          // keeping the last provider's hit rate in the tooltip.
+          cached_tokens: (prevUsage.cached_tokens ?? 0) + (e.payload.cached_tokens ?? 0),
+          hit_ratio: e.payload.hit_ratio,
         };
       });
     });
@@ -1115,22 +1133,118 @@ export default function App() {
         currentToolCallsRef.current = [...currentToolCallsRef.current, entry];
         updateActiveAssistantToolCalls(currentToolCallsRef.current);
       }),
-      listen("agent-plan-start", (e: { payload: { task_count: number } }) => {
-        if (e.payload.task_count > 0) {
+      listen<{ task_count: number; mbus?: boolean; bus_id?: string | null }>(
+        "agent-plan-start",
+        (e) => {
+          if (e.payload.task_count <= 0) return;
+          const mbus = e.payload.mbus === true;
+          currentMbusIdRef.current = mbus ? (e.payload.bus_id ?? null) : null;
           const entry: ToolCallEntry = {
-            task_id: `plan-${Date.now()}`,
+            task_id: "planner",
             agent_name: t("app.agents.planner"),
-            description: t("app.agents.planDone", { count: e.payload.task_count }),
-            status: "done",
+            description: mbus
+              ? t("app.agents.plannerMonitoring", { count: e.payload.task_count })
+              : t("app.agents.planDone", { count: e.payload.task_count }),
+            status: mbus ? "running" : "done",
           };
-          currentToolCallsRef.current = [...currentToolCallsRef.current, entry];
+          const exists = currentToolCallsRef.current.some(
+            (item) => item.task_id === "planner"
+          );
+          currentToolCallsRef.current = exists
+            ? currentToolCallsRef.current.map((item) =>
+                item.task_id === "planner"
+                  ? { ...item, ...entry, mbus: item.mbus }
+                  : item
+              )
+            : [...currentToolCallsRef.current, entry];
           updateActiveAssistantToolCalls(currentToolCallsRef.current);
         }
+      ),
+      // Planner supervisor: same row as the plan step, now with live activity.
+      listen<AgentPlannerStateEvent>("agent-planner-state", (e) => {
+        const payload = e.payload;
+        if (payload.session_id && payload.session_id !== sessionIdRef.current) return;
+        if (!currentMbusIdRef.current || payload.bus_id !== currentMbusIdRef.current) return;
+        const status: ToolCallEntry["status"] =
+          payload.status === "error"
+            ? "error"
+            : payload.status === "stopped"
+              ? "skipped"
+              : payload.status === "done"
+                ? "done"
+                : "running";
+        const entry: ToolCallEntry = {
+          task_id: "planner",
+          agent_name: t("app.agents.planner"),
+          description:
+            payload.activity ||
+            t("app.agents.plannerMonitoring", { count: payload.task_count }),
+          status,
+        };
+        const exists = currentToolCallsRef.current.some(
+          (item) => item.task_id === "planner"
+        );
+        currentToolCallsRef.current = exists
+          ? currentToolCallsRef.current.map((item) =>
+              item.task_id === "planner"
+                ? { ...item, ...entry, mbus: item.mbus }
+                : item
+            )
+          : [...currentToolCallsRef.current, entry];
+        updateActiveAssistantToolCalls(currentToolCallsRef.current);
+      }),
+      // Mission-bus traffic: mirror counts and the last message on the sender
+      // and recipient task rows. The full log lives in the Mission panel.
+      listen<AgentMbusMessageEvent>("agent-mbus-message", (e) => {
+        const payload = e.payload;
+        if (payload.session_id && payload.session_id !== sessionIdRef.current) return;
+        if (!currentMbusIdRef.current || payload.bus_id !== currentMbusIdRef.current) return;
+        const body =
+          payload.body.length > 120 ? `${payload.body.slice(0, 120)}…` : payload.body;
+        const fromLabel =
+          payload.from_id === "planner" ? t("app.agents.planner") : payload.from_name;
+        const targetLabel =
+          payload.target_kind === "topic"
+            ? `#${payload.target_id}`
+            : payload.target_id === "planner"
+              ? t("app.agents.planner")
+              : payload.recipients.map((recipient) => recipient.name).join(", ") ||
+                payload.target_id;
+        const recipientIds = new Set(payload.recipients.map((recipient) => recipient.id));
+        currentToolCallsRef.current = currentToolCallsRef.current.map((entry) => {
+          if (entry.task_id === payload.from_id) {
+            return {
+              ...entry,
+              mbus: {
+                sent: (entry.mbus?.sent ?? 0) + 1,
+                received: entry.mbus?.received ?? 0,
+                last: { direction: "out" as const, label: targetLabel, body },
+              },
+            };
+          }
+          if (recipientIds.has(entry.task_id)) {
+            return {
+              ...entry,
+              mbus: {
+                sent: entry.mbus?.sent ?? 0,
+                received: (entry.mbus?.received ?? 0) + 1,
+                last: { direction: "in" as const, label: fromLabel, body },
+              },
+            };
+          }
+          return entry;
+        });
+        updateActiveAssistantToolCalls(currentToolCallsRef.current);
       }),
       listen<{ task_count: number }>("agent-aggregate-done", (e) => {
         // The backend emits this *after* the mission report is assembled, so
         // the step is complete the moment it arrives — rendering it as
         // "running" would spin until the whole final answer is streamed.
+        currentToolCallsRef.current = currentToolCallsRef.current.map((entry) =>
+          entry.task_id === "planner" && entry.status === "running"
+            ? { ...entry, status: "done" as const }
+            : entry
+        );
         const entry: ToolCallEntry = {
           task_id: `aggregate-${Date.now()}`,
           agent_name: t("app.agents.aggregator"),
@@ -1503,6 +1617,7 @@ export default function App() {
     const assistantMsg: Message = { id: assistantId, role: "assistant", content: "", streaming: true };
     currentAssistantMessageIdRef.current = assistantId;
     currentToolCallsRef.current = [];
+    currentMbusIdRef.current = null;
     currentInjectionsRef.current = [];
     hasRunningToolCallRef.current = false;
     setBackgroundTasks([]);
@@ -1726,6 +1841,7 @@ export default function App() {
     const assistantMsg: Message = { id: assistantId, role: "assistant", content: "", streaming: true };
     currentAssistantMessageIdRef.current = assistantId;
     currentToolCallsRef.current = [];
+    currentMbusIdRef.current = null;
     currentInjectionsRef.current = [];
     hasRunningToolCallRef.current = false;
     setBackgroundTasks([]);
@@ -2332,6 +2448,17 @@ export default function App() {
     ? (usage.usage_ratio ?? (usageMax > 0 ? usageTotal / usageMax : 0))
     : 0;
   const usagePercent = Math.max(0, Math.min(100, Math.round(usageRatio * 100)));
+  // Provider-reported prompt-cache hit of the current request. Absent when the
+  // endpoint does not report caching at all (the backend omits the field).
+  const usageCachePercent =
+    usage?.hit_ratio !== undefined ? Math.round(usage.hit_ratio * 100) : null;
+  const usageCacheTooltip =
+    usageCachePercent !== null
+      ? t("app.contextUsageWithCache", {
+          percent: usagePercent,
+          cachePercent: usageCachePercent,
+        })
+      : t("app.contextUsage", { percent: usagePercent });
 
   return (
     <div className="app-layout">
@@ -2792,8 +2919,9 @@ export default function App() {
               aria-label={
                 streaming && !usageReady
                   ? t("chat.tokenUsage")
-                  : t("app.contextUsage", { percent: usagePercent })
+                  : usageCacheTooltip
               }
+              title={streaming && usageReady ? usageCacheTooltip : undefined}
               aria-valuemin={0}
               aria-valuemax={100}
               aria-valuenow={streaming && !usageReady ? undefined : usagePercent}

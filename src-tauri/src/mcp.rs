@@ -1777,6 +1777,23 @@ fn convert_mcp_tools(mcp_tools: Vec<serde_json::Value>) -> Vec<serde_json::Value
         .collect()
 }
 
+/// Prompt-cache stability for the `tools` array: adapted MCP tool schemas must
+/// appear in a deterministic order. Their source order comes from
+/// `tools/list`, which some servers do not keep stable across restarts, and a
+/// changed tools payload re-keys the entire request prefix. Adapted function
+/// names are already unique and stable (`mcp_<server-hash>_<name>`), so
+/// sorting by that name fully determines the order regardless of how the
+/// servers or their tool lists are enumerated.
+pub fn sort_adapted_tools(tools: &mut [serde_json::Value]) {
+    let key = |tool: &serde_json::Value| {
+        tool.pointer("/function/name")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    tools.sort_by(|left, right| key(left).cmp(&key(right)));
+}
+
 /// Turn one converted MCP tool into the function schema advertised to the
 /// model: a stable `mcp_<server-hash>_<name>` function name (at most 64
 /// characters, the provider limit) and a description that names the server.
