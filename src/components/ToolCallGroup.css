@@ -95,6 +95,20 @@
     pointer-events: none;
 }
 
+/* Collapsed main line: the text tail keeps its fade mask, the status glyph
+   sits outside it and is pinned to the right edge (matching the expanded rows). */
+.tool-call-preview-line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.tool-call-preview-line .tool-call-preview-main {
+    flex: 1;
+    min-width: 0;
+}
+
 .tool-call-preview-row {
     display: flex;
     align-items: center;

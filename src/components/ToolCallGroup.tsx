@@ -115,18 +115,22 @@ export function ToolCallGroup({ message, onConfirm, onCancelBackground }: Props)
           </span>
           {!open && (
             <span className="tool-call-group-preview" aria-hidden="true">
-              <FlipRow
-                className="tool-call-preview-row tool-call-preview-main"
-                flipKey={previewEntry.task_id}
-              >
+              <span className="tool-call-preview-line">
+                <FlipRow
+                  className="tool-call-preview-row tool-call-preview-main"
+                  flipKey={previewEntry.task_id}
+                >
+                  <span className="tool-call-preview-name">[{previewEntry.agent_name}]</span>
+                  <span className="tool-call-preview-desc">{previewEntry.description}</span>
+                </FlipRow>
+                {/* Outside the masked text row so the fade does not dim the
+                    glyph; sits at the right edge like the expanded rows. */}
                 <span
                   className={`tool-call-preview-icon tool-call-preview-icon--${previewEntry.status}`}
                 >
                   <StatusIcon status={previewEntry.status} />
                 </span>
-                <span className="tool-call-preview-name">[{previewEntry.agent_name}]</span>
-                <span className="tool-call-preview-desc">{previewEntry.description}</span>
-              </FlipRow>
+              </span>
               <FlipRow
                 className={previewSubClass}
                 flipKey={`${previewEntry.task_id}|${previewSub}`}
