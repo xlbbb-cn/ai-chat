@@ -31,6 +31,7 @@ pub use tools::neo4j_db;
 use tools::{timer, todos};
 
 const OPEN_APP_DATA_DIR_MENU_ID: &str = "open-app-data-dir";
+const OPEN_WORKSPACE_DIR_MENU_ID: &str = "open-workspace-dir";
 const SAVE_PROFILE_MENU_ID: &str = "save-profile";
 const RESTORE_PROFILE_MENU_ID: &str = "restore-profile";
 const MARKDOWN_EDIT_MENU_ID: &str = "markdown-edit";
@@ -67,6 +68,23 @@ fn open_app_data_dir(app: &AppHandle) {
             .opener()
             .open_path(data_dir.to_string_lossy().into_owned(), None::<&str>);
     }
+}
+
+/// Open the OS file manager at the active workspace directory.
+///
+/// The live `AppState.workspace_dir` is authoritative (it moves when the user
+/// switches workspaces), so the command and the native menu share this helper.
+fn open_workspace_dir(app: &AppHandle) -> Result<(), String> {
+    let dir = app
+        .state::<AppState>()
+        .workspace_dir
+        .lock()
+        .unwrap()
+        .clone();
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    app.opener()
+        .open_path(dir.to_string_lossy().into_owned(), None::<&str>)
+        .map_err(|e| e.to_string())
 }
 
 /// Read a Markdown file and hand it to the built-in editor via events.
@@ -118,6 +136,11 @@ fn show_about(app: &AppHandle) {
 #[tauri::command]
 fn app_open_data_dir(app: AppHandle) {
     open_app_data_dir(&app);
+}
+
+#[tauri::command]
+fn app_open_workspace_dir(app: AppHandle) -> Result<(), String> {
+    open_workspace_dir(&app)
 }
 
 /// Open `<app_data>/agents` — the folder holding every `llm` agent definition.
@@ -1151,6 +1174,8 @@ pub fn run() {
         .on_menu_event(|app, event| {
             if event.id() == OPEN_APP_DATA_DIR_MENU_ID {
                 open_app_data_dir(app);
+            } else if event.id() == OPEN_WORKSPACE_DIR_MENU_ID {
+                let _ = open_workspace_dir(app);
             } else if event.id() == SAVE_PROFILE_MENU_ID {
                 if let Some(path) = app
                     .dialog()
@@ -1204,6 +1229,14 @@ pub fn run() {
                 None::<&str>,
             )
             .expect("failed to create menu item");
+            let open_workspace_dir_item = MenuItem::with_id(
+                app,
+                OPEN_WORKSPACE_DIR_MENU_ID,
+                "Open Workspace Directory",
+                true,
+                None::<&str>,
+            )
+            .expect("failed to create workspace menu item");
             let save_profile_item = MenuItem::with_id(
                 app,
                 SAVE_PROFILE_MENU_ID,
@@ -1232,7 +1265,7 @@ pub fn run() {
                 app,
                 "File",
                 true,
-                &[&save_profile_item, &restore_profile_item, &open_app_data_dir_item],
+                &[&save_profile_item, &restore_profile_item, &open_app_data_dir_item, &open_workspace_dir_item],
             )
                 .expect("failed to create app menu");
             let tools_menu = Submenu::with_items(app, "Tools", true, &[&markdown_edit_item])
@@ -1408,6 +1441,7 @@ pub fn run() {
             get_workspace_dir,
             save_markdown_file,
             app_open_data_dir,
+            app_open_workspace_dir,
             app_open_markdown,
             app_export_profile,
             app_import_profile,

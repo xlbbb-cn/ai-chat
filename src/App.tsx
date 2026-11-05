@@ -24,6 +24,7 @@ import type {
   AgentTaskTokenEvent,
   AgentMbusMessageEvent,
   AgentPlannerStateEvent,
+  AgentPlannerActionEvent,
   ChatInjection,
   ToolCallEntry,
   Attachment,
@@ -46,7 +47,6 @@ import {
   faClockRotateLeft,
   faFileLines,
   faFilePen,
-  faGear,
   faPaperclip,
   faPenToSquare,
   faPlug,
@@ -1193,6 +1193,51 @@ export default function App() {
           : [...currentToolCallsRef.current, entry];
         updateActiveAssistantToolCalls(currentToolCallsRef.current);
       }),
+      // Planner actions (schedule, mbus send/status/history, subscribe, finish)
+      // become their own rows in the tool group. `action_id` is stable across
+      // the running → done/error pair, so the row settles in place.
+      listen<AgentPlannerActionEvent>("agent-planner-action", (e) => {
+        const payload = e.payload;
+        if (payload.session_id && payload.session_id !== sessionIdRef.current) return;
+        if (!currentMbusIdRef.current || payload.bus_id !== currentMbusIdRef.current) return;
+        const description = (() => {
+          switch (payload.action) {
+            case "schedule":
+              return t("app.agents.plannerActionSchedule");
+            case "send":
+              return t("app.agents.plannerActionSend", { target: payload.target });
+            case "status":
+              return t("app.agents.plannerActionStatus");
+            case "history":
+              return t("app.agents.plannerActionHistory");
+            case "subscribe":
+              return t("app.agents.plannerActionSubscribe", { target: payload.target });
+            case "unsubscribe":
+              return t("app.agents.plannerActionUnsubscribe", { target: payload.target });
+            case "finish":
+              return t("app.agents.plannerActionFinish");
+            default:
+              return t("app.agents.plannerActionUnknown", { action: payload.action });
+          }
+        })();
+        const entry: ToolCallEntry = {
+          task_id: payload.action_id,
+          agent_name: t("app.agents.planner"),
+          description,
+          status: payload.status,
+          summary: payload.status === "error" ? undefined : payload.detail || undefined,
+          error: payload.status === "error" ? payload.detail || undefined : undefined,
+        };
+        const exists = currentToolCallsRef.current.some(
+          (item) => item.task_id === payload.action_id
+        );
+        currentToolCallsRef.current = exists
+          ? currentToolCallsRef.current.map((item) =>
+              item.task_id === payload.action_id ? { ...item, ...entry } : item
+            )
+          : [...currentToolCallsRef.current, entry];
+        updateActiveAssistantToolCalls(currentToolCallsRef.current);
+      }),
       // Mission-bus traffic: mirror counts and the last message on the sender
       // and recipient task rows. The full log lives in the Mission panel.
       listen<AgentMbusMessageEvent>("agent-mbus-message", (e) => {
@@ -2107,6 +2152,11 @@ export default function App() {
     [selectedModel],
   );
 
+  /** Menu entry point — always opens Settings, never toggles it closed. */
+  function openSettings() {
+    if (sidebar !== "settings") toggleSidebar("settings");
+  }
+
   function toggleSidebar(panel: Sidebar) {
     if (sidebar === panel) {
       closeSidebar();
@@ -2466,6 +2516,7 @@ export default function App() {
         sleepLock={sleepLock}
         turnStartedAt={turnStartedAt}
         now={timerTick}
+        onOpenSettings={openSettings}
       />
       {markdownEditorOpen && (
         <Portal>
@@ -2714,15 +2765,6 @@ export default function App() {
               <FontAwesomeIcon icon={faClockRotateLeft} />
               {t("app.toolbarHistory")}
             </button>
-            <button
-              className={`toolbar-btn ${sidebar === "settings" ? "active" : ""}`}
-              onClick={() => toggleSidebar("settings")}
-              title={t("app.toolbarSettings")}
-            >
-              <FontAwesomeIcon icon={faGear} />
-              {t("app.toolbarSettings")}
-            </button>
-
 
           </div>
         </header>
