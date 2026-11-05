@@ -319,16 +319,17 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Gradient typewriter: only the text that arrived in the latest token chunk
-   carries this class (see ChatMessage.tsx), so a live reply materialises chunk
-   by chunk while everything already on screen stays still. */
+/* Gradient typewriter: only the text that arrived in the latest render carries
+   this class (see ChatMessage.tsx), and the render is throttled to the fade
+   length, so a chunk brightens from transparent before the next rebuild
+   replaces the wrapper — new text materialises instead of popping. */
 .message-content .stream-ink {
-  animation: message-stream-ink 0.28s var(--ts-ease) both;
+  animation: message-stream-ink var(--t-dur-stream) ease-out both;
 }
 
 @keyframes message-stream-ink {
   from {
-    opacity: 0.4;
+    opacity: 0;
   }
 
   to {

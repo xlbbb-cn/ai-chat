@@ -1,5 +1,5 @@
 import type { Message, MessageContent } from "../types";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ToolCallGroup } from "./ToolCallGroup";
 import { TodoList } from "./TodoList";
 import MarkdownIt from "markdown-it";
@@ -307,6 +307,41 @@ function formatInjectionTime(createdAtMs: number): string {
  */
 const STREAM_INK_MAX_CHARS = 400;
 
+/**
+ * Streaming arrives token by token, so `dangerouslySetInnerHTML` would be
+ * rewritten dozens of times per second. Every rewrite replaces the whole
+ * subtree — including the `.stream-ink` wrapper that is still fading — so the
+ * new text never actually fades in, it pops. Rendering in ~9 commits/s gives
+ * each chunk the full fade window before the next rebuild replaces it, while
+ * the visible delay stays far below the model's own token cadence.
+ */
+const STREAM_FLUSH_MS = 110;
+
+/**
+ * Throttle a streaming reply to one visible update per `STREAM_FLUSH_MS`.
+ * State is updated from an interval that always reads the latest prop, so the
+ * timer never restarts as tokens arrive. When the turn ends the full text is
+ * returned immediately instead of waiting for the next tick.
+ */
+function useStreamedText(text: string, streaming: boolean): string {
+  const [shown, setShown] = useState(text);
+  const latest = useRef(text);
+  latest.current = text;
+
+  useEffect(() => {
+    if (!streaming) {
+      setShown(latest.current);
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setShown((previous) => (latest.current === previous ? previous : latest.current));
+    }, STREAM_FLUSH_MS);
+    return () => window.clearInterval(timer);
+  }, [streaming]);
+
+  return streaming ? shown : text;
+}
+
 /** One loop of the writing indicator's nib + ink animations, in ms. */
 const WRITING_LOOP_MS = 1500;
 
@@ -397,7 +432,15 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
     ? displayContent
     : embeddedThought.mainContent;
   const renderedReasoningContent = reasoningContent ? md.render(reasoningContent) : "";
-  const renderedMainContent = md.render(mainContent);
+  // The reply body is throttled while it streams: see `useStreamedText`.
+  const streamedMainContent = useStreamedText(
+    mainContent,
+    isAssistant && Boolean(message.streaming),
+  );
+  const renderedMainContent = useMemo(
+    () => md.render(streamedMainContent),
+    [streamedMainContent],
+  );
   // A failed turn can only be resumed when it left something usable behind;
   // an immediate rate limit with no tokens has nothing to continue.
   const hasPartialReply =
@@ -424,23 +467,32 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
     };
   }, [reasoningContent]);
 
-  // Live reply rendering. `dangerouslySetInnerHTML` rebuilds the markdown
-  // subtree on every token, so nothing can live inside that markup: each
-  // commit re-attaches the writing indicator to the end of the last rendered
-  // block and wraps only the freshly arrived text in `.stream-ink`. Earlier
-  // text is never wrapped, so the reply grows smoothly instead of re-flashing.
+  // Live reply rendering happens outside React: the markdown subtree is
+  // written imperatively only when the rendered HTML changes, and the pen is
+  // re-attached after every commit (the parent re-renders on every token,
+  // which would otherwise wipe the imperatively added indicator). The text
+  // diff below is a no-op when nothing visibly changed.
   //
-  // Deliberately no dependency array: React re-applies the injected HTML even
-  // when an empty reply simply re-renders, which wipes the imperatively added
-  // pen. Running the check after every commit puts it back before paint; the
-  // text diff below is a no-op when nothing changed.
+  // Deliberately no dependency array: the check runs after every commit so the
+  // pen is back before paint, even when the HTML itself did not change.
   const contentRef = useRef<HTMLDivElement>(null);
   const streamedTextRef = useRef("");
+  const renderedHtmlRef = useRef("");
   const writingPenRef = useRef<HTMLSpanElement | null>(null);
   const writingStartRef = useRef(0);
   useLayoutEffect(() => {
     const el = contentRef.current;
     if (!el) return;
+
+    // `dangerouslySetInnerHTML` is re-applied on every parent render, and
+    // tokens arrive several times faster than the visible flush — each write
+    // would destroy the `.stream-ink` wrapper that is still fading. Writing
+    // the HTML only when it actually changed keeps the streaming DOM stable
+    // between flushes, so a chunk's fade can finish.
+    if (renderedHtmlRef.current !== renderedMainContent) {
+      el.innerHTML = renderedMainContent;
+      renderedHtmlRef.current = renderedMainContent;
+    }
 
     // Pen: visible for the whole live turn, pinned to the typewriter's tail.
     if (!isAssistant || !message.streaming) {
@@ -567,7 +619,6 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
         <div
           className="message-content"
           ref={contentRef}
-          dangerouslySetInnerHTML={{ __html: renderedMainContent }}
           onClick={(e) => {
             const target = e.target as HTMLElement;
             const copyButton = target.closest(".code-copy-btn") as HTMLButtonElement | null;
