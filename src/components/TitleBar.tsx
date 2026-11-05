@@ -57,11 +57,9 @@ interface Props {
     turnStartedAt: number | null;
     /** 1 s heartbeat owned by the app shell (the delay timers use it too). */
     now: number;
-    /** Open the fullscreen Settings page from the app menu. */
-    onOpenSettings: () => void;
 }
 
-export function TitleBar({ sleepLock, turnStartedAt, now, onOpenSettings }: Props) {
+export function TitleBar({ sleepLock, turnStartedAt, now }: Props) {
     const { t } = useI18n();
     const [maximized, setMaximized] = useState(false);
     const [menuOpen, setMenuOpen] = useState(false);
@@ -155,12 +153,6 @@ export function TitleBar({ sleepLock, turnStartedAt, now, onOpenSettings }: Prop
     const handleOpenDataDir = () => run(openAppDataDir);
 
     const handleOpenWorkspaceDir = () => run(openWorkspaceDir);
-
-    /** Settings is local UI state, so it bypasses `run` (no invoke/error). */
-    const handleOpenSettings = () => {
-        closeMenu();
-        onOpenSettings();
-    };
 
     const handleSaveProfile = () =>
         run(async () => {
@@ -320,14 +312,6 @@ export function TitleBar({ sleepLock, turnStartedAt, now, onOpenSettings }: Prop
                             {t("app.appMenuMarkdownEdit")}
                         </button>
                         <div className="titlebar-menu-sep" role="separator" />
-                        <button
-                            type="button"
-                            role="menuitem"
-                            className="titlebar-menu-item"
-                            onClick={handleOpenSettings}
-                        >
-                            {t("app.appMenuSettings")}
-                        </button>
                         <button
                             type="button"
                             role="menuitem"

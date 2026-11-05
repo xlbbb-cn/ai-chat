@@ -54,11 +54,10 @@ const zhCN: Messages = {
         appMenuSaveProfile: "导出配置…",
         appMenuRestoreProfile: "恢复配置…",
         appMenuMarkdownEdit: "Markdown 编辑…",
-        appMenuSettings: "设置",
         appMenuAbout: "关于 AI Chat",
 
         emptyStart: "开始一段对话",
-        emptyHint: "使用{skills}设置系统提示词，或在应用菜单中打开{settings}。",
+        emptyHint: "使用{skills}设置系统提示词，或在{settings}中配置 API。",
 
         profileExportLabel: "正在导出并压缩配置…",
         profileExportPreparing: "正在准备导出配置…",

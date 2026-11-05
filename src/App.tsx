@@ -47,6 +47,7 @@ import {
   faClockRotateLeft,
   faFileLines,
   faFilePen,
+  faGear,
   faPaperclip,
   faPenToSquare,
   faPlug,
@@ -2152,11 +2153,6 @@ export default function App() {
     [selectedModel],
   );
 
-  /** Menu entry point — always opens Settings, never toggles it closed. */
-  function openSettings() {
-    if (sidebar !== "settings") toggleSidebar("settings");
-  }
-
   function toggleSidebar(panel: Sidebar) {
     if (sidebar === panel) {
       closeSidebar();
@@ -2516,7 +2512,6 @@ export default function App() {
         sleepLock={sleepLock}
         turnStartedAt={turnStartedAt}
         now={timerTick}
-        onOpenSettings={openSettings}
       />
       {markdownEditorOpen && (
         <Portal>
@@ -2764,6 +2759,14 @@ export default function App() {
             >
               <FontAwesomeIcon icon={faClockRotateLeft} />
               {t("app.toolbarHistory")}
+            </button>
+            <button
+              className={`toolbar-btn ${sidebar === "settings" ? "active" : ""}`}
+              onClick={() => toggleSidebar("settings")}
+              title={t("app.toolbarSettings")}
+            >
+              <FontAwesomeIcon icon={faGear} />
+              {t("app.toolbarSettings")}
             </button>
 
           </div>

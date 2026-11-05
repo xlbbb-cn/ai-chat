@@ -54,11 +54,10 @@ const zhTW: Messages = {
         appMenuSaveProfile: "匯出設定檔…",
         appMenuRestoreProfile: "還原設定檔…",
         appMenuMarkdownEdit: "Markdown 編輯…",
-        appMenuSettings: "設定",
         appMenuAbout: "關於 AI Chat",
 
         emptyStart: "開始一段對話",
-        emptyHint: "使用{skills}設定系統提示詞，或在應用程式選單中開啟{settings}。",
+        emptyHint: "使用{skills}設定系統提示詞，或在{settings}中設定 API。",
 
         profileExportLabel: "正在匯出並壓縮設定檔…",
         profileExportPreparing: "正在準備匯出設定檔…",

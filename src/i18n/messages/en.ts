@@ -63,11 +63,10 @@ const en = {
         appMenuSaveProfile: "Save profile…",
         appMenuRestoreProfile: "Restore profile…",
         appMenuMarkdownEdit: "Markdown edit…",
-        appMenuSettings: "Settings",
         appMenuAbout: "About AI Chat",
 
         emptyStart: "Start a conversation",
-        emptyHint: "Use {skills} to set a system prompt, or open {settings} from the app menu.",
+        emptyHint: "Use {skills} to set a system prompt, or configure the API in {settings}.",
 
         profileExportLabel: "Exporting and compressing profile...",
         profileExportPreparing: "Preparing profile export...",
