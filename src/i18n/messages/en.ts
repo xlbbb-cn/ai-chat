@@ -634,13 +634,17 @@ const en = {
         model: "Model (optional, overrides main config)",
         modelPlaceholder: "Leave empty to inherit the main model",
         modelHint: "Overrides the main model for this agent's LLM requests.",
+        contextWindow: "Context window (tokens)",
+        contextWindowPlaceholder: "Default 131072",
+        contextWindowHint:
+            "Stored per model id and shared with the main chat. Empty = default (131072 for agents). The conversation is compressed at 80% of this value.",
         maxTokens: "Max completion tokens",
         maxTokensPlaceholder: "Default completion limit 8192",
         temperature: "Temperature",
         temperaturePlaceholder: "Inherit default",
         maxIterations: "Max iter",
         maxIterationsHint:
-            "0 means no iteration limit; mission completion is controlled by external task state.",
+            "0 (default) means no iteration limit; mission completion is controlled by external task state.",
         capabilities: "Capabilities",
         allowedTools: "Allowed tools",
         statusRunning: "Running",

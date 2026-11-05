@@ -735,6 +735,36 @@ fn save_config(
     apply_config(&app, &state, config)
 }
 
+/// Store (or clear) the context window for one model id.
+///
+/// The Settings form only edits the main model's window, but an `llm`
+/// sub-agent may run a different model. The budget is keyed by model id and
+/// shared by every agent that uses it, so the Agents panel updates just this
+/// entry instead of round-tripping the whole `AppConfig` form.
+#[tauri::command]
+fn set_model_context_length(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    model: String,
+    context_length: Option<u32>,
+) -> Result<(), String> {
+    let model = model.trim().to_string();
+    if model.is_empty() {
+        return Err("A model id is required to store a context window.".to_string());
+    }
+
+    let mut config = state.config.lock().unwrap().clone();
+    match context_length.filter(|value| *value > 0) {
+        Some(value) => {
+            config.model_context_lengths.insert(model, value);
+        }
+        None => {
+            config.model_context_lengths.remove(&model);
+        }
+    }
+    apply_config(&app, &state, config)
+}
+
 #[tauri::command]
 async fn fetch_models(state: State<'_, AppState>) -> Result<Vec<RemoteModel>, String> {
     let config = state.config.lock().unwrap().clone();
@@ -1436,6 +1466,7 @@ pub fn run() {
             confirm_command,
             get_config,
             save_config,
+            set_model_context_length,
             fetch_models,
             model_metadata::fetch_model_metadata,
             get_workspace_dir,

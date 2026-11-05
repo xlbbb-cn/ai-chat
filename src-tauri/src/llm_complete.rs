@@ -172,6 +172,22 @@ mod tests {
         assert_eq!(resolve_reasoning_effort(&config, "gpt-5"), Some("high"));
     }
 
+    #[test]
+    fn context_window_prefers_the_per_model_value() {
+        let mut config = crate::AppConfig::default();
+        config.model_context_lengths.insert("gpt-5".to_string(), 400_000);
+
+        assert_eq!(resolve_context_window(&config, "gpt-5", 131_072), 400_000);
+        // Whitespace around the model id must not defeat the lookup.
+        assert_eq!(resolve_context_window(&config, " gpt-5 ", 131_072), 400_000);
+        // Models without an entry fall back to the caller's default.
+        assert_eq!(resolve_context_window(&config, "gpt-4o", 131_072), 131_072);
+
+        // A zero/absent entry is "unknown", never a zero-token budget.
+        config.model_context_lengths.insert("gpt-4o".to_string(), 0);
+        assert_eq!(resolve_context_window(&config, "gpt-4o", 131_072), 131_072);
+    }
+
     /// All three cache dialects the usage parser supports, and the case where
     /// the endpoint reports no caching figure at all (`None`, not `Some(0)`:
     /// a reported zero-hit request must stay distinguishable).
@@ -1180,6 +1196,27 @@ pub(crate) fn resolve_reasoning_effort(
         .find(|effort| effort.eq_ignore_ascii_case(candidate))
         .copied()
 }
+
+/// Effective context window for one model.
+///
+/// Resolution order:
+/// 1. the per-model value in `config.model_context_lengths` (auto-detected
+///    from the provider's `/models` response, matched from the metadata
+///    catalogue, or entered manually);
+/// 2. `default` — a conservative value chosen by the caller.
+///
+/// Output-token caps (`max_tokens` / `max_complete_tokens`) are deliberately
+/// not consulted: they describe a different quantity and using one as the
+/// context budget silently shrinks the window to a few thousand tokens.
+pub(crate) fn resolve_context_window(config: &crate::AppConfig, model: &str, default: u32) -> u32 {
+    config
+        .model_context_lengths
+        .get(model.trim())
+        .copied()
+        .filter(|limit| *limit > 0)
+        .unwrap_or(default)
+}
+
 /// Cached prompt-prefix token count reported in one of the OpenAI-compatible
 /// usage dialects. The three shapes are mutually exclusive per provider, so
 /// the first present wins:
@@ -2856,17 +2893,11 @@ async fn run_chat_turn(
             let _ = app.emit("chat-injected", json!({ "items": items }));
         }
 
-        // Context window used for the usage gauge (`Tokens: X / Y`).
-        // Resolution order: per-model context window (auto-detected from the
-        // provider's `/models` response or entered manually in Settings) →
-        // legacy `max_tokens` override → conservative global default.
-        let effective_max_tokens = config
-            .model_context_lengths
-            .get(active_model.as_str())
-            .copied()
-            .filter(|max| *max > 0)
-            .or_else(|| config.model_settings.max_tokens.filter(|max| *max > 0))
-            .unwrap_or(DEFAULT_MODEL_MAX_TOKENS);
+        // Context window used for the usage gauge (`Tokens: X / Y`) and the
+        // compression threshold. Same resolver as sub-agents: only the
+        // per-model window counts, never an output-token cap.
+        let effective_max_tokens =
+            resolve_context_window(&config, &active_model, DEFAULT_MODEL_MAX_TOKENS);
 
         let mut req_body = json!({
             "model": active_model,

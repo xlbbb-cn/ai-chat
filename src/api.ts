@@ -55,6 +55,19 @@ export async function saveConfig(config: AppConfig): Promise<void> {
 }
 
 /**
+ * Store (or clear with `null`) the context window for one model id.
+ *
+ * Shared per model: every sub-agent that runs the model uses the same value.
+ * Clearing it falls back to the built-in default (128K for sub-agents).
+ */
+export async function setModelContextLength(
+  model: string,
+  contextLength: number | null,
+): Promise<void> {
+  return invoke("set_model_context_length", { model, contextLength });
+}
+
+/**
  * One entry of the remote `/models` listing.
  * `context_length` is only present when the provider reports a context
  * window (OpenRouter, Groq, vLLM, LM Studio…); OpenAI's own endpoint

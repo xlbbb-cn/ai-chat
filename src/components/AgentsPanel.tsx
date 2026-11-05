@@ -3,6 +3,7 @@ import {
   listSubAgents, saveSubAgent, deleteSubAgent,
   getAgentOrchestration, saveAgentOrchestration,
   probeAgentCli, probeAgentCloud, openAgentsDir, refreshSubAgentIndex,
+  getConfig, setModelContextLength,
 } from "../api";
 import type {
   AgentType,
@@ -127,11 +128,11 @@ const emptyAgent = (agentType: AgentType = "llm"): SubAgent => ({
   color: undefined,
   file: undefined,
   model: undefined,
-  max_tokens: undefined,
+  max_complete_tokens: undefined,
   temperature: undefined,
   allowed_tools: agentType === "llm" ? [...DEFAULT_LLM_TOOLS] : [],
   allowed_skills: [],
-  max_iterations: 10,
+  max_iterations: 0,
   enable_mcp: false,
   cli: emptyCliSettings(),
   cloud: emptyCloudSettings(),
@@ -273,6 +274,12 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
   const [promptDraft, setPromptDraft] = useState("");
   const [search, setSearch] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+  /** Per-model context windows — the same map the backend budgets from. */
+  const [modelContextLengths, setModelContextLengths] = useState<Record<string, number>>({});
+  /** Model inherited when an agent leaves its model field empty. */
+  const [fallbackModel, setFallbackModel] = useState("");
+  /** In-progress edit, scoped to the model id it was typed for. */
+  const [contextEdit, setContextEdit] = useState<{ model: string; value: string } | null>(null);
 
   const refreshAgents = async () => {
     const updated = await listSubAgents();
@@ -283,6 +290,13 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
   useEffect(() => {
     refreshAgents().catch(console.error);
     getAgentOrchestration().then(setOrchestration).catch(console.error);
+    // Context windows are keyed by model id, so one read covers every agent.
+    getConfig()
+      .then((cfg) => {
+        setModelContextLengths(cfg.model_context_lengths ?? {});
+        setFallbackModel(cfg.model);
+      })
+      .catch(console.error);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -323,11 +337,44 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
       await saveSubAgent(draftToAgent(draft));
       await refreshAgents();
       setDraft(null);
+      setContextEdit(null);
       setProbe(null);
     } catch (e) {
       setSaveError(String(e));
     } finally {
       setSaving(false);
+    }
+  }
+
+  /**
+   * Persist the context-window edit for the model currently selected in the
+   * draft. It is stored per model id (shared by every agent using it) and read
+   * by the backend on each request, so it must be saved outside the agent draft.
+   */
+  async function commitContextWindow() {
+    if (!draft || !contextEdit) return;
+    const model = activeModelFor(draft.agent);
+    if (!model || contextEdit.model !== model) return;
+
+    const raw = contextEdit.value.trim();
+    const parsed = raw === "" ? null : Math.floor(Number(raw));
+    if (parsed !== null && (!Number.isFinite(parsed) || parsed <= 0)) {
+      // Drop an invalid edit instead of leaving the field stuck on "abc".
+      setContextEdit(null);
+      return;
+    }
+
+    try {
+      await setModelContextLength(model, parsed);
+      setModelContextLengths((prev) => {
+        const next = { ...prev };
+        if (parsed === null) delete next[model];
+        else next[model] = parsed;
+        return next;
+      });
+      setContextEdit(null);
+    } catch (e) {
+      setSaveError(String(e));
     }
   }
 
@@ -383,6 +430,10 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
       setProbe({ status: "error", text: String(e) });
     }
   }
+
+  /** Model the draft will actually run on (empty field inherits the main one). */
+  const activeModelFor = (agent: SubAgent): string =>
+    (agent.model ?? "").trim() || fallbackModel.trim();
 
   const updateDraft = (patch: Partial<AgentDraft>) => {
     setDraft((prev) => (prev ? { ...prev, ...patch } : prev));
@@ -687,6 +738,14 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
     }
 
     // ── llm ──
+    const activeModel = activeModelFor(agent);
+    const storedContext = activeModel ? modelContextLengths[activeModel] : undefined;
+    const contextText =
+      contextEdit && contextEdit.model === activeModel
+        ? contextEdit.value
+        : storedContext !== undefined
+          ? String(storedContext)
+          : "";
     return (
       <>
         <label>
@@ -708,10 +767,37 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
           {t("agents.model")}
           <input
             value={agent.model ?? ""}
-            onChange={(e) => updateAgent({ model: e.target.value || undefined })}
+            onChange={(e) => {
+              // The window belongs to the model id, not to the draft: never
+              // carry a pending value over to a different model.
+              setContextEdit(null);
+              updateAgent({ model: e.target.value || undefined });
+            }}
             placeholder={t("agents.modelPlaceholder")}
           />
           <small className="agent-field-hint">{t("agents.modelHint")}</small>
+        </label>
+        <label>
+          {t("agents.contextWindow")}
+          <input
+            type="number"
+            min={1}
+            step={1024}
+            value={contextText}
+            disabled={!activeModel}
+            onChange={(e) =>
+              setContextEdit({ model: activeModel, value: e.target.value })
+            }
+            onBlur={() => void commitContextWindow()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void commitContextWindow();
+              }
+            }}
+            placeholder={t("agents.contextWindowPlaceholder")}
+          />
+          <small className="agent-field-hint">{t("agents.contextWindowHint")}</small>
         </label>
         <div className="agent-editor-row">
           <label style={{ flex: 1 }}>
@@ -720,9 +806,11 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
               type="number"
               min={512}
               max={128000}
-              value={agent.max_tokens ?? ""}
+              value={agent.max_complete_tokens ?? ""}
               onChange={(e) =>
-                updateAgent({ max_tokens: e.target.value ? Number(e.target.value) : undefined })
+                updateAgent({
+                  max_complete_tokens: e.target.value ? Number(e.target.value) : undefined,
+                })
               }
               placeholder={t("agents.maxTokensPlaceholder")}
             />
@@ -750,7 +838,10 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
               value={agent.max_iterations}
               onChange={(e) =>
                 updateAgent({
-                  max_iterations: e.target.value === "" ? 10 : Math.max(0, Number(e.target.value) || 0),
+                  max_iterations:
+                    e.target.value === ""
+                      ? 0
+                      : Math.max(0, Math.min(500, Number(e.target.value) || 0)),
                 })
               }
             />
@@ -988,6 +1079,7 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
               className="btn-secondary"
               onClick={() => {
                 setDraft(null);
+                setContextEdit(null);
                 setProbe(null);
                 setSaveError(null);
               }}
@@ -1212,6 +1304,7 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
                               onClick={() => {
                                 setProbe(null);
                                 setSaveError(null);
+                                setContextEdit(null);
                                 setDraft(toDraft({ ...agent }));
                               }}
                             >
@@ -1277,7 +1370,10 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
           <div className="agents-footer">
             <button
               className="btn-primary"
-              onClick={() => setDraft(toDraft(emptyAgent()))}
+              onClick={() => {
+                setContextEdit(null);
+                setDraft(toDraft(emptyAgent()));
+              }}
             >
               {t("agents.newAgent")}
             </button>

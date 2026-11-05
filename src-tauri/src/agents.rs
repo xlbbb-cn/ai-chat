@@ -10,7 +10,7 @@ use tiktoken_rs::cl100k_base;
 use uuid::Uuid;
 
 const LLM_DEFAULT_MAX_TOKENS: u32 = 131_072;
-const LLM_DEFAULT_MAX_COMLETE_TOKENS: u32 = 4_096;
+const LLM_DEFAULT_MAX_COMLETE_TOKENS: u32 = 8_192;
 
 use crate::{
     llm_complete::{
@@ -121,9 +121,16 @@ pub fn normalize_agent_type(value: &str) -> String {
     }
 }
 
+/// Iteration cap for `llm` agents. `0` means "no limit": the default, because
+/// mission completion is driven by the external task state, not by a round
+/// count. The panel keeps a 500-round ceiling for typo protection.
 fn default_max_iterations() -> u32 {
-    10
+    0
 }
+
+/// Upper bound accepted for `max_iterations`. Anything larger is clamped on
+/// load/save so a hand-edited `sub_agents.json` cannot pin a runaway loop.
+pub const MAX_AGENT_ITERATIONS: u32 = 500;
 fn default_true() -> bool {
     true
 }
@@ -307,7 +314,9 @@ pub struct LegacyCliAgent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentsConfig {
     /// Schema version. Version 2 moved `llm` agent definitions to
-    /// `<app_data>/agents/**/*.md`; this file is configuration only.
+    /// `<app_data>/agents/**/*.md`; v3 turned smart selection on by default;
+    /// v4 made `max_iterations` unlimited by default. This file is
+    /// configuration only.
     #[serde(default = "default_config_version")]
     pub version: u32,
     #[serde(default)]
@@ -321,7 +330,7 @@ pub struct AgentsConfig {
 }
 
 fn default_config_version() -> u32 {
-    3
+    4
 }
 
 impl Default for AgentsConfig {
@@ -347,8 +356,29 @@ pub fn normalize_config(config: &mut AgentsConfig) {
         config.version = 3;
     }
 
+    // v4 made `max_iterations` unlimited by default. Older files always
+    // serialized the old default (10), so exactly 10 is the old default rather
+    // than a deliberate choice — reset it once, then persist v4 so a later
+    // explicit 10 sticks.
+    if config.version < 4 {
+        for agent in &mut config.agents {
+            if agent.max_iterations == 10 {
+                agent.max_iterations = 0;
+            }
+        }
+        config.version = 4;
+    }
+
     for agent in &mut config.agents {
         agent.agent_type = normalize_agent_type(&agent.agent_type);
+        // `max_tokens` was the pre-2.8 name of the per-agent output cap. The
+        // panel wrote it but the backend only reads `max_complete_tokens`, so
+        // migrate the old value once and clear the dead field. `0` means unset.
+        if agent.max_complete_tokens.filter(|limit| *limit > 0).is_none() {
+            agent.max_complete_tokens = agent.max_tokens.take().filter(|limit| *limit > 0);
+        }
+        agent.max_tokens = None;
+        agent.max_iterations = agent.max_iterations.min(MAX_AGENT_ITERATIONS);
     }
 
     if config.cli_agents.is_empty() {
@@ -558,8 +588,13 @@ impl TaskResult {
 }
 
 const AGENT_CONTEXT_COMPRESSION_THRESHOLD: f32 = 0.8;
-const AGENT_WORKING_MEMORY_MESSAGES: usize = 8;
-const AGENT_MIN_RECENT_MESSAGES: usize = 4;
+/// Safety ceiling: a long tool loop compresses even if the model window is
+/// huge. The token budget is the primary trigger; this only bounds pathological
+/// rounds. It is deliberately well above the 12-message window kept on
+/// compression, so normal work is never summarised early.
+const AGENT_WORKING_MEMORY_MESSAGES: usize = 60;
+/// Messages kept verbatim after a compression (same as the main chat).
+const AGENT_MIN_RECENT_MESSAGES: usize = 12;
 const AGENT_SUMMARY_MAX_TOKENS: u32 = 768;
 const AGENT_DEFAULT_CONTEXT_WINDOW: usize = 131_072;
 const AGENT_CONTINUE_PROMPT: &str = "Continue autonomously. Re-read the injected mission snapshot and active task list. Use the external task tools to add, update, or complete tasks, and only call mark_mission_accomplished when the mission is truly done.";
@@ -1173,13 +1208,10 @@ async fn compress_working_memory_if_needed(
         return Ok(false);
     }
 
-    let keep_count = if working_memory.len() > AGENT_WORKING_MEMORY_MESSAGES {
-        AGENT_WORKING_MEMORY_MESSAGES
-    } else {
-        working_memory
-            .len()
-            .saturating_sub(AGENT_MIN_RECENT_MESSAGES)
-    };
+    // Always keep the recent window verbatim, whether the trigger was the token
+    // budget or the message ceiling. Summarising down to the last 60 messages
+    // after a 61-message runaway would leave the summary far too large.
+    let keep_count = AGENT_MIN_RECENT_MESSAGES.min(working_memory.len());
 
     if working_memory.len() <= keep_count || keep_count == 0 {
         return Ok(false);
@@ -4134,6 +4166,19 @@ async fn run_main_agent_helper_inner(
     })
 }
 
+/// Output-token cap for one `llm` sub-agent request.
+///
+/// `max_complete_tokens` is the current field; `max_tokens` is the pre-2.8 name
+/// and is only read as a fallback for configurations that were not migrated
+/// yet. `0` means "unset" for either field.
+fn resolve_completion_limit(agent: &SubAgent) -> u32 {
+    agent
+        .max_complete_tokens
+        .filter(|limit| *limit > 0)
+        .or_else(|| agent.max_tokens.filter(|limit| *limit > 0))
+        .unwrap_or(LLM_DEFAULT_MAX_COMLETE_TOKENS)
+}
+
 async fn run_llm_agent_body(
     app: &AppHandle,
     client: &Client,
@@ -4164,9 +4209,7 @@ async fn run_llm_agent_body(
     // Same configured conversation-id header and custom headers as the main
     // chat: a sub-agent is still part of the same gateway conversation.
     let headers = upstream_request_headers(config, session_id);
-    let max_complete_tokens = agent
-        .max_complete_tokens
-        .unwrap_or(LLM_DEFAULT_MAX_COMLETE_TOKENS);
+    let max_complete_tokens = resolve_completion_limit(agent);
     // `timer` is a chat-session tool (it resumes the conversation later), so it
     // is never handed to a sub-agent even if an agent config lists it.
     let mut agent_tool_ids: Vec<String> = agent
@@ -4218,25 +4261,15 @@ async fn run_llm_agent_body(
     let mut tool_calls_count: u32 = 0;
     let mut main_help_calls: u32 = 0;
     let mission_id = mission_id_for_task(task).to_string();
-    // Context budget resolution order:
-    // 1. Per-model context window from config (auto-detected from the
-    //    provider's `/models` response or entered manually in Settings).
-    // 2. `max_complete_tokens` (legacy approximation).
-    // 3. Conservative global default.
-    let context_budget = config
-        .model_context_lengths
-        .get(model)
-        .copied()
-        .filter(|limit| *limit > 0)
-        .map(|limit| limit as usize)
-        .or_else(|| {
-            config
-                .model_settings
-                .max_complete_tokens
-                .filter(|limit| *limit > 0)
-                .map(|limit| limit as usize)
-        })
-        .unwrap_or(AGENT_DEFAULT_CONTEXT_WINDOW);
+    // Context budget: the per-model window from config (auto-detected from the
+    // provider's `/models` response, the metadata catalogue, or entered for the
+    // model in the Agents panel), otherwise a conservative default. Output-token
+    // caps are a different quantity and must never shrink the context budget.
+    let context_budget = crate::llm_complete::resolve_context_window(
+        config,
+        model,
+        AGENT_DEFAULT_CONTEXT_WINDOW as u32,
+    ) as usize;
 
     let mut self_evolution_context =
         crate::skills::self_evolution_prompt(skill_access_root.as_deref());
@@ -4539,13 +4572,17 @@ async fn run_llm_agent_body(
             app,
             "INFO",
             format!(
-                "agent [{}] {} round {} request: model={}, messages={}, tools={}",
+                "agent [{}] {} round {} request: model={}, messages={}, tools={}, \
+                 context_budget={}, max_completion_tokens={}, max_iterations={} (0 = unlimited)",
                 task.id,
                 agent.name,
                 iterations,
                 model,
                 working_memory.len(),
-                tools_list.len()
+                tools_list.len(),
+                context_budget,
+                max_complete_tokens,
+                max_iterations.unwrap_or(0),
             ),
         );
 
@@ -5130,6 +5167,61 @@ mod tests {
     }
 
     #[test]
+    fn legacy_max_tokens_migrates_to_max_complete_tokens() {
+        let mut config: AgentsConfig = serde_json::from_str(
+            r#"{"agents":[
+                {"id":"legacy","max_tokens":16384},
+                {"id":"explicit","max_tokens":8192,"max_complete_tokens":2048},
+                {"id":"zero","max_tokens":4096,"max_complete_tokens":0}
+            ]}"#,
+        )
+        .expect("config parses");
+        normalize_config(&mut config);
+
+        // A legacy-only value is adopted and the dead field is cleared.
+        assert_eq!(config.agents[0].max_complete_tokens, Some(16_384));
+        assert_eq!(config.agents[0].max_tokens, None);
+        // An explicit new value wins.
+        assert_eq!(config.agents[1].max_complete_tokens, Some(2_048));
+        assert_eq!(config.agents[1].max_tokens, None);
+        // `0` is "unset", so the legacy value still applies.
+        assert_eq!(config.agents[2].max_complete_tokens, Some(4_096));
+        assert_eq!(config.agents[2].max_tokens, None);
+    }
+
+    #[test]
+    fn max_iterations_defaults_to_unlimited_and_is_capped() {
+        let mut config: AgentsConfig = serde_json::from_str(
+            r#"{"agents":[{"id":"default"},{"id":"huge","max_iterations":99999}]}"#,
+        )
+        .expect("config parses");
+        normalize_config(&mut config);
+
+        // Default changed from 10 to 0: the external task state ends a mission,
+        // not an arbitrary round count.
+        assert_eq!(config.agents[0].max_iterations, 0);
+        // A hand-edited file cannot exceed the documented ceiling.
+        assert_eq!(config.agents[1].max_iterations, MAX_AGENT_ITERATIONS);
+    }
+
+    #[test]
+    fn completion_limit_prefers_the_new_field() {
+        let mut agent: SubAgent =
+            serde_json::from_str(r#"{"id":"a"}"#).expect("agent parses");
+        assert_eq!(resolve_completion_limit(&agent), LLM_DEFAULT_MAX_COMLETE_TOKENS);
+
+        agent.max_tokens = Some(16_384);
+        assert_eq!(resolve_completion_limit(&agent), 16_384);
+
+        agent.max_complete_tokens = Some(2_048);
+        assert_eq!(resolve_completion_limit(&agent), 2_048);
+
+        // A zero in the current field means "unset", not "zero output".
+        agent.max_complete_tokens = Some(0);
+        assert_eq!(resolve_completion_limit(&agent), 16_384);
+    }
+
+    #[test]
     fn v2_config_adopts_smart_selection_once() {
         // A v2 file always carried an explicit `false` (old default): adopt the
         // new default once …
@@ -5139,7 +5231,7 @@ mod tests {
         .expect("config parses");
         normalize_config(&mut config);
         assert!(config.orchestration.auto_configure);
-        assert_eq!(config.version, 3);
+        assert_eq!(config.version, 4);
 
         // … while a v3 file keeps whatever the user chose.
         let mut config: AgentsConfig = serde_json::from_str(
@@ -5148,6 +5240,24 @@ mod tests {
         .expect("config parses");
         normalize_config(&mut config);
         assert!(!config.orchestration.auto_configure);
+    }
+
+    #[test]
+    fn v3_config_migrates_the_old_iteration_default_once() {
+        // The old panel always serialized `10`, so that is the old default, not
+        // a deliberate cap. Any other value is the user's choice and survives.
+        let mut config: AgentsConfig = serde_json::from_str(
+            r#"{"version":3,"agents":[
+                {"id":"old-default","max_iterations":10},
+                {"id":"explicit","max_iterations":25}
+            ]}"#,
+        )
+        .expect("config parses");
+        normalize_config(&mut config);
+
+        assert_eq!(config.agents[0].max_iterations, 0);
+        assert_eq!(config.agents[1].max_iterations, 25);
+        assert_eq!(config.version, 4);
     }
 
     fn roster_ids(ids: &[&str]) -> Vec<String> {
@@ -5524,7 +5634,7 @@ mod tests {
             &std::fs::read_to_string(&path).expect("read config"),
         )
         .expect("json");
-        assert_eq!(saved["version"], 3);
+        assert_eq!(saved["version"], 4);
         let agents = saved["agents"].as_array().expect("agents array");
         assert_eq!(agents.len(), 2, "virtual agents are never persisted");
 
