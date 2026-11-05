@@ -793,7 +793,7 @@ pub fn get_main_agent_help_tool() -> Value {
         "type": "function",
         "function": {
             "name": "ask_main_agent",
-            "description": "Ask the main agent to collect material you cannot obtain yourself (conversation context, skills, MCP servers, extra tools). The main agent sees the real conversation history and returns concrete material; you continue your task with the result. Use it for missing context or research, not for work you can already do with your own tools.",
+            "description": "Ask the main agent to collect material you cannot obtain yourself (conversation context, skills, enabled MCP servers, browser/network access, or extra tools). Use this immediately when the task needs live web/browser/API data or a tool that is not in your tool list — do not burn rounds scanning local snapshots for a missing data channel. The main agent sees the real conversation history and returns concrete material; you continue your task with the result.",
             "parameters": {
                 "type": "object",
                 "properties": {

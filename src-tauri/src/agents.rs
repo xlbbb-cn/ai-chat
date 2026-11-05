@@ -673,6 +673,7 @@ pub fn initialize_mission_state(
            episodic_summary = '', \
            final_report = '', \
            help_notes = '', \
+           created_at = CURRENT_TIMESTAMP, \
            updated_at = CURRENT_TIMESTAMP",
         rusqlite::params![mission_id, session_id, agent.id, task.description, task.context, bus_id],
     )
@@ -695,6 +696,7 @@ pub fn initialize_mission_state(
            name = excluded.name, \
            description = excluded.description, \
            status = 'in_progress', \
+           created_at = CURRENT_TIMESTAMP, \
            updated_at = CURRENT_TIMESTAMP, \
            completed_at = NULL",
         rusqlite::params![
@@ -802,7 +804,7 @@ pub fn get_active_mission_tasks(
         .prepare(
             "SELECT task_id, name, description, status \
              FROM agent_tasks \
-             WHERE mission_id = ?1 AND status != 'completed' \
+             WHERE mission_id = ?1 AND status NOT IN ('completed', 'failed', 'stopped') \
              ORDER BY CASE status WHEN 'in_progress' THEN 0 ELSE 1 END, created_at, task_id",
         )
         .map_err(|e| e.to_string())?;
@@ -896,11 +898,24 @@ fn close_mission(app: &AppHandle, mission_id: &str, status: &str) {
         Ok(db) => db,
         Err(_) => return,
     };
-    let _ = db.execute(
+    let updated = db.execute(
         "UPDATE agent_missions SET status = ?2, updated_at = CURRENT_TIMESTAMP \
          WHERE mission_id = ?1 AND mission_accomplished = 0 AND status = 'running'",
         rusqlite::params![mission_id, status],
     );
+    // A failed/stopped mission must not leave its root task (or any internal
+    // sub-task) showing as `in_progress` in the Mission panel. `agent_tasks`
+    // only knows pending/in_progress/completed in the tool API, so the terminal
+    // failed/stopped values are written internally and excluded by
+    // `get_active_mission_tasks`.
+    if updated.unwrap_or(0) > 0 {
+        let _ = db.execute(
+            "UPDATE agent_tasks SET status = ?2, updated_at = CURRENT_TIMESTAMP \
+             WHERE mission_id = ?1 \
+               AND status NOT IN ('completed', 'failed', 'stopped')",
+            rusqlite::params![mission_id, status],
+        );
+    }
 }
 
 fn load_mission_state(
@@ -1692,6 +1707,21 @@ fn log_agent_event(app: &AppHandle, level: &str, message: String) {
     }
 }
 
+/// Provider balance/quota failures are terminal for this account: retrying or
+/// spending more iterations on the same request only burns the turn. The text
+/// is provider-specific, so match the common 402/quota phrasings.
+fn is_provider_balance_error(err: &str) -> bool {
+    let lower = err.to_ascii_lowercase();
+    lower.contains("insufficient account funds")
+        || lower.contains("insufficient_quota")
+        || lower.contains("free usage limit")
+        || lower.contains("requires more credits")
+        || lower.contains("credit balance")
+        || lower.contains("billing")
+        || lower.contains("http 402")
+        || lower.contains(" 402 ")
+}
+
 /// UTF-8-safe preview for log lines and prompts (`limit` is bytes).
 fn preview_text(text: &str, limit: usize) -> String {
     let mut out = String::new();
@@ -2154,6 +2184,29 @@ pub async fn orchestrate(
     // a oneshot from the executor cancels a slow supervisor call the moment the
     // last task settles, so supervision never delays the final answer.
     let use_parallel = orchestration.mode != "sequential" && plan.execution_mode != "sequential";
+    if let Some(bus) = &mission_bus {
+        let _ = app.emit(
+            "agent-planner-action",
+            json!({
+                "session_id": session_id,
+                "bus_id": bus.bus_id(),
+                "task_id": "planner",
+                "action_id": "planner-schedule",
+                "activation": 0,
+                "round": 0,
+                "action": "schedule",
+                "status": "done",
+                "target": "plan",
+                "detail": format!(
+                    "{} task(s) · {} · max concurrent {}",
+                    plan.tasks.len(),
+                    if use_parallel { "parallel" } else { "sequential" },
+                    orchestration.max_concurrent
+                ),
+                "created_at_ms": chrono::Local::now().timestamp_millis(),
+            }),
+        );
+    }
     let skill_access_root =
         crate::skills::self_evolution_skill_root(Some(&workspace_dir), config.self_evolution_mode);
     let supervisor_tasks = plan.tasks.clone();
@@ -2313,12 +2366,13 @@ async fn select_agents(
         .iter()
         .map(|agent| {
             format!(
-                "- id={} name={} type={} tools={} skills={} desc={}",
+                "- id={} name={} type={} tools={} skills={} mcp={} desc={}",
                 agent.id,
                 agent.name,
                 normalize_agent_type(&agent.agent_type),
                 compact_list(&agent.allowed_tools),
                 compact_list(&agent.allowed_skills),
+                if agent.enable_mcp { "enabled" } else { "none" },
                 preview_text(&agent.description, ROSTER_DESC_MAX_BYTES)
             )
         })
@@ -2349,6 +2403,7 @@ async fn select_agents(
          Rules:\n\
          - Pick the smallest set that can do the job: 0 to {MAX_SELECTED_AGENTS} agents.\n\
          - Use `llm` agents for reasoning, analysis and writing; `cli` agents for large code changes in the workspace; `cloud` agents for long remote jobs.\n\
+         - Match capabilities to the task. A live web/browser/API data task needs an agent with `mcp=enabled` or browser/network tools. Do not pick a file-only analyst merely because its domain matches. If no agent has the required data channel, return delegate=false so the main agent (which has MCP/browser tools) handles the live fetch.\n\
          - If no agent fits, or the request can be answered directly, return delegate=false.\n\
          - Copy every id exactly from the list above. Never invent ids.\n\n\
          Return ONLY one JSON object — no markdown, no commentary:\n\
@@ -2474,10 +2529,13 @@ async fn plan_tasks(
         .iter()
         .map(|a| {
             format!(
-                "  - id={} name={} type={} desc={}",
+                "  - id={} name={} type={} tools={} skills={} mcp={} desc={}",
                 a.id,
                 a.name,
                 normalize_agent_type(&a.agent_type),
+                compact_list(&a.allowed_tools),
+                compact_list(&a.allowed_skills),
+                if a.enable_mcp { "enabled" } else { "none" },
                 preview_text(&a.description, ROSTER_DESC_MAX_BYTES)
             )
         })
@@ -2523,6 +2581,7 @@ async fn plan_tasks(
         - execution_mode: \"parallel\" when tasks are independent, \"sequential\" when order matters\n\
         - dependencies: list of task ids that must finish before this one\n\
         - Every agent_id must be exactly one of: {roster}\n\
+        - Match capabilities to the task: live web/browser/API data collection needs `mcp=enabled` or browser/network tools. Never assign that work to a file-only agent (mcp=none); it will burn iterations scanning local snapshots. If no listed agent can fetch the data, leave the live fetch to the main agent and plan only analysis tasks.\n\
         - Keep descriptions brief and actionable",
         workspace_root = workspace_dir.display(),
     );
@@ -4274,13 +4333,22 @@ async fn run_llm_agent_body(
             )
         })
         .unwrap_or_default();
+    // Tool/task fit guard: a sub-agent with file-only tools must not burn its
+    // whole iteration budget mining local snapshots for data that only the main
+    // agent's browser/network/MCP tools can fetch.
+    let escalation = if config.sub_agent_main_help {
+        "\n\nTOOL ESCALATION: If the task needs live web/browser/API data, an MCP service, or any tool that is not in your tool list, call `ask_main_agent` with one concrete request (what data, from where, what you already tried) BEFORE spending more rounds on local snapshots. The main agent has the full tool set and the enabled MCP servers. Do not substitute repeated local file scans for a missing data channel."
+    } else {
+        "\n\nTOOL FIT: If the task needs live web/browser/API data or a tool that is not in your tool list, stop and report the missing capability instead of repeatedly scanning local files."
+    };
     let static_system_prompt = format!(
         "{}\n\nWorking directory: {}\n`run_cmd`, `run_shell` and `run_shell` serve processes start in this directory. \
-         `file_actions` paths are always relative to the workspace root ({}), not to the working directory.{}",
+         `file_actions` paths are always relative to the workspace root ({}), not to the working directory.{}{}",
         build_agent_static_system_prompt(agent, &self_evolution_context),
         task_cwd.display(),
         workspace_dir.display(),
         mbus_block,
+        escalation,
     );
     let max_iterations = (agent.max_iterations > 0).then_some(agent.max_iterations);
     let mut iterations: u32 = 0;
@@ -4467,6 +4535,19 @@ async fn run_llm_agent_body(
             req_body["tools"] = json!(tools_list);
             req_body["tool_choice"] = json!("auto");
         }
+        log_agent_event(
+            app,
+            "INFO",
+            format!(
+                "agent [{}] {} round {} request: model={}, messages={}, tools={}",
+                task.id,
+                agent.name,
+                iterations,
+                model,
+                working_memory.len(),
+                tools_list.len()
+            ),
+        );
 
         let stream_result = stream_llm_request(
             app,
@@ -4499,22 +4580,52 @@ async fn run_llm_agent_body(
 
         match stream_result {
             Err(e) => {
+                let balance_error = is_provider_balance_error(&e);
+                let error = if balance_error {
+                    format!("Upstream account balance/quota exhausted: {e}")
+                } else {
+                    e
+                };
+                log_agent_event(
+                    app,
+                    "ERROR",
+                    format!(
+                        "agent [{}] {} round {} request failed{}: {error}",
+                        task.id,
+                        agent.name,
+                        iterations,
+                        if balance_error { " (provider balance/quota)" } else { "" },
+                    ),
+                );
                 let _ = app.emit(
                     "agent-task-error",
-                    json!({ "task_id": task.id, "agent_id": agent.id, "error": e }),
+                    json!({ "task_id": task.id, "agent_id": agent.id, "error": error.clone() }),
                 );
                 return TaskResult {
                     task_id: task.id.clone(),
                     agent_id: agent.id.clone(),
                     agent_name: agent.name.clone(),
                     status: "error".to_string(),
-                    content: format!("Error: {e}"),
+                    content: format!("Error: {error}"),
                     tool_calls_count,
                     tokens_used: total_tokens,
                 };
             }
             Ok((content, reasoning_content, agent_tool_calls, tokens)) => {
                 total_tokens += tokens;
+                log_agent_event(
+                    app,
+                    "INFO",
+                    format!(
+                        "agent [{}] {} round {} response: tokens={}, tool_calls={}, text_chars={}",
+                        task.id,
+                        agent.name,
+                        iterations,
+                        tokens,
+                        agent_tool_calls.len(),
+                        content.chars().count()
+                    ),
+                );
 
                 if agent_tool_calls.is_empty() {
                     if !content.trim().is_empty() {
@@ -4645,6 +4756,17 @@ async fn run_llm_agent_body(
                     if let Some(bus) = mbus {
                         bus.mark_tool(&task.id, name);
                     }
+                    log_agent_event(
+                        app,
+                        "INFO",
+                        format!(
+                            "agent [{}] {} tool {}: {}",
+                            task.id,
+                            agent.name,
+                            name,
+                            preview_text(args, 240)
+                        ),
+                    );
                     let result = if name == "mbus" {
                         match mbus {
                             Some(bus) => {
@@ -4804,6 +4926,22 @@ async fn run_llm_agent_body(
                         )
                         .await
                     };
+                    log_agent_event(
+                        app,
+                        if result.trim_start().starts_with("Error") {
+                            "WARN"
+                        } else {
+                            "INFO"
+                        },
+                        format!(
+                            "agent [{}] {} tool {} -> {} chars: {}",
+                            task.id,
+                            agent.name,
+                            name,
+                            result.chars().count(),
+                            preview_text(&result, 160)
+                        ),
+                    );
                     working_memory
                         .push(json!({ "role": "tool", "tool_call_id": id, "content": result }));
                 }
@@ -4882,6 +5020,20 @@ async fn run_llm_agent_body(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provider_balance_errors_are_recognized() {
+        for text in [
+            "Upstream request failed: Insufficient account funds",
+            "insufficient_quota",
+            "Free usage limit reached",
+            "This request requires more credits, or fewer max_tokens",
+        ] {
+            assert!(is_provider_balance_error(text), "{text}");
+        }
+        assert!(!is_provider_balance_error("Model is unavailable"));
+        assert!(!is_provider_balance_error("connection reset by peer"));
+    }
 
     /// The user's pre-typed config: an `llm` agent plus the legacy standalone
     /// CLI-agent array. Loading it must yield two typed agents and drop the

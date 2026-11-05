@@ -74,6 +74,14 @@ pub async fn run_planner_supervisor(
 ) {
     let headers = upstream_request_headers(config, session_id);
     let system = build_system_prompt(&bus, tasks, conversation);
+    // A single-task plan has no peers to coordinate and the executor's done
+    // signal is enough; one initial activation avoids paying for a second
+    // planner call just to observe a trivial mission.
+    let max_activations: u32 = if tasks.len() <= 1 {
+        1
+    } else {
+        MAX_ACTIVATIONS
+    };
     let mut last_seq = 0u64;
     let mut activation: u32 = 0;
     let mut notes: Vec<String> = Vec::new();
@@ -102,9 +110,9 @@ pub async fn run_planner_supervisor(
         if executor_done {
             break;
         }
-        if activation >= MAX_ACTIVATIONS {
+        if activation >= max_activations {
             final_status = "done";
-            final_note = format!("supervision budget reached ({MAX_ACTIVATIONS} activations)");
+            final_note = format!("supervision budget reached ({max_activations} activations)");
             break;
         }
 
@@ -135,7 +143,7 @@ pub async fn run_planner_supervisor(
             let activity_text = render_activities(&activities);
             let inbox_text = render_inbox(&inbox);
             let prompt = format!(
-                "ACTIVATION {activation}/{MAX_ACTIVATIONS}\n\
+                "ACTIVATION {activation}/{max_activations}\n\
                  MISSION STATUS:\n{status_text}\n\n\
                  NEW ACTIVITY SINCE YOUR LAST ACTIVATION:\n{activity_text}\n\n\
                  MESSAGES ADDRESSED TO YOU (already delivered to this prompt):\n{inbox_text}\n\n\
@@ -163,6 +171,7 @@ pub async fn run_planner_supervisor(
                 client,
                 url,
                 config,
+                activation,
                 model,
                 &headers,
                 &system,
@@ -242,6 +251,32 @@ pub async fn run_planner_supervisor(
     // The bus stays open until `orchestrate` joins the executor: the supervisor
     // may stop early (budget / `finish`) while agents are still running, and
     // they must keep their peer-to-peer channel.
+    // The executor only says "settled", not "success": reflect failed/skipped
+    // tasks in the planner row instead of claiming everything finished.
+    if executor_done && final_status == "done" {
+        let statuses = bus.status();
+        let completed = statuses.iter().filter(|peer| peer.state == "completed").count();
+        let failed = statuses.iter().filter(|peer| peer.state == "error").count();
+        let skipped = statuses.iter().filter(|peer| peer.state == "skipped").count();
+        let incomplete = statuses
+            .iter()
+            .filter(|peer| peer.state == "pending" || peer.state == "running")
+            .count();
+        if completed + failed + skipped + incomplete > 0 {
+            final_note = if failed + skipped + incomplete > 0 {
+                format!(
+                    "settled: {completed} completed, {failed} failed, {skipped} skipped{}",
+                    if incomplete > 0 {
+                        format!(", {incomplete} not settled")
+                    } else {
+                        String::new()
+                    }
+                )
+            } else {
+                format!("all {completed} task(s) completed")
+            };
+        }
+    }
     emit_state(
         app,
         session_id,
@@ -266,6 +301,7 @@ async fn run_activation(
     client: &Client,
     url: &str,
     config: &AppConfig,
+    activation: u32,
     model: &str,
     headers: &[(String, String)],
     system: &str,
@@ -416,13 +452,36 @@ async fn run_activation(
 
         for (id, name, args) in &stream.tool_calls {
             let parsed: Value = serde_json::from_str(args).unwrap_or_default();
-            let action = parsed["action"].as_str().unwrap_or("").trim().to_string();
+            let action_label = if name == "mbus" {
+                let value = parsed["action"].as_str().unwrap_or("mbus").trim();
+                if value.is_empty() {
+                    "mbus"
+                } else {
+                    value
+                }
+            } else {
+                name.as_str()
+            };
+            let target = planner_action_target(&parsed, action_label, name);
+            let before_detail = planner_action_before_detail(&parsed, action_label, name);
+            emit_planner_action(
+                app,
+                bus,
+                activation,
+                round,
+                id,
+                action_label,
+                "running",
+                &target,
+                &before_detail,
+            );
+
             let (result, is_finish) = if name != "mbus" {
                 (
                     format!("Error: unknown planner tool '{name}'. Only 'mbus' is available."),
                     false,
                 )
-            } else if action == "finish" {
+            } else if action_label == "finish" {
                 (mbus::handle_tool(app, bus, PLANNER_ID, &parsed, true), true)
             } else {
                 (
@@ -430,24 +489,37 @@ async fn run_activation(
                     false,
                 )
             };
+
+            let status = if result.trim_start().starts_with("Error") {
+                "error"
+            } else {
+                "done"
+            };
+            let after_detail = if status == "error" {
+                result.clone()
+            } else if action_label == "send" {
+                parsed["message"].as_str().unwrap_or("").to_string()
+            } else {
+                summarize_action_result(action_label, &result)
+            };
+            emit_planner_action(
+                app,
+                bus,
+                activation,
+                round,
+                id,
+                action_label,
+                status,
+                &target,
+                &after_detail,
+            );
+
             messages.push(json!({
                 "role": "tool",
                 "tool_call_id": id,
                 "content": result,
             }));
-            if action == "send" && !result.starts_with("Error") {
-                let target =
-                    if let Some(to) = parsed["to"].as_str().filter(|value| !value.is_empty()) {
-                        to.to_string()
-                    } else {
-                        format!(
-                            "#{}",
-                            parsed["topic"]
-                                .as_str()
-                                .filter(|value| !value.is_empty())
-                                .unwrap_or("broadcast")
-                        )
-                    };
+            if action_label == "send" && status == "done" {
                 collected_notes.push(format!(
                     "activation {}: sent to {}: {}",
                     round + 1,
@@ -473,6 +545,177 @@ async fn run_activation(
         done: false,
         cancelled: false,
         error: None,
+    }
+}
+
+/// Mirror one planner decision into the chat tool group. The UI keeps a row
+/// per `action_id`, so a `running` event creates the row and the following
+/// `done`/`error` event settles it.
+fn emit_planner_action(
+    app: &AppHandle,
+    bus: &MissionBus,
+    activation: u32,
+    round: usize,
+    tool_call_id: &str,
+    action: &str,
+    status: &str,
+    target: &str,
+    detail: &str,
+) {
+    let _ = app.emit(
+        "agent-planner-action",
+        json!({
+            "session_id": bus.session_id(),
+            "bus_id": bus.bus_id(),
+            "task_id": "planner",
+            "action_id": format!("planner-{activation}-{round}-{tool_call_id}"),
+            "activation": activation,
+            "round": round,
+            "action": action,
+            "status": status,
+            "target": preview_text(target, 160),
+            "detail": preview_text(detail, 300),
+            "created_at_ms": now_ms(),
+        }),
+    );
+}
+
+fn planner_action_target(parsed: &Value, action: &str, tool_name: &str) -> String {
+    match action {
+        "send" => {
+            let to = parsed["to"].as_str().unwrap_or("").trim();
+            if !to.is_empty() {
+                to.to_string()
+            } else {
+                let topic = parsed["topic"]
+                    .as_str()
+                    .filter(|value| !value.trim().is_empty())
+                    .unwrap_or("broadcast");
+                format!("#{topic}")
+            }
+        }
+        "status" => {
+            let ids = parsed["task_ids"]
+                .as_array()
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.as_str())
+                        .filter(|value| !value.trim().is_empty())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default();
+            if ids.is_empty() {
+                "all agents".to_string()
+            } else {
+                ids
+            }
+        }
+        "history" => {
+            let topic = parsed["topic"].as_str().unwrap_or("").trim();
+            if topic.is_empty() {
+                "all traffic".to_string()
+            } else {
+                format!("#{topic}")
+            }
+        }
+        "subscribe" | "unsubscribe" => {
+            let topics = parsed["topics"]
+                .as_array()
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default();
+            if topics.is_empty() {
+                "topics".to_string()
+            } else {
+                topics
+            }
+        }
+        "finish" => "—".to_string(),
+        _ => tool_name.to_string(),
+    }
+}
+
+fn planner_action_before_detail(parsed: &Value, action: &str, tool_name: &str) -> String {
+    match action {
+        "send" => preview_text(parsed["message"].as_str().unwrap_or(""), 300),
+        "status" => "checking agent status".to_string(),
+        "history" => "reading bus history".to_string(),
+        "subscribe" => "updating subscriptions".to_string(),
+        "unsubscribe" => "updating subscriptions".to_string(),
+        "finish" => parsed["note"]
+            .as_str()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("finishing supervision")
+            .to_string(),
+        _ => format!("unsupported tool: {tool_name}"),
+    }
+}
+
+fn summarize_action_result(action: &str, result: &str) -> String {
+    if result.trim_start().starts_with("Error") {
+        return preview_text(result.trim(), 300);
+    }
+    let parsed = serde_json::from_str::<Value>(result).ok();
+    match action {
+        "status" => {
+            if let Some(value) = &parsed {
+                if let Some(peers) = value["peers"].as_array() {
+                    let parts: Vec<String> = peers
+                        .iter()
+                        .map(|peer| {
+                            format!(
+                                "{} {}",
+                                peer["id"].as_str().unwrap_or("?"),
+                                peer["state"].as_str().unwrap_or("?")
+                            )
+                        })
+                        .collect();
+                    if !parts.is_empty() {
+                        return format!("{} agent(s): {}", parts.len(), parts.join(", "));
+                    }
+                }
+            }
+            preview_text(result.trim(), 300)
+        }
+        "history" => {
+            if let Some(value) = &parsed {
+                if let Some(messages) = value["messages"].as_array() {
+                    return format!("{} message(s)", messages.len());
+                }
+            }
+            preview_text(result.trim(), 300)
+        }
+        "subscribe" | "unsubscribe" => {
+            if let Some(value) = &parsed {
+                if let Some(topics) = value["subscriptions"].as_array() {
+                    let topics = topics
+                        .iter()
+                        .filter_map(|item| item.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    if !topics.is_empty() {
+                        return topics;
+                    }
+                }
+            }
+            preview_text(result.trim(), 300)
+        }
+        "finish" => {
+            if let Some(value) = &parsed {
+                if let Some(note) = value["note"].as_str().filter(|value| !value.is_empty()) {
+                    return note.to_string();
+                }
+            }
+            "supervision finished".to_string()
+        }
+        _ => preview_text(result.trim(), 300),
     }
 }
 

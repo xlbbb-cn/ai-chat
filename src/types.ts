@@ -740,6 +740,22 @@ export interface AgentPlannerStateEvent {
   activity: string;
 }
 
+/** `agent-planner-action`: one planner decision mirrored into the tool group. */
+export interface AgentPlannerActionEvent {
+  session_id: string;
+  bus_id: string;
+  task_id: string;
+  action_id: string;
+  activation: number;
+  round: number;
+  /** schedule | send | status | history | subscribe | unsubscribe | finish */
+  action: string;
+  status: "running" | "done" | "error";
+  target: string;
+  detail: string;
+  created_at_ms: number;
+}
+
 /** Persisted mission-bus message rendered in the Agent Mission panel. */
 export interface AgentBusMessage {
   id: number;
