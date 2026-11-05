@@ -41,7 +41,10 @@ const EVOLUTION_AUTO_LIMIT: usize = 40;
 /// "a block that occupies a large share of memory", not every pair of facts.
 const CONSOLIDATE_MIN_ENTRIES: usize = 4;
 const CONSOLIDATE_MIN_SHARE_PCT: usize = 20;
-/// Space held back for the "+ N lower-ranked facts" tail line.
+/// Space held back for the "+ N lower-ranked facts" tail line. The renderer
+/// measures the final pointer line as well: when a very small budget cannot
+/// spare this reserve, the lowest-ranked placed lines are popped until the
+/// render fits.
 const EVOLUTION_TAIL_RESERVE: usize = 140;
 
 /// Every scope the `memory` tool accepts, in fan-out order.
@@ -94,7 +97,8 @@ pub struct EvolutionMeta {
     /// `fact` | `recipe` | `location` | `pitfall` — used to group a skill body.
     pub kind: String,
     pub tags: Vec<String>,
-    /// 1–5, set by the model. 5 (or `pinned`) always survives the budget cut.
+    /// 1–5, set by the model. 5 (or `pinned`) outranks every other entry and
+    /// its line is the last one dropped when the budget fills.
     pub importance: u32,
     /// 1–5, how strong the evidence behind the fact is.
     pub confidence: u32,
@@ -650,6 +654,14 @@ pub struct RenderedEvolution {
 ///
 /// Deterministic: it never writes to disk, and ties break on `key`, so two
 /// consecutive builds produce byte-identical text (prompt-cache friendly).
+///
+/// Every measurement is in **characters**: `EVOLUTION_CONTEXT_BUDGET_CHARS` is
+/// a character budget, and a CJK line costs ~3 bytes per character, so byte
+/// accounting would silently fill only a third of it.
+///
+/// Pinned / importance-5 entries are protected: their +100 score always ranks
+/// them above every other entry, so they fill the tiers first and their lines
+/// are the last ones dropped when a budget tightens.
 pub fn render_ranked_entries(ranked: &[ScoredEntry], budget_chars: usize) -> RenderedEvolution {
     if ranked.is_empty() {
         return RenderedEvolution {
@@ -662,10 +674,23 @@ pub fn render_ranked_entries(ranked: &[ScoredEntry], budget_chars: usize) -> Ren
     let hard_budget = budget_chars.saturating_sub(tail_reserve);
     let tier1_budget = hard_budget * 85 / 100;
 
-    let mut tier1 = String::new();
-    let mut injected: Vec<String> = Vec::new();
+    // One rendered line per entry, kept in rank order. `tier1` is the full
+    // summary line, `tier2` the title-only fallback (the two sections are
+    // concatenated below, as before).
+    struct Placed {
+        key: String,
+        line: String,
+        chars: usize,
+        tier1: bool,
+    }
+
+    let char_len = |text: &str| text.chars().count();
+    let mut placed: Vec<Placed> = Vec::new();
+    let mut tier1_chars = 0usize;
+    let mut tier2_chars = 0usize;
     let mut pending: Vec<&ScoredEntry> = Vec::new();
 
+    // Tier 1: full distilled summaries in rank order.
     for scored in ranked {
         let key = scored.entry.meta.key.clone();
         let summary = one_line(&scored.entry.summary, EVOLUTION_SUMMARY_MAX);
@@ -674,15 +699,23 @@ pub fn render_ranked_entries(ranked: &[ScoredEntry], budget_chars: usize) -> Ren
             continue;
         }
         let line = format!("- {key}: {summary}\n");
-        if tier1.len() + line.len() <= tier1_budget {
-            tier1.push_str(&line);
-            injected.push(key);
+        let line_chars = char_len(&line);
+        if tier1_chars + line_chars <= tier1_budget {
+            tier1_chars += line_chars;
+            placed.push(Placed {
+                key,
+                line,
+                chars: line_chars,
+                tier1: true,
+            });
         } else {
             pending.push(scored);
         }
     }
 
-    let mut tier2 = String::new();
+    // Tier 2: title-only fallback lines, still in rank order — protected
+    // entries (pinned / importance 5) come first because only they carry the
+    // +100 score bonus.
     let mut omitted = 0usize;
     for scored in pending {
         let key = scored.entry.meta.key.clone();
@@ -692,25 +725,76 @@ pub fn render_ranked_entries(ranked: &[ScoredEntry], budget_chars: usize) -> Ren
             continue;
         }
         let line = format!("- {key}: {title}\n");
-        if tier1.len() + tier2.len() + line.len() <= hard_budget {
-            tier2.push_str(&line);
-            injected.push(key);
+        let line_chars = char_len(&line);
+        if tier1_chars + tier2_chars + line_chars <= hard_budget {
+            tier2_chars += line_chars;
+            placed.push(Placed {
+                key,
+                line,
+                chars: line_chars,
+                tier1: false,
+            });
         } else {
             omitted += 1;
         }
     }
 
-    let mut text = tier1;
-    text.push_str(&tier2);
-    if omitted > 0 {
-        text.push_str(&format!(
-            "+ {omitted} lower-ranked facts — memory search scope=evolution"
-        ));
+    // The pointer line must also fit the budget. The reserve usually absorbs
+    // it; with very small budgets it may not, so drop the lowest-ranked placed
+    // line (the end of the rank-ordered list) until the render fits exactly.
+    // Every drop frees at least a few characters while the omitted digit count
+    // can grow by one, so the loop terminates.
+    let tail_line = |omitted: usize| -> String {
+        if omitted > 0 {
+            format!("+ {omitted} lower-ranked facts — memory search scope=evolution")
+        } else {
+            String::new()
+        }
+    };
+    loop {
+        let tail_chars = char_len(&tail_line(omitted));
+        if tier1_chars + tier2_chars + tail_chars <= budget_chars {
+            break;
+        }
+        let Some(last) = placed.pop() else {
+            // Nothing left to drop; a tail-only render is as small as this
+            // gets (only reachable with a degenerate budget).
+            break;
+        };
+        if last.tier1 {
+            tier1_chars -= last.chars;
+        } else {
+            tier2_chars -= last.chars;
+        }
+        omitted += 1;
     }
 
+    let mut text = String::new();
+    for entry in placed.iter().filter(|entry| entry.tier1) {
+        text.push_str(&entry.line);
+    }
+    for entry in placed.iter().filter(|entry| !entry.tier1) {
+        text.push_str(&entry.line);
+    }
+    let tail = tail_line(omitted);
+    if !tail.is_empty() {
+        text.push_str(&tail);
+    }
+    text = text.trim_end().to_string();
+
     RenderedEvolution {
-        text: text.trim_end().to_string(),
-        injected,
+        text,
+        injected: placed
+            .iter()
+            .filter(|entry| entry.tier1)
+            .map(|entry| entry.key.clone())
+            .chain(
+                placed
+                    .iter()
+                    .filter(|entry| !entry.tier1)
+                    .map(|entry| entry.key.clone()),
+            )
+            .collect(),
     }
 }
 
@@ -2619,6 +2703,124 @@ mod tests {
         assert!(first.contains("lower-ranked facts"));
     }
 
+    /// The budget is counted in characters, not bytes: a CJK workspace fills
+    /// the injection instead of silently getting a third of it.
+    #[test]
+    fn budget_is_counted_in_characters_not_bytes() {
+        let workspace = TempWorkspace::new("cjk-budget");
+        let fact =
+            "这是一条足够长的中文事实，用来证明预算必须按字符而不是按字节统计才能够把整个注入区域用满。";
+        for index in 0..12 {
+            upsert_evolution_entry(
+                &workspace.dir,
+                &format!("fact-{index:02}"),
+                &format!("{fact}编号 {index}。"),
+                &format!("中文事实 {index}"),
+                "fact",
+                Some(3),
+                false,
+                &[],
+                true,
+            )
+            .unwrap();
+        }
+
+        let budget = 600;
+        let first = render_evolution_context(&workspace.dir, budget);
+        let second = render_evolution_context(&workspace.dir, budget);
+        assert_eq!(first, second);
+        assert!(first.chars().count() <= budget);
+        // Each CJK summary line is ~60 characters (~180 bytes). Byte
+        // accounting renders the same lines as roughly a third of the budget,
+        // leaving most of it unused.
+        assert!(
+            first.chars().count() > budget * 2 / 5,
+            "the CJK render must fill the character budget: {} of {budget} chars",
+            first.chars().count()
+        );
+    }
+
+    /// Even a very small budget keeps the final render within the cap: the
+    /// tail line is measured, and placed lines are popped when the reserve
+    /// cannot cover the pointer.
+    #[test]
+    fn a_tiny_budget_still_respects_the_hard_cap() {
+        let workspace = TempWorkspace::new("tiny-cap");
+        for index in 0..12 {
+            upsert_evolution_entry(
+                &workspace.dir,
+                &format!("fact-{index:02}"),
+                &format!("This is a sufficiently long fact number {index} with details that fill the line."),
+                &format!("Fact {index}"),
+                "fact",
+                Some(3),
+                false,
+                &[],
+                true,
+            )
+            .unwrap();
+        }
+
+        let budget = 300;
+        let rendered = render_evolution_context(&workspace.dir, budget);
+        assert!(
+            rendered.chars().count() <= budget,
+            "the render must respect the budget: {} chars for budget {budget}",
+            rendered.chars().count()
+        );
+        assert!(rendered.contains("lower-ranked facts"));
+    }
+
+    /// Pinned entries are protected: a flood of pins ranked first still
+    /// contributes every one of its lines, while the lower-ranked plain
+    /// entries give way under the same cap.
+    #[test]
+    fn pinned_entries_survive_the_budget_cut() {
+        let workspace = TempWorkspace::new("pinned-flood");
+        for index in 0..8 {
+            upsert_evolution_entry(
+                &workspace.dir,
+                &format!("critical-{index:02}"),
+                &format!("Critical fact {index}: a body long enough to overflow the tier one budget."),
+                &format!("Critical {index}"),
+                "fact",
+                Some(1),
+                true,
+                &[],
+                true,
+            )
+            .unwrap();
+            upsert_evolution_entry(
+                &workspace.dir,
+                &format!("plain-{index:02}"),
+                &format!("Plain fact {index}: fillers that will be cut when the pins flood the budget."),
+                &format!("Plain {index}"),
+                "fact",
+                Some(3),
+                false,
+                &[],
+                true,
+            )
+            .unwrap();
+        }
+
+        let rendered = render_evolution_context(&workspace.dir, 600);
+        assert!(rendered.chars().count() <= 600);
+        // Every pinned entry lands, whichever tier fits it.
+        for index in 0..8 {
+            assert!(
+                rendered.contains(&format!("critical-{index:02}")),
+                "pinned entry {index} was dropped from the render"
+            );
+        }
+        // At most two of the lower-ranked plain entries fit behind the pins.
+        assert!(
+            rendered.matches("plain-0").count() <= 2,
+            "plain entries must give way to pinned entries"
+        );
+        assert!(rendered.contains("plain-00"));
+    }
+
     /// CJK truncation is by characters, never by bytes.
     #[test]
     fn truncation_is_character_safe() {
@@ -2767,7 +2969,8 @@ mod tests {
         assert_eq!(load_evolution_entries(&workspace.dir).len(), 1);
     }
 
-    /// A successful apply writes + enables the skill, then archives the entries.    #[test]
+    /// A successful apply writes + enables the skill, then archives the entries.
+    #[test]
     fn apply_archives_entries_into_the_skill_and_restore_round_trips() {
         let workspace = TempWorkspace::new("apply-ok");
         for index in 0..2 {
