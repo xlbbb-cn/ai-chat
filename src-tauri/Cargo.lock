@@ -30,7 +30,7 @@ dependencies = [
 
 [[package]]
 name = "ai-chat"
-version = "2.8.7"
+version = "2.8.8"
 dependencies = [
  "async-trait",
  "chrono",
