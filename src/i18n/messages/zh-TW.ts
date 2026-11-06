@@ -564,12 +564,16 @@ const zhTW: Messages = {
         typeHint:
             "LLM：在應用程式內執行自主工具迴圈；CLI：啟動本機安裝的無介面編碼 CLI；雲端：把任務送到遠端 HTTP 端點。",
         searchPlaceholder: "搜尋名稱、職責或分類",
+        filterByStatus: "依啟用狀態篩選代理",
+        filterAll: "全部",
+        filterEnabled: "已啟用",
+        filterDisabled: "未啟用",
         enabledCount: "已啟用 {enabled} / 共 {total}",
         groupCustom: "自建",
         groupUncategorized: "未分類",
         rescan: "重新整理 agent 索引",
         openFolder: "開啟 agents 目錄",
-        noResults: "沒有符合的代理。",
+        noResults: "沒有符合篩選條件的代理。",
         sourceFile: "定義檔案：agents/{file}",
         definitionStorageHint:
             "LLM 代理的定義保存在 app_data/agents 下的 md 檔案中（名稱、說明、emoji、顏色與提示詞），此處只把執行設定寫入 sub_agents.json。",

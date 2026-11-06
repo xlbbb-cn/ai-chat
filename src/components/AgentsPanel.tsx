@@ -257,6 +257,17 @@ interface ProbeState {
   text: string;
 }
 
+/** Sidebar enablement filter. */
+type StatusFilter = "all" | "enabled" | "disabled";
+
+const STATUS_FILTERS: StatusFilter[] = ["all", "enabled", "disabled"];
+
+const STATUS_FILTER_LABEL_KEYS: Record<StatusFilter, MessageKey> = {
+  all: "agents.filterAll",
+  enabled: "agents.filterEnabled",
+  disabled: "agents.filterDisabled",
+};
+
 export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggleUseAgents, agentStatuses }: Props) {
   const { t } = useI18n();
   const [agents, setAgents] = useState<SubAgent[]>([]);
@@ -275,6 +286,8 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
   const [isPromptEditorOpen, setIsPromptEditorOpen] = useState(false);
   const [promptDraft, setPromptDraft] = useState("");
   const [search, setSearch] = useState("");
+  /** Sidebar filter by enablement: "all" | "enabled" | "disabled". */
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [refreshing, setRefreshing] = useState(false);
   /** Per-model context windows — the same map the backend budgets from. */
   const [modelContextLengths, setModelContextLengths] = useState<Record<string, number>>({});
@@ -909,14 +922,26 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
     );
   };
 
+  const enabledCount = agents.filter((agent) => agent.enabled).length;
+  const filterCounts: Record<StatusFilter, number> = {
+    all: agents.length,
+    enabled: enabledCount,
+    disabled: agents.length - enabledCount,
+  };
+  // Enablement filter and search compose: the segmented control narrows the
+  // roster, the input narrows it further. Counts on the segments always
+  // describe the whole roster so they do not collapse while searching.
+  const statusAgents = agents.filter((agent) =>
+    statusFilter === "all" ? true : statusFilter === "enabled" ? agent.enabled : !agent.enabled,
+  );
   const query = search.trim().toLowerCase();
   const visibleAgents = query
-    ? agents.filter((agent) =>
+    ? statusAgents.filter((agent) =>
         [agent.name, agent.description, agent.id, agentFile(agent), agentCategory(agent)].some(
           (value) => value.toLowerCase().includes(query),
         ),
       )
-    : agents;
+    : statusAgents;
 
   const groups: Array<{ category: string; agents: SubAgent[] }> = [];
   for (const agent of visibleAgents) {
@@ -938,8 +963,6 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
         Number(right.enabled) - Number(left.enabled) || left.name.localeCompare(right.name),
     );
   }
-  const enabledCount = agents.filter((agent) => agent.enabled).length;
-
   const groupLabel = (category: string): string => {
     if (category === "custom") return t("agents.groupCustom");
     if (category === "") return t("agents.groupUncategorized");
@@ -1245,6 +1268,24 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
               placeholder={t("agents.searchPlaceholder")}
               aria-label={t("agents.searchPlaceholder")}
             />
+            <div
+              className="agents-status-filter"
+              role="group"
+              aria-label={t("agents.filterByStatus")}
+            >
+              {STATUS_FILTERS.map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={`agents-status-filter-btn${statusFilter === value ? " active" : ""}`}
+                  aria-pressed={statusFilter === value}
+                  onClick={() => setStatusFilter(value)}
+                >
+                  <span>{t(STATUS_FILTER_LABEL_KEYS[value])}</span>
+                  <span className="agents-status-filter-count">{filterCounts[value]}</span>
+                </button>
+              ))}
+            </div>
             <div className="agents-filter-row">
               <span className="agents-count">
                 {t("agents.enabledCount", { enabled: enabledCount, total: agents.length })}

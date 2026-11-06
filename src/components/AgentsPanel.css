@@ -132,6 +132,60 @@
     gap: 4px;
 }
 
+/* Enablement filter: three segments sharing one hairline outline, mirroring
+   the agent-type switch in the editor. Active is accent-soft, not a new
+   colour and not a fill that competes with the primary action. */
+.agents-status-filter {
+    display: flex;
+    border: 0.5px solid var(--c-border-i);
+    border-radius: var(--r-sm);
+    overflow: hidden;
+}
+
+.agents-status-filter-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    min-height: 30px;
+    padding: 0 6px;
+    border: none;
+    border-right: 0.5px solid var(--c-border-i);
+    background: var(--c-surface);
+    color: var(--c-body);
+    font-family: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background-color var(--t-dur) var(--t-ease),
+        color var(--t-dur) var(--t-ease);
+}
+
+.agents-status-filter-btn:last-child {
+    border-right: none;
+}
+
+.agents-status-filter-btn:hover {
+    background: var(--c-hover);
+}
+
+.agents-status-filter-btn.active {
+    background: var(--c-accent-soft);
+    color: var(--c-accent-text);
+    font-weight: 500;
+}
+
+.agents-status-filter-count {
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    color: var(--c-muted);
+}
+
+.agents-status-filter-btn.active .agents-status-filter-count {
+    color: inherit;
+    opacity: 0.8;
+}
+
 .agent-group {
     display: flex;
     flex-direction: column;

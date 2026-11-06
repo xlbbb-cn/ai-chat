@@ -609,12 +609,16 @@ const en = {
         typeHint:
             "LLM runs an autonomous tool-using loop inside the app. CLI launches a headless coding CLI installed on this machine. Cloud sends the task to a remote HTTP endpoint.",
         searchPlaceholder: "Search agents by name, role or category",
+        filterByStatus: "Filter agents by enablement",
+        filterAll: "All",
+        filterEnabled: "Enabled",
+        filterDisabled: "Disabled",
         enabledCount: "{enabled} of {total} enabled",
         groupCustom: "Custom",
         groupUncategorized: "Uncategorized",
         rescan: "Refresh agent index",
         openFolder: "Open agents folder",
-        noResults: "No agents match this search.",
+        noResults: "No agents match these filters.",
         sourceFile: "Definition file: agents/{file}",
         definitionStorageHint:
             "LLM agent definitions live in app_data/agents — name, description, emoji, color and the prompt are read from the .md file; runtime settings stay in sub_agents.json.",

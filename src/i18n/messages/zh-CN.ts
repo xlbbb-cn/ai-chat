@@ -564,12 +564,16 @@ const zhCN: Messages = {
         typeHint:
             "LLM：在应用内运行自主工具循环；CLI：启动本机安装的无界面编码 CLI；云端：把任务发送到远程 HTTP 端点。",
         searchPlaceholder: "搜索名称、职责或分类",
+        filterByStatus: "按启用状态筛选智能体",
+        filterAll: "全部",
+        filterEnabled: "已启用",
+        filterDisabled: "未启用",
         enabledCount: "已启用 {enabled} / 共 {total}",
         groupCustom: "自建",
         groupUncategorized: "未分类",
         rescan: "刷新 agent 索引",
         openFolder: "打开 agents 目录",
-        noResults: "没有匹配的智能体。",
+        noResults: "没有符合筛选条件的智能体。",
         sourceFile: "定义文件：agents/{file}",
         definitionStorageHint:
             "LLM 智能体的定义保存在 app_data/agents 下的 md 文件中（名称、描述、emoji、颜色和提示词），此处只把运行配置写入 sub_agents.json。",
