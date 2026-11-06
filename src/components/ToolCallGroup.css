@@ -150,6 +150,11 @@
     flex-shrink: 0;
 }
 
+/* Sub-agent appearance number (`#1 · Name`); muted like the rest of the row. */
+.tool-call-agent-index {
+    font-variant-numeric: tabular-nums;
+}
+
 .tool-call-preview-desc {
     min-width: 0;
     overflow: hidden;
@@ -284,9 +289,10 @@
     text-align: center;
 }
 
-/* Self-animating Font Awesome spinner — see .tool-call-preview-icon--running. */
+/* Self-animating Font Awesome spinner — see .tool-call-preview-icon--running.
+   In-progress is not success: green is reserved for a finished step. */
 .tool-call-entry--running .tool-call-entry-icon {
-    color: var(--c-success);
+    color: var(--c-accent-text);
 }
 
 .tool-call-entry--done .tool-call-entry-icon {

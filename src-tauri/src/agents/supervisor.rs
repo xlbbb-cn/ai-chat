@@ -356,7 +356,7 @@ async fn run_activation(
                 // only its status events and bus messages reach the UI.
                 token_event: "agent-planner-token",
                 task_id: None,
-                emit_reasoning: false,
+                reasoning_event: None,
                 emit_usage: false,
                 usage_max_tokens: None,
                 ds_format: config.ds_format_for(model),
@@ -638,6 +638,16 @@ fn planner_action_target(parsed: &Value, action: &str, tool_name: &str) -> Strin
             }
         }
         "finish" => "—".to_string(),
+        "direct" => parsed["to"]
+            .as_str()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("task")
+            .to_string(),
+        "end_task" => parsed["to"]
+            .as_str()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("task")
+            .to_string(),
         _ => tool_name.to_string(),
     }
 }
@@ -649,6 +659,22 @@ fn planner_action_before_detail(parsed: &Value, action: &str, tool_name: &str) -
         "history" => "reading bus history".to_string(),
         "subscribe" => "updating subscriptions".to_string(),
         "unsubscribe" => "updating subscriptions".to_string(),
+        "direct" => {
+            let objective = parsed["objective"].as_str().unwrap_or("").trim();
+            match parsed["done_when"].as_str().map(str::trim) {
+                Some(done) if !done.is_empty() => format!(
+                    "{} (done when: {})",
+                    preview_text(objective, 200),
+                    preview_text(done, 100)
+                ),
+                _ => preview_text(objective, 300),
+            }
+        }
+        "end_task" => parsed["note"]
+            .as_str()
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| preview_text(value, 300))
+            .unwrap_or_else(|| "ending task".to_string()),
         "finish" => parsed["note"]
             .as_str()
             .filter(|value| !value.trim().is_empty())
@@ -715,6 +741,22 @@ fn summarize_action_result(action: &str, result: &str) -> String {
             }
             "supervision finished".to_string()
         }
+        "direct" => {
+            if let Some(value) = &parsed {
+                if let Some(objective) = value["objective"].as_str() {
+                    return preview_text(objective, 300);
+                }
+            }
+            preview_text(result.trim(), 300)
+        }
+        "end_task" => {
+            if let Some(value) = &parsed {
+                if let Some(note) = value["note"].as_str().filter(|value| !value.is_empty()) {
+                    return preview_text(note, 300);
+                }
+            }
+            "task ended".to_string()
+        }
         _ => preview_text(result.trim(), 300),
     }
 }
@@ -727,6 +769,7 @@ fn is_trigger(event: &ActivityEvent) -> bool {
             | "task_skipped"
             | "message_to_planner"
             | "message_broadcast"
+            | "pair_limit"
     )
 }
 
@@ -808,16 +851,20 @@ fn build_system_prompt(bus: &MissionBus, tasks: &[Task], conversation: &[ChatMes
          MISSION BUS PEERS:\n{peers}\n\n\
          RECENT CONVERSATION:\n{conversation}\n\n\
          Rules:\n\
-         - Use `mbus` action `status` to inspect live state; it includes rounds, last tool, queued messages and active subtasks.\n\
+         - Use `mbus` action `status` to inspect live state; it includes rounds, last tool, queued messages, active subtasks, objectives and per-pair message counts.\n\
          - Use `mbus` action `send` with `to: \"<task id>\"` for one peer or `topic: \"broadcast\"` for everyone. Messages are delivered at the recipient's NEXT reasoning round, never instantly.\n\
          - A message must add information, correct a misunderstanding, or connect two tasks. Never send acknowledgements or repeat a note already in your previous supervision notes.\n\
+         - Sub-agents may exchange at most {pair_limit} messages with each other (both directions combined; 0 = unrestricted). When a pair reaches that limit you receive a \"Mission bus\" escalation: take over the coordination yourself.\n\
+         - When you take over, send each involved task a `direct` objective (what to achieve) plus `done_when` (the explicit exit condition). A directive is authoritative and the task must finish as soon as the condition is met.\n\
+         - Use `mbus` action `end_task` when a task is redundant, already covered, or its remaining work no longer serves the mission. Do not end a task that is still producing the needed result.\n\
          - If a task is running normally, do nothing.\n\
-         - If a task is stuck, ask for a short progress note or suggest a smaller step.\n\
+         - If a task is stuck, ask for a short progress note, give it a `direct` objective, or suggest a smaller step.\n\
          - Use `mbus` action `history` to review recent traffic; do not poll it every activation.\n\
          - Call `mbus` action `finish` when every task is terminal or nothing useful remains. The executor keeps running regardless.",
         plan = plan,
         peers = mbus::describe_peers(bus, PLANNER_ID),
         conversation = conversation,
+        pair_limit = bus.pair_limit(),
     )
 }
 

@@ -11,8 +11,9 @@ use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Manager, State};
 
+use super::emit_tool_progress;
 use super::search::{run_integrated_search, SearchOptions};
 use super::truncate_tool_output;
 
@@ -1807,8 +1808,9 @@ pub(super) async fn handle_memory_tool(
             return "Error: 'key' is required for memory get.".to_string();
         }
 
-        let _ = app.emit(
-            "tool-call",
+        let _ = emit_tool_progress(
+            app,
+            mission_id,
             format!("🧠 *Memory {} across all scopes*\n", action),
         );
 
@@ -1862,8 +1864,9 @@ pub(super) async fn handle_memory_tool(
                     "scope": "session",
                 });
                 session_mem.insert(key.clone(), entry.clone());
-                let _ = app.emit(
-                    "tool-call",
+                let _ = emit_tool_progress(
+                    app,
+                    mission_id,
                     format!("🧠 *Session memory stored: {}*\n", key),
                 );
                 serde_json::to_string_pretty(&entry).unwrap_or_else(|_| entry.to_string())
@@ -1874,8 +1877,9 @@ pub(super) async fn handle_memory_tool(
                 }
                 match session_mem.get(&key) {
                     Some(entry) => {
-                        let _ = app.emit(
-                            "tool-call",
+                        let _ = emit_tool_progress(
+                            app,
+                            mission_id,
                             format!("🧠 *Session memory retrieved: {}*\n", key),
                         );
                         serde_json::to_string_pretty(entry).unwrap_or_else(|_| entry.to_string())
@@ -1888,8 +1892,9 @@ pub(super) async fn handle_memory_tool(
                     return "(no session memories)".to_string();
                 }
                 let keys: Vec<&String> = session_mem.keys().collect();
-                let _ = app.emit(
-                    "tool-call",
+                let _ = emit_tool_progress(
+                    app,
+                    mission_id,
                     format!("🧠 *Listing {} session memories*\n", keys.len()),
                 );
                 serde_json::to_string_pretty(&json!({
@@ -1929,8 +1934,9 @@ pub(super) async fn handle_memory_tool(
                     db::search_session_summaries(&db_guard, session_id, &query, 5);
                 drop(db_guard);
 
-                let _ = app.emit(
-                    "tool-call",
+                let _ = emit_tool_progress(
+                    app,
+                    mission_id,
                     format!("🧠 *Searching session memories for '{}'*\n", query),
                 );
 
@@ -1975,8 +1981,9 @@ pub(super) async fn handle_memory_tool(
                 }
                 match session_mem.remove(&key) {
                     Some(_) => {
-                        let _ = app.emit(
-                            "tool-call",
+                        let _ = emit_tool_progress(
+                            app,
+                            mission_id,
                             format!("🧠 *Session memory deleted: {}*\n", key),
                         );
                         format!("Session memory '{}' deleted.", key)
@@ -1991,7 +1998,17 @@ pub(super) async fn handle_memory_tool(
         }
     // ── Evolution scoped (structured, ranked, archive-aware) ────────
     } else if scope == EVOLUTION_SCOPE {
-        handle_evolution_scope(app, args, action, &key, &content, &query, &tags, workspace_dir)
+        handle_evolution_scope(
+            app,
+            args,
+            action,
+            &key,
+            &content,
+            &query,
+            &tags,
+            workspace_dir,
+            mission_id,
+        )
     // ── User / Repo scoped (file-backed) ─────────────────────────────
     } else if scope == "user" || scope == "repo" {
         let memory_root = crate::workspace::memory_root(workspace_dir).join(scope);
@@ -2016,8 +2033,9 @@ pub(super) async fn handle_memory_tool(
 
                 match fs::write(&file_path, &file_content) {
                     Ok(_) => {
-                        let _ = app.emit(
-                            "tool-call",
+                        let _ = emit_tool_progress(
+                            app,
+                            mission_id,
                             format!("🧠 *{} memory stored: {}*\n", scope, key),
                         );
                         let entry = json!({
@@ -2041,8 +2059,9 @@ pub(super) async fn handle_memory_tool(
 
                 match fs::read_to_string(&file_path) {
                     Ok(content) => {
-                        let _ = app.emit(
-                            "tool-call",
+                        let _ = emit_tool_progress(
+                            app,
+                            mission_id,
                             format!("🧠 *{} memory retrieved: {}*\n", scope, key),
                         );
                         content
@@ -2065,8 +2084,9 @@ pub(super) async fn handle_memory_tool(
                             }));
                         }
                     }
-                    let _ = app.emit(
-                        "tool-call",
+                    let _ = emit_tool_progress(
+                        app,
+                        mission_id,
                         format!("🧠 *Listing {} {} memories*\n", items.len(), scope),
                     );
                     if items.is_empty() {
@@ -2086,8 +2106,9 @@ pub(super) async fn handle_memory_tool(
                 if query.is_empty() {
                     return "Error: 'query' is required for memory search.".to_string();
                 }
-                let _ = app.emit(
-                    "tool-call",
+                let _ = emit_tool_progress(
+                    app,
+                    mission_id,
                     format!("🧠 *Searching {} memories for '{}'*\n", scope, query),
                 );
                 match run_integrated_search(
@@ -2119,8 +2140,9 @@ pub(super) async fn handle_memory_tool(
 
                 match fs::remove_file(&file_path) {
                     Ok(_) => {
-                        let _ = app.emit(
-                            "tool-call",
+                        let _ = emit_tool_progress(
+                            app,
+                            mission_id,
                             format!("🧠 *{} memory deleted: {}*\n", scope, key),
                         );
                         format!("{} memory '{}' deleted.", scope, key)
@@ -2156,6 +2178,7 @@ fn handle_evolution_scope(
     query: &str,
     tags: &[String],
     workspace_dir: &Path,
+    mission_id: Option<&str>,
 ) -> String {
     let dir = evolution_dir(workspace_dir);
     let _ = fs::create_dir_all(&dir);
@@ -2189,8 +2212,9 @@ fn handle_evolution_scope(
                 merge,
             ) {
                 Ok(outcome) => {
-                    let _ = app.emit(
-                        "tool-call",
+                    let _ = emit_tool_progress(
+                        app,
+                        mission_id,
                         format!(
                             "🧠 *Evolution memory {}: {}*\n",
                             if outcome.created { "stored" } else { "updated" },
@@ -2227,8 +2251,9 @@ fn handle_evolution_scope(
             ) {
                 let entry = &ranked[index].entry;
                 bump_uses(workspace_dir, &[entry.meta.key.clone()]);
-                let _ = app.emit(
-                    "tool-call",
+                let _ = emit_tool_progress(
+                    app,
+                    mission_id,
                     format!("🧠 *Evolution memory retrieved: {}*\n", entry.meta.key),
                 );
                 return evolution_entry_to_md(entry);
@@ -2244,8 +2269,9 @@ fn handle_evolution_scope(
         }
         "list" => {
             let ranked = ranked_evolution_entries(workspace_dir);
-            let _ = app.emit(
-                "tool-call",
+            let _ = emit_tool_progress(
+                app,
+                mission_id,
                 format!("🧠 *Listing {} evolution memories*\n", ranked.len()),
             );
             if ranked.is_empty() {
@@ -2283,8 +2309,9 @@ fn handle_evolution_scope(
             if query.is_empty() {
                 return "Error: 'query' is required for memory search.".to_string();
             }
-            let _ = app.emit(
-                "tool-call",
+            let _ = emit_tool_progress(
+                app,
+                mission_id,
                 format!("🧠 *Searching evolution memories for '{}'*\n", query),
             );
             let needle = normalize_text(query);
@@ -2331,8 +2358,9 @@ fn handle_evolution_scope(
             let path = dir.join(format!("{safe_key}.md"));
             match fs::remove_file(&path) {
                 Ok(_) => {
-                    let _ = app.emit(
-                        "tool-call",
+                    let _ = emit_tool_progress(
+                        app,
+                        mission_id,
                         format!("🧠 *Evolution memory deleted: {}*\n", key),
                     );
                     format!("Evolution memory '{key}' deleted.")
@@ -2351,7 +2379,11 @@ fn handle_evolution_scope(
         }
         "consolidate" => {
             let report = consolidate_report(args, workspace_dir);
-            let _ = app.emit("tool-call", "🧠 *Consolidating evolution memory*\n".to_string());
+            let _ = emit_tool_progress(
+                app,
+                mission_id,
+                "🧠 *Consolidating evolution memory*\n".to_string(),
+            );
             report
         }
         _ => format!(

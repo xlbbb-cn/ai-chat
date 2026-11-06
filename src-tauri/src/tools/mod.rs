@@ -2248,6 +2248,32 @@ three
     }
 }
 
+/// Emits one tool-progress line, scoped to the caller.
+///
+/// The main chat owns the `tool-call` transcript event: its listener settles
+/// the running step and appends a row. A sub-agent mission must never write
+/// there — that would settle the task's *own* row to "done" while it is still
+/// working and add a stray main-chat row. Mission progress goes out as
+/// `agent-task-tool`, which the UI applies to the task row without touching its
+/// status.
+pub(crate) fn emit_tool_progress(
+    app: &AppHandle,
+    mission_id: Option<&str>,
+    text: impl Into<String>,
+) {
+    match mission_id {
+        Some(task_id) => {
+            let _ = app.emit(
+                "agent-task-tool",
+                json!({ "task_id": task_id, "phase": "progress", "text": text.into() }),
+            );
+        }
+        None => {
+            let _ = app.emit("tool-call", text.into());
+        }
+    }
+}
+
 pub async fn execute_tool(
     app: &AppHandle,
     name: &str,
@@ -2384,8 +2410,9 @@ pub async fn execute_tool(
 
             match crate::timer::schedule(app, session_id, delay_seconds, label, message) {
                 Ok(entry) => {
-                    let _ = app.emit(
-                        "tool-call",
+                    let _ = emit_tool_progress(
+                        app,
+                        mission_id,
                         format!(
                             "⏱️ *Timer set: {}*\n\n```\n{}\n```\n",
                             crate::timer::format_delay(delay_seconds),
@@ -2438,8 +2465,9 @@ pub async fn execute_tool(
             }
             match crate::timer::cancel(app, timer_id) {
                 Ok(entry) => {
-                    let _ = app.emit(
-                        "tool-call",
+                    let _ = emit_tool_progress(
+                        app,
+                        mission_id,
                         format!("⏱️ *Timer cancelled: {}*\n", entry.label),
                     );
                     format!(
@@ -2468,7 +2496,7 @@ pub async fn execute_tool(
         // `file_actions`). Legacy per-action names are routed to the same
         // handler so chats continued from older sessions keep working.
         "todos" | "todo_add" | "todo_update_status" | "todo_list" | "todo_clear_completed"
-        | "todo_archive" => todos::handle_todos_tool(app, name, &args, session_id),
+        | "todo_archive" => todos::handle_todos_tool(app, name, &args, session_id, mission_id),
         "skill_read" => {
             let action = args["action"].as_str().unwrap_or("");
             let skill_name = args["skill_name"].as_str().unwrap_or("");
@@ -2524,8 +2552,9 @@ pub async fn execute_tool(
 
             match action {
                 "read" => {
-                    let _ = app.emit(
-                        "tool-call",
+                    let _ = emit_tool_progress(
+                        app,
+                        mission_id,
                         format!("📄 *Reading skill file {}/{}*\n\n", skill_name, rel_path),
                     );
 
@@ -2586,8 +2615,9 @@ pub async fn execute_tool(
                     }
                 }
                 "list" => {
-                    let _ = app.emit(
-                        "tool-call",
+                    let _ = emit_tool_progress(
+                        app,
+                        mission_id,
                         format!("📂 *Listing skill directory {}/{}*\n\n", skill_name, rel_path),
                     );
 
@@ -2662,8 +2692,9 @@ pub async fn execute_tool(
                         return "Error: query is required for search.".to_string();
                     }
 
-                    let _ = app.emit(
-                        "tool-call",
+                    let _ = emit_tool_progress(
+                        app,
+                        mission_id,
                         format!(
                             "🔎 *Searching skill {} for {}*\n\n",
                             skill_name,
@@ -2808,8 +2839,9 @@ pub async fn execute_tool(
 
             // ── L5/L6: run directly (no confirmation) ────────────────────────
             if risk_level.is_auto_approvable() {
-                let _ = app.emit(
-                    "tool-call",
+                let _ = emit_tool_progress(
+                    app,
+                    mission_id,
                     format!(
                         "✅ *Risk assessment passed: {} (score: {}) - running directly*\n\n```\n{}\n```\n\n",
                         report.risk_level, report.risk_score, command
@@ -2871,8 +2903,9 @@ pub async fn execute_tool(
             }
 
             // ── Execute after user confirmation ───────────────────────────────
-            let _ = app.emit(
-                "tool-call",
+            let _ = emit_tool_progress(
+                app,
+                mission_id,
                 format!(
                     "⚠️ *User confirmed execution: {} (score: {})*\n\n```\n{}\n```\n\n",
                     report.risk_level, report.risk_score, command
@@ -3042,8 +3075,9 @@ pub async fn execute_tool(
 
             // ── L5/L6: run directly (no confirmation) ────────────────────────
             if risk_level.is_auto_approvable() {
-                let _ = app.emit(
-                    "tool-call",
+                let _ = emit_tool_progress(
+                    app,
+                    mission_id,
                     format!(
                         "✅ *Risk assessment passed: {} (score: {}) - running directly*\n\n```{}\n{}\n```\n\n",
                         report.risk_level, report.risk_score, shell_type, code
@@ -3109,8 +3143,9 @@ pub async fn execute_tool(
             }
 
             // ── Execute after user confirmation ───────────────────────────────
-            let _ = app.emit(
-                "tool-call",
+            let _ = emit_tool_progress(
+                app,
+                mission_id,
                 format!(
                     "⚠️ *User confirmed execution: {} (score: {})*\n\n```{}\n{}\n```\n\n",
                     report.risk_level, report.risk_score, shell_type, code
@@ -3141,6 +3176,7 @@ pub async fn execute_tool(
                 &args,
                 &workspace_dir,
                 protected_skill_root,
+                mission_id,
                 cancel,
             )
             .await
@@ -3148,8 +3184,9 @@ pub async fn execute_tool(
         "knowledge_graph" => {
             let query = args["query"].as_str().unwrap_or("").to_string();
             let engine = config.kg_engine.as_deref().unwrap_or("neo4j").to_string();
-            let _ = app.emit(
-                "tool-call",
+            let _ = emit_tool_progress(
+                app,
+                mission_id,
                 format!(
                     "🧠 *Querying Knowledge Graph ({}) with: {}...*\n\n",
                     engine, query

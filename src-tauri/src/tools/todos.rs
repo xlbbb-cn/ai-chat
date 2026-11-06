@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
+use super::emit_tool_progress;
 use crate::AppState;
 
 // ─── Domain types ────────────────────────────────────────────────────────────
@@ -520,6 +521,9 @@ pub(super) fn handle_todos_tool(
     name: &str,
     args: &Value,
     session_id: Option<&str>,
+    // Current autonomous mission id, so progress lines reach the task row
+    // instead of the main chat's `tool-call` transcript.
+    mission_id: Option<&str>,
 ) -> String {
     let action = args["action"].as_str().unwrap_or(match name {
         "todo_add" => "add",
@@ -535,7 +539,7 @@ pub(super) fn handle_todos_tool(
             let Some(session_id) = session_id else {
                 return "Error: todos requires an active chat session.".to_string();
             };
-            let _ = app.emit("tool-call", "📋 *Listing active todos*\n".to_string());
+            let _ = emit_tool_progress(app, mission_id, "📋 *Listing active todos*\n".to_string());
             match get_active_list(app, session_id) {
                 Ok(Some(summary)) => {
                     serde_json::to_string_pretty(&summary).unwrap_or_else(|_| "null".to_string())
@@ -556,7 +560,11 @@ pub(super) fn handle_todos_tool(
                 return "Error: 'title' is required for the 'add' action.".to_string();
             }
             let description = args["description"].as_str().unwrap_or("").to_string();
-            let _ = app.emit("tool-call", format!("✅ *Adding todo: {}*\n", title.trim()));
+            let _ = emit_tool_progress(
+                app,
+                mission_id,
+                format!("✅ *Adding todo: {}*\n", title.trim()),
+            );
             match add_todo(app, session_id, &title, &description) {
                 Ok(summary) => {
                     let payload = json!({
@@ -583,8 +591,9 @@ pub(super) fn handle_todos_tool(
             // Truncate on char boundaries only: the model may pass multi-byte
             // utf-8 ids, and byte slicing would panic on non-boundary offsets.
             let id_preview: String = todo_id.chars().take(8).collect();
-            let _ = app.emit(
-                "tool-call",
+            let _ = emit_tool_progress(
+                app,
+                mission_id,
                 format!("🔄 *Updating todo status: {} → {}*\n", id_preview, status),
             );
             match update_todo_status(app, session_id, todo_id, status) {
@@ -605,7 +614,11 @@ pub(super) fn handle_todos_tool(
             let Some(session_id) = session_id else {
                 return "Error: todos requires an active chat session.".to_string();
             };
-            let _ = app.emit("tool-call", "🧹 *Clearing completed todos*\n".to_string());
+            let _ = emit_tool_progress(
+                app,
+                mission_id,
+                "🧹 *Clearing completed todos*\n".to_string(),
+            );
             match clear_completed(app, session_id) {
                 Ok(summary) => {
                     let _ = app.emit(
@@ -630,8 +643,9 @@ pub(super) fn handle_todos_tool(
                 return "Error: todos requires an active chat session.".to_string();
             };
             let new_title = args["new_title"].as_str();
-            let _ = app.emit(
-                "tool-call",
+            let _ = emit_tool_progress(
+                app,
+                mission_id,
                 format!(
                     "📦 *Archiving todo list, starting new: {}*\n",
                     new_title.unwrap_or("Working plan")

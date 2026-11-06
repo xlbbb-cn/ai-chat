@@ -227,17 +227,18 @@ function agentFile(agent: SubAgent): string {
 }
 
 /**
- * Sidebar grouping: the first folder under `agents/`, `custom` for agents the
- * panel created, and an empty string (uncategorized) for cli/cloud agents and
- * top-level markdown files.
+ * Sidebar grouping: file-backed `llm` agents are grouped by the first folder
+ * under `agents/` (`custom/…` for panel-created definitions, `engineering/…`
+ * and other imported collections after it). Agents with no definition file —
+ * `cli` / `cloud` agents and legacy inline `llm` entries, all created by the
+ * user — belong to the `custom` group so they stay above the library.
+ * A top-level markdown file has no category and sorts last.
  */
 function agentCategory(agent: SubAgent): string {
   const file = agentFile(agent);
-  if (file) {
-    const parts = file.split("/");
-    return parts.length > 1 ? parts[0] : "";
-  }
-  return agent.agent_type === "llm" ? "custom" : "";
+  if (!file) return "custom";
+  const parts = file.split("/");
+  return parts.length > 1 ? parts[0] : "";
 }
 
 /**
@@ -265,6 +266,7 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
     max_concurrent: 3,
     mode: "parallel",
     mbus_enabled: true,
+    mbus_pair_limit: 4,
   });
   const [draft, setDraft] = useState<AgentDraft | null>(null);
   const [probe, setProbe] = useState<ProbeState | null>(null);
@@ -1181,6 +1183,29 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
               </label>
             </div>
             <div className="agent-field-hint">{t("agents.mbusHint")}</div>
+
+            <div className="orch-row">
+              <span>{t("agents.mbusPairLimit")}</span>
+              <input
+                className="orch-number"
+                type="number"
+                min={0}
+                max={20}
+                value={orchestration.mbus_pair_limit}
+                disabled={!orchestration.mbus_enabled}
+                onChange={(e) => {
+                  // 0 is meaningful (cap off), so an empty field must fall back
+                  // to the default rather than silently disabling the cap.
+                  const raw = e.target.value.trim();
+                  const parsed = raw === "" ? 4 : Number(raw);
+                  const value = Number.isFinite(parsed)
+                    ? Math.max(0, Math.min(20, Math.trunc(parsed)))
+                    : 4;
+                  handleSaveOrchestration({ ...orchestration, mbus_pair_limit: value });
+                }}
+              />
+            </div>
+            <div className="agent-field-hint">{t("agents.mbusPairLimitHint")}</div>
 
             <div className="orch-row">
               <span>{t("agents.executionMode")}</span>

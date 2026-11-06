@@ -513,23 +513,31 @@ pub struct StreamResult {
 }
 
 /// Options controlling how a streaming LLM request behaves.
-/// Main agent: emit reasoning + usage, token_event="chat-token", no task_id.
-/// Sub-agent:  no reasoning/usage, token_event="agent-task-token", task_id=Some(...).
+/// Main agent: reasoning + usage, token_event="chat-token", no task_id.
+/// Sub-agent:  token_event="agent-task-token", reasoning_event="agent-task-reasoning",
+///             task_id=Some(...), no usage.
 pub struct StreamOptions<'a> {
     /// Event name for content delta tokens.
     pub token_event: &'a str,
     /// If set, include `{"task_id": ..., "token": ...}` payload instead of a plain string.
     pub task_id: Option<&'a str>,
-    /// Emit `chat-reasoning-token` for DeepSeek/Qwen reasoning_content.
-    pub emit_reasoning: bool,
+    /// Event name for reasoning deltas, or `None` to keep them off the wire.
+    ///
+    /// The main chat uses `chat-reasoning-token`; a sub-agent mission uses its
+    /// own event so the task row can show a live "thinking" line while the
+    /// model reasons — without leaking that text into the chat transcript.
+    pub reasoning_event: Option<&'a str>,
     /// Emit `chat-usage` and populate prompt/completion token counts.
     pub emit_usage: bool,
     /// Emit content deltas on `token_event`. The planner supervisor turns this
     /// off so its internal reasoning never reaches the chat transcript.
     pub emit_tokens: bool,
-    /// Emit `chat-error` for a terminal upstream error. Internal helper calls
-    /// (the planner supervisor) turn this off: a failed helper must not paint
-    /// the user's chat bubble as an error.
+    /// Emit `chat-error` for a terminal upstream error.
+    ///
+    /// Only the user's own chat turn may emit it: the frontend treats
+    /// `chat-error` as the whole turn failing, closes the transcript and drops
+    /// later task events. Sub-agent requests and internal helpers therefore turn
+    /// this off and report through their own scoped events instead.
     pub emit_errors: bool,
     /// Optional —— token ceiling used for usage ratio reporting.
     pub usage_max_tokens: Option<u32>,
@@ -1326,8 +1334,12 @@ fn process_stream_chunk(
         .and_then(|v| v.as_str())
     {
         reasoning_content.push_str(reasoning);
-        if opts.emit_reasoning {
-            let _ = app.emit("chat-reasoning-token", reasoning.to_string());
+        if let Some(event) = opts.reasoning_event {
+            if let Some(task_id) = opts.task_id {
+                let _ = app.emit(event, json!({ "task_id": task_id, "token": reasoning }));
+            } else {
+                let _ = app.emit(event, reasoning.to_string());
+            }
         }
     }
 
@@ -1934,7 +1946,7 @@ async fn stream_request(
         StreamOptions {
             token_event: "chat-token",
             task_id: None,
-            emit_reasoning: true,
+            reasoning_event: Some("chat-reasoning-token"),
             emit_usage: true,
             emit_tokens: true,
             emit_errors: true,

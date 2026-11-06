@@ -1,10 +1,35 @@
 export interface ToolCallEntry {
   task_id: string;
   agent_name: string;
+  /**
+   * 1-based position of a planner-dispatched sub-agent inside this turn
+   * (`#1`, `#2`, …), assigned by the frontend in event order. Absent for
+   * planner/selector/aggregator rows, ordinary tool calls and old history.
+   */
+  agent_index?: number;
+  /**
+   * Row kind. `agent` is a sub-agent task row: it owns its own status and is
+   * never settled by a main-chat tool event. Absent means an ordinary tool /
+   * planner row (or a row persisted before the field existed).
+   */
+  kind?: "agent" | "planner" | "tool";
   description: string;
   status: "running" | "done" | "error" | "skipped";
   summary?: string;
   error?: string;
+  /** Epoch ms when the row was created; drives the live elapsed timer. */
+  started_at?: number;
+  /**
+   * Latest tool the sub-agent is running (`agent-task-tool`). Shown instead of
+   * an empty summary while a round produces no content, so the row keeps
+   * moving between model calls.
+   */
+  activity?: string;
+  /**
+   * Live reasoning preview for a sub-agent task. Only the character count is
+   * kept — the reasoning text is never persisted in the mission report.
+   */
+  thinking?: { chars: number; started_at: number };
   /**
    * Set when this entry records a `use_skill` load. Persisted with the entry
    * (DB `tool_calls` column) and sent back to the backend as `loaded_skills`,
@@ -578,6 +603,12 @@ export interface AgentOrchestration {
   mode: "parallel" | "sequential";
   /** Mission message bus + planner supervision (default true). */
   mbus_enabled: boolean;
+  /**
+   * Max mbus messages between any two sub-agents, both directions combined.
+   * Reaching it blocks the pair and asks the planner to mediate. `0` disables
+   * the per-pair cap.
+   */
+  mbus_pair_limit: number;
 }
 
 /** One key/value pair: a CLI agent's env var, or a cloud agent's header. */
@@ -654,6 +685,29 @@ export interface AgentTaskTokenEvent {
   token: string;
 }
 
+/**
+ * `agent-task-tool` payload: one tool call on a sub-agent task row.
+ *
+ * `phase: "progress"` carries only `text` (a one-line progress note emitted by
+ * the tool itself); `"start"` / `"done"` bracket the actual call. The row's
+ * status is never derived from this event — it only feeds the activity line.
+ */
+export interface AgentTaskToolEvent {
+  task_id: string;
+  phase: "start" | "progress" | "done";
+  tool?: string;
+  detail?: string;
+  text?: string;
+  duration_ms?: number;
+  ok?: boolean;
+}
+
+/** `agent-task-reasoning` payload: one streamed reasoning delta. */
+export interface AgentTaskReasoningEvent {
+  task_id: string;
+  token: string;
+}
+
 /** Legacy standalone CLI agent (pre agent-type profiles), kept for imports. */
 export interface LegacyCliAgent {
   id: string;
@@ -675,6 +729,8 @@ export interface AgentTaskEvent {
   description?: string;
   summary?: string;
   error?: string;
+  /** Terminal outcome of a task (`agent-task-done`). */
+  status?: "success" | "stopped" | "error";
   /** Why a planned task never ran (unknown agent, unmet dependency, stop). */
   reason?: string;
   /**

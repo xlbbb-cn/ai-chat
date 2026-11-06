@@ -183,6 +183,8 @@ const en = {
             plannerActionHistory: "Planner read bus history",
             plannerActionSubscribe: "Planner subscribed to {target}",
             plannerActionUnsubscribe: "Planner unsubscribed from {target}",
+            plannerActionDirect: "Planner directive → {target}",
+            plannerActionEndTask: "Planner ended {target}",
             plannerActionFinish: "Planner finished supervision",
             plannerActionUnknown: "Planner action: {action}",
             selectionDone: {
@@ -221,6 +223,9 @@ const en = {
             other: "{count} steps: {done} completed, {skipped} skipped",
         },
         steps: { one: "{count} step", other: "{count} steps" },
+        running: "{running} running · {done} completed",
+        thinkingLive: "Thinking · {count} chars · {seconds}s",
+        waitingOutput: "Waiting for output · {seconds}s",
         confirmTitle: "Allow this shell command?",
         rejected: "Rejected by user",
         mainAgentHelp: "Main agent",
@@ -588,6 +593,9 @@ const en = {
         mbus: "Mission bus (mbus)",
         mbusHint:
             "Let the planner supervise dispatched sub-agents and let agents exchange messages. Adds planner model calls while tasks run.",
+        mbusPairLimit: "Messages per agent pair",
+        mbusPairLimitHint:
+            "Both directions combined. When two agents reach this limit they can no longer message each other and the planner is asked to coordinate them (0 = no limit).",
         executionMode: "Execution mode",
         modeParallel: "Parallel",
         modeSequential: "Sequential",

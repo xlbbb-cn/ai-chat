@@ -90,9 +90,17 @@ function recordsToMessages(sessionRecords: HistoryRecord[]): Message[] {
       try {
         const parsed = (JSON.parse(r.tool_calls) as ToolCallEntry[]).map((e) => ({
           ...e,
-          // A skipped step stays neutral in history; everything else settles to
-          // "done" because a reload cannot resume a running step.
-          status: e.status === "skipped" ? ("skipped" as const) : ("done" as const),
+          // A reload cannot resume a running step, but it must not invent a
+          // success either: `running` becomes neutral ("skipped"), a real
+          // failure stays an error, and the live-only thinking counter is
+          // dropped (its text was never persisted).
+          status:
+            e.status === "error"
+              ? ("error" as const)
+              : e.status === "done" || e.status === "skipped"
+                ? e.status
+                : ("skipped" as const),
+          thinking: undefined,
           // A pending inline confirmation is dead the moment the turn ended —
           // never replay its allow/deny buttons from persisted history.
           confirm: undefined,

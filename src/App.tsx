@@ -22,6 +22,8 @@ import type {
   AgentHelpEvent,
   AgentSelectionEvent,
   AgentTaskTokenEvent,
+  AgentTaskToolEvent,
+  AgentTaskReasoningEvent,
   AgentMbusMessageEvent,
   AgentPlannerStateEvent,
   AgentPlannerActionEvent,
@@ -462,8 +464,13 @@ export default function App() {
   const currentToolCallsRef = useRef<ToolCallEntry[]>([]);
   /** Mission bus of the current turn; old bus events must not touch new rows. */
   const currentMbusIdRef = useRef<string | null>(null);
-  /** Buffered `agent-task-token` chunks per task, flushed on a timer. */
-  const pendingAgentTokensRef = useRef<Map<string, string>>(new Map());
+  /**
+   * Buffered sub-agent stream state per task, flushed on a timer:
+   * `text` is `agent-task-token` content, `reasoning` counts thinking chars.
+   */
+  const pendingAgentTokensRef = useRef<
+    Map<string, { text: string; reasoning: number }>
+  >(new Map());
   /** Resume prompts from fired timers, plus mid-turn injections that arrived
    *  after the turn's last request. Sent one at a time once the chat is idle,
    *  so the turn order stays intact. */
@@ -553,6 +560,88 @@ export default function App() {
       )
     );
   }, []);
+
+  /**
+   * Apply the buffered sub-agent stream to the task rows.
+   *
+   * The 400 ms timer keeps a fast stream from re-rendering the transcript per
+   * token, while the first chunk of a task is applied immediately (the caller
+   * flushes on the leading edge) so a row never sits blank after it starts.
+   * A task row keeps its planner description and its own status: content goes
+   * to `summary`, reasoning to the `thinking` counter, tool calls to
+   * `activity`.
+   */
+  const flushAgentTokenBuffers = useCallback(() => {
+    const pending = pendingAgentTokensRef.current;
+    if (pending.size === 0) return;
+    const chunks = new Map(pending);
+    pending.clear();
+
+    currentToolCallsRef.current = currentToolCallsRef.current.map((entry) => {
+      const chunk = chunks.get(entry.task_id);
+      if (!chunk) return entry;
+
+      if (entry.kind === "agent") {
+        const reasoning = (entry.thinking?.chars ?? 0) + chunk.reasoning;
+        return {
+          ...entry,
+          summary: chunk.text
+            ? ((entry.summary ?? "") + chunk.text).slice(-1200)
+            : entry.summary,
+          // A new reasoning burst follows the previous tool: drop its activity
+          // line so the live thinking counter is what the row shows. Streamed
+          // content ends the thinking phase, so the answer becomes visible.
+          activity: chunk.reasoning > 0 ? undefined : entry.activity,
+          thinking: chunk.text
+            ? undefined
+            : reasoning > 0
+              ? {
+                  chars: reasoning,
+                  started_at: entry.thinking?.started_at ?? Date.now(),
+                }
+              : entry.thinking,
+        };
+      }
+
+      const output = ((entry.summary ?? "") + chunk.text).slice(-1200);
+      const lastLine = chunk.text
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .pop();
+      return {
+        ...entry,
+        summary: output,
+        description: lastLine ? lastLine.slice(0, 140) : entry.description,
+      };
+    });
+    updateActiveAssistantToolCalls(currentToolCallsRef.current);
+  }, [updateActiveAssistantToolCalls]);
+
+  /**
+   * Adds a stream delta to a task's buffer and applies it immediately when the
+   * row has nothing visible yet (the first content / reasoning chunk of that
+   * task). Later chunks stay batched in the 400 ms flush.
+   */
+  const appendAgentBuffer = useCallback(
+    (taskId: string, delta: { text?: string; reasoning?: number }) => {
+      const buffered = pendingAgentTokensRef.current.get(taskId) ?? {
+        text: "",
+        reasoning: 0,
+      };
+      pendingAgentTokensRef.current.set(taskId, {
+        text: delta.text
+          ? (buffered.text + delta.text).slice(-4000)
+          : buffered.text,
+        reasoning: buffered.reasoning + (delta.reasoning ?? 0),
+      });
+      const entry = currentToolCallsRef.current.find(
+        (item) => item.task_id === taskId
+      );
+      if (entry && !entry.summary && !entry.thinking) flushAgentTokenBuffers();
+    },
+    [flushAgentTokenBuffers]
+  );
 
   /**
    * Paint the scroll-edge shade on a boundary only while the transcript hides
@@ -1004,6 +1093,13 @@ export default function App() {
   // Agent task progress tracking
   useEffect(() => {
     const unlisteners: Promise<() => void>[] = [];
+    // Appearance-order numbering for sub-agent rows (`#1`, `#2`, …), so the
+    // tool group matches the planner's task ids without exposing long uuids.
+    const nextAgentIndex = () =>
+      currentToolCallsRef.current.reduce(
+        (max, entry) => Math.max(max, entry.agent_index ?? 0),
+        0
+      ) + 1;
     unlisteners.push(
       listen<AgentTaskEvent>("agent-task-start", (e) => {
         const { agent_id, agent_name, description, task_id, cwd } = e.payload;
@@ -1014,22 +1110,39 @@ export default function App() {
         const entry: ToolCallEntry = {
           task_id,
           agent_name,
+          kind: "agent",
+          agent_index: nextAgentIndex(),
           description: description ?? "",
           status: "running",
           cwd: cwd ?? undefined,
+          started_at: Date.now(),
         };
         currentToolCallsRef.current = [...currentToolCallsRef.current, entry];
         updateActiveAssistantToolCalls(currentToolCallsRef.current);
       }),
       listen<AgentTaskEvent>("agent-task-done", (e) => {
-        const { agent_id, summary, task_id } = e.payload;
+        const { agent_id, summary, task_id, status } = e.payload;
+        // Flush the last buffered chunks first: the final tokens of a task must
+        // not be dropped when the row settles.
+        flushAgentTokenBuffers();
         setAgentStatuses((prev) => ({
           ...prev,
           [agent_id]: { status: "done", summary: summary ?? "" },
         }));
         currentToolCallsRef.current = currentToolCallsRef.current.map((entry) =>
           entry.task_id === task_id
-            ? { ...entry, status: "done" as const, summary: summary ?? undefined }
+            ? {
+                ...entry,
+                // `stopped` is neutral, never a green success checkmark.
+                status:
+                  status === "stopped"
+                    ? ("skipped" as const)
+                    : status === "error"
+                      ? ("error" as const)
+                      : ("done" as const),
+                summary: summary ?? entry.summary,
+                thinking: undefined,
+              }
             : entry
         );
         updateActiveAssistantToolCalls(currentToolCallsRef.current);
@@ -1042,7 +1155,12 @@ export default function App() {
         }));
         currentToolCallsRef.current = currentToolCallsRef.current.map((entry) =>
           entry.task_id === task_id
-            ? { ...entry, status: "error" as const, error: error ?? undefined }
+            ? {
+                ...entry,
+                status: "error" as const,
+                error: error ?? undefined,
+                thinking: undefined,
+              }
             : entry
         );
         updateActiveAssistantToolCalls(currentToolCallsRef.current);
@@ -1071,6 +1189,8 @@ export default function App() {
               {
                 task_id,
                 agent_name,
+                kind: "agent" as const,
+                agent_index: nextAgentIndex(),
                 description: text,
                 status: "skipped" as const,
               },
@@ -1125,6 +1245,7 @@ export default function App() {
         const entry: ToolCallEntry = {
           task_id: `selection-${Date.now()}`,
           agent_name: t("app.agents.selector"),
+          kind: "planner",
           description: t("app.agents.selectionDone", {
             count: agents.length,
             names: agents.map((agent) => agent.name).join(", "),
@@ -1143,10 +1264,12 @@ export default function App() {
           const entry: ToolCallEntry = {
             task_id: "planner",
             agent_name: t("app.agents.planner"),
+            kind: "planner",
             description: mbus
               ? t("app.agents.plannerMonitoring", { count: e.payload.task_count })
               : t("app.agents.planDone", { count: e.payload.task_count }),
             status: mbus ? "running" : "done",
+            started_at: Date.now(),
           };
           const exists = currentToolCallsRef.current.some(
             (item) => item.task_id === "planner"
@@ -1215,6 +1338,10 @@ export default function App() {
               return t("app.agents.plannerActionSubscribe", { target: payload.target });
             case "unsubscribe":
               return t("app.agents.plannerActionUnsubscribe", { target: payload.target });
+            case "direct":
+              return t("app.agents.plannerActionDirect", { target: payload.target });
+            case "end_task":
+              return t("app.agents.plannerActionEndTask", { target: payload.target });
             case "finish":
               return t("app.agents.plannerActionFinish");
             default:
@@ -1224,6 +1351,7 @@ export default function App() {
         const entry: ToolCallEntry = {
           task_id: payload.action_id,
           agent_name: t("app.agents.planner"),
+          kind: "planner",
           description,
           status: payload.status,
           summary: payload.status === "error" ? undefined : payload.detail || undefined,
@@ -1294,6 +1422,7 @@ export default function App() {
         const entry: ToolCallEntry = {
           task_id: `aggregate-${Date.now()}`,
           agent_name: t("app.agents.aggregator"),
+          kind: "tool",
           description: t("app.agents.aggregated", { count: e.payload?.task_count ?? 0 }),
           status: "done",
         };
@@ -1320,6 +1449,7 @@ export default function App() {
         const entry: ToolCallEntry = {
           task_id: crypto.randomUUID(),
           agent_name: t("app.agents.tool"),
+          kind: "tool",
           description: label,
           status: "running",
           summary: detail,
@@ -1327,7 +1457,13 @@ export default function App() {
 
         currentToolCallsRef.current = [
           ...currentToolCallsRef.current.map((tc) =>
-            tc.status === "running" ? { ...tc, status: "done" as const } : tc
+            // Only the main chat's own steps settle here. A sub-agent row and
+            // the planner have their own terminal events; settling them on the
+            // next main tool call is what showed a green checkmark while a task
+            // was still running.
+            tc.status === "running" && tc.kind !== "agent" && tc.kind !== "planner"
+              ? { ...tc, status: "done" as const }
+              : tc
           ),
           entry,
         ];
@@ -1337,11 +1473,51 @@ export default function App() {
       listen<AgentTaskTokenEvent>("agent-task-token", (e) => {
         // Sub-agent output (llm / cli / cloud) arrives token by token; buffer
         // it and let the flush interval update the entry, so a long stream does
-        // not re-render the whole transcript per token.
+        // not re-render the whole transcript per token. The first chunk of a
+        // task is applied immediately: it is the row's first visible text.
         const { task_id, token } = e.payload;
         if (!task_id || !token) return;
-        const buffered = pendingAgentTokensRef.current.get(task_id) ?? "";
-        pendingAgentTokensRef.current.set(task_id, (buffered + token).slice(-4000));
+        appendAgentBuffer(task_id, { text: token });
+      }),
+      listen<AgentTaskReasoningEvent>("agent-task-reasoning", (e) => {
+        // Reasoning is streamed separately from content: it is usually the
+        // very first thing the model produces, so it makes a blank row show
+        // "thinking" within a second instead of waiting for the answer.
+        const { task_id, token } = e.payload;
+        if (!task_id || !token) return;
+        appendAgentBuffer(task_id, { reasoning: token.length });
+      }),
+      listen<AgentTaskToolEvent>("agent-task-tool", (e) => {
+        // A tool call inside a sub-agent task. It updates only the activity
+        // line — never the row status (the task's own `agent-task-done` /
+        // `agent-task-error` owns that).
+        const { task_id, phase, tool, detail, text, duration_ms, ok } = e.payload;
+        if (!task_id) return;
+        currentToolCallsRef.current = currentToolCallsRef.current.map((entry) => {
+          if (entry.task_id !== task_id || entry.kind !== "agent") return entry;
+          if (phase === "progress") {
+            return text
+              ? { ...entry, activity: text.trim().slice(0, 200), thinking: undefined }
+              : entry;
+          }
+          if (phase === "start") {
+            const label = [tool, detail].filter(Boolean).join(" · ").trim();
+            return label
+              ? { ...entry, activity: label.slice(0, 200), thinking: undefined }
+              : entry;
+          }
+          // done: keep the tool name visible; the duration is informational.
+          const seconds =
+            duration_ms !== undefined ? ` · ${(duration_ms / 1000).toFixed(1)}s` : "";
+          const label = [ok === false ? `⚠ ${tool}` : tool, detail]
+            .filter(Boolean)
+            .join(" · ");
+          return {
+            ...entry,
+            activity: (label + seconds).trim().slice(0, 200),
+          };
+        });
+        updateActiveAssistantToolCalls(currentToolCallsRef.current);
       }),
       listen<string>("skill-loaded", (e) => {
         // Structured skill-load event. The entry carries `skill_name`, which
@@ -1351,13 +1527,16 @@ export default function App() {
         const entry: ToolCallEntry = {
           task_id: crypto.randomUUID(),
           agent_name: t("app.agents.tool"),
+          kind: "tool",
           description: t("app.agents.loadingSkill", { name: skillName }),
           status: "running",
           skill_name: skillName,
         };
         currentToolCallsRef.current = [
           ...currentToolCallsRef.current.map((tc) =>
-            tc.status === "running" ? { ...tc, status: "done" as const } : tc
+            tc.status === "running" && tc.kind !== "agent" && tc.kind !== "planner"
+              ? { ...tc, status: "done" as const }
+              : tc
           ),
           entry,
         ];
@@ -1439,37 +1618,20 @@ export default function App() {
     return () => {
       unlisteners.forEach((p) => p.then((fn) => fn()));
     };
-  }, [updateActiveAssistantToolCalls, t]);
+  }, [
+    updateActiveAssistantToolCalls,
+    flushAgentTokenBuffers,
+    appendAgentBuffer,
+    t,
+  ]);
 
-  // Flush buffered sub-agent output into its tool-call entry a few times per
-  // second (see the `agent-task-token` listener above).
+  // Flush buffered sub-agent output into its task row a few times per second
+  // (see the `agent-task-token` / `agent-task-reasoning` listeners above). The
+  // first chunk of a task bypasses this timer (leading edge).
   useEffect(() => {
-    const interval = window.setInterval(() => {
-      const pending = pendingAgentTokensRef.current;
-      if (pending.size === 0) return;
-      const chunks = new Map(pending);
-      pending.clear();
-
-      currentToolCallsRef.current = currentToolCallsRef.current.map((entry) => {
-        const chunk = chunks.get(entry.task_id);
-        if (!chunk) return entry;
-        const output = ((entry.summary ?? "") + chunk).slice(-1200);
-        const lastLine = chunk
-          .split("\n")
-          .map((line) => line.trim())
-          .filter((line) => line.length > 0)
-          .pop();
-        return {
-          ...entry,
-          summary: output,
-          description: lastLine ? lastLine.slice(0, 140) : entry.description,
-        };
-      });
-      updateActiveAssistantToolCalls(currentToolCallsRef.current);
-    }, 400);
-
+    const interval = window.setInterval(flushAgentTokenBuffers, 400);
     return () => window.clearInterval(interval);
-  }, [updateActiveAssistantToolCalls]);
+  }, [flushAgentTokenBuffers]);
 
   // The timer listener is registered once, so it reads the active session from
   // a ref instead of re-subscribing whenever the user switches chats.
@@ -1663,6 +1825,7 @@ export default function App() {
     const assistantMsg: Message = { id: assistantId, role: "assistant", content: "", streaming: true };
     currentAssistantMessageIdRef.current = assistantId;
     currentToolCallsRef.current = [];
+    pendingAgentTokensRef.current.clear();
     currentMbusIdRef.current = null;
     currentInjectionsRef.current = [];
     hasRunningToolCallRef.current = false;
@@ -1735,7 +1898,14 @@ export default function App() {
 
             const nextToolCalls = shouldMarkDone
               ? (m.tool_calls ?? []).map((e) =>
-                e.status === "running" ? { ...e, status: "done" as const } : e
+                // The answer starting means the main agent's own step is
+                // done. A sub-agent row / planner row keeps its own status
+                // until its terminal event arrives.
+                e.status === "running" &&
+                e.kind !== "agent" &&
+                e.kind !== "planner"
+                  ? { ...e, status: "done" as const }
+                  : e
               )
               : m.tool_calls;
 
@@ -1759,10 +1929,16 @@ export default function App() {
         setBackgroundWaiting(0);
         // Settle the still-running steps before persisting: the transcript
         // must never carry a "running" entry into the history (it would spin
-        // forever once the chat is reloaded).
-        const finalToolCalls = currentToolCallsRef.current.map((e) =>
-          e.status === "running" ? { ...e, status: "done" as const } : e
-        );
+        // forever once the chat is reloaded). A sub-agent row that was still
+        // running when the turn ended was torn down by the backend, so it is
+        // neutral ("skipped") — never a success checkmark.
+        const finalToolCalls = currentToolCallsRef.current.map((e) => {
+          if (e.status !== "running") return e;
+          if (e.kind === "agent") {
+            return { ...e, status: "skipped" as const, thinking: undefined };
+          }
+          return { ...e, status: "done" as const };
+        });
         // Deliveries are stored on the assistant row: one turn is one row, and
         // the reply was generated after the model saw them.
         const deliveredInjections = currentInjectionsRef.current;
@@ -1795,6 +1971,7 @@ export default function App() {
         flushUndeliveredInjections();
         currentAssistantMessageIdRef.current = null;
         currentToolCallsRef.current = [];
+        pendingAgentTokensRef.current.clear();
         setStreaming(false);
         cleanupRef.current = null;
       },
@@ -1802,9 +1979,19 @@ export default function App() {
         setError(err);
         // A step that was still running when the turn failed never completed:
         // settle it so the group does not keep a spinner spinning forever.
-        const settledToolCalls = currentToolCallsRef.current.map((e) =>
-          e.status === "running" ? { ...e, status: "error" as const, confirm: undefined } : e
-        );
+        const settledToolCalls = currentToolCallsRef.current.map((e) => {
+          if (e.status !== "running") return e;
+          // A task killed by a failing turn is not itself a failed task.
+          if (e.kind === "agent") {
+            return {
+              ...e,
+              status: "skipped" as const,
+              confirm: undefined,
+              thinking: undefined,
+            };
+          }
+          return { ...e, status: "error" as const, confirm: undefined };
+        });
         setMessages((prev) =>
           prev
             .filter((m) => !m.id.startsWith("agent-progress-"))
@@ -1850,6 +2037,7 @@ export default function App() {
         flushUndeliveredInjections();
         currentAssistantMessageIdRef.current = null;
         currentToolCallsRef.current = [];
+        pendingAgentTokensRef.current.clear();
         setStreaming(false);
         cleanupRef.current = null;
       },
@@ -1887,6 +2075,7 @@ export default function App() {
     const assistantMsg: Message = { id: assistantId, role: "assistant", content: "", streaming: true };
     currentAssistantMessageIdRef.current = assistantId;
     currentToolCallsRef.current = [];
+    pendingAgentTokensRef.current.clear();
     currentMbusIdRef.current = null;
     currentInjectionsRef.current = [];
     hasRunningToolCallRef.current = false;
@@ -1954,7 +2143,14 @@ export default function App() {
 
             const nextToolCalls = shouldMarkDone
               ? (m.tool_calls ?? []).map((e) =>
-                e.status === "running" ? { ...e, status: "done" as const } : e
+                // The answer starting means the main agent's own step is
+                // done. A sub-agent row / planner row keeps its own status
+                // until its terminal event arrives.
+                e.status === "running" &&
+                e.kind !== "agent" &&
+                e.kind !== "planner"
+                  ? { ...e, status: "done" as const }
+                  : e
               )
               : m.tool_calls;
 
@@ -1976,9 +2172,13 @@ export default function App() {
       },
       onDone() {
         setBackgroundWaiting(0);
-        const finalToolCalls = currentToolCallsRef.current.map((e) =>
-          e.status === "running" ? { ...e, status: "done" as const } : e
-        );
+        const finalToolCalls = currentToolCallsRef.current.map((e) => {
+          if (e.status !== "running") return e;
+          if (e.kind === "agent") {
+            return { ...e, status: "skipped" as const, thinking: undefined };
+          }
+          return { ...e, status: "done" as const };
+        });
         // Deliveries are stored on the assistant row: one turn is one row, and
         // the reply was generated after the model saw them.
         const deliveredInjections = currentInjectionsRef.current;
@@ -2011,14 +2211,25 @@ export default function App() {
         flushUndeliveredInjections();
         currentAssistantMessageIdRef.current = null;
         currentToolCallsRef.current = [];
+        pendingAgentTokensRef.current.clear();
         setStreaming(false);
         cleanupRef.current = null;
       },
       onError(err) {
         setError(err);
-        const settledToolCalls = currentToolCallsRef.current.map((e) =>
-          e.status === "running" ? { ...e, status: "error" as const, confirm: undefined } : e
-        );
+        const settledToolCalls = currentToolCallsRef.current.map((e) => {
+          if (e.status !== "running") return e;
+          // A task killed by a failing turn is not itself a failed task.
+          if (e.kind === "agent") {
+            return {
+              ...e,
+              status: "skipped" as const,
+              confirm: undefined,
+              thinking: undefined,
+            };
+          }
+          return { ...e, status: "error" as const, confirm: undefined };
+        });
         setMessages((prev) =>
           prev
             .filter((m) => !m.id.startsWith("agent-progress-"))
@@ -2062,6 +2273,7 @@ export default function App() {
         flushUndeliveredInjections();
         currentAssistantMessageIdRef.current = null;
         currentToolCallsRef.current = [];
+        pendingAgentTokensRef.current.clear();
         setStreaming(false);
         cleanupRef.current = null;
       },
@@ -2375,11 +2587,21 @@ export default function App() {
     // A stopped turn also drops any pending inline confirmation: clear the
     // `confirm` payload so no stale allow/deny row survives the settle (the
     // 120 s backend timeout already answers it as "not confirmed").
-    const settledToolCalls = currentToolCallsRef.current.map((e) =>
-      e.status === "running"
-        ? { ...e, status: "error" as const, confirm: undefined }
-        : e
-    );
+    const settledToolCalls = currentToolCallsRef.current.map((e) => {
+      if (e.status !== "running") return e;
+      // A sub-agent torn down by Stop was cancelled, not completed and not a
+      // failure of its own: settle it neutrally so the row cannot keep spinning
+      // or show a success checkmark.
+      if (e.kind === "agent") {
+        return {
+          ...e,
+          status: "skipped" as const,
+          confirm: undefined,
+          thinking: undefined,
+        };
+      }
+      return { ...e, status: "error" as const, confirm: undefined };
+    });
     // The turn is over: sub-agents were torn down by the backend and their
     // `agent-task-done` events arrive after the listeners are gone, so settle
     // the per-agent spinners and drop the in-turn progress rows here.
@@ -2387,6 +2609,7 @@ export default function App() {
     hasRunningToolCallRef.current = false;
     currentAssistantMessageIdRef.current = null;
     currentToolCallsRef.current = [];
+    pendingAgentTokensRef.current.clear();
     setMessages((prev) =>
       prev
         .filter((m) => !m.id.startsWith("agent-progress-"))
