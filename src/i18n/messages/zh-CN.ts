@@ -88,7 +88,6 @@ const zhCN: Messages = {
             toolName: "后台",
         },
 
-        attachFiles: "添加附件",
         fileMention: {
             title: "插入文件引用",
             hint: "↑↓ 选择 · Enter/Tab 插入 · 输入 #12-24 指定行 · Esc 关闭",
@@ -99,7 +98,7 @@ const zhCN: Messages = {
             rangeNotSupported: "{name} 不支持行区间，已附加整个文件。",
         },
         attachmentUnsupported: "已跳过 {names}：“{model}” 无法读取该文件类型。",
-        inputPlaceholder: "输入消息…（Enter 发送，Shift+Enter 换行）",
+        inputPlaceholder: "输入消息…（@ 引用文件，Enter 发送，Shift+Enter 换行）",
         injections: {
             title: "本轮内追加",
             queued: "等待送达",

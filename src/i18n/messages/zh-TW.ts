@@ -88,7 +88,6 @@ const zhTW: Messages = {
             toolName: "背景",
         },
 
-        attachFiles: "附加檔案",
         fileMention: {
             title: "插入檔案參照",
             hint: "↑↓ 選擇 · Enter/Tab 插入 · 輸入 #12-24 指定行 · Esc 關閉",
@@ -99,7 +98,7 @@ const zhTW: Messages = {
             rangeNotSupported: "{name} 不支援行區間，已附加整個檔案。",
         },
         attachmentUnsupported: "已跳過 {names}：「{model}」無法讀取該檔案類型。",
-        inputPlaceholder: "輸入訊息…（Enter 送出，Shift+Enter 換行）",
+        inputPlaceholder: "輸入訊息…（@ 引用檔案，Enter 送出，Shift+Enter 換行）",
         injections: {
             title: "本輪內追加",
             queued: "等待送達",

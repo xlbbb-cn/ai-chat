@@ -166,8 +166,8 @@ export interface ServeProcessInfo {
  * Completions `messages[].content` array element shape.
  *
  * - `text`      — plain text segment
- * - `image_url` — image, either a remote URL or a `data:` URL produced by
- *                 reading an attached file via `FileReader.readAsDataURL`
+ * - `image_url` — image, either a remote URL or a `data:` URL produced by the
+ *                 `read_workspace_file_bytes` command for a `@file` mention
  * - `file`      — generic file (e.g. PDF) using the newer
  *                 `{ type: "file", file: { filename, file_data } }` shape
  * - `input_audio` — audio clip as base64 (`wav` / `mp3`, per the OpenAI
@@ -205,7 +205,7 @@ export interface Attachment {
    * How the attachment reaches the model: `text` is inlined into the prompt,
    * the others become a content part (`image_url` / `file` / `input_audio`) and
    * therefore need the matching model capability — see
-   * `supportsAttachmentKind` in `App.tsx`.
+   * `supportsAttachmentKind` in `attachments.ts`.
    */
   kind: "text" | "image" | "file" | "audio";
   /** MIME type when known (e.g. `image/png`, `application/pdf`). */
