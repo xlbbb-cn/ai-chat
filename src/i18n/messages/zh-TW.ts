@@ -95,8 +95,15 @@ const zhTW: Messages = {
             readFailed: "無法讀取 {name}：{error}",
             rangeNotSupported: "{name} 不支援行區間，已附加整個檔案。",
         },
+        slashMention: {
+            title: "插入技能參照",
+            hint: "↑↓ 選擇 · Enter/Tab 插入 · Esc 關閉",
+            loading: "正在讀取工作區技能…",
+            noMatches: "沒有符合“{query}”的技能。",
+            listFailed: "無法列出工作區技能：{error}",
+        },
         attachmentUnsupported: "已跳過 {names}：「{model}」無法讀取該檔案類型。",
-        inputPlaceholder: "輸入訊息…（@ 引用檔案，Enter 送出，Shift+Enter 換行）",
+        inputPlaceholder: "輸入訊息…（@ 引用檔案，/ 引用技能，Enter 送出，Shift+Enter 換行）",
         injections: {
             title: "本輪內追加",
             queued: "等待送達",

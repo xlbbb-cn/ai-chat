@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles } from "./api";
+import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills } from "./api";
 
 import { ChatMessage } from "./components/ChatMessage";
 import { ToolCallGroup } from "./components/ToolCallGroup";
@@ -16,6 +16,7 @@ import { Portal } from "./components/Portal";
 import { TitleBar } from "./components/TitleBar";
 import { UpdatePanel } from "./components/UpdatePanel";
 import { FileMentionPopup } from "./components/FileMentionPopup";
+import { SlashMentionPopup } from "./components/SlashMentionPopup";
 import type {
   AppConfig,
   Message,
@@ -45,6 +46,8 @@ import type {
 } from "./types";
 import { classifyName, extensionOf, supportsAttachmentKind } from "./attachments";
 import { activeMentionQuery, resolveFileMentions, scoreWorkspaceFile } from "./fileMention";
+import { activeSlashQuery, scoreSkillOption, toSkillOptions } from "./slashMention";
+import type { SkillMentionOption } from "./slashMention";
 import { isGenerationStopped, isLocale, stripGenerationStopped, useI18n } from "./i18n";
 import { formatCountdown } from "./utils/time";
 import {
@@ -213,6 +216,8 @@ const WORKSPACE_FILES_TTL_MS = 15_000;
 /** Rows the `@file` popup shows at once — enough to be useful, short enough
  *  that arrow-key navigation stays predictable. */
 const MENTION_MAX_ITEMS = 8;
+/** How long the `/skill` popup trusts its cached skill list. */
+const SKILL_MENTIONS_TTL_MS = 15_000;
 
 interface MarkdownEditPayload {
   path: string;
@@ -239,6 +244,23 @@ export default function App() {
   /** Timestamped cache of `workspaceFiles`, so the walk runs at most every 15s. */
   const workspaceFilesRef = useRef<{ at: number; files: WorkspaceFileEntry[] } | null>(null);
   const workspaceFilesPendingRef = useRef(false);
+  /**
+   * Composer `/skill` popup, the Claude-Code style sibling of the `@file` one.
+   * `start` is the index of the `/` that opened it — the whole token is
+   * replaced when a skill is accepted.
+   */
+  const [slashState, setSlashState] = useState<{
+    open: boolean;
+    query: string;
+    start: number;
+  }>({ open: false, query: "", start: 0 });
+  const [slashIndex, setSlashIndex] = useState(0);
+  /** Workspace skills for the popup; `null` until the first `/` triggers a load. */
+  const [slashSkills, setSlashSkills] = useState<SkillMentionOption[] | null>(null);
+  const [slashSkillsLoading, setSlashSkillsLoading] = useState(false);
+  /** Timestamped cache of `slashSkills`, so the list is read at most every 15s. */
+  const slashSkillsRef = useRef<{ at: number; options: SkillMentionOption[] } | null>(null);
+  const slashSkillsPendingRef = useRef(false);
   const [streaming, setStreaming] = useState(false);
   const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
   const [sidebar, setSidebar] = useState<Sidebar>(null);
@@ -2238,28 +2260,38 @@ export default function App() {
       return;
     }
 
-    // The `@file` popup owns the arrow keys, Enter/Tab and Escape while open.
-    if (mentionState.open) {
+    // An open mention popup (`@file` or `/skill`) owns the arrow keys,
+    // Enter/Tab and Escape while it is visible. Their token grammars are
+    // mutually exclusive, so at most one is open and it decides which list,
+    // index and accept handler the keys act on.
+    if (mentionState.open || slashState.open) {
+      const rowCount = mentionState.open ? mentionItems.length : slashItems.length;
       if (e.key === "Escape") {
         e.preventDefault();
         closeMention();
+        closeSlash();
         return;
       }
-      if (mentionItems.length > 0) {
-        if (e.key === "ArrowDown") {
+      if (rowCount > 0) {
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") {
           e.preventDefault();
-          setMentionIndex((prev) => (prev + 1) % mentionItems.length);
-          return;
-        }
-        if (e.key === "ArrowUp") {
-          e.preventDefault();
-          setMentionIndex((prev) => (prev - 1 + mentionItems.length) % mentionItems.length);
+          const delta = e.key === "ArrowDown" ? 1 : -1;
+          if (mentionState.open) {
+            setMentionIndex((prev) => (prev + delta + rowCount) % rowCount);
+          } else {
+            setSlashIndex((prev) => (prev + delta + rowCount) % rowCount);
+          }
           return;
         }
         if (e.key === "Enter" || e.key === "Tab") {
           e.preventDefault();
-          const item = mentionItems[mentionActiveIndex];
-          if (item) acceptMention(item);
+          if (mentionState.open) {
+            const item = mentionItems[mentionActiveIndex];
+            if (item) acceptMention(item);
+          } else {
+            const item = slashItems[slashActiveIndex];
+            if (item) acceptSlash(item);
+          }
           return;
         }
       }
@@ -2746,6 +2778,136 @@ export default function App() {
     [closeMention, input, mentionState.start],
   );
 
+  // ─── Composer `/skill` mentions ───────────────────────────────────────────
+
+  /**
+   * Skills the `/skill` popup offers, ranked by relevance.
+   *
+   * Nothing is filtered out: `use_skill` resolves any skill in the workspace,
+   * so mentioning a disabled one is still meaningful — enabling only preloads
+   * its description into the system prompt. Within one relevance tier the
+   * enabled skills come first, because those are the ones the model already
+   * knows about.
+   */
+  const slashItems = useMemo(() => {
+    if (!slashState.open || !slashSkills) return [];
+    const scored: { item: SkillMentionOption; score: number; rank: number }[] = [];
+    for (const option of slashSkills) {
+      const score = scoreSkillOption(option, slashState.query);
+      if (score === null) continue;
+      const enabled = skillStatus?.skills[option.name]?.enabled === true;
+      scored.push({ item: option, score, rank: enabled ? 0 : 1 });
+    }
+    scored.sort(
+      (a, b) => a.score - b.score || a.rank - b.rank || a.item.name.localeCompare(b.item.name),
+    );
+    return scored.slice(0, MENTION_MAX_ITEMS).map((entry) => entry.item);
+  }, [slashState.open, slashState.query, slashSkills, skillStatus]);
+
+  /** Index stays valid while the filtered list shrinks under the cursor. */
+  const slashActiveIndex = Math.min(slashIndex, Math.max(0, slashItems.length - 1));
+
+  const closeSlash = useCallback(() => {
+    setSlashState((prev) => (prev.open ? { open: false, query: "", start: 0 } : prev));
+  }, []);
+
+  /**
+   * Load the workspace skill list for the popup (cached for
+   * `SKILL_MENTIONS_TTL_MS`, so switching workspaces is picked up without an
+   * explicit invalidation hook — same contract as `ensureWorkspaceFiles`).
+   */
+  const ensureSlashSkills = useCallback(async () => {
+    if (slashSkillsPendingRef.current) return;
+    const cached = slashSkillsRef.current;
+    if (cached && Date.now() - cached.at < SKILL_MENTIONS_TTL_MS) return;
+
+    slashSkillsPendingRef.current = true;
+    setSlashSkillsLoading(true);
+    try {
+      const options = toSkillOptions(await listSkills());
+      slashSkillsRef.current = { at: Date.now(), options };
+      setSlashSkills(options);
+    } catch (err) {
+      setError(t("app.slashMention.listFailed", { error: String(err) }));
+    } finally {
+      slashSkillsPendingRef.current = false;
+      setSlashSkillsLoading(false);
+    }
+  }, [t]);
+
+  /**
+   * Open/close the `/skill` popup for the token under the caret. Only a real
+   * user edit reaches this — accepting a skill inserts text programmatically,
+   * which must not immediately reopen the popup.
+   */
+  const syncSlashFromInput = useCallback(
+    (value: string, caret: number) => {
+      // While a turn is running the composer is an injection channel; injected
+      // text cannot carry a reference, so the popup would be misleading.
+      if (streaming) {
+        closeSlash();
+        return;
+      }
+      const active = activeSlashQuery(value, caret);
+      if (!active) {
+        closeSlash();
+        return;
+      }
+      setSlashState((prev) =>
+        prev.open && prev.start === active.start && prev.query === active.query
+          ? prev
+          : { open: true, query: active.query, start: active.start },
+      );
+      setSlashIndex(0);
+      void ensureSlashSkills();
+    },
+    [closeSlash, ensureSlashSkills, streaming],
+  );
+
+  /**
+   * Insert `/<skill>` for `item`, replacing the `/` + query that opened the
+   * popup, and leave the caret right behind the token.
+   */
+  const acceptSlash = useCallback(
+    (item: SkillMentionOption) => {
+      const el = textareaRef.current;
+      const caret = el?.selectionStart ?? input.length;
+      const token = `/${item.name}`;
+      const before = input.slice(0, slashState.start);
+      const after = input.slice(Math.max(caret, slashState.start));
+      setInput(`${before}${token}${after}`);
+      closeSlash();
+      requestAnimationFrame(() => {
+        const position = before.length + token.length;
+        el?.focus();
+        el?.setSelectionRange(position, position);
+      });
+    },
+    [closeSlash, input, slashState.start],
+  );
+
+  /**
+   * Skill names known in this workspace. A sent `/name` token is only
+   * highlighted when it names a real skill, so ordinary text such as
+   * `/usr/bin` stays plain.
+   */
+  const knownSkillNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const option of slashSkills ?? []) names.add(option.name);
+    for (const name of Object.keys(skillStatus?.skills ?? {})) names.add(name);
+    return Array.from(names).sort();
+  }, [slashSkills, skillStatus]);
+
+  // The todo panel belongs to the newest assistant message only (like the
+  // background-task group). A turn can end on a tool_group message, so scan
+  // backwards for the last assistant message instead of taking the tail.
+  const todoMessageId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i].role === "assistant") return messages[i].id;
+    }
+    return null;
+  }, [messages]);
+
   const usageTotal = usage ? (usage.total_tokens ?? usage.prompt_tokens + usage.completion_tokens) : 0;
   const fallbackMaxTokens = 131072; // 128k tokens as a hard upper bound for usage ratio calculations when no explicit max is provided
   const usageMax = usage?.max_tokens ?? maxTokens ?? fallbackMaxTokens;
@@ -3145,6 +3307,9 @@ export default function App() {
                     ? continueUnfinishedReply
                     : undefined
                 }
+                sessionId={sessionId}
+                todoActive={m.role === "assistant" && m.id === todoMessageId}
+                skillNames={knownSkillNames}
               />
             )
           )}
@@ -3234,6 +3399,15 @@ export default function App() {
           )}
           {renderConfirmDialog()}
           <div className="input-row">
+            <SlashMentionPopup
+              open={slashState.open}
+              items={slashItems}
+              activeIndex={slashActiveIndex}
+              loading={slashSkillsLoading}
+              query={slashState.query}
+              onHover={setSlashIndex}
+              onSelect={acceptSlash}
+            />
             <FileMentionPopup
               open={mentionState.open}
               items={mentionItems}
@@ -3252,12 +3426,16 @@ export default function App() {
                 const value = e.target.value;
                 setInput(value);
                 syncMentionFromInput(value, e.target.selectionStart ?? value.length);
+                syncSlashFromInput(value, e.target.selectionStart ?? value.length);
               }}
               onKeyDown={handleKeyDown}
               // A real blur (clicking elsewhere) dismisses the popup; the popup
               // itself accepts on `mousedown` + `preventDefault`, so choosing a
-              // file never blurs the textarea.
-              onBlur={closeMention}
+              // row never blurs the textarea.
+              onBlur={() => {
+                closeMention();
+                closeSlash();
+              }}
               placeholder={streaming ? t("app.injections.placeholder") : t("app.inputPlaceholder")}
               // Stays usable while a reply streams: Enter then adds the text to
               // the running turn instead of starting a new one.

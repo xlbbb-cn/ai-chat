@@ -247,6 +247,19 @@ interface Props {
   backgroundWaiting?: number;
   /** Resume a partial reply that ended with an error. */
   onContinue?: () => void;
+  /**
+   * Skill names in the workspace. A `/name` token in a user message is only
+   * highlighted when it names one of these, so a path such as `/usr/bin` or a
+   * `1/2` fraction stays plain text.
+   */
+  skillNames?: string[];
+  /** Session this message belongs to — the todo panel fetches its active list. */
+  sessionId?: string;
+  /**
+   * Mirror the session's todo list under this message. Only the newest
+   * assistant message gets it, so the list is drawn once per session.
+   */
+  todoActive?: boolean;
 }
 
 function extractAttachmentNames(content: string): string[] {
@@ -310,6 +323,56 @@ function highlightFileMentions(root: HTMLElement) {
       span.textContent = match[0];
       fragment.appendChild(span);
       cursor = match.index + match[0].length;
+    }
+    if (!found) continue;
+    if (cursor < text.length) {
+      fragment.appendChild(document.createTextNode(text.slice(cursor)));
+    }
+    node.replaceWith(fragment);
+  }
+}
+
+/**
+ * Wrap `/skill-name` mentions in the body with the same accent span `@file`
+ * mentions wear — a slash token is a reference to a workspace skill, not prose.
+ *
+ * Mirrors `activeSlashQuery` in `slashMention.ts`: the `/` must open the line or
+ * follow whitespace. A token only counts when it names a known skill (see
+ * `skillNames`), so paths (`/usr/bin`) and fractions stay untouched, and
+ * trailing punctuation is left outside the token.
+ */
+function highlightSkillMentions(root: HTMLElement, known: Set<string>) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode as Text);
+
+  const token = /\/([^\s/@#<>]+)/g;
+
+  for (const node of nodes) {
+    const text = node.data;
+    if (!text.includes("/")) continue;
+    // Already wrapped tokens are skipped, which keeps a re-run idempotent.
+    if (node.parentElement?.closest("pre, code, a, .katex, button, .file-mention-token")) continue;
+
+    const fragment = document.createDocumentFragment();
+    let cursor = 0;
+    let found = false;
+    token.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = token.exec(text)) !== null) {
+      if (match.index > 0 && !/\s/.test(text[match.index - 1])) continue;
+      // Punctuation belongs to the sentence, not to the skill name.
+      const raw = match[0].replace(/[.,;:!?)\]}"']+$/, "");
+      if (!known.has(raw.slice(1))) continue;
+      found = true;
+      if (match.index > cursor) {
+        fragment.appendChild(document.createTextNode(text.slice(cursor, match.index)));
+      }
+      const span = document.createElement("span");
+      span.className = "file-mention-token";
+      span.textContent = raw;
+      fragment.appendChild(span);
+      cursor = match.index + raw.length;
     }
     if (!found) continue;
     if (cursor < text.length) {
@@ -464,7 +527,7 @@ function writingTailHost(content: HTMLElement): HTMLElement {
   return host;
 }
 
-export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onFork, dbId, onConfirm, onCancelBackground, backgroundTasks, backgroundWaiting, onContinue }: Props) {
+export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onFork, dbId, onConfirm, onCancelBackground, backgroundTasks, backgroundWaiting, onContinue, skillNames, sessionId, todoActive }: Props) {
   const { t } = useI18n();
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
@@ -544,6 +607,7 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
   const contentRef = useRef<HTMLDivElement>(null);
   const streamedTextRef = useRef("");
   const renderedHtmlRef = useRef("");
+  const appliedSkillNamesRef = useRef("");
   const writingPenRef = useRef<HTMLSpanElement | null>(null);
   const writingStartRef = useRef(0);
   useLayoutEffect(() => {
@@ -559,7 +623,22 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
       el.innerHTML = renderedMainContent;
       renderedHtmlRef.current = renderedMainContent;
       // The user's body never changes, so this runs once per turn.
-      if (isUser) highlightFileMentions(el);
+      if (isUser) {
+        highlightFileMentions(el);
+        // A freshly painted body carries no `/skill` spans yet.
+        appliedSkillNamesRef.current = "";
+      }
+    }
+
+    // Skill names arrive with the `/skill` popup's first load, which can happen
+    // after a restored history was already painted — re-run the highlight then.
+    // Re-running is safe: `highlightSkillMentions` skips the spans it wrapped.
+    if (isUser && skillNames && skillNames.length > 0) {
+      const key = skillNames.join("\n");
+      if (key !== appliedSkillNamesRef.current) {
+        highlightSkillMentions(el, new Set(skillNames));
+        appliedSkillNamesRef.current = key;
+      }
     }
 
     // Pen: visible for the whole live turn, pinned to the typewriter's tail.
@@ -683,7 +762,7 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
           </details>
         )}
         {isAssistant && <ToolCallGroup message={message} onConfirm={onConfirm} onCancelBackground={onCancelBackground} />}
-        {isAssistant && <TodoList />}
+        {isAssistant && <TodoList sessionId={sessionId} active={todoActive} />}
         {isAssistant && backgroundTasks !== undefined && (
           <BackgroundTaskGroup
             tasks={backgroundTasks}

@@ -107,9 +107,16 @@ const en = {
             rangeNotSupported:
                 "{name} cannot be sliced by lines — attached the whole file.",
         },
+        slashMention: {
+            title: "Insert skill reference",
+            hint: "↑↓ choose · Enter/Tab insert · Esc close",
+            loading: "Loading workspace skills…",
+            noMatches: "No skill matches “{query}”.",
+            listFailed: "Could not list workspace skills: {error}",
+        },
         attachmentUnsupported:
             "Skipped {names}: “{model}” cannot read that file type.",
-        inputPlaceholder: "Type a message… (@ to reference a file, Enter to send)",
+        inputPlaceholder: "Type a message… (@ to reference a file, / for a skill, Enter to send)",
         injections: {
             title: "Added mid-turn",
             queued: "Waiting to be delivered",
