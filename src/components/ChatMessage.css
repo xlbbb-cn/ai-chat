@@ -490,45 +490,6 @@
   background: var(--c-hover);
 }
 
-/* Failure notice for a turn that could not finish. Mirrors the app-level
-   error banner (alternate surface + danger rule) at message density. It is
-   UI-only: the failed message is excluded from the model context. */
-.message-error {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 6px 10px;
-  border-left: 2px solid var(--c-danger);
-  border-radius: 4px;
-  background: var(--ts-ash);
-  color: var(--ts-graphite);
-  font-size: 13px;
-  line-height: 1.55;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.message-error-icon {
-  flex-shrink: 0;
-  margin-top: 3px;
-  font-size: 12px;
-  color: var(--c-danger);
-}
-
-.message-error-text {
-  flex: 1;
-  min-width: 0;
-}
-
-/* Compact resume action inside the failure notice; the base look comes from
-   the shared .inline-edit-btn primitive. */
-.message-error-continue {
-  flex-shrink: 0;
-  min-height: 24px;
-  padding: 2px 10px;
-  font-size: 12px;
-}
-
 /* Mid-turn injections: real user input the model saw during this turn. They
    belong to the assistant bubble (one turn = one message), marked with a
    hairline rule instead of a second card so the transcript stays calm. */
@@ -565,6 +526,28 @@
   line-height: 1.55;
   color: var(--ts-graphite);
   white-space: pre-wrap;
+}
+
+/* Three rows and no more: a long injection is a note *about* the turn, not the
+   turn itself. A `max-height` of three line boxes (`3 × 1.55em`, `em` being the
+   13px above) clips after wrapping and keeps `scrollHeight` honest, so the
+   component can tell a clipped note from a short one in every engine. The
+   "Show more" action below is the affordance — no fade mask, gradients here
+   would be decoration. */
+.message-injection-text.is-folded {
+  max-height: calc(3 * 1.55em);
+  overflow: hidden;
+}
+
+/* Fold action under the note — the shared `.inline-edit-btn` primitive at
+   message density, like the failure notice's "Continue". Compounded with the
+   primitive so the compact size wins in the bundled sheet, where `App.css`
+   (the primitive's home) is emitted after this file. */
+.inline-edit-btn.message-injection-toggle {
+  align-self: flex-start;
+  min-height: 24px;
+  padding: 2px 10px;
+  font-size: 12px;
 }
 
 /* `@file#lines` mention inside a user turn: the accent is the reference

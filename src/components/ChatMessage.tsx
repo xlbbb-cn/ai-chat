@@ -1,4 +1,4 @@
-import type { BackgroundTaskState, Message, MessageContent } from "../types";
+import type { BackgroundTaskState, ChatInjection, Message, MessageContent } from "../types";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { BackgroundTaskGroup } from "./BackgroundTaskGroup";
 import { ToolCallGroup } from "./ToolCallGroup";
@@ -23,7 +23,6 @@ import {
   faPenToSquare,
   faRotateRight,
   faTrash,
-  faTriangleExclamation,
   faVolumeHigh,
 } from "../icons";
 import "./ChatMessage.css";
@@ -245,8 +244,6 @@ interface Props {
    */
   backgroundTasks?: BackgroundTaskState[];
   backgroundWaiting?: number;
-  /** Resume a partial reply that ended with an error. */
-  onContinue?: () => void;
   /**
    * Skill names in the workspace. A `/name` token in a user message is only
    * highlighted when it names one of these, so a path such as `/usr/bin` or a
@@ -419,6 +416,59 @@ function formatInjectionTime(createdAtMs: number): string {
 }
 
 /**
+ * One mid-turn injection as it reads in the transcript.
+ *
+ * A note longer than three lines folds: a pasted paragraph otherwise pushes the
+ * reply it belongs to out of view, and one turn is meant to stay scannable.
+ * Whether the text really overflows is *measured* after paint rather than
+ * counted from `\n` — a single long line wraps past three rows while a two-line
+ * note never reaches the limit — so a note that fits gets no dead "show more"
+ * action.
+ */
+function InjectedNote({ injection }: { injection: ChatInjection }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  const textRef = useRef<HTMLSpanElement>(null);
+
+  // Skipped while open: the unfolded box is the reference for the next
+  // measurement, so collapsing re-reads the clamped height.
+  useLayoutEffect(() => {
+    const el = textRef.current;
+    if (!el || open) return;
+    setOverflows(el.scrollHeight - el.clientHeight > 1);
+  }, [injection.text, open]);
+
+  return (
+    <div className="message-injection">
+      <span className="message-injection-head">
+        <FontAwesomeIcon icon={faPenToSquare} aria-hidden="true" />
+        {t("chat.injected")}
+        <span className="message-injection-time">
+          {formatInjectionTime(injection.created_at_ms)}
+        </span>
+      </span>
+      <span
+        ref={textRef}
+        className={`message-injection-text${open ? "" : " is-folded"}`}
+      >
+        {injection.text}
+      </span>
+      {overflows && (
+        <button
+          type="button"
+          className="inline-edit-btn message-injection-toggle"
+          aria-expanded={open}
+          onClick={() => setOpen((previous) => !previous)}
+        >
+          {t(open ? "chat.foldLess" : "chat.foldMore")}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
  * Upper bound on the text the streaming typewriter animates per commit. A
  * mid-stream markdown rewrite (an opening `**` turning into real bold) changes
  * a whole paragraph; without the cap that paragraph would re-fade at once.
@@ -527,7 +577,7 @@ function writingTailHost(content: HTMLElement): HTMLElement {
   return host;
 }
 
-export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onFork, dbId, onConfirm, onCancelBackground, backgroundTasks, backgroundWaiting, onContinue, skillNames, sessionId, todoActive }: Props) {
+export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onFork, dbId, onConfirm, onCancelBackground, backgroundTasks, backgroundWaiting, skillNames, sessionId, todoActive }: Props) {
   const { t } = useI18n();
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
@@ -570,12 +620,6 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
     () => md.render(streamedMainContent),
     [streamedMainContent],
   );
-  // A failed turn can only be resumed when it left something usable behind;
-  // an immediate rate limit with no tokens has nothing to continue.
-  const hasPartialReply =
-    mainContent.trim().length > 0 ||
-    reasoningContent.trim().length > 0 ||
-    (message.tool_calls?.length ?? 0) > 0;
   const [reasoningOpen, setReasoningOpen] = useState(false);
 
   // Collapsed-state live preview: the last three reasoning lines are rendered
@@ -807,27 +851,6 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
             }
           }}
         />
-        {/* Failure notice for a turn that never completed. It lives outside
-            `content` on purpose: the model context (including retries) skips
-            this message, so provider errors and warnings never become history. */}
-        {isAssistant && message.error && (
-          <div className="message-error" role="alert">
-            <FontAwesomeIcon icon={faTriangleExclamation} className="message-error-icon" aria-hidden="true" />
-            <span className="message-error-text">
-              {t("app.errorPrefix")}
-              {message.error}
-            </span>
-            {onContinue && hasPartialReply && (
-              <button
-                type="button"
-                className="inline-edit-btn message-error-continue"
-                onClick={onContinue}
-              >
-                {t("chat.continue")}
-              </button>
-            )}
-          </div>
-        )}
         {/* Information the user pushed into this turn while it was running.
             One turn stays one bubble, so the block sits under the reply and
             states when the model actually received it. Background task
@@ -836,16 +859,7 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
         {isAssistant && visibleInjections.length > 0 && (
           <div className="message-injections">
             {visibleInjections.map((injection) => (
-              <div key={injection.id} className="message-injection">
-                <span className="message-injection-head">
-                  <FontAwesomeIcon icon={faPenToSquare} aria-hidden="true" />
-                  {t("chat.injected")}
-                  <span className="message-injection-time">
-                    {formatInjectionTime(injection.created_at_ms)}
-                  </span>
-                </span>
-                <span className="message-injection-text">{injection.text}</span>
-              </div>
+              <InjectedNote key={injection.id} injection={injection} />
             ))}
           </div>
         )}
@@ -885,10 +899,13 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
 
       {/* Message action buttons (delete / fork / export).
           The user's retry lives in the same outside-the-bubble row, aligned
-          to its own edge — the card stays a pure content block. */}
+          to its own edge — the card stays a pure content block. A failed turn
+          offers no export: there is no finished reply to hand out, and with
+          the failure row gone that icon would be all that is left at the
+          bottom of the bubble. */}
       {isAssistant && showActions && !message.streaming && (
         <div className="message-action-buttons">
-          {isAssistant && (
+          {isAssistant && !message.error && (
             <button
               type="button"
               className="message-action-btn export"

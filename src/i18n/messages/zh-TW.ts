@@ -67,6 +67,7 @@ const zhTW: Messages = {
         updateAvailable: "新版本 {version} 已發佈 —— 目前版本為 {current}。",
         viewUpdate: "查看更新",
         dismiss: "略過",
+        noticeDismiss: "關閉提示",
 
         timers: {
             title: "計時器",
@@ -128,7 +129,6 @@ const zhTW: Messages = {
         forkFailed: "建立分支工作階段失敗：{error}",
         markdownPathEmpty: "Markdown 檔案路徑為空。",
         markdownSaveFailed: "儲存 Markdown 檔案失敗：{error}",
-        errorPrefix: "錯誤：",
         continueUnfinished: "繼續完成上一條未完成的回覆，不要重複已經生成的內容。",
 
         markdownEditorAria: "Markdown 編輯器",
@@ -198,6 +198,8 @@ const zhTW: Messages = {
         deleteTitle: "刪除這則訊息",
         forkTitle: "從這則訊息建立分支工作階段",
         injected: "本輪內追加",
+        foldMore: "展開",
+        foldLess: "收合",
         continue: "繼續",
     },
 

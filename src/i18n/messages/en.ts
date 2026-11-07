@@ -76,6 +76,7 @@ const en = {
         updateAvailable: "New version {version} is available — you are on {current}.",
         viewUpdate: "View update",
         dismiss: "Dismiss",
+        noticeDismiss: "Dismiss notice",
 
         timers: {
             title: "Timers",
@@ -144,7 +145,6 @@ const en = {
         forkFailed: "Failed to fork session: {error}",
         markdownPathEmpty: "Markdown file path is empty.",
         markdownSaveFailed: "Failed to save markdown file: {error}",
-        errorPrefix: "Error: ",
         continueUnfinished:
             "Continue the unfinished reply above without repeating what you already generated.",
 
@@ -222,6 +222,8 @@ const en = {
         deleteTitle: "Delete this message",
         forkTitle: "Fork conversation from this message",
         injected: "Added mid-turn",
+        foldMore: "Show more",
+        foldLess: "Show less",
         continue: "Continue",
     },
 
