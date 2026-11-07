@@ -264,6 +264,54 @@ function contentToText(content: MessageContent): string {
   return parts.join("");
 }
 
+/**
+ * Wrap `@file#lines` mentions in the body with an accent span.
+ *
+ * A mention is how the user references an attached file, so it reads as a
+ * reference rather than as prose — the accent is the same colour a link
+ * already wears. Code, formulas and links are skipped: there an `@` is
+ * literal text that must not be recoloured.
+ */
+function highlightFileMentions(root: HTMLElement) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode as Text);
+
+  // Mirrors `parseMentions` in `fileMention.ts`: a path, then an optional
+  // `#12` / `#12-24` / `#12-` line range.
+  const token = /@[^\s@#<>]+(?:#\d+(?:-\d*)?)?/g;
+
+  for (const node of nodes) {
+    const text = node.data;
+    if (!text.includes("@")) continue;
+    if (node.parentElement?.closest("pre, code, a, .katex, button")) continue;
+
+    const fragment = document.createDocumentFragment();
+    let cursor = 0;
+    let found = false;
+    token.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = token.exec(text)) !== null) {
+      // Only a token that opens the line or follows whitespace is a mention.
+      if (match.index > 0 && !/\s/.test(text[match.index - 1])) continue;
+      found = true;
+      if (match.index > cursor) {
+        fragment.appendChild(document.createTextNode(text.slice(cursor, match.index)));
+      }
+      const span = document.createElement("span");
+      span.className = "file-mention-token";
+      span.textContent = match[0];
+      fragment.appendChild(span);
+      cursor = match.index + match[0].length;
+    }
+    if (!found) continue;
+    if (cursor < text.length) {
+      fragment.appendChild(document.createTextNode(text.slice(cursor)));
+    }
+    node.replaceWith(fragment);
+  }
+}
+
 function extractEmbeddedThoughtProcess(content: string): {
   reasoningContent: string;
   mainContent: string;
@@ -417,12 +465,17 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
 
   // Display text: collapse multimodal parts to their textual portion.
   const textContent = contentToText(message.content);
-  const attachmentNames =
+  // `@file` mentions carry their own accent-highlighted token in the body (see
+  // `highlightFileMentions`), so only attachments the text does not reference —
+  // legacy picker uploads — still need the compact chip list. Matching on the
+  // path alone keeps a clamped range (`#5-999` → `#5-7`) from re-adding a chip.
+  const attachmentNames = (
     isUser && message.attachments
       ? message.attachments.map((a) => a.name)
       : isUser
         ? extractAttachmentNames(textContent)
-        : [];
+        : []
+  ).filter((name) => !textContent.includes(`@${name.split("#")[0]}`));
   const displayContent = isUser
     ? textContent.replace(/<details><summary>Attached File:[^<]*<\/summary>[\s\S]*?<\/details>/g, "").trim()
     : textContent;
@@ -492,6 +545,8 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
     if (renderedHtmlRef.current !== renderedMainContent) {
       el.innerHTML = renderedMainContent;
       renderedHtmlRef.current = renderedMainContent;
+      // The user's body never changes, so this runs once per turn.
+      if (isUser) highlightFileMentions(el);
     }
 
     // Pen: visible for the whole live turn, pinned to the typewriter's tail.
