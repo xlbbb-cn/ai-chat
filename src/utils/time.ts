@@ -13,3 +13,17 @@ export function formatCountdown(ms: number): string {
     ? `${hours}:${pad(minutes)}:${pad(seconds)}`
     : `${pad(minutes)}:${pad(seconds)}`;
 }
+
+/**
+ * Uptime / elapsed label: `75` → `1m 15s`, `3700` → `1h 1m`. Kept short so a
+ * monitor row stays on one line even next to a process id and a state.
+ */
+export function formatUptime(totalSeconds: number): string {
+  if (totalSeconds >= 3600) {
+    return `${Math.floor(totalSeconds / 3600)}h ${Math.floor((totalSeconds % 3600) / 60)}m`;
+  }
+  if (totalSeconds >= 60) {
+    return `${Math.floor(totalSeconds / 60)}m ${totalSeconds % 60}s`;
+  }
+  return `${Math.max(0, Math.floor(totalSeconds))}s`;
+}

@@ -1,5 +1,6 @@
-import type { Message, MessageContent } from "../types";
+import type { BackgroundTaskState, Message, MessageContent } from "../types";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { BackgroundTaskGroup } from "./BackgroundTaskGroup";
 import { ToolCallGroup } from "./ToolCallGroup";
 import { TodoList } from "./TodoList";
 import MarkdownIt from "markdown-it";
@@ -238,6 +239,12 @@ interface Props {
   onConfirm?: (requestId: string, allowed: boolean) => void;
   /** Stop a running background tool task (its process tree is terminated). */
   onCancelBackground?: (taskId: string) => void;
+  /**
+   * Live background work for this turn. Only the newest assistant message gets
+   * it, so the group is drawn once — between the todo list and the body.
+   */
+  backgroundTasks?: BackgroundTaskState[];
+  backgroundWaiting?: number;
   /** Resume a partial reply that ended with an error. */
   onContinue?: () => void;
 }
@@ -457,7 +464,7 @@ function writingTailHost(content: HTMLElement): HTMLElement {
   return host;
 }
 
-export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onFork, dbId, onConfirm, onCancelBackground, onContinue }: Props) {
+export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onFork, dbId, onConfirm, onCancelBackground, backgroundTasks, backgroundWaiting, onContinue }: Props) {
   const { t } = useI18n();
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
@@ -677,6 +684,13 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
         )}
         {isAssistant && <ToolCallGroup message={message} onConfirm={onConfirm} onCancelBackground={onCancelBackground} />}
         {isAssistant && <TodoList />}
+        {isAssistant && backgroundTasks !== undefined && (
+          <BackgroundTaskGroup
+            tasks={backgroundTasks}
+            waiting={backgroundWaiting ?? 0}
+            onCancelTask={onCancelBackground}
+          />
+        )}
         <div
           className="message-content"
           ref={contentRef}

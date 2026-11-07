@@ -57,7 +57,6 @@ import {
   faRobot,
   faRotateRight,
   faScrewdriverWrench,
-  faSpinner,
   faStopwatch,
   faTriangleExclamation,
   faWandMagicSparkles,
@@ -3131,6 +3130,16 @@ export default function App() {
                 dbId={m.dbId}
                 onConfirm={respondToolCallConfirm}
                 onCancelBackground={handleCancelBackgroundTask}
+                backgroundTasks={
+                  m.role === "assistant" && m.id === messages[messages.length - 1]?.id
+                    ? backgroundTasks
+                    : undefined
+                }
+                backgroundWaiting={
+                  m.role === "assistant" && m.id === messages[messages.length - 1]?.id
+                    ? backgroundWaiting
+                    : undefined
+                }
                 onContinue={
                   !streaming && m.role === "assistant" && m.id === messages[messages.length - 1]?.id
                     ? continueUnfinishedReply
@@ -3180,38 +3189,6 @@ export default function App() {
                     </div>
                   );
                 })}
-              </div>
-            </div>
-          )}
-          {(backgroundTasks.some((task) => task.status === "running") ||
-            backgroundWaiting > 0) && (
-            <div className="timer-bar" role="status" aria-live="polite">
-              <span className="timer-bar-title">
-                <FontAwesomeIcon icon={faSpinner} spin />
-                {backgroundWaiting > 0
-                  ? t("app.background.waiting", { count: backgroundWaiting })
-                  : t("app.background.title")}
-              </span>
-              <div className="timer-bar-chips">
-                {backgroundTasks
-                  .filter((task) => task.status === "running")
-                  .map((task) => (
-                    <div key={task.id} className="timer-chip" title={task.label}>
-                      <span className="timer-chip-label">{task.label}</span>
-                      <span className="timer-chip-countdown">
-                        {formatCountdown(timerTick - task.started_at_ms)}
-                      </span>
-                      <button
-                        type="button"
-                        className="timer-chip-cancel"
-                        title={t("app.background.cancel")}
-                        aria-label={t("app.background.cancel")}
-                        onClick={() => void handleCancelBackgroundTask(task.id)}
-                      >
-                        <FontAwesomeIcon icon={faXmark} />
-                      </button>
-                    </div>
-                  ))}
               </div>
             </div>
           )}

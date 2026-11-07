@@ -1,0 +1,233 @@
+/* Background work group: the one place serve processes and background tool
+   tasks are listed. Same card language as `.tool-call-group` — an ash block
+   with a clickable summary row — so the transcript keeps one visual rhythm. */
+.background-group {
+    align-self: flex-start;
+    width: 100%;
+    min-width: 200px;
+    border-radius: 4px;
+    background: var(--ts-ash, var(--c-reason));
+    overflow: hidden;
+}
+
+.background-group-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 6px 10px;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    user-select: none;
+}
+
+.background-group-header:hover {
+    background: var(--c-hover);
+}
+
+.background-group-header[aria-expanded="true"] {
+    border-bottom: 1px solid var(--ts-cloud, var(--c-border));
+}
+
+/* Status dot — the sanctioned dot indicator. The group is only ever mounted
+   while something runs, so the dot is always the live (breathing) one. */
+.background-group-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--c-success);
+    animation: background-group-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes background-group-pulse {
+    0%,
+    100% {
+        opacity: 0.4;
+    }
+    50% {
+        opacity: 1;
+    }
+}
+
+.background-group-title {
+    flex: 1;
+    min-width: 0;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--ts-carbon, var(--c-text));
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.background-group-badge {
+    flex-shrink: 0;
+    font-size: 11px;
+    color: var(--ts-pewter, var(--c-muted));
+    border: 1px solid var(--ts-cloud, var(--c-border));
+    border-radius: 4px;
+    padding: 2px 8px;
+    white-space: nowrap;
+}
+
+/* A round blocked on a background result is the attention state of the two
+   badges — semantic warning, not the view's accent (DESIGN.md: the accent is
+   reserved for the primary action). */
+.background-group-badge.waiting {
+    color: var(--c-warning);
+    border-color: var(--c-warning);
+}
+
+.background-group-chevron {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    font-size: 11px;
+    color: var(--ts-pewter, var(--c-muted));
+}
+
+.background-group-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 6px 10px 8px;
+}
+
+.background-group-section-title {
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ts-pewter, var(--c-muted));
+    margin-bottom: 4px;
+}
+
+.background-group-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    /* Live output must never push the transcript away. */
+    max-height: min(40vh, 340px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.background-group-hint {
+    font-size: 12px;
+    color: var(--ts-pewter, var(--c-muted));
+    line-height: 1.5;
+}
+
+.background-entry {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px 8px;
+    border: 1px solid var(--c-border-i);
+    border-radius: 4px;
+    background: var(--c-surface);
+}
+
+.background-entry-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.background-entry-name {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+    color: var(--c-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.background-entry-meta {
+    flex-shrink: 0;
+    font-size: 12px;
+    color: var(--c-muted);
+    white-space: nowrap;
+}
+
+.background-entry-icon {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    font-size: 11px;
+    color: var(--c-muted);
+}
+
+.background-entry-icon.running {
+    color: var(--c-accent-text);
+}
+
+.background-serve-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--c-success);
+}
+
+.background-entry-action {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 4px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--c-muted);
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.background-entry-action:hover {
+    background: var(--c-hover);
+    color: var(--c-text);
+}
+
+.background-entry-action:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.background-entry-code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--c-body);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 3.9em;
+    overflow: hidden;
+}
+
+.background-entry-output,
+.background-entry-preview {
+    margin: 0;
+    padding: 4px 6px;
+    border-radius: 4px;
+    background: var(--c-surface-2);
+    color: var(--c-muted);
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 5.5em;
+    overflow: hidden;
+}
+
+.background-entry-output {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
