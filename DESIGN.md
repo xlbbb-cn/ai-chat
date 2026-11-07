@@ -337,6 +337,37 @@ never restate the frame.
 - The `@` picker materialises attachments on send; the `/` picker leaves a plain
   `/skill-name` token in the body for the model to resolve with `use_skill`.
 
+#### Chat notices (warning / error)
+
+Warnings and errors never enter the transcript. A bar inside the message flow
+pushed the conversation around as it appeared and then stayed on screen until the
+next request; they now float over the chat window instead. `components/ChatNotice.tsx`
+renders the `.chat-notice` rules from `src/App.css` inside `.chat-notices` — a
+zero-height anchor strip in `App.tsx` directly above the transcript (below the
+toolbar and its optional bars), so a notice needs no measured offset and
+reserves no space.
+
+- **Placement:** absolute, `top: 8px; left: 12px`, `width: min(420px, calc(100% - 24px))`
+  — the chat window's top-left corner, never over the toolbar's controls.
+- **Surface:** `--c-surface` + 1px `--c-border-i` + 4px radius, **no shadow**, with
+  a 2px semantic rule on the left (`--c-danger` for errors, `--c-warning` for
+  warnings) and the glyph in the same colour. Body is `--c-body` 13px / 1.55.
+- **One dismiss target:** `.chat-notice-body` (glyph + text) is the `<button>` —
+  click, `Enter` or `Space` closes the notice. Long text clamps to three lines
+  with an ellipsis; the full message rides along as the accessible name and in
+  `title`.
+- **Timing:** leaves on click and on its own after **5 s** — `opacity` → 0 on
+  `--t-dur` / `--t-ease`, then unmounts. One notice at a time; a new one replaces
+  the old and restarts the dwell. `prefers-reduced-motion` collapses the fade to
+  a single frame, it does not remove the disappearance.
+- **At most one action**, as a compact `.inline-edit-btn` at the end of the bar
+  (today: "Continue" for a turn that died half-way). A notice that carries an
+  action **does not** fade on its own — a button disappearing from under the
+  pointer that is reaching for it is worse than a bar that waits to be read.
+- Nothing about a failure is rendered in the transcript: no error row, no
+  failure bubble. The turn stays on disk with its `status: "error"` for history
+  and for the retry path, but the user-facing report is the notice alone.
+
 ### Chat transcript
 
 This is the one place with a deliberate asymmetry:
@@ -348,6 +379,12 @@ This is the one place with a deliberate asymmetry:
   `padding: 10px 12px`, right-aligned, `max-width: 80%`.
 - Reasoning, tool-call groups, code blocks and tables use `--c-surface-2` with
   4px radius and `--c-border-s` internals.
+- **Mid-turn injections fold at three lines.** What the user pushed into a
+  running turn renders under the reply (`.message-injection`); anything past
+  three lines is clamped with a `Show more` / `Show less` action built from the
+  `.inline-edit-btn` primitive at message density (24px). The fold is *measured*
+  after paint (`scrollHeight > clientHeight`), so a note that fits never shows a
+  dead toggle.
 - Streaming states may animate a gradient sweep across a label, but must respect
   `prefers-reduced-motion`.
 
@@ -461,7 +498,7 @@ too. True modal dialogs (9999 layer) still cover the titlebar on purpose.
 
 | File | Owns |
 |---|---|
-| `src/App.css` | **All tokens**, app shell, toolbar, **titlebar / window chrome**, transcript, input row, dialogs, markdown editor, scrollbars, shared primitives |
+| `src/App.css` | **All tokens**, app shell, toolbar, **titlebar / window chrome**, transcript, **floating chat notices**, input row, dialogs, markdown editor, scrollbars, shared primitives |
 | `src/components/ChatMessage.css` | Transcript turns, reasoning, code blocks, tables (`--ts-*` are aliases of `--c-*`) |
 | `src/components/ToolCallGroup.css` | Tool-call cards and streaming states |
 | `src/components/TodoList.css` | Todo rows |

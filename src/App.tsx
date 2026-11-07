@@ -14,6 +14,12 @@ import { AgentsPanel } from "./components/AgentsPanel";
 import { MarkdownPreview } from "./components/MarkdownPreview";
 import { Portal } from "./components/Portal";
 import { TitleBar } from "./components/TitleBar";
+import { ChatNotice } from "./components/ChatNotice";
+import type {
+  ChatNoticeAction,
+  ChatNoticeState,
+  ChatNoticeTone,
+} from "./components/ChatNotice";
 import { UpdatePanel } from "./components/UpdatePanel";
 import { FileMentionPopup } from "./components/FileMentionPopup";
 import { SlashMentionPopup } from "./components/SlashMentionPopup";
@@ -203,6 +209,23 @@ function isInterruptedAssistant(m: Message): boolean {
   );
 }
 
+/**
+ * The action a failed turn offers in its notice. Resuming only makes sense when
+ * the turn left something usable behind — an immediate rate limit with no
+ * tokens has nothing to continue.
+ */
+function resumeAction(
+  label: string,
+  content: string,
+  reasoning: string,
+  toolCallCount: number,
+  run: () => void,
+): ChatNoticeAction | undefined {
+  const resumable =
+    content.trim() !== "" || reasoning.trim() !== "" || toolCallCount > 0;
+  return resumable ? { label, run } : undefined;
+}
+
 interface AgentStatus {
   status: "idle" | "running" | "done" | "error";
   description?: string;
@@ -277,7 +300,35 @@ export default function App() {
   const [skillStatusLoaded, setSkillStatusLoaded] = useState(false);
   /** Bumped after a workspace switch so HistoryPanel re-reads its DB. */
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
-  const [error, setError] = useState<string | null>(null);
+  // Warnings and errors are transient notices, never transcript rows — see
+  // `components/ChatNotice.tsx`. `setError` keeps its original call shape
+  // (`setError(null)` clears) and takes an optional tone and action — the
+  // failed turn's "continue" is only reachable through the notice, now that
+  // the transcript carries no failure row. Every call bumps a nonce so a
+  // repeated message restarts the dwell instead of reading as "no change" and
+  // leaving a half-faded bar on screen.
+  const [notice, setNotice] = useState<ChatNoticeState | null>(null);
+  const noticeNonceRef = useRef(0);
+  const setError = useCallback(
+    (
+      message: string | null,
+      tone: ChatNoticeTone = "error",
+      action?: ChatNoticeAction,
+    ) => {
+      if (!message) {
+        setNotice(null);
+        return;
+      }
+      noticeNonceRef.current += 1;
+      setNotice({ text: message, tone, nonce: noticeNonceRef.current, action });
+    },
+    [],
+  );
+  const dismissNotice = useCallback(() => setNotice(null), []);
+  // A failed turn reports itself from inside `sendMessage`, which is defined
+  // before the resume action exists; the notice reads the action through this
+  // ref so a click always runs the current one instead of a stale render's.
+  const continueUnfinishedRef = useRef<() => void>(() => {});
   // Newest published release; shared by the startup banner and the update dialog.
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [updatePanelOpen, setUpdatePanelOpen] = useState(false);
@@ -1776,8 +1827,8 @@ export default function App() {
     setError(null);
     if (mentionResult.problems.length > 0) {
       // Unresolvable mentions never block the message: the text is still sent,
-      // the banner says which references were not attached.
-      setError(mentionResult.problems.join("\n"));
+      // the notice says which references were not attached.
+      setError(mentionResult.problems.join("\n"), "warning");
     }
     // A new request starts with no token figures yet — the usage bar above the
     // input must sweep until this request's `chat-usage` arrives.
@@ -1914,7 +1965,6 @@ export default function App() {
         cleanupRef.current = null;
       },
       onError(err) {
-        setError(err);
         // A step that was still running when the turn failed never completed:
         // settle it so the group does not keep a spinner spinning forever.
         const settledToolCalls = currentToolCallsRef.current.map((e) => {
@@ -1930,6 +1980,19 @@ export default function App() {
           }
           return { ...e, status: "error" as const, confirm: undefined };
         });
+        // The transcript holds no failure row any more, so a turn that can
+        // still be pushed forward offers "continue" from the notice.
+        setError(
+          err,
+          "error",
+          resumeAction(
+            t("chat.continue"),
+            accumulatedContent,
+            accumulatedReasoning,
+            settledToolCalls.length,
+            () => continueUnfinishedRef.current(),
+          ),
+        );
         setMessages((prev) =>
           prev
             .filter((m) => !m.id.startsWith("agent-progress-"))
@@ -1993,6 +2056,11 @@ export default function App() {
     if (streaming) return;
     void sendMessage(t("app.continueUnfinished"));
   }, [streaming, sendMessage, t]);
+
+  // Handed to the failure notice, which is built before this callback exists.
+  useEffect(() => {
+    continueUnfinishedRef.current = continueUnfinishedReply;
+  }, [continueUnfinishedReply]);
 
   // Continue the conversation from a fired timer — or deliver an injection
   // that arrived after the turn's last request — once the chat is idle. The
@@ -2154,7 +2222,6 @@ export default function App() {
         cleanupRef.current = null;
       },
       onError(err) {
-        setError(err);
         const settledToolCalls = currentToolCallsRef.current.map((e) => {
           if (e.status !== "running") return e;
           // A task killed by a failing turn is not itself a failed task.
@@ -2168,6 +2235,20 @@ export default function App() {
           }
           return { ...e, status: "error" as const, confirm: undefined };
         });
+        // Same as the first-turn handler: the failure is reported through the
+        // notice, and the notice carries the resume action when there is
+        // anything left to resume.
+        setError(
+          err,
+          "error",
+          resumeAction(
+            t("chat.continue"),
+            accumulatedContent,
+            accumulatedReasoning,
+            settledToolCalls.length,
+            () => continueUnfinishedRef.current(),
+          ),
+        );
         setMessages((prev) =>
           prev
             .filter((m) => !m.id.startsWith("agent-progress-"))
@@ -3080,7 +3161,7 @@ export default function App() {
                 disableSessionSwitch={streaming}
                 onLoad={(sid, msgs) => {
                   if (streaming) {
-                    setError(t("app.sessionSwitchBlocked"));
+                    setError(t("app.sessionSwitchBlocked"), "warning");
                     return;
                   }
                   if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null; }
@@ -3265,6 +3346,12 @@ export default function App() {
           </div>
         )}
 
+        {/* Warnings and errors float here — top-left of the chat window,
+            between the last bar and the transcript, outside the scroll
+            container. The strip has no height, so a notice never pushes the
+            conversation around; the bars above it keep their own space. */}
+        {notice && <ChatNotice notice={notice} onDismiss={dismissNotice} />}
+
         {/* Messages */}
         <div className="messages" ref={messagesRef} onScroll={handleMessagesScroll}>
           {messages.length === 0 && (
@@ -3302,18 +3389,12 @@ export default function App() {
                     ? backgroundWaiting
                     : undefined
                 }
-                onContinue={
-                  !streaming && m.role === "assistant" && m.id === messages[messages.length - 1]?.id
-                    ? continueUnfinishedReply
-                    : undefined
-                }
                 sessionId={sessionId}
                 todoActive={m.role === "assistant" && m.id === todoMessageId}
                 skillNames={knownSkillNames}
               />
             )
           )}
-          {error && <div className="error-banner">{error}</div>}
         </div>
 
         {/* Input */}

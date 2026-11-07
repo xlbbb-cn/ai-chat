@@ -67,6 +67,7 @@ const zhCN: Messages = {
         updateAvailable: "新版本 {version} 可用 —— 当前版本 {current}。",
         viewUpdate: "查看更新",
         dismiss: "忽略",
+        noticeDismiss: "关闭提示",
 
         timers: {
             title: "定时器",
@@ -128,7 +129,6 @@ const zhCN: Messages = {
         forkFailed: "创建分支会话失败：{error}",
         markdownPathEmpty: "Markdown 文件路径为空。",
         markdownSaveFailed: "保存 Markdown 文件失败：{error}",
-        errorPrefix: "错误：",
         continueUnfinished: "继续完成上一条未完成的回复，不要重复已经生成的内容。",
 
         markdownEditorAria: "Markdown 编辑器",
@@ -198,6 +198,8 @@ const zhCN: Messages = {
         deleteTitle: "删除这条消息",
         forkTitle: "从这条消息创建分支会话",
         injected: "本轮内追加",
+        foldMore: "展开",
+        foldLess: "收起",
         continue: "继续",
     },
 

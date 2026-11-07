@@ -980,14 +980,112 @@ body {
   color: var(--c-muted);
 }
 
-.error-banner {
-  padding: 9px 12px;
-  background: var(--c-surface-2);
-  color: var(--c-body);
-  border-radius: 4px;
-  font-size: 14px;
-  align-self: stretch;
+/* Transient notices — warnings and errors float over the chat window's
+   top-left corner instead of living in the transcript (a bar inside the
+   message flow pushed the conversation around and stayed until the next
+   request). The strip is a zero-height anchor rendered directly above the
+   transcript (below the toolbar and its optional bars), so the notice needs no
+   measured offset and reserves no space.
+   Behaviour lives in `components/ChatNotice.tsx`; see DESIGN.md. */
+.chat-notices {
+  position: relative;
+  height: 0;
+  flex-shrink: 0;
+  z-index: 20;
+  /* The empty strip spans the chat width — only the bar itself is clickable. */
+  pointer-events: none;
+}
+
+.chat-notice {
+  position: absolute;
+  top: 8px;
+  left: 12px;
+  width: min(420px, calc(100% - 24px));
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--c-border-i);
   border-left: 2px solid var(--c-danger);
+  border-radius: var(--r-sm);
+  background: var(--c-surface);
+  color: var(--c-body);
+  font-size: 13px;
+  line-height: 1.55;
+  pointer-events: auto;
+  transition: background-color var(--t-dur) var(--t-ease),
+    opacity var(--t-dur) var(--t-ease);
+}
+
+.chat-notice:hover {
+  background: var(--c-surface-2);
+}
+
+/* The body is the dismiss target: one click clears the notice, and the whole
+   bar stays a single hit area whether or not it carries an action. */
+.chat-notice-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* The one action a notice may offer (currently: continue a failed turn).
+   Compounded with the primitive: `App.css` is emitted after the component
+   sheets, so a single-class override would lose the size tie. */
+.inline-edit-btn.chat-notice-action {
+  flex-shrink: 0;
+  min-height: 24px;
+  padding: 2px 10px;
+  font-size: 12px;
+}
+
+.chat-notice[data-tone="warning"] {
+  border-left-color: var(--c-warning);
+}
+
+/* Leaving: the fade runs on the shared curve, then the parent drops it. */
+.chat-notice.is-leaving {
+  opacity: 0;
+}
+
+.chat-notice-icon {
+  flex-shrink: 0;
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--c-danger);
+}
+
+.chat-notice[data-tone="warning"] .chat-notice-icon {
+  color: var(--c-warning);
+}
+
+/* Three lines, then an ellipsis. The bar is transient by design; the whole
+   message stays reachable through the title. */
+.chat-notice-text {
+  flex: 1;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-notice {
+    transition-duration: 0.01s;
+  }
 }
 
 /* Input area — frosted like the nav, separated from the transcript by one
