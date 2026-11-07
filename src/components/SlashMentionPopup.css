@@ -1,0 +1,18 @@
+/* Inline `/skill` picker for the composer (see components/SlashMentionPopup.tsx).
+
+   The surface — frame, header, rows, active state — is the `@file` popup from
+   FileMentionPopup.css, reused verbatim so both mentions look and behave
+   identically. Only the two deltas below are declared here. */
+
+/* A skill is a reference rather than an attachment, so its glyph wears the
+   accent (like a link) instead of a per-kind colour. */
+.slash-mention-icon {
+  color: var(--c-accent-text);
+}
+
+/* `@file` rows print a path right-to-left so deep paths keep their tail; a
+   skill description must read straight through. */
+.slash-mention-item .file-mention-path {
+  direction: ltr;
+  text-align: right;
+}

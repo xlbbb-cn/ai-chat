@@ -310,7 +310,32 @@ disabled row is `opacity: .55`.
 
 - Modal backdrop: `rgba(128,128,128,.65)` + `backdrop-filter: blur(8px)`.
 - Popup / dialog surface: `--c-surface` + 1px `--c-border-i` + 4px radius, **no shadow**.
+  A popup that floats *inside* the composer uses `--c-bg-secondary` instead, so it
+  separates from the frosted input bar without elevation.
 - Frosted bars: `background: var(--c-toolbar)` + `backdrop-filter: blur(20px)`.
+
+#### Composer mention popups (`@file`, `/skill`)
+
+One surface, two triggers, one behaviour. `components/FileMentionPopup.css` owns
+the frame — header, rows, active fill, empty state — and both
+`components/FileMentionPopup.tsx` and `components/SlashMentionPopup.tsx` render
+those `.file-mention-*` classes. `SlashMentionPopup.css` may only add the skill
+glyph colour (`--c-accent-text`) and the left-to-right description row; it must
+never restate the frame.
+
+- Sits `bottom: calc(100% + 6px)` inside `.input-row`, full input width,
+  `max-height: 240px` with its own scroll.
+- **Never takes focus.** A row accepts on `mousedown` + `preventDefault`, so the
+  caret stays in the textarea and the popup is drivable by keyboard alone.
+- Keyboard contract, identical for both: `↑` / `↓` move, `Enter` / `Tab` accept,
+  `Esc` dismisses. Only the active row wears the `--c-accent-soft` fill.
+- Row: 4px radius, transparent at rest, `--c-hover` on hover; name `--c-text`
+  500, meta (path or description) `--c-muted` 11px, truncated, `margin-left: auto`.
+- **At most one popup is open** — the token grammars are mutually exclusive
+  (`@` needs a word boundary and no whitespace/`/`; `/` needs a word boundary and
+  no whitespace/`@`/`#`), so no stacking rule is needed.
+- The `@` picker materialises attachments on send; the `/` picker leaves a plain
+  `/skill-name` token in the body for the model to resolve with `use_skill`.
 
 ### Chat transcript
 
@@ -440,6 +465,7 @@ too. True modal dialogs (9999 layer) still cover the titlebar on purpose.
 | `src/components/ChatMessage.css` | Transcript turns, reasoning, code blocks, tables (`--ts-*` are aliases of `--c-*`) |
 | `src/components/ToolCallGroup.css` | Tool-call cards and streaming states |
 | `src/components/TodoList.css` | Todo rows |
+| `src/components/FileMentionPopup.css` | Composer mention popup — one surface shared by the `@file` and `/skill` pickers; `SlashMentionPopup.css` only adds the glyph colour and the left-to-right description |
 | `src/components/{Skills,Mcp,Tools,Agents,History}Panel.css` | Panel-specific layout only — chrome comes from the shared primitives |
 | `src/components/SettingsPanel.css` | Settings page (`--t-*` are aliases of `--c-*`) |
 | `src/components/ModelSelect.css` | Model picker trigger + portal popup |
