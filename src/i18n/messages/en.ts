@@ -217,7 +217,6 @@ const en = {
         deleteTitle: "Delete this message",
         forkTitle: "Fork conversation from this message",
         injected: "Added mid-turn",
-        backgroundResult: "Background task result",
         continue: "Continue",
     },
 
