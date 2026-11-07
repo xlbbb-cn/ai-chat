@@ -27,6 +27,8 @@ import type {
   BackgroundTaskState,
   UpdateInfo,
   UpdateDownloadProgress,
+  WorkspaceFileEntry,
+  WorkspaceFileRange,
 } from "./types";
 
 export async function getConfig(): Promise<AppConfig> {
@@ -48,6 +50,34 @@ export async function confirmCommand(
 
 export async function getWorkspaceDir(): Promise<string> {
   return invoke("get_workspace_dir");
+}
+
+/**
+ * Files the composer's `@` mention popup can offer (hidden files and
+ * `.gitignore`d entries are already filtered out by the backend).
+ */
+export async function listWorkspaceFiles(): Promise<WorkspaceFileEntry[]> {
+  return invoke("list_workspace_files");
+}
+
+/**
+ * Read a workspace text file, optionally sliced to a 1-based line range:
+ * `startLine`/`endLine` both set → that range, `endLine` omitted → to EOF.
+ */
+export async function readWorkspaceFileRange(
+  path: string,
+  opts?: { startLine?: number; endLine?: number },
+): Promise<WorkspaceFileRange> {
+  return invoke("read_workspace_file_range", {
+    path,
+    startLine: opts?.startLine ?? null,
+    endLine: opts?.endLine ?? null,
+  });
+}
+
+/** Base64 payload of an image/binary workspace file (attached whole). */
+export async function readWorkspaceFileBytes(path: string): Promise<string> {
+  return invoke("read_workspace_file_bytes", { path });
 }
 
 export async function saveConfig(config: AppConfig): Promise<void> {

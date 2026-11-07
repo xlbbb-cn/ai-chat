@@ -25,6 +25,7 @@ mod skills;
 mod tools;
 mod update;
 mod workspace;
+mod workspace_files;
 
 use logger::{AppLogger, LoggerOutput};
 pub use tools::neo4j_db;
@@ -1487,6 +1488,9 @@ pub fn run() {
             fetch_models,
             model_metadata::fetch_model_metadata,
             get_workspace_dir,
+            workspace_files::list_workspace_files,
+            workspace_files::read_workspace_file_range,
+            workspace_files::read_workspace_file_bytes,
             save_markdown_file,
             app_open_data_dir,
             app_open_workspace_dir,

@@ -89,6 +89,15 @@ const zhCN: Messages = {
         },
 
         attachFiles: "添加附件",
+        fileMention: {
+            title: "插入文件引用",
+            hint: "↑↓ 选择 · Enter/Tab 插入 · 输入 #12-24 指定行 · Esc 关闭",
+            loading: "正在读取工作区文件…",
+            noMatches: "当前模型下没有匹配“{query}”的文件。",
+            listFailed: "无法列出工作区文件：{error}",
+            readFailed: "无法读取 {name}：{error}",
+            rangeNotSupported: "{name} 不支持行区间，已附加整个文件。",
+        },
         attachmentUnsupported: "已跳过 {names}：“{model}” 无法读取该文件类型。",
         inputPlaceholder: "输入消息…（Enter 发送，Shift+Enter 换行）",
         injections: {

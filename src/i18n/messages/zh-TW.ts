@@ -89,6 +89,15 @@ const zhTW: Messages = {
         },
 
         attachFiles: "附加檔案",
+        fileMention: {
+            title: "插入檔案參照",
+            hint: "↑↓ 選擇 · Enter/Tab 插入 · 輸入 #12-24 指定行 · Esc 關閉",
+            loading: "正在讀取工作區檔案…",
+            noMatches: "目前模型下沒有符合“{query}”的檔案。",
+            listFailed: "無法列出工作區檔案：{error}",
+            readFailed: "無法讀取 {name}：{error}",
+            rangeNotSupported: "{name} 不支援行區間，已附加整個檔案。",
+        },
         attachmentUnsupported: "已跳過 {names}：「{model}」無法讀取該檔案類型。",
         inputPlaceholder: "輸入訊息…（Enter 送出，Shift+Enter 換行）",
         injections: {
