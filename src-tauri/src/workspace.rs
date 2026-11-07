@@ -13,6 +13,7 @@
 //!     todos/<session>/...      todos tool
 //!     skills/<name>/skill.md   workspace skills (the only skills root)
 //!     scripts/                 run_cmd script library (on the child PATH)
+//!     tmp/<batch-id>/...       sub-agent deliverable exchange area
 //!     skills.status            per-workspace skill enablement + metadata
 //! ```
 //!
@@ -63,6 +64,15 @@ pub fn scripts_root(workspace_dir: &Path) -> PathBuf {
     data_root(workspace_dir).join("scripts")
 }
 
+/// Sub-agent deliverable exchange root (`<workspace>/.data/tmp`).
+///
+/// Every mission (or direct `call_subagent` call) gets one batch directory
+/// below it; see `agents::exchange`. The area is permanent and the user
+/// cleans it manually, so it is deliberately not pruned at startup.
+pub fn tmp_root(workspace_dir: &Path) -> PathBuf {
+    data_root(workspace_dir).join("tmp")
+}
+
 /// Workspace skill status file (`<workspace>/.data/skills.status`).
 pub fn skills_status_path(workspace_dir: &Path) -> PathBuf {
     data_root(workspace_dir).join("skills.status")
@@ -73,12 +83,16 @@ pub fn skills_status_path(workspace_dir: &Path) -> PathBuf {
 /// Called at startup and whenever the active workspace changes. Individual
 /// sub-directories (`memory`, `todos`, `skills`) are still created on demand
 /// by the feature that owns them, except `memory`, which the memory tool and
-/// the automatic conclusion recorder create before writing, and `scripts`,
-/// which is created here so the script library exists from the first launch.
+/// the automatic conclusion recorder create before writing, and `scripts` /
+/// `tmp`, which are created here so the script library and the deliverable
+/// exchange root exist from the first launch.
 pub fn ensure_data_layout(workspace_dir: &Path) -> std::io::Result<()> {
     let root = data_root(workspace_dir);
     std::fs::create_dir_all(&root)?;
     std::fs::create_dir_all(scripts_root(workspace_dir))?;
+    // The exchange root exists from the first launch so the main agent can
+    // always open/inspect it; batch directories are created on demand.
+    std::fs::create_dir_all(tmp_root(workspace_dir))?;
     mark_hidden(&root);
     Ok(())
 }
@@ -86,9 +100,7 @@ pub fn ensure_data_layout(workspace_dir: &Path) -> std::io::Result<()> {
 #[cfg(windows)]
 fn mark_hidden(path: &Path) {
     use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::{
-        SetFileAttributesW, FILE_ATTRIBUTE_HIDDEN,
-    };
+    use windows_sys::Win32::Storage::FileSystem::{SetFileAttributesW, FILE_ATTRIBUTE_HIDDEN};
 
     let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
     wide.push(0);
@@ -117,6 +129,7 @@ mod tests {
         assert_eq!(todos_root(workspace), data.join("todos"));
         assert_eq!(skills_root(workspace), data.join("skills"));
         assert_eq!(scripts_root(workspace), data.join("scripts"));
+        assert_eq!(tmp_root(workspace), data.join("tmp"));
         assert_eq!(skills_status_path(workspace), data.join("skills.status"));
     }
 
@@ -124,11 +137,17 @@ mod tests {
     fn there_is_exactly_one_skills_root_per_workspace() {
         let workspace = Path::new("/workspace");
         // The one and only skills directory: `<workspace>/.data/skills`.
-        assert_eq!(skills_root(workspace), workspace.join(".data").join("skills"));
+        assert_eq!(
+            skills_root(workspace),
+            workspace.join(".data").join("skills")
+        );
         // It is not mirrored anywhere else in the workspace layout.
         assert_ne!(skills_root(workspace), memory_root(workspace));
         assert_ne!(skills_root(workspace), todos_root(workspace));
         // The skill status file lives next to it, not inside it.
-        assert_eq!(skills_status_path(workspace), workspace.join(".data").join("skills.status"));
+        assert_eq!(
+            skills_status_path(workspace),
+            workspace.join(".data").join("skills.status")
+        );
     }
 }

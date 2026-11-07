@@ -36,10 +36,11 @@ interface ToolOption {
 }
 
 /**
- * Tools an `llm` sub-agent may be granted. Sub-agents are execution workers,
- * so the selection is limited to the local execution tools; memory, todos and
- * the knowledge graph stay with the main agent (the backend still understands
- * those ids for backwards compatibility, but they are not offered here).
+ * Tools an `llm` sub-agent may be granted. `memory` is offered by default so
+ * every sub-agent reads and writes the same session/user/repo store; the user
+ * can still uncheck it per agent. `todos` and the knowledge graph stay with the
+ * main agent (the backend still understands those ids for backwards
+ * compatibility, but they are not offered here).
  */
 const KNOWN_TOOLS: ToolOption[] = [
   {
@@ -56,6 +57,11 @@ const KNOWN_TOOLS: ToolOption[] = [
     id: "run_shell",
     label: "run_shell",
     hintKey: "agents.toolHints.runShell",
+  },
+  {
+    id: "memory",
+    label: "memory",
+    hintKey: "agents.toolHints.memory",
   },
 ];
 
@@ -116,7 +122,7 @@ function emptyCloudSettings(): CloudAgentSettings {
 }
 
 /** Tools a newly created `llm` agent starts with (matches discovered agents). */
-const DEFAULT_LLM_TOOLS = ["file_actions"];
+const DEFAULT_LLM_TOOLS = ["file_actions", "memory"];
 
 const emptyAgent = (agentType: AgentType = "llm"): SubAgent => ({
   id: "",

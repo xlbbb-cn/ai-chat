@@ -18,11 +18,12 @@ use crate::{
         extract_upstream_error_message, has_authorization_header, resolve_reasoning_effort,
         sanitize_tool_pairs, stream_llm_request, upstream_request_headers, StreamOptions,
     },
-    tools, AppConfig, AppState, mcp,
+    mcp, tools, AppConfig, AppState,
 };
 
 pub mod cli;
 pub mod cloud;
+pub mod exchange;
 pub mod files;
 pub mod mbus;
 pub mod supervisor;
@@ -315,8 +316,8 @@ pub struct LegacyCliAgent {
 pub struct AgentsConfig {
     /// Schema version. Version 2 moved `llm` agent definitions to
     /// `<app_data>/agents/**/*.md`; v3 turned smart selection on by default;
-    /// v4 made `max_iterations` unlimited by default. This file is
-    /// configuration only.
+    /// v4 made `max_iterations` unlimited by default; v5 enabled the shared
+    /// `memory` tool for every `llm` sub-agent. This file is configuration only.
     #[serde(default = "default_config_version")]
     pub version: u32,
     #[serde(default)]
@@ -330,7 +331,7 @@ pub struct AgentsConfig {
 }
 
 fn default_config_version() -> u32 {
-    4
+    5
 }
 
 impl Default for AgentsConfig {
@@ -369,12 +370,31 @@ pub fn normalize_config(config: &mut AgentsConfig) {
         config.version = 4;
     }
 
+    // v5 gives every `llm` sub-agent the shared `memory` tool by default.
+    // Before v5 the panel did not offer it, so no agent could have disabled it
+    // deliberately; after the migration the user can uncheck it and the choice
+    // sticks (the version guard runs once).
+    if config.version < 5 {
+        for agent in &mut config.agents {
+            if normalize_agent_type(&agent.agent_type) == AGENT_TYPE_LLM
+                && !agent.allowed_tools.iter().any(|tool| tool == "memory")
+            {
+                agent.allowed_tools.push("memory".to_string());
+            }
+        }
+        config.version = 5;
+    }
+
     for agent in &mut config.agents {
         agent.agent_type = normalize_agent_type(&agent.agent_type);
         // `max_tokens` was the pre-2.8 name of the per-agent output cap. The
         // panel wrote it but the backend only reads `max_complete_tokens`, so
         // migrate the old value once and clear the dead field. `0` means unset.
-        if agent.max_complete_tokens.filter(|limit| *limit > 0).is_none() {
+        if agent
+            .max_complete_tokens
+            .filter(|limit| *limit > 0)
+            .is_none()
+        {
             agent.max_complete_tokens = agent.max_tokens.take().filter(|limit| *limit > 0);
         }
         agent.max_tokens = None;
@@ -566,6 +586,19 @@ struct TaskPlan {
     tasks: Vec<Task>,
     #[serde(default)]
     execution_mode: String,
+    /// Planner's own answer to "does this request need sub-agents at all?".
+    /// `None` keeps the old behaviour (delegate when tasks are present).
+    #[serde(default)]
+    delegate: Option<bool>,
+    #[serde(default)]
+    why: String,
+}
+
+/// The planner's first decision: answer directly, or execute a mission.
+#[derive(Debug)]
+enum PlanDecision {
+    Direct { why: String },
+    Mission(TaskPlan),
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1326,7 +1359,10 @@ pub(crate) fn save_agents_config_file(path: &Path, config: &AgentsConfig) -> Res
     // the resolved view, which is why this is done here and not in a serde
     // `skip_serializing_if` (that would omit `description: ""` from the panel
     // payloads too).
-    if let Some(agents) = json.get_mut("agents").and_then(|value| value.as_array_mut()) {
+    if let Some(agents) = json
+        .get_mut("agents")
+        .and_then(|value| value.as_array_mut())
+    {
         for agent in agents {
             let Some(object) = agent.as_object_mut() else {
                 continue;
@@ -1405,7 +1441,7 @@ pub fn save_sub_agent(state: State<'_, AppState>, agent: SubAgent) -> Result<Sub
             let existing_type = normalize_agent_type(&existing.agent_type);
             if existing_type == AGENT_TYPE_LLM && existing_type != a.agent_type {
                 return Err(
-                    "The agent type cannot be changed after the agent is created.".to_string()
+                    "The agent type cannot be changed after the agent is created.".to_string(),
                 );
             }
         }
@@ -1423,11 +1459,7 @@ pub fn save_sub_agent(state: State<'_, AppState>, agent: SubAgent) -> Result<Sub
             // the config so a stale client cannot strand the old markdown file.
             let relative = match existing_file {
                 Some(value) => files::normalize_relative(&value)?,
-                None => match a
-                    .file
-                    .clone()
-                    .filter(|value| !value.trim().is_empty())
-                {
+                None => match a.file.clone().filter(|value| !value.trim().is_empty()) {
                     Some(value) => files::normalize_relative(&value)?,
                     None => files::unique_agent_path(&root, files::CUSTOM_CATEGORY, &a.name),
                 },
@@ -1443,7 +1475,10 @@ pub fn save_sub_agent(state: State<'_, AppState>, agent: SubAgent) -> Result<Sub
                 } else {
                     other.name.as_str()
                 };
-                return Err(format!("Another agent ('{}') already uses {}.", label, relative));
+                return Err(format!(
+                    "Another agent ('{}') already uses {}.",
+                    label, relative
+                ));
             }
 
             let definition = files::AgentDefinition {
@@ -1988,12 +2023,32 @@ fn find_cycle_edge(tasks: &[Task]) -> Option<(String, String)> {
 /// duplicate task ids and cyclic dependencies. None of those should waste the
 /// turn: the plan is extracted, repaired and sanitized here, and every fix is
 /// reported back as an issue for the log. Only an unusable answer fails.
-fn parse_task_plan(raw: &str, roster: &[String]) -> Result<(TaskPlan, Vec<String>), String> {
+fn parse_task_plan(raw: &str, roster: &[String]) -> Result<(PlanDecision, Vec<String>), String> {
     use std::collections::HashSet;
 
-    let json =
-        extract_json_object(raw).ok_or_else(|| "no JSON object in the planner output".to_string())?;
+    let json = extract_json_object(raw)
+        .ok_or_else(|| "no JSON object in the planner output".to_string())?;
     let plan: TaskPlan = serde_json::from_str(&repair_json(json)).map_err(|e| e.to_string())?;
+
+    // The planner is allowed to look at the request and decline delegation
+    // before planning anything. A missing `delegate` keeps the old contract:
+    // tasks mean delegation.
+    let delegate = plan.delegate.unwrap_or(!plan.tasks.is_empty());
+    if !delegate {
+        let mut issues: Vec<String> = Vec::new();
+        if !plan.tasks.is_empty() {
+            issues.push(format!(
+                "planner returned delegate=false with {} task(s); ignored them",
+                plan.tasks.len()
+            ));
+        }
+        return Ok((
+            PlanDecision::Direct {
+                why: plan.why.trim().to_string(),
+            },
+            issues,
+        ));
+    }
 
     let mut issues: Vec<String> = Vec::new();
     let mut tasks: Vec<Task> = Vec::new();
@@ -2032,9 +2087,7 @@ fn parse_task_plan(raw: &str, roster: &[String]) -> Result<(TaskPlan, Vec<String
             unique = format!("{base}-{suffix}");
         }
         if unique != base {
-            issues.push(format!(
-                "renamed duplicate task id '{base}' to '{unique}'"
-            ));
+            issues.push(format!("renamed duplicate task id '{base}' to '{unique}'"));
         }
         used_ids.insert(unique.clone());
         task.id = unique;
@@ -2060,9 +2113,8 @@ fn parse_task_plan(raw: &str, roster: &[String]) -> Result<(TaskPlan, Vec<String
     for task in &mut tasks {
         let before = task.dependencies.len();
         let mut seen = HashSet::new();
-        task.dependencies.retain(|dep| {
-            dep != &task.id && known.contains(dep) && seen.insert(dep.clone())
-        });
+        task.dependencies
+            .retain(|dep| dep != &task.id && known.contains(dep) && seen.insert(dep.clone()));
         if task.dependencies.len() != before {
             issues.push(format!(
                 "dropped {} invalid dependency(ies) from task '{}'",
@@ -2098,10 +2150,12 @@ fn parse_task_plan(raw: &str, roster: &[String]) -> Result<(TaskPlan, Vec<String
     }
 
     Ok((
-        TaskPlan {
+        PlanDecision::Mission(TaskPlan {
             tasks,
             execution_mode: plan.execution_mode,
-        },
+            delegate: Some(true),
+            why: plan.why,
+        }),
         issues,
     ))
 }
@@ -2186,14 +2240,6 @@ pub async fn orchestrate(
         (enabled.clone(), None)
     };
 
-    // A single-agent roster is not a decision worth a UI chip; the selection
-    // still narrows the planner (it is already the whole roster).
-    if let Some(selection) = &selection {
-        if enabled.len() > 1 {
-            emit_agent_selection(app, selection);
-        }
-    }
-
     // The selector can decide the request needs no sub-agents at all. Skipping
     // planning here saves a full LLM round trip and keeps simple questions on
     // the direct-answer path.
@@ -2213,7 +2259,11 @@ pub async fn orchestrate(
     // The planner needs the workspace root to name task directories: the main
     // agent decides *where* each delegated task runs, not the agent definition.
     let workspace_dir = state.workspace_dir.lock().unwrap().clone();
-    let plan = plan_tasks(
+    // The batch root is reserved before planning so the planner can reference
+    // the deliverable exchange area in task context. The directory itself is
+    // created only when the planner actually delegates.
+    let exchange_root = exchange::ExchangeArea::new_batch_root(&workspace_dir);
+    let decision = plan_tasks(
         app,
         &client,
         &url,
@@ -2223,12 +2273,71 @@ pub async fn orchestrate(
         messages,
         &working_agents,
         &workspace_dir,
+        &exchange_root,
     )
     .await?;
 
     if cancelled.load(Ordering::SeqCst) {
         return Err("stopped by the user".to_string());
     }
+
+    // The planner has the final say: a request that one direct answer can
+    // handle exits here, before a mission, bus or supervisor is created.
+    let plan = match decision {
+        PlanDecision::Direct { why } => {
+            let why = if why.trim().is_empty() {
+                "the planner decided this request needs no sub-agents".to_string()
+            } else {
+                why
+            };
+            log_agent_event(app, "INFO", format!("planner declined delegation: {why}"));
+            let declined = AgentSelection {
+                delegate: false,
+                confidence: selection
+                    .as_ref()
+                    .map(|selection| selection.confidence)
+                    .unwrap_or(1.0),
+                choices: Vec::new(),
+            };
+            if enabled.len() > 1 {
+                emit_agent_selection(app, &declined);
+            }
+            return Ok(OrchestrationOutcome {
+                report: None,
+                selection: Some(declined),
+            });
+        }
+        PlanDecision::Mission(plan) => plan,
+    };
+
+    // Emit the selector chip only after the planner confirmed the mission, so a
+    // declined plan never leaves a stale "agents selected" row in the UI.
+    if let Some(selection) = &selection {
+        if enabled.len() > 1 {
+            emit_agent_selection(app, selection);
+        }
+    }
+
+    let exchange_area = match exchange::ExchangeArea::create_at(
+        exchange_root,
+        &workspace_dir,
+        &plan
+            .tasks
+            .iter()
+            .map(|task| task.id.clone())
+            .collect::<Vec<_>>(),
+    ) {
+        Ok(area) => Some(area),
+        Err(err) => {
+            log_agent_event(
+                app,
+                "WARN",
+                format!("deliverable exchange area unavailable: {err}"),
+            );
+            None
+        }
+    };
+
     // Step 3: Create the mission bus for this batch. A batch with no in-app LLM
     // agent has no peer that can call mbus tools, so it keeps the old behaviour.
     let mission_bus: Option<Arc<mbus::MissionBus>> = if orchestration.mbus_enabled {
@@ -2288,6 +2397,8 @@ pub async fn orchestrate(
     let executor_client = client.clone();
     let executor_url = url.clone();
     let executor_cancelled = cancelled.clone();
+    let executor_workspace = workspace_dir.clone();
+    let executor_exchange = exchange_area.clone();
     let executor = async move {
         let results = execute_tasks(
             app,
@@ -2297,7 +2408,8 @@ pub async fn orchestrate(
             session_id,
             &working_agents,
             plan.tasks,
-            workspace_dir,
+            executor_workspace,
+            executor_exchange,
             skill_access_root,
             use_parallel,
             orchestration.max_concurrent,
@@ -2349,7 +2461,10 @@ pub async fn orchestrate(
         json!({ "task_count": results.len() }),
     );
     Ok(OrchestrationOutcome {
-        report: Some(build_mission_results_block(&results)),
+        report: Some(build_mission_results_block(
+            &results,
+            exchange_area.as_ref(),
+        )),
         selection,
     })
 }
@@ -2463,11 +2578,7 @@ async fn select_agents(
     // An attachment-only turn has no text for the selector to judge. Narrowing
     // on an empty query would wrongly decline delegation, so skip the call.
     if user_query.trim().is_empty() {
-        return Ok(full_roster_selection(
-            existing,
-            1.0,
-            "no text to analyse",
-        ));
+        return Ok(full_roster_selection(existing, 1.0, "no text to analyse"));
     }
 
     let system = format!(
@@ -2499,8 +2610,12 @@ async fn select_agents(
     )
     .await?;
 
-    let json = extract_json_object(&raw)
-        .ok_or_else(|| format!("no JSON in the selection output: {}", preview_text(&raw, 300)))?;
+    let json = extract_json_object(&raw).ok_or_else(|| {
+        format!(
+            "no JSON in the selection output: {}",
+            preview_text(&raw, 300)
+        )
+    })?;
     let parsed: SelectionResponse = serde_json::from_str(&repair_json(json))
         .map_err(|e| format!("selection parse error: {e}"))?;
     // A model that lists agents but forgets `delegate` still meant to delegate;
@@ -2572,7 +2687,11 @@ async fn select_agents(
             "WARN",
             format!("agent selection {reason}; falling back to every enabled agent"),
         );
-        return Ok(full_roster_selection(existing, confidence, "fallback: full roster"));
+        return Ok(full_roster_selection(
+            existing,
+            confidence,
+            "fallback: full roster",
+        ));
     }
 
     Ok(SelectionResult {
@@ -2597,7 +2716,8 @@ async fn plan_tasks(
     messages: &[crate::llm_complete::ChatMessage],
     agents: &[SubAgent],
     workspace_dir: &Path,
-) -> Result<TaskPlan, String> {
+    exchange_root: &Path,
+) -> Result<PlanDecision, String> {
     let agents_desc = agents
         .iter()
         .map(|a| {
@@ -2639,15 +2759,30 @@ async fn plan_tasks(
         .join("\n");
 
     let system = format!(
-        "You are a task planning expert. Decompose the user request into tasks for sub-agents.\n\
+        "You are a task planning expert. FIRST decide whether the request needs sub-agents at all.\n\n\
+        Step 1 — delegation decision:\n\
+        - Return {{\"delegate\":false,\"why\":\"<one short sentence>\"}} when one direct answer from \
+        the main agent is enough: a simple question, a single lookup, a small edit, or a writing task.\n\
+        - Return {{\"delegate\":true,...}} only when the work clearly benefits from sub-agents: \
+        parallel research, large code changes, long remote jobs, or independent workstreams.\n\
+        - When unsure, delegate. A wrong decline loses capability; a needless mission only costs one task.\n\
+        - A single task is a valid plan when one agent is enough.\n\n\
+        Step 2 — only for delegate:true, plan the tasks.\n\
         Available agents:\n{agents_desc}\n\n\
         Workspace root: {workspace_root}\n\
+        Deliverable exchange area: {exchange_root}\n\
+        Each task gets its own directory under the exchange area (named after its task id); shared \
+        files go to {exchange_root}/shared. In `context`, refer to a dependency's artifact as \
+        `<task-id>/<filename>` relative to the exchange root; never paste large artifacts into task \
+        descriptions.\n\n\
         Every task may name one working directory with `cwd` (workspace-relative, for example \
         \"apps/web\"). The sub-agent starts in that directory, so use it whenever the request \
         names or clearly targets a specific project/folder; omit it (or use \".\") for the \
         workspace root. Never invent a directory that the conversation does not mention.\n\n\
         Return ONLY valid JSON — no markdown, no extra text:\n\
-        {{\"tasks\":[{{\"id\":\"t1\",\"agent_id\":\"<id>\",\"description\":\"...\",\
+        {{\"delegate\":false,\"why\":\"...\"}}\n\
+        or\n\
+        {{\"delegate\":true,\"tasks\":[{{\"id\":\"t1\",\"agent_id\":\"<id>\",\"description\":\"...\",\
           \"context\":\"...\",\"cwd\":\"<workspace-relative dir, omit for root>\",\"dependencies\":[]}}],\
           \"execution_mode\":\"parallel\"}}\n\
         Rules:\n\
@@ -2657,6 +2792,7 @@ async fn plan_tasks(
         - Match capabilities to the task: live web/browser/API data collection needs `mcp=enabled` or browser/network tools. Never assign that work to a file-only agent (mcp=none); it will burn iterations scanning local snapshots. If no listed agent can fetch the data, leave the live fetch to the main agent and plan only analysis tasks.\n\
         - Keep descriptions brief and actionable",
         workspace_root = workspace_dir.display(),
+        exchange_root = exchange_root.display(),
     );
     let user_prompt = format!("Conversation:\n{conversation}\n\nCreate a task plan.");
     let roster_ids: Vec<String> = agents.iter().map(|a| a.id.clone()).collect();
@@ -2728,6 +2864,7 @@ async fn execute_tasks(
     agents: &[SubAgent],
     tasks: Vec<Task>,
     workspace_dir: PathBuf,
+    exchange: Option<exchange::ExchangeArea>,
     skill_access_root: Option<PathBuf>,
     use_parallel: bool,
     max_concurrent: usize,
@@ -2744,6 +2881,7 @@ async fn execute_tasks(
             agents,
             tasks,
             workspace_dir,
+            exchange,
             skill_access_root,
             max_concurrent,
             cancelled,
@@ -2760,6 +2898,7 @@ async fn execute_tasks(
             agents,
             tasks,
             workspace_dir,
+            exchange,
             skill_access_root,
             cancelled,
             mbus,
@@ -2796,6 +2935,7 @@ async fn execute_parallel(
     agents: &[SubAgent],
     tasks: Vec<Task>,
     workspace_dir: PathBuf,
+    exchange: Option<exchange::ExchangeArea>,
     skill_access_root: Option<PathBuf>,
     max_concurrent: usize,
     cancelled: &Arc<AtomicBool>,
@@ -2883,7 +3023,10 @@ async fn execute_parallel(
                 let reason = if missing.is_empty() {
                     "dependencies could not be satisfied".to_string()
                 } else {
-                    format!("dependencies could not be satisfied: {}", missing.join(", "))
+                    format!(
+                        "dependencies could not be satisfied: {}",
+                        missing.join(", ")
+                    )
                 };
                 let result = TaskResult::skipped(&task, &task.agent_id, reason);
                 finish_skipped(app, mbus.as_deref(), &result);
@@ -2926,6 +3069,7 @@ async fn execute_parallel(
                 let session_id_c = session_id.to_string();
                 let task_c = task.clone();
                 let wd_c = workspace_dir.clone();
+                let exchange_c = exchange.clone();
                 let skill_roots_c = skill_access_root.clone();
                 // Arc snapshot of the app-global cancel flag: the spawned job
                 // and every sub-agent inside it observe the same flag, so Stop
@@ -2949,6 +3093,7 @@ async fn execute_parallel(
                         &agent,
                         &task_c,
                         wd_c,
+                        exchange_c.as_ref(),
                         skill_roots_c,
                         cancelled_c,
                         mbus_c,
@@ -3049,6 +3194,7 @@ async fn execute_sequential(
     agents: &[SubAgent],
     tasks: Vec<Task>,
     workspace_dir: PathBuf,
+    exchange: Option<exchange::ExchangeArea>,
     skill_access_root: Option<PathBuf>,
     cancelled: &Arc<AtomicBool>,
     mbus: Option<Arc<mbus::MissionBus>>,
@@ -3110,6 +3256,7 @@ async fn execute_sequential(
             agent,
             &task,
             workspace_dir.clone(),
+            exchange.as_ref(),
             skill_access_root.clone(),
             cancelled.clone(),
             mbus.clone(),
@@ -3134,6 +3281,7 @@ pub async fn run_sub_agent(
     agent: &SubAgent,
     task: &Task,
     workspace_dir: PathBuf,
+    exchange: Option<&exchange::ExchangeArea>,
     skill_access_root: Option<PathBuf>,
     cancelled: Arc<AtomicBool>,
     mbus: Option<Arc<mbus::MissionBus>>,
@@ -3196,6 +3344,7 @@ pub async fn run_sub_agent(
                 task,
                 session_id,
                 task_cwd,
+                exchange,
                 ExternalBackend::Cli,
                 cancelled,
                 mbus.as_deref(),
@@ -3209,6 +3358,7 @@ pub async fn run_sub_agent(
                 task,
                 session_id,
                 task_cwd,
+                exchange,
                 ExternalBackend::Cloud,
                 cancelled,
                 mbus.as_deref(),
@@ -3226,6 +3376,7 @@ pub async fn run_sub_agent(
                 task,
                 workspace_dir,
                 task_cwd,
+                exchange,
                 skill_access_root,
                 &cancelled,
                 mbus.as_deref(),
@@ -3308,6 +3459,7 @@ async fn run_external_agent(
     task: &Task,
     session_id: &str,
     task_cwd: PathBuf,
+    exchange: Option<&exchange::ExchangeArea>,
     backend: ExternalBackend,
     cancelled: Arc<AtomicBool>,
     mbus: Option<&mbus::MissionBus>,
@@ -3369,7 +3521,12 @@ async fn run_external_agent(
         json!({ "mission_id": mission_id, "session_id": session_id, "status": "running", "event": "initialized" }),
     );
 
-    let mut prompt = build_external_prompt(agent, task);
+    let mut prompt = build_external_prompt(
+        agent,
+        task,
+        exchange,
+        matches!(backend, ExternalBackend::Cli),
+    );
     // External agents cannot call app tools, but a message queued before the
     // process starts can still be absorbed into its one-shot prompt.
     if let Some(bus) = mbus {
@@ -3492,7 +3649,11 @@ async fn run_external_agent(
         Err(err) => {
             // Cloud agents report a stop as an error message; surface the
             // mission as "stopped" rather than "failed" for those.
-            let status = if err.contains("cancel") { "stopped" } else { "error" };
+            let status = if err.contains("cancel") {
+                "stopped"
+            } else {
+                "error"
+            };
             let _ = app.emit(
                 "agent-task-error",
                 json!({ "task_id": task.id, "agent_id": agent.id, "error": err }),
@@ -3512,7 +3673,12 @@ async fn run_external_agent(
 
 /// The single prompt handed to a `cli` / `cloud` agent: the task plus whatever
 /// context the caller attached. External agents never see the chat history.
-fn build_external_prompt(agent: &SubAgent, task: &Task) -> String {
+fn build_external_prompt(
+    agent: &SubAgent,
+    task: &Task,
+    exchange: Option<&exchange::ExchangeArea>,
+    local_files: bool,
+) -> String {
     let mut prompt = String::new();
     if !agent.system_prompt.trim().is_empty() {
         prompt.push_str(agent.system_prompt.trim());
@@ -3522,6 +3688,16 @@ fn build_external_prompt(agent: &SubAgent, task: &Task) -> String {
     if !task.context.trim().is_empty() {
         prompt.push_str("\n\nContext:\n");
         prompt.push_str(task.context.trim());
+    }
+    if let Some(area) = exchange {
+        if local_files {
+            prompt.push_str(&area.prompt_block(&task.id, true));
+        } else {
+            prompt.push_str(
+                "\n\nDELIVERABLE EXCHANGE AREA: not available — a cloud agent cannot access the \
+                 local workspace. Return the deliverable inline in your answer.",
+            );
+        }
     }
     prompt
 }
@@ -3648,6 +3824,7 @@ async fn run_sub_agent_inner(
     task: &Task,
     workspace_dir: PathBuf,
     task_cwd: PathBuf,
+    exchange: Option<&exchange::ExchangeArea>,
     skill_access_root: Option<PathBuf>,
     cancelled: &AtomicBool,
     mbus: Option<&mbus::MissionBus>,
@@ -3667,6 +3844,7 @@ async fn run_sub_agent_inner(
         task,
         workspace_dir,
         task_cwd,
+        exchange,
         skill_access_root,
         cancelled,
         &mut mcp_session,
@@ -3710,9 +3888,7 @@ fn build_main_helper_history(records: &[crate::db::HistoryRecord]) -> String {
     let mut used = 0usize;
 
     for record in records.iter().rev() {
-        if lines.len() >= MAIN_HELPER_HISTORY_MESSAGES
-            || used >= MAIN_HELPER_HISTORY_BUDGET_BYTES
-        {
+        if lines.len() >= MAIN_HELPER_HISTORY_MESSAGES || used >= MAIN_HELPER_HISTORY_BUDGET_BYTES {
             break;
         }
         let text = record.content.trim();
@@ -3884,12 +4060,8 @@ async fn run_main_agent_helper_inner(
             .db
             .lock()
             .map_err(|_| "database lock poisoned".to_string())?;
-        crate::db::query_recent_session_messages(
-            &db,
-            session_id,
-            MAIN_HELPER_HISTORY_MESSAGES * 2,
-        )
-        .map_err(|e| e.to_string())?
+        crate::db::query_recent_session_messages(&db, session_id, MAIN_HELPER_HISTORY_MESSAGES * 2)
+            .map_err(|e| e.to_string())?
     };
     let transcript = build_main_helper_history(&history);
 
@@ -3919,9 +4091,12 @@ async fn run_main_agent_helper_inner(
         tools_list.push(tools::get_use_skill_tool());
         tools_list.push(tools::get_skill_read_tool());
     }
-    let (mcp_tools, mcp_tool_map) =
-        load_enabled_mcp_tools(app, mcp_session, &format!("agent:{}:main-helper", agent.name))
-            .await;
+    let (mcp_tools, mcp_tool_map) = load_enabled_mcp_tools(
+        app,
+        mcp_session,
+        &format!("agent:{}:main-helper", agent.name),
+    )
+    .await;
     tools_list.extend(mcp_tools);
 
     // ── Prompt ───────────────────────────────────────────────────────────────
@@ -4133,7 +4308,10 @@ async fn run_main_agent_helper_inner(
                                     allowed_commands.push(command.clone());
                                 }
                             }
-                            if !active_skill_dirs.iter().any(|(name, _)| name == &skill.name) {
+                            if !active_skill_dirs
+                                .iter()
+                                .any(|(name, _)| name == &skill.name)
+                            {
                                 active_skill_dirs
                                     .push((skill.name.clone(), resolved.skill_dir.clone()));
                             }
@@ -4258,6 +4436,7 @@ async fn run_llm_agent_body(
     task: &Task,
     workspace_dir: PathBuf,
     task_cwd: PathBuf,
+    exchange: Option<&exchange::ExchangeArea>,
     skill_access_root: Option<PathBuf>,
     cancelled: &AtomicBool,
     mcp_session: &mut mcp::AgentMcpSession,
@@ -4297,8 +4476,7 @@ async fn run_llm_agent_body(
             }
         }
     }
-    let mut tools_list =
-        tools::get_all_tools(&agent_tool_ids, config.self_evolution_mode, false);
+    let mut tools_list = tools::get_all_tools(&agent_tool_ids, config.self_evolution_mode, false);
     tools_list.extend(tools::get_agent_task_tools());
     // The mission bus is available only inside a planner-dispatched batch.
     // `call_subagent` (a direct main-agent delegation) has no bus, so the tool
@@ -4348,11 +4526,10 @@ async fn run_llm_agent_body(
     // tool, the file locations it uses often) are injected here so a
     // sub-agent reuses them instead of rediscovering them.
     if !self_evolution_context.is_empty() {
-        let evolution_facts =
-            crate::tools::memory::render_evolution_context(
-                &workspace_dir,
-                crate::tools::memory::EVOLUTION_CONTEXT_BUDGET_CHARS,
-            );
+        let evolution_facts = crate::tools::memory::render_evolution_context(
+            &workspace_dir,
+            crate::tools::memory::EVOLUTION_CONTEXT_BUDGET_CHARS,
+        );
         if !evolution_facts.is_empty() {
             self_evolution_context.push_str(
                 "\n\nVERIFIED FACTS (self-evolution memory, already known — reuse them, do not \
@@ -4471,13 +4648,49 @@ async fn run_llm_agent_body(
     } else {
         "\n\nTOOL FIT: If the task needs live web/browser/API data or a tool that is not in your tool list, stop and report the missing capability instead of repeatedly scanning local files."
     };
+    // The deliverable exchange area is advertised only when the agent can
+    // actually write files; an agent without a file/shell tool gets a short
+    // "return it inline" note instead of a path it cannot use.
+    let can_write_files = agent_tool_ids
+        .iter()
+        .any(|tool| matches!(tool.as_str(), "file_actions" | "run_cmd" | "run_shell"));
+    let exchange_block = exchange
+        .map(|area| area.prompt_block(&task.id, can_write_files))
+        .unwrap_or_default();
+    // All sub-agents share the same session/user/repo memory scopes: session
+    // is keyed by the main chat id, user/repo are workspace files. The tool is
+    // present by default (v5 migration / panel default) but can be unchecked.
+    let memory_block = if agent_tool_ids.iter().any(|tool| tool == "memory") {
+        let evolution = if config.self_evolution_mode {
+            "- `evolution`: verified experience that survives across sessions.\n"
+        } else {
+            ""
+        };
+        format!(
+            "\n\nSHARED MEMORY: You have the `memory` tool. Every sub-agent in this chat shares \
+             the same memory:\n\
+             - `session`: notes shared with the main agent and sibling tasks in this chat.\n\
+             - `repo`: durable project facts and decisions, persisted in the workspace.\n\
+             - `user`: user preferences.\n\
+             {}\
+             Search before starting (`memory search`) and add one concise conclusion before \
+             finishing (`memory add`). Use a task-specific key prefix for mission notes \
+             (for example `{}-...`). Never store credentials. Do not run `consolidate`; leave \
+             skill consolidation to the main agent.",
+            evolution, task.id,
+        )
+    } else {
+        String::new()
+    };
     let static_system_prompt = format!(
         "{}\n\nWorking directory: {}\n`run_cmd`, `run_shell` and `run_shell` serve processes start in this directory. \
-         `file_actions` paths are always relative to the workspace root ({}), not to the working directory.{}{}",
+         `file_actions` paths are always relative to the workspace root ({}), not to the working directory.{}{}{}{}",
         build_agent_static_system_prompt(agent, &self_evolution_context),
         task_cwd.display(),
         workspace_dir.display(),
         mbus_block,
+        exchange_block,
+        memory_block,
         escalation,
     );
     let max_iterations = (agent.max_iterations > 0).then_some(agent.max_iterations);
@@ -4800,7 +5013,11 @@ async fn run_llm_agent_body(
                         task.id,
                         agent.name,
                         iterations,
-                        if balance_error { " (provider balance/quota)" } else { "" },
+                        if balance_error {
+                            " (provider balance/quota)"
+                        } else {
+                            ""
+                        },
                     ),
                 );
                 let _ = app.emit(
@@ -5003,8 +5220,7 @@ async fn run_llm_agent_body(
                                 MAIN_HELPER_MAX_CALLS
                             )
                         } else {
-                            let args_json: Value =
-                                serde_json::from_str(args).unwrap_or_default();
+                            let args_json: Value = serde_json::from_str(args).unwrap_or_default();
                             let request = args_json["request"]
                                 .as_str()
                                 .unwrap_or("")
@@ -5017,8 +5233,7 @@ async fn run_llm_agent_body(
                                 .to_string();
 
                             if request.is_empty() {
-                                "Error: ask_main_agent requires a non-empty 'request'."
-                                    .to_string()
+                                "Error: ask_main_agent requires a non-empty 'request'.".to_string()
                             } else {
                                 main_help_calls += 1;
                                 let _ = app.emit(
@@ -5052,8 +5267,7 @@ async fn run_llm_agent_body(
                                 .await
                                 {
                                     Ok(outcome) => {
-                                        total_tokens =
-                                            total_tokens.saturating_add(outcome.tokens);
+                                        total_tokens = total_tokens.saturating_add(outcome.tokens);
                                         tool_calls_count =
                                             tool_calls_count.saturating_add(outcome.tool_calls);
                                         let answer_chars = outcome.content.chars().count();
@@ -5103,9 +5317,7 @@ async fn run_llm_agent_body(
                                 }
                             }
                         }
-                    } else if let Some((mcp_server, actual_tool_name)) =
-                        mcp_tool_map.get(name)
-                    {
+                    } else if let Some((mcp_server, actual_tool_name)) = mcp_tool_map.get(name) {
                         let state = app.state::<AppState>();
                         let arguments: Value =
                             serde_json::from_str(args).unwrap_or_else(|_| json!({}));
@@ -5137,7 +5349,7 @@ async fn run_llm_agent_body(
                             skill_access_root.as_deref(),
                             Some(&mission_id),
                             Some(session_id),
-                            &[], // sub-agents don't track active skill dirs for skill_read
+                            &[],  // sub-agents don't track active skill dirs for skill_read
                             None, // background tasks are never advertised to sub-agents
                             Some(task_cwd.as_path()),
                         )
@@ -5371,7 +5583,10 @@ mod tests {
             .find(|agent| agent.id == "opencode-agent")
             .expect("legacy CLI agent migrated");
         assert_eq!(cli_agent.agent_type, AGENT_TYPE_CLI);
-        assert_eq!(cli_agent.cli.args, vec!["run".to_string(), "{prompt}".to_string()]);
+        assert_eq!(
+            cli_agent.cli.args,
+            vec!["run".to_string(), "{prompt}".to_string()]
+        );
         assert_eq!(cli_agent.cli.default_timeout_seconds, 600);
         assert!(cli_agent.cli.command.ends_with("opencode2.ps1"));
 
@@ -5451,9 +5666,11 @@ mod tests {
 
     #[test]
     fn completion_limit_prefers_the_new_field() {
-        let mut agent: SubAgent =
-            serde_json::from_str(r#"{"id":"a"}"#).expect("agent parses");
-        assert_eq!(resolve_completion_limit(&agent), LLM_DEFAULT_MAX_COMLETE_TOKENS);
+        let mut agent: SubAgent = serde_json::from_str(r#"{"id":"a"}"#).expect("agent parses");
+        assert_eq!(
+            resolve_completion_limit(&agent),
+            LLM_DEFAULT_MAX_COMLETE_TOKENS
+        );
 
         agent.max_tokens = Some(16_384);
         assert_eq!(resolve_completion_limit(&agent), 16_384);
@@ -5476,7 +5693,7 @@ mod tests {
         .expect("config parses");
         normalize_config(&mut config);
         assert!(config.orchestration.auto_configure);
-        assert_eq!(config.version, 4);
+        assert_eq!(config.version, 5);
 
         // … while a v3 file keeps whatever the user chose.
         let mut config: AgentsConfig = serde_json::from_str(
@@ -5502,18 +5719,63 @@ mod tests {
 
         assert_eq!(config.agents[0].max_iterations, 0);
         assert_eq!(config.agents[1].max_iterations, 25);
-        assert_eq!(config.version, 4);
+        assert_eq!(config.version, 5);
+    }
+
+    #[test]
+    fn v4_config_adds_shared_memory_to_llm_agents_once() {
+        let mut config: AgentsConfig = serde_json::from_str(
+            r#"{"version":4,"agents":[
+                {"id":"llm","agent_type":"llm","allowed_tools":["file_actions"]},
+                {"id":"cli","agent_type":"cli","allowed_tools":[]}
+            ]}"#,
+        )
+        .expect("config parses");
+        normalize_config(&mut config);
+
+        assert!(config.agents[0]
+            .allowed_tools
+            .iter()
+            .any(|tool| tool == "memory"));
+        assert!(!config.agents[1]
+            .allowed_tools
+            .iter()
+            .any(|tool| tool == "memory"));
+        assert_eq!(config.version, 5);
+
+        // A v5 file keeps a deliberate opt-out.
+        let mut config: AgentsConfig = serde_json::from_str(
+            r#"{"version":5,"agents":[
+                {"id":"llm","agent_type":"llm","allowed_tools":["file_actions"]}
+            ]}"#,
+        )
+        .expect("config parses");
+        normalize_config(&mut config);
+        assert!(!config.agents[0]
+            .allowed_tools
+            .iter()
+            .any(|tool| tool == "memory"));
     }
 
     fn roster_ids(ids: &[&str]) -> Vec<String> {
         ids.iter().map(|id| id.to_string()).collect()
     }
 
+    fn expect_mission(decision: PlanDecision) -> TaskPlan {
+        match decision {
+            PlanDecision::Mission(plan) => plan,
+            PlanDecision::Direct { why } => {
+                panic!("expected a mission plan, got a direct answer: {why}")
+            }
+        }
+    }
+
     #[test]
     fn plan_parser_strips_fences_and_preamble() {
         let raw = "Here is the plan you asked for:\n```json\n{\"tasks\":[{\"id\":\"t1\",\
                    \"agent_id\":\"a\",\"description\":\"do it\"}],\"execution_mode\":\"parallel\"}\n```\nEnjoy!";
-        let (plan, issues) = parse_task_plan(raw, &roster_ids(&["a"])).expect("plan parses");
+        let (decision, issues) = parse_task_plan(raw, &roster_ids(&["a"])).expect("plan parses");
+        let plan = expect_mission(decision);
         assert_eq!(plan.tasks.len(), 1);
         assert_eq!(plan.tasks[0].id, "t1");
         assert_eq!(plan.execution_mode, "parallel");
@@ -5528,7 +5790,8 @@ mod tests {
                 { "id": "t2", "agent_id": "a", "description": "two" }
             ],
         }"#;
-        let (plan, _) = parse_task_plan(raw, &roster_ids(&["a"])).expect("plan parses");
+        let (decision, _) = parse_task_plan(raw, &roster_ids(&["a"])).expect("plan parses");
+        let plan = expect_mission(decision);
         assert_eq!(plan.tasks.len(), 2);
     }
 
@@ -5540,7 +5803,8 @@ mod tests {
             {"id":"t2","agent_id":"ghost","description":"unknown agent"},
             {"id":"t3","agent_id":"a","description":"   "}
         ]}"#;
-        let (plan, issues) = parse_task_plan(raw, &roster_ids(&["a"])).expect("plan parses");
+        let (decision, issues) = parse_task_plan(raw, &roster_ids(&["a"])).expect("plan parses");
+        let plan = expect_mission(decision);
         // t2 (unknown agent) and t3 (empty description) are dropped; the
         // duplicate t1 is renamed so mission ids stay unique.
         assert_eq!(plan.tasks.len(), 2);
@@ -5556,7 +5820,8 @@ mod tests {
             {"id":"planner","agent_id":"a","description":"model used the reserved id"},
             {"id":"t1","agent_id":"a","description":"normal"}
         ]}"#;
-        let (plan, issues) = parse_task_plan(raw, &roster_ids(&["a"])).expect("plan parses");
+        let (decision, issues) = parse_task_plan(raw, &roster_ids(&["a"])).expect("plan parses");
+        let plan = expect_mission(decision);
         assert_eq!(plan.tasks.len(), 2);
         assert_eq!(plan.tasks[0].id, "task");
         assert_eq!(plan.tasks[1].id, "t1");
@@ -5571,7 +5836,8 @@ mod tests {
             {"id":"a1","agent_id":"a","description":"first","dependencies":["b1"]},
             {"id":"b1","agent_id":"a","description":"second","dependencies":["a1"]}
         ],"execution_mode":"parallel"}"#;
-        let (plan, issues) = parse_task_plan(raw, &roster_ids(&["a"])).expect("plan parses");
+        let (decision, issues) = parse_task_plan(raw, &roster_ids(&["a"])).expect("plan parses");
+        let plan = expect_mission(decision);
         assert_eq!(plan.tasks.len(), 2);
         // At least one edge is gone, so the wave scheduler can start somewhere.
         assert!(
@@ -5586,7 +5852,8 @@ mod tests {
         let raw = r#"{"tasks":[
             {"id":"t1","agent_id":"a","description":"only task","dependencies":["missing","t1"]}
         ]}"#;
-        let (plan, issues) = parse_task_plan(raw, &roster_ids(&["a"])).expect("plan parses");
+        let (decision, issues) = parse_task_plan(raw, &roster_ids(&["a"])).expect("plan parses");
+        let plan = expect_mission(decision);
         assert!(plan.tasks[0].dependencies.is_empty());
         assert!(issues.iter().any(|issue| issue.contains("dependency")));
     }
@@ -5599,11 +5866,15 @@ mod tests {
             {"id":"t3","agent_id":"a","description":"three","cwd":null},
             {"id":"t4","agent_id":"a","description":"four"}
         ]}"#;
-        let (plan, _) = parse_task_plan(raw, &roster_ids(&["a"])).expect("plan parses");
+        let (decision, _) = parse_task_plan(raw, &roster_ids(&["a"])).expect("plan parses");
+        let plan = expect_mission(decision);
         assert_eq!(plan.tasks[0].cwd.as_deref(), Some("apps/web"));
         assert_eq!(plan.tasks[1].cwd, None, "\"./\" means the workspace root");
         assert_eq!(plan.tasks[2].cwd, None, "null means the workspace root");
-        assert_eq!(plan.tasks[3].cwd, None, "missing cwd means the workspace root");
+        assert_eq!(
+            plan.tasks[3].cwd, None,
+            "missing cwd means the workspace root"
+        );
     }
 
     #[test]
@@ -5645,13 +5916,40 @@ mod tests {
         let raw = r#"{"tasks":[{"id":"t1","agent_id":"ghost","description":"x"}]}"#;
         let err = parse_task_plan(raw, &roster_ids(&["a"])).expect_err("no usable tasks");
         assert!(err.contains("ghost"), "unexpected error: {err}");
-        // Missing the tasks array entirely.
-        assert!(parse_task_plan(r#"{"execution_mode":"parallel"}"#, &roster_ids(&["a"])).is_err());
+        // `delegate:true` without tasks is unusable.
+        assert!(parse_task_plan(
+            r#"{"delegate":true,"execution_mode":"parallel"}"#,
+            &roster_ids(&["a"])
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn plan_parser_honours_a_direct_answer() {
+        let (decision, issues) = parse_task_plan(
+            r#"{"delegate":false,"why":"simple question"}"#,
+            &roster_ids(&["a"]),
+        )
+        .expect("decline parses");
+        match decision {
+            PlanDecision::Direct { why } => assert_eq!(why, "simple question"),
+            PlanDecision::Mission(_) => panic!("expected a direct answer"),
+        }
+        assert!(issues.is_empty());
+
+        // An explicit false wins even when the model also emitted tasks.
+        let raw = r#"{"delegate":false,"why":"no","tasks":[
+            {"id":"t1","agent_id":"a","description":"ignored"}
+        ]}"#;
+        let (decision, issues) = parse_task_plan(raw, &roster_ids(&["a"])).expect("decline parses");
+        assert!(matches!(decision, PlanDecision::Direct { .. }));
+        assert!(issues.iter().any(|issue| issue.contains("ignored")));
     }
 
     #[test]
     fn json_extraction_handles_braces_inside_strings() {
-        let raw = r#"prefix {"tasks":[{"id":"t1","agent_id":"a","description":"a } brace"}]} suffix"#;
+        let raw =
+            r#"prefix {"tasks":[{"id":"t1","agent_id":"a","description":"a } brace"}]} suffix"#;
         let extracted = extract_json_object(raw).expect("object found");
         assert!(extracted.starts_with('{'));
         assert!(extracted.ends_with('}'));
@@ -5730,9 +6028,18 @@ mod tests {
             .collect();
 
         let transcript = build_main_helper_history(&records);
-        assert!(transcript.starts_with("[user]: message 8"), "got: {transcript}");
-        assert!(transcript.ends_with("[assistant]: message 19"), "got: {transcript}");
-        assert!(!transcript.contains("message 7"), "older entry was not dropped");
+        assert!(
+            transcript.starts_with("[user]: message 8"),
+            "got: {transcript}"
+        );
+        assert!(
+            transcript.ends_with("[assistant]: message 19"),
+            "got: {transcript}"
+        );
+        assert!(
+            !transcript.contains("message 7"),
+            "older entry was not dropped"
+        );
     }
 
     #[test]
@@ -5811,10 +6118,7 @@ mod tests {
     }
 
     fn temp_agents_dir(label: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "ai-chat-agents-{label}-{}",
-            Uuid::new_v4()
-        ));
+        let dir = std::env::temp_dir().join(format!("ai-chat-agents-{label}-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&dir).expect("temp dir");
         dir
     }
@@ -5875,11 +6179,10 @@ mod tests {
         };
         save_agents_config_file(&path, &config).expect("save");
 
-        let saved: Value = serde_json::from_str(
-            &std::fs::read_to_string(&path).expect("read config"),
-        )
-        .expect("json");
-        assert_eq!(saved["version"], 4);
+        let saved: Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read config"))
+                .expect("json");
+        assert_eq!(saved["version"], 5);
         let agents = saved["agents"].as_array().expect("agents array");
         assert_eq!(agents.len(), 2, "virtual agents are never persisted");
 
@@ -5997,15 +6300,21 @@ mod tests {
         assert!(!library.enabled);
         assert_eq!(library.name, "Library");
         assert_eq!(library.emoji.as_deref(), Some("📚"));
-        assert_eq!(library.allowed_tools, vec!["file_actions".to_string()]);
+        assert_eq!(
+            library.allowed_tools,
+            vec!["file_actions".to_string(), "memory".to_string()]
+        );
         assert!(!library.enable_mcp);
 
-        let saved: Value = serde_json::from_str(
-            &std::fs::read_to_string(&path).expect("read config"),
-        )
-        .expect("json");
+        let saved: Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read config"))
+                .expect("json");
         let agents = saved["agents"].as_array().expect("agents array");
-        assert_eq!(agents.len(), 1, "only the migrated config entry is persisted");
+        assert_eq!(
+            agents.len(),
+            1,
+            "only the migrated config entry is persisted"
+        );
         assert_eq!(agents[0]["id"], "legacy");
         assert_eq!(agents[0]["file"], "custom/legacy.md");
         assert!(agents[0].get("system_prompt").is_none());
@@ -6019,7 +6328,10 @@ mod tests {
 /// Renders the finished mission for injection into the main agent's context.
 /// The main agent — not a separate synthesizer prompt — defines the final
 /// user-facing answer from these reports.
-fn build_mission_results_block(results: &[TaskResult]) -> String {
+fn build_mission_results_block(
+    results: &[TaskResult],
+    exchange: Option<&exchange::ExchangeArea>,
+) -> String {
     let mut body = String::from(
         "All sub-agent tasks have finished. Sub-agents are execution workers and do not \
          write the user-facing answer: define and deliver the final result yourself. \
@@ -6028,6 +6340,16 @@ fn build_mission_results_block(results: &[TaskResult]) -> String {
          Tasks marked `skipped` produced no work at all: never present them as completed — \
          either do that part yourself or state clearly what was not done.\n\n",
     );
+
+    if let Some(area) = exchange {
+        body.push_str(&format!(
+            "Deliverable exchange area: {} (workspace-relative: {})\n\
+             Read deliverables with `file_actions` before answering; do not paste huge files \
+             verbatim into the answer.\n\n",
+            area.root().display(),
+            area.relative_root(),
+        ));
+    }
 
     if results.is_empty() {
         body.push_str("No task results were produced.");
@@ -6044,6 +6366,11 @@ fn build_mission_results_block(results: &[TaskResult]) -> String {
             result.tokens_used,
             result.content
         ));
+        if let Some(area) = exchange {
+            body.push_str("Deliverables:\n");
+            body.push_str(&exchange::render_files(&area.list_files(&result.task_id)));
+            body.push_str("\n\n");
+        }
     }
 
     body

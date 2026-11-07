@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { fetchModels, fetchModelMetadata, getAppVersion, getConfig, getWorkspaceDir, saveConfig, listProfiles, saveProfile, deleteProfile, applyProfile, listMcpServers, listSubAgents, getAgentOrchestration } from "../api";
+import { fetchModels, fetchModelMetadata, getAppVersion, getConfig, getWorkspaceDir, saveConfig, listProfiles, saveProfile, deleteProfile, applyProfile, listMcpServers, listSubAgents, getAgentOrchestration, openWorkspaceTmpDir } from "../api";
 import type { AppConfig, ModelMetadata, ModelSettings, Palette, Profile, RequestHeader } from "../types";
 import { LOCALE_LABELS, LOCALES, useI18n, type Locale, type MessageKey } from "../i18n";
 import { matchModelCatalog, isDeepSeekModel } from "../utils/modelMetadata";
@@ -630,6 +630,24 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
                     </button>
                   )}
                 </div>
+              </div>
+
+              <div className="settings-field-row settings-field-row-stacked">
+                <span className="settings-field-label">
+                  {t("settings.workspace.openTmp")}
+                </span>
+                <div className="workspace-dir-row">
+                  <button
+                    type="button"
+                    className="settings-btn"
+                    onClick={() => void openWorkspaceTmpDir()}
+                  >
+                    {t("settings.workspace.openTmp")}
+                  </button>
+                </div>
+                <small className="settings-field-hint">
+                  {t("settings.workspace.openTmpHint")}
+                </small>
               </div>
 
               <label className="settings-checkbox">

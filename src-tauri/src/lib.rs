@@ -143,6 +143,23 @@ fn app_open_workspace_dir(app: AppHandle) -> Result<(), String> {
     open_workspace_dir(&app)
 }
 
+/// Open `<workspace>/.data/tmp` — the sub-agent deliverable exchange area.
+/// It is permanent, so this is the manual cleanup entry point.
+#[tauri::command]
+fn app_open_workspace_tmp_dir(app: AppHandle) -> Result<(), String> {
+    let workspace = app
+        .state::<AppState>()
+        .workspace_dir
+        .lock()
+        .unwrap()
+        .clone();
+    let dir = workspace::tmp_root(&workspace);
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    app.opener()
+        .open_path(dir.to_string_lossy().into_owned(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
 /// Open `<app_data>/agents` — the folder holding every `llm` agent definition.
 #[tauri::command]
 fn app_open_agents_dir(app: AppHandle) -> Result<(), String> {
@@ -198,17 +215,13 @@ fn resolve_workspace_path(app: &AppHandle, workspace_dir: Option<&str>) -> Resul
 /// Create the hidden `<workspace>/.data` layout (best effort, logged on error).
 fn ensure_workspace_data_layout(state: &AppState, workspace_dir: &PathBuf) {
     if let Err(err) = workspace::ensure_data_layout(workspace_dir) {
-        state
-            .logger
-            .lock()
-            .unwrap()
-            .log(
-                "WARN",
-                &format!(
-                    "Failed to create workspace data directory '{}': {err}",
-                    workspace::data_root(workspace_dir).display()
-                ),
-            );
+        state.logger.lock().unwrap().log(
+            "WARN",
+            &format!(
+                "Failed to create workspace data directory '{}': {err}",
+                workspace::data_root(workspace_dir).display()
+            ),
+        );
     }
 }
 
@@ -257,10 +270,8 @@ pub(crate) fn apply_config(
     let logger_output = config.logger_output.clone();
     *state.config.lock().unwrap() = config;
 
-    let new_workspace_path = resolve_workspace_path(
-        app,
-        state.config.lock().unwrap().workspace_dir.as_deref(),
-    )?;
+    let new_workspace_path =
+        resolve_workspace_path(app, state.config.lock().unwrap().workspace_dir.as_deref())?;
     fs::create_dir_all(&new_workspace_path).ok();
     // Note: `<workspace>/.data/skills` is NOT created eagerly. Skills are
     // discovered by scanning; a missing folder simply yields no workspace
@@ -1295,9 +1306,14 @@ pub fn run() {
                 app,
                 "File",
                 true,
-                &[&save_profile_item, &restore_profile_item, &open_app_data_dir_item, &open_workspace_dir_item],
+                &[
+                    &save_profile_item,
+                    &restore_profile_item,
+                    &open_app_data_dir_item,
+                    &open_workspace_dir_item,
+                ],
             )
-                .expect("failed to create app menu");
+            .expect("failed to create app menu");
             let tools_menu = Submenu::with_items(app, "Tools", true, &[&markdown_edit_item])
                 .expect("failed to create tools menu");
 
@@ -1307,25 +1323,26 @@ pub fn run() {
                 "Edit",
                 true,
                 &[
-                    &PredefinedMenuItem::undo(app, None::<&str>).expect("failed to create undo menu item"),
-                    &PredefinedMenuItem::redo(app, None::<&str>).expect("failed to create redo menu item"),
+                    &PredefinedMenuItem::undo(app, None::<&str>)
+                        .expect("failed to create undo menu item"),
+                    &PredefinedMenuItem::redo(app, None::<&str>)
+                        .expect("failed to create redo menu item"),
                     &PredefinedMenuItem::separator(app).expect("failed to create separator"),
-                    &PredefinedMenuItem::cut(app, None::<&str>).expect("failed to create cut menu item"),
-                    &PredefinedMenuItem::copy(app, None::<&str>).expect("failed to create copy menu item"),
-                    &PredefinedMenuItem::paste(app, None::<&str>).expect("failed to create paste menu item"),
-                    &PredefinedMenuItem::select_all(app, None::<&str>).expect("failed to create select all menu item"),
+                    &PredefinedMenuItem::cut(app, None::<&str>)
+                        .expect("failed to create cut menu item"),
+                    &PredefinedMenuItem::copy(app, None::<&str>)
+                        .expect("failed to create copy menu item"),
+                    &PredefinedMenuItem::paste(app, None::<&str>)
+                        .expect("failed to create paste menu item"),
+                    &PredefinedMenuItem::select_all(app, None::<&str>)
+                        .expect("failed to create select all menu item"),
                 ],
             )
             .expect("failed to create edit menu");
 
-            let about_item = MenuItem::with_id(
-                app,
-                ABOUT_MENU_ID,
-                "About AI Chat",
-                true,
-                None::<&str>,
-            )
-            .expect("failed to create about menu item");
+            let about_item =
+                MenuItem::with_id(app, ABOUT_MENU_ID, "About AI Chat", true, None::<&str>)
+                    .expect("failed to create about menu item");
             let about_menu = Submenu::with_items(app, "About", true, &[&about_item])
                 .expect("failed to create about menu");
             let menu = Menu::with_items(app, &[&file_menu, &edit_menu, &tools_menu, &about_menu])
@@ -1473,6 +1490,7 @@ pub fn run() {
             save_markdown_file,
             app_open_data_dir,
             app_open_workspace_dir,
+            app_open_workspace_tmp_dir,
             app_open_markdown,
             app_export_profile,
             app_import_profile,
@@ -1649,10 +1667,7 @@ mod tests {
         ];
 
         let tools = config.effective_tools();
-        assert_eq!(
-            tools.iter().filter(|tool| *tool == "memory").count(),
-            1
-        );
+        assert_eq!(tools.iter().filter(|tool| *tool == "memory").count(), 1);
         assert_eq!(tools.len(), 2);
     }
 }

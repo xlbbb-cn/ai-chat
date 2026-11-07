@@ -275,6 +275,8 @@ const en = {
             reset: "Reset",
             resetTitle: "Use the default workspace directory",
             resetAria: "Reset workspace directory to default",
+            openTmp: "Open deliverable exchange folder",
+            openTmpHint: "Sub-agent deliverables live under .data/tmp; clean them up here.",
             selfEvolution: "Enable Self-Evolution Mode",
             selfEvolutionHint:
                 "Let the assistant evolve its own skills inside the workspace. The file actions and memory tools stay enabled while the mode is on, and the assistant keeps verified facts (runtime environment, correct tool usage, file locations) in a dedicated evolution memory.",
@@ -674,7 +676,7 @@ const en = {
             knowledgeGraph: "Neo4j-backed knowledge graph queries",
             todos:
                 "The session todo list via the `todos` tool (list / add / update_status / clear_completed / archive). The plan is shared with the chat session and every parallel agent.",
-            memory: "Session / user / repo memory store",
+            memory: "Shared session / user / repo memory store (every sub-agent reads and writes the same one)",
         },
 
         // ── cli backend ──

@@ -717,6 +717,11 @@ export async function openWorkspaceDir(): Promise<void> {
   return invoke("app_open_workspace_dir");
 }
 
+/** Open `<workspace>/.data/tmp` — the sub-agent deliverable exchange area. */
+export async function openWorkspaceTmpDir(): Promise<void> {
+  return invoke("app_open_workspace_tmp_dir");
+}
+
 /** Open `<app_data>/agents` (the `llm` agent definition folder). */
 export async function openAgentsDir(): Promise<void> {
   return invoke("app_open_agents_dir");

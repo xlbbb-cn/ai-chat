@@ -41,7 +41,7 @@ use uuid::Uuid;
 ///
 /// Discovered agents are disabled by default, so granting the read/write tool
 /// does not run anything on its own. `run_cmd` / `run_shell` stay opt-in.
-pub const DISCOVERED_DEFAULT_TOOLS: [&str; 1] = ["file_actions"];
+pub const DISCOVERED_DEFAULT_TOOLS: [&str; 2] = ["file_actions", "memory"];
 
 /// Where the app puts agents created from the panel.
 pub const CUSTOM_CATEGORY: &str = "custom";
@@ -205,7 +205,9 @@ pub fn normalize_relative(relative: &str) -> Result<String, String> {
             }
             Component::CurDir => {}
             Component::Prefix(_) | Component::RootDir | Component::ParentDir => {
-                return Err("The agent file path must stay inside the agents directory.".to_string());
+                return Err(
+                    "The agent file path must stay inside the agents directory.".to_string()
+                );
             }
         }
     }
@@ -307,7 +309,11 @@ pub fn unique_agent_path(root: &Path, category: &str, name: &str) -> String {
         }
         counter += 1;
         if counter > 9_999 {
-            return format!("{}agent-{}.md", category_with_slash(category), &Uuid::new_v4().to_string()[..8]);
+            return format!(
+                "{}agent-{}.md",
+                category_with_slash(category),
+                &Uuid::new_v4().to_string()[..8]
+            );
         }
     }
 }
@@ -565,7 +571,10 @@ fn backup_file(path: &Path) -> Result<(), String> {
     if !path.is_file() {
         return Ok(());
     }
-    let Some(name) = path.file_name().map(|name| name.to_string_lossy().to_string()) else {
+    let Some(name) = path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+    else {
         return Ok(());
     };
     for counter in 1..=999u32 {
@@ -846,10 +855,7 @@ mod tests {
     use super::*;
 
     fn temp_root(label: &str) -> PathBuf {
-        let path = std::env::temp_dir().join(format!(
-            "ai-chat-agents-{label}-{}",
-            Uuid::new_v4()
-        ));
+        let path = std::env::temp_dir().join(format!("ai-chat-agents-{label}-{}", Uuid::new_v4()));
         fs::create_dir_all(&path).expect("temp agents root");
         path
     }
@@ -923,7 +929,9 @@ mod tests {
         };
         write_definition(&root, relative, &changed).expect("changed write");
         assert!(root.join("custom/reviewer.md.bak.1").is_file());
-        assert!(fs::read_to_string(&path).unwrap().contains("be very precise"));
+        assert!(fs::read_to_string(&path)
+            .unwrap()
+            .contains("be very precise"));
 
         fs::remove_dir_all(&root).ok();
     }
@@ -962,13 +970,13 @@ mod tests {
             },
         )
         .unwrap();
-        fs::write(root.join("engineering/one.md.bak.1"), "---\nname: backup\n---\n").unwrap();
-        fs::create_dir_all(root.join(".hidden")).unwrap();
         fs::write(
-            root.join(".hidden/two.md"),
-            "---\nname: hidden\n---\n",
+            root.join("engineering/one.md.bak.1"),
+            "---\nname: backup\n---\n",
         )
         .unwrap();
+        fs::create_dir_all(root.join(".hidden")).unwrap();
+        fs::write(root.join(".hidden/two.md"), "---\nname: hidden\n---\n").unwrap();
 
         let scanned = scan(&root);
         assert_eq!(scanned.len(), 1);
@@ -1164,7 +1172,10 @@ mod tests {
             .expect("indexed agent");
         assert!(!discovered.configured);
         assert!(!discovered.enabled);
-        assert_eq!(discovered.allowed_tools, vec!["file_actions".to_string()]);
+        assert_eq!(
+            discovered.allowed_tools,
+            vec!["file_actions".to_string(), "memory".to_string()]
+        );
 
         // The file disappeared but the index is stale: the panel must not show a ghost.
         fs::remove_file(root.join("custom/two.md")).unwrap();

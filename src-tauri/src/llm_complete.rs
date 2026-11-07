@@ -175,7 +175,9 @@ mod tests {
     #[test]
     fn context_window_prefers_the_per_model_value() {
         let mut config = crate::AppConfig::default();
-        config.model_context_lengths.insert("gpt-5".to_string(), 400_000);
+        config
+            .model_context_lengths
+            .insert("gpt-5".to_string(), 400_000);
 
         assert_eq!(resolve_context_window(&config, "gpt-5", 131_072), 400_000);
         // Whitespace around the model id must not defeat the lookup.
@@ -212,7 +214,10 @@ mod tests {
         });
         assert_eq!(extract_cached_tokens(&anthropic_style), Some(410));
 
-        assert_eq!(extract_cached_tokens(&json!({ "prompt_tokens": 500 })), None);
+        assert_eq!(
+            extract_cached_tokens(&json!({ "prompt_tokens": 500 })),
+            None
+        );
         assert_eq!(extract_cached_tokens(&json!({ "prompt_tokens": 0 })), None);
 
         // OpenAI wins when several dialects are present, and a reported
@@ -445,7 +450,10 @@ mod tests {
             assert!(is_deepseek_model(id), "{id} should be treated as DeepSeek");
         }
         for id in ["gpt-4o-mini", "qwen3-max", "", "  "] {
-            assert!(!is_deepseek_model(id), "{id} should not be treated as DeepSeek");
+            assert!(
+                !is_deepseek_model(id),
+                "{id} should not be treated as DeepSeek"
+            );
         }
     }
 
@@ -456,9 +464,21 @@ mod tests {
         // the follow-up request as "tool_call_id does not match".
         let mut calls = vec![
             (String::new(), "file_actions".to_string(), "{}".to_string()),
-            ("call_known".to_string(), "file_actions".to_string(), "{}".to_string()),
-            ("   ".to_string(), "file_actions".to_string(), "{}".to_string()),
-            ("call_known".to_string(), "file_actions".to_string(), "{}".to_string()),
+            (
+                "call_known".to_string(),
+                "file_actions".to_string(),
+                "{}".to_string(),
+            ),
+            (
+                "   ".to_string(),
+                "file_actions".to_string(),
+                "{}".to_string(),
+            ),
+            (
+                "call_known".to_string(),
+                "file_actions".to_string(),
+                "{}".to_string(),
+            ),
         ];
         ensure_tool_call_ids(&mut calls);
 
@@ -595,6 +615,29 @@ fn background_requested(args: &Value) -> bool {
         .unwrap_or(false)
 }
 
+/// Formats one `call_subagent` result for the main agent, including the
+/// deliverable exchange directory when the task had one.
+fn format_subagent_delivery(
+    res: &agents::TaskResult,
+    exchange: Option<&agents::exchange::ExchangeArea>,
+) -> String {
+    let mut text = format!(
+        "Task execution finished with status: {}\nTokens used: {}\nTool calls made: {}\n\nResult:\n{}",
+        res.status, res.tokens_used, res.tool_calls_count, res.content
+    );
+    if let Some(area) = exchange {
+        if let Some(dir) = area.task_dir(&res.task_id) {
+            text.push_str(&format!(
+                "\n\nDeliverable directory: {}\nExchange root (workspace-relative): {}\nFiles:\n{}",
+                dir.display(),
+                area.relative_root(),
+                agents::exchange::render_files(&area.list_files(&res.task_id))
+            ));
+        }
+    }
+    text
+}
+
 /// Only the long-running, read-mostly tools may be backgrounded. A background
 /// mutation could race a second edit the model starts while it waits.
 fn background_supported(name: &str, args: &Value) -> bool {
@@ -666,10 +709,7 @@ fn background_label(name: &str, args: &Value) -> String {
 }
 
 fn format_background_delivery(delivery: &tools::background::Delivery) -> String {
-    format!(
-        "{BACKGROUND_RESULT_PREFIX}\n\n{}",
-        delivery.render()
-    )
+    format!("{BACKGROUND_RESULT_PREFIX}\n\n{}", delivery.render())
 }
 
 /// Start one background task and return the placeholder the model sees as the
@@ -733,24 +773,25 @@ where
             log_interaction(
                 &db,
                 &session_for_task,
-                if is_error { "tool_error" } else { "tool_output" },
+                if is_error {
+                    "tool_error"
+                } else {
+                    "tool_output"
+                },
                 "background_tool",
                 &tool_for_task,
                 args_preview,
                 result.clone(),
-                if is_error {
-                    Some(result.clone())
-                } else {
-                    None
-                },
+                if is_error { Some(result.clone()) } else { None },
                 elapsed_ms,
                 None,
             );
         }
 
-        if let Some(snapshot) = app_state
-            .background_tasks
-            .finish(&id_for_task, status, Some(result))
+        if let Some(snapshot) =
+            app_state
+                .background_tasks
+                .finish(&id_for_task, status, Some(result))
         {
             log_event(
                 &app_state,
@@ -884,7 +925,11 @@ fn start_background_mcp_call(
 }
 
 /// `background_task` control tool: list / wait / get / cancel.
-async fn handle_background_task_tool(state: &State<'_, AppState>, session_id: &str, args: &Value) -> String {
+async fn handle_background_task_tool(
+    state: &State<'_, AppState>,
+    session_id: &str,
+    args: &Value,
+) -> String {
     let action = args["action"]
         .as_str()
         .unwrap_or("list")
@@ -897,15 +942,11 @@ async fn handle_background_task_tool(state: &State<'_, AppState>, session_id: &s
             if tasks.is_empty() {
                 "No background tasks in this session.".to_string()
             } else {
-                serde_json::to_string_pretty(&tasks)
-                    .unwrap_or_else(|_| "[]".to_string())
+                serde_json::to_string_pretty(&tasks).unwrap_or_else(|_| "[]".to_string())
             }
         }
         "wait" => {
-            let timeout = args["timeout_seconds"]
-                .as_u64()
-                .unwrap_or(60)
-                .clamp(1, 300);
+            let timeout = args["timeout_seconds"].as_u64().unwrap_or(60).clamp(1, 300);
             let ids: Option<Vec<String>> = args["task_ids"].as_array().map(|items| {
                 items
                     .iter()
@@ -1007,9 +1048,9 @@ async fn handle_background_task_tool(state: &State<'_, AppState>, session_id: &s
                 None => format!("Error: unknown background task '{id}'."),
             }
         }
-        other => format!(
-            "Error: unsupported action '{other}'. Supported: list, wait, get, cancel."
-        ),
+        other => {
+            format!("Error: unsupported action '{other}'. Supported: list, wait, get, cancel.")
+        }
     }
 }
 
@@ -2258,7 +2299,10 @@ async fn run_chat_turn(
                 log_event(
                     &state,
                     "INFO",
-                    format!("agent orchestration stopped by user: session_id={}", session_id),
+                    format!(
+                        "agent orchestration stopped by user: session_id={}",
+                        session_id
+                    ),
                 );
                 // Close the injection window before announcing the end of the
                 // turn, so nothing accepted after this point can be stranded.
@@ -2824,11 +2868,10 @@ async fn run_chat_turn(
             }
         });
         if config.background_tools {
-            subagent_tool["function"]["parameters"]["properties"]["run_in_background"] =
-                json!({
-                    "type": "boolean",
-                    "description": "Delegate as a background task: return a task id immediately instead of waiting. The agent's result is delivered automatically before your next request; the turn stays open until it arrives. Use it when the delegated work is long and you can do something else meanwhile."
-                });
+            subagent_tool["function"]["parameters"]["properties"]["run_in_background"] = json!({
+                "type": "boolean",
+                "description": "Delegate as a background task: return a task id immediately instead of waiting. The agent's result is delivered automatically before your next request; the turn stays open until it arrives. Use it when the delegated work is long and you can do something else meanwhile."
+            });
         }
         tools_list.push(subagent_tool);
     }
@@ -3328,7 +3371,8 @@ async fn run_chat_turn(
                 let skill_name = args_json["skill_name"].as_str().unwrap_or("");
                 let ws_skills_dir = crate::workspace::skills_root(&workspace_dir_for_roots);
 
-                if let Ok(resolved_skill) = skills::resolve_skill_by_name(&ws_skills_dir, skill_name)
+                if let Ok(resolved_skill) =
+                    skills::resolve_skill_by_name(&ws_skills_dir, skill_name)
                 {
                     let skill = resolved_skill.skill;
                     let dyn_marker = format!("--- Skill (Dynamically Loaded): {} ---", skill.name);
@@ -3404,6 +3448,31 @@ async fn run_chat_turn(
                         dependencies: vec![],
                     };
                     let workspace_dir = state.workspace_dir.lock().unwrap().clone();
+                    // Deliverables are exchanged through `<workspace>/.data/tmp`.
+                    // A cloud agent cannot reach the local workspace, so it gets
+                    // no exchange directory.
+                    let agent_type = agents::normalize_agent_type(&agent.agent_type);
+                    let exchange = if matches!(
+                        agent_type.as_str(),
+                        agents::AGENT_TYPE_LLM | agents::AGENT_TYPE_CLI
+                    ) {
+                        match agents::exchange::ExchangeArea::create(
+                            &workspace_dir,
+                            std::slice::from_ref(&task.id),
+                        ) {
+                            Ok(area) => Some(area),
+                            Err(err) => {
+                                log_event(
+                                    &state,
+                                    "WARN",
+                                    format!("deliverable exchange area unavailable: {err}"),
+                                );
+                                None
+                            }
+                        }
+                    } else {
+                        None
+                    };
                     let url = format!(
                         "{}/chat/completions",
                         config.api_base_url.trim_end_matches('/')
@@ -3416,6 +3485,7 @@ async fn run_chat_turn(
                                 let session_for_task = session_id.clone();
                                 let config_for_task = config.clone();
                                 let skill_root_for_task = skill_evolution_root.clone();
+                                let exchange_for_task = exchange.clone();
                                 let label = format!(
                                     "{} · {}",
                                     agent.name,
@@ -3439,15 +3509,13 @@ async fn run_chat_turn(
                                             &agent,
                                             &task,
                                             workspace_dir,
+                                            exchange_for_task.as_ref(),
                                             skill_root_for_task,
                                             cancel,
                                             None,
                                         )
                                         .await;
-                                        format!(
-                                            "Task execution finished with status: {}\nTokens used: {}\nTool calls made: {}\n\nResult:\n{}",
-                                            res.status, res.tokens_used, res.tool_calls_count, res.content
-                                        )
+                                        format_subagent_delivery(&res, exchange_for_task.as_ref())
                                     },
                                 )
                                 .unwrap_or_else(|err| format!("Error: {err}"))
@@ -3461,14 +3529,14 @@ async fn run_chat_turn(
                                     agent,
                                     &task,
                                     workspace_dir,
+                                    exchange.as_ref(),
                                     skill_evolution_root.clone(),
                                     turn_cancelled.clone(),
                                     None,
                                 )
                                 .await;
 
-                                format!("Task execution finished with status: {}\nTokens used: {}\nTool calls made: {}\n\nResult:\n{}", 
-                                    res.status, res.tokens_used, res.tool_calls_count, res.content)
+                                format_subagent_delivery(&res, exchange.as_ref())
                             }
                         }
                         Err(err) => format!("Error: {err}"),
@@ -3620,14 +3688,7 @@ async fn run_chat_turn(
             } else {
                 "repo"
             };
-            record_conclusion_to_memory(
-                &state,
-                &app,
-                &workspace_dir,
-                &session_id,
-                scope,
-                &answer,
-            );
+            record_conclusion_to_memory(&state, &app, &workspace_dir, &session_id, scope, &answer);
         }
     }
 

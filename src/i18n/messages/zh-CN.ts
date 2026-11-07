@@ -246,6 +246,8 @@ const zhCN: Messages = {
             reset: "重置",
             resetTitle: "使用默认工作区目录",
             resetAria: "将工作区目录重置为默认值",
+            openTmp: "打开交付物交换区",
+            openTmpHint: "子 agent 的交付物保存在 .data/tmp 下，可在这里手动清理。",
             selfEvolution: "启用自我进化模式",
             selfEvolutionHint: "允许助手在工作区内自行演进技能。开启期间“文件操作”和“记忆”工具会强制启用并锁定，助手还会把已验证的关键事实（运行环境、正确的工具用法、常用文件位置）记录到专属的自进化记忆区。",
             profilesTitle: "配置方案",
@@ -626,7 +628,7 @@ const zhCN: Messages = {
             knowledgeGraph: "基于 Neo4j 的知识图谱查询",
             todos:
                 "通过 `todos` 工具管理会话待办清单（list / add / update_status / clear_completed / archive）。该计划与聊天会话及所有并行智能体共享。",
-            memory: "会话 / 用户 / 仓库记忆存储",
+            memory: "共享的会话 / 用户 / 仓库记忆存储（所有子 agent 读写同一份）",
         },
 
         // ── CLI 类型 ──
