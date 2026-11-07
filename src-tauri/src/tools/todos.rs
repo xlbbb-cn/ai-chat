@@ -305,10 +305,20 @@ pub fn get_active_list(
     session_id: &str,
 ) -> Result<Option<TodoListSummary>, String> {
     let workspace = workspace_path(app)?;
-    let Some(list_id) = find_active_list_id(&workspace, session_id)? else {
+    active_list_snapshot(&workspace, session_id)
+}
+
+/// Active list snapshot for callers that already hold the workspace path — the
+/// turn builder hands the same snapshot to the prompt block and to the UI
+/// event, so the panel and the model can never disagree about the plan.
+pub fn active_list_snapshot(
+    workspace: &Path,
+    session_id: &str,
+) -> Result<Option<TodoListSummary>, String> {
+    let Some(list_id) = find_active_list_id(workspace, session_id)? else {
         return Ok(None);
     };
-    Ok(Some(load_list(&workspace, session_id, &list_id)?))
+    Ok(Some(load_list(workspace, session_id, &list_id)?))
 }
 
 pub fn add_todo(
@@ -471,9 +481,12 @@ pub fn rotate_active_list(
     })
 }
 
-pub fn render_active_list_for_context(workspace: &Path, session_id: &str) -> Option<String> {
-    let list_id = find_active_list_id(workspace, session_id).ok().flatten()?;
-    let summary = load_list(workspace, session_id, &list_id).ok()?;
+/// Render the `INTERNAL CONTEXT - ACTIVE TODO LIST` block for a list that was
+/// already loaded (the turn builder takes one snapshot and feeds both this
+/// block and the UI event from it). `None` when there is nothing worth
+/// injecting: an empty list, or one where every item is done — the UI still
+/// keeps showing such a list, the model just has nothing left to plan.
+pub fn render_list_block(summary: &TodoListSummary) -> Option<String> {
     if summary.todos.is_empty() {
         return None;
     }
@@ -481,6 +494,10 @@ pub fn render_active_list_for_context(workspace: &Path, session_id: &str) -> Opt
     if summary.completed == summary.total {
         return None;
     }
+    Some(render_list_block_unchecked(summary))
+}
+
+fn render_list_block_unchecked(summary: &TodoListSummary) -> String {
     let mut body = String::new();
     body.push_str(&format!(
         "Active session todo list: \"{}\" ({}/{})\n",
@@ -505,7 +522,7 @@ pub fn render_active_list_for_context(workspace: &Path, session_id: &str) -> Opt
     body.push_str(
         "\nUse the `todos` tool (actions: list, add, update_status, clear_completed, archive) to manage this list. Re-run action `list` whenever you need a fresh view of progress before planning the next step."
     );
-    Some(body)
+    body
 }
 
 // ─── Tool handler (LLM interface) ────────────────────────────────────────────

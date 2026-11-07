@@ -922,6 +922,18 @@ fn cancel_background_task(
         .ok_or_else(|| format!("Unknown background task '{task_id}'"))
 }
 
+/// The session's active todo list, or `null` when it has none. The todo panel
+/// is mounted per assistant message, so a list created in an earlier turn (or
+/// before a reload) has to be fetched instead of waiting for the next
+/// `todo-state` event.
+#[tauri::command]
+fn get_active_todo_list(
+    app: AppHandle,
+    session_id: String,
+) -> Result<Option<todos::TodoListSummary>, String> {
+    todos::get_active_list(&app, &session_id)
+}
+
 /// Push a message into the turn that is currently running, so it reaches the
 /// model at the next request boundary (i.e. before the next tool round or the
 /// final answer) instead of waiting for the turn to end.
@@ -1489,6 +1501,7 @@ pub fn run() {
             inject_user_message,
             list_background_tasks,
             cancel_background_task,
+            get_active_todo_list,
             confirm_command,
             get_config,
             save_config,

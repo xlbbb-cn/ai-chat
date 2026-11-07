@@ -2734,10 +2734,34 @@ async fn run_chat_turn(
 
     // Inject the active todo list (if any) so the assistant can always
     // re-orient itself to the current plan, even mid-turn.
-    if let Ok(workspace_guard) = state.workspace_dir.lock() {
-        if let Some(todo_block) =
-            todos::render_active_list_for_context(&workspace_guard, &session_id)
-        {
+    // The same snapshot is pushed to the UI: the panel is remounted per
+    // assistant message and only the newest one mirrors the session list, so
+    // without it a list created in an earlier turn would stay invisible until
+    // the model happened to touch it again.
+    let todo_snapshot = match state.workspace_dir.lock() {
+        Ok(workspace_guard) => todos::active_list_snapshot(&workspace_guard, &session_id)
+            .ok()
+            .flatten(),
+        Err(_) => None,
+    };
+    if let Some(summary) = &todo_snapshot {
+        if !summary.todos.is_empty() {
+            // Mirror the very same snapshot to the UI. Emitted together with
+            // the prompt block on purpose, and also for a finished list: the
+            // panel must be able to disappear (or never appear) instead of
+            // lingering at 100% from an earlier turn.
+            let _ = app.emit(
+                "todo-state",
+                json!({
+                    "type": "todo_state",
+                    "list_id": summary.list_id,
+                    "session_id": summary.session_id,
+                    "summary": summary,
+                }),
+            );
+        }
+        // Nothing left to track → no prompt block either.
+        if let Some(todo_block) = todos::render_list_block(summary) {
             all_messages.push(json!({
                 "role": "system",
                 "content": format!("{CONTEXT_TODO_MARKER}\n{}", todo_block)
