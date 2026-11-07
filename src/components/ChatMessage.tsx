@@ -476,6 +476,12 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
         ? extractAttachmentNames(textContent)
         : []
   ).filter((name) => !textContent.includes(`@${name.split("#")[0]}`));
+  // Background tool results reach the model through the injection list, but
+  // they are not conversation: a turn shows only what was actually said, so
+  // they are filtered out of the transcript here.
+  const visibleInjections = (message.injections ?? []).filter(
+    (injection) => injection.kind !== "background_result",
+  );
   const displayContent = isUser
     ? textContent.replace(/<details><summary>Attached File:[^<]*<\/summary>[\s\S]*?<\/details>/g, "").trim()
     : textContent;
@@ -731,31 +737,23 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
         )}
         {/* Information the user pushed into this turn while it was running.
             One turn stays one bubble, so the block sits under the reply and
-            states when the model actually received it. */}
-        {isAssistant && message.injections && message.injections.length > 0 && (
+            states when the model actually received it. Background task
+            results are replayed into the model history but stay out of the
+            transcript (see `visibleInjections`). */}
+        {isAssistant && visibleInjections.length > 0 && (
           <div className="message-injections">
-            {message.injections.map((injection) => {
-              const isBackground = injection.kind === "background_result";
-              // The stored text is the full result (it is replayed into the
-              // model's history); the bubble shows a clamped preview so a
-              // multi-thousand-line search does not swallow the transcript.
-              const displayText =
-                isBackground && injection.text.length > 480
-                  ? `${injection.text.slice(0, 480)}…`
-                  : injection.text;
-              return (
-                <div key={injection.id} className="message-injection">
-                  <span className="message-injection-head">
-                    <FontAwesomeIcon icon={faPenToSquare} aria-hidden="true" />
-                    {t(isBackground ? "chat.backgroundResult" : "chat.injected")}
-                    <span className="message-injection-time">
-                      {formatInjectionTime(injection.created_at_ms)}
-                    </span>
+            {visibleInjections.map((injection) => (
+              <div key={injection.id} className="message-injection">
+                <span className="message-injection-head">
+                  <FontAwesomeIcon icon={faPenToSquare} aria-hidden="true" />
+                  {t("chat.injected")}
+                  <span className="message-injection-time">
+                    {formatInjectionTime(injection.created_at_ms)}
                   </span>
-                  <span className="message-injection-text">{displayText}</span>
-                </div>
-              );
-            })}
+                </span>
+                <span className="message-injection-text">{injection.text}</span>
+              </div>
+            ))}
           </div>
         )}
         {attachmentNames.length > 0 && (
