@@ -93,8 +93,6 @@ const en = {
         },
 
         background: {
-            title: "Background tasks",
-            waiting: "Waiting for {count} background task(s)…",
             cancel: "Cancel task",
             toolName: "Background",
         },
@@ -240,6 +238,18 @@ const en = {
         mainAgentHelpChars: "→ {count} chars",
         mainAgentHelpFailed: "Main-agent help failed",
         mbusCounts: "mbus · {sent} sent · {received} received",
+    },
+
+    backgroundGroup: {
+        title: "Background",
+        running: "{count} running",
+        waiting: "{count} waiting",
+        serves: "Serve processes",
+        tasks: "Background tasks",
+        hint: "Waiting for a background result…",
+        cancelTask: "Cancel task",
+        stopServe: "Stop",
+        serveMeta: "pid {pid} · {uptime}",
     },
 
     settings: {
@@ -450,21 +460,6 @@ const en = {
         kgEngine: "Knowledge Graph Engine",
         kgEngineTitle: "Default engine for knowledge graph",
         kgEngineDisabled: "Enable Knowledge Graph tool first",
-        serveProcesses: "Background Serve Processes",
-        serveEmpty:
-            'No background serve processes. Processes started by run_shell with run_type "serve" appear here.',
-        serveCount: "{count} running",
-        serveStateRunning: "running",
-        serveStateExited: "exited",
-        serveStateLost: "lost",
-        serveStateStopped: "stopped",
-        serveStateUnknown: "unknown",
-        serveStop: "Stop",
-        serveRemove: "Remove",
-        serveMeta: "pid {pid} · {uptime}",
-        serveExitCode: "exit {code}",
-        serveCwd: "cwd: {path}",
-        serveOutput: "Recent output",
         autoAccept: "AutoAccept Mode",
         lockedBadge: "Required",
         lockedBySelfEvolution:

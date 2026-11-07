@@ -82,8 +82,6 @@ const zhCN: Messages = {
         },
 
         background: {
-            title: "后台任务",
-            waiting: "等待 {count} 个后台任务完成…",
             cancel: "取消任务",
             toolName: "后台",
         },
@@ -210,6 +208,18 @@ const zhCN: Messages = {
         mainAgentHelpChars: "→ {count} 字符",
         mainAgentHelpFailed: "主代理协助失败",
         mbusCounts: "消息总线 · 发送 {sent} · 接收 {received}",
+    },
+
+    backgroundGroup: {
+        title: "后台任务",
+        running: "{count} 个运行中",
+        waiting: "{count} 轮等待结果",
+        serves: "Serve 进程",
+        tasks: "后台任务",
+        hint: "正在等待后台结果…",
+        cancelTask: "取消任务",
+        stopServe: "停止",
+        serveMeta: "pid {pid} · {uptime}",
     },
 
     settings: {
@@ -416,20 +426,6 @@ const zhCN: Messages = {
         kgEngine: "知识图谱引擎",
         kgEngineTitle: "知识图谱的默认引擎",
         kgEngineDisabled: "请先启用知识图谱工具",
-        serveProcesses: "后台 Serve 进程",
-        serveEmpty: "没有后台 Serve 进程。通过 run_shell 的 run_type \"serve\" 启动的进程会显示在这里。",
-        serveCount: "{count} 个运行中",
-        serveStateRunning: "运行中",
-        serveStateExited: "已退出",
-        serveStateLost: "已失联",
-        serveStateStopped: "已停止",
-        serveStateUnknown: "未知",
-        serveStop: "停止",
-        serveRemove: "移除",
-        serveMeta: "pid {pid} · {uptime}",
-        serveExitCode: "退出码 {code}",
-        serveCwd: "工作目录：{path}",
-        serveOutput: "最近输出",
         autoAccept: "自动确认模式",
         lockedBadge: "必需",
         lockedBySelfEvolution: "自进化模式需要，无法关闭。",

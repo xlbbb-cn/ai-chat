@@ -82,8 +82,6 @@ const zhTW: Messages = {
         },
 
         background: {
-            title: "背景任務",
-            waiting: "等待 {count} 個背景任務完成…",
             cancel: "取消任務",
             toolName: "背景",
         },
@@ -210,6 +208,18 @@ const zhTW: Messages = {
         mainAgentHelpChars: "→ {count} 字元",
         mainAgentHelpFailed: "主代理協助失敗",
         mbusCounts: "訊息匯流排 · 傳送 {sent} · 接收 {received}",
+    },
+
+    backgroundGroup: {
+        title: "背景任務",
+        running: "{count} 個執行中",
+        waiting: "{count} 輪等待結果",
+        serves: "Serve 程序",
+        tasks: "背景任務",
+        hint: "正在等待背景結果…",
+        cancelTask: "取消任務",
+        stopServe: "停止",
+        serveMeta: "pid {pid} · {uptime}",
     },
 
     settings: {
@@ -416,20 +426,6 @@ const zhTW: Messages = {
         kgEngine: "知識圖譜引擎",
         kgEngineTitle: "知識圖譜的預設引擎",
         kgEngineDisabled: "請先啟用知識圖譜工具",
-        serveProcesses: "背景 Serve 程序",
-        serveEmpty: "沒有背景 Serve 程序。透過 run_shell 的 run_type \"serve\" 啟動的程序會顯示在這裡。",
-        serveCount: "{count} 個執行中",
-        serveStateRunning: "執行中",
-        serveStateExited: "已結束",
-        serveStateLost: "已失聯",
-        serveStateStopped: "已停止",
-        serveStateUnknown: "未知",
-        serveStop: "停止",
-        serveRemove: "移除",
-        serveMeta: "pid {pid} · {uptime}",
-        serveExitCode: "結束碼 {code}",
-        serveCwd: "工作目錄：{path}",
-        serveOutput: "最近輸出",
         autoAccept: "自動確認模式",
         lockedBadge: "必需",
         lockedBySelfEvolution: "自我演化模式需要，無法關閉。",
