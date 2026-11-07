@@ -1076,6 +1076,8 @@ body {
 }
 
 .input-row {
+  /* Anchor for the composer's `@file` popup, which floats above this row. */
+  position: relative;
   display: flex;
   gap: 6px;
   align-items: flex-end;

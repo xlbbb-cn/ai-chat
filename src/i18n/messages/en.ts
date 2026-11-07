@@ -100,6 +100,16 @@ const en = {
         },
 
         attachFiles: "Attach files",
+        fileMention: {
+            title: "Insert file reference",
+            hint: "↑↓ choose · Enter/Tab insert · add #12-24 for lines · Esc close",
+            loading: "Loading workspace files…",
+            noMatches: "No file matches “{query}” for this model.",
+            listFailed: "Could not list workspace files: {error}",
+            readFailed: "Could not read {name}: {error}",
+            rangeNotSupported:
+                "{name} cannot be sliced by lines — attached the whole file.",
+        },
         attachmentUnsupported:
             "Skipped {names}: “{model}” cannot read that file type.",
         inputPlaceholder: "Type a message… (Enter to send, Shift+Enter for newline)",

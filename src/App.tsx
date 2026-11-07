@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask } from "./api";
+import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles } from "./api";
 
 import { ChatMessage } from "./components/ChatMessage";
 import { ToolCallGroup } from "./components/ToolCallGroup";
@@ -15,6 +15,7 @@ import { MarkdownPreview } from "./components/MarkdownPreview";
 import { Portal } from "./components/Portal";
 import { TitleBar } from "./components/TitleBar";
 import { UpdatePanel } from "./components/UpdatePanel";
+import { FileMentionPopup } from "./components/FileMentionPopup";
 import type {
   AppConfig,
   Message,
@@ -40,7 +41,19 @@ import type {
   TimerEntry,
   BackgroundTaskState,
   UpdateInfo,
+  WorkspaceFileEntry,
 } from "./types";
+import {
+  AUDIO_EXTENSIONS,
+  FILE_EXTENSIONS,
+  IMAGE_EXTENSIONS,
+  TEXT_EXTENSIONS,
+  classifyName,
+  extensionOf,
+  mimeForName,
+  supportsAttachmentKind,
+} from "./attachments";
+import { activeMentionQuery, resolveFileMentions, scoreWorkspaceFile } from "./fileMention";
 import { isGenerationStopped, isLocale, stripGenerationStopped, useI18n } from "./i18n";
 import { formatCountdown } from "./utils/time";
 import {
@@ -106,34 +119,13 @@ function timerPromptText(timer: TimerEntry): string {
  * - documents become `file` parts → need `supports_files`;
  * - audio becomes an `input_audio` part → needs `supports_audio`, and only the
  *   two formats the Chat Completions schema allows (`wav`, `mp3`).
+ *
+ * The extension lists themselves live in `attachments.ts`, shared with the
+ * composer's `@file` mention popup, so both entry points accept the same files.
  */
-const TEXT_EXTENSIONS = [
-  "txt", "md", "markdown", "csv", "tsv", "json", "jsonl",
-  "yaml", "yml", "xml", "html", "htm", "css", "js", "ts", "jsx", "tsx",
-  "py", "rs", "go", "java", "c", "cpp", "h", "hpp", "cs", "rb", "php",
-  "sh", "bat", "ps1", "sql", "log", "ini", "cfg", "toml", "env",
-  "diff", "patch", "tex", "rst", "adoc", "org", "r", "m", "scala",
-  "swift", "kt", "dart", "lua", "pl", "ex", "exs", "clj", "hs", "ml",
-  "fs", "erl", "vim", "conf", "v",
-];
-const IMAGE_EXTENSIONS = [
-  "jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "heic", "heif", "ico", "tif", "tiff",
-];
-const FILE_EXTENSIONS = ["pdf"];
-const AUDIO_EXTENSIONS = ["mp3", "wav"];
-
 const IMAGE_MIME_PREFIXES = ["image/"];
 const AUDIO_MIME_PREFIXES = ["audio/"];
 const TEXT_MIME_PREFIXES = ["text/"];
-
-const FILE_TYPE_EXT_OVERRIDES: Record<string, string> = {
-  pdf: "application/pdf",
-};
-
-function extensionOf(name: string): string {
-  const dot = name.lastIndexOf(".");
-  return dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
-}
 
 function classifyFile(file: File): Attachment["kind"] {
   const mime = file.type.toLowerCase();
@@ -147,27 +139,6 @@ function classifyFile(file: File): Attachment["kind"] {
   if (AUDIO_EXTENSIONS.includes(ext)) return "audio";
   if (TEXT_EXTENSIONS.includes(ext)) return "text";
   return "file";
-}
-
-/**
- * Can the model behind `metadata` consume this kind of attachment?
- *
- * Unknown metadata (the catalogue was never fetched, or the id was not matched)
- * stays permissive: blocking files a model might well accept is worse than
- * letting the provider answer with its own error.
- */
-function supportsAttachmentKind(metadata: ModelMetadata | undefined, kind: Attachment["kind"]): boolean {
-  if (!metadata) return true;
-  switch (kind) {
-    case "text":
-      return true;
-    case "image":
-      return metadata.supports_vision === true;
-    case "audio":
-      return metadata.supports_audio === true;
-    case "file":
-      return metadata.supports_files === true;
-  }
 }
 
 /** `accept` attribute for the file picker, narrowed to the model's abilities. */
@@ -185,11 +156,7 @@ function acceptedFileTypes(metadata: ModelMetadata | undefined): string {
 function mimeFor(file: File): string {
   const mime = file.type.toLowerCase();
   if (mime && mime !== "application/octet-stream") return mime;
-  const ext = extensionOf(file.name);
-  if (!ext) return "application/octet-stream";
-  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
-  if (FILE_TYPE_EXT_OVERRIDES[ext]) return FILE_TYPE_EXT_OVERRIDES[ext];
-  return `application/${ext}`;
+  return mimeForName(file.name);
 }
 
 /** Strip the `data:<mime>;base64,` prefix — `input_audio` wants the payload. */
@@ -328,6 +295,12 @@ interface AgentStatus {
   tokens?: number;
 }
 
+/** How long the `@file` popup trusts its cached workspace listing. */
+const WORKSPACE_FILES_TTL_MS = 15_000;
+/** Rows the `@file` popup shows at once — enough to be useful, short enough
+ *  that arrow-key navigation stays predictable. */
+const MENTION_MAX_ITEMS = 8;
+
 interface MarkdownEditPayload {
   path: string;
   content: string;
@@ -338,6 +311,22 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  /**
+   * Composer `@file` popup. `start` is the index of the `@` that opened it —
+   * the whole token is replaced when an item is accepted.
+   */
+  const [mentionState, setMentionState] = useState<{
+    open: boolean;
+    query: string;
+    start: number;
+  }>({ open: false, query: "", start: 0 });
+  const [mentionIndex, setMentionIndex] = useState(0);
+  /** Workspace files for the popup; `null` until the first `@` triggers a load. */
+  const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFileEntry[] | null>(null);
+  const [workspaceFilesLoading, setWorkspaceFilesLoading] = useState(false);
+  /** Timestamped cache of `workspaceFiles`, so the walk runs at most every 15s. */
+  const workspaceFilesRef = useRef<{ at: number; files: WorkspaceFileEntry[] } | null>(null);
+  const workspaceFilesPendingRef = useRef(false);
   const [streaming, setStreaming] = useState(false);
   const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
   const [sidebar, setSidebar] = useState<Sidebar>(null);
@@ -378,6 +367,12 @@ export default function App() {
   const [selectedModel, setSelectedModel] = useState("gpt-4o-mini");
   /** Capabilities per model, learned from the llm-metadata catalogue. */
   const [modelMetadata, setModelMetadata] = useState<Record<string, ModelMetadata>>({});
+  /**
+   * Capabilities of the model currently selected in the toolbar. Declared here
+   * (not next to its other uses further down) because `sendMessage` and the
+   * `@file` popup both need it in their dependency lists.
+   */
+  const selectedMetadata = modelMetadata[selectedModel];
   /** Thinking depth per model (`reasoning_effort`); absent = provider default. */
   const [reasoningEfforts, setReasoningEfforts] = useState<Record<string, string>>({});
   const [activeToolCount, setActiveToolCount] = useState(0);
@@ -1806,8 +1801,16 @@ export default function App() {
     // up. A timer resume is not a user action and leaves the view alone.
     if (!autoResume) followBottomRef.current = true;
 
-    const { content: apiContent } = buildMessageContent(rawText, activeAttachments);
-    const userAttachments = activeAttachments.length > 0 ? activeAttachments : undefined;
+    // `@path#lines` mentions are materialised here: the token stays in the body
+    // (the model then sees which file was quoted) while the content travels
+    // through the normal attachment pipeline.
+    const mentionResult = autoResume
+      ? { attachments: [] as Attachment[], problems: [] as string[] }
+      : await resolveFileMentions(rawText, selectedMetadata, selectedModel);
+    const messageAttachments = [...activeAttachments, ...mentionResult.attachments];
+
+    const { content: apiContent } = buildMessageContent(rawText, messageAttachments);
+    const userAttachments = messageAttachments.length > 0 ? messageAttachments : undefined;
     setPendingRetryMessageId(null);
 
     const userMsg: Message = {
@@ -1841,6 +1844,11 @@ export default function App() {
     }
     setStreaming(true);
     setError(null);
+    if (mentionResult.problems.length > 0) {
+      // Unresolvable mentions never block the message: the text is still sent,
+      // the banner says which references were not attached.
+      setError(mentionResult.problems.join("\n"));
+    }
     // A new request starts with no token figures yet — the usage bar above the
     // input must sweep until this request's `chat-usage` arrives.
     setUsageReady(false);
@@ -2044,7 +2052,7 @@ export default function App() {
     }, useAgentsEnabled);
 
     cleanupRef.current = cleanup;
-  }, [input, messages, streaming, profileExporting, activeSkillIds, sessionId, attachments, selectedModel, useAgentsEnabled, t, flushUndeliveredInjections]);
+  }, [input, messages, streaming, profileExporting, activeSkillIds, sessionId, attachments, selectedModel, selectedMetadata, useAgentsEnabled, t, flushUndeliveredInjections]);
 
   /**
    * Resume a partial reply. The normal send path keeps interrupted assistant
@@ -2320,6 +2328,33 @@ export default function App() {
     if (profileExporting) {
       e.preventDefault();
       return;
+    }
+
+    // The `@file` popup owns the arrow keys, Enter/Tab and Escape while open.
+    if (mentionState.open) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeMention();
+        return;
+      }
+      if (mentionItems.length > 0) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setMentionIndex((prev) => (prev + 1) % mentionItems.length);
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setMentionIndex((prev) => (prev - 1 + mentionItems.length) % mentionItems.length);
+          return;
+        }
+        if (e.key === "Enter" || e.key === "Tab") {
+          e.preventDefault();
+          const item = mentionItems[mentionActiveIndex];
+          if (item) acceptMention(item);
+          return;
+        }
+      }
     }
 
     if (e.key === "Enter" && !e.shiftKey) {
@@ -2689,8 +2724,6 @@ export default function App() {
     }
   }
 
-  /** Capabilities of the model currently selected in the toolbar. */
-  const selectedMetadata = modelMetadata[selectedModel];
   /** The thinking-depth control only makes sense for reasoning-capable models. */
   const reasoningEffort = reasoningEfforts[selectedModel] ?? "";
   // Shown for catalogue-matched reasoning models, and kept for any model that
@@ -2709,6 +2742,114 @@ export default function App() {
       model: selectedModel,
     }));
   }, [attachments, selectedMetadata, selectedModel, t]);
+
+  // ─── Composer `@file` mentions ────────────────────────────────────────────
+
+  /**
+   * Files the `@file` popup offers: only the attachment kinds the selected
+   * model can consume (`filter_by_externname` — text is always fine, images
+   * need vision, documents need `supports_files`), ranked by file name first
+   * and path second.
+   */
+  const mentionItems = useMemo(() => {
+    if (!mentionState.open || !workspaceFiles) return [];
+    const scored: { item: WorkspaceFileEntry; score: number }[] = [];
+    for (const file of workspaceFiles) {
+      if (!supportsAttachmentKind(selectedMetadata, classifyName(file.name))) continue;
+      const score = scoreWorkspaceFile(file, mentionState.query);
+      if (score === null) continue;
+      scored.push({ item: file, score });
+    }
+    scored.sort(
+      (a, b) =>
+        a.score - b.score ||
+        a.item.path.length - b.item.path.length ||
+        a.item.path.localeCompare(b.item.path),
+    );
+    return scored.slice(0, MENTION_MAX_ITEMS).map((entry) => entry.item);
+  }, [mentionState.open, mentionState.query, workspaceFiles, selectedMetadata]);
+
+  /** Index stays valid while the filtered list shrinks under the cursor. */
+  const mentionActiveIndex = Math.min(mentionIndex, Math.max(0, mentionItems.length - 1));
+
+  const closeMention = useCallback(() => {
+    setMentionState((prev) => (prev.open ? { open: false, query: "", start: 0 } : prev));
+  }, []);
+
+  /**
+   * Load the workspace file list for the popup (cached for
+   * `WORKSPACE_FILES_TTL_MS`, so switching workspaces is picked up without an
+   * explicit invalidation hook).
+   */
+  const ensureWorkspaceFiles = useCallback(async () => {
+    if (workspaceFilesPendingRef.current) return;
+    const cached = workspaceFilesRef.current;
+    if (cached && Date.now() - cached.at < WORKSPACE_FILES_TTL_MS) return;
+
+    workspaceFilesPendingRef.current = true;
+    setWorkspaceFilesLoading(true);
+    try {
+      const files = await listWorkspaceFiles();
+      workspaceFilesRef.current = { at: Date.now(), files };
+      setWorkspaceFiles(files);
+    } catch (err) {
+      setError(t("app.fileMention.listFailed", { error: String(err) }));
+    } finally {
+      workspaceFilesPendingRef.current = false;
+      setWorkspaceFilesLoading(false);
+    }
+  }, [t]);
+
+  /**
+   * Open/close the popup for the token under the caret. Only a real user edit
+   * reaches this — accepting an item inserts text programmatically, which must
+   * not immediately reopen the popup.
+   */
+  const syncMentionFromInput = useCallback(
+    (value: string, caret: number) => {
+      // While a turn is running the composer is an injection channel: injected
+      // text carries no attachments, so a mention would only look like one.
+      if (streaming) {
+        closeMention();
+        return;
+      }
+      const active = activeMentionQuery(value, caret);
+      if (!active) {
+        closeMention();
+        return;
+      }
+      setMentionState((prev) =>
+        prev.open && prev.start === active.start && prev.query === active.query
+          ? prev
+          : { open: true, query: active.query, start: active.start },
+      );
+      setMentionIndex(0);
+      void ensureWorkspaceFiles();
+    },
+    [closeMention, ensureWorkspaceFiles, streaming],
+  );
+
+  /**
+   * Insert `@<path>` for `item` and leave the caret right behind it, so a
+   * `#12-24` range can be typed straight away.
+   */
+  const acceptMention = useCallback(
+    (item: WorkspaceFileEntry) => {
+      const el = textareaRef.current;
+      const caret = el?.selectionStart ?? input.length;
+      const token = `@${item.path}`;
+      const before = input.slice(0, mentionState.start);
+      const after = input.slice(Math.max(caret, mentionState.start));
+      setInput(`${before}${token}${after}`);
+      closeMention();
+      requestAnimationFrame(() => {
+        const position = before.length + token.length;
+        el?.focus();
+        el?.setSelectionRange(position, position);
+      });
+    },
+    [closeMention, input, mentionState.start],
+  );
 
   const usageTotal = usage ? (usage.total_tokens ?? usage.prompt_tokens + usage.completion_tokens) : 0;
   const fallbackMaxTokens = 131072; // 128k tokens as a hard upper bound for usage ratio calculations when no explicit max is provided
@@ -3257,6 +3398,15 @@ export default function App() {
           )}
           {renderConfirmDialog()}
           <div className="input-row">
+            <FileMentionPopup
+              open={mentionState.open}
+              items={mentionItems}
+              activeIndex={mentionActiveIndex}
+              loading={workspaceFilesLoading}
+              query={mentionState.query}
+              onHover={setMentionIndex}
+              onSelect={acceptMention}
+            />
             <button
               className="attach-btn"
               title={t("app.attachFiles")}
@@ -3309,8 +3459,16 @@ export default function App() {
               className="chat-input"
               rows={1}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                const value = e.target.value;
+                setInput(value);
+                syncMentionFromInput(value, e.target.selectionStart ?? value.length);
+              }}
               onKeyDown={handleKeyDown}
+              // A real blur (clicking elsewhere) dismisses the popup; the popup
+              // itself accepts on `mousedown` + `preventDefault`, so choosing a
+              // file never blurs the textarea.
+              onBlur={closeMention}
               placeholder={streaming ? t("app.injections.placeholder") : t("app.inputPlaceholder")}
               // Stays usable while a reply streams: Enter then adds the text to
               // the running turn instead of starting a new one.

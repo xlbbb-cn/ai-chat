@@ -484,6 +484,30 @@ export interface ModelMetadata {
   match_score?: number;
 }
 
+/**
+ * One file offered by the composer's `@` mention popup
+ * (`workspace_files::list_workspace_files`).
+ */
+export interface WorkspaceFileEntry {
+  /** Workspace-relative path with `/` separators. */
+  path: string;
+  /** File name (basename) — what the popup filters on first. */
+  name: string;
+  /** Lowercase extension without the dot; `""` when there is none. */
+  ext: string;
+  size: number;
+}
+
+/** A text file sliced to a 1-based line range (`read_workspace_file_range`). */
+export interface WorkspaceFileRange {
+  text: string;
+  total_lines: number;
+  start_line: number;
+  end_line: number;
+  /** The requested range ran past the end of the file and was clamped. */
+  truncated: boolean;
+}
+
 export interface Skill {
   name: string;
   description: string;
