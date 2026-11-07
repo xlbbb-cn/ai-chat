@@ -567,6 +567,15 @@
   white-space: pre-wrap;
 }
 
+/* `@file#lines` mention inside a user turn: the accent is the reference
+   colour, so the token the user typed reads as a reference and not as prose.
+   The chip list below survives only for attachments the body does not name
+   (files attached before mentions existed). */
+.file-mention-token {
+  color: var(--c-accent-text);
+  font-weight: 500;
+}
+
 .message-attachments {
   display: flex;
   flex-wrap: wrap;
