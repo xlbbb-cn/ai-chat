@@ -43,16 +43,7 @@ import type {
   UpdateInfo,
   WorkspaceFileEntry,
 } from "./types";
-import {
-  AUDIO_EXTENSIONS,
-  FILE_EXTENSIONS,
-  IMAGE_EXTENSIONS,
-  TEXT_EXTENSIONS,
-  classifyName,
-  extensionOf,
-  mimeForName,
-  supportsAttachmentKind,
-} from "./attachments";
+import { classifyName, extensionOf, supportsAttachmentKind } from "./attachments";
 import { activeMentionQuery, resolveFileMentions, scoreWorkspaceFile } from "./fileMention";
 import { isGenerationStopped, isLocale, stripGenerationStopped, useI18n } from "./i18n";
 import { formatCountdown } from "./utils/time";
@@ -60,10 +51,7 @@ import {
   FontAwesomeIcon,
   faBrain,
   faClockRotateLeft,
-  faFileLines,
-  faFilePen,
   faGear,
-  faPaperclip,
   faPenToSquare,
   faPlug,
   faRobot,
@@ -72,7 +60,6 @@ import {
   faSpinner,
   faStopwatch,
   faTriangleExclamation,
-  faVolumeHigh,
   faWandMagicSparkles,
   faXmark,
 } from "./icons";
@@ -110,83 +97,10 @@ function timerPromptText(timer: TimerEntry): string {
 
 // ─── Attachment handling ─────────────────────────────────────────────────────
 
-/**
- * Which extensions the picker offers depends on the selected model's
- * capabilities (see `acceptedFileTypes`):
- * - text is always accepted — it is inlined into the prompt, not sent as a
- *   content part, so any model can consume it;
- * - images become `image_url` parts → need `supports_vision`;
- * - documents become `file` parts → need `supports_files`;
- * - audio becomes an `input_audio` part → needs `supports_audio`, and only the
- *   two formats the Chat Completions schema allows (`wav`, `mp3`).
- *
- * The extension lists themselves live in `attachments.ts`, shared with the
- * composer's `@file` mention popup, so both entry points accept the same files.
- */
-const IMAGE_MIME_PREFIXES = ["image/"];
-const AUDIO_MIME_PREFIXES = ["audio/"];
-const TEXT_MIME_PREFIXES = ["text/"];
-
-function classifyFile(file: File): Attachment["kind"] {
-  const mime = file.type.toLowerCase();
-  if (mime && IMAGE_MIME_PREFIXES.some((p) => mime.startsWith(p))) return "image";
-  if (mime && AUDIO_MIME_PREFIXES.some((p) => mime.startsWith(p))) return "audio";
-  if (mime && TEXT_MIME_PREFIXES.some((p) => mime.startsWith(p))) return "text";
-  if (mime && mime !== "application/octet-stream") return "file";
-  const ext = extensionOf(file.name);
-  if (!ext) return "file";
-  if (IMAGE_EXTENSIONS.includes(ext)) return "image";
-  if (AUDIO_EXTENSIONS.includes(ext)) return "audio";
-  if (TEXT_EXTENSIONS.includes(ext)) return "text";
-  return "file";
-}
-
-/** `accept` attribute for the file picker, narrowed to the model's abilities. */
-function acceptedFileTypes(metadata: ModelMetadata | undefined): string {
-  const extensions = new Set(TEXT_EXTENSIONS);
-  const allow = (kind: Attachment["kind"], list: string[]) => {
-    if (supportsAttachmentKind(metadata, kind)) list.forEach((ext) => extensions.add(ext));
-  };
-  allow("image", IMAGE_EXTENSIONS);
-  allow("file", FILE_EXTENSIONS);
-  allow("audio", AUDIO_EXTENSIONS);
-  return Array.from(extensions, (ext) => `.${ext}`).join(",");
-}
-
-function mimeFor(file: File): string {
-  const mime = file.type.toLowerCase();
-  if (mime && mime !== "application/octet-stream") return mime;
-  return mimeForName(file.name);
-}
-
 /** Strip the `data:<mime>;base64,` prefix — `input_audio` wants the payload. */
 function dataUrlBase64(dataUrl: string): string {
   const comma = dataUrl.indexOf(",");
   return comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
-}
-
-function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"));
-    reader.onload = () => {
-      const result = reader.result;
-      if (typeof result === "string") resolve(result);
-      else reject(new Error("Unexpected reader result type"));
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
-async function readAttachment(file: File): Promise<Attachment> {
-  const kind = classifyFile(file);
-  const mime = mimeFor(file);
-  if (kind === "text") {
-    const text_content = await file.text();
-    return { name: file.name, kind, mime, text_content };
-  }
-  const data_url = await readFileAsDataUrl(file);
-  return { name: file.name, kind, mime, data_url };
 }
 
 /** Render a user message's attachments into a structured `content` payload. */
@@ -310,7 +224,6 @@ export default function App() {
   const { t, setLocale } = useI18n();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
   /**
    * Composer `@file` popup. `start` is the index of the `@` that opened it —
    * the whole token is replaced when an item is accepted.
@@ -449,7 +362,6 @@ export default function App() {
   const toolbarRef = useRef<HTMLElement>(null);
   const inputAreaRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
   const sidebarMotionTimerRef = useRef<number | null>(null);
   const themeRef = useRef<ThemeMode>("auto");
@@ -1789,12 +1701,11 @@ export default function App() {
   const sendMessage = useCallback(async (overrideText?: string) => {
     if (profileExporting) return;
 
-    // `overrideText` is the timer resume path: it bypasses the input box and
-    // never picks up the attachments the user is still composing.
+    // `overrideText` is the timer resume path: it bypasses the input box
+    // entirely, so it must not carry a `@file` mention either.
     const autoResume = overrideText !== undefined;
-    const activeAttachments = autoResume ? [] : attachments;
     const rawText = (overrideText ?? input).trim();
-    if ((!rawText && activeAttachments.length === 0) || streaming) return;
+    if (!rawText || streaming) return;
 
     // Sending is an explicit "show me what happens next": re-arm the follow so
     // the new turn is pinned into view even if the user was reading further
@@ -1807,7 +1718,7 @@ export default function App() {
     const mentionResult = autoResume
       ? { attachments: [] as Attachment[], problems: [] as string[] }
       : await resolveFileMentions(rawText, selectedMetadata, selectedModel);
-    const messageAttachments = [...activeAttachments, ...mentionResult.attachments];
+    const messageAttachments = mentionResult.attachments;
 
     const { content: apiContent } = buildMessageContent(rawText, messageAttachments);
     const userAttachments = messageAttachments.length > 0 ? messageAttachments : undefined;
@@ -1836,11 +1747,9 @@ export default function App() {
     setBackgroundWaiting(0);
 
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
-    // An auto-resume must not discard a draft or attachments the user is
-    // still composing in the input box.
+    // An auto-resume must not discard a draft the user is still composing.
     if (!autoResume) {
       setInput("");
-      setAttachments([]);
     }
     setStreaming(true);
     setError(null);
@@ -2052,7 +1961,7 @@ export default function App() {
     }, useAgentsEnabled);
 
     cleanupRef.current = cleanup;
-  }, [input, messages, streaming, profileExporting, activeSkillIds, sessionId, attachments, selectedModel, selectedMetadata, useAgentsEnabled, t, flushUndeliveredInjections]);
+  }, [input, messages, streaming, profileExporting, activeSkillIds, sessionId, selectedModel, selectedMetadata, useAgentsEnabled, t, flushUndeliveredInjections]);
 
   /**
    * Resume a partial reply. The normal send path keeps interrupted assistant
@@ -2730,19 +2639,6 @@ export default function App() {
   // already has a depth configured (e.g. an unmatched model set by hand).
   const reasoningSupported = selectedMetadata?.supports_reasoning === true || reasoningEffort !== "";
 
-  // Switching to a model that cannot consume an attached file type would only
-  // fail upstream, so drop those attachments and say which ones went away.
-  useEffect(() => {
-    const dropped = attachments.filter((a) => !supportsAttachmentKind(selectedMetadata, a.kind));
-    if (dropped.length === 0) return;
-
-    setAttachments((prev) => prev.filter((a) => supportsAttachmentKind(selectedMetadata, a.kind)));
-    setError(t("app.attachmentUnsupported", {
-      names: dropped.map((a) => a.name).join(", "),
-      model: selectedModel,
-    }));
-  }, [attachments, selectedMetadata, selectedModel, t]);
-
   // ─── Composer `@file` mentions ────────────────────────────────────────────
 
   /**
@@ -3359,43 +3255,6 @@ export default function App() {
               ))}
             </div>
           )}
-          {attachments.length > 0 && (
-            <div className="attachments-bar">
-              {attachments.map((file, i) => (
-                <div key={i} className={`attachment-pill attachment-kind-${file.kind}`}>
-                  {file.kind === "image" && file.data_url && (
-                    <img
-                      className="attachment-thumb"
-                      src={file.data_url}
-                      alt={file.name}
-                      title={file.name}
-                    />
-                  )}
-                  {file.kind === "file" && (
-                    <span className="attachment-icon" aria-hidden="true">
-                      <FontAwesomeIcon icon={faFileLines} />
-                    </span>
-                  )}
-                  {file.kind === "audio" && (
-                    <span className="attachment-icon" aria-hidden="true">
-                      <FontAwesomeIcon icon={faVolumeHigh} />
-                    </span>
-                  )}
-                  {file.kind === "text" && (
-                    <span className="attachment-icon" aria-hidden="true">
-                      <FontAwesomeIcon icon={faFilePen} />
-                    </span>
-                  )}
-                  <span className="attachment-name" title={file.name}>{file.name}</span>
-                  <button className="attachment-remove" onClick={() => {
-                    setAttachments(prev => prev.filter((_, idx) => idx !== i));
-                  }}>
-                    <FontAwesomeIcon icon={faXmark} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
           {renderConfirmDialog()}
           <div className="input-row">
             <FileMentionPopup
@@ -3406,53 +3265,6 @@ export default function App() {
               query={mentionState.query}
               onHover={setMentionIndex}
               onSelect={acceptMention}
-            />
-            <button
-              className="attach-btn"
-              title={t("app.attachFiles")}
-              onClick={() => fileInputRef.current?.click()}
-              disabled={streaming || profileExporting}
-            >
-              <FontAwesomeIcon icon={faPaperclip} />
-            </button>
-            <input
-              type="file"
-              multiple
-              // Only offer what the selected model can actually consume.
-              accept={acceptedFileTypes(selectedMetadata)}
-              ref={fileInputRef}
-              style={{ display: 'none' }}
-              onChange={async (e) => {
-                const files = e.target.files;
-                if (files && files.length > 0) {
-                  const newAttachments: Attachment[] = [];
-                  const skipped: string[] = [];
-                  for (const f of Array.from(files)) {
-                    // The picker is filtered already, but the OS dialog can be
-                    // talked into other files — never send one the model
-                    // cannot read.
-                    if (!supportsAttachmentKind(selectedMetadata, classifyFile(f))) {
-                      skipped.push(f.name);
-                      continue;
-                    }
-                    try {
-                      newAttachments.push(await readAttachment(f));
-                    } catch (err) {
-                      console.error("Failed to read file", f.name, err);
-                    }
-                  }
-                  if (newAttachments.length > 0) {
-                    setAttachments(prev => [...prev, ...newAttachments]);
-                  }
-                  if (skipped.length > 0) {
-                    setError(t("app.attachmentUnsupported", {
-                      names: skipped.join(", "),
-                      model: selectedModel,
-                    }));
-                  }
-                }
-                e.target.value = '';
-              }}
             />
             <textarea
               ref={textareaRef}
@@ -3508,7 +3320,7 @@ export default function App() {
             <button
               className="send-btn"
               onClick={() => (streaming ? void stopStreaming() : void sendMessage())}
-              disabled={profileExporting || (!streaming && !input.trim() && attachments.length === 0)}
+              disabled={profileExporting || (!streaming && !input.trim())}
             >
               {streaming ? t("app.stop") : t("app.send")}
             </button>

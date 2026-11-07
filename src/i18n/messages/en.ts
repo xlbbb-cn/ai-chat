@@ -99,7 +99,6 @@ const en = {
             toolName: "Background",
         },
 
-        attachFiles: "Attach files",
         fileMention: {
             title: "Insert file reference",
             hint: "↑↓ choose · Enter/Tab insert · add #12-24 for lines · Esc close",
@@ -112,7 +111,7 @@ const en = {
         },
         attachmentUnsupported:
             "Skipped {names}: “{model}” cannot read that file type.",
-        inputPlaceholder: "Type a message… (Enter to send, Shift+Enter for newline)",
+        inputPlaceholder: "Type a message… (@ to reference a file, Enter to send)",
         injections: {
             title: "Added mid-turn",
             queued: "Waiting to be delivered",

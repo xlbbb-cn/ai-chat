@@ -1084,39 +1084,9 @@ body {
   width: 100%;
 }
 
-.attach-btn {
-  background: var(--c-surface);
-  border: 1px solid var(--c-border-i);
-  border-radius: 4px;
-  font-size: 14px;
-  cursor: pointer;
-  padding: 4px 10px;
-  min-height: 34px;
-  color: var(--c-text);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background-color var(--t-dur) var(--t-ease),
-    border-color var(--t-dur) var(--t-ease);
-}
-
-.attach-btn:hover:not(:disabled) {
-  background-color: var(--c-hover);
-  border-color: var(--c-border-i);
-}
-
-.attach-btn:active:not(:disabled) {
-  background-color: var(--c-active);
-}
-
-.attach-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 /* Injections waiting for the running turn's next request. They live above the
-   composer, next to attachments, and are cleared by `chat-injected` once the
-   model has actually received them. */
+   composer and are cleared by `chat-injected` once the model has actually
+   received them. */
 .injection-bar {
   display: flex;
   flex-wrap: wrap;
@@ -1161,57 +1131,6 @@ body {
   color: var(--c-muted);
 }
 
-.attachments-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin-bottom: 2px;
-}
-
-.attachment-pill {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  background: var(--c-surface);
-  border-radius: 4px;
-  padding: 3px 8px;
-  font-size: 12px;
-  color: var(--c-text);
-  border: 1px solid var(--c-border-i);
-}
-
-/* Tighter padding for image attachments so the thumb sits flush inside the
-   frame. The single accent outline marks the richest attachment type; the
-   other kinds are told apart by their icon alone. */
-.attachment-pill.attachment-kind-image {
-  padding: 2px 8px 2px 2px;
-  border-color: var(--c-accent-text);
-}
-
-.attachment-pill.attachment-kind-file,
-.attachment-pill.attachment-kind-audio {
-  background: var(--c-surface);
-}
-
-.attachment-thumb {
-  width: 28px;
-  height: 28px;
-  object-fit: cover;
-  border-radius: var(--r-sm);
-  flex-shrink: 0;
-  background: var(--c-hover);
-}
-
-.attachment-icon {
-  font-size: 12px;
-  line-height: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  flex-shrink: 0;
-}
 
 .toggle-switch {
   position: relative;
@@ -1363,34 +1282,6 @@ body {
 .toggle-switch input:disabled+.toggle-switch-slider {
   opacity: 0.6;
   cursor: not-allowed;
-}
-
-.attachment-name {
-  max-width: 150px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.attachment-remove {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: none;
-  border: none;
-  color: var(--c-muted);
-  cursor: pointer;
-  font-size: 10px;
-  line-height: 1;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  transition: background-color 0.15s, color 0.15s;
-}
-
-.attachment-remove:hover {
-  background: var(--c-danger);
-  color: #FFFFFF;
 }
 
 .chat-input {
