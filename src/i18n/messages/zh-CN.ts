@@ -428,7 +428,7 @@ const zhCN: Messages = {
             fileActions: {
                 name: "文件操作",
                 description: [
-                    "仅在当前工作区根目录内读取、写入、列出、搜索、修补、重命名、移动、创建和删除文件——`.data` 状态目录（技能、记忆、待办）也在其中。",
+                    "仅在当前工作区根目录内读取、写入、列出、搜索、修补、重命名、移动、创建和删除文件——`.data` 状态目录（技能、脚本、记忆、待办）也在其中。",
                     "使用 `./...` 形式的路径，例如 `./src/App.tsx`、`./.data/skills/demo/skill.md`，或用 `.` 表示工作区根目录。",
                     "`workspace/...`、`../...` 等路径会被拒绝。工作区数据库（`.data/chat.db`）由应用管理，不能通过此工具修改。",
                 ].join("\n"),
@@ -436,8 +436,9 @@ const zhCN: Messages = {
             runCmd: {
                 name: "运行命令",
                 description: [
-                    "直接运行程序（不经过 shell）。进程在工作区根目录启动。",
-                    "程序必须是不带路径的裸名称，由系统通过 PATH 环境变量解析——例如 `python`、`python3`、`git`、`curl`、`wget`。绝对路径和相对路径会被拒绝；确实需要路径时请使用“运行脚本”。",
+                    "直接运行程序或工作区脚本（不经过 shell）。进程在工作区根目录启动。",
+                    "`action: \"run\"`（默认）执行 `command`：第一个词先按裸名称到工作区脚本库 `./.data/scripts` 中解析（扩展名可省略，例如 `build-frontend`、`deploy.py`）；找不到时才是由系统通过 PATH 解析的裸程序名（例如 `python`、`git`、`curl`）。脚本库会被前置到子进程的 PATH，同名脚本优先于系统程序。绝对路径和相对路径会被拒绝；确实需要路径时请使用“运行脚本”。",
+                    "`action: \"list\"` 列出脚本库中的脚本及其解释器、`@description`、`@usage` 和使用次数。说明与用法只从脚本头部注释读取（`#`、`//`、`REM` 或 `::`）。脚本正文命中破坏性/敏感模式时首次运行会弹一次确认；批准结果按内容哈希记住，文件内容变化后需要重新确认。",
                     "特权操作和危险命令需要显式确认。",
                 ].join("\n"),
             },
@@ -620,7 +621,7 @@ const zhCN: Messages = {
         },
         toolHints: {
             fileActions: "在工作区内读取、写入、修补和搜索文件",
-            runCmd: "执行单条命令并附带风险评估",
+            runCmd: "执行单条命令或工作区脚本并附带风险评估",
             runShell: "运行 PowerShell / bash 脚本（direct / serve 后台进程）",
             knowledgeGraph: "基于 Neo4j 的知识图谱查询",
             todos:

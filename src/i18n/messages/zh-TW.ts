@@ -428,7 +428,7 @@ const zhTW: Messages = {
             fileActions: {
                 name: "檔案操作",
                 description: [
-                    "僅在目前工作區根目錄內讀取、寫入、列出、搜尋、修補、重新命名、移動、建立與刪除檔案——`.data` 狀態目錄（技能、記憶、待辦）也在其中。",
+                    "僅在目前工作區根目錄內讀取、寫入、列出、搜尋、修補、重新命名、移動、建立與刪除檔案——`.data` 狀態目錄（技能、指令碼、記憶、待辦）也在其中。",
                     "使用 `./...` 形式的路徑，例如 `./src/App.tsx`、`./.data/skills/demo/skill.md`，或以 `.` 表示工作區根目錄。",
                     "`workspace/...`、`../...` 等路徑會被拒絕。工作區資料庫（`.data/chat.db`）由應用程式管理，不能透過此工具修改。",
                 ].join("\n"),
@@ -436,8 +436,9 @@ const zhTW: Messages = {
             runCmd: {
                 name: "執行命令",
                 description: [
-                    "直接執行程式（不經過 shell）。程序會在工作區根目錄啟動。",
-                    "程式必須是不帶路徑的裸名稱，由系統透過 PATH 環境變數解析——例如 `python`、`python3`、`git`、`curl`、`wget`。絕對路徑與相對路徑會被拒絕；確實需要路徑時請使用「執行指令碼」。",
+                    "直接執行程式或工作區指令碼（不經過 shell）。程序會在工作區根目錄啟動。",
+                    "`action: \"run\"`（預設）執行 `command`：第一個詞先以裸名稱到工作區指令碼庫 `./.data/scripts` 中解析（副檔名可省略，例如 `build-frontend`、`deploy.py`）；找不到時才是由系統透過 PATH 解析的裸程式名稱（例如 `python`、`git`、`curl`）。指令碼庫會前置到子程序的 PATH，同名指令碼優先於系統程式。絕對路徑與相對路徑會被拒絕；確實需要路徑時請使用「執行指令碼」。",
+                    "`action: \"list\"` 列出指令碼庫中的指令碼及其解譯器、`@description`、`@usage` 與使用次數。說明與用法只從指令碼開頭註解讀取（`#`、`//`、`REM` 或 `::`）。指令碼內容命中破壞性/敏感模式時，首次執行會詢問一次；批准結果依內容雜湊記住，檔案內容變更後需要重新確認。",
                     "特權操作與危險命令需要明確確認。",
                 ].join("\n"),
             },
@@ -620,7 +621,7 @@ const zhTW: Messages = {
         },
         toolHints: {
             fileActions: "在工作區內讀取、寫入、修補與搜尋檔案",
-            runCmd: "執行單一命令並附帶風險評估",
+            runCmd: "執行單一命令或工作區指令碼並附帶風險評估",
             runShell: "執行 PowerShell / bash 指令碼（direct / serve 背景程序）",
             knowledgeGraph: "以 Neo4j 為後端的知識圖譜查詢",
             todos:

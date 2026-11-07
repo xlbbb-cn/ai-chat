@@ -257,6 +257,18 @@ pub(crate) fn build_command(
     code: &str,
     cwd: Option<PathBuf>,
 ) -> Result<tokio::process::Command, String> {
+    build_command_with_path(cmd_type, code, cwd, None)
+}
+
+/// Like [`build_command`], but optionally prepends a directory to the child's
+/// `PATH`. `run_cmd` uses this to put `<workspace>/.data/scripts` first, so
+/// library scripts (and programs they spawn) resolve there.
+pub(crate) fn build_command_with_path(
+    cmd_type: &str,
+    code: &str,
+    cwd: Option<PathBuf>,
+    scripts_dir: Option<&Path>,
+) -> Result<tokio::process::Command, String> {
     let mut cmd = match cmd_type {
         "direct" => {
             // Run the executable directly — no shell wrapper needed.
@@ -325,6 +337,18 @@ pub(crate) fn build_command(
         _ => return Err(format!("Unsupported command type: {}", cmd_type)),
     };
 
+    finish_command(&mut cmd, cwd, scripts_dir);
+    Ok(cmd)
+}
+
+/// Apply the process-wide launch options shared by every child this module
+/// starts: working directory, `PWD`, the script-library `PATH` entry, and the
+/// platform-specific process-group/console settings.
+fn finish_command(
+    cmd: &mut tokio::process::Command,
+    cwd: Option<PathBuf>,
+    scripts_dir: Option<&Path>,
+) {
     if let Some(dir) = cwd {
         cmd.current_dir(&dir);
         // `current_dir` does not update the inherited `PWD`, and programs that
@@ -332,6 +356,10 @@ pub(crate) fn build_command(
         // directory. Keep the two in sync for run_cmd / run_shell (same rule as
         // `agents/cli.rs` and `mcp.rs`).
         cmd.env("PWD", &dir);
+    }
+
+    if let Some(dir) = scripts_dir {
+        cmd.env("PATH", prepend_to_path(dir));
     }
 
     #[cfg(windows)]
@@ -350,17 +378,32 @@ pub(crate) fn build_command(
     // A dropped run (e.g. the 30s timeout future in `execute_tool`) must not
     // leave the child running.
     cmd.kill_on_drop(true);
+}
 
-    Ok(cmd)
+/// Prepend `dir` to the current `PATH` value.
+///
+/// `split_paths` / `join_paths` handle the platform separator and quoting, so
+/// a directory containing `;` or spaces is passed through correctly.
+fn prepend_to_path(dir: &Path) -> std::ffi::OsString {
+    use std::ffi::OsString;
+
+    let mut paths: Vec<PathBuf> = std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_else(OsString::new),
+    )
+    .collect();
+    paths.retain(|existing| existing != dir);
+    paths.insert(0, dir.to_path_buf());
+    std::env::join_paths(paths).unwrap_or_else(|_| dir.as_os_str().to_os_string())
 }
 
 pub async fn run_command(
     cmd_type: String,
     code: String,
     cwd: Option<PathBuf>,
+    scripts_dir: Option<&Path>,
 ) -> Result<String, String> {
     let decode_hint = decode_hint_for_shell(&cmd_type);
-    let mut cmd = build_command(&cmd_type, &code, cwd)?;
+    let mut cmd = build_command_with_path(&cmd_type, &code, cwd, scripts_dir)?;
     let output = cmd.output().await.map_err(|e| e.to_string())?;
     Ok(format_process_output(output, decode_hint))
 }
@@ -375,22 +418,79 @@ pub async fn run_command(
 /// Windows. It therefore polls the task's cancel flag and calls
 /// `process_guard::kill_process_tree`, which is also what the Stop button and
 /// app exit use.
+///
+/// `scripts_dir`, when set, is prepended to the child's `PATH` (`run_cmd`
+/// passes `<workspace>/.data/scripts`; `run_shell` passes `None`).
 pub(crate) async fn run_command_timed(
     cmd_type: String,
     code: String,
     cwd: Option<PathBuf>,
     timeout_secs: u64,
     cancel: Option<Arc<AtomicBool>>,
+    scripts_dir: Option<&Path>,
 ) -> String {
     match cancel {
-        Some(flag) => run_command_cancellable(cmd_type, code, cwd, timeout_secs, flag).await,
+        Some(flag) => {
+            run_command_cancellable(cmd_type, code, cwd, timeout_secs, flag, scripts_dir).await
+        }
         None => tokio::time::timeout(
             Duration::from_secs(timeout_secs),
-            run_command(cmd_type, code, cwd),
+            run_command(cmd_type, code, cwd, scripts_dir),
         )
         .await
         .unwrap_or_else(|_| Ok(format!("Command timed out after {} seconds.", timeout_secs)))
         .unwrap_or_else(|e| format!("Error: {}", e)),
+    }
+}
+
+/// Run a program with pre-split arguments and a timeout.
+///
+/// This is the library-script entry point: the script path stays one `Command`
+/// argument, so spaces / quotes / Windows backslashes cannot be re-parsed as
+/// shell syntax. Cancellation, tree killing and output decoding are identical
+/// to `run_command_timed`.
+pub(crate) async fn run_program_timed(
+    program: String,
+    args: Vec<String>,
+    cwd: Option<PathBuf>,
+    timeout_secs: u64,
+    cancel: Option<Arc<AtomicBool>>,
+    scripts_dir: Option<&Path>,
+) -> String {
+    let decode_hint = decode_hint_for_program(&program);
+    let mut cmd = tokio::process::Command::new(&program);
+    cmd.args(&args);
+    finish_command(&mut cmd, cwd, scripts_dir);
+
+    match cancel {
+        Some(flag) => {
+            run_prepared_cancellable(
+                cmd,
+                timeout_secs,
+                flag,
+                decode_hint,
+                "background script tool".to_string(),
+            )
+            .await
+        }
+        None => match tokio::time::timeout(Duration::from_secs(timeout_secs), cmd.output()).await {
+            Ok(Ok(output)) => format_process_output(output, decode_hint),
+            Ok(Err(err)) => format!("Error: failed to start '{program}': {err}"),
+            Err(_) => format!("Command timed out after {timeout_secs} seconds."),
+        },
+    }
+}
+
+fn decode_hint_for_program(program: &str) -> OutputDecodeHint {
+    let name = Path::new(program)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or(program)
+        .to_ascii_lowercase();
+    match name.as_str() {
+        "powershell" | "pwsh" => OutputDecodeHint::PowerShell,
+        "cmd" => OutputDecodeHint::CmdShell,
+        _ => OutputDecodeHint::Direct,
     }
 }
 
@@ -401,12 +501,26 @@ async fn run_command_cancellable(
     cwd: Option<PathBuf>,
     timeout_secs: u64,
     cancel: Arc<AtomicBool>,
+    scripts_dir: Option<&Path>,
 ) -> String {
     let decode_hint = decode_hint_for_shell(&cmd_type);
-    let mut cmd = match build_command(&cmd_type, &code, cwd) {
+    let cmd = match build_command_with_path(&cmd_type, &code, cwd, scripts_dir) {
         Ok(cmd) => cmd,
         Err(err) => return format!("Error: {err}"),
     };
+    let label = format!("background {cmd_type} tool");
+    run_prepared_cancellable(cmd, timeout_secs, cancel, decode_hint, label).await
+}
+
+/// Shared cancellable runner: spawn the prepared command, then race its output
+/// against the timeout and the task's cancel flag.
+async fn run_prepared_cancellable(
+    mut cmd: tokio::process::Command,
+    timeout_secs: u64,
+    cancel: Arc<AtomicBool>,
+    decode_hint: OutputDecodeHint,
+    label: String,
+) -> String {
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
@@ -418,7 +532,7 @@ async fn run_command_cancellable(
     let pid = child.id();
     // Registered for app-exit cleanup even though this task is turn-scoped:
     // a crash must not leave the child running.
-    let tracked = crate::process_guard::track_child(&child, format!("background {cmd_type} tool"));
+    let tracked = crate::process_guard::track_child(&child, label);
 
     // `wait_with_output` drains both pipes concurrently and reaps the child.
     // The select below only decides whether to kill it first; the inner task
@@ -534,6 +648,7 @@ mod tests {
             None,
             60,
             flag,
+            None,
         )
         .await;
 
@@ -542,6 +657,44 @@ mod tests {
             started.elapsed() < Duration::from_secs(20),
             "cancellation did not interrupt the command"
         );
+    }
+
+    /// A library script is executed as interpreter + path + arguments. This
+    /// covers the whole chain (`resolve` → `command_parts` →
+    /// `run_program_timed`), including a path containing a space.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_library_script_runs_through_its_interpreter() {
+        use std::fs;
+
+        let workspace = std::env::temp_dir().join(format!(
+            "ai-chat-run-script-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let scripts_dir = crate::workspace::scripts_root(&workspace);
+        fs::create_dir_all(&scripts_dir).unwrap();
+        fs::write(
+            scripts_dir.join("hello script.ps1"),
+            "param([string]$Name)\nWrite-Output \"hello $Name\"\n",
+        )
+        .unwrap();
+
+        let script = super::super::scripts::resolve(&workspace, "hello script")
+            .unwrap()
+            .expect("library script resolves");
+        let (program, args) = script.command_parts(&["world".to_string()]);
+        let output = super::run_program_timed(
+            program,
+            args,
+            Some(workspace.clone()),
+            60,
+            None,
+            Some(&scripts_dir),
+        )
+        .await;
+
+        assert!(output.contains("hello world"), "unexpected output: {output}");
+        let _ = fs::remove_dir_all(&workspace);
     }
 
     /// An empty program name is not a program at all.

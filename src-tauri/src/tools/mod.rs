@@ -16,6 +16,7 @@ mod paths;
 mod process;
 mod risk;
 mod search;
+pub(crate) mod scripts;
 pub(crate) mod serve;
 pub(crate) mod timer;
 pub(crate) mod todos;
@@ -250,13 +251,18 @@ pub fn get_all_tools(
             "type": "function",
             "function": {
                 "name": "run_cmd",
-                "description": "Execute a program with patent-compliant risk assessment. L5/L6 (safe/read-only) commands execute directly. L0-L4 commands require user confirmation with risk score display. Syntax errors are rejected with detailed error report. Returns execution result or rejection reason.\n\nThe program must be a bare name that the operating system resolves through the PATH environment variable (for example 'python', 'python3', 'git', 'node'). Absolute and relative paths are rejected — use `run_shell` when an absolute path is really needed.",
+                "description": "Execute a program or a workspace script with patent-compliant risk assessment. L5/L6 (safe/read-only) commands execute directly. L0-L4 commands require user confirmation with risk score display. Syntax errors are rejected with detailed error report. Returns execution result or rejection reason.\n\n`action: \"run\"` (default) executes a command. The first word is resolved against the workspace script library `<workspace>/.data/scripts` (a bare script name, extension optional, for example `build-frontend` or `deploy.py`) and otherwise must be a bare program name that the operating system resolves through PATH (for example `python`, `python3`, `git`, `node`). The script library is prepended to the child's PATH, so a script name wins over a program with the same name. Absolute and relative paths are rejected — use `run_shell` when a path is really needed.\n\n`action: \"list\"` lists the library scripts with their interpreter, description, usage and use count; it does not execute anything. Save a script with `file_actions` and give it `@description` / `@usage` header comments (see the self-evolution instructions).",
                 "parameters": {
                     "type": "object",
                     "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["run", "list"],
+                            "description": "'run' (default) executes `command`; 'list' returns the workspace script library (interpreter, description, usage, use count)."
+                        },
                         "command": {
                             "type": "string",
-                            "description": "The full command line to execute (e.g. 'python script.py', 'curl -s https://example.com'). The first word must be a bare program name resolved through PATH; the rest are arguments."
+                            "description": "Required for action 'run'. The full command line to execute (e.g. 'build-frontend --release', 'python -V', 'curl -s https://example.com'). The first word is a library script name or a bare program name resolved through PATH; the rest are arguments."
                         },
                         "timeout_seconds": {
                             "type": "integer",
@@ -265,7 +271,7 @@ pub fn get_all_tools(
                             "description": "Optional timeout for the command, in seconds. Defaults to 30 if omitted."
                         }
                     },
-                    "required": ["command"]
+                    "required": ["action"]
                 }
             }
         }));
@@ -329,7 +335,7 @@ pub fn get_all_tools(
             "type": "function",
             "function": {
                 "name": "file_actions",
-                "description": "Perform file operations strictly inside the workspace. Always use `./...` paths (for example `./src/App.tsx`) or `.` for the workspace root; absolute paths inside the workspace root are also accepted. Anything that resolves outside the workspace root is rejected — use `run_shell` only when external access is genuinely required. In self-evolution mode the skill directory `./.data/skills/...` is writable (create, edit, move and delete skills there); the rest of `.data` stays read-only. Protected self-evolution targets create automated backups before mutation.",
+                "description": "Perform file operations strictly inside the workspace. Always use `./...` paths (for example `./src/App.tsx`) or `.` for the workspace root; absolute paths inside the workspace root are also accepted. Anything that resolves outside the workspace root is rejected — use `run_shell` only when external access is genuinely required. In self-evolution mode the skill directory `./.data/skills/...` is writable (create, edit, move and delete skills there). `./.data/scripts/...` is the `run_cmd` script library and may be maintained with this tool (the self-evolution policy decides when a reusable script should be saved); the rest of `.data` (memory, todos, status) is writable too, except `.data/chat.db`. Protected self-evolution targets create automated backups before mutation.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -2274,6 +2280,53 @@ pub(crate) fn emit_tool_progress(
     }
 }
 
+/// Execute one `run_cmd` invocation after every gate (syntax, risk, script
+/// safety) has passed.
+///
+/// A library script runs as interpreter + path + arguments, so the path is one
+/// `Command` argument and never re-parsed as shell syntax. Anything else goes
+/// through the historical `direct` command path, now with the script library
+/// prepended to `PATH`.
+#[allow(clippy::too_many_arguments)]
+async fn run_run_cmd(
+    workspace_dir: &Path,
+    scripts_dir: &Path,
+    resolved: Option<&scripts::ResolvedScript>,
+    parts: &[String],
+    command: &str,
+    cwd: PathBuf,
+    timeout_secs: u64,
+    cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+) -> String {
+    match resolved {
+        Some(script) => {
+            let (program, args) = script.command_parts(&parts[1..]);
+            let output = process::run_program_timed(
+                program,
+                args,
+                Some(cwd),
+                timeout_secs,
+                cancel,
+                Some(scripts_dir),
+            )
+            .await;
+            scripts::record_use(workspace_dir, &script.entry.file_name, &output);
+            output
+        }
+        None => {
+            process::run_command_timed(
+                "direct".to_string(),
+                command.to_string(),
+                Some(cwd),
+                timeout_secs,
+                cancel,
+                Some(scripts_dir),
+            )
+            .await
+        }
+    }
+}
+
 pub async fn execute_tool(
     app: &AppHandle,
     name: &str,
@@ -2722,40 +2775,77 @@ pub async fn execute_tool(
             }
         }
         "run_cmd" => {
-            let command = args["command"].as_str().unwrap_or("").to_string();
+            let action = args["action"]
+                .as_str()
+                .unwrap_or("run")
+                .trim()
+                .to_ascii_lowercase();
+
+            // ── Script library listing ────────────────────────────────────────
+            if action == "list" {
+                return scripts::render_list(&workspace_dir);
+            }
+            if action != "run" {
+                return format!(
+                    "Error: unsupported run_cmd action '{}'. Supported actions: run, list",
+                    action
+                );
+            }
+
+            let command = args["command"].as_str().unwrap_or("").trim().to_string();
             let command_cwd = working_dir
                 .map(Path::to_path_buf)
                 .unwrap_or_else(|| workspace_dir.clone());
 
-            if command.trim().is_empty() {
-                return "Error: run_cmd requires a non-empty 'command' argument.".to_string();
+            if command.is_empty() {
+                return "Error: run_cmd requires a non-empty 'command' argument when action is 'run'."
+                    .to_string();
             }
+
+            // Split once: the first token addresses either the workspace script
+            // library or a PATH-resolved program; the rest are its arguments.
+            let parts = split_command_line(&command);
+            let program = parts.first().map(|s| s.as_str()).unwrap_or("");
 
             // ── PATH-resolved program only ───────────────────────────────────
-            // `run_cmd` runs a program the OS resolves through `PATH`
-            // (`python`, `python3`, `git`, …). Absolute and relative paths are
-            // refused — `run_shell` is the tool that may run any script, from
-            // anywhere, under the risk audit.
-            {
-                let parts = split_command_line(&command);
-                let program = parts.first().map(|s| s.as_str()).unwrap_or("");
-                if let Err(e) = process::validate_path_resolved_program(program) {
-                    return e;
-                }
+            // `run_cmd` runs a bare name the OS resolves through `PATH`
+            // (`python`, `python3`, `git`, …) or a library script name.
+            // Absolute and relative paths are refused — `run_shell` is the tool
+            // that may run any script, from anywhere, under the risk audit.
+            if let Err(e) = process::validate_path_resolved_program(program) {
+                return e;
             }
 
+            let scripts_dir = crate::workspace::scripts_root(&workspace_dir);
+            let resolved = match scripts::resolve(&workspace_dir, program) {
+                Ok(resolved) => resolved,
+                Err(err) => return format!("⛔ {err}"),
+            };
+
             // ── Allowed-commands enforcement (skill context) ──────────────────
+            // A library script is allowed by its command name, its file name or
+            // the interpreter that runs it.
             if !allowed_commands.is_empty() {
-                let parts = split_command_line(&command);
-                let program = parts.first().map(|s| s.as_str()).unwrap_or("");
                 let exe_name = Path::new(program)
                     .file_stem()
                     .and_then(|s| s.to_str())
                     .unwrap_or(program)
                     .to_lowercase();
-                let permitted = allowed_commands
+                let mut permitted = allowed_commands
                     .iter()
                     .any(|a| a.eq_ignore_ascii_case(&exe_name));
+                if let Some(script) = &resolved {
+                    permitted = permitted
+                        || allowed_commands
+                            .iter()
+                            .any(|a| a.eq_ignore_ascii_case(&script.entry.name))
+                        || allowed_commands
+                            .iter()
+                            .any(|a| a.eq_ignore_ascii_case(&script.entry.file_name))
+                        || allowed_commands
+                            .iter()
+                            .any(|a| a.eq_ignore_ascii_case(script.entry.interpreter.program_name()));
+                }
                 if !permitted {
                     return format!(
                         "⛔ Command '{}' is not in this skill's allowed-commands list ({}).",
@@ -2819,6 +2909,59 @@ pub async fn execute_tool(
 
             let risk_level = score_to_risk_level(report.risk_score);
 
+            // ── Script body safety scan ───────────────────────────────────────
+            // The command line cannot show what a script does. Scan the resolved
+            // script and every script passed to an interpreter as an argument.
+            // A clean scan needs no approval; a hit is approved once per exact
+            // content hash and re-prompts after the file changes.
+            let mut scan_targets: Vec<PathBuf> = Vec::new();
+            if let Some(script) = &resolved {
+                scan_targets.push(script.path.clone());
+            }
+            for path in
+                scripts::referenced_scripts(&workspace_dir, &command_cwd, &parts[1..])
+            {
+                if !scan_targets.contains(&path) {
+                    scan_targets.push(path);
+                }
+            }
+
+            let mut scans: Vec<scripts::ScriptScan> = Vec::new();
+            for path in &scan_targets {
+                match scripts::scan(path) {
+                    Ok(scan) => scans.push(scan),
+                    Err(err) => return format!("⛔ Script safety scan failed: {err}"),
+                }
+            }
+
+            let unapproved: Vec<&scripts::ScriptScan> = scans
+                .iter()
+                .filter(|scan| {
+                    !scan.hits.is_empty()
+                        && !scripts::is_approved(&workspace_dir, &scan.file_name, &scan.hash)
+                })
+                .collect();
+
+            let script_scan_hits: Vec<Value> = scans
+                .iter()
+                .filter(|scan| !scan.hits.is_empty())
+                .map(|scan| {
+                    json!({
+                        "file": scan.file_name,
+                        "hash": scan.hash,
+                        "approved": scripts::is_approved(
+                            &workspace_dir,
+                            &scan.file_name,
+                            &scan.hash,
+                        ),
+                        "hits": scan.hits,
+                    })
+                })
+                .collect();
+            let script_label = resolved
+                .as_ref()
+                .map(|script| script.entry.file_name.clone());
+
             // ── Emit risk assessment event for frontend display ───────────────
             let _ = app.emit(
                 "risk-assessment",
@@ -2832,13 +2975,22 @@ pub async fn execute_tool(
                     "recommendation": report.recommendation,
                     "blacklist_hits": report.blacklist_hits,
                     "penalty_items": report.penalty_items,
-                    "requires_confirmation": !risk_level.is_auto_approvable(),
-                    "report": report,
+                    "requires_confirmation": !risk_level.is_auto_approvable()
+                        || !unapproved.is_empty(),
+                    "script": script_label,
+                    "script_scan_hits": script_scan_hits,
+                    "report": &report,
                 }),
             );
 
-            // ── L5/L6: run directly (no confirmation) ────────────────────────
-            if risk_level.is_auto_approvable() {
+            let needs_risk_confirmation = !risk_level.is_auto_approvable();
+            let timeout_secs = args["timeout_seconds"]
+                .as_i64()
+                .unwrap_or(30)
+                .clamp(1, 3600) as u64;
+
+            // ── L5/L6 + clean script: run directly ────────────────────────────
+            if !needs_risk_confirmation && unapproved.is_empty() {
                 let _ = emit_tool_progress(
                     app,
                     mission_id,
@@ -2848,25 +3000,26 @@ pub async fn execute_tool(
                     ),
                 );
 
-                let timeout_secs = args["timeout_seconds"]
-                    .as_i64()
-                    .unwrap_or(30)
-                    .clamp(1, 3600) as u64;
-
-                return process::run_command_timed(
-                    "direct".to_string(),
-                    command,
-                    Some(command_cwd),
+                return run_run_cmd(
+                    &workspace_dir,
+                    &scripts_dir,
+                    resolved.as_ref(),
+                    &parts,
+                    &command,
+                    command_cwd,
                     timeout_secs,
                     cancel.cloned(),
                 )
                 .await;
             }
 
-            // ── L0-L4: require frontend confirmation ─────────────────────────
-            let confirm = request_tool_confirmation(
-                app,
-                format!(
+            // ── One dialog for the command risk and the script content ────────
+            // Both checks describe the same execution; asking twice for one run
+            // would be noise. The script findings are included only when this
+            // exact content was never approved.
+            let mut reason = String::new();
+            if needs_risk_confirmation {
+                reason.push_str(&format!(
                     "Risk assessment: {} (score: {})\nDisposition: {}\n\nMatched rules:\n{}\n\nPenalty items:\n{}",
                     report.risk_level,
                     report.risk_score,
@@ -2879,48 +3032,103 @@ pub async fn execute_tool(
                         .map(|p| format!("  - {}: +{}", p.name, p.points))
                         .collect::<Vec<_>>()
                         .join("\n")
-                ),
+                ));
+            }
+            if !unapproved.is_empty() {
+                if !reason.is_empty() {
+                    reason.push_str("\n\n");
+                }
+                reason.push_str(
+                    "Script safety scan: the script body contains destructive or sensitive patterns. \
+                     Approving remembers this exact content until the file changes.\n",
+                );
+                for scan in &unapproved {
+                    reason.push_str(&format!("\n- {} ({})\n", scan.file_name, scan.hash));
+                    for hit in &scan.hits {
+                        reason.push_str(&format!(
+                            "  - [{}] {}: {}\n",
+                            hit.rule_id, hit.severity, hit.matched
+                        ));
+                    }
+                }
+            }
+
+            // A script hit is always the `dangerous` kind: the body scan only
+            // fires on destructive or sensitive patterns, so a user who
+            // auto-accepts a weaker kind must still see this one.
+            let confirm_kind = if unapproved.is_empty() {
+                risk_level.confirm_kind()
+            } else {
+                "dangerous"
+            };
+            let confirm = request_tool_confirmation(
+                app,
+                reason,
                 "direct".to_string(),
                 command.clone(),
-                risk_level.confirm_kind(),
+                confirm_kind,
                 "none",
                 cancel,
             )
             .await;
 
             if !confirm.confirmed {
-                return format!(
-                    "⛔ Execution rejected by user\n\n\
-                    Risk level: {}\n\
-                    Risk score: {}\n\
-                    Disposition: {}\n\n\
-                    Structured report:\n```json\n{}\n```",
-                    report.risk_level,
-                    report.risk_score,
-                    report.disposition,
-                    serde_json::to_string_pretty(&report).unwrap_or_default()
-                );
+                let mut out = String::from("⛔ Execution rejected by user");
+                if needs_risk_confirmation {
+                    out.push_str(&format!(
+                        "\n\nRisk level: {}\nRisk score: {}\nDisposition: {}\n\nStructured report:\n```json\n{}\n```",
+                        report.risk_level,
+                        report.risk_score,
+                        report.disposition,
+                        serde_json::to_string_pretty(&report).unwrap_or_default()
+                    ));
+                }
+                if !unapproved.is_empty() {
+                    out.push_str(&format!(
+                        "\n\nUnapproved script safety findings: {}",
+                        unapproved
+                            .iter()
+                            .map(|scan| scan.file_name.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+                return out;
             }
 
-            // ── Execute after user confirmation ───────────────────────────────
+            // The user accepted exactly this content: remember it per file.
+            for scan in &unapproved {
+                scripts::approve(&workspace_dir, &scan.file_name, &scan.hash);
+            }
+
             let _ = emit_tool_progress(
                 app,
                 mission_id,
-                format!(
-                    "⚠️ *User confirmed execution: {} (score: {})*\n\n```\n{}\n```\n\n",
-                    report.risk_level, report.risk_score, command
-                ),
+                if needs_risk_confirmation {
+                    format!(
+                        "⚠️ *User confirmed execution: {} (score: {})*\n\n```\n{}\n```\n\n",
+                        report.risk_level, report.risk_score, command
+                    )
+                } else {
+                    format!(
+                        "⚠️ *User approved script content: {}*\n\n```\n{}\n```\n\n",
+                        unapproved
+                            .iter()
+                            .map(|scan| scan.file_name.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        command
+                    )
+                },
             );
 
-            let timeout_secs = args["timeout_seconds"]
-                .as_i64()
-                .unwrap_or(30)
-                .clamp(1, 3600) as u64;
-
-            process::run_command_timed(
-                "direct".to_string(),
-                command,
-                Some(command_cwd),
+            run_run_cmd(
+                &workspace_dir,
+                &scripts_dir,
+                resolved.as_ref(),
+                &parts,
+                &command,
+                command_cwd,
                 timeout_secs,
                 cancel.cloned(),
             )
@@ -3099,6 +3307,7 @@ pub async fn execute_tool(
                     Some(command_cwd),
                     timeout_secs,
                     cancel.cloned(),
+                    None,
                 )
                 .await;
             }
@@ -3167,6 +3376,7 @@ pub async fn execute_tool(
                 Some(command_cwd),
                 timeout_secs,
                 cancel.cloned(),
+                None,
             )
             .await
         }

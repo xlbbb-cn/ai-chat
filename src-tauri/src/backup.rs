@@ -11,6 +11,7 @@
 //! workspace/memory/...    workspace-scoped memory notes
 //! workspace/todos/...     workspace-scoped todo lists
 //! workspace/skills/...    workspace skills (the one skills root)
+//! workspace/scripts/...   run_cmd script library (+ .index.json)
 //! workspace/skills.status workspace skill enablement + metadata
 //! chat.db                 SQLite snapshot (VACUUM INTO)
 //! ```
@@ -40,11 +41,12 @@ pub(crate) const PROFILE_RESTORED_EVENT: &str = "profile-restored";
 
 /// Workspace-scoped state directories that are part of a profile backup, as
 /// `(zip name, path under <workspace>/.data)`.
-fn workspace_backup_dirs(workspace_dir: &Path) -> [(&'static str, PathBuf); 3] {
+fn workspace_backup_dirs(workspace_dir: &Path) -> [(&'static str, PathBuf); 4] {
     [
         ("memory", crate::workspace::memory_root(workspace_dir)),
         ("todos", crate::workspace::todos_root(workspace_dir)),
         ("skills", crate::workspace::skills_root(workspace_dir)),
+        ("scripts", crate::workspace::scripts_root(workspace_dir)),
     ]
 }
 
@@ -284,8 +286,9 @@ pub(crate) fn spawn_profile_export(app: AppHandle, profile_path: PathBuf) {
 
 // ─── Import ──────────────────────────────────────────────────────────────────
 
-/// Restore the workspace-scoped folders (`memory`, `todos`, `skills`) and the
-/// skill status file from the archive into `<workspace>/.data`.
+/// Restore the workspace-scoped folders (`memory`, `todos`, `skills`,
+/// `scripts`) and the skill status file from the archive into
+/// `<workspace>/.data`.
 ///
 /// Folders present in the archive replace their on-disk counterpart; folders
 /// that are absent from the archive are left untouched. Entry paths are

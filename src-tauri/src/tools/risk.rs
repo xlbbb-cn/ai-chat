@@ -909,3 +909,148 @@ fn sensitive_read_detected(lower: &str) -> bool {
     ];
     SENSITIVE.iter().any(|s| lower.contains(s))
 }
+
+// ─── Library-script body scan ────────────────────────────────────────────────
+
+/// Destructive commands in *command position* (line start, after `;`, `&&`,
+/// `|`, `(`, `then`, `do`, `else`) or explicit Python filesystem calls.
+///
+/// This is deliberately narrower than `destructive_command_regex`: a script
+/// body is prose-like code, so a bare `format` inside `"{}".format(x)` or a
+/// `Format-Table` cmdlet must not look like `format c:`. The generic L0 regex
+/// set is not used for the same reason.
+fn script_destructive_regex() -> &'static regex::Regex {
+    use std::sync::OnceLock;
+    static RE: OnceLock<regex::Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        regex::Regex::new(
+            r"(?mi)(?:^|[;&|()]|\b(?:then|do|else)\b)\s*(?:sudo\s+)?(?:rm|rd|rmdir|del|erase|shred|unlink|mkfs(?:\.\w+)?|fdisk|diskpart|dd|chmod|chown|chgrp|icacls|takeown|remove-item|rmtree)\b|\b(?:os|shutil)\.(?:remove|rmtree|unlink)\b|\.unlink\s*\(|\bformat(?:[ \t]|$)",
+        )
+        .expect("script destructive regex must compile")
+    })
+}
+
+fn push_script_hit(
+    hits: &mut Vec<BlacklistHit>,
+    rule_id: &str,
+    severity: &str,
+    matched: &str,
+    contribution: u32,
+) {
+    if hits.iter().any(|hit| hit.rule_id == rule_id) {
+        return;
+    }
+    hits.push(BlacklistHit {
+        rule_id: rule_id.to_string(),
+        severity: severity.to_string(),
+        matched: matched.to_string(),
+        contribution,
+    });
+}
+
+/// Scan a library script body for patterns that must never run silently.
+///
+/// A non-empty result does not reject the script: the tool layer asks the user
+/// once for the exact content (the approved hash is stored in `.index.json`).
+/// The scan is a safety net, not a sandbox — `run_shell` remains the tool with
+/// unrestricted freedom and per-call risk auditing.
+pub(crate) fn scan_script_body(body: &str) -> Vec<BlacklistHit> {
+    let lower = body.to_lowercase();
+    let mut hits: Vec<BlacklistHit> = Vec::new();
+
+    let is_rm_rf_root = lower.contains("rm -rf /")
+        || lower.contains("rm -rf /*")
+        || lower.contains("rm -fr /")
+        || lower.contains("rm -fr /*");
+    let destructive = script_destructive_regex().is_match(&lower);
+    let system_target = targets_system_path(&lower);
+
+    if is_rm_rf_root {
+        push_script_hit(
+            &mut hits,
+            "RM_RF_ROOT",
+            "critical",
+            "rm -rf / detected - destroys entire filesystem",
+            40,
+        );
+    } else if destructive && system_target {
+        push_script_hit(
+            &mut hits,
+            "SYSTEM_PATH_DESTRUCTIVE",
+            "high",
+            "Destructive operation on a system path",
+            40,
+        );
+    } else if destructive {
+        push_script_hit(
+            &mut hits,
+            "USER_DATA_DESTRUCTIVE",
+            "medium",
+            "Destructive operation on user data",
+            24,
+        );
+    }
+
+    if sensitive_read_detected(&lower) {
+        push_script_hit(
+            &mut hits,
+            "SENSITIVE_READ",
+            "high",
+            "Read of a sensitive file or credential",
+            40,
+        );
+    }
+    if home_wipe_regex().is_match(&lower) {
+        push_script_hit(
+            &mut hits,
+            "HOME_WIPE",
+            "high",
+            "Deletion targeting the home directory",
+            30,
+        );
+    }
+    if workspace_wipe_regex().is_match(&lower) {
+        push_script_hit(
+            &mut hits,
+            "WORKSPACE_WIPE",
+            "medium",
+            "Deletion targeting the current directory",
+            25,
+        );
+    }
+    if shell_rc_redirection_regex().is_match(&lower) {
+        push_script_hit(
+            &mut hits,
+            "SHELL_RC_REDIRECTION",
+            "high",
+            "Redirection into a shell rc file",
+            25,
+        );
+    }
+
+    hits
+}
+
+#[cfg(test)]
+mod script_body_tests {
+    use super::scan_script_body;
+
+    #[test]
+    fn dangerous_script_bodies_are_flagged() {
+        assert!(!scan_script_body("rm -rf ~\n").is_empty());
+        assert!(!scan_script_body("Remove-Item -Recurse -Force C:\\Windows\\Temp\n").is_empty());
+        assert!(!scan_script_body("cat ~/.ssh/id_rsa\n").is_empty());
+        assert!(!scan_script_body("echo x > ~/.bashrc\n").is_empty());
+        assert!(!scan_script_body("import os\nos.remove('x')\n").is_empty());
+    }
+
+    #[test]
+    fn ordinary_scripts_and_python_format_calls_are_not_flagged() {
+        assert!(scan_script_body(
+            "#!/usr/bin/env bash\nset -euo pipefail\ngit status\n"
+        )
+        .is_empty());
+        assert!(scan_script_body("print('{}'.format(value))\n").is_empty());
+        assert!(scan_script_body("Get-ChildItem | Format-Table Name\n").is_empty());
+    }
+}

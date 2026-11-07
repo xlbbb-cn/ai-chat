@@ -12,6 +12,7 @@
 //!     memory/evolution/...     self-evolution entries (front matter) + archive/
 //!     todos/<session>/...      todos tool
 //!     skills/<name>/skill.md   workspace skills (the only skills root)
+//!     scripts/                 run_cmd script library (on the child PATH)
 //!     skills.status            per-workspace skill enablement + metadata
 //! ```
 //!
@@ -52,6 +53,16 @@ pub fn skills_root(workspace_dir: &Path) -> PathBuf {
     data_root(workspace_dir).join("skills")
 }
 
+/// Workspace script library root (`<workspace>/.data/scripts`).
+///
+/// `run_cmd` prepends this directory to the child's `PATH` and also resolves
+/// script names itself, so `.ps1` / `.py` files work on Windows without
+/// `PATHEXT`. Metadata is read from the script header; see
+/// `tools::scripts`.
+pub fn scripts_root(workspace_dir: &Path) -> PathBuf {
+    data_root(workspace_dir).join("scripts")
+}
+
 /// Workspace skill status file (`<workspace>/.data/skills.status`).
 pub fn skills_status_path(workspace_dir: &Path) -> PathBuf {
     data_root(workspace_dir).join("skills.status")
@@ -62,10 +73,12 @@ pub fn skills_status_path(workspace_dir: &Path) -> PathBuf {
 /// Called at startup and whenever the active workspace changes. Individual
 /// sub-directories (`memory`, `todos`, `skills`) are still created on demand
 /// by the feature that owns them, except `memory`, which the memory tool and
-/// the automatic conclusion recorder create before writing.
+/// the automatic conclusion recorder create before writing, and `scripts`,
+/// which is created here so the script library exists from the first launch.
 pub fn ensure_data_layout(workspace_dir: &Path) -> std::io::Result<()> {
     let root = data_root(workspace_dir);
     std::fs::create_dir_all(&root)?;
+    std::fs::create_dir_all(scripts_root(workspace_dir))?;
     mark_hidden(&root);
     Ok(())
 }
@@ -103,6 +116,7 @@ mod tests {
         assert_eq!(memory_root(workspace), data.join("memory"));
         assert_eq!(todos_root(workspace), data.join("todos"));
         assert_eq!(skills_root(workspace), data.join("skills"));
+        assert_eq!(scripts_root(workspace), data.join("scripts"));
         assert_eq!(skills_status_path(workspace), data.join("skills.status"));
     }
 

@@ -4362,6 +4362,19 @@ async fn run_llm_agent_body(
         }
     }
 
+    // The workspace script library is shared with the main chat. Only a
+    // sub-agent that can actually run commands sees the listing.
+    if agent_tool_ids.iter().any(|tool| tool == "run_cmd") {
+        let scripts_context =
+            crate::tools::scripts::prompt_block(&workspace_dir, config.self_evolution_mode);
+        if !scripts_context.is_empty() {
+            if !self_evolution_context.is_empty() {
+                self_evolution_context.push_str("\n\n");
+            }
+            self_evolution_context.push_str(&scripts_context);
+        }
+    }
+
     let task_system = format!(
         "Execute this mission.\nPrimary task: {}\nContext: {}\nTreat the external mission snapshot as authoritative and keep the explicit task list updated through tools.",
         task.description, task.context

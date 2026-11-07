@@ -463,7 +463,7 @@ const en = {
             fileActions: {
                 name: "File Actions",
                 description: [
-                    "Read, write, list, search, patch, rename, move, create, and delete files only inside the current workspace root — including the `.data` state folder (skills, memory, todos).",
+                    "Read, write, list, search, patch, rename, move, create, and delete files only inside the current workspace root — including the `.data` state folder (skills, scripts, memory, todos).",
                     "Use `./...` paths such as `./src/App.tsx`, `./.data/skills/demo/skill.md`, or `.` for the workspace root.",
                     "Paths such as `workspace/...` and `../...` are rejected. The workspace database (`.data/chat.db`) is managed by the app and cannot be modified through this tool.",
                 ].join("\n"),
@@ -471,8 +471,9 @@ const en = {
             runCmd: {
                 name: "Run Command",
                 description: [
-                    "Run a program directly (without a shell). The process starts in the workspace root.",
-                    "The program must be a bare name that the operating system resolves through the PATH environment variable — for example `python`, `python3`, `git`, `curl`, `wget`. Absolute and relative paths are rejected; use Run Shell when a path is really needed.",
+                    "Run a program or a workspace script directly (without a shell). The process starts in the workspace root.",
+                    "Action `run` (default) executes `command`. Its first word is resolved against the workspace script library `./.data/scripts` by bare name with the extension optional (`build-frontend`, `deploy.py`); otherwise it must be a bare program name that PATH resolves (`python`, `git`, `curl`). The library is prepended to the child's PATH, so a script wins over a program with the same name. Absolute and relative paths are rejected; use Run Shell when a path is really needed.",
+                    "Action `list` shows the library scripts with their interpreter, `@description`, `@usage` and use count. Description and usage are read only from header comments (`#`, `//`, `REM` or `::`). A script whose body contains destructive or sensitive patterns asks for confirmation once; the approval is remembered for that exact content until the file changes.",
                     "Privileged operations and dangerous commands require explicit confirmation.",
                 ].join("\n"),
             },
@@ -668,7 +669,7 @@ const en = {
         },
         toolHints: {
             fileActions: "Read, write, patch and search files inside the workspace",
-            runCmd: "Execute a single command with risk assessment",
+            runCmd: "Execute a single command or workspace script with risk assessment",
             runShell: "Run PowerShell / bash scripts (direct or background serve)",
             knowledgeGraph: "Neo4j-backed knowledge graph queries",
             todos:

@@ -599,7 +599,11 @@ fn background_requested(args: &Value) -> bool {
 /// mutation could race a second edit the model starts while it waits.
 fn background_supported(name: &str, args: &Value) -> bool {
     match name {
-        "run_cmd" => true,
+        // Listing the library is instant and must not invent a pending task.
+        "run_cmd" => !args["action"]
+            .as_str()
+            .unwrap_or("run")
+            .eq_ignore_ascii_case("list"),
         "run_shell" => args["run_type"].as_str().unwrap_or("direct") != "serve",
         "file_actions" => args["action"].as_str().unwrap_or("") == "search",
         _ => false,
@@ -633,7 +637,14 @@ fn tool_args_block(args: &Value) -> String {
 /// One-line label for the UI and for the result header.
 fn background_label(name: &str, args: &Value) -> String {
     let detail = match name {
-        "run_cmd" => args["command"].as_str().unwrap_or("").to_string(),
+        "run_cmd" => {
+            let action = args["action"].as_str().unwrap_or("run");
+            if action.eq_ignore_ascii_case("list") {
+                "list scripts".to_string()
+            } else {
+                args["command"].as_str().unwrap_or("").to_string()
+            }
+        }
         "run_shell" => {
             let shell = args["type"].as_str().unwrap_or("shell");
             let code = args["code"].as_str().unwrap_or("");
@@ -2409,6 +2420,23 @@ async fn run_chat_turn(
                  action `consolidate` and phase `plan` first, review the clusters, then call \
                  `apply` with the full `skill_md` and the same `keys`. Never delete entries by hand.",
             );
+        }
+    }
+
+    // ── Workspace script library ────────────────────────────────────────────
+    // Self-evolution mode adds the save policy; every mode lists the scripts
+    // that already exist so the model reuses them instead of retyping the same
+    // command from scratch.
+    if config.effective_tools().iter().any(|t| t == "run_cmd") {
+        let scripts_context = crate::tools::scripts::prompt_block(
+            &workspace_dir_for_roots,
+            config.self_evolution_mode,
+        );
+        if !scripts_context.is_empty() {
+            if !system_content.is_empty() {
+                system_content.push_str("\n\n");
+            }
+            system_content.push_str(&scripts_context);
         }
     }
 
