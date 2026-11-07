@@ -6,10 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
 use std::sync::Mutex;
-use tauri::{
-    menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
-    AppHandle, Emitter, Manager, State,
-};
+#[cfg(target_os = "macos")]
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 use tauri_plugin_opener::OpenerExt;
 
@@ -1263,92 +1262,101 @@ pub fn run() {
                 .expect("failed to get app data dir");
             fs::create_dir_all(&data_dir).ok();
 
-            let open_app_data_dir_item = MenuItem::with_id(
-                app,
-                OPEN_APP_DATA_DIR_MENU_ID,
-                "Open App Data Directory",
-                true,
-                None::<&str>,
-            )
-            .expect("failed to create menu item");
-            let open_workspace_dir_item = MenuItem::with_id(
-                app,
-                OPEN_WORKSPACE_DIR_MENU_ID,
-                "Open Workspace Directory",
-                true,
-                None::<&str>,
-            )
-            .expect("failed to create workspace menu item");
-            let save_profile_item = MenuItem::with_id(
-                app,
-                SAVE_PROFILE_MENU_ID,
-                "Save Profile...",
-                true,
-                None::<&str>,
-            )
-            .expect("failed to create menu item");
-            let restore_profile_item = MenuItem::with_id(
-                app,
-                RESTORE_PROFILE_MENU_ID,
-                "Restore Profile...",
-                true,
-                None::<&str>,
-            )
-            .expect("failed to create menu item");
-            let markdown_edit_item = MenuItem::with_id(
-                app,
-                MARKDOWN_EDIT_MENU_ID,
-                "Markdown Edit...",
-                true,
-                None::<&str>,
-            )
-            .expect("failed to create tools menu item");
-            let file_menu = Submenu::with_items(
-                app,
-                "File",
-                true,
-                &[
-                    &save_profile_item,
-                    &restore_profile_item,
-                    &open_app_data_dir_item,
-                    &open_workspace_dir_item,
-                ],
-            )
-            .expect("failed to create app menu");
-            let tools_menu = Submenu::with_items(app, "Tools", true, &[&markdown_edit_item])
-                .expect("failed to create tools menu");
-
-            // Standard Edit menu for copy/paste/select-all keyboard shortcuts
-            let edit_menu = Submenu::with_items(
-                app,
-                "Edit",
-                true,
-                &[
-                    &PredefinedMenuItem::undo(app, None::<&str>)
-                        .expect("failed to create undo menu item"),
-                    &PredefinedMenuItem::redo(app, None::<&str>)
-                        .expect("failed to create redo menu item"),
-                    &PredefinedMenuItem::separator(app).expect("failed to create separator"),
-                    &PredefinedMenuItem::cut(app, None::<&str>)
-                        .expect("failed to create cut menu item"),
-                    &PredefinedMenuItem::copy(app, None::<&str>)
-                        .expect("failed to create copy menu item"),
-                    &PredefinedMenuItem::paste(app, None::<&str>)
-                        .expect("failed to create paste menu item"),
-                    &PredefinedMenuItem::select_all(app, None::<&str>)
-                        .expect("failed to create select all menu item"),
-                ],
-            )
-            .expect("failed to create edit menu");
-
-            let about_item =
-                MenuItem::with_id(app, ABOUT_MENU_ID, "About AI Chat", true, None::<&str>)
-                    .expect("failed to create about menu item");
-            let about_menu = Submenu::with_items(app, "About", true, &[&about_item])
-                .expect("failed to create about menu");
-            let menu = Menu::with_items(app, &[&file_menu, &edit_menu, &tools_menu, &about_menu])
+            // Only macOS gets a native menu bar: there it lands in the
+            // system-wide bar, which is how a Mac app exposes these commands.
+            // On GTK/Win32 `set_menu` instead draws a bar *inside* the window,
+            // stacked above our decorations-less custom titlebar — so those
+            // platforms rely on the titlebar's `⋯` menu, which carries the
+            // very same entries (see `TitleBar.tsx`).
+            #[cfg(target_os = "macos")]
+            {
+                let open_app_data_dir_item = MenuItem::with_id(
+                    app,
+                    OPEN_APP_DATA_DIR_MENU_ID,
+                    "Open App Data Directory",
+                    true,
+                    None::<&str>,
+                )
+                .expect("failed to create menu item");
+                let open_workspace_dir_item = MenuItem::with_id(
+                    app,
+                    OPEN_WORKSPACE_DIR_MENU_ID,
+                    "Open Workspace Directory",
+                    true,
+                    None::<&str>,
+                )
+                .expect("failed to create workspace menu item");
+                let save_profile_item = MenuItem::with_id(
+                    app,
+                    SAVE_PROFILE_MENU_ID,
+                    "Save Profile...",
+                    true,
+                    None::<&str>,
+                )
+                .expect("failed to create menu item");
+                let restore_profile_item = MenuItem::with_id(
+                    app,
+                    RESTORE_PROFILE_MENU_ID,
+                    "Restore Profile...",
+                    true,
+                    None::<&str>,
+                )
+                .expect("failed to create menu item");
+                let markdown_edit_item = MenuItem::with_id(
+                    app,
+                    MARKDOWN_EDIT_MENU_ID,
+                    "Markdown Edit...",
+                    true,
+                    None::<&str>,
+                )
+                .expect("failed to create tools menu item");
+                let file_menu = Submenu::with_items(
+                    app,
+                    "File",
+                    true,
+                    &[
+                        &save_profile_item,
+                        &restore_profile_item,
+                        &open_app_data_dir_item,
+                        &open_workspace_dir_item,
+                    ],
+                )
                 .expect("failed to create app menu");
-            app.set_menu(menu).expect("failed to set app menu");
+                let tools_menu = Submenu::with_items(app, "Tools", true, &[&markdown_edit_item])
+                    .expect("failed to create tools menu");
+
+                // Standard Edit menu for copy/paste/select-all keyboard shortcuts
+                let edit_menu = Submenu::with_items(
+                    app,
+                    "Edit",
+                    true,
+                    &[
+                        &PredefinedMenuItem::undo(app, None::<&str>)
+                            .expect("failed to create undo menu item"),
+                        &PredefinedMenuItem::redo(app, None::<&str>)
+                            .expect("failed to create redo menu item"),
+                        &PredefinedMenuItem::separator(app).expect("failed to create separator"),
+                        &PredefinedMenuItem::cut(app, None::<&str>)
+                            .expect("failed to create cut menu item"),
+                        &PredefinedMenuItem::copy(app, None::<&str>)
+                            .expect("failed to create copy menu item"),
+                        &PredefinedMenuItem::paste(app, None::<&str>)
+                            .expect("failed to create paste menu item"),
+                        &PredefinedMenuItem::select_all(app, None::<&str>)
+                            .expect("failed to create select all menu item"),
+                    ],
+                )
+                .expect("failed to create edit menu");
+
+                let about_item =
+                    MenuItem::with_id(app, ABOUT_MENU_ID, "About AI Chat", true, None::<&str>)
+                        .expect("failed to create about menu item");
+                let about_menu = Submenu::with_items(app, "About", true, &[&about_item])
+                    .expect("failed to create about menu");
+                let menu = Menu::with_items(app, &[&file_menu, &edit_menu, &tools_menu, &about_menu])
+                    .expect("failed to create app menu");
+                app.set_menu(menu).expect("failed to set app menu");
+            }
 
             let mcp_servers_path = data_dir.join("mcp_servers.json");
             let agents_config_path = data_dir.join("sub_agents.json");
