@@ -25,6 +25,7 @@ import type {
   SleepLockState,
   TimerEntry,
   BackgroundTaskState,
+  TodoListSummary,
   UpdateInfo,
   UpdateDownloadProgress,
   WorkspaceFileEntry,
@@ -245,6 +246,20 @@ export async function listBackgroundTasks(
   sessionId: string,
 ): Promise<BackgroundTaskState[]> {
   return invoke("list_background_tasks", { sessionId });
+}
+
+// ─── Todo list ───────────────────────────────────────────────────────────────
+
+/**
+ * The session's active todo list, or `null` when it has none. The panel is
+ * mounted per assistant message and therefore has no state of its own: this is
+ * what makes a list created in an earlier turn (or before a reload) visible as
+ * soon as the user sends the next message.
+ */
+export async function getActiveTodoList(
+  sessionId: string,
+): Promise<TodoListSummary | null> {
+  return invoke("get_active_todo_list", { sessionId });
 }
 
 /** Stop one background task; its whole process tree is terminated. */

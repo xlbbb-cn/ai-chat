@@ -921,3 +921,42 @@ export interface SkillsStatus {
   updated_at?: string;
   skills: Record<string, SkillStatusEntry>;
 }
+
+/** One item of a session's todo list (`todos` tool / `<workspace>/.data/todos`). */
+export interface TodoRecord {
+  id: string;
+  session_id: string;
+  list_id: string;
+  title: string;
+  description: string;
+  status: string;
+  position: number;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+/** A whole todo list plus its derived counters, as stored on disk. */
+export interface TodoListSummary {
+  list_id: string;
+  session_id: string;
+  title: string;
+  description: string;
+  total: number;
+  pending: number;
+  in_progress: number;
+  completed: number;
+  cancelled: number;
+  created_at: string;
+  updated_at: string;
+  todos: TodoRecord[];
+}
+
+/** Payload of the `todo-state` Tauri event. */
+export interface TodoStateEvent {
+  type: "todo_state" | "todo_updated" | "todo_cleared" | "todo_list_changed";
+  list_id?: string;
+  session_id?: string;
+  summary?: TodoListSummary;
+  todo?: TodoRecord;
+}

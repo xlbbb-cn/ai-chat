@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { getActiveTodoList } from "../api";
+import type { TodoListSummary, TodoRecord, TodoStateEvent } from "../types";
 import {
     FontAwesomeIcon,
     faChevronRight,
@@ -11,40 +13,15 @@ import {
 } from "../icons";
 import "./TodoList.css";
 
-interface TodoRecord {
-    id: string;
-    session_id: string;
-    list_id: string;
-    title: string;
-    description: string;
-    status: string;
-    position: number;
-    created_at: string;
-    updated_at: string;
-    completed_at: string | null;
-}
-
-interface TodoListSummary {
-    list_id: string;
-    session_id: string;
-    title: string;
-    description: string;
-    total: number;
-    pending: number;
-    in_progress: number;
-    completed: number;
-    cancelled: number;
-    created_at: string;
-    updated_at: string;
-    todos: TodoRecord[];
-}
-
-interface TodoStateEvent {
-    type: "todo_state" | "todo_updated" | "todo_cleared" | "todo_list_changed";
-    list_id?: string;
-    session_id?: string;
-    summary?: TodoListSummary;
-    todo?: TodoRecord;
+interface TodoListProps {
+    /** Session whose active list this panel mirrors. */
+    sessionId?: string;
+    /**
+     * Only the newest assistant message mirrors the session's list. The panel is
+     * mounted once per message, so mirroring in every message would draw the
+     * same list again under each historic reply.
+     */
+    active?: boolean;
 }
 
 function statusIcon(status: string) {
@@ -111,16 +88,60 @@ function dropCompleted(prev: TodoListSummary): TodoListSummary {
     return withTodos(prev, prev.todos.filter(t => t.status !== "completed"));
 }
 
-export function TodoList() {
+/** Session an event belongs to, when its payload carries one. */
+function eventSessionId(event: TodoStateEvent): string | undefined {
+    return event.summary?.session_id ?? event.todo?.session_id ?? event.session_id;
+}
+
+export function TodoList({ sessionId, active = false }: TodoListProps) {
     const [todoList, setTodoList] = useState<TodoListSummary | null>(null);
     const [open, setOpen] = useState(false);
+    // Bumped on every event: an in-flight initial fetch must not overwrite a
+    // snapshot that arrived while it was running.
+    const eventSeq = useRef(0);
+
+    const enabled = active && Boolean(sessionId);
+
+    // Mount fetches the session's active list. The panel belongs to one
+    // assistant message and has no state of its own, so without this a plan
+    // created in an earlier turn (or before a reload) would stay invisible
+    // until the model happened to touch the list again.
+    useEffect(() => {
+        if (!sessionId || !active) {
+            setTodoList(null);
+            return;
+        }
+        const seq = eventSeq.current;
+        let cancelled = false;
+        getActiveTodoList(sessionId)
+            .then((list) => {
+                if (cancelled || eventSeq.current !== seq) return;
+                // A fully completed list stays visible (100% panel); only an
+                // absent list hides the panel.
+                setTodoList(list ?? null);
+            })
+            .catch(() => {
+                // No active list, or the workspace is switching — stay hidden.
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [sessionId, active]);
 
     useEffect(() => {
-        // Subscribe exactly once: re-registering per state change opens a
-        // window where events are dropped (unlisten resolves asynchronously).
-        // All handlers use functional updates, so no stale closure is read.
+        if (!sessionId || !active) return;
+        // Subscribe exactly once per (panel, session): re-registering per state
+        // change opens a window where events are dropped (unlisten resolves
+        // asynchronously). All handlers use functional updates, so no stale
+        // closure is read.
         const unlisten = listen<TodoStateEvent>("todo-state", (e) => {
             const event = e.payload;
+
+            // Parallel sessions share this broadcast: a panel must never mirror
+            // another session's list.
+            const owner = eventSessionId(event);
+            if (owner && owner !== sessionId) return;
+            eventSeq.current += 1;
 
             switch (event.type) {
                 case "todo_state":
@@ -157,14 +178,27 @@ export function TodoList() {
         return () => {
             unlisten.then(fn => fn());
         };
-    }, []);
+    }, [sessionId, active]);
 
-    if (!todoList || todoList.todos.length === 0) {
+    if (!enabled || !todoList || todoList.todos.length === 0) {
+        return null;
+    }
+
+    // Nothing left to track: the panel exists to show work in progress, so a
+    // finished plan disappears instead of lingering at 100% — the same rule the
+    // prompt block follows. "Finished" means nothing pending and nothing
+    // running, which also covers a plan whose leftovers were all cancelled.
+    if (todoList.pending === 0 && todoList.in_progress === 0) {
         return null;
     }
 
     const sortedTodos = [...todoList.todos].sort((a, b) => a.position - b.position);
     const activeTodo = sortedTodos.find((t) => t.status === "in_progress");
+    // Collapsed preview line: what is being worked on right now, or — when
+    // every item is still pending — the next item up, so the second line never
+    // goes empty while work remains.
+    const previewTodo =
+        activeTodo ?? sortedTodos.find((t) => t.status === "pending") ?? null;
 
     return (
         <div className="todo-list-container">
@@ -188,14 +222,11 @@ export function TodoList() {
                             <FontAwesomeIcon icon={faChevronRight} />
                         </span>
                     </span>
-                    {!open && activeTodo && (
+                    {!open && previewTodo && (
                         <span className="todo-list-preview" aria-hidden="true">
                             <span className="todo-preview-row todo-preview-main">
-                                <span className="todo-preview-icon">{statusIcon(activeTodo.status)}</span>
-                                <span className="todo-preview-title">{activeTodo.title}</span>
-                            </span>
-                            <span className="todo-preview-row todo-preview-sub">
-                                {activeTodo.description || "\u00A0"}
+                                <span className="todo-preview-icon">{statusIcon(previewTodo.status)}</span>
+                                <span className="todo-preview-title">{previewTodo.title}</span>
                             </span>
                         </span>
                     )}
