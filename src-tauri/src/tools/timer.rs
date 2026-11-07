@@ -344,19 +344,32 @@ mod platform {
         }
     }
 
-    /// Linux: a D-Bus session inhibit — `org.freedesktop.ScreenSaver`
-    /// (GNOME/KDE) where available, the legacy `org.freedesktop.PowerManagement`
-    /// otherwise. Without a desktop session (headless, tiling WM) the call
-    /// fails and no sleep prevention happens; not an error worth stopping
-    /// anything over. The inhibit also dies with the D-Bus connection, so an
-    /// app crash cannot leak an awake system.
+    /// Linux: hold every sleep-inhibit mechanism the session offers.
+    ///
+    /// Two are worth having and they are not interchangeable:
+    ///
+    /// * `org.freedesktop.login1` (systemd-logind) — the portable one. It lives
+    ///   on the *system* bus and exists on every systemd distribution whatever
+    ///   the desktop, which is exactly where the desktop-specific service is
+    ///   missing: Fedora MATE, for one, exports `org.mate.ScreenSaver` and
+    ///   nothing under `org.freedesktop.*`.
+    /// * the desktop screensaver — what keeps the display awake on GNOME, KDE,
+    ///   Xfce and MATE, so it is held *in addition* when it answers.
+    ///
+    /// Each inhibition dies with its own handle (logind: the file descriptor it
+    /// returns, closed by dropping it; screensaver: the cookie, released with
+    /// `UnInhibit`; session bus: closing it drops whatever it owned), so an app
+    /// crash cannot leak an awake machine. When no service answers at all,
+    /// nothing is held and the log says so once — an unusual session is not an
+    /// error worth stopping a long task over.
     #[cfg(target_os = "linux")]
     mod linux {
         use std::sync::{mpsc, OnceLock};
         use zbus::fdo::Result as FdoResult;
+        use zbus::zvariant::OwnedFd;
 
-        /// GNOME/KDE screensaver inhibit — returns a cookie that must pair
-        /// with the matching `UnInhibit` call.
+        /// Desktop screensaver inhibit — returns a cookie that must pair with
+        /// the matching `UnInhibit` call.
         #[zbus::proxy(
             default_service = "org.freedesktop.ScreenSaver",
             default_path = "/org/freedesktop/ScreenSaver",
@@ -364,29 +377,61 @@ mod platform {
         )]
         trait ScreenSaver {
             fn inhibit(&self, application_name: &str, reason_for_inhibit: &str) -> FdoResult<u32>;
-            fn uninhibit(&self, cookie: u32) -> FdoResult<()>;
+            // The freedesktop spec spells it `UnInhibit` — the odd capital I
+            // comes from the method's lifetime as `UnInhibit`, so the snake
+            // name must be `un_inhibit` to land on it.
+            fn un_inhibit(&self, cookie: u32) -> FdoResult<()>;
         }
 
-        /// Legacy power management inhibit (cookieless).
+        /// MATE exports the same idea under its own name and interface.
         #[zbus::proxy(
-            default_service = "org.freedesktop.PowerManagement",
-            default_path = "/org/freedesktop/PowerManagement/Inhibit",
-            interface = "org.freedesktop.PowerManagement.Inhibit"
+            default_service = "org.mate.ScreenSaver",
+            default_path = "/org/mate/ScreenSaver",
+            interface = "org.mate.ScreenSaver"
         )]
-        trait PowerManagement {
-            fn inhibit(&self, application_name: &str, reason: &str) -> FdoResult<()>;
-            fn uninhibit(&self) -> FdoResult<()>;
+        trait MateScreenSaver {
+            fn inhibit(&self, application_name: &str, reason: &str) -> FdoResult<u32>;
+            fn un_inhibit(&self, cookie: u32) -> FdoResult<()>;
+        }
+
+        /// systemd-logind. `Inhibit` answers with a file descriptor and the
+        /// inhibition lives exactly as long as that descriptor stays open.
+        #[zbus::proxy(
+            default_service = "org.freedesktop.login1",
+            default_path = "/org/freedesktop/login1",
+            interface = "org.freedesktop.login1.Manager"
+        )]
+        trait Login1Manager {
+            fn inhibit(&self, what: &str, who: &str, why: &str, mode: &str) -> FdoResult<OwnedFd>;
         }
 
         const APP_NAME: &str = "ai-chat";
         const REASON: &str = "long task in progress";
+        /// `idle` is the inhibit logind grants without a polkit prompt, and the
+        /// one power managers consult before suspending on their own.
+        const LOGIND_WHAT: &str = "idle";
 
-        /// A live inhibit: the session-bus connection (whose close alone would
-        /// drop the inhibition) plus the ScreenSaver cookie when that
-        /// interface won.
-        struct Held {
-            connection: zbus::blocking::Connection,
-            screensaver_cookie: Option<u32>,
+        /// Which screensaver answered, so the release knows who to call.
+        #[derive(Clone, Copy)]
+        enum Saver {
+            Freedesktop,
+            Mate,
+        }
+
+        /// One mechanism actually held, together with everything releasing it
+        /// needs. Dropping the value is safe: logind's descriptor closes, and a
+        /// dropped session bus drops its own inhibition.
+        enum Hold {
+            Logind {
+                /// Kept alive so the descriptor below stays valid.
+                _bus: zbus::blocking::Connection,
+                _fd: OwnedFd,
+            },
+            ScreenSaver {
+                bus: zbus::blocking::Connection,
+                saver: Saver,
+                cookie: u32,
+            },
         }
 
         /// One D-Bus worker owns the inhibit for the app's lifetime, so the
@@ -407,65 +452,131 @@ mod platform {
             let _ = std::thread::Builder::new()
                 .name("sleep-lock".to_string())
                 .spawn(move || {
-                    let mut held: Option<Held> = None;
+                    let mut holds: Vec<Hold> = Vec::new();
+                    // One line per cause: a session without any inhibit service
+                    // re-arms on every turn and must not repeat itself.
+                    let mut reported: Option<String> = None;
                     while let Ok(on) = receiver.recv() {
                         if on {
-                            if held.is_none() {
+                            if holds.is_empty() {
                                 match establish_inhibit() {
-                                    Ok(session) => held = Some(session),
-                                    Err(err) => eprintln!("sleep-lock: {err}"),
+                                    Ok(held) => {
+                                        holds = held;
+                                        reported = None;
+                                    }
+                                    Err(err) => {
+                                        if reported.as_deref() != Some(err.as_str()) {
+                                            eprintln!("sleep-lock: {err}");
+                                            reported = Some(err);
+                                        }
+                                    }
                                 }
                             }
-                        } else if let Some(session) = held.take() {
-                            if let Err(err) = lift_inhibit(session) {
-                                eprintln!("sleep-lock: {err}");
-                            }
+                        } else {
+                            lift_holds(std::mem::take(&mut holds));
                         }
                     }
                 });
             sender
         }
 
-        fn establish_inhibit() -> Result<Held, String> {
-            let connection = zbus::blocking::Connection::session()
-                .map_err(|err| format!("D-Bus session failed: {err}"))?;
-            let screensaver = ScreenSaverProxyBlocking::new(&connection)
-                .map_err(|err| format!("ScreenSaver proxy failed: {err}"))?;
-            match screensaver.inhibit(APP_NAME, REASON) {
-                Ok(cookie) => Ok(Held {
-                    connection,
-                    screensaver_cookie: Some(cookie),
-                }),
-                Err(_) => {
-                    // No screensaver service: fall back to the legacy,
-                    // cookieless power-management inhibit.
-                    let power = PowerManagementProxyBlocking::new(&connection)
-                        .map_err(|err| format!("PowerManagement proxy failed: {err}"))?;
-                    power
-                        .inhibit(APP_NAME, REASON)
-                        .map_err(|err| format!("PowerManagement Inhibit failed: {err}"))?;
-                    Ok(Held {
-                        connection,
-                        screensaver_cookie: None,
-                    })
+        /// Acquire every mechanism that answers rather than stopping at the
+        /// first: logind asks the power manager to stay up, the screensaver
+        /// keeps the display on, and a desktop honouring only one of them is
+        /// still covered.
+        fn establish_inhibit() -> Result<Vec<Hold>, String> {
+            let mut holds = Vec::new();
+            let mut notes: Vec<String> = Vec::new();
+
+            match logind_inhibit() {
+                Ok(hold) => holds.push(hold),
+                Err(note) => notes.push(note),
+            }
+            match screensaver_inhibit() {
+                Ok(hold) => holds.push(hold),
+                Err(note) => notes.push(note),
+            }
+
+            if holds.is_empty() {
+                return Err(format!(
+                    "no sleep-inhibit service answered ({})",
+                    notes.join("; ")
+                ));
+            }
+            Ok(holds)
+        }
+
+        fn logind_inhibit() -> Result<Hold, String> {
+            let bus = zbus::blocking::Connection::system()
+                .map_err(|err| format!("system D-Bus failed: {err}"))?;
+            let manager = Login1ManagerProxyBlocking::new(&bus)
+                .map_err(|err| format!("logind proxy failed: {err}"))?;
+            let fd = manager
+                .inhibit(LOGIND_WHAT, APP_NAME, REASON, "block")
+                .map_err(|err| format!("logind Inhibit failed: {err}"))?;
+            Ok(Hold::Logind { _bus: bus, _fd: fd })
+        }
+
+        fn screensaver_inhibit() -> Result<Hold, String> {
+            let bus = zbus::blocking::Connection::session()
+                .map_err(|err| format!("session D-Bus failed: {err}"))?;
+            let mut notes: Vec<String> = Vec::new();
+
+            match ScreenSaverProxyBlocking::new(&bus) {
+                Ok(proxy) => match proxy.inhibit(APP_NAME, REASON) {
+                    Ok(cookie) => {
+                        return Ok(Hold::ScreenSaver {
+                            bus,
+                            saver: Saver::Freedesktop,
+                            cookie,
+                        })
+                    }
+                    Err(err) => notes.push(err.to_string()),
+                },
+                Err(err) => notes.push(err.to_string()),
+            }
+
+            match MateScreenSaverProxyBlocking::new(&bus) {
+                Ok(proxy) => match proxy.inhibit(APP_NAME, REASON) {
+                    Ok(cookie) => {
+                        return Ok(Hold::ScreenSaver {
+                            bus,
+                            saver: Saver::Mate,
+                            cookie,
+                        })
+                    }
+                    Err(err) => notes.push(err.to_string()),
+                },
+                Err(err) => notes.push(err.to_string()),
+            }
+
+            Err(format!("screensaver unavailable ({})", notes.join("; ")))
+        }
+
+        fn lift_holds(holds: Vec<Hold>) {
+            for hold in holds {
+                if let Err(err) = release(hold) {
+                    eprintln!("sleep-lock: {err}");
                 }
             }
         }
 
-        fn lift_inhibit(held: Held) -> Result<(), String> {
-            if let Some(cookie) = held.screensaver_cookie {
-                let screensaver = ScreenSaverProxyBlocking::new(&held.connection)
-                    .map_err(|err| format!("ScreenSaver proxy failed: {err}"))?;
-                screensaver
-                    .uninhibit(cookie)
-                    .map_err(|err| format!("ScreenSaver UnInhibit failed: {err}"))?;
-                return Ok(());
+        fn release(hold: Hold) -> Result<(), String> {
+            match hold {
+                // Dropping the value closes the descriptor, which is the whole
+                // release as far as logind is concerned.
+                Hold::Logind { .. } => Ok(()),
+                Hold::ScreenSaver { bus, saver, cookie } => match saver {
+                    Saver::Freedesktop => ScreenSaverProxyBlocking::new(&bus)
+                        .map_err(|err| format!("ScreenSaver proxy failed: {err}"))?
+                        .un_inhibit(cookie)
+                        .map_err(|err| format!("ScreenSaver UnInhibit failed: {err}")),
+                    Saver::Mate => MateScreenSaverProxyBlocking::new(&bus)
+                        .map_err(|err| format!("MATE ScreenSaver proxy failed: {err}"))?
+                        .un_inhibit(cookie)
+                        .map_err(|err| format!("MATE ScreenSaver UnInhibit failed: {err}")),
+                },
             }
-            let power = PowerManagementProxyBlocking::new(&held.connection)
-                .map_err(|err| format!("PowerManagement proxy failed: {err}"))?;
-            power
-                .uninhibit()
-                .map_err(|err| format!("PowerManagement UnInhibit failed: {err}"))
         }
     }
 }
