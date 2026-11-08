@@ -1,0 +1,38 @@
+name: Tag token probe
+
+# 一次性诊断：tag 触发的运行 + 与 release.yml 相同的顶层 permissions，
+# 用 GITHUB_TOKEN 建草稿 Release 再删掉。job 成功 => tag 触发下 token 有 contents: write。
+on:
+  push:
+    tags:
+      - 'perm-probe-*'
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Create draft release then delete it
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          url="https://api.github.com/repos/$GITHUB_REPOSITORY/releases"
+          code=$(curl -sS -o /tmp/create.json -w '%{http_code}' -X POST "$url" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -d "{\"tag_name\":\"$GITHUB_REF_NAME\",\"name\":\"perm probe\",\"draft\":true,\"body\":\"probe\"}")
+          echo "create-release HTTP $code"
+          cat /tmp/create.json
+          if [ "$code" != "201" ]; then
+            echo "::error::create-release HTTP=$code body=$(head -c 400 /tmp/create.json | tr '\n' ' ')"
+            exit 1
+          fi
+          rel_id=$(python3 -c 'import json;print(json.load(open("/tmp/create.json"))["id"])')
+          del_code=$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE "$url/$rel_id" \
+            -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json")
+          echo "::notice::create-release HTTP=201 ok, delete HTTP=$del_code"
