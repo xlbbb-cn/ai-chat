@@ -1,5 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
+import { compactAttachmentsForDb } from "./attachments";
 import type {
   AppConfig,
   Attachment,
@@ -101,21 +102,44 @@ export interface PdfMentionResult {
   truncated: boolean;
 }
 
+/** One progress tick of a PDF mention conversion, streamed while it runs. */
+export interface PdfMentionProgress {
+  /**
+   * Pipeline stage: `reading`, `extracting`, `analysing`, `parsing`,
+   * `cleaning`, `rendering` or `done`.
+   */
+  stage: string;
+  /** Page being worked on; 0 outside the per-page stages. */
+  page: number;
+  /** Pages in the requested range; 0 outside the per-page stages. */
+  total: number;
+  /** Overall completion, 0–100, as the library computes it. */
+  percent: number;
+}
+
 /**
  * Render the page range of a workspace PDF (`#2`, `#2-5`, `#2-`) to Markdown.
  *
  * Omitted bounds mean "no range in the mention": the backend then converts a
  * bounded preview (60 pages) instead of a whole book; `endPage` omitted *with*
  * a `startPage` means "to the last page".
+ *
+ * `onProgress` receives the conversion's ticks (`page 12 of 30`, then the
+ * finishing stages) over a Tauri channel while the command runs on a blocking
+ * thread — the composer has nothing else to show during that wait.
  */
 export async function convertPdfMention(
   path: string,
   opts?: { startPage?: number; endPage?: number },
+  onProgress?: (update: PdfMentionProgress) => void,
 ): Promise<PdfMentionResult> {
+  const progress = new Channel<PdfMentionProgress>();
+  progress.onmessage = (update) => onProgress?.(update);
   return invoke("convert_pdf_mention", {
     path,
     startPage: opts?.startPage ?? null,
     endPage: opts?.endPage ?? null,
+    onProgress: progress,
   });
 }
 
@@ -451,8 +475,14 @@ export async function saveHistory(
   // Serialise the attachments array as JSON so it can be stored in a
   // single TEXT column. Pass `null` (not `undefined`) when absent so the
   // Tauri command receives an explicit `None` and writes NULL.
-  const attachmentsJson = attachments && attachments.length > 0
-    ? JSON.stringify(attachments)
+  //
+  // A converted PDF mention is stored by path instead of by text: its Markdown
+  // is already in `content`, and the two copies would double the row.
+  const stored = attachments && attachments.length > 0
+    ? compactAttachmentsForDb(attachments)
+    : undefined;
+  const attachmentsJson = stored && stored.length > 0
+    ? JSON.stringify(stored)
     : null;
   return invoke("save_history", {
     sessionId,

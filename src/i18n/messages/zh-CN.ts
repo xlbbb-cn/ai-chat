@@ -96,6 +96,8 @@ const zhCN: Messages = {
             readFailed: "无法读取 {name}：{error}",
             rangeNotSupported: "{name} 不支持行区间，已附加整个文件。",
             pdfFailed: "无法转换 PDF {name}：{error}",
+            pdfConverting: "正在把 {name} 转成 Markdown…",
+            pdfConvertingPage: "第 {page} / {total} 页",
         },
         slashMention: {
             title: "插入技能引用",

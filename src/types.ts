@@ -214,6 +214,17 @@ export interface Attachment {
   data_url?: string;
   /** Original text for text attachments (also preserved in `content` parts). */
   text_content?: string;
+  /**
+   * Workspace-relative path of the file that holds this attachment's text when
+   * it is too big to keep in the history row (a converted PDF mention caches its
+   * Markdown under `.data/tmp/pdf/`).
+   *
+   * The stored copy drops `text_content` once this is set — the text still
+   * reaches the model through the message `content`, so the attachment record
+   * only has to remember where the file is. See `compactAttachmentsForDb` in
+   * `attachments.ts`.
+   */
+  path?: string;
 }
 
 export interface Message {

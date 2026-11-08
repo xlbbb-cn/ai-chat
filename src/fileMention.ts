@@ -131,6 +131,32 @@ export interface MentionResolution {
 }
 
 /**
+ * Live progress of the PDF conversions inside one {@link resolveFileMentions}
+ * run.
+ *
+ * A 60-page mention spends seconds in the backend before the turn even starts,
+ * so the composer renders these ticks ("converting kk.pdf — page 3 of 30")
+ * while it waits. `page`/`total` are 0 for the stages that do not walk pages
+ * (reading, parsing, rendering); `percent` covers the whole conversion and never
+ * walks backwards, which is what a progress bar needs.
+ */
+export interface MentionProgress {
+  /** Workspace path of the PDF being converted right now. */
+  name: string;
+  /**
+   * Pipeline stage code: `reading`, `extracting`, `analysing`, `parsing`,
+   * `cleaning`, `rendering` or `done`.
+   */
+  stage: string;
+  /** Page being worked on; 0 outside the page stages. */
+  page: number;
+  /** Pages in the requested range; 0 outside the page stages. */
+  total: number;
+  /** Overall completion, 0–100. */
+  percent: number;
+}
+
+/**
  * `true` when the mention names a PDF.
  *
  * A PDF is the one binary the composer can turn into *text*: sending it as a
@@ -158,11 +184,16 @@ function pdfLabel(path: string, result: PdfMentionResult): string {
  * Failures are collected instead of thrown: a mention that cannot be resolved
  * (missing file, unsupported type, out-of-range lines) must not swallow the
  * message the user typed.
+ *
+ * `onProgress` receives the conversion ticks of every PDF in the text, tagged
+ * with the path it belongs to: resolving happens before the turn starts, so
+ * without it a long document is a silent pause.
  */
 export async function resolveFileMentions(
   text: string,
   metadata: ModelMetadata | undefined,
   modelLabel: string,
+  onProgress?: (progress: MentionProgress) => void,
 ): Promise<MentionResolution> {
   const tokens = parseFileMentions(text);
   const attachments: Attachment[] = [];
@@ -179,15 +210,23 @@ export async function resolveFileMentions(
     // provider never sees a file part.
     if (isPdfMention(token.path)) {
       try {
-        const result = await convertPdfMention(token.path, {
-          startPage: token.startLine,
-          endPage: token.endLine,
-        });
+        const result = await convertPdfMention(
+          token.path,
+          {
+            startPage: token.startLine,
+            endPage: token.endLine,
+          },
+          (update) => onProgress?.({ name: token.path, ...update }),
+        );
         attachments.push({
           name: pdfLabel(token.path, result),
           kind: "text",
           mime: "text/markdown",
           text_content: result.markdown,
+          // The Markdown also goes into the message `content`; the stored
+          // attachment keeps only this path (see `compactAttachmentsForDb`),
+          // which is what the provenance comment points at too.
+          path: result.path,
         });
       } catch (err) {
         problems.push(t("app.fileMention.pdfFailed", { name: token.path, error: String(err) }));

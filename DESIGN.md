@@ -423,6 +423,21 @@ The 2px bar pinned to the input area's top border has two states:
 absolutely positioned over the input area's top border, so it never causes
 layout shift.
 
+### Mention progress strip
+
+A PDF mention (`@paper.pdf#2`) is converted to Markdown *before* the turn
+starts, so the input area grows one status row while it runs:
+
+- one muted 12px row (`--c-muted`): spinner + "converting `paper.pdf`…", the
+  page counter in 11px `--c-placeholder` with tabular numerals, then the same
+  2px `--c-accent` track the context bar uses (no gradient, no fill);
+- it is **in flow**, unlike the usage bar: it shares `.injection-bar`'s recipe,
+  so a transient row enters and leaves the stack the same way and needs no
+  reserved height;
+- `prefers-reduced-motion` drops the width transition, the row is `role="status"`
+  so a screen reader hears the page change, and the composer clears it in a
+  `finally` — a failed conversion never leaves it behind.
+
 ### The compact zone
 
 Settings, the chat input row, and the sidebar panels all share **34px controls**.
