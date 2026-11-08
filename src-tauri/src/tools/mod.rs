@@ -251,24 +251,24 @@ pub fn get_all_tools(
             "type": "function",
             "function": {
                 "name": "run_cmd",
-                "description": "Execute a program or a workspace script with patent-compliant risk assessment. L5/L6 (safe/read-only) commands execute directly. L0-L4 commands require user confirmation with risk score display. Syntax errors are rejected with detailed error report. Returns execution result or rejection reason.\n\n`action: \"run\"` (default) executes a command. The first word is resolved against the workspace script library `<workspace>/.data/scripts` (a bare script name, extension optional, for example `build-frontend` or `deploy.py`) and otherwise must be a bare program name that the operating system resolves through PATH (for example `python`, `python3`, `git`, `node`). The script library is prepended to the child's PATH, so a script name wins over a program with the same name. Absolute and relative paths are rejected — use `run_shell` when a path is really needed.\n\n`action: \"list\"` lists the library scripts with their interpreter, description, usage and use count; it does not execute anything. Save a script with `file_actions` and give it `@description` / `@usage` header comments (see the self-evolution instructions).",
+                "description": "Execute a program or a workspace script with patent-compliant risk assessment. L5/L6 (safe/read-only) run directly; L0-L4 need the user's confirmation with the risk score; syntax errors are rejected with a detailed report. Returns the result or the rejection reason.\n\n`action: \"run\"` (default) runs `command`. The first word is a script name in the library `<workspace>/.data/scripts` (extension optional, e.g. `build-frontend`, `deploy.py`) or a bare program name resolved through PATH (`python`, `git`, `node`); the library is prepended to the child's PATH, so a script wins over a same-named program. Absolute and relative paths are refused — use `run_shell` when a path is really needed.\n\n`action: \"list\"` lists the library with its `@description` / `@usage` header, interpreter and use count, and executes nothing. Scripts are plain files in that folder: write them with `file_actions` and give them `@description` / `@usage` header comments.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "action": {
                             "type": "string",
                             "enum": ["run", "list"],
-                            "description": "'run' (default) executes `command`; 'list' returns the workspace script library (interpreter, description, usage, use count)."
+                            "description": "'run' (default) executes `command`; 'list' returns the workspace script library without running anything."
                         },
                         "command": {
                             "type": "string",
-                            "description": "Required for action 'run'. The full command line to execute (e.g. 'build-frontend --release', 'python -V', 'curl -s https://example.com'). The first word is a library script name or a bare program name resolved through PATH; the rest are arguments."
+                            "description": "Required for 'run'. Full command line (e.g. 'build-frontend --release', 'python -V', 'curl -s https://example.com'): the first word is a library script name or a bare PATH program, the rest are arguments."
                         },
                         "timeout_seconds": {
                             "type": "integer",
                             "minimum": 1,
                             "maximum": 3600,
-                            "description": "Optional timeout for the command, in seconds. Defaults to 30 if omitted."
+                            "description": "Optional timeout in seconds. Defaults to 30."
                         }
                     },
                     "required": ["action"]
@@ -282,7 +282,7 @@ pub fn get_all_tools(
             "type": "function",
             "function": {
                 "name": "run_shell",
-                "description": "Execute or manage a shell script with patent-compliant risk assessment. L5/L6 (safe/read-only) scripts execute directly. L0-L4 scripts require user confirmation with risk score display. Syntax errors are rejected with detailed error report.\n\nThe script has full freedom: it starts in the working directory (the workspace root for the main chat, the task's directory inside a sub-agent mission) but may change directory anywhere and run anything, and every script is audited by the risk engine before it runs. Use it when a PATH-resolved program is not enough (absolute paths, pipes, loops, redirections).\n\nUse `run_type: \"direct\"` (default) to run a script to completion and return its output. Use `run_type: \"serve\"` to start a long-lived background process (for example an HTTP service or a file watcher) and return immediately with a serve id; list running serve processes with `run_type: \"serve\", action: \"list\"`, and terminate one (or all, with `serve_id: \"all\"`) with `action: \"stop\"`. IMPORTANT: serve processes live only for the current chat turn — they are stopped (whole process tree, exit verified) as soon as this turn ends, and at app exit.",
+                "description": "Execute or manage a shell script under the same risk assessment and confirmation rules as `run_cmd`.\n\nThe script starts in the working directory (the workspace root for the main chat, the task directory inside a sub-agent mission) but may `cd` and run anything — pipes, loops, redirections, absolute paths. Use it when a PATH-resolved program is not enough.\n\n`run_type: \"direct\"` (default) runs to completion and returns the output. `run_type: \"serve\"` starts a long-lived child (HTTP service, watcher…) and returns a `serve_id`; then `action: \"list\"` shows the processes and `action: \"stop\"` kills one id (or `serve_id: \"all\"`). Serve processes die with this chat turn and at app exit.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -294,34 +294,34 @@ pub fn get_all_tools(
                         "run_type": {
                             "type": "string",
                             "enum": ["direct", "serve"],
-                            "description": "Execution mode. 'direct' (default) waits for the script to finish and returns its output. 'serve' starts the script as a long-lived background process and returns a serve id immediately."
+                            "description": "'direct' (default) waits for the script and returns its output; 'serve' starts it as a long-lived background process and returns a serve id immediately."
                         },
                         "action": {
                             "type": "string",
                             "enum": ["start", "stop", "list"],
-                            "description": "Only used with run_type 'serve': 'start' (default) launches a background process, 'stop' terminates the process named by serve_id, 'list' shows all known serve processes and their recent output."
+                            "description": "Only with run_type 'serve': 'start' (default), 'stop' (kills the process named by serve_id), 'list' (known serve processes with recent output)."
                         },
                         "serve_id": {
                             "type": "string",
-                            "description": "Serve process id returned by a previous `run_type: \"serve\"` start call (required for action 'stop'). Use 'all' to stop every running serve process."
+                            "description": "Serve id returned by a `run_type: \"serve\"` start (required for 'stop'). Use 'all' to stop every serve process."
                         },
                         "code": {
                             "type": "string",
-                            "description": "The shell script body to execute. Required for run_type 'direct' and for serve action 'start'; not needed for 'stop'/'list'."
+                            "description": "The shell script body. Required for run_type 'direct' and serve 'start'; not needed for 'stop'/'list'."
                         },
                         "sudo": {
                             "type": "boolean",
-                            "description": "If true (bash only), run the entire script via sudo. Requires explicit user confirmation and sudo credentials."
+                            "description": "If true (bash only), run the whole script through sudo. Asks for confirmation and sudo credentials."
                         },
                         "elevated": {
                             "type": "boolean",
-                            "description": "If true (PowerShell only), request administrator elevation (UAC). Requires explicit user confirmation."
+                            "description": "If true (PowerShell only), request administrator elevation (UAC). Asks for confirmation."
                         },
                         "timeout_seconds": {
                             "type": "integer",
                             "minimum": 1,
                             "maximum": 3600,
-                            "description": "Optional timeout for run_type 'direct', in seconds. Defaults to 30 if omitted. Ignored for serve processes, which keep running until stopped, the current chat turn ends, or the app exits."
+                            "description": "Optional timeout for run_type 'direct', in seconds (default 30). Ignored for serve processes, which run until stopped, the turn ends or the app exits."
                         }
                     },
                     "required": ["type"]
@@ -335,88 +335,88 @@ pub fn get_all_tools(
             "type": "function",
             "function": {
                 "name": "file_actions",
-                "description": "Perform file operations strictly inside the workspace. Always use `./...` paths (for example `./src/App.tsx`) or `.` for the workspace root; absolute paths inside the workspace root are also accepted. Anything that resolves outside the workspace root is rejected — use `run_shell` only when external access is genuinely required. In self-evolution mode the skill directory `./.data/skills/...` is writable (create, edit, move and delete skills there). `./.data/scripts/...` is the `run_cmd` script library and may be maintained with this tool (the self-evolution policy decides when a reusable script should be saved); the rest of `.data` (memory, todos, status) is writable too, except `.data/chat.db`. Protected self-evolution targets create automated backups before mutation.",
+                "description": "File operations strictly inside the workspace. Use `./...` paths (e.g. `./src/App.tsx`) or `.` for the root; absolute paths inside the workspace work, anything resolving outside is rejected — use `run_shell` only when external access is genuinely required. `.data` is part of the workspace and writable: skills under `./.data/skills/...`, the `run_cmd` script library under `./.data/scripts/...`, memory/todos/status — everything except `.data/chat.db`. Protected self-evolution targets get an automatic `.bak.<n>` backup before mutation.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "action": {
                             "type": "string",
                             "enum": ["read", "write", "list", "search", "mkdir", "patch", "diff", "rename", "move", "delete"],
-                            "description": "The file action to perform: read file content, write/overwrite a file, list directory entries, search file contents with the built-in search engine, recursively create directories, apply a unified diff patch (hunks are located by content — the `@@` line numbers are only hints), compare two files and return a unified diff, rename a file/directory, move a file/directory, or delete a file/directory."
+                            "description": "read file content, write/overwrite a file, list a directory, search file contents, create directories recursively, apply a unified diff patch (hunks are located by content — `@@` numbers are hints), diff two files, rename, move, delete."
                         },
                         "path": {
                             "type": "string",
-                            "description": "Workspace-relative path to the file or directory. Use the `./...` form, for example `./src/App.tsx`, or `.`/`./` for the workspace root when listing or searching. External or absolute paths outside the workspace are not allowed."
+                            "description": "Workspace-relative path, e.g. `./src/App.tsx`, or `.`/`./` for the root when listing or searching. Paths outside the workspace are refused."
                         },
                         "new_path": {
                             "type": "string",
-                            "description": "Destination relative path for rename operations. Required when action is 'rename'. For action 'diff' this is the second (modified) file to compare `path` against."
+                            "description": "Destination path for 'rename'; for 'diff' the second file to compare `path` against."
                         },
                         "start_line": {
                             "type": "integer",
                             "minimum": 1,
-                            "description": "Optional 1-based starting line number to read from (inclusive). Only used for 'read'."
+                            "description": "First line to read (1-based, inclusive; 'read' only)."
                         },
                         "end_line": {
                             "type": "integer",
                             "minimum": 1,
-                            "description": "Optional 1-based ending line number to read to (inclusive). Only used for 'read'."
+                            "description": "Last line to read (1-based, inclusive; 'read' only)."
                         },
                         "content": {
                             "type": "string",
-                            "description": "Content to write (only for 'write')."
+                            "description": "Content to write ('write' only)."
                         },
                         "query": {
                             "type": "string",
-                            "description": "Content search text or regex pattern (only for 'search'). No external rg executable is required."
+                            "description": "Search text or regex pattern ('search' only). No external rg executable is needed."
                         },
                         "recursive": {
                             "type": "boolean",
-                            "description": "Whether to search subdirectories recursively when path is a directory (only for 'search'). Defaults to true."
+                            "description": "Recurse into subdirectories when `path` is a directory ('search', default true)."
                         },
                         "case_sensitive": {
                             "type": "boolean",
-                            "description": "Whether the content search is case-sensitive (only for 'search'). Defaults to false."
+                            "description": "Case-sensitive content search ('search', default false)."
                         },
                         "smart_case": {
                             "type": "boolean",
-                            "description": "Whether uppercase letters in query should automatically switch search to case-sensitive when case_sensitive is false (only for 'search'). Defaults to false."
+                            "description": "Uppercase letters in `query` switch to case-sensitive when case_sensitive is false ('search', default false)."
                         },
                         "use_regex": {
                             "type": "boolean",
-                            "description": "Whether query should be treated as a regular expression instead of plain text (only for 'search'). Defaults to false."
+                            "description": "Treat `query` as a regular expression instead of plain text ('search', default false)."
                         },
                         "glob": {
                             "type": "string",
-                            "description": "Optional file path glob filter for search targets, such as '**/*.rs' or 'src/**/*.ts' (only for 'search')."
+                            "description": "Path glob filter for search targets, e.g. '**/*.rs' ('search' only)."
                         },
                         "include_hidden": {
                             "type": "boolean",
-                            "description": "Whether hidden files and directories should be included during directory searches (only for 'search'). Defaults to true."
+                            "description": "Include hidden files and directories in directory searches ('search', default true)."
                         },
                         "respect_gitignore": {
                             "type": "boolean",
-                            "description": "Whether .gitignore, .ignore, and git exclude rules should be respected during directory searches (only for 'search'). Defaults to false. Set true on large trees — it is the single biggest speedup, because it skips node_modules/, target/ and similar build output."
+                            "description": "Respect .gitignore/.ignore/git-exclude rules ('search', default false). Set true on large trees — skipping node_modules/, target/ etc. is the biggest speedup."
                         },
                         "max_results": {
                             "type": "integer",
                             "minimum": 1,
                             "maximum": 20000,
-                            "description": "Maximum number of matching lines to return for 'search'. Defaults to 1000. Searching is parallel and stops early once this budget is spent, so a broad query degrades to a fast prefix instead of a long stall."
+                            "description": "Max matching lines to return ('search', default 1000). The parallel search stops early once the budget is spent, so a broad query degrades to a fast prefix."
                         },
                         "patch": {
                             "type": "string",
-                            "description": "Unified diff to apply to the file (only for 'patch'). The patch is located by CONTENT, not by line numbers, so stale numbers are tolerated — but context and changed lines must be real copies of the file.\n\nFormat (both header parts optional):\n@@ -<old_line>,<count> +<new_line>,<count> @@\n <unchanged context line>\n-<removed line>\n+<added line>\n <unchanged context line>\n\nTo apply on the first try:\n1. Read the file first (action 'read') and copy every context/removed/added line character-for-character — keep the leading space of context lines and the file's exact indentation; never retype or re-wrap them.\n2. Include 3 unchanged context lines above and below each change (more when the surrounding text repeats).\n3. Line numbers and counts may be approximate — copy them from the read output when possible; content decides where the hunk lands.\n4. One hunk per separated change (keep hunks in file order); do not merge distant edits into one hunk.\n5. `---`/`+++`/`diff --git` headers are optional and ignored; LF or CRLF both work; `\\ No newline at end of file` is understood.\nMatching tolerates leading/trailing whitespace differences only. On failure the error shows the closest actual content — re-read, fix the context and retry; use action 'write' for large rewrites."
+                            "description": "Unified diff to apply ('patch' only). Hunks are located by CONTENT, not line numbers, so stale numbers are tolerated — but context and changed lines must be real copies of the file.\n\nFormat (both header parts optional):\n@@ -<old_line>,<count> +<new_line>,<count> @@\n <unchanged context line>\n-<removed line>\n+<added line>\n <unchanged context line>\n\nTo apply on the first try: (1) read the file first and copy every context/removed/added line character-for-character — keep the leading space of context lines and the file's exact indentation, never retype or re-wrap; (2) give 3 unchanged context lines above and below each change (more when the text repeats); (3) copy line numbers from the read output when possible — they are hints, content decides; (4) one hunk per separated change, in file order, never merge distant edits. `---`/`+++`/`diff --git` headers are optional and ignored, LF and CRLF both work, `\\ No newline at end of file` is understood. Matching tolerates leading/trailing whitespace only; on failure the error shows the closest actual content — re-read, fix the context and retry, or use action 'write' for large rewrites."
                         },
                         "context_lines": {
                             "type": "integer",
                             "minimum": 0,
                             "maximum": 20,
-                            "description": "Number of unchanged context lines shown around each change in a 'diff' result. Defaults to 3."
+                            "description": "Unchanged context lines shown around each change in a 'diff' result (default 3)."
                         },
                         "ignore_whitespace": {
                             "type": "boolean",
-                            "description": "Whether a 'diff' should ignore leading/trailing whitespace and repeated whitespace inside lines. Defaults to false."
+                            "description": "Ignore leading/trailing and repeated whitespace inside lines when diffing ('diff', default false)."
                         }
                     },
                     "required": ["action", "path"]
@@ -427,10 +427,7 @@ pub fn get_all_tools(
 
     if selected_tools.iter().any(|t| t == "memory") {
         let evolution_scope = if self_evolution {
-            "\n- `evolution`: Long-term, file-backed. The self-evolution area: verified facts that \
-             must survive across sessions (the default interpreter and runtime environment, the \
-             correct way to operate a tool, the file locations you use often). Read it before \
-             starting work so you reuse what you already learned."
+            "\n- `evolution`: file-backed self-evolution area — verified facts that must survive across sessions (default interpreter and runtime environment, correct tool usage, frequent file locations). Search it when a problem needs earlier experience."
         } else {
             ""
         };
@@ -438,7 +435,7 @@ pub fn get_all_tools(
             "type": "function",
             "function": {
                 "name": "memory",
-                "description": format!("Manage a persistent memory system with three scopes:\n- `session`: Short-term, in-memory only. Survives for the current chat session. Use for task-specific context and in-progress notes.\n- `user`: Long-term, file-backed. Cross-session persistent. Use for user preferences, patterns, and general insights.\n- `repo`: Long-term, file-backed. Repository-scoped. Use for codebase conventions, build commands, and project facts.{evolution_scope}\n\nPass `scope: \"all\"` to run get/list/search across every scope at once (read-only); add/delete need one concrete scope. Session memories are automatically discarded when the app restarts. User and repo memories persist as markdown files in the workspace memory directory (`.data/memory`, app-managed — never edit it with file tools). Evolution entries are structured (key, title, kind, tags, importance, evidence) and injected into the system prompt in ranked order, so keep each one to a single dense fact. `action: \"consolidate\"` folds a large cluster of evolution entries into a skill archive — call it with `phase: \"plan\"` first, then `phase: \"apply\"` with the full `skill_md` and the same `keys`."),
+                "description": format!("Manage persistent memory in these scopes:\n- `session`: in-memory, cleared at app restart — task context and in-progress notes.\n- `user`: file-backed, cross-session — preferences, patterns, general insights.\n- `repo`: file-backed, repository-scoped — conventions, build commands, project facts.{evolution_scope}\n\n`scope: \"all\"` runs get/list/search over every scope at once (read-only); add/delete need one concrete scope. `user`/`repo` are markdown files in the workspace `.data/memory` (app-managed — never edit them with file tools). Nothing is preloaded into the prompt: you look memory up yourself. Evolution entries are structured (key, title, kind, tags, importance, evidence) and ranked by experience, so a search returns the most useful entries first — keep each to one dense fact. `consolidate` folds a large evolution cluster into a skill archive: `phase: \"plan\"` first, then `phase: \"apply\"` with the full `skill_md` and the same `keys`."),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -449,7 +446,7 @@ pub fn get_all_tools(
                             } else {
                                 json!(["add", "get", "list", "search", "delete"])
                             },
-                            "description": "The memory operation: 'add' to store/update an entry, 'get' to retrieve by key, 'list' to list entries (ranked), 'search' to find entries by content, 'delete' to remove an entry, 'consolidate' to fold a large evolution-memory cluster into a skill archive."
+                            "description": "'add' stores or updates an entry, 'get' fetches by key, 'list' lists entries (ranked), 'search' finds by content, 'delete' removes one, 'consolidate' folds a large evolution cluster into a skill archive."
                         },
                         "scope": {
                             "type": "string",
@@ -459,68 +456,68 @@ pub fn get_all_tools(
                                 json!(["session", "user", "repo", "all"])
                             },
                             "description": if self_evolution {
-                                "Memory scope. 'session' is in-memory only (cleared on restart). 'user', 'repo' and 'evolution' are file-backed and persist across sessions — 'evolution' is the self-evolution area for verified, reusable facts. 'all' runs get/list/search across every scope and returns a merged view (read-only). Defaults to 'session'."
+                                "Memory scope: 'session' is in-memory only (cleared on restart); 'user', 'repo' and 'evolution' are file-backed and persist — 'evolution' holds verified reusable facts; 'all' runs get/list/search over every scope (read-only). Defaults to 'session'."
                             } else {
-                                "Memory scope. 'session' is in-memory only (cleared on restart). 'user' and 'repo' are file-backed and persist across sessions. 'all' runs get/list/search across every scope and returns a merged view (read-only). Defaults to 'session'."
+                                "Memory scope: 'session' is in-memory only (cleared on restart); 'user' and 'repo' are file-backed and persist; 'all' runs get/list/search over every scope (read-only). Defaults to 'session'."
                             }
                         },
                         "key": {
                             "type": "string",
-                            "description": "Unique key for the memory entry (required for add/get/delete). Use a short, descriptive slug like 'api-keys' or 'project-setup'. Re-adding the same key updates the entry and raises its evidence count."
+                            "description": "Unique key (required for add/get/delete); a short descriptive slug like 'api-keys'. Re-adding the same key updates the entry and raises its evidence count."
                         },
                         "content": {
                             "type": "string",
-                            "description": "The fact to store (required for 'add'). Markdown is supported, but for the evolution scope keep it to one dense sentence — never paste a whole conversation or a long answer."
+                            "description": "The fact (required for 'add'). Markdown is allowed; for evolution keep it to one dense sentence — never a whole conversation or answer."
                         },
                         "title": {
                             "type": "string",
-                            "description": "Evolution scope only: one-line title used when the entry is rendered in compact form (max ~100 chars)."
+                            "description": "Evolution: one-line title for compact rendering (max ~100 chars)."
                         },
                         "kind": {
                             "type": "string",
                             "enum": ["fact", "recipe", "location", "pitfall"],
-                            "description": "Evolution scope only: category of the entry. Grouped into sections when a cluster becomes a skill."
+                            "description": "Evolution: category of the entry; a cluster is grouped by kind when archived into a skill."
                         },
                         "importance": {
                             "type": "integer",
                             "minimum": 1,
                             "maximum": 5,
-                            "description": "Evolution scope only: 1-5. 5 (or pinned) means the fact always survives the prompt budget. Use it for cross-project environment facts only."
+                            "description": "Evolution: 1-5; 5 (or pinned) always survives the prompt budget — reserve it for cross-project environment facts."
                         },
                         "pinned": {
                             "type": "boolean",
-                            "description": "Evolution scope only: always inject this entry, regardless of ranking."
+                            "description": "Evolution: always inject this entry, regardless of ranking."
                         },
                         "merge": {
                             "type": "boolean",
-                            "description": "Evolution scope only: when a similar entry already exists, merge into it instead of creating a second file. Defaults to true."
+                            "description": "Evolution: merge into a similar existing entry instead of creating a second file (default true)."
                         },
                         "tags": {
                             "type": "array",
                             "items": { "type": "string" },
-                            "description": "Optional tags for categorization (only for 'add')."
+                            "description": "Optional tags ('add' only)."
                         },
                         "query": {
                             "type": "string",
-                            "description": "Search query text (required for 'search'). Searches across keys and content."
+                            "description": "Search text (required for 'search'); matches keys and content."
                         },
                         "phase": {
                             "type": "string",
                             "enum": ["plan", "apply", "restore", "list"],
-                            "description": "Consolidate only: 'plan' returns the large related clusters (start here), 'apply' writes the skill and archives its keys, 'restore' moves archived entries back, 'list' shows archived skills."
+                            "description": "'plan' lists the large clusters (start here); 'apply' writes the skill and archives its keys; 'restore' moves archived entries back; 'list' shows archived skills."
                         },
                         "keys": {
                             "type": "array",
                             "items": { "type": "string" },
-                            "description": "Consolidate/apply only: the evolution memory keys being archived. Copy them verbatim from the plan; every key must also appear in the skill's `source-memory` front matter."
+                            "description": "apply: the evolution keys being archived — verbatim from the plan; each must also appear in the skill's `source-memory` front matter."
                         },
                         "skill_md": {
                             "type": "string",
-                            "description": "Consolidate/apply only: the complete skill document (YAML frontmatter with name, description and source-memory, then the grouped runbook body)."
+                            "description": "apply: the complete skill document (YAML frontmatter with name, description, source-memory, then the grouped runbook body)."
                         },
                         "skill": {
                             "type": "string",
-                            "description": "Consolidate/restore only: the skill name whose archived memory entries should be moved back."
+                            "description": "restore: the skill whose archived entries move back."
                         }
                     },
                     "required": ["action"]
@@ -537,35 +534,35 @@ pub fn get_all_tools(
             "type": "function",
             "function": {
                 "name": "todos",
-                "description": "Manage the todo list of the current chat session — the `file_actions` counterpart for plans. ALWAYS call action 'list' first to check whether this session already has todos before planning or adding items: the list is long-running session state shared with every parallel agent, and the UI mirrors every change live. Actions: 'list' returns the active list with item ids and statuses, 'add' appends a new item, 'update_status' moves one item through pending → in_progress → completed/cancelled, 'clear_completed' removes finished items, 'archive' archives the active list and starts a fresh one.",
+                "description": "Manage this session's todo list (the `file_actions` counterpart for plans). Call 'list' first — the list is long-running session state shared with every parallel agent and the UI mirrors every change live. 'add' appends an item, 'update_status' moves one through pending → in_progress → completed/cancelled, 'clear_completed' removes finished items, 'archive' starts a fresh list.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "action": {
                             "type": "string",
                             "enum": ["list", "add", "update_status", "clear_completed", "archive"],
-                            "description": "The operation to perform: list the session's todos, add a new item, update one item's status, clear completed items, or archive the active list."
+                            "description": "list / add / update one item's status / clear finished items / archive the active list."
                         },
                         "title": {
                             "type": "string",
-                            "description": "Short, action-oriented title of the todo item (required for 'add')."
+                            "description": "Short, action-oriented title (required for 'add')."
                         },
                         "description": {
                             "type": "string",
-                            "description": "Optional longer description with concrete acceptance criteria (only for 'add')."
+                            "description": "Optional longer description with acceptance criteria ('add' only)."
                         },
                         "todo_id": {
                             "type": "string",
-                            "description": "Id of the todo item to update (required for 'update_status'). Copy it from a 'list' result — do not invent one."
+                            "description": "Id to update ('update_status' only) — copy it from a 'list' result, never invent one."
                         },
                         "status": {
                             "type": "string",
                             "enum": ["pending", "in_progress", "completed", "cancelled"],
-                            "description": "New status for the item (required for 'update_status')."
+                            "description": "New status ('update_status' only)."
                         },
                         "new_title": {
                             "type": "string",
-                            "description": "Optional title for the new active list after archiving (only for 'archive'). Defaults to 'Working plan'."
+                            "description": "Optional title for the list that follows the archive ('archive' only). Defaults to 'Working plan'."
                         }
                     },
                     "required": ["action"]
@@ -579,7 +576,7 @@ pub fn get_all_tools(
             "type": "function",
             "function": {
                 "name": "timer_set",
-                "description": "Schedule a one-shot delay timer that resumes this conversation later. Use it whenever a task must wait for something slow to finish — a 30-minute log collection, a long build or download, a rate-limit window, a deployment to settle. NEVER busy-wait, sleep in a shell command, or poll in a loop: start the long-running work, call timer_set with the delay and the instruction to run when it fires, tell the user, and END YOUR TURN. When the timer fires the app injects `message` into this chat as a new user turn, so you continue with the full conversation history.",
+                "description": "Schedule a one-shot delay timer that resumes this conversation later (see the TIMER policy). Start the slow work first, then arm the timer, tell the user and END YOUR TURN: the app injects `message` into this chat as a new user turn, with the full history.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -587,15 +584,15 @@ pub fn get_all_tools(
                             "type": "integer",
                             "minimum": 1,
                             "maximum": 2592000,
-                            "description": "How long to wait before resuming, in seconds (e.g. 1800 for 30 minutes, 600 for 10 minutes). Maximum 2592000 (30 days)."
+                            "description": "How long to wait before resuming, in seconds (1800 = 30 minutes). Maximum 2592000 (30 days)."
                         },
                         "message": {
                             "type": "string",
-                            "description": "The instruction to run when the timer fires. Write it as a self-contained prompt for the future turn, including what to check and where the output lives, e.g. 'The log collection started at 15:07 should be finished. Check ./logs/collect-2026-09-24.log, summarise the errors, and continue with the root-cause analysis.'"
+                            "description": "Self-contained prompt for the future turn: what to do, what to check, where the output lives — it is the only thing that turn knows besides the history."
                         },
                         "label": {
                             "type": "string",
-                            "description": "Short human-readable label shown in the timer bar, e.g. 'collect logs'."
+                            "description": "Short label shown in the timer bar, e.g. 'collect logs'."
                         }
                     },
                     "required": ["delay_seconds", "message"]
@@ -606,7 +603,7 @@ pub fn get_all_tools(
             "type": "function",
             "function": {
                 "name": "timer_list",
-                "description": "List the pending delay timers (id, label, fire time, remaining seconds, message). Call this to check whether a wait is already scheduled before setting a duplicate timer, or to find a timer id to cancel.",
+                "description": "List pending timers (id, label, fire time, remaining seconds, message) — check before arming a duplicate, or to find a timer id to cancel.",
                 "parameters": {
                     "type": "object",
                     "properties": {}
@@ -617,13 +614,13 @@ pub fn get_all_tools(
             "type": "function",
             "function": {
                 "name": "timer_cancel",
-                "description": "Cancel a pending delay timer so it never resumes the conversation. Use the timer_id returned by timer_set or timer_list.",
+                "description": "Cancel a pending timer so it never resumes the conversation.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "timer_id": {
                             "type": "string",
-                            "description": "Id of the timer to cancel."
+                            "description": "Id from timer_set or timer_list."
                         }
                     },
                     "required": ["timer_id"]
@@ -644,7 +641,7 @@ pub fn get_all_tools(
             if matches!(name, "run_cmd" | "run_shell" | "file_actions") {
                 tool["function"]["parameters"]["properties"]["run_in_background"] = json!({
                     "type": "boolean",
-                    "description": "Run this tool as a background task: return a task id immediately instead of blocking the turn. The real result is delivered automatically before your next request, and the turn stays open until it arrives. Use it for slow work (large searches, builds, long commands) that you can do something else while waiting for. Do NOT use it for a quick command, and do not start one and then produce your final answer: call `background_task` with action `wait` first, or the turn will simply wait for you."
+                    "description": "Run as a background task: return a task id immediately instead of blocking the turn. The result arrives automatically before your next request and the turn stays open until it does. Use it for slow work (large searches, builds, long commands) you can do something else meanwhile — not for a quick command, and never start one and then finish without `background_task` action `wait`."
                 });
             }
         }
@@ -652,7 +649,7 @@ pub fn get_all_tools(
             "type": "function",
             "function": {
                 "name": "background_task",
-                "description": "Manage background tasks started with `run_in_background`.\n\n- `list`: running and finished tasks of this session (id, tool, status, elapsed).\n- `wait`: block until the given tasks (or every task of the session) finish, up to `timeout_seconds`; returns the results that became available.\n- `get`: fetch the full result of one finished task.\n- `cancel`: stop a task (or all of them) — the process tree is terminated and its result is discarded.\n\nA finished task's result is also delivered automatically before your next request, so `wait` is only needed when you cannot proceed without it. Cancel tasks you no longer need: they keep the turn open until they finish.",
+                "description": "Manage background tasks started with `run_in_background`:\n- `list`: running and finished tasks of this session (id, tool, status, elapsed).\n- `wait`: block until the given tasks (or every task) finish, up to `timeout_seconds`; returns the results that became available.\n- `get`: full result of one finished task.\n- `cancel`: stop a task (or all) — the process tree is killed and the result discarded.\n\nA finished task's result is also delivered automatically before your next request, so `wait` is only needed when you cannot proceed without it.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -663,18 +660,18 @@ pub fn get_all_tools(
                         },
                         "task_id": {
                             "type": "string",
-                            "description": "Single task id (for `get` / `cancel`). Use `\"all\"` with `cancel` to stop every task of this session."
+                            "description": "Single task id (`get` / `cancel`). Use `\"all\"` with `cancel` to stop every task of this session."
                         },
                         "task_ids": {
                             "type": "array",
                             "items": { "type": "string" },
-                            "description": "Optional list of task ids (for `wait`). Omit to wait for every task of this session."
+                            "description": "Task ids to wait for (`wait`); omit to wait for every task of this session."
                         },
                         "timeout_seconds": {
                             "type": "integer",
                             "minimum": 1,
                             "maximum": 300,
-                            "description": "Maximum time to wait, in seconds. Defaults to 60."
+                            "description": "Maximum wait in seconds (default 60)."
                         }
                     },
                     "required": ["action"]
@@ -703,14 +700,14 @@ pub fn get_skill_read_tool() -> Value {
         "type": "function",
         "function": {
             "name": "skill_read",
-            "description": "Read, list, or search files within an active skill's directory. Use this to access supplementary files (templates, configs, data, examples) that accompany a skill's SKILL.md. Paths are relative to the skill's root directory.",
+            "description": "Read, list or search files inside an active skill's directory — supplementary material (templates, configs, data, examples) that accompanies its SKILL.md. Paths are relative to the skill root.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
                         "enum": ["read", "list", "search"],
-                        "description": "The operation to perform: 'read' file content, 'list' directory entries, or 'search' file contents with the built-in search engine."
+                        "description": "read file content, list directory entries, or search file contents."
                     },
                     "skill_name": {
                         "type": "string",
@@ -718,43 +715,43 @@ pub fn get_skill_read_tool() -> Value {
                     },
                     "path": {
                         "type": "string",
-                        "description": "Path relative to the skill's root directory. Use '.' for the skill root itself. Defaults to '.' if omitted."
+                        "description": "Path relative to the skill root; '.' (the default) is the root itself."
                     },
                     "start_line": {
                         "type": "integer",
                         "minimum": 1,
-                        "description": "Optional 1-based starting line number to read from (inclusive). Only used for 'read'."
+                        "description": "First line to read (1-based, inclusive)."
                     },
                     "end_line": {
                         "type": "integer",
                         "minimum": 1,
-                        "description": "Optional 1-based ending line number to read to (inclusive). Only used for 'read'."
+                        "description": "Last line to read (1-based, inclusive)."
                     },
                     "query": {
                         "type": "string",
-                        "description": "Content search text or regex pattern (only for 'search')."
+                        "description": "Search text or regex pattern ('search')."
                     },
                     "recursive": {
                         "type": "boolean",
-                        "description": "Whether to search subdirectories recursively (only for 'search'). Defaults to true."
+                        "description": "Recurse into subdirectories ('search', default true)."
                     },
                     "case_sensitive": {
                         "type": "boolean",
-                        "description": "Whether the content search is case-sensitive (only for 'search'). Defaults to false."
+                        "description": "Case-sensitive search ('search', default false)."
                     },
                     "use_regex": {
                         "type": "boolean",
-                        "description": "Whether query should be treated as a regular expression (only for 'search'). Defaults to false."
+                        "description": "Treat `query` as a regular expression ('search', default false)."
                     },
                     "glob": {
                         "type": "string",
-                        "description": "Optional file path glob filter for search targets, such as '**/*.md' (only for 'search')."
+                        "description": "Path glob filter, e.g. '**/*.md' ('search')."
                     },
                     "max_results": {
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 20000,
-                        "description": "Maximum number of matching lines to return for 'search'. Defaults to 1000 (only for 'search')."
+                        "description": "Max matching lines to return ('search', default 1000)."
                     }
                 },
                 "required": ["action", "skill_name"]

@@ -782,22 +782,16 @@ pub(crate) fn prompt_block(workspace_dir: &Path, self_evolution: bool) -> String
 
     if self_evolution {
         out.push_str(
-            "SCRIPT LIBRARY: `./.data/scripts` is the workspace script library. It is \
-             prepended to the PATH of `run_cmd`, so a script runs by bare name with the \
-             extension optional; `run_cmd {\"action\":\"list\"}` shows its interpreter, \
+            "SCRIPT LIBRARY: `./.data/scripts` is prepended to `run_cmd`'s PATH, so a script runs by \
+             bare name (extension optional); `run_cmd {\"action\":\"list\"}` shows interpreter, \
              description, usage and use count.\n\
-             When a multi-step command has succeeded at least twice, or the user asks to \
-             keep/reuse a command, save it as a script in `./.data/scripts` through \
-             `file_actions`:\n\
-             - prefer a shell script: `.ps1` on Windows, `.sh` on Linux/macOS; use `.py` or \
-             `.js` only when the logic really needs it;\n\
-             - add a header with `@description: ...` and `@usage: name [args]`, using the \
-             language's comment prefix;\n\
-             - make it self-contained and argument-driven, avoid hardcoded machine paths and \
-             secrets; bash scripts start with `set -euo pipefail`;\n\
-             - run it once by name to verify it, then `run_cmd {\"action\":\"list\"}` to \
-             confirm it is registered.\n\
-             Never store credentials in the library. Scripts are shared by the whole workspace.",
+             When a multi-step command has succeeded at least twice, or the user asks to keep/reuse \
+             it, save it there with `file_actions`: prefer `.ps1` on Windows and `.sh` elsewhere \
+             (`.py`/`.js` only when the logic really needs it); add `@description:` and \
+             `@usage: name [args]` header comments in that language's comment prefix; keep it \
+             self-contained and argument-driven, with no hardcoded machine paths or secrets \
+             (`set -euo pipefail` in bash); run it once by name to verify it. Scripts are shared by \
+             the whole workspace and never hold credentials.",
         );
     }
 
@@ -806,8 +800,8 @@ pub(crate) fn prompt_block(workspace_dir: &Path, self_evolution: bool) -> String
             out.push_str("\n\n");
         }
         out.push_str(
-            "AVAILABLE SCRIPTS (`./.data/scripts`, run with `run_cmd` by bare name — \
-             `run_cmd {\"action\":\"list\"}` for the full details):\n",
+            "AVAILABLE SCRIPTS (`./.data/scripts`, bare name via `run_cmd`; \
+             `{\"action\":\"list\"}` for full details):\n",
         );
         let mut shown = 0;
         for entry in &entries {

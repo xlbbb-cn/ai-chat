@@ -2309,25 +2309,25 @@ async fn build_turn_tools(
             "type": "function",
             "function": {
                 "name": "call_subagent",
-                "description": "Delegate a task to one of the configured agents (llm / cli / cloud). You must specify the exact agent_id from the available-agents list. The agent does not see this conversation, so `task_description` must be self-contained. Wait for it to finish; it returns the final result.",
+                "description": "Delegate a task to a configured agent (llm / cli / cloud). Use an exact `agent_id` from the available-agents list; the agent never sees this conversation, so `task_description` must be self-contained. Waits and returns the final result.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "agent_id": {
                             "type": "string",
-                            "description": "The exact ID of the agent to invoke"
+                            "description": "Exact id of the agent to invoke."
                         },
                         "task_description": {
                             "type": "string",
-                            "description": "Detailed, self-contained prompt/description of the task for the agent to perform"
+                            "description": "Detailed, self-contained task prompt for the agent."
                         },
                         "context": {
                             "type": "string",
-                            "description": "Optional extra context (file paths, findings, constraints) appended to the task description"
+                            "description": "Optional extra context (file paths, findings, constraints) appended to the task description."
                         },
                         "cwd": {
                             "type": "string",
-                            "description": "Working directory for this task, workspace-relative or absolute inside the workspace (for example \"./apps/web\"). The agent starts there, so pass it whenever the work targets a specific project or subfolder. Omit it to use the workspace root."
+                            "description": "Working directory for the task: workspace-relative (e.g. \"./apps/web\") or absolute inside the workspace. The agent starts there — pass it whenever the work targets a specific project or subfolder; omit for the workspace root."
                         }
                     },
                     "required": ["agent_id", "task_description"]
@@ -2337,7 +2337,7 @@ async fn build_turn_tools(
         if config.background_tools {
             subagent_tool["function"]["parameters"]["properties"]["run_in_background"] = json!({
                 "type": "boolean",
-                "description": "Delegate as a background task: return a task id immediately instead of waiting. The agent's result is delivered automatically before your next request; the turn stays open until it arrives. Use it when the delegated work is long and you can do something else meanwhile."
+                "description": "Delegate in the background: return a task id immediately instead of waiting. The result is delivered automatically before your next request and the turn stays open until it arrives — for long work you can do something else meanwhile."
             });
         }
         tools_list.push(subagent_tool);
@@ -2476,9 +2476,8 @@ async fn run_chat_turn(
     system_content.push_str(&os_sys_msg);
     system_content.push_str(
         "\n\n\
-        Explicit invocation: {tool:<name>}, {mcp:<server>.<tool>}, {skill:<name>}. \
-        Treat these as direct requests — call the tool or load the skill before answering, \
-        without asking for confirmation.",
+        Explicit invocation: {tool:<name>} / {mcp:<server>.<tool>} / {skill:<name>} are direct \
+        requests — call the tool or load the skill before answering, no confirmation needed.",
     ); //Add system info & explicit invocation syntax to system prompt
 
     let ws_skills_dir = crate::workspace::skills_root(&workspace_dir_for_roots);
@@ -2505,7 +2504,7 @@ async fn run_chat_turn(
             // friendly): activated skills stay listed here AND additionally get
             // their full instructions appended to the loaded-skills block below.
             available_skills_info.push_str(&format!(
-                "- Name: {}\n  Description: {}\n",
+                "- {}: {}\n",
                 skill.name, skill.description
             ));
             if activated_skills.contains(&skill.name) {
@@ -2544,9 +2543,8 @@ async fn run_chat_turn(
 
     if !available_skills_info.is_empty() {
         let skills_sys_msg = format!(
-            "Available skills (descriptions only). Call `use_skill` with the skill name to load \
-            full instructions — only when the request clearly requires that skill's knowledge or files.\n\n\
-            Available skills:\n{}",
+            "Available skills — descriptions only; `use_skill` loads the full instructions when \
+            the request clearly needs them:\n{}",
             available_skills_info
         );
         if !system_content.is_empty() {
@@ -2566,24 +2564,11 @@ async fn run_chat_turn(
         }
         system_content.push_str(&self_evolution_context);
 
-        // The facts the assistant verified in earlier sessions — the default
-        // interpreter and runtime environment, the correct way to operate a
-        // tool, the file locations it uses often — are injected here so they
-        // are reused instead of rediscovered every session. The budget constant
-        // lives in the memory module because the renderer, the consolidation
-        // planner and the panel all share it.
-        let evolution_facts = crate::tools::memory::render_evolution_context(
-            &workspace_dir_for_roots,
-            crate::tools::memory::EVOLUTION_CONTEXT_BUDGET_CHARS,
-        );
-        if !evolution_facts.is_empty() {
-            system_content.push_str("\n\n");
-            system_content.push_str(
-                "VERIFIED FACTS (self-evolution memory, already known — reuse them, do not \
-                 rediscover):\n",
-            );
-            system_content.push_str(&evolution_facts);
-        }
+        // Earlier sessions' verified facts are deliberately NOT preloaded: a
+        // "VERIFIED FACTS" block dominated the first request's prefill and was
+        // mostly irrelevant to the current task. The self-evolution text only
+        // points at the `evolution` memory scope, and the model searches it
+        // (`memory search` / `get`) when it actually hits a problem.
 
         // The user may explicitly ask for a memory tidy-up. Point the model at
         // the consolidation flow instead of letting it delete entries by hand.
@@ -2660,29 +2645,28 @@ async fn run_chat_turn(
         for agent in &advertised_agents {
             let kind = agents::normalize_agent_type(&agent.agent_type);
             let detail = match kind.as_str() {
-                agents::AGENT_TYPE_CLI => format!(" (CLI: {})", agent.cli.command.trim()),
-                agents::AGENT_TYPE_CLOUD => format!(" (Cloud: {})", agent.cloud.endpoint.trim()),
+                agents::AGENT_TYPE_CLI => format!(" (cli: {})", agent.cli.command.trim()),
+                agents::AGENT_TYPE_CLOUD => format!(" (cloud: {})", agent.cloud.endpoint.trim()),
                 _ => {
-                    let mcp = if agent.enable_mcp { ", MCP tools" } else { "" };
+                    let mcp = if agent.enable_mcp { " + MCP" } else { "" };
                     format!(
-                        " (Model: {}{})",
+                        " (model {}{})",
                         agent
                             .model
                             .clone()
-                            .unwrap_or_else(|| "inherits the main model".to_string()),
+                            .unwrap_or_else(|| "main".to_string()),
                         mcp
                     )
                 }
             };
             available_agents_info.push_str(&format!(
-                "- ID: {}\n  Name: {} [{}]{}\n  Description: {}\n",
-                agent.id, agent.name, kind, detail, agent.description
+                "- {} [{}] {} — {}{}\n",
+                agent.id, kind, agent.name, agent.description, detail
             ));
         }
         let mut agents_sys_msg = format!(
-        "You have access to the following agents. To delegate a task to one of them, use the `call_subagent` tool with the corresponding `agent_id` and a self-contained `task_description` (they never see this conversation).\n\
-        Agent types: `llm` agents run an autonomous tool-using loop inside the app; `cli` agents are headless coding CLIs installed on this machine (they edit files in the workspace directly); `cloud` agents run the task on a remote endpoint. Prefer `llm` for reasoning/reporting, `cli`/`cloud` for large end-to-end coding work. The first run of a `cli`/`cloud` agent may require the user's approval.\n\
-        Workspace root: {} — pass its workspace-relative path as `cwd` (for example \"./apps/web\") whenever the task targets a specific project or subfolder, so the agent starts there. Omit `cwd` for the workspace root.\n\n\
+        "Agents you can reach with `call_subagent` (exact `agent_id`, self-contained `task_description` — they never see this conversation). Types: `llm` runs an autonomous tool loop inside the app; `cli` is a headless coding CLI on this machine that edits workspace files directly; `cloud` runs the task on a remote endpoint. Prefer `llm` for reasoning/reporting, `cli`/`cloud` for large end-to-end coding; a first `cli`/`cloud` run may need the user's approval.\n\
+        Workspace root: {} — pass a workspace-relative `cwd` (e.g. \"./apps/web\") when the task targets a subfolder, omit it for the root.\n\n\
         Available agents:\n{}",
         workspace_dir_for_roots.display(),
         available_agents_info
@@ -2696,7 +2680,7 @@ async fn run_chat_turn(
             .filter(|selection| selection.delegate && !selection.choices.is_empty())
         {
             agents_sys_msg.push_str(
-                "\n<agent-selection>\nSelected for this turn; the other enabled agents stay available through `call_subagent` if the work really needs them.\n",
+                "\n<agent-selection>\nPicked for this turn (the others stay callable if the work really needs them):\n",
             );
             for choice in &selection.choices {
                 if choice.why.is_empty() {
@@ -2738,22 +2722,21 @@ async fn run_chat_turn(
     // `memory` tool (the tool description carries the full scope/usage details).
     if config.effective_tools().iter().any(|t| t == "memory") {
         let evolution_hint = if config.self_evolution_mode {
-            " `evolution` for verified facts that must survive across sessions \
-             (runtime environment, correct tool usage, file locations) — one dense \
-             sentence per entry, never a transcript."
+            ", `evolution` for verified facts that must survive across sessions (runtime \
+             environment, correct tool usage, file locations)"
         } else {
             ""
         };
         let memory_guidance = format!(
             "\
         MEMORY: You have a `memory` tool (scopes: `session`, `user`, `repo`{}). \
-        Search memory before answering to reuse prior conclusions. \
-        When you reach a definitive, accurate conclusion — a resolved question, \
-        confirmed root cause, decided approach, or verified fact — you MUST call \
-        `memory add` to persist it before ending your turn. \
-        Scope guidance: `repo` for project/codebase facts and decisions, `user` for \
-        user preferences and general insights, `session` for task-specific in-progress \
-        notes. Use a short descriptive `key` and put the conclusion in `content`.",
+        Nothing is preloaded — look memory up on demand: search it when you hit a problem \
+        you may have solved before, or need a verified environment/tool fact. \
+        When you reach a definitive, accurate conclusion (a resolved question, confirmed \
+        root cause, decided approach, verified fact), `memory add` it before ending your \
+        turn: `repo` for codebase facts and decisions, `user` for preferences and general \
+        insights, `session` for in-progress notes. Short descriptive `key`, conclusion in \
+        `content`.",
             evolution_hint
         );
         if !system_content.is_empty() {
@@ -2767,16 +2750,12 @@ async fn run_chat_turn(
     // the model waits asynchronously instead of burning a turn on polling.
     if config.selected_tools.iter().any(|t| t == "timer") {
         let timer_guidance = "\
-        TIMER: You have a `timer` tool (`timer_set`, `timer_list`, `timer_cancel`) for work that \
-        cannot finish within this turn. Whenever the next step depends on something slow — a log \
-        collection, a build, a download, a deployment, an external job, a rate-limit window — do \
-        not busy-wait, `sleep`, or poll in a loop. Instead: (1) start the slow work, (2) call \
-        `timer_set` with `delay_seconds` and a `message` that fully restates what to do when it \
-        fires (the future turn only sees the chat history plus that message), (3) tell the user when \
-        the timer will fire and END YOUR TURN. The app injects `message` into this session when the \
-        timer fires, so you resume with the full history. Use `timer_list` before setting a timer so \
-        you do not schedule duplicates, and `timer_cancel` when the user says the wait is no longer \
-        needed.";
+        TIMER: `timer_set` / `timer_list` / `timer_cancel` cover work that cannot finish within this \
+        turn. When the next step depends on something slow (log collection, build, download, \
+        deployment, external job, rate-limit window), never busy-wait, `sleep` or poll in a loop: \
+        start the slow work, arm a timer whose `message` restates what to do when it fires (that turn \
+        sees only the history plus that message), tell the user when it will fire and END YOUR TURN. \
+        Check `timer_list` first to avoid duplicates, `timer_cancel` when the wait is no longer needed.";
         if !system_content.is_empty() {
             system_content.push_str("\n\n");
         }
@@ -2793,13 +2772,12 @@ async fn run_chat_turn(
         .any(|t| t == "todo_list" || t == "todo")
     {
         let todo_guidance = "\
-        TODOS: You have a `todos` tool managing this session's todo list. Before \
-        planning or starting non-trivial work, call it with action `list` to check \
-        whether the session already has todos; the active list is also shown to you \
-        as internal context when it has unfinished items. If a list exists, continue \
-        from it and update each item's status as you work (`pending` → `in_progress` \
-        → `completed`); add items (action `add`) when a new multi-step task begins. \
-        The UI mirrors every change live, so never leave stale items behind.";
+        TODOS: the `todos` tool holds this session's plan. Before planning or starting \
+        non-trivial work, `list` it — the active list is also injected as internal context \
+        while it has unfinished items. Continue from an existing list and move items \
+        `pending` → `in_progress` → `completed` as you work; `add` items when a new \
+        multi-step task begins. The UI mirrors every change live, so never leave stale \
+        items behind.";
         if !system_content.is_empty() {
             system_content.push_str("\n\n");
         }
@@ -2821,13 +2799,12 @@ async fn run_chat_turn(
         // Generic sandbox rules live in the tool descriptions (always sent);
         // only skill-specific notes are repeated here.
         let active_skills_context = format!(
-            "INTERNAL CONTEXT - ACTIVE SKILLS:\n\
-             Workspace root: {workspace_root_display}\n\
-             All local filesystem tools are sandboxed to the workspace root (see tool descriptions). \
-             `skill_read` paths are locked to each skill's own directory — `..` escapes are rejected. \
-             Skill edits are limited to `./.data/skills/...` and create `.bak.<n>` backups automatically. \
-             MCP tools are NOT sandboxed — treat their path arguments as opaque. \
-             Reuse exact paths returned by tools; do not reference app-data or external absolute paths.\n\n\
+            "INTERNAL CONTEXT - ACTIVE SKILLS (root: {workspace_root_display}). \
+             Local file tools are sandboxed to the workspace root; `skill_read` is locked to each \
+             skill's own directory (`..` rejected); skill edits are limited to `./.data/skills/...` \
+             and create `.bak.<n>` backups automatically; MCP tool paths are NOT sandboxed — treat \
+             them as opaque. Reuse exact paths returned by tools; never reference app-data or \
+             external absolute paths.\n\n\
              Active skill instructions:{}",
             loaded_skills_content
         );

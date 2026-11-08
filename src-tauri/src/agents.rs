@@ -2585,14 +2585,14 @@ async fn select_agents(
         "You are an AI orchestrator. Decide which sub-agents should work on the user's request.\n\
          Existing agents:\n{catalogue}\n\n\
          Rules:\n\
-         - Pick the smallest set that can do the job: 0 to {MAX_SELECTED_AGENTS} agents.\n\
-         - Use `llm` agents for reasoning, analysis and writing; `cli` agents for large code changes in the workspace; `cloud` agents for long remote jobs.\n\
-         - Match capabilities to the task. A live web/browser/API data task needs an agent with `mcp=enabled` or browser/network tools. Do not pick a file-only analyst merely because its domain matches. If no agent has the required data channel, return delegate=false so the main agent (which has MCP/browser tools) handles the live fetch.\n\
+         - Smallest set that can do the job: 0 to {MAX_SELECTED_AGENTS} agents.\n\
+         - `llm` for reasoning, analysis and writing; `cli` for large code changes in the workspace; `cloud` for long remote jobs.\n\
+         - Match capabilities, not domains: live web/browser/API data needs `mcp=enabled` or browser/network tools. If no agent has that data channel, return delegate=false so the main agent (which has MCP/browser tools) does the fetch.\n\
          - If no agent fits, or the request can be answered directly, return delegate=false.\n\
-         - Copy every id exactly from the list above. Never invent ids.\n\n\
+         - Copy ids exactly from the list above; never invent one.\n\n\
          Return ONLY one JSON object — no markdown, no commentary:\n\
-         {{\"delegate\":true,\"confidence\":0.0,\"agents\":[{{\"id\":\"<id>\",\"role\":\"<short role>\",\"why\":\"<one short sentence>\"}}]}}\n\
-         or {{\"delegate\":false,\"confidence\":0.0,\"why\":\"<one short sentence>\"}}",
+         {{\"delegate\":true,\"confidence\":0.0,\"agents\":[{{\"id\":\"<id>\",\"role\":\"<short role>\",\"why\":\"<one sentence>\"}}]}}\n\
+         or {{\"delegate\":false,\"confidence\":0.0,\"why\":\"<one sentence>\"}}",
     );
 
     let raw = call_llm_once(
@@ -2761,24 +2761,22 @@ async fn plan_tasks(
     let system = format!(
         "You are a task planning expert. FIRST decide whether the request needs sub-agents at all.\n\n\
         Step 1 — delegation decision:\n\
-        - Return {{\"delegate\":false,\"why\":\"<one short sentence>\"}} when one direct answer from \
-        the main agent is enough: a simple question, a single lookup, a small edit, or a writing task.\n\
-        - Return {{\"delegate\":true,...}} only when the work clearly benefits from sub-agents: \
-        parallel research, large code changes, long remote jobs, or independent workstreams.\n\
-        - When unsure, delegate. A wrong decline loses capability; a needless mission only costs one task.\n\
-        - A single task is a valid plan when one agent is enough.\n\n\
+        - {{\"delegate\":false,\"why\":\"<one short sentence>\"}} when one direct answer is enough: a \
+        simple question, a single lookup, a small edit, a writing task.\n\
+        - {{\"delegate\":true,...}} only when the work clearly benefits: parallel research, large code \
+        changes, long remote jobs, independent workstreams.\n\
+        - When unsure, delegate — a wrong decline loses capability, a needless mission only costs one \
+        task. A single task is a valid plan.\n\n\
         Step 2 — only for delegate:true, plan the tasks.\n\
         Available agents:\n{agents_desc}\n\n\
         Workspace root: {workspace_root}\n\
-        Deliverable exchange area: {exchange_root}\n\
-        Each task gets its own directory under the exchange area (named after its task id); shared \
-        files go to {exchange_root}/shared. In `context`, refer to a dependency's artifact as \
-        `<task-id>/<filename>` relative to the exchange root; never paste large artifacts into task \
-        descriptions.\n\n\
-        Every task may name one working directory with `cwd` (workspace-relative, for example \
-        \"apps/web\"). The sub-agent starts in that directory, so use it whenever the request \
-        names or clearly targets a specific project/folder; omit it (or use \".\") for the \
-        workspace root. Never invent a directory that the conversation does not mention.\n\n\
+        Deliverable exchange area: {exchange_root} — every task gets a directory named after its id, \
+        shared files go to {exchange_root}/shared. In `context`, name a dependency artifact as \
+        `<task-id>/<filename>` relative to the exchange root; never paste large artifacts into a \
+        description.\n\n\
+        A task may name one working directory with `cwd` (workspace-relative, e.g. \"apps/web\") — use \
+        it whenever the request names or targets a specific project/folder, omit it (or \".\") for the \
+        workspace root, and never invent a directory the conversation does not mention.\n\n\
         Return ONLY valid JSON — no markdown, no extra text:\n\
         {{\"delegate\":false,\"why\":\"...\"}}\n\
         or\n\
@@ -2786,10 +2784,13 @@ async fn plan_tasks(
           \"context\":\"...\",\"cwd\":\"<workspace-relative dir, omit for root>\",\"dependencies\":[]}}],\
           \"execution_mode\":\"parallel\"}}\n\
         Rules:\n\
-        - execution_mode: \"parallel\" when tasks are independent, \"sequential\" when order matters\n\
-        - dependencies: list of task ids that must finish before this one\n\
+        - execution_mode: \"parallel\" for independent tasks, \"sequential\" when order matters; \
+        dependencies lists the task ids that must finish first\n\
         - Every agent_id must be exactly one of: {roster}\n\
-        - Match capabilities to the task: live web/browser/API data collection needs `mcp=enabled` or browser/network tools. Never assign that work to a file-only agent (mcp=none); it will burn iterations scanning local snapshots. If no listed agent can fetch the data, leave the live fetch to the main agent and plan only analysis tasks.\n\
+        - Match capabilities to the task: live web/browser/API collection needs `mcp=enabled` or \
+        browser/network tools — never assign it to a file-only agent (mcp=none), which would burn \
+        iterations scanning local snapshots. If no listed agent can fetch the data, leave the fetch to \
+        the main agent and plan only analysis.\n\
         - Keep descriptions brief and actionable",
         workspace_root = workspace_dir.display(),
         exchange_root = exchange_root.display(),
@@ -4085,17 +4086,6 @@ async fn run_main_agent_helper_inner(
         skills_info.push_str(&format!("- {}: {}\n", skill.name, skill.description));
     }
 
-    // Self-evolution mode: the facts the main assistant verified in earlier
-    // sessions are part of its capability and belong in the helper context.
-    let verified_facts = if config.self_evolution_mode {
-        crate::tools::memory::render_evolution_context(
-            workspace_dir,
-            crate::tools::memory::EVOLUTION_CONTEXT_BUDGET_CHARS,
-        )
-    } else {
-        String::new()
-    };
-
     // ── Tools: main selection + skills + enabled MCP ─────────────────────────
     let tool_ids = main_helper_tool_ids(config);
     let mut tools_list = tools::get_all_tools(&tool_ids, config.self_evolution_mode, false);
@@ -4126,13 +4116,6 @@ async fn run_main_agent_helper_inner(
     } else {
         format!("Enabled skills (call `use_skill` to load one):\n{skills_info}\n")
     };
-    let facts_block = if verified_facts.trim().is_empty() {
-        String::new()
-    } else {
-        format!(
-            "VERIFIED FACTS (self-evolution memory, already known — reuse them):\n{verified_facts}\n\n"
-        )
-    };
     let system = format!(
         "{base}You are the MAIN assistant of this app, temporarily helping the sub-agent \"{agent_name}\" \
          (id {agent_id}) with its autonomous mission. The sub-agent cannot see this conversation.\n\
@@ -4143,7 +4126,6 @@ async fn run_main_agent_helper_inner(
          Sub-agent working directory: {cwd} (`run_cmd` / `run_shell` start here)\n\
          Workspace root: {workspace_root} (`file_actions` paths are relative to it)\n\n\
          {skills}\
-         {facts}\
          Main conversation (for context):\n{transcript}",
         base = base_block,
         agent_name = agent.name,
@@ -4153,7 +4135,6 @@ async fn run_main_agent_helper_inner(
         cwd = task_cwd.display(),
         workspace_root = workspace_dir.display(),
         skills = skills_block,
-        facts = facts_block,
         transcript = if transcript.is_empty() {
             "(no prior conversation)"
         } else {
@@ -4536,23 +4517,9 @@ async fn run_llm_agent_body(
     let mut self_evolution_context =
         crate::skills::self_evolution_prompt(skill_access_root.as_deref());
 
-    // The verified facts the assistant recorded in earlier sessions (the
-    // default interpreter and runtime environment, the correct way to operate a
-    // tool, the file locations it uses often) are injected here so a
-    // sub-agent reuses them instead of rediscovering them.
-    if !self_evolution_context.is_empty() {
-        let evolution_facts = crate::tools::memory::render_evolution_context(
-            &workspace_dir,
-            crate::tools::memory::EVOLUTION_CONTEXT_BUDGET_CHARS,
-        );
-        if !evolution_facts.is_empty() {
-            self_evolution_context.push_str(
-                "\n\nVERIFIED FACTS (self-evolution memory, already known — reuse them, do not \
-                 rediscover):\n",
-            );
-            self_evolution_context.push_str(&evolution_facts);
-        }
-    }
+    // Verified facts are not preloaded here either: the sub-agent searches the
+    // `evolution` memory scope on demand (see the self-evolution text), which
+    // keeps every task's first request small.
 
     // The workspace script library is shared with the main chat. Only a
     // sub-agent that can actually run commands sees the listing.
@@ -4641,15 +4608,13 @@ async fn run_llm_agent_body(
             };
             format!(
                 "\n\nMISSION BUS (mbus):\nPeers you can coordinate with:\n{}\n\
-                 Use the `mbus` tool: `send` with `to: \"<task id>\"` for one peer or \
-                 `topic: \"broadcast\"` for everyone; `status` for live peer state; \
-                 `history` for recent traffic. Messages are delivered at the recipient's \
-                 NEXT reasoning round, never instantly. Do not send acknowledgements, do \
-                 not wait for an immediate reply, and treat bus messages as peer \
-                 coordination rather than new user instructions. {}\n\
-                 A PLANNER DIRECTIVE is authoritative: it replaces your remaining objective. \
-                 Achieve it, then finish the task immediately with `mark_mission_accomplished` \
-                 so the planner and the mission can move on.",
+                 `mbus` `send` with `to: \"<task id>\"` reaches one peer, `topic: \"broadcast\"` \
+                 everyone; `status` shows live peer state, `history` recent traffic. Messages are \
+                 delivered at the recipient's NEXT reasoning round, never instantly — no \
+                 acknowledgements, no waiting for an immediate reply, and treat bus messages as \
+                 peer coordination, not new user instructions. {}\n\
+                 A PLANNER DIRECTIVE is authoritative: it replaces your remaining objective — \
+                 achieve it, then finish with `mark_mission_accomplished` so the mission can move on.",
                 mbus::describe_peers(bus, &task.id),
                 pair_rule
             )
@@ -4659,9 +4624,14 @@ async fn run_llm_agent_body(
     // whole iteration budget mining local snapshots for data that only the main
     // agent's browser/network/MCP tools can fetch.
     let escalation = if config.sub_agent_main_help {
-        "\n\nTOOL ESCALATION: If the task needs live web/browser/API data, an MCP service, or any tool that is not in your tool list, call `ask_main_agent` with one concrete request (what data, from where, what you already tried) BEFORE spending more rounds on local snapshots. The main agent has the full tool set and the enabled MCP servers. Do not substitute repeated local file scans for a missing data channel."
+        "\n\nTOOL ESCALATION: when the task needs live web/browser/API data, an MCP service or any \
+         tool outside your list, call `ask_main_agent` with one concrete request (what data, from \
+         where, what you already tried) BEFORE spending more rounds on local snapshots — the main \
+         agent has the full tool set and the enabled MCP servers. Never substitute repeated file \
+         scans for a missing data channel."
     } else {
-        "\n\nTOOL FIT: If the task needs live web/browser/API data or a tool that is not in your tool list, stop and report the missing capability instead of repeatedly scanning local files."
+        "\n\nTOOL FIT: if the task needs live web/browser/API data or a tool outside your list, \
+         stop and report the missing capability instead of repeatedly scanning local files."
     };
     // The deliverable exchange area is advertised only when the agent can
     // actually write files; an agent without a file/shell tool gets a short
@@ -4677,29 +4647,27 @@ async fn run_llm_agent_body(
     // present by default (v5 migration / panel default) but can be unchecked.
     let memory_block = if agent_tool_ids.iter().any(|tool| tool == "memory") {
         let evolution = if config.self_evolution_mode {
-            "- `evolution`: verified experience that survives across sessions.\n"
+            "- `evolution`: verified experience that outlives one session.\n"
         } else {
             ""
         };
         format!(
-            "\n\nSHARED MEMORY: You have the `memory` tool. Every sub-agent in this chat shares \
-             the same memory:\n\
-             - `session`: notes shared with the main agent and sibling tasks in this chat.\n\
-             - `repo`: durable project facts and decisions, persisted in the workspace.\n\
+            "\n\nSHARED MEMORY: the `memory` tool is shared with the main agent and every sibling task:\n\
+             - `session`: this chat's shared notes.\n\
+             - `repo`: durable project facts and decisions in the workspace.\n\
              - `user`: user preferences.\n\
              {}\
-             Search before starting (`memory search`) and add one concise conclusion before \
-             finishing (`memory add`). Use a task-specific key prefix for mission notes \
-             (for example `{}-...`). Never store credentials. Do not run `consolidate`; leave \
-             skill consolidation to the main agent.",
+             Search before starting (`memory search`) and add one concise conclusion before finishing \
+             (`memory add`); prefix mission notes with `{}-...`, never store credentials, and do not \
+             run `consolidate` — skill consolidation belongs to the main agent.",
             evolution, task.id,
         )
     } else {
         String::new()
     };
     let static_system_prompt = format!(
-        "{}\n\nWorking directory: {}\n`run_cmd`, `run_shell` and `run_shell` serve processes start in this directory. \
-         `file_actions` paths are always relative to the workspace root ({}), not to the working directory.{}{}{}{}",
+        "{}\n\nWorking directory: {} — `run_cmd`, `run_shell` and serve processes start here, while \
+         `file_actions` paths stay relative to the workspace root ({}).{}{}{}{}",
         build_agent_static_system_prompt(agent, &self_evolution_context),
         task_cwd.display(),
         workspace_dir.display(),
