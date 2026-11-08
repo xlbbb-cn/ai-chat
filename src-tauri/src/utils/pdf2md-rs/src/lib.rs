@@ -1,10 +1,11 @@
 //! # pdf2md-rs
 //!
-//! A PDF → Markdown converter that is built as a *document* pipeline rather
-//! than a text extractor. Every backend produces the same intermediate
-//! representation ([`ir::Document`]) and every renderer consumes it, so the
-//! Markdown writer can be swapped for an HTML/DOCX writer (or an editor view)
-//! without touching the parsing side.
+//! A PDF → Markdown **library** that is built as a *document* pipeline rather
+//! than a text extractor: a host application decides what to read, where to
+//! write and when to stop, and this crate turns bytes into an intermediate
+//! representation ([`ir::Document`]) and Markdown. Every backend produces that
+//! IR and every renderer consumes it, so the Markdown writer can be swapped for
+//! an HTML/DOCX writer (or an editor view) without touching the parsing side.
 //!
 //! ```text
 //! bytes ──▶ extract ──▶ layout ──▶ router ──▶ parse ──▶ clean ──▶ render ──▶ Markdown
@@ -33,7 +34,7 @@
 //! | [`router`] | decide plain-text / paper / scanned, with the evidence |
 //! | [`parse`] | page layout → IR blocks (headings, tables, formulas, captions) |
 //! | [`clean`] | running headers/footers, hyphenation, cross-page paragraphs |
-//! | [`render`] | IR → Markdown (or a block-level debug dump) |
+//! | [`render`] | IR → Markdown, plus the [`render::Renderer`] trait |
 //! | [`assets`] | image naming, deduplication, writing |
 //! | [`pipeline`] | the orchestrator that runs every stage in order |
 //! | [`jobs`] | background job manager (submit / progress / cancel) |
@@ -53,6 +54,7 @@
 //! `#[non_exhaustive]`-style guard rails are the compiler's job — this crate
 //! keeps the enum closed on purpose so a new kind is a compile error in every
 //! backend instead of a silently dropped block.
+//!
 //! ## Honest limits
 //!
 //! * A PDF has no structure, only glyphs. Headings, tables and formulas are
