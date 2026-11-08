@@ -57,3 +57,6 @@ tauri-plugin-single-instance = "2"
 # / `org.freedesktop.PowerManagement` inhibit on GNOME/KDE; best-effort).
 zbus = "5"
 
+
+[workspace]
+members = ["src/utils/pdf2md-rs"]
