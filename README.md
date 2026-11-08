@@ -42,7 +42,6 @@ Chat is the easy part. AI Chat gives the agent a workspace, real utilities (memo
 | **Prompt ownership** — no default persona or hidden rewrite; your system message is the base, tool/skill guidance is appended | ✅ | ◐ assistant prompts | ◐ prompt library | ◐ per-model prompt |
 | **Local request audit** — body, tokens, latency, status, errors | ✅ | ◐ history only | ◐ history only | ◐ history + server log |
 | **Background execution** — slow tools, MCP calls and sub-agents keep running while the model works | ✅ | — | — | — |
-| **Knowledge graph** — Neo4j-backed tool | ✅ | — | — | — |
 
 <sub>✅ built in · ◐ partial or adjacent · — not offered. Based on public documentation as of October 2026.</sub>
 
@@ -83,7 +82,7 @@ Use cases:
 
 Full usage guides live in the GitHub Wiki:
 
-- [English Wiki](https://github.com/xlbbb-cn/ai-chat/wiki) — installation, chat and models, workspace, skills, tools, memory/todos/timers, Neo4j, MCP, sub-agents, prompts and context, configuration/backup, monitoring, updates, security, development and FAQ.
+- [English Wiki](https://github.com/xlbbb-cn/ai-chat/wiki) — installation, chat and models, workspace, skills, tools, memory/todos/timers, MCP, sub-agents, prompts and context, configuration/backup, monitoring, updates, security, development and FAQ.
 - [简体中文 Wiki](https://github.com/xlbbb-cn/ai-chat/wiki/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87) — complete Simplified Chinese translation of every page.
 
 ---
@@ -135,7 +134,6 @@ Three execution tools with deliberately different scopes:
 - `memory`: Four scopes (`session` / `user` / `repo` / `evolution`) for searching and persisting conclusions
 - `todos`: Per-session task lists the model can plan, update and close
 - `timer`: One-shot delay timers that resume the session instead of polling; timers and running turns keep the system awake (Windows / macOS / Linux)
-- `knowledge_graph`: Knowledge graph queries (supports Neo4j)
 
 ### 5) MCP Management
 
@@ -201,7 +199,7 @@ Think of it as:
 - reqwest (HTTP / streaming)
 - rusqlite (local database)
 - serde / serde_json / serde_yaml (serialization)
-- Neo4j client (knowledge graph)
+- neo4rs (Neo4j driver, used by the knowledge graph library in `src-tauri/src/utils/knowledge_graph`)
 
 ### Communication Model
 
@@ -309,15 +307,11 @@ After running, a config.json file will be generated in the system app data direc
     "reasoning_effort": "medium",
     "max_tokens": 4096
   },
-  "selected_tools": ["run_cmd", "file_actions", "knowledge_graph"],
+  "selected_tools": ["run_cmd", "file_actions"],
   "self_evolution_mode": false,
   "background_tools": false,
   "single_instance": true,
-  "workspace_dir": "D:/projects/my-repo",
-  "kg_engine": "neo4j",
-  "neo4j_uri": "bolt://localhost:7687",
-  "neo4j_user": "neo4j",
-  "neo4j_password": "your_password"
+  "workspace_dir": "D:/projects/my-repo"
 }
 ```
 
@@ -327,7 +321,6 @@ Security recommendations:
 
 - Do not commit real API keys
 - Use separate keys and minimal privilege accounts for production
-- Separate knowledge graph accounts from application accounts
 - Add `<workspace>/.data/` to the workspace's `.gitignore` when the workspace is a git repository (it holds the chat database, memories, todos and skills)
 
 ---

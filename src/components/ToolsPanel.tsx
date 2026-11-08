@@ -43,11 +43,6 @@ const AVAILABLE_TOOLS: { id: string; nameKey: MessageKey; descriptionKey: Messag
         nameKey: "tools.items.timer.name",
         descriptionKey: "tools.items.timer.description",
     },
-    {
-        id: "knowledge_graph",
-        nameKey: "tools.items.knowledgeGraph.name",
-        descriptionKey: "tools.items.knowledgeGraph.description",
-    }
 ];
 
 const AVAILABLE_TOOL_IDS = new Set(AVAILABLE_TOOLS.map((t) => t.id));
@@ -60,10 +55,6 @@ const AVAILABLE_TOOL_IDS = new Set(AVAILABLE_TOOLS.map((t) => t.id));
  * it — the switches stay visible and checked, just locked.
  */
 const SELF_EVOLUTION_LOCKED_TOOLS = ["file_actions", "memory"];
-
-const KG_ENGINES = [
-    { value: "neo4j", label: "Neo4j" }
-];
 
 /**
  * Confirmation kinds that can actually reach the approval dialog. The `kind`
@@ -136,7 +127,6 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
     const [config, setConfig] = useState<AppConfig | null>(null);
     const [expandedTool, setExpandedTool] = useState<string | null>(null);
     const [autoAcceptExpanded, setAutoAcceptExpanded] = useState(true);
-    const [kgExpanded, setKgExpanded] = useState(false);
 
     useEffect(() => {
         getConfig()
@@ -167,13 +157,6 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
         setConfig(newConfig);
         await saveConfig(newConfig);
         onToolsChange(updated);
-    }
-
-    async function updateKgEngine(kg_engine: string) {
-        if (!config) return;
-        const newConfig = { ...config, kg_engine };
-        setConfig(newConfig);
-        await saveConfig(newConfig);
     }
 
     async function persistAutoAcceptKinds(kinds: AutoAcceptKind[]) {
@@ -216,9 +199,6 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
     const selfEvolution = config.self_evolution_mode ?? false;
     const isLockedTool = (toolId: string) =>
         selfEvolution && SELF_EVOLUTION_LOCKED_TOOLS.includes(toolId);
-    const kgEngine = config.kg_engine ?? "neo4j";
-    const kgEnabled = selectedTools.includes("knowledge_graph");
-    const kgEngineLabel = KG_ENGINES.find((engine) => engine.value === kgEngine)?.label ?? kgEngine;
     const autoAcceptKinds = sanitizeAutoAcceptKinds(config.auto_accept_confirm_kinds);
     const autoAcceptAll = autoAcceptKinds.includes(AUTO_ACCEPT_ALL);
     const allAutoAcceptEnabled =
@@ -300,42 +280,6 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                         </div>
                     );
                 })}
-            </div>
-
-            <div className="tools-footer-section">
-                <button
-                    type="button"
-                    className="tools-footer-toggle"
-                    onClick={() => setKgExpanded((expanded) => !expanded)}
-                    aria-expanded={kgExpanded}
-                    title={kgEnabled ? t("tools.kgEngineTitle") : t("tools.kgEngineDisabled")}
-                >
-                    <span className="tools-footer-title">{t("tools.kgEngine")}</span>
-                    <span className="tools-footer-aside">
-                        <span className="tools-footer-value">{kgEngineLabel}</span>
-                        <span className="tools-footer-chevron">
-                            <FontAwesomeIcon icon={kgExpanded ? faChevronUp : faChevronDown} />
-                        </span>
-                    </span>
-                </button>
-
-                {kgExpanded && (
-                    <select
-                        id="kg-engine-select"
-                        className="search-engine-select"
-                        value={kgEngine}
-                        onChange={(e) => void updateKgEngine(e.target.value)}
-                        disabled={!kgEnabled}
-                        aria-label={t("tools.kgEngine")}
-                        title={kgEnabled ? t("tools.kgEngineTitle") : t("tools.kgEngineDisabled")}
-                    >
-                        {KG_ENGINES.map(engine => (
-                            <option key={engine.value} value={engine.value}>
-                                {engine.label}
-                            </option>
-                        ))}
-                    </select>
-                )}
             </div>
 
             <div className="tools-footer-section">

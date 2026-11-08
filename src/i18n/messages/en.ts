@@ -469,9 +469,6 @@ const en = {
     tools: {
         title: "Tools",
         builtIn: "Built-In Tool Set",
-        kgEngine: "Knowledge Graph Engine",
-        kgEngineTitle: "Default engine for knowledge graph",
-        kgEngineDisabled: "Enable Knowledge Graph tool first",
         autoAccept: "AutoAccept Mode",
         lockedBadge: "Required",
         lockedBySelfEvolution:
@@ -519,10 +516,6 @@ const en = {
                 name: "Todo List",
                 description:
                     "Track complex multi-step work with a session-scoped todo list. The assistant can add items, update statuses, check progress, clear completed items, and archive finished lists.",
-            },
-            knowledgeGraph: {
-                name: "Knowledge Graph",
-                description: "Connect to a knowledge graph and perform queries",
             },
             timer: {
                 name: "Timer",
@@ -688,7 +681,6 @@ const en = {
             fileActions: "Read, write, patch and search files inside the workspace",
             runCmd: "Execute a single command or workspace script with risk assessment",
             runShell: "Run PowerShell / bash scripts (direct or background serve)",
-            knowledgeGraph: "Neo4j-backed knowledge graph queries",
             todos:
                 "The session todo list via the `todos` tool (list / add / update_status / clear_completed / archive). The plan is shared with the chat session and every parallel agent.",
             memory: "Shared session / user / repo memory store (every sub-agent reads and writes the same one)",

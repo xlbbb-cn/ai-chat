@@ -42,7 +42,6 @@
 | **提示词自主** —— 无默认人设、无隐藏改写；你的 system message 是基底，只追加工具/技能说明 | ✅ | ◐ 助手提示词 | ◐ 提示词库 | ◐ 按模型提示词 |
 | **本地请求审计** —— 请求体、token、耗时、状态、错误 | ✅ | ◐ 仅历史记录 | ◐ 仅历史记录 | ◐ 历史 + 服务端日志 |
 | **后台执行** —— 慢工具、MCP 调用与子智能体在模型继续工作时运行 | ✅ | — | — | — |
-| **知识图谱** —— Neo4j 工具 | ✅ | — | — | — |
 
 <sub>✅ 原生 · ◐ 部分/相近 · — 未提供；基于 2026 年 10 月的公开文档。</sub>
 
@@ -83,7 +82,7 @@ AI Chat 是一个桌面端 AI 助手应用，支持接入任意 OpenAI 兼容模
 
 完整使用教程在 GitHub Wiki：
 
-- [English Wiki](https://github.com/xlbbb-cn/ai-chat/wiki) — 英文主站，包含安装、聊天与模型、工作区、技能、工具、记忆/待办/定时器、Neo4j、MCP、子智能体、提示词与上下文、配置与备份、监控、更新、安全、开发构建和常见问题。
+- [English Wiki](https://github.com/xlbbb-cn/ai-chat/wiki) — 英文主站，包含安装、聊天与模型、工作区、技能、工具、记忆/待办/定时器、MCP、子智能体、提示词与上下文、配置与备份、监控、更新、安全、开发构建和常见问题。
 - [简体中文 Wiki](https://github.com/xlbbb-cn/ai-chat/wiki/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87) — 每个页面的完整简体中文对照。
 
 ---
@@ -135,7 +134,6 @@ AI Chat 是一个桌面端 AI 助手应用，支持接入任意 OpenAI 兼容模
 - memory：`session` / `user` / `repo` / `evolution` 四级记忆，可检索与沉淀结论
 - todos：按会话维护任务清单，模型可规划、更新与关闭
 - timer：一次性延时定时器，到点自动恢复会话，无需轮询；定时器挂起与回合进行中会阻止系统休眠（Windows / macOS / Linux）
-- knowledge_graph：知识图谱查询（支持 Neo4j）
 
 ### 5) MCP 管理
 
@@ -201,7 +199,7 @@ AI Chat 是一个桌面端 AI 助手应用，支持接入任意 OpenAI 兼容模
 - reqwest（HTTP / 流式）
 - rusqlite（本地数据库）
 - serde / serde_json / serde_yaml（序列化）
-- Neo4j 客户端（知识图谱）
+- neo4rs（Neo4j 驱动，供 `src-tauri/src/utils/knowledge_graph` 下的知识图谱库使用）
 
 ### 通信模型
 
@@ -307,15 +305,11 @@ git push origin v2.0.0
     "reasoning_effort": "medium",
     "max_tokens": 4096
   },
-  "selected_tools": ["run_cmd", "file_actions", "knowledge_graph"],
+  "selected_tools": ["run_cmd", "file_actions"],
   "self_evolution_mode": false,
   "background_tools": false,
   "single_instance": true,
-  "workspace_dir": "D:/projects/my-repo",
-  "kg_engine": "neo4j",
-  "neo4j_uri": "bolt://localhost:7687",
-  "neo4j_user": "neo4j",
-  "neo4j_password": "your_password"
+  "workspace_dir": "D:/projects/my-repo"
 }
 ```
 
@@ -325,7 +319,6 @@ git push origin v2.0.0
 
 - 不要提交真实 API Key
 - 生产环境使用独立密钥与最小权限账号
-- 将知识图谱账号与应用账号分离
 - 若工作区本身是 git 仓库，把 `<workspace>/.data/` 加入 `.gitignore`（其中包含聊天数据库、记忆、待办与技能）
 
 ---

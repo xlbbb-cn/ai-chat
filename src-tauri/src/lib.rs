@@ -17,6 +17,14 @@ mod backup;
 mod db;
 mod llm_complete;
 mod logger;
+// Knowledge graph client library. It sits under `src/utils/` (next to the
+// `pdf2md-rs` crate) and is registered from the crate root, so `src/utils/`
+// keeps no `mod.rs` of its own: it is a plain folder on disk, not a module.
+// Nothing in the tool set wires it up yet — see
+// `utils/knowledge_graph/mod.rs` for how to reconnect it.
+#[path = "utils/knowledge_graph/mod.rs"]
+pub mod knowledge_graph;
+
 pub mod mcp;
 pub mod model_metadata;
 mod pdf_mentions;
@@ -28,7 +36,6 @@ mod workspace;
 mod workspace_files;
 
 use logger::{AppLogger, LoggerOutput};
-pub use tools::neo4j_db;
 use tools::{timer, todos};
 
 const OPEN_APP_DATA_DIR_MENU_ID: &str = "open-app-data-dir";
@@ -40,6 +47,14 @@ const ABOUT_MENU_ID: &str = "about";
 const MARKDOWN_EDIT_OPEN_EVENT: &str = "markdown-edit-open";
 const MARKDOWN_EDIT_ERROR_EVENT: &str = "markdown-edit-error";
 const WORKSPACE_CHANGED_EVENT: &str = "workspace-changed";
+
+/// Tool ids that no longer exist in the tool set.
+///
+/// They can still linger in a persisted `selected_tools` (the knowledge graph
+/// tool was removed, its client now lives in `utils/knowledge_graph`). Dropping
+/// them on load / save / read keeps the prompt, the dispatcher and the Tools
+/// panel free of phantom tools.
+pub const RETIRED_TOOL_IDS: [&str; 1] = ["knowledge_graph"];
 
 /// Tools that self-evolution mode always keeps enabled.
 ///
@@ -263,6 +278,7 @@ pub(crate) fn apply_config(
     // on before anything is written, so no caller (UI, profile, backup
     // restore) can switch them off while the mode is active.
     let mut config = config;
+    config.strip_retired_tools();
     config.enforce_self_evolution_tools();
 
     let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
@@ -420,10 +436,6 @@ pub struct AppConfig {
     /// executable.
     #[serde(default = "update::default_true")]
     pub sub_agent_main_help: bool,
-    pub kg_engine: Option<String>,
-    pub neo4j_uri: Option<String>,
-    pub neo4j_user: Option<String>,
-    pub neo4j_password: Option<String>,
     #[serde(default)]
     pub workspace_dir: Option<String>,
     #[serde(default)]
@@ -482,10 +494,6 @@ impl Default for AppConfig {
             self_evolution_mode: false,
             background_tools: true,
             sub_agent_main_help: true,
-            kg_engine: None,
-            neo4j_uri: Some("bolt://localhost:7687".to_string()),
-            neo4j_user: Some("neo4j".to_string()),
-            neo4j_password: Some(String::new()),
             workspace_dir: None,
             logger_output: LoggerOutput::default(),
             auto_accept_confirm_kinds: vec![],
@@ -501,6 +509,16 @@ impl Default for AppConfig {
 }
 
 impl AppConfig {
+    /// Drop tool ids that were removed from the tool set.
+    ///
+    /// Called on every config write, on startup and whenever the config is
+    /// handed to the UI, so a hand-edited or stale `config.json` cannot keep a
+    /// retired tool selected.
+    fn strip_retired_tools(&mut self) {
+        self.selected_tools
+            .retain(|tool| !RETIRED_TOOL_IDS.contains(&tool.as_str()));
+    }
+
     /// Force the self-evolution tools into the persisted selection.
     ///
     /// Called on every config write and on startup, so the invariant holds
@@ -524,6 +542,9 @@ impl AppConfig {
     pub fn effective_tools(&self) -> Vec<String> {
         let mut tools: Vec<String> = Vec::with_capacity(self.selected_tools.len() + 2);
         for tool in &self.selected_tools {
+            if RETIRED_TOOL_IDS.contains(&tool.as_str()) {
+                continue;
+            }
             if !tools.iter().any(|existing| existing == tool) {
                 tools.push(tool.clone());
             }
@@ -732,6 +753,9 @@ pub struct ToolConfirmation {
 #[tauri::command]
 fn get_config(state: State<'_, AppState>) -> AppConfig {
     let mut config = state.config.lock().unwrap().clone();
+    // Retired tool ids are dropped on the way out too, so the UI never renders
+    // a switch for a tool that no longer exists.
+    config.strip_retired_tools();
     // The UI must see the enforced selection, so the two self-evolution tools
     // always show as enabled while the mode is on.
     config.enforce_self_evolution_tools();
@@ -1386,6 +1410,7 @@ pub fn run() {
             // A config edited outside the app may be missing the tools that
             // self-evolution mode requires — re-add them before the first turn.
             let mut config = config;
+            config.strip_retired_tools();
             config.enforce_self_evolution_tools();
 
             // Resolve the active workspace first: the database, memory, todo
@@ -1640,6 +1665,53 @@ mod tests {
 
     /// A hand-edited config that drops the tools cannot take them away from
     /// the model while the mode is on.
+    #[test]
+    fn retired_tools_are_dropped_from_the_selection() {
+        let mut config = AppConfig::default();
+        config.selected_tools = vec![
+            "run_cmd".to_string(),
+            "knowledge_graph".to_string(),
+            "memory".to_string(),
+        ];
+
+        config.strip_retired_tools();
+        assert_eq!(
+            config.selected_tools,
+            vec!["run_cmd".to_string(), "memory".to_string()]
+        );
+
+        // `effective_tools` is the last line of defence for a stale in-memory
+        // selection that never went through `strip_retired_tools`.
+        config.selected_tools.push("knowledge_graph".to_string());
+        let tools = config.effective_tools();
+        assert!(!tools.contains(&"knowledge_graph".to_string()));
+        assert!(tools.contains(&"run_cmd".to_string()));
+    }
+
+    /// A `config.json` written by an older version still parses: the removed
+    /// knowledge graph settings are ignored instead of failing deserialization.
+    #[test]
+    fn legacy_graph_settings_are_ignored() {
+        let config: AppConfig = serde_json::from_str(
+            r#"{
+                "api_base_url": "https://api.openai.com/v1",
+                "api_key": "sk-test",
+                "model": "gpt-4o-mini",
+                "selected_tools": ["run_cmd", "knowledge_graph"],
+                "kg_engine": "neo4j",
+                "neo4j_uri": "bolt://db:7687",
+                "neo4j_user": "neo4j",
+                "neo4j_password": "secret"
+            }"#,
+        )
+        .expect("a legacy config still parses");
+
+        assert_eq!(
+            config.selected_tools,
+            vec!["run_cmd".to_string(), "knowledge_graph".to_string()]
+        );
+    }
+
     #[test]
     fn effective_tools_keeps_the_required_tools_even_if_the_config_lacks_them() {
         let mut config = AppConfig::default();

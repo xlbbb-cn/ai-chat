@@ -167,7 +167,7 @@ This is enforced by the skills/tools layer. Don't add code that lets a skill esc
 
 ## Tools & dangerous commands
 
-- Tools: `run_cmd`, `run_shell`, `file_actions`, `knowledge_graph` (Neo4j backend), plus the `memory`, `todos` and `timer` tools — all in `src-tauri/src/tools/` (`skill_read` is auto-injected when skills are active).
+- Tools: `run_cmd`, `run_shell`, `file_actions`, plus the `memory`, `todos` and `timer` tools — all in `src-tauri/src/tools/` (`skill_read` is auto-injected when skills are active). The former `knowledge_graph` tool is retired for now: its client lives in `src-tauri/src/utils/knowledge_graph/` as a module library (module-owned `Settings`, no `AppConfig` fields) and is neither advertised nor dispatchable until it is wired back into `tools/mod.rs`.
 - **`run_shell` run types**: `direct` (default) waits for the script to exit and returns its output; `serve` starts a long-lived background child (HTTP server, watcher…) and returns a `serve_id` immediately. The same tool manages them: `action: "list"` shows running/finished entries with recent output, and `action: "stop"` with `serve_id` (or `"all"`) kills the whole tree. Serve state lives in `tools/serve.rs`; stopping a serve process never asks for confirmation because it only targets children this app started. **Serve processes live only for the chat turn that spawned them**: the `chat_completion` wrapper calls `ServeRegistry::shutdown_all` after every turn (final answer, error or Stop), which drains the registry, kills each tree, polls until the pids are confirmed gone — escalating with a second whole-tree kill once — and logs the verified summary (`exit NOT confirmed` on the pathological leftover).
 - **Child-process cleanup** (`src-tauri/src/process_guard.rs`): every long-lived child (stdio MCP server — the main pool or an `llm` agent task — `serve` process, `cli` sub-agent) is registered by pid. `RunEvent::Exit` and the main-window `CloseRequested` hook call `kill_all()`, which terminates each process tree. On Windows children are also assigned to a job object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, so even a hard crash cannot leave MCP servers / CLI agents / serve processes running. On Unix children opt into their own process group (`process_group(0)`) so `kill(-pid)` reaches grandchildren.
 - **Path policy** — the three execution tools have deliberately different scopes:
@@ -228,7 +228,10 @@ src-tauri/
     scripts.rs             #   run_cmd script library (resolve, header metadata, approvals)
     timer.rs               #   delay timers (fire → resume a session, + tests)
     todos.rs               #   todo lists (+ tests)
-    neo4j_db.rs            #   Neo4j client wrapper (pub, re-exported at root)
+  src/utils/knowledge_graph/  # knowledge graph client library (NOT part of the tool set)
+    mod.rs                 #   `KnowledgeGraph` trait + re-exports (registered via #[path])
+    settings.rs            #   Engine + Settings (module-owned; no AppConfig fields)
+    neo4j.rs               #   Neo4jRepo over the `neo4rs` driver
   src/mcp.rs               # MCP transports/log; main stdio pool + per-agent AgentMcpSession
   src/model_metadata.rs    # llm-metadata catalogue fetch (capabilities/context)
   src/agents.rs            # sub-agents, orchestration, missions
