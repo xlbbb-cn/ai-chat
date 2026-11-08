@@ -9,6 +9,30 @@ npm run changelog -- --from <上一个 tag> --to <本次 tag> --details --write
 条目按 Conventional Commits 的类型分组，作用域加粗；工作区里提交标题是英文、正文是中文，
 所以带 `--details` 时是中英对照。
 
+## [v2.9.2](https://github.com/xlbbb-cn/ai-chat/releases/tag/v2.9.2) — 2026-11-08
+
+### 新增
+
+- **release**: generate the changelog and release notes from commits ([`874a572`](https://github.com/xlbbb-cn/ai-chat/commit/874a572b3c4c83c9f42c4f61678ced6a43768bfd))
+  - `--write` upserts the section into CHANGELOG.md and replaces a section for the same version, so re-running a release is idempotent.
+  - `--format body --output <file>` produces the short list the workflow needs.
+  - `release.yml` gains a "Generate release notes" step: it resolves the previous tag with `git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^"`, renders the body, and hands it over through `$GITHUB_OUTPUT` with a heredoc delimiter (a plain `echo` would flatten the newlines). `releaseBody` embeds it above the install notes.
+
+### 重构
+
+- **tools**: retire the knowledge graph tool, keep its client in utils ([`fd38515`](https://github.com/xlbbb-cn/ai-chat/commit/fd38515e09b8fe3088000fb137b75630bf362cd8))
+  - `src-tauri/src/utils/knowledge_graph/` is a self-contained module library: `mod.rs` (the `KnowledgeGraph` trait), `settings.rs` (`Engine` + `Settings`) and `neo4j.rs` (`Neo4jRepo`). It is registered from the crate root with `#[path]`, so `src/utils/` stays a plain folder next to the `pdf2md-rs` crate instead of growing a `mod.rs` of its own.
+  - `Settings` owns the connection defaults (`bolt://localhost:7687`, user `neo4j`, empty password) that used to live in `AppConfig::default()`, so re-enabling the tool is a tool definition plus a dispatch arm calling `Neo4jRepo::connect(&Settings)`.
+  - `AppConfig` loses `kg_engine` / `neo4j_uri` / `neo4j_user` / `neo4j_password`. A `config.json` written by an older version still parses — serde ignores the unknown keys — and the next save drops them.
+  - `RETIRED_TOOL_IDS` with `AppConfig::strip_retired_tools()` prunes the stale id on startup, on every save, in `get_config` and in `effective_tools()`, so a selection carried over from an old config cannot reach the prompt.
+  - The tool definition, the dispatch arm, the Tools-panel row, the engine selector, its CSS and the i18n keys are gone. `neo4rs` stays a dependency of the library, and `build_config` is split out so the settings → driver mapping is covered by a test that never touches the network.
+
+### 杂项
+
+- keep the local test book PDF out of the repository ([`5d108f2`](https://github.com/xlbbb-cn/ai-chat/commit/5d108f219b342e4792f55ccfc21294e64ece8447))
+
+**完整对比**：[v2.9.1...v2.9.2](https://github.com/xlbbb-cn/ai-chat/compare/v2.9.1...v2.9.2)
+
 ## [v2.9.1](https://github.com/xlbbb-cn/ai-chat/releases/tag/v2.9.1) — 2026-11-08
 
 ### 新增
