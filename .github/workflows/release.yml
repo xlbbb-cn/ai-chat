@@ -123,6 +123,26 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # Release 正文由「上一个 tag..本次 tag」的提交生成，省得每次手写更新说明。
+      # 四个平台各算一次、内容相同：谁先创建 Release 谁带上，其余平台更新成同一份正文。
+      - name: Generate release notes
+        if: github.event_name == 'push'
+        id: notes
+        shell: bash
+        run: |
+          prev="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" || true)"
+          if [ -n "$prev" ]; then
+            node scripts/gen-changelog.cjs --from "$prev" --to "$GITHUB_REF_NAME" --format body --output release-notes.md
+          else
+            printf '## 本次更新\n\n首个版本。\n' > release-notes.md
+          fi
+          # 多行值必须用定界符写进 $GITHUB_OUTPUT，直接 echo "body=$(...)" 会把换行吃掉。
+          {
+            echo 'body<<RELEASE_NOTES_EOF'
+            cat release-notes.md
+            echo 'RELEASE_NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
       # tauri build 会走 tauri.conf.json 的 beforeBuildCommand（npm run build），
       # 其中 sync-version:git-tag 把 package.json / Cargo.toml / tauri.conf.json 的版本对齐到 tag。
       - name: Build installers
@@ -139,6 +159,10 @@ jobs:
           releaseName: ${{ github.event_name == 'push' && 'AI Chat v__VERSION__' || '' }}
           releaseBody: |
             `AI Chat v__VERSION__` 由 GitHub Actions 自动构建。
+
+            ${{ steps.notes.outputs.body }}
+
+            ### 安装包
 
             - Windows：`.msi` / `-setup.exe`
             - macOS：`.dmg`（Apple Silicon `aarch64` / Intel `x86_64`）
