@@ -47,6 +47,12 @@ const DEFAULT_PAGE_LIMIT: usize = 60;
 /// The full text stays in the cache file.
 const MAX_MARKDOWN_CHARS: usize = 60_000;
 
+/// Cached conversions older than this are dropped when a new one is written.
+/// `.data/tmp` is never swept by the app and a 60-page conversion is not small,
+/// so the directory needs its own expiry — a week covers "read the rest of it"
+/// without keeping every page ever quoted.
+const CACHE_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 60 * 60);
+
 /// What the frontend appends to the LLM request for one PDF mention.
 #[derive(Debug, Clone, Serialize)]
 pub struct PdfMention {
@@ -193,6 +199,34 @@ fn prompt_markdown(full: &str, cached_relative: &str) -> (String, bool) {
     (cut, true)
 }
 
+/// Delete cached conversions older than [`CACHE_MAX_AGE`].
+///
+/// Only our own `*.md` files in the cache directory are touched and every
+/// failure is ignored: a stale file is better than a failed mention.
+fn prune_cache(dir: &Path, now: std::time::SystemTime) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().map(|ext| ext != "md").unwrap_or(true) {
+            continue;
+        }
+        let Ok(modified) = entry.metadata().and_then(|meta| meta.modified()) else {
+            continue;
+        };
+        // `duration_since` errs when the mtime is in the future; keep the file.
+        let Ok(age) = now.duration_since(modified) else {
+            continue;
+        };
+        if age >= CACHE_MAX_AGE && std::fs::remove_file(&path).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
 /// User-facing message for a conversion failure.
 fn describe_error(name: &str, error: &pdf2md_rs::Error) -> String {
     use pdf2md_rs::Error;
@@ -271,6 +305,10 @@ fn convert_blocking(
     // The cache is the full conversion — that is what makes it worth keeping
     // once the prompt has been cut. Only the returned text is budgeted.
     std::fs::write(&cached, &full).map_err(|e| format!("{}: {e}", cached.display()))?;
+    // Sweep stale conversions while we are writing into that directory anyway.
+    if let Some(dir) = cached.parent() {
+        prune_cache(dir, std::time::SystemTime::now());
+    }
     let (markdown, budget_cut) = prompt_markdown(&full, &cached_relative);
     let truncated = plan.truncated || budget_cut;
 
@@ -523,6 +561,32 @@ mod tests {
 
         assert_eq!(first.path, second.path);
         assert_ne!(first.path, other.path, "a different range is a different file");
+    }
+
+    #[test]
+    fn stale_cached_conversions_are_pruned() {
+        let ws = TempWorkspace::new();
+        let cache_dir = ws.dir.join(".data/tmp/pdf");
+        std::fs::create_dir_all(&cache_dir).expect("cache dir");
+        let stale = cache_dir.join("old-conversion-0.md");
+        let unrelated = cache_dir.join("notes.txt");
+        std::fs::write(&stale, "a week-old conversion").expect("stale");
+        std::fs::write(&unrelated, "not ours").expect("unrelated");
+        let week_ago =
+            std::time::SystemTime::now() - std::time::Duration::from_secs(8 * 24 * 60 * 60);
+        std::fs::File::options()
+            .write(true)
+            .open(&stale)
+            .expect("open stale")
+            .set_times(std::fs::FileTimes::new().set_modified(week_ago))
+            .expect("backdate stale");
+
+        ws.put("kk.pdf", &sample_pdf(3));
+        let mention = convert_blocking(&ws.dir, "kk.pdf", Some(1), Some(1)).expect("convert");
+
+        assert!(!stale.exists(), "a week-old conversion should be gone");
+        assert!(unrelated.exists(), "only our own .md files are pruned");
+        assert!(ws.dir.join(&mention.path).exists(), "the fresh cache stays");
     }
 
     #[test]
