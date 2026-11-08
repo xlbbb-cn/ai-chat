@@ -94,3 +94,19 @@ export function supportsAttachmentKind(
       return metadata.supports_files === true;
   }
 }
+
+/**
+ * Can the composer offer `name` as an `@` mention to this model?
+ *
+ * Same rule as {@link supportsAttachmentKind} with one exception: a PDF
+ * mention is *converted to Markdown text* by the backend (`convert_pdf_mention`),
+ * not sent as a `file` part, so it is available to every model — a model
+ * without `supports_files` can still discuss page 2 of a paper.
+ */
+export function supportsMentionName(
+  metadata: ModelMetadata | undefined,
+  name: string,
+): boolean {
+  if (extensionOf(name) === "pdf") return true;
+  return supportsAttachmentKind(metadata, classifyName(name));
+}

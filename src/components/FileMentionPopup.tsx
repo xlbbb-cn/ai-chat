@@ -6,6 +6,9 @@
  * (text is always allowed, images need vision, documents need `supports_files`)
  * and ranked by file name first, path second. Selecting a file inserts
  * `@<path>`; appending `#12`, `#12-24` or `#12-` attaches only those lines.
+ * A PDF is the exception: it is offered to every model because the backend
+ * converts the mentioned pages to Markdown text (`convert_pdf_mention`), so
+ * `#2` means page 2 there instead of line 2.
  *
  * The popup is not a dialog: it never takes focus (rows accept on `mousedown`
  * with `preventDefault`), so the caret stays in the textarea and the keyboard

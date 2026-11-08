@@ -89,12 +89,13 @@ const zhTW: Messages = {
 
         fileMention: {
             title: "插入檔案參照",
-            hint: "↑↓ 選擇 · Enter/Tab 插入 · 輸入 #12-24 指定行 · Esc 關閉",
+            hint: "↑↓ 選擇 · Enter/Tab 插入 · 文字 #12-24 指定行，PDF 用 #2 指定頁 · Esc 關閉",
             loading: "正在讀取工作區檔案…",
             noMatches: "目前模型下沒有符合“{query}”的檔案。",
             listFailed: "無法列出工作區檔案：{error}",
             readFailed: "無法讀取 {name}：{error}",
             rangeNotSupported: "{name} 不支援行區間，已附加整個檔案。",
+            pdfFailed: "無法轉換 PDF {name}：{error}",
         },
         slashMention: {
             title: "插入技能參照",

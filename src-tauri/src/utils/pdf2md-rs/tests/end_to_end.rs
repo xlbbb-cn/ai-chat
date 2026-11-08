@@ -86,6 +86,14 @@ fn a_page_range_limits_the_output() {
 }
 
 #[test]
+fn the_page_count_is_readable_without_converting() {
+    let bytes = common::sample_pdf();
+    assert_eq!(pipeline::page_count(&bytes).expect("page count"), 3);
+    // Junk is an error, not a panic.
+    assert!(pipeline::page_count(b"not a pdf").is_err());
+}
+
+#[test]
 fn table_styles_are_honoured() {
     let mut options = Options::paper();
     options.markdown.table_style = TableStyle::Html;

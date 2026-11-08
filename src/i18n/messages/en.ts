@@ -100,13 +100,14 @@ const en = {
 
         fileMention: {
             title: "Insert file reference",
-            hint: "↑↓ choose · Enter/Tab insert · add #12-24 for lines · Esc close",
+            hint: "↑↓ choose · Enter/Tab insert · #12-24 for lines, #2 for a PDF page · Esc close",
             loading: "Loading workspace files…",
             noMatches: "No file matches “{query}” for this model.",
             listFailed: "Could not list workspace files: {error}",
             readFailed: "Could not read {name}: {error}",
             rangeNotSupported:
                 "{name} cannot be sliced by lines — attached the whole file.",
+            pdfFailed: "Could not convert the PDF {name}: {error}",
         },
         slashMention: {
             title: "Insert skill reference",
