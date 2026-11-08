@@ -9,6 +9,8 @@
 //! rules, images), then line assembly.
 
 pub mod content;
+mod cmap;
+mod fallback;
 pub mod fonts;
 pub mod images;
 pub mod lines;
