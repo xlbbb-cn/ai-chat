@@ -7,7 +7,7 @@
 
 use std::io::Cursor;
 
-use image::{DynamicImage, ExtendedColorType, ImageBuffer, Luma, Rgb};
+use image::{DynamicImage, ImageBuffer, Luma, Rgb};
 use lopdf::{Dictionary, Object, Stream};
 
 use crate::error::{Error, Result};
@@ -105,7 +105,7 @@ pub fn extract(stream: &Stream) -> Result<ImageData> {
             let palette = palette.ok_or_else(|| Error::UnsupportedImage("missing palette".into()))?;
             samples
                 .iter()
-                .map(|i| {
+                .flat_map(|i| {
                     let base = (*i as usize) * 3;
                     if base + 2 < palette.len() {
                         [palette[base], palette[base + 1], palette[base + 2]]
@@ -113,7 +113,6 @@ pub fn extract(stream: &Stream) -> Result<ImageData> {
                         [0, 0, 0]
                     }
                 })
-                .flatten()
                 .collect()
         }
     };

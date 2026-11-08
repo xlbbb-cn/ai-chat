@@ -30,6 +30,7 @@ pub struct AssetOutput {
 }
 
 /// Writes extracted images under `dir/folder/` and hands back Markdown links.
+#[derive(Debug)]
 pub struct AssetWriter {
     dir: Option<PathBuf>,
     folder: String,

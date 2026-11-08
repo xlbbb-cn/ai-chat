@@ -81,7 +81,10 @@ pub fn ruled_tables(layout: &PageLayout) -> Vec<TableCandidate> {
             .map(|(x, _, _)| *x)
             .collect();
         xs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        if xs.len() < 2 {
+        // A grid with a single column is not a table: it is a box around some
+        // text (a wire frame, a callout), and emitting it as one would destroy
+        // the paragraph.
+        if xs.len() < 3 {
             continue;
         }
         let left = xs.first().copied().unwrap_or(0.0).min(
@@ -101,22 +104,44 @@ pub fn ruled_tables(layout: &PageLayout) -> Vec<TableCandidate> {
             let mut row: Vec<String> = Vec::new();
             for window in xs.windows(2) {
                 let cell = Rect::new(window[0], y_start, window[1], y_end);
-                let mut text = String::new();
+                // Assign *words*, not whole lines: one line routinely holds the
+                // text of several cells ("Method    Score"), and taking the
+                // line's centre would push all of it into a single cell.
+                let mut parts: Vec<(f32, &str)> = Vec::new();
                 for line in &layout.lines {
-                    if cell.contains_point(line.rect.center_x(), line.rect.center_y()) {
-                        if !text.is_empty() {
-                            text.push(' ');
+                    for word in &line.words {
+                        if cell.contains_point(word.rect.center_x(), word.rect.center_y()) {
+                            parts.push((word.rect.x0, word.text.trim()));
                         }
-                        text.push_str(line.text.trim());
                     }
                 }
-                row.push(text.trim().to_string());
+                parts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+                row.push(
+                    parts
+                        .iter()
+                        .map(|(_, text)| *text)
+                        .filter(|text| !text.is_empty())
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                );
             }
             if row.iter().any(|c| !c.is_empty()) {
                 rows.push(row);
             }
         }
         if rows.len() < 2 {
+            continue;
+        }
+        // A grid often has more vertical rules than the text uses ("Method |
+        // Score | <empty> | <empty>"). Columns that carry no text in any row are
+        // noise from the drawing, not part of the table.
+        while rows.first().is_some_and(|row| row.last().is_some_and(String::is_empty)) {
+            for row in &mut rows {
+                row.pop();
+            }
+        }
+        normalize_rows(&mut rows);
+        if rows.first().map_or(true, |row| row.is_empty()) {
             continue;
         }
         let consumed_lines = lines_inside(layout, &rect);
@@ -179,22 +204,25 @@ pub fn aligned_table(layout: &PageLayout, start: usize) -> Option<TableCandidate
             row.iter().filter(|x| columns.iter().any(|c| (*c - **x).abs() <= 6.0)).count() >= 2
         })
         .count();
-    if aligned_rows as f32 / indices.len() as f32 < 0.6 {
+    if aligned_rows as f32 / (indices.len() as f32) < 0.6 {
         return None;
     }
 
     // Split each line into cells at gaps wider than a space.
     let mut rows: Vec<Vec<String>> = Vec::new();
+    let mut cell_starts: Vec<Vec<f32>> = Vec::new();
     for index in &indices {
         let line = &layout.lines[*index];
         let threshold = (line.size * 1.1).max(6.0);
         let mut cells: Vec<String> = Vec::new();
+        let mut starts: Vec<f32> = Vec::new();
         let mut current = String::new();
         let mut previous_x1: Option<f32> = None;
         for word in &line.words {
             if let Some(x1) = previous_x1 {
                 if word.rect.x0 - x1 > threshold {
                     cells.push(current.trim().to_string());
+                    starts.push(word.rect.x0);
                     current.clear();
                 }
             }
@@ -209,13 +237,19 @@ pub fn aligned_table(layout: &PageLayout, start: usize) -> Option<TableCandidate
         }
         if cells.len() >= 2 {
             rows.push(cells);
+            cell_starts.push(starts);
         }
     }
     if rows.len() < 3 {
         return None;
     }
-    let width = rows.iter().map(|r| r.len()).max().unwrap_or(0);
-    if width < 2 {
+    // A table is a *grid*: the same number of cells, starting at the same x, on
+    // most rows. Scattered labels (a schematic, a poster, a diagram) also have
+    // wide gaps between words; what they never have is a repeated grid, and
+    // without this test they would all turn into one giant table.
+    let width = grid_width(&cell_starts)?;
+    rows.retain(|row| row.len() == width);
+    if rows.len() < 3 {
         return None;
     }
     normalize_rows(&mut rows);
@@ -229,6 +263,44 @@ pub fn aligned_table(layout: &PageLayout, start: usize) -> Option<TableCandidate
         has_header: true,
         source: "aligned-text",
     })
+}
+
+/// Number of columns of the grid `cell_starts` describes, if it is one.
+///
+/// `cell_starts[i]` holds the left edges of the cells of row `i` *after* the
+/// first cell, so the row has `len + 1` cells. The modal count wins, and at
+/// least 60 % of the rows must both have that count and start each cell within
+/// six points of the first such row. That is the difference between a table and
+/// a page of scattered labels.
+fn grid_width(cell_starts: &[Vec<f32>]) -> Option<usize> {
+    if cell_starts.len() < 3 {
+        return None;
+    }
+    let mut counts: Vec<(usize, usize)> = Vec::new();
+    for starts in cell_starts {
+        let cells = starts.len() + 1;
+        match counts.iter_mut().find(|(width, _)| *width == cells) {
+            Some((_, rows)) => *rows += 1,
+            None => counts.push((cells, 1)),
+        }
+    }
+    let (width, _) = counts.into_iter().max_by_key(|(width, rows)| (*rows, *width))?;
+    if width < 2 {
+        return None;
+    }
+    let reference = cell_starts.iter().find(|starts| starts.len() + 1 == width)?;
+    let consistent = cell_starts
+        .iter()
+        .filter(|starts| {
+            starts.len() + 1 == width
+                && starts.iter().zip(reference).all(|(x, reference)| (x - reference).abs() <= 6.0)
+        })
+        .count();
+    if consistent >= 3 && consistent * 10 >= cell_starts.len() * 6 {
+        Some(width)
+    } else {
+        None
+    }
 }
 
 /// Pad rows to a rectangle.

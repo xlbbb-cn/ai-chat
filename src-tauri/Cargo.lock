@@ -3396,6 +3396,7 @@ dependencies = [
  "image",
  "lopdf",
  "quick-xml",
+ "rayon",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

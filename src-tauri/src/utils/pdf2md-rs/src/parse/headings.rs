@@ -72,9 +72,7 @@ impl HeadingDetector {
             let ratio = size / self.body_size;
             if ratio >= 1.45 {
                 self.base_level
-            } else if ratio >= 1.2 {
-                self.base_level + 1
-            } else if ratio >= 1.06 && bold {
+            } else if ratio >= 1.2 || (ratio >= 1.06 && bold) {
                 self.base_level + 1
             } else if bold && self.headings_seen > 0 && ratio >= 0.98 && word_count(trimmed) <= 8 {
                 // A short bold line in an already-structured document reads as
@@ -128,9 +126,15 @@ pub fn numbering_depth(text: &str) -> Option<usize> {
         if rest.is_empty() || !components.is_empty() {
             let depth = components.len();
             // `2023 was a good year` must not become a heading: a single number
-            // needs a separator or a following capitalised word.
+            // needs a separator, or a following capitalised/CJK word.
             if depth == 1 && !has_separator_after_number(trimmed) {
-                return None;
+                let capitalised = rest
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_uppercase() || crate::clean::text::is_cjk(c));
+                if !capitalised {
+                    return None;
+                }
             }
             return Some(depth.clamp(1, 4));
         }
@@ -214,7 +218,7 @@ fn roman_or_letter_prefix(text: &str) -> Option<usize> {
     if is_roman && (closed || trimmed[letters.len()..].starts_with('.')) {
         return Some(1);
     }
-    if (letters.len() == 1 || closed) && (closed || trimmed[letters.len()..].starts_with('.')) {
+    if closed || (letters.len() == 1 && trimmed[letters.len()..].starts_with('.')) {
         return Some(2);
     }
     None

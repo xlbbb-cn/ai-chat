@@ -80,9 +80,14 @@ impl HeuristicFormula {
         if width < column.width() * 0.06 || width > column.width() * 0.88 {
             return None;
         }
-        // Centred in its column?
-        let centre_offset = (paragraph.rect.center_x() - column.center()).abs();
-        let centred = centre_offset <= column.width() * 0.08;
+        // Centred in its column? Both margins must be there and roughly equal —
+        // comparing the centres alone would call a short left-aligned line
+        // "centred" whenever the text box is narrower than the page.
+        let left = paragraph.rect.x0 - column.x0;
+        let right = column.x1 - paragraph.rect.x1;
+        let centred = left >= -2.0
+            && right >= -2.0
+            && (left - right).abs() <= column.width() * 0.08;
 
         let text = layout.paragraph_text(paragraph);
         let symbol_ratio = math_symbol_ratio(&text);
@@ -129,7 +134,7 @@ pub fn math_symbol_ratio(text: &str) -> f32 {
 /// Characters that almost never appear in prose.
 pub fn is_math_symbol(ch: char) -> bool {
     matches!(ch,
-        '=' | '+' | '×' | '÷' | '±' | '∓' | '∑' | '∏' | '∫' | '√' | '∞' | '≈' | '≠' | '≤' | '≥'
+        '=' | '+' | '*' | '/' | '×' | '÷' | '±' | '∓' | '∑' | '∏' | '∫' | '√' | '∞' | '≈' | '≠' | '≤' | '≥'
         | '≪' | '≫' | '≡' | '∝' | '∈' | '∉' | '⊂' | '⊃' | '∪' | '∩' | '∀' | '∃' | '∂' | '∇'
         | '→' | '←' | '↔' | '⇒' | '⇔' | '⋅' | '∘' | '⊗' | '⊕' | '⊥' | '∥' | 'α'..='ω'
         | 'Α'..='Ω' | '^' | '_' | '·'
@@ -149,7 +154,7 @@ fn ends_like_sentence(text: &str) -> bool {
 pub fn to_latex(text: &str) -> String {
     let mut out = String::with_capacity(text.len() + 8);
     let mut pending_text = String::new();
-    let mut flush = |pending: &mut String, out: &mut String| {
+    let flush = |pending: &mut String, out: &mut String| {
         if pending.is_empty() {
             return;
         }
@@ -158,11 +163,17 @@ pub fn to_latex(text: &str) -> String {
         pending.clear();
     };
 
-    for ch in text.chars() {
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
         match latex_for(ch) {
             Some(command) => {
                 flush(&mut pending_text, &mut out);
                 out.push_str(command);
+                // `a×b` must become `a\times b`: a control word followed by a
+                // letter would otherwise read as a longer command (`\timesb`).
+                if chars.peek().is_some_and(|next| next.is_ascii_alphabetic()) {
+                    out.push(' ');
+                }
             }
             None => pending_text.push(ch),
         }
@@ -298,14 +309,16 @@ pub fn wrap_inline_math(text: &str) -> String {
             separator.push_str(token);
             continue;
         }
-        if looks_like_math(token) {
+        // A bare operator continues the run it sits inside: `x[n] = h[n]` is one
+        // formula, not three.
+        let continues = !run.is_empty() && operator_token(token);
+        if looks_like_math(token) || continues {
+            // While a run is open its separators belong to the formula, so they
+            // are dropped here and re-created by `run.join(" ")`.
             if run.is_empty() {
                 out.push_str(&separator);
-                separator.clear();
-            } else {
-                out.push_str(&separator);
-                separator.clear();
             }
+            separator.clear();
             run.push(token);
         } else {
             if !run.is_empty() {
@@ -326,6 +339,16 @@ pub fn wrap_inline_math(text: &str) -> String {
     }
     out.push_str(&separator);
     out
+}
+
+/// `true` for a token made only of operators/punctuation, e.g. `=`, `+`, `≤`.
+fn operator_token(token: &str) -> bool {
+    let trimmed = token.trim();
+    !trimmed.is_empty()
+        && trimmed.chars().any(is_math_symbol)
+        && trimmed.chars().all(|ch| {
+            is_math_symbol(ch) || matches!(ch, ',' | '.' | '(' | ')' | '|' | ':' | ';')
+        })
 }
 
 fn split_keep_spaces(text: &str) -> Vec<&str> {
@@ -350,31 +373,42 @@ fn split_keep_spaces(text: &str) -> Vec<&str> {
 
 fn looks_like_math(token: &str) -> bool {
     let trimmed = token.trim_matches(|c: char| c.is_ascii_punctuation() && c != '[' && c != ']');
-    if trimmed.is_empty() {
+    // A formula token is short; identifiers and prose are not.
+    if trimmed.is_empty() || trimmed.chars().count() > 24 {
         return false;
     }
-    if trimmed.chars().any(is_math_symbol) && trimmed.chars().any(|c| c.is_alphanumeric()) {
+    // A real operator with a variable next to it is enough. `_` and `^` do not
+    // count here: they also appear in identifier-shaped names (`a_b_c`).
+    if trimmed.chars().any(|ch| is_math_symbol(ch) && !matches!(ch, '_' | '^'))
+        && trimmed.chars().any(|c| c.is_alphanumeric())
+    {
         return true;
     }
-    // `x[n]`, `h_i`, `f(x)^2`
-    let mut chars = trimmed.chars().peekable();
-    let mut saw_variable = false;
-    while let Some(ch) = chars.next() {
-        if ch.is_alphabetic() {
-            saw_variable = true;
-            continue;
-        }
-        if saw_variable && matches!(ch, '[' | '_') {
-            // Require a closing bracket for `[` and at least one char after `_`.
-            if ch == '[' && trimmed.contains(']') {
-                return true;
-            }
-            if ch == '_' && chars.peek().is_some_and(|c| c.is_alphanumeric() || *c == '{') {
-                return true;
-            }
-        }
+    // `x[n]`, `h_i`, `v_{0}`, `max_i`: one short variable name, then exactly one
+    // bracket or subscript. `Conn_02x10_Odd_Even` and `Odd_Even` are identifiers
+    // from a diagram or a netlist, not formulas — a second marker, a long name or
+    // a long subscript disqualifies the token.
+    let Some(position) = trimmed.find(['[', '_']) else {
+        return false;
+    };
+    if trimmed[position..].matches(['[', '_']).count() > 1 {
+        return false;
     }
-    false
+    let name = &trimmed[..position];
+    let name_len = name.chars().count();
+    if name_len == 0 || name_len > 3 || !name.chars().all(char::is_alphabetic) {
+        return false;
+    }
+    let rest = &trimmed[position + 1..];
+    if trimmed.as_bytes()[position] == b'[' {
+        let inside = rest.split(']').next().unwrap_or_default();
+        return rest.contains(']') && inside.chars().count() <= 6;
+    }
+    if rest.starts_with('{') {
+        return rest.contains('}');
+    }
+    let script = rest.chars().take_while(|ch| ch.is_alphanumeric()).count();
+    rest.chars().next().is_some_and(|ch| ch.is_alphanumeric()) && script <= 2
 }
 
 #[cfg(test)]
@@ -406,6 +440,10 @@ mod tests {
         assert!(looks_like_math("y[n]"));
         assert!(looks_like_math("h_i"));
         assert!(!looks_like_math("hello"));
+        // Identifiers from diagrams and netlists are not formulas.
+        assert!(!looks_like_math("Conn_02x10_Odd_Even"));
+        assert!(!looks_like_math("symbol_name"));
+        assert!(looks_like_math("v_0"));
     }
 
     #[test]

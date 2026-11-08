@@ -78,7 +78,7 @@ pub enum Block {
         /// LaTeX source. A native PDF parser cannot recover this: the built-in
         /// [`crate::formula::HeuristicFormula`] transcriber emits an escaped
         /// plain-text approximation (`\text{…}`) and a real recognizer can be
-        /// plugged in through [`crate::formula::FormulaExtractor`].
+        /// plugged in through [`crate::formula::FormulaRecognizer`].
         latex: String,
         /// Display formula (`$$…$$`) versus inline (`$…$`).
         display: bool,
