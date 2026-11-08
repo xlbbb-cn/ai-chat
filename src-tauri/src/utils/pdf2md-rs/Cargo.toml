@@ -26,8 +26,14 @@ serde_json = "1"
 ureq = { version = "3", default-features = false, features = ["json"], optional = true }
 quick-xml = { version = "0.39", optional = true }
 
+# Batch conversion in parallel (`--features parallel`).
+rayon = { version = "1", optional = true }
+
 [features]
 default = []
 # `grobid` enables the optional GROBID layout backend for academic papers
 # (`Options::layout_backend = LayoutBackend::Grobid`).
 grobid = ["dep:ureq", "dep:quick-xml"]
+# `parallel` converts a batch of files on a worker pool (`batch::convert`).
+# Without it the batch module still works — one file at a time.
+parallel = ["dep:rayon"]

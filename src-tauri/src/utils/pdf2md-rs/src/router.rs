@@ -58,6 +58,25 @@ impl PdfProfile {
     pub fn is_multi_column(&self) -> bool {
         self.columns > 1
     }
+
+    /// The profile of a document parsed by the GROBID backend.
+    ///
+    /// GROBID decides the structure itself, so the built-in detector has
+    /// nothing to add; this exists to keep `Conversion::profile` meaningful
+    /// instead of absent.
+    pub fn grobid(page_count: usize) -> Self {
+        PdfProfile {
+            class: DocumentClass::Paper,
+            columns: 1,
+            has_text_layer: true,
+            image_count: 0,
+            rule_count: 0,
+            math_density: 0.0,
+            char_count: 0,
+            page_count,
+            reason: vec!["structured by the GROBID backend"],
+        }
+    }
 }
 
 /// Average characters per page below which the PDF is treated as a scan.
@@ -82,7 +101,7 @@ pub fn detect(pages: &[PageLayout], info: &PdfInfo, mode: ParseMode) -> PdfProfi
     let columns = dominant_column_count(pages);
 
     let mut reason: Vec<&'static str> = Vec::new();
-    let per_page = if page_count > 0 { char_count / page_count } else { 0 };
+    let per_page = char_count.checked_div(page_count).unwrap_or(0);
 
     if mode == ParseMode::Paper {
         reason.push("forced by ParseMode::Paper");

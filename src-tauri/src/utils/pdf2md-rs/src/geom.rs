@@ -23,16 +23,13 @@ impl Default for Matrix {
     }
 }
 
-impl Matrix {
-    pub const IDENTITY: Matrix = Matrix { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 0.0, f: 0.0 };
+/// `self × other`: the composition PDF uses — the text matrix first, then the
+/// current transformation matrix (`Tm`/`Td` are in text space, `cm` in user
+/// space).
+impl std::ops::Mul for Matrix {
+    type Output = Matrix;
 
-    pub fn new(a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) -> Self {
-        Matrix { a, b, c, d, e, f }
-    }
-
-    /// `self` then `other` (i.e. `self × other`, the order PDF composes in:
-    /// text matrix first, then the current transformation matrix).
-    pub fn mul(self, other: Matrix) -> Matrix {
+    fn mul(self, other: Matrix) -> Matrix {
         Matrix {
             a: self.a * other.a + self.b * other.c,
             b: self.a * other.b + self.b * other.d,
@@ -41,6 +38,14 @@ impl Matrix {
             e: self.e * other.a + self.f * other.c + other.e,
             f: self.e * other.b + self.f * other.d + other.f,
         }
+    }
+}
+
+impl Matrix {
+    pub const IDENTITY: Matrix = Matrix { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 0.0, f: 0.0 };
+
+    pub fn new(a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) -> Self {
+        Matrix { a, b, c, d, e, f }
     }
 
     /// Apply the affine map to a point.
@@ -151,7 +156,7 @@ impl Rect {
 }
 
 /// A horizontal band of a page, used for header/footer detection.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Band {
     pub start: f32,
     pub end: f32,
@@ -171,7 +176,7 @@ mod tests {
     fn matrix_composition_applies_text_then_ctm() {
         let ctm = Matrix::new(2.0, 0.0, 0.0, 2.0, 10.0, 20.0);
         let tm = Matrix::new(1.0, 0.0, 0.0, 1.0, 5.0, 0.0);
-        let m = tm.mul(ctm);
+        let m = tm * ctm;
         assert_eq!(m.apply(0.0, 0.0), (20.0, 20.0));
         assert_eq!(m.scale(), 2.0);
         assert!(m.is_upright());
@@ -190,7 +195,10 @@ mod tests {
         let big = Rect::new(0.0, 0.0, 100.0, 100.0);
         let small = Rect::new(90.0, 90.0, 100.0, 100.0);
         assert!(small.overlaps(&big, 0.99));
-        assert!(!big.overlaps(&small, 0.99));
+        // Normalised by the *smaller* area, so containment is symmetric — a
+        // small box fully inside a big one overlaps it completely.
+        assert!(big.overlaps(&small, 0.99));
+        assert!(!big.overlaps(&Rect::new(50.0, 50.0, 150.0, 150.0), 0.99));
     }
 
     #[test]

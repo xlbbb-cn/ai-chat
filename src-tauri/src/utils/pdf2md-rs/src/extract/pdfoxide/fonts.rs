@@ -32,6 +32,14 @@ pub struct FontInfo {
     pub cid: bool,
     /// Ascent as a fraction of the em, used to derive a glyph's top edge.
     pub ascent: f32,
+    /// Exact advances from the font's `/Widths` array, in em units, indexed by
+    /// `code - first_char`. Empty when the PDF does not carry them (composite
+    /// fonts, broken generators), in which case [`FontInfo::advance`] estimates.
+    pub widths: Vec<f32>,
+    /// `/FirstChar`: the code the first entry of `widths` belongs to.
+    pub first_char: u16,
+    /// `/MissingWidth`, in em units, for codes outside `widths`.
+    pub missing_width: Option<f32>,
 }
 
 impl Default for FontInfo {
@@ -44,6 +52,9 @@ impl Default for FontInfo {
             math: false,
             cid: false,
             ascent: 0.75,
+            widths: Vec::new(),
+            first_char: 0,
+            missing_width: None,
         }
     }
 }
@@ -85,7 +96,36 @@ impl FontInfo {
             || lower.contains("mtmi")
             || lower.contains("mtsy")
             || lower.contains("stix");
-        FontInfo { name, bold, italic, mono, math, cid, ascent: 0.75 }
+        FontInfo {
+            name,
+            bold,
+            italic,
+            mono,
+            math,
+            cid,
+            ascent: 0.75,
+            widths: Vec::new(),
+            first_char: 0,
+            missing_width: None,
+        }
+    }
+
+    /// Advance width of a single-byte code, from the font's own `/Widths`.
+    ///
+    /// `None` when the font carries no widths or the entry is unusable; the
+    /// caller then falls back to [`FontInfo::advance`]. Using the real widths
+    /// instead of an estimate is what keeps runs that resume from an explicit
+    /// text matrix (`Tm`/`Td`) from overlapping the text before them.
+    pub fn advance_code(&self, code: u8) -> Option<f32> {
+        let index = i32::from(code) - i32::from(self.first_char);
+        if index >= 0 {
+            if let Some(width) = self.widths.get(index as usize) {
+                if width.is_finite() {
+                    return Some(*width);
+                }
+            }
+        }
+        self.missing_width.filter(|width| width.is_finite())
     }
 
     /// Estimated advance width of `c`, as a fraction of the font size.
@@ -141,6 +181,14 @@ pub struct FontTable<'a> {
     fonts: HashMap<Vec<u8>, Entry<'a>>,
 }
 
+impl std::fmt::Debug for FontTable<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FontTable")
+            .field("fonts", &self.fonts.keys().map(|k| String::from_utf8_lossy(k)).collect::<Vec<_>>())
+            .finish()
+    }
+}
+
 struct Entry<'a> {
     info: FontInfo,
     encoding: Option<Encoding<'a>>,
@@ -185,6 +233,12 @@ impl<'a> FontTable<'a> {
                 .unwrap_or(0.75);
             let mut info = FontInfo::classify(&base_font, flags, italic_angle, cid);
             info.ascent = ascent;
+            if !cid {
+                let (widths, first_char, missing_width) = font_widths(doc, dict, descriptor);
+                info.widths = widths;
+                info.first_char = first_char;
+                info.missing_width = missing_width;
+            }
             let encoding = dict.get_font_encoding(doc).ok();
             fonts.insert(name, Entry { info, encoding });
         }
@@ -203,8 +257,16 @@ impl<'a> FontTable<'a> {
     /// dropped (a wrong-but-visible character beats a hole in the text).
     pub fn decode(&self, name: &[u8], bytes: &[u8]) -> String {
         let Some(entry) = self.fonts.get(name) else {
-            return latin1(bytes);
+            return utf8_if_valid(bytes).map(str::to_string).unwrap_or_else(|| latin1(bytes));
         };
+        // Some generators write UTF-8 into a literal string although the font
+        // declares a single-byte encoding; a byte sequence that parses as
+        // multi-byte UTF-8 is authoritative over the (wrong) table.
+        if !entry.info.cid {
+            if let Some(text) = utf8_if_valid(bytes) {
+                return text.to_string();
+            }
+        }
         if let Some(encoding) = &entry.encoding {
             if let Ok(text) = encoding.bytes_to_string(bytes) {
                 if !text.is_empty() {
@@ -219,6 +281,46 @@ impl<'a> FontTable<'a> {
     pub fn is_empty(&self) -> bool {
         self.fonts.is_empty()
     }
+}
+
+/// Read `/FirstChar`, `/Widths` and `/MissingWidth` from a simple font.
+///
+/// The values are 1/1000 em; the `/FontMatrix` of a Type 3 font is ignored
+/// (those glyph widths are useless for text layout anyway), and entries that do
+/// not parse become `NaN` so [`FontInfo::advance_code`] falls back per character
+/// instead of shifting every code after it.
+fn font_widths(
+    doc: &Document,
+    dict: &Dictionary,
+    descriptor: Option<&Dictionary>,
+) -> (Vec<f32>, u16, Option<f32>) {
+    let first_char = dict
+        .get(b"FirstChar")
+        .ok()
+        .and_then(|o| o.as_i64().ok())
+        .unwrap_or(0)
+        .clamp(0, 255) as u16;
+    let mut widths: Vec<f32> = Vec::new();
+    if let Ok(object) = dict.get_deref(b"Widths", doc) {
+        if let Ok(array) = object.as_array() {
+            widths = array
+                .iter()
+                .map(|item| {
+                    let (_, value) = doc.dereference(item).unwrap_or((None, item));
+                    value
+                        .as_float()
+                        .or_else(|_| value.as_i64().map(|v| v as f32))
+                        .map(|v| v / 1000.0)
+                        .unwrap_or(f32::NAN)
+                })
+                .collect();
+        }
+    }
+    let missing_width = descriptor
+        .and_then(|d| d.get(b"MissingWidth").ok())
+        .and_then(|o| o.as_float().ok().or_else(|| o.as_i64().ok().map(|v| v as f32)))
+        .map(|v| v / 1000.0);
+    (widths, first_char, missing_width)
 }
 
 /// Follow `/FontDescriptor`, and for composite fonts the descendant's one.
@@ -251,9 +353,38 @@ pub fn latin1(bytes: &[u8]) -> String {
     bytes.iter().map(|b| *b as char).collect()
 }
 
+/// Read the bytes as UTF-8 when they really are UTF-8.
+///
+/// Generators that write no `/ToUnicode` CMap very often put **UTF-8** in the
+/// string operand anyway (reportlab, some LaTeX pipelines, hand-written PDFs),
+/// and reading those bytes as Latin-1 turns every bullet into `â€¢`. A byte
+/// string that is valid UTF-8 *and* contains a multi-byte sequence is taken as
+/// UTF-8; anything else is not, and the caller keeps its own decoding (Latin-1
+/// never loses a byte). Composite (`Type0`) fonts are excluded at the call site:
+/// their codes are 2-byte CIDs, not a character stream.
+fn utf8_if_valid(bytes: &[u8]) -> Option<&str> {
+    if bytes.iter().any(|b| *b >= 0xC2) {
+        std::str::from_utf8(bytes).ok()
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn utf8_operands_are_not_read_as_latin1() {
+        // `•` is E2 80 A2 in UTF-8 and `¢` in Latin-1.
+        assert_eq!(utf8_if_valid("• First".as_bytes()), Some("• First"));
+        assert_eq!(utf8_if_valid("café".as_bytes()), Some("café"));
+        // Latin-1 bytes are not valid UTF-8, so they keep their own reading.
+        assert_eq!(utf8_if_valid(b"caf\xe9"), None);
+        assert_eq!(latin1(b"caf\xe9"), "café");
+        // Pure ASCII is left to the font encoding.
+        assert_eq!(utf8_if_valid(b"plain"), None);
+    }
 
     #[test]
     fn subset_prefix_is_stripped() {

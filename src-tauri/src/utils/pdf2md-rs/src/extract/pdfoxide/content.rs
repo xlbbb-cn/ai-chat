@@ -184,7 +184,7 @@ impl<'a> Interpreter<'a> {
                 }
                 "cm" => {
                     if let Some(m) = matrix_operand(&op.operands) {
-                        state.ctm = m.mul(state.ctm);
+                        state.ctm = m * state.ctm;
                     }
                 }
                 "BT" => {
@@ -208,14 +208,14 @@ impl<'a> Interpreter<'a> {
                 "Td" => {
                     let tx = float_at(&op.operands, 0).unwrap_or(0.0);
                     let ty = float_at(&op.operands, 1).unwrap_or(0.0);
-                    state.tlm = translate(tx, ty).mul(state.tlm);
+                    state.tlm = translate(tx, ty) * state.tlm;
                     state.tm = state.tlm;
                 }
                 "TD" => {
                     let tx = float_at(&op.operands, 0).unwrap_or(0.0);
                     let ty = float_at(&op.operands, 1).unwrap_or(0.0);
                     state.leading = -ty;
-                    state.tlm = translate(tx, ty).mul(state.tlm);
+                    state.tlm = translate(tx, ty) * state.tlm;
                     state.tm = state.tlm;
                 }
                 "Tm" => {
@@ -225,7 +225,7 @@ impl<'a> Interpreter<'a> {
                     }
                 }
                 "T*" => {
-                    state.tlm = translate(0.0, -state.leading).mul(state.tlm);
+                    state.tlm = translate(0.0, -state.leading) * state.tlm;
                     state.tm = state.tlm;
                 }
                 "Tj" => {
@@ -239,7 +239,7 @@ impl<'a> Interpreter<'a> {
                     }
                 }
                 "'" => {
-                    state.tlm = translate(0.0, -state.leading).mul(state.tlm);
+                    state.tlm = translate(0.0, -state.leading) * state.tlm;
                     state.tm = state.tlm;
                     if let Some(Object::String(bytes, _)) = op.operands.first() {
                         self.show_text(&mut state, bytes);
@@ -252,7 +252,7 @@ impl<'a> Interpreter<'a> {
                     if let Some(value) = float_at(&op.operands, 1) {
                         state.char_spacing = value;
                     }
-                    state.tlm = translate(0.0, -state.leading).mul(state.tlm);
+                    state.tlm = translate(0.0, -state.leading) * state.tlm;
                     state.tm = state.tlm;
                     if let Some(Object::String(bytes, _)) = op.operands.get(2) {
                         self.show_text(&mut state, bytes);
@@ -341,8 +341,15 @@ impl<'a> Interpreter<'a> {
         let fallback = FontInfo::default();
         let info = self.fonts.info(&font_name).unwrap_or(&fallback).clone();
         let text = self.fonts.decode(&font_name, bytes);
-        for ch in text.chars() {
-            self.emit_glyph(state, &info, ch);
+        // The font's own widths are indexed by *code*, so they can only be used
+        // when the decoding is one byte per character. A string that decodes to
+        // a different number of characters (a CMap, a UTF-8 sniff, a dropped
+        // byte) falls back to the estimate for the whole run — mixing the two
+        // would place the run wrong from the first mismatch on.
+        let codes: Option<&[u8]> = if text.chars().count() == bytes.len() { Some(bytes) } else { None };
+        for (index, ch) in text.chars().enumerate() {
+            let width = codes.and_then(|codes| info.advance_code(codes[index]));
+            self.emit_glyph(state, &info, ch, width);
         }
     }
 
@@ -360,19 +367,22 @@ impl<'a> Interpreter<'a> {
 
     fn kern(&mut self, state: &mut GState, amount: f32) {
         let shift = -amount / 1000.0 * state.font_size * state.h_scale;
-        state.tm = translate(shift, 0.0).mul(state.tm);
+        state.tm = translate(shift, 0.0) * state.tm;
     }
 
     /// Place one character and advance the text matrix past it.
-    fn emit_glyph(&mut self, state: &mut GState, info: &FontInfo, ch: char) {
-        let width_em = info.advance(ch);
+    ///
+    /// `width_em` is the font's own advance for the character's code when the
+    /// PDF provides it, and `None` for the estimate.
+    fn emit_glyph(&mut self, state: &mut GState, info: &FontInfo, ch: char, width_em: Option<f32>) {
+        let width_em = width_em.unwrap_or_else(|| info.advance(ch));
         let mut advance = width_em * state.font_size + state.char_spacing;
         if ch == ' ' {
             advance += state.word_spacing;
         }
         advance *= state.h_scale;
 
-        let trm = state.tm.mul(state.ctm);
+        let trm = state.tm * state.ctm;
         let start = trm.apply(0.0, state.rise);
         let end = trm.apply(advance, state.rise);
 
@@ -395,7 +405,7 @@ impl<'a> Interpreter<'a> {
             });
         }
 
-        state.tm = translate(advance, 0.0).mul(state.tm);
+        state.tm = translate(advance, 0.0) * state.tm;
     }
 
     /// Turn the current path into rules (thin) and rectangles (table borders).
@@ -494,7 +504,7 @@ impl<'a> Interpreter<'a> {
     }
 
     /// Follow a form XObject, applying its `/Matrix`, a few levels deep.
-    fn run_form(&mut self, state: &GState, stream: &Stream) {
+    fn run_form(&mut self, state: &GState, stream: &'a Stream) {
         if self.depth >= 3 {
             return;
         }
@@ -511,8 +521,7 @@ impl<'a> Interpreter<'a> {
                 if values.len() == 6 {
                     inner.ctm = Matrix::new(
                         values[0], values[1], values[2], values[3], values[4], values[5],
-                    )
-                    .mul(inner.ctm);
+                    ) * inner.ctm;
                 }
             }
         }
@@ -600,10 +609,10 @@ mod tests {
     fn text_matrix_advance_moves_the_pen() {
         let mut state = GState { font_size: 10.0, ..GState::default() };
         let info = FontInfo::default();
-        let trm_before = state.tm.mul(state.ctm);
+        let trm_before = state.tm * state.ctm;
         let advance = info.advance('A') * 10.0;
-        state.tm = translate(advance, 0.0).mul(state.tm);
-        let trm_after = state.tm.mul(state.ctm);
+        state.tm = translate(advance, 0.0) * state.tm;
+        let trm_after = state.tm * state.ctm;
         assert!((trm_after.e - trm_before.e - advance).abs() < 0.001);
         assert!((trm_after.f - trm_before.f).abs() < 0.001);
     }

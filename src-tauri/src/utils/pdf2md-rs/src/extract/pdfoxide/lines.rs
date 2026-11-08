@@ -37,11 +37,6 @@ pub struct Line {
 }
 
 impl Line {
-    /// `true` when the line starts a new sentence/paragraph candidate.
-    pub fn is_short(&self, right_margin: f32) -> bool {
-        self.rect.x1 < right_margin - self.size * 1.5
-    }
-
     /// Number of words.
     pub fn word_count(&self) -> usize {
         self.words.len()
