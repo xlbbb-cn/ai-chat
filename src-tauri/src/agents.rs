@@ -3880,6 +3880,18 @@ fn main_helper_tool_ids(config: &AppConfig) -> Vec<String> {
         .collect()
 }
 
+/// Drop the self-evolution `mcp_self` tool from a sub-agent / helper list.
+///
+/// Building an MCP server is a main-agent capability: parallel tasks would race
+/// on `mcp_servers.json`, an `AgentMcpSession` only loads servers at task start
+/// (so a task's own creation would never reach its tool list), and registering
+/// one asks the user for confirmation — a blocking dialog inside a mission.
+/// The main agent owns the registry; sub-agents consume what it enabled.
+fn drop_mcp_self(tools_list: &mut Vec<Value>) {
+    let name = tools::mcp_self::TOOL_NAME;
+    tools_list.retain(|tool| tool.pointer("/function/name").and_then(Value::as_str) != Some(name));
+}
+
 /// Compact transcript of the real conversation for the helper. Newest entries
 /// win when the budget is exhausted; tool-call rounds are skipped because only
 /// the user/assistant text is useful as context.
@@ -3948,7 +3960,8 @@ async fn load_enabled_mcp_tools(
     let mut tool_map: std::collections::HashMap<String, (mcp::McpServer, String)> =
         std::collections::HashMap::new();
 
-    let enabled_servers: Vec<mcp::McpServer> = mcp::load_servers(&state.mcp_servers_path)
+    // Merged roster: panel servers plus the assistant's own (`.data/mcp.conf`).
+    let enabled_servers: Vec<mcp::McpServer> = mcp::load_effective_servers(&state)
         .into_iter()
         .filter(|server| server.enabled)
         .collect();
@@ -4086,6 +4099,7 @@ async fn run_main_agent_helper_inner(
     // ── Tools: main selection + skills + enabled MCP ─────────────────────────
     let tool_ids = main_helper_tool_ids(config);
     let mut tools_list = tools::get_all_tools(&tool_ids, config.self_evolution_mode, false);
+    drop_mcp_self(&mut tools_list);
     let has_skills = !skills.is_empty() || config.self_evolution_mode;
     if has_skills {
         tools_list.push(tools::get_use_skill_tool());
@@ -4477,6 +4491,7 @@ async fn run_llm_agent_body(
         }
     }
     let mut tools_list = tools::get_all_tools(&agent_tool_ids, config.self_evolution_mode, false);
+    drop_mcp_self(&mut tools_list);
     tools_list.extend(tools::get_agent_task_tools());
     // The mission bus is available only inside a planner-dispatched batch.
     // `call_subagent` (a direct main-agent delegation) has no bus, so the tool

@@ -278,7 +278,7 @@ const zhCN: Messages = {
             openTmp: "打开交付物交换区",
             openTmpHint: "子 agent 的交付物保存在 .data/tmp 下，可在这里手动清理。",
             selfEvolution: "启用自我进化模式",
-            selfEvolutionHint: "允许助手在工作区内自行演进技能。开启期间“文件操作”和“记忆”工具会强制启用并锁定，助手还会把已验证的关键事实（运行环境、正确的工具用法、常用文件位置）记录到专属的自进化记忆区。",
+            selfEvolutionHint: "允许助手在工作区内自行演进技能。开启期间“文件操作”和“记忆”工具会强制启用并锁定，助手还会把已验证的关键事实（运行环境、正确的工具用法、常用文件位置）记录到专属的自进化记忆区。助手还可以自建 MCP 服务器（`mcp_self`）：脚本存放在 .data/mcp，经你确认后作为本地进程启动。",
             profilesTitle: "配置方案",
             profileNamePlaceholder: "配置名称",
             saveCurrent: "保存当前配置",
@@ -521,6 +521,9 @@ const zhCN: Messages = {
         editTitle: "编辑 MCP 服务器",
         description: "Model Context Protocol (MCP) 服务器通过外部工具与数据源扩展 AI 能力。",
         empty: "尚未配置任何服务器。",
+        selfBuilt: "自建",
+        selfBuiltHint:
+            "助手在进化模式下自建的服务器，配置存放在工作区 .data/mcp.conf 并与本列表合并。脚本：{path}",
         addServer: "+ 添加服务器",
         name: "名称",
         namePlaceholder: "我的 MCP 服务器",

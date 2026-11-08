@@ -573,6 +573,13 @@ export interface McpServer {
   url: string;
   auth_token: string;
   enabled: boolean;
+  /**
+   * `""` / `"user"` for a panel-owned entry, `"self-evolution"` for a server
+   * the assistant built with the `mcp_self` tool.
+   */
+  source?: string;
+  /** Workspace-relative script path of a self-built server (`.data/mcp/<slug>/server.py`). */
+  definition_path?: string;
 }
 
 export type McpLogLevel = "info" | "warn" | "error";

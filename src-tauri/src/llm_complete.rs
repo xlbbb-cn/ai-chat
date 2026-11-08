@@ -2217,6 +2217,135 @@ impl Drop for InjectionWindow {
     }
 }
 
+/// Assemble the complete tool payload for one request of a chat turn.
+///
+/// Re-entrant on purpose: the `mcp_self` tool can create and enable an MCP
+/// server from inside the turn (which bumps `AppState::mcp_revision`), and the
+/// tool loop rebuilds this payload at the next request boundary so the new
+/// tools are callable in the *same* turn instead of the next one. Built-ins,
+/// `skill_read`, `use_skill` and `call_subagent` are re-derived from the same
+/// inputs, so a rebuild is idempotent.
+async fn build_turn_tools(
+    state: &AppState,
+    config: &crate::AppConfig,
+    active_skill_dirs: &[(String, PathBuf)],
+    has_skills: bool,
+    evolution_root: Option<&Path>,
+    enabled_agents: &[agents::SubAgent],
+) -> (
+    Vec<Value>,
+    std::collections::HashMap<String, (mcp::McpServer, String)>,
+    u64,
+) {
+    let mut tools_list = tools::get_all_tools(
+        &config.effective_tools(),
+        config.self_evolution_mode,
+        config.background_tools,
+    );
+
+    // ── Skill-read tool ─────────────────────────────────────────────────────
+    // Auto-inject skill_read when one or more skills are active.
+    if !active_skill_dirs.is_empty() {
+        tools_list.push(tools::get_skill_read_tool());
+    }
+
+    // ── MCP tools ───────────────────────────────────────────────────────────
+    let mut mcp_tool_map: std::collections::HashMap<String, (mcp::McpServer, String)> =
+        std::collections::HashMap::new();
+    {
+        // Merged roster: the user's panel servers (`mcp_servers.json`) plus the
+        // ones the assistant built (`.data/mcp.conf`).
+        let enabled_servers: Vec<mcp::McpServer> = mcp::load_effective_servers(state)
+            .into_iter()
+            .filter(|s| s.enabled)
+            .collect();
+
+        // Sorting boundary: only the appended MCP segment is re-ordered — the
+        // built-in tools and the skill tools keep their layout.
+        let mcp_tools_start = tools_list.len();
+
+        for server in enabled_servers.iter() {
+            match mcp::get_server_tools(&state, server).await {
+                Ok(server_tools) => {
+                    for tool in server_tools {
+                        // Stable `mcp_<server-hash>_<name>` function name and
+                        // a description that names the server.
+                        if let Some((fn_name, actual_name, openai_tool)) =
+                            mcp::adapt_tool_for_llm(server, &tool, config.background_tools)
+                        {
+                            tools_list.push(openai_tool);
+                            mcp_tool_map.insert(fn_name, (server.clone(), actual_name));
+                        }
+                    }
+                }
+                Err(e) => {
+                    // Same shape as the sub-agent loader: a server that cannot
+                    // list its tools is skipped, never fatal for the turn.
+                    if let Ok(logger) = state.logger.lock() {
+                        logger.log(
+                            "ERROR",
+                            &format!("MCP server '{}' tools/list failed: {e}", server.name),
+                        );
+                    }
+                }
+            }
+        }
+
+        // The tools payload sits at the very top of the cached request prefix,
+        // so its order must not depend on enumeration order (see
+        // `mcp::sort_adapted_tools`).
+        mcp::sort_adapted_tools(&mut tools_list[mcp_tools_start..]);
+    }
+
+    // `use_skill` is advertised when the user has at least one enabled skill —
+    // and always in self-evolution mode, where the assistant may have just written
+    // a new skill that is not enabled yet but must still be loadable.
+    if has_skills || evolution_root.is_some() {
+        tools_list.push(tools::get_use_skill_tool());
+    }
+
+    if !enabled_agents.is_empty() {
+        let mut subagent_tool = json!({
+            "type": "function",
+            "function": {
+                "name": "call_subagent",
+                "description": "Delegate a task to one of the configured agents (llm / cli / cloud). You must specify the exact agent_id from the available-agents list. The agent does not see this conversation, so `task_description` must be self-contained. Wait for it to finish; it returns the final result.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "agent_id": {
+                            "type": "string",
+                            "description": "The exact ID of the agent to invoke"
+                        },
+                        "task_description": {
+                            "type": "string",
+                            "description": "Detailed, self-contained prompt/description of the task for the agent to perform"
+                        },
+                        "context": {
+                            "type": "string",
+                            "description": "Optional extra context (file paths, findings, constraints) appended to the task description"
+                        },
+                        "cwd": {
+                            "type": "string",
+                            "description": "Working directory for this task, workspace-relative or absolute inside the workspace (for example \"./apps/web\"). The agent starts there, so pass it whenever the work targets a specific project or subfolder. Omit it to use the workspace root."
+                        }
+                    },
+                    "required": ["agent_id", "task_description"]
+                }
+            }
+        });
+        if config.background_tools {
+            subagent_tool["function"]["parameters"]["properties"]["run_in_background"] = json!({
+                "type": "boolean",
+                "description": "Delegate as a background task: return a task id immediately instead of waiting. The agent's result is delivered automatically before your next request; the turn stays open until it arrives. Use it when the delegated work is long and you can do something else meanwhile."
+            });
+        }
+        tools_list.push(subagent_tool);
+    }
+
+    (tools_list, mcp_tool_map, state.mcp_revision())
+}
+
 /// The whole chat turn: orchestration, the main-agent tool loop, and the
 /// final answer. Extracted from `chat_completion` so the command wrapper can
 /// run turn-end cleanup on every exit path (final answer, upstream error,
@@ -2794,111 +2923,20 @@ async fn run_chat_turn(
     // the same conversation id (and the same custom headers).
     let request_headers = upstream_request_headers(&config, &session_id);
 
-    let mut tools_list = tools::get_all_tools(
-        &config.effective_tools(),
-        config.self_evolution_mode,
-        config.background_tools,
-    );
-
-    // ── Skill-read tool ─────────────────────────────────────────────────────
-    // Auto-inject skill_read when one or more skills are active.
-    if !active_skill_dirs.is_empty() {
-        tools_list.push(tools::get_skill_read_tool());
-    }
-
     let active_model = model_override
         .map(|m| m.trim().to_string())
         .filter(|m| !m.is_empty())
         .unwrap_or_else(|| config.model.clone());
 
-    // ── MCP tools ───────────────────────────────────────────────────────────
-    let mut mcp_tool_map: std::collections::HashMap<String, (mcp::McpServer, String)> =
-        std::collections::HashMap::new();
-    {
-        let enabled_servers: Vec<mcp::McpServer> = mcp::load_servers(&state.mcp_servers_path)
-            .into_iter()
-            .filter(|s| s.enabled)
-            .collect();
-
-        // Sorting boundary: only the appended MCP segment is re-ordered — the
-        // built-in tools and the skill tools keep their layout.
-        let mcp_tools_start = tools_list.len();
-
-        for server in enabled_servers.iter() {
-            match mcp::get_server_tools(&state, server).await {
-                Ok(server_tools) => {
-                    for tool in server_tools {
-                        // Stable `mcp_<server-hash>_<name>` function name and
-                        // a description that names the server.
-                        if let Some((fn_name, actual_name, openai_tool)) =
-                            mcp::adapt_tool_for_llm(server, &tool, config.background_tools)
-                        {
-                            tools_list.push(openai_tool);
-                            mcp_tool_map.insert(fn_name, (server.clone(), actual_name));
-                        }
-                    }
-                }
-                Err(e) => {
-                    log_event(
-                        &state,
-                        "ERROR",
-                        format!("MCP server '{}' tools/list failed: {e}", server.name),
-                    );
-                }
-            }
-        }
-
-        // The tools payload sits at the very top of the cached request prefix,
-        // so its order must not depend on enumeration order (see
-        // `mcp::sort_adapted_tools`).
-        mcp::sort_adapted_tools(&mut tools_list[mcp_tools_start..]);
-    }
-
-    // `use_skill` is advertised when the user has at least one enabled skill —
-    // and always in self-evolution mode, where the assistant may have just written
-    // a new skill that is not enabled yet but must still be loadable.
-    if !skill_ids.is_empty() || skill_evolution_root.is_some() {
-        tools_list.push(tools::get_use_skill_tool());
-    }
-
-    if !enabled_agents.is_empty() {
-        let mut subagent_tool = json!({
-            "type": "function",
-            "function": {
-                "name": "call_subagent",
-                "description": "Delegate a task to one of the configured agents (llm / cli / cloud). You must specify the exact agent_id from the available-agents list. The agent does not see this conversation, so `task_description` must be self-contained. Wait for it to finish; it returns the final result.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "agent_id": {
-                            "type": "string",
-                            "description": "The exact ID of the agent to invoke"
-                        },
-                        "task_description": {
-                            "type": "string",
-                            "description": "Detailed, self-contained prompt/description of the task for the agent to perform"
-                        },
-                        "context": {
-                            "type": "string",
-                            "description": "Optional extra context (file paths, findings, constraints) appended to the task description"
-                        },
-                        "cwd": {
-                            "type": "string",
-                            "description": "Working directory for this task, workspace-relative or absolute inside the workspace (for example \"./apps/web\"). The agent starts there, so pass it whenever the work targets a specific project or subfolder. Omit it to use the workspace root."
-                        }
-                    },
-                    "required": ["agent_id", "task_description"]
-                }
-            }
-        });
-        if config.background_tools {
-            subagent_tool["function"]["parameters"]["properties"]["run_in_background"] = json!({
-                "type": "boolean",
-                "description": "Delegate as a background task: return a task id immediately instead of waiting. The agent's result is delivered automatically before your next request; the turn stays open until it arrives. Use it when the delegated work is long and you can do something else meanwhile."
-            });
-        }
-        tools_list.push(subagent_tool);
-    }
+    let (mut tools_list, mut mcp_tool_map, mut tools_revision) = build_turn_tools(
+        &state,
+        &config,
+        &active_skill_dirs,
+        !skill_ids.is_empty(),
+        skill_evolution_root.as_deref(),
+        &enabled_agents,
+    )
+    .await;
 
     // Track the final answer and whether the LLM already persisted memory via
     // the `memory` tool, so the automatic fallback doesn't duplicate it.
@@ -2912,6 +2950,37 @@ async fn run_chat_turn(
     let mut background_hold_rounds: u32 = 0;
 
     loop {
+        // ── MCP registry changed during this turn? ───────────────────────────
+        // `mcp_self` can create and enable a server while the turn is running.
+        // Rebuilding the payload before the next request is what makes the new
+        // tools callable *now*; without it the model would have to wait for the
+        // next conversation turn, which reads like "the server was created but
+        // its tools do not exist".
+        let registry_revision = state.mcp_revision();
+        if registry_revision != tools_revision {
+            let rebuilt = build_turn_tools(
+                &state,
+                &config,
+                &active_skill_dirs,
+                !skill_ids.is_empty(),
+                skill_evolution_root.as_deref(),
+                &enabled_agents,
+            )
+            .await;
+            tools_list = rebuilt.0;
+            mcp_tool_map = rebuilt.1;
+            tools_revision = rebuilt.2;
+            log_event(
+                &state,
+                "INFO",
+                format!(
+                    "MCP tool payload rebuilt mid-turn: session_id={}, revision={tools_revision}, tools={}",
+                    session_id,
+                    tools_list.len()
+                ),
+            );
+        }
+
         // Sanitize tool call pairs before each request to prevent the API error:
         // "Messages with role 'tool' must be a response to a preceding message with 'tool_calls'"
         sanitize_tool_pairs(&mut all_messages);
