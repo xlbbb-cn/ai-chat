@@ -192,6 +192,16 @@ pub fn normalize_relative(relative: &str) -> Result<String, String> {
     if trimmed.is_empty() {
         return Err("The agent file path cannot be empty.".to_string());
     }
+    // A drive-qualified path is absolute even on a host that does not parse it
+    // as one (`C:/x/agent.md` is three ordinary components on Linux).
+    {
+        let bytes = trimmed.as_bytes();
+        if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+            return Err(
+                "The agent file path must stay inside the agents directory.".to_string()
+            );
+        }
+    }
 
     let mut parts: Vec<String> = Vec::new();
     for component in Path::new(&trimmed).components() {
