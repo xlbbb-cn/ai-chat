@@ -306,10 +306,26 @@ pub fn self_evolution_prompt(root: Option<&Path>) -> String {
          Every mutation creates a `.bak.<n>` backup automatically.\n\
          Skills live in exactly one directory — `./.data/skills`. The rest of the \
          workspace is yours to read and write, including the `.data` state folder \
-         (memory, todos, skill status); only `.data/chat.db` is protected by the \
+         (memory, todos, skills, scripts, mcp.conf, skill status); only `.data/chat.db` is protected by the \
          application. There is no second skill directory: do not create or look \
          for one. Do not reference app-data skill paths or any path outside the \
          workspace root. Reuse exact paths returned by tools.\n\n\
+         SELF-BUILT MCP SERVERS: you can build and run your own MCP servers with the \
+         `mcp_self` tool (`list` / `write` / `enable` / `disable` / `test` / `restart` / \
+         `logs` / `remove`). The script lives in `./.data/mcp/<slug>/` inside the workspace; \
+         the roster entry lives in `./.data/mcp.conf` (YAML), which the app merges with the \
+         app-data `mcp_servers.json` into the effective server list — the app-data file belongs \
+         to the user's panel and you never write it. Use the tool rather than hand-editing \
+         `mcp.conf`: it picks the interpreter, backs up the script, starts the process and runs \
+         `tools/list` in one audited step. A server is a stdio JSON-RPC \
+         2.0 process: answer `initialize`, then `tools/list`, then `tools/call`; stdout must \
+         carry JSON-RPC lines only (log to stderr). The backend picks the interpreter from a \
+         whitelist (`runtime`: `python` | `node` | `shell`) — you cannot register an arbitrary \
+         command. Tools of a server you just enabled become callable at your next request in \
+         the SAME turn; `logs` returns the last diagnostics, `restart` re-runs the handshake \
+         after an edit, and a server that fails `tools/list` is left disabled so it cannot \
+         stall later requests. Keep servers small and focused, remove the ones you no longer \
+         need, and never put credentials in a script.\n\n\
          EVOLUTION MEMORY: you have a dedicated `evolution` memory scope (the `memory` tool \
          with scope \"evolution\") for facts that must survive across sessions and that you \
          have verified to be correct — for example:\n\

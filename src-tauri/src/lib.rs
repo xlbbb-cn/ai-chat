@@ -643,6 +643,14 @@ pub struct AppState {
     pub mcp_children: std::sync::Arc<
         tokio::sync::Mutex<std::collections::HashMap<String, mcp::StdioProcessHandle>>,
     >,
+    /// Monotonic revision of the MCP registry (`mcp_servers.json`).
+    ///
+    /// Bumped by every entry change (`save_mcp_server`, `delete_mcp_server`,
+    /// `mcp::upsert_server` / `remove_server`). `chat_completion` captures it
+    /// when it assembles the tool payload and rebuilds that payload at the next
+    /// request boundary when it changed — that is what makes a server created
+    /// and enabled by the `mcp_self` tool usable inside the *same* turn.
+    pub mcp_revision: AtomicU64,
     /// Long-lived background children started by `run_shell run_type="serve"`.
     /// Killed on demand by the tool and automatically at app exit.
     pub serve_processes: tools::serve::ServeRegistry,
@@ -678,6 +686,19 @@ impl AppState {
     /// Active workspace skill status file (`<workspace>/.data/skills.status`).
     pub fn skills_status_path(&self) -> PathBuf {
         workspace::skills_status_path(&self.workspace_dir.lock().unwrap())
+    }
+
+    /// Current MCP registry revision (see `AppState::mcp_revision`).
+    pub fn mcp_revision(&self) -> u64 {
+        self.mcp_revision.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Mark the MCP registry as changed, so an in-flight turn rebuilds its MCP
+    /// tool segment at the next request boundary.
+    pub fn bump_mcp_revision(&self) -> u64 {
+        self.mcp_revision
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1
     }
 
     /// Start the injection window of a new turn and return its id.
@@ -1159,6 +1180,9 @@ fn apply_profile_config(
     };
     let mcp_json = serde_json::to_string_pretty(&mcp_file).map_err(|e| e.to_string())?;
     fs::write(&state.mcp_servers_path, mcp_json).map_err(|e| e.to_string())?;
+    // The roster changed wholesale: a running turn must rebuild its MCP tool
+    // segment instead of calling tools the profile removed.
+    state.bump_mcp_revision();
 
     let _ = app.emit(backup::PROFILE_RESTORED_EVENT, ());
     Ok(())
@@ -1462,6 +1486,7 @@ pub fn run() {
                 mcp_logs: std::sync::Arc::new(Mutex::new(Default::default())),
                 mcp_cancelled_tests: std::sync::Arc::new(Mutex::new(Default::default())),
                 mcp_children: std::sync::Arc::new(tokio::sync::Mutex::new(Default::default())),
+                mcp_revision: AtomicU64::new(1),
                 serve_processes: Default::default(),
                 background_tasks: Default::default(),
                 session_memories: Mutex::new(Default::default()),
@@ -1487,7 +1512,29 @@ pub fn run() {
 
             // Warmup: auto-start all enabled stdio MCP servers
             {
-                let servers = mcp::load_servers(&mcp_servers_path);
+                // Servers the assistant built live in the workspace roster
+                // (`.data/mcp.conf`); fold any leftover ones out of the
+                // app-data file before the merged roster is read.
+                let managed = app.try_state::<AppState>();
+                if let Some(state) = managed.as_deref() {
+                    match mcp::migrate_self_built_servers(state) {
+                        Ok(0) => {}
+                        Ok(moved) => state.logger.lock().unwrap().log(
+                            "INFO",
+                            &format!(
+                                "Moved {moved} self-built MCP server(s) into <workspace>/.data/mcp.conf"
+                            ),
+                        ),
+                        Err(err) => state.logger.lock().unwrap().log(
+                            "WARN",
+                            &format!("Could not move self-built MCP servers into the workspace: {err}"),
+                        ),
+                    }
+                }
+                let servers = match managed.as_deref() {
+                    Some(state) => mcp::load_effective_servers(state),
+                    None => mcp::load_servers(&mcp_servers_path),
+                };
                 let enabled_stdio: Vec<_> = servers
                     .iter()
                     .filter(|s| s.enabled && matches!(s.transport, mcp::McpTransport::Stdio))

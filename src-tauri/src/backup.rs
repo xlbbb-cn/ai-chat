@@ -5,13 +5,15 @@
 //! ```text
 //! config.json             AppConfig
 //! profiles.json           named profiles (copy of the app-data profiles.json)
-//! mcp_servers.json        MCP server definitions
+//! mcp_servers.json        MCP servers created by hand (the MCP panel)
 //! sub_agents.json         sub-agent runtime config + orchestration
 //! agents/...              `llm` agent definitions (md, app-wide)
 //! workspace/memory/...    workspace-scoped memory notes
 //! workspace/todos/...     workspace-scoped todo lists
 //! workspace/skills/...    workspace skills (the one skills root)
 //! workspace/scripts/...   run_cmd script library (+ .index.json)
+//! workspace/mcp/...       self-built MCP servers (evolution mode)
+//! workspace/mcp.conf      roster of those servers (merged with mcp_servers.json)
 //! workspace/skills.status workspace skill enablement + metadata
 //! chat.db                 SQLite snapshot (VACUUM INTO)
 //! ```
@@ -41,12 +43,13 @@ pub(crate) const PROFILE_RESTORED_EVENT: &str = "profile-restored";
 
 /// Workspace-scoped state directories that are part of a profile backup, as
 /// `(zip name, path under <workspace>/.data)`.
-fn workspace_backup_dirs(workspace_dir: &Path) -> [(&'static str, PathBuf); 4] {
+fn workspace_backup_dirs(workspace_dir: &Path) -> [(&'static str, PathBuf); 5] {
     [
         ("memory", crate::workspace::memory_root(workspace_dir)),
         ("todos", crate::workspace::todos_root(workspace_dir)),
         ("skills", crate::workspace::skills_root(workspace_dir)),
         ("scripts", crate::workspace::scripts_root(workspace_dir)),
+        ("mcp", crate::workspace::mcp_root(workspace_dir)),
     ]
 }
 
@@ -246,6 +249,21 @@ fn export_profile(app: &AppHandle, profile_path: &Path) -> Result<(), String> {
         result?;
     }
 
+    // The assistant's own MCP roster travels with the workspace it belongs to
+    // (the panel-owned servers stay in `mcp_servers.json` above).
+    let mcp_conf_path = crate::workspace::mcp_conf_path(&workspace_dir);
+    if mcp_conf_path.is_file() {
+        emit_profile_export_status(app, "Packing workspace/mcp.conf");
+        let result = (|| -> Result<(), String> {
+            zip.start_file("workspace/mcp.conf", zip_options())
+                .map_err(|e| e.to_string())?;
+            let mut conf_file = fs::File::open(&mcp_conf_path).map_err(|e| e.to_string())?;
+            std::io::copy(&mut conf_file, &mut zip).map_err(|e| e.to_string())?;
+            Ok(())
+        })();
+        result?;
+    }
+
     emit_profile_export_status(app, "Exporting chat.db (sending disabled during export)");
     let chat_db_backup = backup_chat_db(&state)?;
     let db_result = (|| -> Result<(), String> {
@@ -359,6 +377,36 @@ fn restore_workspace_dirs(
         );
     }
 
+    // Assistant-built MCP roster, next to the `workspace/mcp/` scripts restored
+    // above. Parsing first means a corrupt archive entry cannot make the next
+    // chat fail: an unreadable roster simply resolves to "no self-built
+    // servers".
+    if let Ok(mut conf_entry) = archive.by_name("workspace/mcp.conf") {
+        let mut contents = Vec::new();
+        conf_entry
+            .read_to_end(&mut contents)
+            .map_err(|e| e.to_string())?;
+        let text = String::from_utf8_lossy(&contents).to_string();
+        if crate::mcp::validate_workspace_roster(&text) {
+            let conf_path = crate::workspace::mcp_conf_path(&workspace_dir);
+            if let Some(parent) = conf_path.parent() {
+                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            fs::write(&conf_path, text).map_err(|e| e.to_string())?;
+            state.bump_mcp_revision();
+            state.logger.lock().unwrap().log(
+                "INFO",
+                "Restored workspace/mcp.conf from profile archive",
+            );
+        } else {
+            state
+                .logger
+                .lock()
+                .unwrap()
+                .log("WARN", "Ignored an unreadable workspace/mcp.conf in the profile archive");
+        }
+    }
+
     Ok(())
 }
 
@@ -445,6 +493,34 @@ pub(crate) fn import_profile(app: &AppHandle, profile_path: &Path) -> Result<(),
     // so inline prompts from old archives can still be migrated.
     restore_agent_files(&state, &mut archive)?;
 
+    // MCP roster: the archive's `mcp_servers.json` replaces the local one.
+    // Parsing first keeps a hand-edited/corrupt entry from bricking the next
+    // startup, and the live stdio children are retired so the restored roster
+    // (including the `.data/mcp` scripts restored below) takes effect on the
+    // next tool call instead of keeping the old processes alive.
+    if let Ok(mut mcp_file) = archive.by_name("mcp_servers.json") {
+        let mut mcp_json = String::new();
+        mcp_file
+            .read_to_string(&mut mcp_json)
+            .map_err(|e| e.to_string())?;
+        if let Ok(parsed) = serde_json::from_str::<mcp::McpServersFile>(&mcp_json) {
+            let json = serde_json::to_string_pretty(&parsed).map_err(|e| e.to_string())?;
+            fs::write(&state.mcp_servers_path, json).map_err(|e| e.to_string())?;
+            state.bump_mcp_revision();
+            let app_handle = app.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Some(state) = app_handle.try_state::<AppState>() {
+                    mcp::stop_all_stdio_processes(&state).await;
+                }
+            });
+        } else {
+            state.logger.lock().unwrap().log(
+                "WARN",
+                "Ignored mcp_servers.json from profile archive: not a valid servers file",
+            );
+        }
+    }
+
     if let Ok(mut profiles_file) = archive.by_name("profiles.json") {
         let mut profiles_json = String::new();
         profiles_file
@@ -462,6 +538,19 @@ pub(crate) fn import_profile(app: &AppHandle, profile_path: &Path) -> Result<(),
     }
 
     restore_workspace_dirs(&state, &mut archive)?;
+
+    // Both rosters may have just changed (app-data `mcp_servers.json` above and
+    // the workspace's `mcp.conf` inside the restore). Retire the live stdio
+    // children so the restored set — not the old processes with their old code
+    // — answers the next tool call.
+    {
+        let app_handle = app.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Some(state) = app_handle.try_state::<AppState>() {
+                mcp::stop_all_stdio_processes(&state).await;
+            }
+        });
+    }
 
     // Fold legacy inline prompts into `agents/custom/` and discover any
     // definitions that are new to this machine.

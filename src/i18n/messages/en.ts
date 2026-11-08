@@ -309,7 +309,7 @@ const en = {
             openTmpHint: "Sub-agent deliverables live under .data/tmp; clean them up here.",
             selfEvolution: "Enable Self-Evolution Mode",
             selfEvolutionHint:
-                "Let the assistant evolve its own skills inside the workspace. The file actions and memory tools stay enabled while the mode is on, and the assistant keeps verified facts (runtime environment, correct tool usage, file locations) in a dedicated evolution memory.",
+                "Let the assistant evolve its own skills inside the workspace. The file actions and memory tools stay enabled while the mode is on, and the assistant keeps verified facts (runtime environment, correct tool usage, file locations) in a dedicated evolution memory. The assistant may also build its own MCP servers (`mcp_self`) — scripts under .data/mcp, started as local processes after your confirmation.",
             profilesTitle: "Configuration Profiles",
             profileNamePlaceholder: "Profile name",
             saveCurrent: "Save Current",
@@ -562,6 +562,9 @@ const en = {
         description:
             "Model Context Protocol (MCP) servers extend the AI with external tools and data sources.",
         empty: "No servers configured yet.",
+        selfBuilt: "self-built",
+        selfBuiltHint:
+            "Built by the assistant in self-evolution mode. Stored in the workspace roster .data/mcp.conf, merged with this list. Script: {path}",
         addServer: "+ Add Server",
         name: "Name",
         namePlaceholder: "My MCP Server",

@@ -626,6 +626,28 @@ export async function clearMcpLogs(id: string): Promise<void> {
   return invoke("clear_mcp_logs", { id });
 }
 
+/**
+ * One registry mutation performed by the assistant's `mcp_self` tool
+ * (self-evolution mode): create / update / enable / disable / remove.
+ *
+ * The open MCP panel refreshes its list from this event, so a server the model
+ * built mid-chat shows up without reopening the panel.
+ */
+export interface McpServersChanged {
+  id: string;
+  name: string;
+  action: string;
+  enabled: boolean;
+  source?: string;
+  definition_path?: string;
+}
+
+export async function onMcpServersChanged(
+  cb: (change: McpServersChanged) => void,
+): Promise<UnlistenFn> {
+  return listen<McpServersChanged>("mcp-servers-changed", (e) => cb(e.payload));
+}
+
 // ─── API Request Monitor ──────────────────────────────────────────────────────
 
 export interface ApiRequestRecord {

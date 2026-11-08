@@ -10,6 +10,7 @@ use self::search::{run_integrated_search, SearchOptions, SEARCH_MAX_MATCHES};
 
 mod file_actions;
 pub(crate) mod memory;
+pub(crate) mod mcp_self;
 mod patch;
 mod paths;
 mod process;
@@ -682,6 +683,16 @@ pub fn get_all_tools(
         }));
     }
 
+    // Self-evolution mode owns a second capability besides skills and memory:
+    // the assistant may build and run its own MCP servers (`mcp_self`). The
+    // tool is not part of `selected_tools` — the mode is the switch, exactly
+    // like `skill_read` / `use_skill` are injected from the session state. It
+    // is filtered back out for sub-agents and the main-agent helper, which must
+    // not race on the registry (see `agents::SUB_AGENT_EXCLUDED_TOOLS`).
+    if self_evolution {
+        tools.push(self::mcp_self::schema());
+    }
+
     tools
 }
 
@@ -919,6 +930,28 @@ mod tests {
 
         assert!(actions(&memory_tool(true)).contains(&"consolidate".to_string()));
         assert!(!actions(&memory_tool(false)).contains(&"consolidate".to_string()));
+    }
+
+    /// `mcp_self` is the mode's capability switch: advertised only while
+    /// self-evolution mode is on, and never advertised without it (it writes
+    /// the app-data MCP registry and starts local processes).
+    #[test]
+    fn mcp_self_is_advertised_only_in_self_evolution_mode() {
+        let advertised = super::get_all_tools(&["file_actions".to_string()], true, false);
+        assert!(
+            advertised
+                .iter()
+                .any(|tool| tool["function"]["name"] == "mcp_self"),
+            "self-evolution mode must advertise mcp_self"
+        );
+
+        let plain = super::get_all_tools(&["file_actions".to_string()], false, false);
+        assert!(
+            !plain
+                .iter()
+                .any(|tool| tool["function"]["name"] == "mcp_self"),
+            "mcp_self must not be advertised outside self-evolution mode"
+        );
     }
 
     #[test]
@@ -2512,6 +2545,17 @@ pub async fn execute_tool(
                 }
                 Err(err) => format!("Error: {err}"),
             }
+        }
+        // Self-built MCP servers (self-evolution mode only). The tool writes the
+        // script under `<workspace>/.data/mcp/`, registers it in the app-data
+        // registry (which `file_actions` cannot reach) and starts the stdio
+        // process. Re-checked here as well as in the schema, so a hand-crafted
+        // call without the advertised capability is refused.
+        "mcp_self" => {
+            if !config.self_evolution_mode {
+                return "Error: mcp_self is only available in self-evolution mode.".to_string();
+            }
+            return self::mcp_self::handle(app, &args, &workspace_dir, cancel).await;
         }
         "memory" => {
             memory::handle_memory_tool(

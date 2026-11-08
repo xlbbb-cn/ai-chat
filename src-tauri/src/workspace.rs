@@ -14,6 +14,9 @@
 //!     skills/<name>/skill.md   workspace skills (the only skills root)
 //!     scripts/                 run_cmd script library (on the child PATH)
 //!     tmp/<batch-id>/...       sub-agent deliverable exchange area
+//!     mcp/<slug>/server.*      self-built MCP servers (evolution mode)
+//!     mcp.conf                 self-built server roster (merged with the
+//!                              app-data mcp_servers.json)
 //!     skills.status            per-workspace skill enablement + metadata
 //! ```
 //!
@@ -73,6 +76,28 @@ pub fn tmp_root(workspace_dir: &Path) -> PathBuf {
     data_root(workspace_dir).join("tmp")
 }
 
+/// Root of the self-built MCP servers (`<workspace>/.data/mcp`).
+///
+/// One directory per server (`<slug>/server.py`), written by the `mcp_self`
+/// tool in self-evolution mode. The registry entry in the app-data
+/// `mcp_servers.json` points at the script with a workspace-relative path, so
+/// the assets travel with the workspace (and with a profile backup) while the
+/// stdio child keeps starting in the workspace root.
+pub fn mcp_root(workspace_dir: &Path) -> PathBuf {
+    data_root(workspace_dir).join("mcp")
+}
+
+/// Workspace side of the MCP roster (`<workspace>/.data/mcp.conf`, YAML).
+///
+/// The assistant's self-evolution mode keeps the servers it built here, next
+/// to their scripts, and never writes the app-data `mcp_servers.json`. The two
+/// files are merged into the effective roster (`mcp::load_effective_servers`),
+/// so a self-built server still moves with the workspace (and with a profile
+/// backup) while the panel-owned entries stay application-wide.
+pub fn mcp_conf_path(workspace_dir: &Path) -> PathBuf {
+    data_root(workspace_dir).join("mcp.conf")
+}
+
 /// Workspace skill status file (`<workspace>/.data/skills.status`).
 pub fn skills_status_path(workspace_dir: &Path) -> PathBuf {
     data_root(workspace_dir).join("skills.status")
@@ -130,6 +155,7 @@ mod tests {
         assert_eq!(skills_root(workspace), data.join("skills"));
         assert_eq!(scripts_root(workspace), data.join("scripts"));
         assert_eq!(tmp_root(workspace), data.join("tmp"));
+        assert_eq!(mcp_root(workspace), data.join("mcp"));
         assert_eq!(skills_status_path(workspace), data.join("skills.status"));
     }
 

@@ -306,6 +306,26 @@ padding: 10px 12px;
 Hover deepens the outline to `--c-muted`. **No shadow, no lift, no scale.** A
 disabled row is `opacity: .55`.
 
+### Provenance badge
+
+A hairline marker that records where a row came from — e.g. an MCP server the
+assistant built itself in self-evolution mode (`.mcp-self-badge`):
+
+```css
+display: inline-block;
+margin-left: 6px;
+padding: 0 4px;
+border: 1px solid var(--c-border);
+border-radius: 4px;
+font-size: 11px;
+font-weight: 400;
+line-height: 15px;
+color: var(--c-muted);
+```
+
+Metadata is neutral by construction: never a pill, never a fill, never the
+accent colour. A badge that is not a state must not compete with the one accent.
+
 ### Overlays and popups
 
 - Modal backdrop: `rgba(128,128,128,.65)` + `backdrop-filter: blur(8px)`.

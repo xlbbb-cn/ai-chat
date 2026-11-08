@@ -54,6 +54,19 @@ pub struct McpServer {
     pub auth_token: String,
     #[serde(default)]
     pub enabled: bool,
+    /// Where the entry came from: `""` / `user` (the panel, an imported
+    /// profile, a hand-edited file) or `self-evolution` (written by the
+    /// `mcp_self` tool in self-evolution mode). Only the latter is deletable
+    /// from the assistant's side; the panel owns everything else.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub source: String,
+    /// Workspace-relative path of the server script
+    /// (`.data/mcp/<slug>/server.py`). Informational for the panel and the
+    /// model — the executable contract stays `command` + `args`, and because
+    /// every stdio child starts in the workspace root the relative path
+    /// resolves on any machine the profile is restored on.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub definition_path: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -413,6 +426,202 @@ fn save_servers(path: &PathBuf, servers: &[McpServer]) -> Result<(), String> {
     fs::write(path, json).map_err(|e| e.to_string())
 }
 
+/// Persist one server entry (add, or replace the entry with the same id) and
+/// bump the registry revision.
+///
+/// Single writer for the app-data roster (`mcp_servers.json`) — the panel
+/// commands and the profile restore — so the revision is bumped exactly once
+/// per change and an in-flight turn knows to rebuild its MCP tool segment
+/// before the next request. The assistant's own servers go through
+/// [`upsert_workspace_server`] instead.
+pub fn upsert_server(state: &AppState, server: McpServer) -> Result<(), String> {
+    let mut servers = load_servers(&state.mcp_servers_path);
+    if let Some(existing) = servers.iter_mut().find(|s| s.id == server.id) {
+        *existing = server;
+    } else {
+        servers.push(server);
+    }
+    save_servers(&state.mcp_servers_path, &servers)?;
+    state.bump_mcp_revision();
+    Ok(())
+}
+
+/// Remove one server entry by id and bump the registry revision. Returns
+/// whether an entry was actually removed.
+pub fn remove_server(state: &AppState, id: &str) -> Result<bool, String> {
+    let mut servers = load_servers(&state.mcp_servers_path);
+    let before = servers.len();
+    servers.retain(|s| s.id != id);
+    let removed = servers.len() != before;
+    if removed {
+        save_servers(&state.mcp_servers_path, &servers)?;
+        state.bump_mcp_revision();
+    }
+    Ok(removed)
+}
+
+// ─── Two rosters: app data (panel) + workspace (self-evolution) ──────────────
+//
+// `mcp_servers.json` in the app-data directory belongs to the user: the MCP
+// panel, an imported profile and a hand edit all write it. Servers the
+// assistant builds for itself in self-evolution mode belong to the *workspace*
+// and live in `<workspace>/.data/mcp.conf`, next to their scripts — so they
+// follow the workspace, they travel inside the profile's workspace snapshot,
+// and switching the workspace switches the assistant's server set with it.
+//
+// The rest of the app only ever reads the merged view
+// ([`load_effective_servers`]), which is why the MCP panel lists
+// assistant-built servers without knowing where they came from.
+
+/// `McpServer.source` value for entries the assistant built itself.
+pub const SOURCE_SELF_EVOLUTION: &str = "self-evolution";
+
+/// Version stamped into a freshly written `.data/mcp.conf`.
+const WORKSPACE_ROSTER_VERSION: u32 = 1;
+
+/// Shape of `<workspace>/.data/mcp.conf`.
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct WorkspaceMcpFile {
+    #[serde(default)]
+    pub version: u32,
+    #[serde(default)]
+    pub servers: Vec<McpServer>,
+}
+
+/// Parse a workspace roster. YAML is what we write (a `.conf` is meant to be
+/// readable), JSON is accepted too because a hand-edited file is likely.
+fn parse_workspace_roster(text: &str) -> Option<WorkspaceMcpFile> {
+    if let Ok(file) = serde_yaml::from_str::<WorkspaceMcpFile>(text) {
+        return Some(file);
+    }
+    serde_json::from_str::<WorkspaceMcpFile>(text).ok()
+}
+
+/// Read the workspace roster (assistant-built servers). A missing or broken
+/// file is an empty roster: an unreachable workspace must never block a chat.
+pub fn load_workspace_servers(workspace_dir: &Path) -> Vec<McpServer> {
+    fs::read_to_string(crate::workspace::mcp_conf_path(workspace_dir))
+        .ok()
+        .and_then(|text| parse_workspace_roster(&text))
+        .map(|file| file.servers)
+        .unwrap_or_default()
+}
+
+/// Whether `text` is a roster this module can read (YAML or JSON).
+///
+/// The profile restore checks the archive entry with it, so a hand-broken
+/// `mcp.conf` cannot replace a working one — the file simply keeps whatever it
+/// had, and the assistant's servers stay usable.
+pub fn validate_workspace_roster(text: &str) -> bool {
+    parse_workspace_roster(text).is_some()
+}
+
+/// Write the workspace roster as YAML with a provenance header.
+pub fn save_workspace_servers(workspace_dir: &Path, servers: &[McpServer]) -> Result<(), String> {
+    let path = crate::workspace::mcp_conf_path(workspace_dir);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let file = WorkspaceMcpFile {
+        version: WORKSPACE_ROSTER_VERSION,
+        servers: servers.to_vec(),
+    };
+    let body = serde_yaml::to_string(&file).map_err(|e| e.to_string())?;
+    let text = format!(
+        "# MCP servers the assistant built itself (self-evolution mode).\n\
+         # Managed by the `mcp_self` tool; merged with the app-data mcp_servers.json,\n\
+         # which wins when both files describe the same id.\n{body}"
+    );
+    fs::write(&path, text).map_err(|e| e.to_string())
+}
+
+/// Merge the two rosters into the effective server list.
+///
+/// The app-data entry wins when both files describe the same id: it is the one
+/// the user sees in the panel and can always edit, and a duplicated id would
+/// otherwise produce two servers answering to one `mcp_<hash>_…` tool prefix.
+pub fn merge_rosters(panel: Vec<McpServer>, workspace: Vec<McpServer>) -> Vec<McpServer> {
+    let mut merged = panel;
+    for server in workspace {
+        if merged.iter().any(|existing| existing.id == server.id) {
+            continue;
+        }
+        merged.push(server);
+    }
+    merged
+}
+
+/// The complete roster: app-data entries first, then the workspace file.
+pub fn load_effective_servers(state: &AppState) -> Vec<McpServer> {
+    let workspace_dir = state.workspace_dir.lock().unwrap().clone();
+    merge_rosters(
+        load_servers(&state.mcp_servers_path),
+        load_workspace_servers(&workspace_dir),
+    )
+}
+
+/// Persist one assistant-built server into the workspace roster and bump the
+/// registry revision (the panel path for the same change is [`upsert_server`]).
+pub fn upsert_workspace_server(state: &AppState, server: McpServer) -> Result<(), String> {
+    let workspace_dir = state.workspace_dir.lock().unwrap().clone();
+    let mut servers = load_workspace_servers(&workspace_dir);
+    if let Some(existing) = servers.iter_mut().find(|s| s.id == server.id) {
+        *existing = server;
+    } else {
+        servers.push(server);
+    }
+    save_workspace_servers(&workspace_dir, &servers)?;
+    state.bump_mcp_revision();
+    Ok(())
+}
+
+/// Remove one assistant-built server from the workspace roster.
+pub fn remove_workspace_server(state: &AppState, id: &str) -> Result<bool, String> {
+    let workspace_dir = state.workspace_dir.lock().unwrap().clone();
+    let mut servers = load_workspace_servers(&workspace_dir);
+    let before = servers.len();
+    servers.retain(|s| s.id != id);
+    let removed = servers.len() != before;
+    if removed {
+        save_workspace_servers(&workspace_dir, &servers)?;
+        state.bump_mcp_revision();
+    }
+    Ok(removed)
+}
+
+/// Move `source: self-evolution` entries out of the app-data roster into the
+/// workspace file. Returns how many entries moved.
+///
+/// The first cut of the feature wrote assistant-built servers into
+/// `mcp_servers.json`; those entries have to end up in the workspace roster so
+/// a workspace switch stops dragging them along.
+pub fn migrate_self_built_servers(state: &AppState) -> Result<usize, String> {
+    let (self_built, panel): (Vec<McpServer>, Vec<McpServer>) =
+        load_servers(&state.mcp_servers_path)
+            .into_iter()
+            .partition(|server| server.source == SOURCE_SELF_EVOLUTION);
+    if self_built.is_empty() {
+        return Ok(0);
+    }
+
+    let workspace_dir = state.workspace_dir.lock().unwrap().clone();
+    let mut roster = load_workspace_servers(&workspace_dir);
+    let mut moved = 0usize;
+    for server in self_built {
+        if roster.iter().any(|existing| existing.id == server.id) {
+            continue;
+        }
+        roster.push(server);
+        moved += 1;
+    }
+    // Write the workspace side first: if that fails the app-data entries stay
+    // where they are and the merged view still serves them.
+    save_workspace_servers(&workspace_dir, &roster)?;
+    save_servers(&state.mcp_servers_path, &panel)?;
+    state.bump_mcp_revision();
+    Ok(moved)
+}
+
 /// Canonical lowercase name for a transport (used in logs and errors).
 fn transport_name(transport: &McpTransport) -> &'static str {
     match transport {
@@ -461,23 +670,38 @@ fn summarise_server_for_log(server: &McpServer) -> String {
 
 #[tauri::command]
 pub fn list_mcp_servers(state: State<'_, AppState>) -> Vec<McpServer> {
-    load_servers(&state.mcp_servers_path)
+    // Merged view: panel-owned entries from `mcp_servers.json` plus the
+    // assistant-built ones from `<workspace>/.data/mcp.conf`. The panel renders
+    // both; `source` tells them apart.
+    load_effective_servers(&state)
 }
 
 #[tauri::command]
 pub fn save_mcp_server(state: State<'_, AppState>, server: McpServer) -> Result<(), String> {
-    let mut servers = load_servers(&state.mcp_servers_path);
-    let action = if servers.iter().any(|s| s.id == server.id) {
+    // Route by provenance: an entry that lives in the workspace roster keeps
+    // living there (editing it from the panel must not fork a second copy into
+    // the app-data file), everything else is a normal panel server.
+    let mut server = server;
+    let workspace_dir = state.workspace_dir.lock().unwrap().clone();
+    let in_workspace_roster = load_workspace_servers(&workspace_dir)
+        .iter()
+        .any(|s| s.id == server.id);
+    if in_workspace_roster && server.source.is_empty() {
+        server.source = SOURCE_SELF_EVOLUTION.to_string();
+    }
+    let action = if load_effective_servers(&state)
+        .iter()
+        .any(|s| s.id == server.id)
+    {
         "updated"
     } else {
         "added"
     };
-    if let Some(existing) = servers.iter_mut().find(|s| s.id == server.id) {
-        *existing = server.clone();
+    let save_result = if in_workspace_roster || server.source == SOURCE_SELF_EVOLUTION {
+        upsert_workspace_server(&state, server.clone())
     } else {
-        servers.push(server.clone());
-    }
-    let save_result = save_servers(&state.mcp_servers_path, &servers);
+        upsert_server(&state, server.clone())
+    };
     if save_result.is_ok() {
         append_mcp_log(
             &state,
@@ -491,9 +715,13 @@ pub fn save_mcp_server(state: State<'_, AppState>, server: McpServer) -> Result<
 
 #[tauri::command]
 pub fn delete_mcp_server(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    let mut servers = load_servers(&state.mcp_servers_path);
-    servers.retain(|s| s.id != id);
-    let save_result = save_servers(&state.mcp_servers_path, &servers);
+    // Try the workspace roster first so a self-built server is deleted from the
+    // file that actually holds it.
+    let save_result = match remove_workspace_server(&state, &id) {
+        Ok(true) => Ok(()),
+        Ok(false) => remove_server(&state, &id).map(|_| ()),
+        Err(err) => Err(err),
+    };
     if save_result.is_ok() {
         append_mcp_log(&state, &id, McpLogLevel::Info, "Server deleted".to_string());
         // Drop the log buffer for the removed server.
@@ -508,7 +736,7 @@ pub async fn mcp_start_stdio(
     state: State<'_, AppState>,
     server_id: String,
 ) -> Result<(), String> {
-    let server = load_servers(&state.mcp_servers_path)
+    let server = load_effective_servers(&state)
         .into_iter()
         .find(|s| s.id == server_id)
         .ok_or("Server not found")?;
@@ -613,7 +841,7 @@ fn test_stdio_config(server: &McpServer) -> Result<String, String> {
 }
 
 /// Check if a command exists in PATH (cross-platform, no spawn).
-fn command_exists(cmd: &str) -> bool {
+pub(crate) fn command_exists(cmd: &str) -> bool {
     use std::path::Path;
 
     // If it's an absolute path, check directly
@@ -2204,6 +2432,8 @@ mod tests {
             url: String::new(),
             auth_token: String::new(),
             enabled: true,
+            source: String::new(),
+            definition_path: String::new(),
         }
     }
 
@@ -2264,5 +2494,83 @@ mod tests {
             adapted["function"]["parameters"]["properties"]["run_in_background"]["type"],
             "string"
         );
+    }
+
+    // ── Two rosters ─────────────────────────────────────────────────────────
+
+    fn built_server(id: &str, name: &str) -> McpServer {
+        McpServer {
+            id: id.to_string(),
+            name: name.to_string(),
+            source: SOURCE_SELF_EVOLUTION.to_string(),
+            ..test_server()
+        }
+    }
+
+    /// Throwaway workspace directory for the roster round-trip.
+    fn temp_workspace() -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir =
+            std::env::temp_dir().join(format!("ai-chat-roster-{}-{nanos}", std::process::id()));
+        fs::create_dir_all(&dir).expect("temp workspace");
+        dir
+    }
+
+    #[test]
+    fn merge_rosters_keeps_the_panel_entry_on_an_id_clash() {
+        let panel = vec![test_server()];
+        let workspace = vec![
+            built_server("server-1", "Built over the same id"),
+            built_server("self-1", "Only in the workspace"),
+        ];
+
+        let merged = merge_rosters(panel, workspace);
+
+        assert_eq!(
+            merged.len(),
+            2,
+            "a duplicated id must not create a second server"
+        );
+        assert_eq!(merged[0].name, "Files", "the app-data entry wins");
+        assert_eq!(merged[1].id, "self-1");
+    }
+
+    #[test]
+    fn workspace_roster_round_trips_as_yaml() {
+        let workspace_dir = temp_workspace();
+        let servers = vec![
+            built_server("self-echo", "Echo"),
+            built_server("self-files", "Files"),
+        ];
+
+        save_workspace_servers(&workspace_dir, &servers).expect("writes the roster");
+
+        let text = fs::read_to_string(crate::workspace::mcp_conf_path(&workspace_dir))
+            .expect("roster readable");
+        assert!(text.starts_with('#'), "the roster documents itself: {text}");
+        assert!(text.contains("servers:"), "written as YAML: {text}");
+
+        let loaded = load_workspace_servers(&workspace_dir);
+        let ids: Vec<&str> = loaded.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, vec!["self-echo", "self-files"]);
+        assert_eq!(loaded[0].source, SOURCE_SELF_EVOLUTION);
+
+        let _ = fs::remove_dir_all(&workspace_dir);
+    }
+
+    #[test]
+    fn workspace_roster_accepts_json_and_rejects_junk() {
+        let as_json = r#"{"version":1,"servers":[{"id":"self-1","name":"J","enabled":true}]}"#;
+        assert!(validate_workspace_roster(as_json), "JSON is tolerated");
+        assert!(validate_workspace_roster(
+            "servers:\n  - id: self-1\n    name: Y\n"
+        ));
+        // An empty file is a legitimate "no self-built servers" roster.
+        assert!(validate_workspace_roster(""));
+        assert!(!validate_workspace_roster("this: [is, not, a roster"));
+        assert!(!validate_workspace_roster("servers: 42"));
     }
 }

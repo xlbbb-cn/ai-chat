@@ -278,7 +278,7 @@ const zhTW: Messages = {
             openTmp: "開啟交付物交換區",
             openTmpHint: "子 agent 的交付物保存在 .data/tmp 下，可在這裡手動清理。",
             selfEvolution: "啟用自我演化模式",
-            selfEvolutionHint: "允許助理在工作區內自行演化技能。開啟期間「檔案操作」與「記憶」工具會強制啟用並鎖定，助理還會把已驗證的關鍵事實（執行環境、正確的工具用法、常用檔案位置）記錄到專屬的自我演化記憶區。",
+            selfEvolutionHint: "允許助理在工作區內自行演化技能。開啟期間「檔案操作」與「記憶」工具會強制啟用並鎖定，助理還會把已驗證的關鍵事實（執行環境、正確的工具用法、常用檔案位置）記錄到專屬的自我演化記憶區。助理也可以自建 MCP 伺服器（`mcp_self`）：腳本存放在 .data/mcp，經你確認後作為本機行程啟動。",
             profilesTitle: "設定檔",
             profileNamePlaceholder: "設定檔名稱",
             saveCurrent: "儲存目前設定",
@@ -521,6 +521,9 @@ const zhTW: Messages = {
         editTitle: "編輯 MCP 伺服器",
         description: "Model Context Protocol (MCP) 伺服器透過外部工具與資料來源擴充 AI 能力。",
         empty: "尚未設定任何伺服器。",
+        selfBuilt: "自建",
+        selfBuiltHint:
+            "助理在進化模式下自建的伺服器，設定存放在工作區 .data/mcp.conf 並與本清單合併。腳本：{path}",
         addServer: "+ 新增伺服器",
         name: "名稱",
         namePlaceholder: "我的 MCP 伺服器",

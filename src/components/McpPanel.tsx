@@ -8,6 +8,7 @@ import {
     stopStdioMcp,
     getMcpLogs,
     clearMcpLogs,
+    onMcpServersChanged,
 } from "../api";
 import type { McpServer, McpTransport, McpLogEntry } from "../types";
 import { useI18n } from "../i18n";
@@ -76,6 +77,36 @@ export function McpPanel({ onClose, onServersChange }: Props) {
     useEffect(() => {
         listMcpServers().then(setServers).catch(console.error);
     }, []);
+
+    // The assistant can build and enable servers itself (`mcp_self`, evolution
+    // mode). Refresh the list when the registry changes so the panel never
+    // shows a stale roster; a deleted entry also closes its log modal.
+    useEffect(() => {
+        let disposed = false;
+        let unlisten: (() => void) | undefined;
+        onMcpServersChanged(() => {
+            if (disposed) return;
+            listMcpServers()
+                .then((list) => {
+                    if (disposed) return;
+                    setServers(list);
+                    if (logServer && !list.some((s) => s.id === logServer.id)) {
+                        closeLogs();
+                    }
+                })
+                .catch(console.error);
+        })
+            .then((stop) => {
+                if (disposed) stop();
+                else unlisten = stop;
+            })
+            .catch(console.error);
+        return () => {
+            disposed = true;
+            unlisten?.();
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [logServer]);
 
     useEffect(() => {
         onServersChange?.(servers.filter((s) => s.enabled).length);
@@ -376,6 +407,16 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                                     onClick={() => void toggleEnabled(s)}
                                 >
                                     {s.name || t("common.unnamed")}
+                                    {s.source === "self-evolution" && (
+                                        <span
+                                            className="mcp-self-badge"
+                                            title={t("mcp.selfBuiltHint", {
+                                                path: s.definition_path || t("common.unnamed"),
+                                            })}
+                                        >
+                                            {t("mcp.selfBuilt")}
+                                        </span>
+                                    )}
                                     {testing === s.id && (
                                         <span className="mcp-testing-badge" title={t("mcp.testingTitle")}>
                                             <span className="mcp-testing-spinner" />
