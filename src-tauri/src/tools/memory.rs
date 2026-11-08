@@ -3,7 +3,8 @@
 //
 // The `evolution` scope is special: it is the self-evolution memory area, and
 // it is the only scope with a structured on-disk format (YAML front matter),
-// a ranked prompt injection, and a "consolidate into a skill" archive path.
+// a ranked read path the model queries on demand, and a "consolidate into a
+// skill" archive path.
 
 use crate::db;
 use serde::{Deserialize, Serialize};
@@ -25,9 +26,10 @@ use super::truncate_tool_output;
 /// self-evolution mode is on.
 pub const EVOLUTION_SCOPE: &str = "evolution";
 
-/// How much of the self-evolution memory area is injected into the system
-/// prompt. The entries are distilled one-liners, so a few thousand characters
-/// cover a large library without bloating the cached prompt prefix.
+/// Budget (in characters) of one rendered block of the self-evolution memory
+/// area — what the panel shows as the top tier and what a `plan` consolidation
+/// measures its clusters against. Nothing is preloaded into a request, so this
+/// is a UI/analysis budget, not part of the prompt prefix.
 pub const EVOLUTION_CONTEXT_BUDGET_CHARS: usize = 4_000;
 
 /// On-disk format version of an evolution memory entry.
@@ -537,11 +539,10 @@ fn entry_age_days(entry: &EvolutionEntry) -> f64 {
 /// and how recently it proved useful. Pinned entries float above everything.
 ///
 /// The recency term is bucketed to **whole days**: the ranked render lands in
-/// the system prompt (the head of the cached request prefix), so a
-/// fractional-day wall-clock drift would silently reorder entries between
-/// consecutive turns and invalidate that entire prefix. With whole-day
-/// buckets the order only changes at day boundaries or on explicit
-/// `uses`/`evidence` bumps — never click by click of the clock.
+/// the panel and in on-demand `list` output, so a fractional-day wall-clock
+/// drift would silently reorder entries between two looks at the same data.
+/// With whole-day buckets the order only changes at day boundaries or on
+/// explicit `uses`/`evidence` bumps — never click by click of the clock.
 pub fn score_evolution_entry(entry: &EvolutionEntry) -> f64 {
     let meta = &entry.meta;
     let age_days = entry_age_days(entry).floor();
@@ -630,8 +631,8 @@ pub fn load_evolution_entries(workspace_dir: &Path) -> Vec<EvolutionEntry> {
     dedupe_entries(loaded)
 }
 
-/// Load + rank. The single read entry point shared by the prompt injector,
-/// `memory list`, the consolidation planner and the panel.
+/// Load + rank. The single read entry point shared by `memory list`, the
+/// consolidation planner and the panel.
 pub fn ranked_evolution_entries(workspace_dir: &Path) -> Vec<ScoredEntry> {
     let mut scored: Vec<ScoredEntry> = load_evolution_entries(workspace_dir)
         .into_iter()
@@ -652,9 +653,12 @@ pub fn ranked_evolution_entries(workspace_dir: &Path) -> Vec<ScoredEntry> {
 
 // ─── Prompt rendering ────────────────────────────────────────────────────────
 
-/// Result of the tiered renderer: the prompt text plus the keys that made it
-/// into it (the panel marks those rows as injected).
+/// Result of the tiered renderer: the rendered text plus the keys that made it
+/// into the top tier (the panel marks those rows).
 pub struct RenderedEvolution {
+    /// Rendered block. Nothing injects it into a request any more (the model
+    /// searches the scope on demand), so only the reference tests read it.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub text: String,
     pub injected: Vec<String>,
 }
@@ -807,11 +811,14 @@ pub fn render_ranked_entries(ranked: &[ScoredEntry], budget_chars: usize) -> Ren
     }
 }
 
-/// Render the self-evolution memory area for the model prompt.
+/// Render the self-evolution memory area as one text block.
 ///
-/// The entries are the verified facts the assistant recorded in earlier
-/// sessions. They are injected into the system prompt so the assistant reuses
-/// them instead of rediscovering them every session.
+/// This is **not** part of any request: preloading every verified fact made the
+/// first request's prefill dominate the prompt, so the model now gets a pointer
+/// to the `evolution` scope and searches it on demand. The renderer is kept as
+/// the reference implementation its tests pin down (deterministic tiering and a
+/// character budget).
+#[cfg(test)]
 pub fn render_evolution_context(workspace_dir: &Path, budget_chars: usize) -> String {
     let ranked = ranked_evolution_entries(workspace_dir);
     render_ranked_entries(&ranked, budget_chars).text

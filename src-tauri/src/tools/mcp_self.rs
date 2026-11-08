@@ -82,49 +82,46 @@ pub fn schema() -> Value {
         "function": {
             "name": TOOL_NAME,
             "description": "Build and run your own MCP servers (self-evolution mode only). \
-    A server is a small stdio program that speaks line-delimited JSON-RPC 2.0 on stdin/stdout: \
-    answer `initialize` with protocolVersion/capabilities/serverInfo, then `tools/list` with your \
-    tool schemas, then `tools/call` with `content: [{type: \"text\", text: ...}]`. Write ONLY \
-    JSON-RPC to stdout — anything else (prints, logs) corrupts the stream; log to stderr instead.\n\n\
-    The script is stored at `<workspace>/.data/mcp/<slug>/server.<ext>` and registered in the \
-    workspace roster `<workspace>/.data/mcp.conf` (YAML, `source: \"self-evolution\"`), which is \
-    merged with the app-data `mcp_servers.json` — you never edit the app-data file yourself. The \
-    process is executed by an interpreter the backend picks from a whitelist (`runtime`), never by \
-    an arbitrary command. Because every stdio MCP child starts in the workspace root, the script may \
-    read workspace-relative paths.\n\n\
-    Workflow: `write` (creates/updates + optionally enables + returns the advertised tool names) → \
-    call the tools → `test` after an edit is not needed (`write` re-tests) → `logs` when something \
-    fails. `write`, `enable` and `remove` ask the user once (`user_software`). Server tools become \
-    callable from your next request in the same turn.\n\n\
-    Rules: never store credentials in a script (read them from the environment or an app tool \
-    instead); keep servers focused (one job, a few tools); prefer `python` unless the task needs \
-    Node; a server that fails `tools/list` is left disabled so it cannot stall later requests. \
-    A running server keeps the code it was started with: after editing the script with \
-    `file_actions`, call `restart` (a fresh `write` restarts it for you).",
+    A server is a small stdio program speaking line-delimited JSON-RPC 2.0: answer `initialize`, \
+    then `tools/list` with your schemas, then `tools/call` returning \
+    `content: [{type: \"text\", text: ...}]`. Write ONLY JSON-RPC to stdout — nothing else, and \
+    log to stderr.\n\n\
+    The script lives at `<workspace>/.data/mcp/<slug>/server.<ext>`, registered in \
+    `<workspace>/.data/mcp.conf` (YAML, `source: \"self-evolution\"`) and merged with the app-data \
+    `mcp_servers.json` that the user's panel owns — never write that file. The backend resolves \
+    the interpreter from `runtime`, never an arbitrary command; stdio children start in the \
+    workspace root, so workspace-relative paths work.\n\n\
+    Workflow: `write` (create/update, optionally enable, returns the tool names) → use the tools → \
+    `logs` on failure (`write` re-tests, so `test` is for diagnosis). `write`, `enable` and `remove` \
+    ask the user once (`user_software`); new tools are callable from your next request in the same \
+    turn. Rules: no credentials in a script (use the environment or an app tool); one job and a few \
+    tools per server; prefer `python` unless the task needs Node; a server whose `tools/list` fails \
+    stays disabled so it cannot stall later requests. A running server keeps the code it started \
+    with — after editing it with `file_actions`, `restart` (or `write` again).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
                         "enum": ["list", "write", "enable", "disable", "test", "restart", "logs", "remove"],
-                        "description": "'list' shows your self-built servers; 'write' creates or updates a server script and registers it; 'enable'/'disable' toggles one; 'test' runs tools/list and reports the tools; 'restart' kills the process and re-runs tools/list (after an edit); 'logs' returns the recent diagnostics; 'remove' stops the server, deletes its folder and drops the registry entry."
+                        "description": "'list' shows your servers; 'write' creates/updates a script and registers it; 'enable'/'disable' toggles one; 'test' runs tools/list; 'restart' kills the process and re-runs the handshake after an edit; 'logs' returns recent diagnostics; 'remove' stops it, deletes its folder and drops the registry entry."
                     },
                     "name": {
                         "type": "string",
-                        "description": "Server name (action 'write'). Human readable; a slug is derived for the folder."
+                        "description": "Server name ('write'); human readable — a slug is derived for the folder."
                     },
                     "runtime": {
                         "type": "string",
                         "enum": ["python", "node", "shell"],
-                        "description": "Interpreter for the script (action 'write', default 'python'). The backend resolves the concrete command (python3/python, node, bash/powershell) — you cannot choose an arbitrary executable."
+                        "description": "Interpreter ('write', default 'python'). The backend resolves the concrete command (python3/python, node, bash/powershell); arbitrary executables are refused."
                     },
                     "code": {
                         "type": "string",
-                        "description": "Complete script source (action 'write'). Must implement the MCP stdio handshake and tools/list + tools/call."
+                        "description": "Complete script source ('write'). Must implement the handshake plus `tools/list` and `tools/call`."
                     },
                     "description": {
                         "type": "string",
-                        "description": "Optional one-line note about what the server does; stored in the diagnostic log."
+                        "description": "Optional one-line note about the server; stored in the diagnostic log."
                     },
                     "env": {
                         "type": "object",
@@ -133,11 +130,11 @@ pub fn schema() -> Value {
                     },
                     "enabled": {
                         "type": "boolean",
-                        "description": "For 'write': enable and start the server immediately (default true). A failed start leaves it disabled and reports the error plus the log tail."
+                        "description": "For 'write': enable and start it immediately (default true). A failed start leaves it disabled and reports the error plus the log tail."
                     },
                     "id": {
                         "type": "string",
-                        "description": "Existing server id (actions 'enable'/'disable'/'test'/'restart'/'logs'/'remove'; optional for 'write' to update in place). Copy it from 'list'."
+                        "description": "Existing server id ('enable'/'disable'/'test'/'restart'/'logs'/'remove'; optional for 'write' to update in place). Copy it from 'list'."
                     }
                 },
                 "required": ["action"]

@@ -20,10 +20,11 @@ interface Props {
 /**
  * Read-only view of the self-evolution memory.
  *
- * The rows are the exact ranking the prompt uses (`rank` and `injected` come
- * from the same backend function), so this panel answers "what does the model
- * actually see, and in what order". Nothing here mutates memory: tidying is an
- * explicit chat request that goes through `memory consolidate`.
+ * The rows are the exact ranking an on-demand memory search returns (`rank` and
+ * `injected` come from the same backend function; `injected` now means "top
+ * tier within the analysis budget", since nothing is preloaded into the
+ * prompt). Nothing here mutates memory: tidying is an explicit chat request
+ * that goes through `memory consolidate`.
  */
 export function MemoryPanel({ onClose, refreshKey = 0 }: Props) {
   const { t } = useI18n();

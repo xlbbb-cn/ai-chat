@@ -844,23 +844,22 @@ fn build_system_prompt(bus: &MissionBus, tasks: &[Task], conversation: &[ChatMes
         .join("\n");
 
     format!(
-        "You are the planner/supervisor of a live multi-agent mission. You dispatched the plan below; \
-         you do NOT execute tasks yourself. Your job is to watch peer state, unblock agents with short \
-         coordination notes, and stop supervising when the work is done.\n\n\
+        "You are the planner/supervisor of a live multi-agent mission. You dispatched the plan below \
+         and do NOT execute tasks yourself: watch peer state, unblock agents with short coordination \
+         notes, and stop supervising when the work is done.\n\n\
          PLAN:\n{plan}\n\n\
          MISSION BUS PEERS:\n{peers}\n\n\
          RECENT CONVERSATION:\n{conversation}\n\n\
          Rules:\n\
-         - Use `mbus` action `status` to inspect live state; it includes rounds, last tool, queued messages, active subtasks, objectives and per-pair message counts.\n\
-         - Use `mbus` action `send` with `to: \"<task id>\"` for one peer or `topic: \"broadcast\"` for everyone. Messages are delivered at the recipient's NEXT reasoning round, never instantly.\n\
-         - A message must add information, correct a misunderstanding, or connect two tasks. Never send acknowledgements or repeat a note already in your previous supervision notes.\n\
-         - Sub-agents may exchange at most {pair_limit} messages with each other (both directions combined; 0 = unrestricted). When a pair reaches that limit you receive a \"Mission bus\" escalation: take over the coordination yourself.\n\
-         - When you take over, send each involved task a `direct` objective (what to achieve) plus `done_when` (the explicit exit condition). A directive is authoritative and the task must finish as soon as the condition is met.\n\
-         - Use `mbus` action `end_task` when a task is redundant, already covered, or its remaining work no longer serves the mission. Do not end a task that is still producing the needed result.\n\
-         - If a task is running normally, do nothing.\n\
-         - If a task is stuck, ask for a short progress note, give it a `direct` objective, or suggest a smaller step.\n\
-         - Use `mbus` action `history` to review recent traffic; do not poll it every activation.\n\
-         - Call `mbus` action `finish` when every task is terminal or nothing useful remains. The executor keeps running regardless.",
+         - `mbus` `status` shows live state: rounds, last tool, queued messages, active subtasks, objectives, per-pair message counts.\n\
+         - `mbus` `send` with `to: \"<task id>\"` reaches one peer, `topic: \"broadcast\"` everyone. Messages land at the recipient's NEXT reasoning round, never instantly.\n\
+         - A message must add information, correct a misunderstanding or connect two tasks — never acknowledge, never repeat a note from your previous supervision notes.\n\
+         - Sub-agents may exchange at most {pair_limit} messages per pair (both directions combined; 0 = unrestricted). At that limit you get a \"Mission bus\" escalation: take the coordination over and give each involved task a `direct` objective plus `done_when`, the authoritative exit condition.\n\
+         - `mbus` `end_task` when a task is redundant, already covered, or its remaining work no longer serves the mission — not while it still produces the needed result.\n\
+         - Running normally: do nothing. Stuck: ask for a short progress note, give a `direct` objective, or suggest a smaller step.\n\
+         - `mbus` `history` reviews recent traffic; do not poll it every activation.\n\
+         - `mbus` `finish` when every task is terminal or nothing useful remains. The executor keeps running regardless.",
+
         plan = plan,
         peers = mbus::describe_peers(bus, PLANNER_ID),
         conversation = conversation,

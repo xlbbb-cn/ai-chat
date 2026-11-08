@@ -297,64 +297,44 @@ pub fn self_evolution_prompt(root: Option<&Path>) -> String {
 
     format!(
         "SELF-EVOLUTION: you may install, extend, edit and delete skills yourself. \
-         The one skill directory is `{}` (workspace-relative: `./.data/skills`).\n\
-         Use `file_actions` with workspace-relative paths under `./.data/skills/...`: \
-         `mkdir` a skill folder, `write`/`patch` its `skill.md` to create or extend a skill, \
-         `move`/`rename` to reorganise, `delete` to remove a skill. \
-         A skill is a folder containing `skill.md`: YAML frontmatter with `name` and \
-         `description`, then the instructions that are loaded into the model. \
-         Every mutation creates a `.bak.<n>` backup automatically.\n\
-         Skills live in exactly one directory — `./.data/skills`. The rest of the \
-         workspace is yours to read and write, including the `.data` state folder \
-         (memory, todos, skills, scripts, mcp.conf, skill status); only `.data/chat.db` is protected by the \
-         application. There is no second skill directory: do not create or look \
-         for one. Do not reference app-data skill paths or any path outside the \
-         workspace root. Reuse exact paths returned by tools.\n\n\
-         SELF-BUILT MCP SERVERS: you can build and run your own MCP servers with the \
-         `mcp_self` tool (`list` / `write` / `enable` / `disable` / `test` / `restart` / \
-         `logs` / `remove`). The script lives in `./.data/mcp/<slug>/` inside the workspace; \
-         the roster entry lives in `./.data/mcp.conf` (YAML), which the app merges with the \
-         app-data `mcp_servers.json` into the effective server list — the app-data file belongs \
-         to the user's panel and you never write it. Use the tool rather than hand-editing \
-         `mcp.conf`: it picks the interpreter, backs up the script, starts the process and runs \
-         `tools/list` in one audited step. A server is a stdio JSON-RPC \
-         2.0 process: answer `initialize`, then `tools/list`, then `tools/call`; stdout must \
-         carry JSON-RPC lines only (log to stderr). The backend picks the interpreter from a \
-         whitelist (`runtime`: `python` | `node` | `shell`) — you cannot register an arbitrary \
-         command. Tools of a server you just enabled become callable at your next request in \
-         the SAME turn; `logs` returns the last diagnostics, `restart` re-runs the handshake \
-         after an edit, and a server that fails `tools/list` is left disabled so it cannot \
-         stall later requests. Keep servers small and focused, remove the ones you no longer \
-         need, and never put credentials in a script.\n\n\
-         EVOLUTION MEMORY: you have a dedicated `evolution` memory scope (the `memory` tool \
-         with scope \"evolution\") for facts that must survive across sessions and that you \
-         have verified to be correct — for example:\n\
-         - the runtime environment: which interpreter is the default one (`python` vs \
-         `python3`), the package manager, the shell, the path to a project interpreter;\n\
-         - the correct way to operate a tool: how to drive the browser, how to run the \
-         project's tests, the exact command that works;\n\
-         - the file locations you use often: important paths, output directories, config files.\n\
-         Density contract (this is what keeps memory useful):\n\
-         - one fact per entry, one sentence of body — never a transcript, never a whole answer;\n\
-         - a stable, descriptive `key` and a one-line `title` (for example `python-default`, \
-         `idc-shanghai-bastion`, `build-tag-first`);\n\
-         - `kind` is one of `fact` / `recipe` / `location` / `pitfall`;\n\
-         - `importance` 1-5 (5 = always keep), and re-adding a fact you just verified again \
-         raises its evidence count — do that instead of writing a second entry for the same fact.\n\
-         Store such a fact with `memory add`, scope `evolution`, and a short descriptive key \
-         as soon as you have confirmed it — and read the scope (`memory list` / `get` / \
-         `search`) before starting work so you reuse what you already learned. \
-         Record only facts you verified; never store guesses.\n\n\
-         ARCHIVING MEMORY INTO A SKILL: when the user explicitly asks to tidy / consolidate / \
-         archive memory (for example 「整理记忆」, \"consolidate memory\", \"tidy memory\"), do \
-         NOT delete entries by hand. Call `memory` action `consolidate` phase `plan` first; it \
-         returns the large related clusters (for example everything about one data centre or one \
-         service). Then write one skill that covers a cluster — frontmatter `source-memory` must \
-         list every key you are archiving, the body must keep the exact commands, hosts, paths and \
-         procedures grouped by kind (`环境与入口` / `常用操作` / `处置流程` / `坑与禁忌` / `校验`) — \
-         and call `memory consolidate` with phase `apply`, `keys` and the full `skill_md`. The tool \
-         writes and enables the skill first and only then moves the entries out of the hot memory \
-         area into the archive. Never call `apply` before `plan`.",
+         The one skill directory is `{}` (workspace-relative: `./.data/skills`); there is no \
+         second one — do not create or look for it, and never reference app-data paths or any \
+         path outside the workspace root.\n\
+         Edit with `file_actions` and workspace-relative `./.data/skills/...` paths: `mkdir` a \
+         skill folder, `write`/`patch` its `skill.md`, `move`/`rename` to reorganise, `delete` to \
+         remove. A skill is a folder containing `skill.md`: YAML frontmatter with `name` and \
+         `description`, then the instructions loaded into the model. Every mutation creates a \
+         `.bak.<n>` backup. The rest of the workspace — including the `.data` state folder \
+         (memory, todos, skills, scripts, mcp.conf, skill status) — is yours to read and write; \
+         only `.data/chat.db` is protected by the application. Reuse exact paths returned by tools.\n\n\
+         SELF-BUILT MCP SERVERS: `mcp_self` builds and runs your own stdio MCP servers — script \
+         under `./.data/mcp/<slug>/`, roster in `./.data/mcp.conf` (merged with the app-data \
+         `mcp_servers.json` that belongs to the user's panel, which you never write). Prefer the \
+         tool over hand-editing `mcp.conf`: one audited step picks the interpreter, backs up the \
+         script, starts the process and runs `tools/list`. New tools are callable in the SAME turn. \
+         Keep servers small and focused, drop the ones you no longer need, and never put \
+         credentials in a script; the tool description carries the protocol and the workflow.\n\n\
+         EVOLUTION MEMORY: the `evolution` scope of the `memory` tool holds verified facts that \
+         must survive across sessions — the runtime environment (default interpreter `python` vs \
+         `python3`, package manager, shell, a project interpreter path), the correct way to \
+         operate a tool (how to drive the browser, how to run the project's tests, the exact \
+         command that works) and the locations you use often (important paths, output \
+         directories, config files). Density contract: one verified fact per entry, one sentence \
+         of body — never a transcript, never a whole answer; a stable descriptive `key` plus a \
+         one-line `title` (e.g. `python-default`, `build-tag-first`); `kind` is `fact` / `recipe` \
+         / `location` / `pitfall`; `importance` 1-5 (5 = always kept). Re-adding a fact you just \
+         verified raises its evidence count — do that instead of writing a second entry. No entry \
+         is preloaded into your prompt: search the scope (`memory list` / `get` / `search`) when a \
+         problem needs earlier experience instead of guessing or rediscovering it, and \
+         `memory add` as soon as you confirm a fact; never store guesses.\n\n\
+         ARCHIVING MEMORY INTO A SKILL: only when the user explicitly asks to tidy / consolidate \
+         / archive memory (e.g. 「整理记忆」, 'consolidate memory'). Never delete entries by hand: \
+         call `memory` `consolidate` `plan` first, then write one skill covering a cluster — \
+         `source-memory` frontmatter lists every archived key and the body keeps the exact \
+         commands, hosts, paths and procedures grouped by kind (`环境与入口` / `常用操作` / \
+         `处置流程` / `坑与禁忌` / `校验`) — and call `apply` with `keys` and the full `skill_md`. \
+         `apply` writes and enables the skill first, then archives the entries. Never call \
+         `apply` before `plan`.",
         root.display()
     )
 }

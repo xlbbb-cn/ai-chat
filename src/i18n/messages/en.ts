@@ -430,8 +430,8 @@ const en = {
 
     memoryPanel: {
         title: "Evolution memory",
-        summary: "{count} entries · {injected} in prompt",
-        budget: "{chars} / {budget} chars in ranked facts",
+        summary: "{count} entries · {injected} in the top tier",
+        budget: "{chars} / {budget} chars in top-tier facts",
         loading: "Loading…",
         empty: "No evolution memories yet. They are recorded while self-evolution mode is on.",
         pinned: "pinned",
@@ -507,7 +507,7 @@ const en = {
                     "**session** — Short-term, in-memory only. Survives for the current chat session. Use for task-specific context and in-progress notes.",
                     "**user** — Long-term, file-backed. Cross-session persistent. Use for user preferences, patterns, and general insights.",
                     "**repo** — Long-term, file-backed. Repository-scoped. Use for codebase conventions, build commands, and project facts.",
-                    "**evolution** — Long-term, file-backed. The self-evolution area, available while self-evolution mode is on. Use for verified facts that must survive across sessions: the default interpreter and runtime environment, the correct way to operate a tool, the file locations you use often. Each entry carries a title, kind, tags, importance and an evidence count, and the scope is injected into the prompt in ranked order — keep each entry to one dense fact.",
+                    "**evolution** — Long-term, file-backed. The self-evolution area, available while self-evolution mode is on. Use for verified facts that must survive across sessions: the default interpreter and runtime environment, the correct way to operate a tool, the file locations you use often. Each entry carries a title, kind, tags, importance and an evidence count, and the scope is queried on demand (never preloaded into the prompt) in ranked order — keep each entry to one dense fact.",
                     "",
                     "Supports add, get, list, search, delete, and consolidate. `consolidate` folds a large related cluster of evolution entries into a skill archive (plan first, then apply with the full skill markdown and the same keys).",
                 ].join("\n"),
