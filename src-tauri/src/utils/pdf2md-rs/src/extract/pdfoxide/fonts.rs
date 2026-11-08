@@ -11,7 +11,10 @@
 
 use std::collections::HashMap;
 
-use lopdf::{Dictionary, Document, Encoding, ObjectId};
+use lopdf::{Dictionary, Document, Encoding, Object, ObjectId};
+
+use super::cmap::UnicodeMap;
+use super::fallback::Charset;
 
 /// PDF font descriptor flags (ISO 32000-1, table 123) that we care about.
 const FLAG_FIXED_PITCH: i64 = 1;
@@ -191,6 +194,16 @@ impl std::fmt::Debug for FontTable<'_> {
 
 struct Entry<'a> {
     info: FontInfo,
+    /// The font's own `ToUnicode` CMap, read by [`super::cmap`] instead of
+    /// `lopdf`: a generator that writes a header a strict grammar rejects still
+    /// has a perfectly readable mapping, and that mapping beats any encoding
+    /// table because it is what the producer meant.
+    unicode: Option<UnicodeMap>,
+    /// What the font's `/Encoding` entry (or its CID ordering) guarantees
+    /// without a CMap at all: `UniGB-UCS2-H` means "the codes are UTF-16BE".
+    charset: Option<Charset>,
+    /// `lopdf`'s own resolution, still the last word for one-byte encodings and
+    /// `/Differences` tables.
     encoding: Option<Encoding<'a>>,
 }
 
@@ -239,8 +252,31 @@ impl<'a> FontTable<'a> {
                 info.first_char = first_char;
                 info.missing_width = missing_width;
             }
-            let encoding = dict.get_font_encoding(doc).ok();
-            fonts.insert(name, Entry { info, encoding });
+            // The font's own `ToUnicode` CMap is the producer's statement of what
+            // the codes mean, so it is read here rather than trusted to `lopdf`,
+            // which drops the whole mapping when the header is off spec.
+            let unicode = to_unicode_map(doc, dict);
+            // Without a CMap, a composite font's `/Encoding` name or its CID
+            // ordering may still state the code space exactly.
+            let charset = if cid { declared_charset(doc, dict) } else { None };
+            // `lopdf`'s resolution is only asked for when it can still add
+            // something: for a composite font it either re-parses the very same
+            // CMap (doubling the cost on every page) or hands back the
+            // `StandardEncoding` guess we deliberately stopped trusting.
+            let encoding = if !cid || (unicode.is_none() && charset.is_none()) {
+                dict.get_font_encoding(doc).ok()
+            } else {
+                None
+            };
+            fonts.insert(
+                name,
+                Entry {
+                    info,
+                    unicode,
+                    charset,
+                    encoding,
+                },
+            );
         }
         FontTable { fonts }
     }
@@ -252,20 +288,42 @@ impl<'a> FontTable<'a> {
 
     /// Decode a string operand to Unicode.
     ///
-    /// Fonts with a `/ToUnicode` CMap decode exactly; simple fonts fall back to
-    /// their base encoding and finally to Latin-1, so no byte is silently
-    /// dropped (a wrong-but-visible character beats a hole in the text).
+    /// The routes are tried in order of how much they are *stated* rather than
+    /// guessed, and each one that produces nothing falls forward to the next:
+    ///
+    /// 1. the font's `ToUnicode` CMap (parsed here, tolerantly — see
+    ///    [`super::cmap`]), which is the producer's own mapping;
+    /// 2. a predefined CMap name such as `UniGB-UCS2-H`, or a `UCS` CID ordering,
+    ///    both of which make the character codes Unicode by definition
+    ///    ([`super::fallback`]);
+    /// 3. UTF-8 that a generator wrote into a single-byte-declared font anyway;
+    /// 4. the CJK byte encodings, accepted only when the result could not
+    ///    plausibly be anything else (the "no `ToUnicode`" guess);
+    /// 5. `lopdf`'s encoding resolution — one-byte tables and `/Differences`;
+    /// 6. Latin-1, so no byte is ever silently dropped (a wrong-but-visible
+    ///    character beats a hole in the text).
     pub fn decode(&self, name: &[u8], bytes: &[u8]) -> String {
         let Some(entry) = self.fonts.get(name) else {
             return utf8_if_valid(bytes).map(str::to_string).unwrap_or_else(|| latin1(bytes));
         };
-        // Some generators write UTF-8 into a literal string although the font
-        // declares a single-byte encoding; a byte sequence that parses as
-        // multi-byte UTF-8 is authoritative over the (wrong) table.
+        if let Some(map) = &entry.unicode {
+            let decoded = map.decode(bytes);
+            // A CMap that covers none of this operand's codes is a hole, not an
+            // answer: keep falling forward.
+            if decoded.mapped() > 0 {
+                return decoded.text;
+            }
+        }
+        if let Some(charset) = entry.charset {
+            return charset.decode(bytes);
+        }
         if !entry.info.cid {
             if let Some(text) = utf8_if_valid(bytes) {
                 return text.to_string();
             }
+        }
+        if let Some(text) = guess_charset(&entry.info, bytes) {
+            return text;
         }
         if let Some(encoding) = &entry.encoding {
             if let Ok(text) = encoding.bytes_to_string(bytes) {
@@ -343,6 +401,176 @@ fn descriptor_dict<'a>(doc: &'a Document, dict: &'a Dictionary) -> Option<&'a Di
                     }
                 }
             }
+        }
+    }
+    None
+}
+
+/// The font's `/ToUnicode` CMap, read with our own tolerant parser.
+///
+/// `lopdf` reaches the same stream only through `/Encoding /Identity-*` and
+/// gives up on it (one-byte `StandardEncoding` afterwards, with a `log::warn`
+/// nobody sees) when its strict grammar rejects a single header token — the
+/// 174-page Chinese book this crate was calibrated on wrote
+/// `/CMapName SimSun-cmap def`, and every page came out as `ł W L ! ¥ Ø J T X`.
+/// The stream is looked for on the font itself and on the descendant, because
+/// generators put it on either.
+fn to_unicode_map(doc: &Document, dict: &Dictionary) -> Option<UnicodeMap> {
+    for candidate in std::iter::once(dict).chain(descendant_dicts(doc, dict)) {
+        if let Ok(Object::Stream(stream)) = candidate.get_deref(b"ToUnicode", doc) {
+            if let Ok(content) = stream.get_plain_content() {
+                if let Some(map) = UnicodeMap::parse(&content) {
+                    return Some(map);
+                }
+            }
+        }
+    }
+    // A composite font may carry the mapping in an embedded CMap stream instead,
+    // which for the `Uni…-UCS2` / `Uni…-UTF16` collections *is* a Unicode
+    // mapping: those CMaps end at a UCS-2 destination, not at a CID.
+    if let Some(content) = encoding_cmap_content(doc, dict) {
+        if contains_ascii(&content, b"UCS2") || contains_ascii(&content, b"UTF16") {
+            return UnicodeMap::parse(&content);
+        }
+    }
+    None
+}
+
+/// What the character codes already are, with no per-document mapping to read.
+fn declared_charset(doc: &Document, dict: &Dictionary) -> Option<Charset> {
+    let Ok(entry) = dict.get(b"Encoding") else {
+        return None;
+    };
+    match doc.dereference(entry).ok().map(|(_, object)| object) {
+        Some(Object::Name(name)) => {
+            if let Some(charset) = Charset::from_cmap_name(name) {
+                return Some(charset);
+            }
+            // `Identity-H` says nothing by itself — unless the descendant's CID
+            // ordering is UCS, in which case the CID *is* the UCS-2 value.
+            if name.as_slice() == b"Identity-H" || name.as_slice() == b"Identity-V" {
+                if let Some(ordering) = cid_ordering(doc, dict) {
+                    return Charset::from_cid_ordering(&ordering);
+                }
+            }
+            None
+        }
+        Some(Object::Stream(_)) => Charset::from_cmap_name(&embedded_cmap_name(doc, dict)?),
+        _ => None,
+    }
+}
+
+/// The descendant font dictionaries of a composite font.
+fn descendant_dicts<'a>(doc: &'a Document, dict: &'a Dictionary) -> Vec<&'a Dictionary> {
+    let Ok(objects) = dict.get_deref(b"DescendantFonts", doc) else {
+        return Vec::new();
+    };
+    let Ok(array) = objects.as_array() else {
+        return Vec::new();
+    };
+    array
+        .iter()
+        .filter_map(|item| doc.dereference(item).ok())
+        .filter_map(|(_, object)| object.as_dict().ok())
+        .collect()
+}
+
+/// `/CIDSystemInfo /Ordering` of the first descendant font.
+fn cid_ordering(doc: &Document, dict: &Dictionary) -> Option<Vec<u8>> {
+    for descendant in descendant_dicts(doc, dict) {
+        let Ok(info) = descendant.get_deref(b"CIDSystemInfo", doc) else {
+            continue;
+        };
+        let dicts: Vec<&Dictionary> = match info {
+            Object::Dictionary(single) => vec![single],
+            Object::Array(items) => items
+                .iter()
+                .filter_map(|item| doc.dereference(item).ok())
+                .filter_map(|(_, object)| object.as_dict().ok())
+                .collect(),
+            _ => Vec::new(),
+        };
+        for info in dicts {
+            if let Ok(Object::Name(ordering)) = info.get(b"Ordering") {
+                return Some(ordering.to_vec());
+            }
+        }
+    }
+    None
+}
+
+/// The CMap program behind an `/Encoding` that is a stream rather than a name.
+fn encoding_cmap_content(doc: &Document, dict: &Dictionary) -> Option<Vec<u8>> {
+    let entry = dict.get(b"Encoding").ok()?;
+    let Object::Stream(stream) = doc.dereference(entry).ok()?.1 else {
+        return None;
+    };
+    stream.get_plain_content().ok()
+}
+
+/// The `/CMapName` a CMap program declares, as a name we can look up.
+fn embedded_cmap_name(doc: &Document, dict: &Dictionary) -> Option<Vec<u8>> {
+    let content = encoding_cmap_content(doc, dict)?;
+    let key = b"/CMapName";
+    let mut index = find(&content, key)? + key.len();
+    while content.get(index).is_some_and(u8::is_ascii_whitespace) {
+        index += 1;
+    }
+    // The value is normally a name (`/UniGB-UCS2-H def`), but broken generators
+    // also write it bare (`SimSun-cmap def`), slash included or not.
+    if content.get(index) == Some(&b'/') {
+        index += 1;
+    }
+    let begin = index;
+    while content.get(index).is_some_and(|byte| !is_name_delimiter(*byte)) {
+        index += 1;
+    }
+    if index == begin {
+        return None;
+    }
+    Some(content[begin..index].to_vec())
+}
+
+/// Position of the first occurrence of `needle` in `haystack`.
+fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return None;
+    }
+    haystack.windows(needle.len()).position(|window| window == needle)
+}
+
+fn contains_ascii(haystack: &[u8], needle: &[u8]) -> bool {
+    find(haystack, needle).is_some()
+}
+
+/// PostScript name delimiters, so a CMap name can be cut out of a stream.
+fn is_name_delimiter(byte: u8) -> bool {
+    byte.is_ascii_whitespace()
+        || matches!(byte, b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'%')
+}
+
+/// The last guess before giving up: try the CJK byte encodings and keep the one
+/// whose output could not plausibly be anything else.
+///
+/// A font with one-byte codes can never carry UTF-16, so those candidates are
+/// only offered to composite fonts; and a font whose name says nothing about CJK
+/// is only ever offered the strict gate, so Latin text is never "rescued" into
+/// ideographs.
+fn guess_charset(info: &FontInfo, bytes: &[u8]) -> Option<String> {
+    let hinted = Charset::looks_cjk(&info.name);
+    if !info.cid && !hinted {
+        return None;
+    }
+    if bytes.len() < 2 {
+        return None;
+    }
+    for charset in Charset::guessed_for_name(&info.name) {
+        if !info.cid && matches!(charset, Charset::Utf16Be | Charset::Utf8) {
+            continue;
+        }
+        let text = charset.decode(bytes);
+        if charset.plausible(bytes, &text, hinted) {
+            return Some(text);
         }
     }
     None

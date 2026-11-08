@@ -141,7 +141,23 @@ Options {
   a document whose headings all share one font size still gets a correct outline.
 * **Two-column papers** are read column-major; full-width figures, equations and
   headings split the page into bands instead of being interleaved.
+* **Text decoding falls forward, never sideways.** An operand is read through the
+  font's own `ToUnicode` CMap first — parsed *here*, not by `lopdf`, whose strict
+  grammar throws away the whole mapping when one header token is off spec. A
+  calibration book wrote `/CMapName SimSun-cmap def` (a PostScript name with no
+  leading slash: invalid, and produced by a real generator), which cost all 174
+  pages their Chinese and turned 目录 into `ł W L ! ¥ Ø J T X`. With no CMap at
+  all, a predefined CMap name (`GBK-EUC-H`, `UniGB-UCS2-H`) or a `UCS` CID
+  ordering still states the code space by definition; with neither, the CJK byte
+  encodings are offered and only kept when the result could not plausibly be
+  anything else — an unhinted font name has to come back *nothing but* CJK, so
+  Latin text is never "rescued" into ideographs. The last resort is Latin-1,
+  because a wrong-but-visible character beats a hole in the text.
 * **Scanned PDFs** are refused with `Error::NoTextLayer` — no silent empty file.
+* **A subset font whose CIDs are glyph ids and that carries no `ToUnicode` is not
+  recoverable** by anything short of reading the embedded font's `cmap` table;
+  those runs keep the old one-byte reading. Generators that do this normally
+  still write a `ToUnicode`, which is why the ladder above reaches it first.
 
 ## Features and MSRV
 
@@ -163,6 +179,12 @@ The end-to-end fixture is built with `lopdf` at test time (real text operators,
 rules as filled rectangles, a running header, a page break inside a paragraph, a
 ruled table, a bulleted list and a centred formula), so the regression it
 protects is the whole pipeline, not one heuristic.
+
+`tests/cjk_fonts.rs` covers the decoding ladder the same way, with fixtures built
+at test time: a composite font whose CMap header is off spec, `GBK-EUC-H` and
+`UniGB-UCS2-H` with no CMap at all, a `UCS` CID ordering, a GBK run recovered from
+the font name alone — and the two shapes that must *not* be recovered: glyph-id
+CIDs under a Latin name, and an ordinary WinAnsi run with one high byte in it.
 
 ## License
 

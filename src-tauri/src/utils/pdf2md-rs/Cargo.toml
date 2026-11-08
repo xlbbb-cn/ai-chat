@@ -1,6 +1,6 @@
 [package]
 name = "pdf2md-rs"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.80"
 description = "PDF (plain text and academic papers) to Markdown: PDFOxide text extraction, page layout analysis, unified IR, Markdown renderer"
@@ -14,6 +14,10 @@ path = "src/lib.rs"
 # PDF object model, page tree, content-stream operator decoding, font encodings
 # (ToUnicode CMaps), stream filters.
 lopdf = "0.47"
+# Byte-encoding tables for fonts that carry no `ToUnicode` CMap: GBK, Big5,
+# Shift_JIS, EUC-JP and EUC-KR are the national standards the Adobe predefined
+# CMaps were built from, so their tables decode the codes directly.
+encoding_rs = "0.8"
 flate2 = "1"
 # Re-encoding Flate/raw image samples into PNG.
 image = { version = "0.25", default-features = false, features = ["png"] }
