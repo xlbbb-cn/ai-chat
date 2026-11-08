@@ -11,7 +11,8 @@
     "tauri": "tauri",
     "sync-version": "node scripts/sync-version.cjs",
     "sync-version:git-tag": "node scripts/sync-version.cjs --from-git-tag",
-    "sync-version:bump-patch": "node scripts/sync-version.cjs --bump patch"
+    "sync-version:bump-patch": "node scripts/sync-version.cjs --bump patch",
+    "changelog": "node scripts/gen-changelog.cjs"
   },
   "dependencies": {
     "@fortawesome/fontawesome-svg-core": "^7.3.1",

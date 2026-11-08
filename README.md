@@ -283,6 +283,8 @@ git push origin v2.0.0
 | Linux | `.AppImage`, `.deb`, `.rpm` |
 
 - The app version comes from the newest git tag (`sync-version:git-tag` runs inside `npm run build`), so the pushed tag must be the newest one — otherwise the workflow fails fast.
+- The Release body is filled by the same workflow from the commits between the previous tag and this one (`scripts/gen-changelog.cjs`, grouped by Conventional Commits type), so there are no hand-written release notes.
+- `CHANGELOG.md` comes from that script too: run `npm run changelog -- --from <prev-tag> --to <tag> --details --write` before tagging to keep it current.
 - The release is published as soon as the first platform finishes; the remaining installers upload afterwards.
 - Each published release also submits its NSIS installer to `microsoft/winget-pkgs` through `.github/workflows/winget.yml` (requires the `WINGET_TOKEN` secret and an existing package entry).
 - macOS builds are ad-hoc signed (no Apple Developer certificate yet), so the first launch needs "Right click → Open" or System Settings → Privacy & Security → "Open Anyway".
