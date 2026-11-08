@@ -17,14 +17,8 @@ mod backup;
 mod db;
 mod llm_complete;
 mod logger;
-// Knowledge graph client library. It sits under `src/utils/` (next to the
-// `pdf2md-rs` crate) and is registered from the crate root, so `src/utils/`
-// keeps no `mod.rs` of its own: it is a plain folder on disk, not a module.
-// Nothing in the tool set wires it up yet — see
-// `utils/knowledge_graph/mod.rs` for how to reconnect it.
-#[path = "utils/knowledge_graph/mod.rs"]
-pub mod knowledge_graph;
-
+// `src/utils/` is a plain folder holding standalone crates (workspace members
+// `pdf2md-rs` and `knowledge-graph`), not a module: nothing here declares it.
 pub mod mcp;
 pub mod model_metadata;
 mod pdf_mentions;
@@ -51,9 +45,9 @@ const WORKSPACE_CHANGED_EVENT: &str = "workspace-changed";
 /// Tool ids that no longer exist in the tool set.
 ///
 /// They can still linger in a persisted `selected_tools` (the knowledge graph
-/// tool was removed, its client now lives in `utils/knowledge_graph`). Dropping
-/// them on load / save / read keeps the prompt, the dispatcher and the Tools
-/// panel free of phantom tools.
+/// tool was removed, its client now lives in the standalone `knowledge-graph`
+/// crate at `src/utils/knowledge_graph`). Dropping them on load / save / read
+/// keeps the prompt, the dispatcher and the Tools panel free of phantom tools.
 pub const RETIRED_TOOL_IDS: [&str; 1] = ["knowledge_graph"];
 
 /// Tools that self-evolution mode always keeps enabled.
