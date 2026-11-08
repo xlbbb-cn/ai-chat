@@ -232,6 +232,18 @@ pub(crate) fn validate_path_resolved_program(program: &str) -> Result<(), String
         return Err("run_cmd requires a program name.".to_string());
     }
 
+    // A Windows path stays a path on every platform: on Linux the backslashes
+    // are ordinary characters, so `C:\Python\python.exe` would otherwise look
+    // like one bare name and only fail later with a confusing ENOENT.
+    if looks_like_windows_path(trimmed) {
+        return Err(format!(
+            "⛔ run_cmd only runs programs that PATH resolves (for example 'python' or \
+             'python3'). '{}' is a path — pass a bare program name instead, or use \
+             `run_shell` when an absolute path is really needed.",
+            trimmed
+        ));
+    }
+
     // A bare program name is exactly one `Normal` component. Anything else
     // carries a separator, a drive prefix or a root — that is a path.
     let mut components = Path::new(trimmed).components();
@@ -248,6 +260,15 @@ pub(crate) fn validate_path_resolved_program(program: &str) -> Result<(), String
     }
 
     Ok(())
+}
+
+/// `C:\dir\x.exe` or `dir\x.exe`: a Windows path, whatever the host platform.
+pub(crate) fn looks_like_windows_path(value: &str) -> bool {
+    if value.contains('\\') {
+        return true;
+    }
+    let bytes = value.as_bytes();
+    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
 }
 
 /// Build a command for `cmd_type` rooted at `cwd`, without running it.
