@@ -19,6 +19,7 @@ mod llm_complete;
 mod logger;
 pub mod mcp;
 pub mod model_metadata;
+mod pdf_mentions;
 mod process_guard;
 mod skills;
 mod tools;
@@ -1512,6 +1513,7 @@ pub fn run() {
             workspace_files::list_workspace_files,
             workspace_files::read_workspace_file_range,
             workspace_files::read_workspace_file_bytes,
+            pdf_mentions::convert_pdf_mention,
             save_markdown_file,
             app_open_data_dir,
             app_open_workspace_dir,

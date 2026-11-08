@@ -81,6 +81,44 @@ export async function readWorkspaceFileBytes(path: string): Promise<string> {
   return invoke("read_workspace_file_bytes", { path });
 }
 
+/**
+ * Markdown of one PDF mention (`@paper.pdf#2`).
+ *
+ * The page range is converted in-process by the `pdf2md-rs` library and cached
+ * under `<workspace>/.data/tmp/pdf/`; `markdown` is what goes into the prompt
+ * and `path` is where the full conversion stayed on disk.
+ */
+export interface PdfMentionResult {
+  markdown: string;
+  /** Workspace-relative path of the cached Markdown. */
+  path: string;
+  /** 1-based first converted page. */
+  start_page: number;
+  /** 1-based last converted page (clamped to the document). */
+  end_page: number;
+  total_pages: number;
+  /** The page range or the prompt budget dropped content. */
+  truncated: boolean;
+}
+
+/**
+ * Render the page range of a workspace PDF (`#2`, `#2-5`, `#2-`) to Markdown.
+ *
+ * Omitted bounds mean "no range in the mention": the backend then converts a
+ * bounded preview (60 pages) instead of a whole book; `endPage` omitted *with*
+ * a `startPage` means "to the last page".
+ */
+export async function convertPdfMention(
+  path: string,
+  opts?: { startPage?: number; endPage?: number },
+): Promise<PdfMentionResult> {
+  return invoke("convert_pdf_mention", {
+    path,
+    startPage: opts?.startPage ?? null,
+    endPage: opts?.endPage ?? null,
+  });
+}
+
 export async function saveConfig(config: AppConfig): Promise<void> {
   return invoke("save_config", { config });
 }

@@ -50,7 +50,7 @@ import type {
   UpdateInfo,
   WorkspaceFileEntry,
 } from "./types";
-import { classifyName, extensionOf, supportsAttachmentKind } from "./attachments";
+import { extensionOf, supportsMentionName } from "./attachments";
 import { activeMentionQuery, resolveFileMentions, scoreWorkspaceFile } from "./fileMention";
 import { activeSlashQuery, scoreSkillOption, toSkillOptions } from "./slashMention";
 import type { SkillMentionOption } from "./slashMention";
@@ -111,6 +111,19 @@ function dataUrlBase64(dataUrl: string): string {
   return comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
 }
 
+/**
+ * Code-fence language for an inlined text attachment.
+ *
+ * The name may carry a range (`kk.pdf#2`, `src/App.tsx#12-24`), which would
+ * otherwise leak into the fence tag, and a converted PDF mention is Markdown
+ * no matter what its extension says.
+ */
+function fenceLanguage(att: Attachment): string {
+  if (att.mime === "text/markdown") return "markdown";
+  const ext = extensionOf(att.name.split("#")[0]);
+  return /^[a-z0-9]+$/.test(ext) ? ext : "";
+}
+
 /** Render a user message's attachments into a structured `content` payload. */
 function buildMessageContent(
   text: string,
@@ -147,11 +160,9 @@ function buildMessageContent(
         },
       });
     } else if (att.kind === "text" && att.text_content !== undefined) {
-      const ext = extensionOf(att.name);
-      const lang = ext || "";
       parts.push({
         type: "text",
-        text: `\n<details><summary>Attached File: ${att.name}</summary>\n\n\`\`\`${lang}\n${att.text_content}\n\`\`\`\n</details>`,
+        text: `\n<details><summary>Attached File: ${att.name}</summary>\n\n\`\`\`${fenceLanguage(att)}\n${att.text_content}\n\`\`\`\n</details>`,
       });
     }
   }
@@ -2763,7 +2774,9 @@ export default function App() {
     if (!mentionState.open || !workspaceFiles) return [];
     const scored: { item: WorkspaceFileEntry; score: number }[] = [];
     for (const file of workspaceFiles) {
-      if (!supportsAttachmentKind(selectedMetadata, classifyName(file.name))) continue;
+      // `@paper.pdf#2` reaches the model as Markdown text, so PDFs are offered
+      // to every model — even one without `supports_files`.
+      if (!supportsMentionName(selectedMetadata, file.name)) continue;
       const score = scoreWorkspaceFile(file, mentionState.query);
       if (score === null) continue;
       scored.push({ item: file, score });

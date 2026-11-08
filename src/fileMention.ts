@@ -1,5 +1,5 @@
 /**
- * `@path#line-line` mentions in the composer.
+ * `@path#range` mentions in the composer.
  *
  * Grammar (one mention, `@` must start a word):
  *
@@ -7,19 +7,31 @@
  * @<relative path>[#<start>[-<end>]]
  * ```
  *
+ * Text files count *lines*:
+ *
  * - `@src/App.tsx`        → the whole file
  * - `@src/App.tsx#12`     → line 12 only
  * - `@src/App.tsx#12-24`  → lines 12…24
  * - `@src/App.tsx#12-`    → lines 12…EOF
  *
+ * A PDF counts *pages*, because its text is not addressable by line:
+ *
+ * - `@paper.pdf#2`        → page 2, converted to Markdown
+ * - `@paper.pdf#2-5`      → pages 2…5
+ * - `@paper.pdf#2-`       → page 2 to the end
+ *
  * The token stays in the message body — the model then sees *which* file was
- * quoted — while the file content travels through the normal attachment
- * pipeline: text is inlined into the prompt, images/binaries become content
- * parts. Line ranges only make sense for text; a range on an image is ignored
- * (with a warning) and the whole file is attached.
+ * quoted — while the content travels through the normal attachment pipeline:
+ * text is inlined into the prompt, images/audio become content parts. A PDF
+ * becomes text too: the backend renders the page range to Markdown
+ * (`convert_pdf_mention`), caches it under `.data/tmp/pdf/` and the Markdown is
+ * inlined — so a PDF mention works with any model, no `supports_files` needed.
+ * A range on an image is ignored (with a warning) and the whole file is
+ * attached.
  */
-import { readWorkspaceFileBytes, readWorkspaceFileRange } from "./api";
-import { classifyName, mimeForName, supportsAttachmentKind } from "./attachments";
+import { convertPdfMention, readWorkspaceFileBytes, readWorkspaceFileRange } from "./api";
+import type { PdfMentionResult } from "./api";
+import { classifyName, extensionOf, mimeForName, supportsAttachmentKind } from "./attachments";
 import { t } from "./i18n";
 import type { Attachment, ModelMetadata, WorkspaceFileEntry } from "./types";
 
@@ -119,6 +131,28 @@ export interface MentionResolution {
 }
 
 /**
+ * `true` when the mention names a PDF.
+ *
+ * A PDF is the one binary the composer can turn into *text*: sending it as a
+ * `file` part needs a model with `supports_files`, while its Markdown works
+ * everywhere and is far cheaper to read.
+ */
+function isPdfMention(path: string): boolean {
+  return extensionOf(path) === "pdf";
+}
+
+/**
+ * Attachment label for a converted PDF, matching the token the user typed but
+ * with the pages that were actually converted (the range may have been
+ * clamped to the document).
+ */
+function pdfLabel(path: string, result: PdfMentionResult): string {
+  return result.start_page === result.end_page
+    ? `${path}#${result.start_page}`
+    : `${path}#${result.start_page}-${result.end_page}`;
+}
+
+/**
  * Turn the mentions in `text` into attachments.
  *
  * Failures are collected instead of thrown: a mention that cannot be resolved
@@ -139,6 +173,27 @@ export async function resolveFileMentions(
     const key = `${token.path}#${token.startLine ?? ""}-${token.endLine ?? ""}`;
     if (seen.has(key)) continue;
     seen.add(key);
+
+    // A PDF mention is a *text* attachment: the pages are rendered to Markdown
+    // by the backend and cached, so no model capability is involved and the
+    // provider never sees a file part.
+    if (isPdfMention(token.path)) {
+      try {
+        const result = await convertPdfMention(token.path, {
+          startPage: token.startLine,
+          endPage: token.endLine,
+        });
+        attachments.push({
+          name: pdfLabel(token.path, result),
+          kind: "text",
+          mime: "text/markdown",
+          text_content: result.markdown,
+        });
+      } catch (err) {
+        problems.push(t("app.fileMention.pdfFailed", { name: token.path, error: String(err) }));
+      }
+      continue;
+    }
 
     const kind = classifyName(token.path);
     if (!supportsAttachmentKind(metadata, kind)) {

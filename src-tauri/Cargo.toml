@@ -39,6 +39,14 @@ globset = "0.4"
 chrono = "0.4"
 # Base64 payloads for `@file` mentions of image/binary files (composer popup).
 base64 = "0.22"
+# `@paper.pdf#2` mentions: the PDF page range is rendered to Markdown in-process
+# by this crate (a library, not a CLI — see its README) and then inlined into
+# the prompt as text.
+pdf2md-rs = { path = "src/utils/pdf2md-rs" }
+
+[dev-dependencies]
+# The PDF mention command is tested against a real PDF generated on the fly.
+lopdf = "0.47"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Globalization", "Win32_Storage_FileSystem", "Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Power"] }

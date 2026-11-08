@@ -172,6 +172,23 @@ pub fn convert_bytes(
     convert_bytes_with(bytes, options, &Uncontrolled, progress)
 }
 
+/// Number of pages in a PDF, without converting anything.
+///
+/// A caller that only wants part of a document needs this *before* the
+/// conversion: `#2-` means "page 2 to the end", and "page 9 of 30" is a far
+/// better error than a failed range. Costs one object-graph walk.
+pub fn page_count(bytes: &[u8]) -> Result<usize> {
+    let document = lopdf::Document::load_mem(bytes)?;
+    if document.is_encrypted() {
+        return Err(Error::Encrypted);
+    }
+    let pages = document.get_pages().len();
+    if pages == 0 {
+        return Err(Error::NoPages);
+    }
+    Ok(pages)
+}
+
 /// Convert in-memory PDF bytes with a cancellation hook.
 pub fn convert_bytes_with(
     bytes: &[u8],

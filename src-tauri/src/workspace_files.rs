@@ -86,7 +86,11 @@ fn workspace_root(state: &State<'_, AppState>) -> Result<PathBuf, String> {
 
 /// Resolve a UI-provided relative path, refusing anything outside the
 /// workspace or inside the app's own `.data` directory.
-fn resolve_in_workspace(root: &Path, relative: &str) -> Result<PathBuf, String> {
+///
+/// Shared with [`crate::pdf_mentions`], which converts a mentioned PDF: the
+/// rule is the same one (`@` can only *name* a path inside the workspace), so
+/// it must not be re-implemented next to it.
+pub(crate) fn resolve_in_workspace(root: &Path, relative: &str) -> Result<PathBuf, String> {
     let trimmed = relative.trim();
     if trimmed.is_empty() {
         return Err("empty path".to_string());
