@@ -38,9 +38,9 @@ interface ToolOption {
 /**
  * Tools an `llm` sub-agent may be granted. `memory` is offered by default so
  * every sub-agent reads and writes the same session/user/repo store; the user
- * can still uncheck it per agent. `todos` and the knowledge graph stay with the
- * main agent (the backend still understands those ids for backwards
- * compatibility, but they are not offered here).
+ * can still uncheck it per agent. `todos` stays with the main agent (the
+ * backend still understands that id for backwards compatibility, but it is not
+ * offered here).
  */
 const KNOWN_TOOLS: ToolOption[] = [
   {

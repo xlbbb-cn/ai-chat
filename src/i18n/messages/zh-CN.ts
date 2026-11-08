@@ -435,9 +435,6 @@ const zhCN: Messages = {
     tools: {
         title: "工具",
         builtIn: "内置工具集",
-        kgEngine: "知识图谱引擎",
-        kgEngineTitle: "知识图谱的默认引擎",
-        kgEngineDisabled: "请先启用知识图谱工具",
         autoAccept: "自动确认模式",
         lockedBadge: "必需",
         lockedBySelfEvolution: "自进化模式需要，无法关闭。",
@@ -484,10 +481,6 @@ const zhCN: Messages = {
                 name: "待办清单",
                 description:
                     "使用会话级待办清单跟踪复杂的多步骤工作。助手可以添加条目、更新状态、检查进度、清理已完成条目并归档已完成的清单。",
-            },
-            knowledgeGraph: {
-                name: "知识图谱",
-                description: "连接知识图谱并执行查询",
             },
             timer: {
                 name: "定时器",
@@ -640,7 +633,6 @@ const zhCN: Messages = {
             fileActions: "在工作区内读取、写入、修补和搜索文件",
             runCmd: "执行单条命令或工作区脚本并附带风险评估",
             runShell: "运行 PowerShell / bash 脚本（direct / serve 后台进程）",
-            knowledgeGraph: "基于 Neo4j 的知识图谱查询",
             todos:
                 "通过 `todos` 工具管理会话待办清单（list / add / update_status / clear_completed / archive）。该计划与聊天会话及所有并行智能体共享。",
             memory: "共享的会话 / 用户 / 仓库记忆存储（所有子 agent 读写同一份）",

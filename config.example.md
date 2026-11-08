@@ -22,11 +22,7 @@ Typical locations:
     "max_tokens": 4096
   },
   "system_message": "You are a helpful assistant.",
-  "selected_tools": ["run_cmd", "file_actions", "knowledge_graph"],
-  "kg_engine": "neo4j",
-  "neo4j_uri": "bolt://localhost:7687",
-  "neo4j_user": "neo4j",
-  "neo4j_password": "your_password",
+  "selected_tools": ["run_cmd", "file_actions"],
   "check_updates_on_startup": true,
   "include_prerelease_updates": false,
   "log_retention_days": 90
@@ -44,11 +40,7 @@ Typical locations:
 - model_reasoning_effort: Per-model "thinking depth" picked next to the model selector in the chat toolbar, forwarded as `reasoning_effort`. Keyed by model id; allowed values are `minimal`, `low`, `medium`, `high` (anything else is dropped so a typo can never be sent upstream). A missing/empty entry means "let the provider decide" and falls back to `model_settings.reasoning_effort`. Only sent for the model that was configured — reasoning models that reject the parameter can be left on Default.
 - model_settings: Advanced model parameters forwarded to chat completion.
 - system_message: Global system prompt appended to each conversation.
-- selected_tools: Enabled tools list. Supported values: run_cmd, run_shell, file_actions, knowledge_graph, memory, todo_list (alias todo) and timer.
-- kg_engine: Knowledge graph backend selector. Current default is neo4j.
-- neo4j_uri: Neo4j Bolt endpoint, for example bolt://localhost:7687.
-- neo4j_user: Neo4j username.
-- neo4j_password: Neo4j password.
+- selected_tools: Enabled tools list. Supported values: run_cmd, run_shell, file_actions, memory, todo_list (alias todo) and timer. A retired id (for example `knowledge_graph`) is dropped on load and on save.
 - check_updates_on_startup: Check the GitHub Releases API for a newer published release when the app starts (default true).
 - include_prerelease_updates: Also consider releases flagged as pre-release; draft releases are never visible to the public API.
 - log_retention_days: Retention window (days, default 90) for the request/interaction log tables (`api_requests`, `interaction_log`). Older rows are deleted at startup and when the Interaction Monitor compacts the database; 0 keeps logs forever. Chat history is never pruned. Each request stores its full prompt body, so this is the main driver of `chat.db` growth.

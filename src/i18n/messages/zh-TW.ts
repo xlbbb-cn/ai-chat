@@ -435,9 +435,6 @@ const zhTW: Messages = {
     tools: {
         title: "工具",
         builtIn: "內建工具集",
-        kgEngine: "知識圖譜引擎",
-        kgEngineTitle: "知識圖譜的預設引擎",
-        kgEngineDisabled: "請先啟用知識圖譜工具",
         autoAccept: "自動確認模式",
         lockedBadge: "必需",
         lockedBySelfEvolution: "自我演化模式需要，無法關閉。",
@@ -484,10 +481,6 @@ const zhTW: Messages = {
                 name: "待辦清單",
                 description:
                     "使用工作階段層級的待辦清單追蹤複雜的多步驟工作。助理可以新增項目、更新狀態、檢查進度、清理已完成項目並封存已完成的清單。",
-            },
-            knowledgeGraph: {
-                name: "知識圖譜",
-                description: "連線知識圖譜並執行查詢",
             },
             timer: {
                 name: "計時器",
@@ -640,7 +633,6 @@ const zhTW: Messages = {
             fileActions: "在工作區內讀取、寫入、修補與搜尋檔案",
             runCmd: "執行單一命令或工作區指令碼並附帶風險評估",
             runShell: "執行 PowerShell / bash 指令碼（direct / serve 背景程序）",
-            knowledgeGraph: "以 Neo4j 為後端的知識圖譜查詢",
             todos:
                 "透過 `todos` 工具管理工作階段待辦清單（list / add / update_status / clear_completed / archive）。此計畫與聊天工作階段及所有平行代理共用。",
             memory: "共用的工作階段 / 使用者 / 儲存庫記憶儲存（所有子 agent 讀寫同一份）",

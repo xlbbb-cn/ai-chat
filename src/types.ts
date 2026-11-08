@@ -383,10 +383,6 @@ export interface AppConfig {
    * for them. Defaults to on.
    */
   sub_agent_main_help?: boolean;
-  kg_engine?: string;
-  neo4j_uri?: string;
-  neo4j_user?: string;
-  neo4j_password?: string;
   workspace_dir?: string;
   logger_output?: "file" | "println";
   /**

@@ -1118,7 +1118,7 @@ body {
   top: 0;
   left: 0;
   right: 0;
-  height: 2px;
+  height: 1px;
   overflow: hidden;
   background: var(--c-border);
 }
@@ -1324,7 +1324,7 @@ body {
 .agent-editor::-webkit-scrollbar,
 .mcp-list::-webkit-scrollbar,
 .mcp-form::-webkit-scrollbar {
-  width: 2px;
+  width: 1px;
   height: 0;
 }
 
@@ -1367,7 +1367,7 @@ body {
 .agent-editor.scrolling-active::-webkit-scrollbar,
 .mcp-list.scrolling-active::-webkit-scrollbar,
 .mcp-form.scrolling-active::-webkit-scrollbar {
-  width: 2px;
+  width: 1px;
 }
 
 .messages.scrolling-active::-webkit-scrollbar-track,
