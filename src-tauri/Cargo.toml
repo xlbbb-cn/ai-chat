@@ -27,8 +27,6 @@ futures-util = "0.3"
 dirs = "5"
 rusqlite = { version = "0.39.0", features = ["bundled"] }
 serde_yaml = "0.9"
-neo4rs = "0.8.0"
-async-trait = "0.1.89"
 diffy = "0.4"
 uuid = { version = "1", features = ["v4"] }
 zip = "0.6"
@@ -67,4 +65,8 @@ zbus = "5"
 
 
 [workspace]
-members = ["src/utils/pdf2md-rs"]
+members = [
+  # Standalone library crates that live under the app's `src/utils/` folder.
+  "src/utils/pdf2md-rs",
+  "src/utils/knowledge_graph",
+]

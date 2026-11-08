@@ -199,7 +199,7 @@ AI Chat 是一个桌面端 AI 助手应用，支持接入任意 OpenAI 兼容模
 - reqwest（HTTP / 流式）
 - rusqlite（本地数据库）
 - serde / serde_json / serde_yaml（序列化）
-- neo4rs（Neo4j 驱动，供 `src-tauri/src/utils/knowledge_graph` 下的知识图谱库使用）
+- neo4rs（Neo4j 驱动，仅供 `src-tauri/src/utils/knowledge_graph` 下独立的 `knowledge-graph` 包使用，不是主 crate 的依赖）
 
 ### 通信模型
 

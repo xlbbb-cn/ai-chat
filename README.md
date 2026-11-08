@@ -199,7 +199,7 @@ Think of it as:
 - reqwest (HTTP / streaming)
 - rusqlite (local database)
 - serde / serde_json / serde_yaml (serialization)
-- neo4rs (Neo4j driver, used by the knowledge graph library in `src-tauri/src/utils/knowledge_graph`)
+- neo4rs (Neo4j driver, used only by the standalone `knowledge-graph` crate in `src-tauri/src/utils/knowledge_graph` — not a dependency of the app crate)
 
 ### Communication Model
 

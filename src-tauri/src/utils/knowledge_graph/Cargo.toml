@@ -1,0 +1,16 @@
+[package]
+name = "knowledge-graph"
+version = "0.1.0"
+edition = "2021"
+description = "Knowledge graph client library: engine settings plus a Neo4j (Bolt) backend behind a small async trait"
+license = "GPL-2.0-only"
+
+[lib]
+name = "knowledge_graph"
+path = "src/lib.rs"
+
+[dependencies]
+async-trait = "0.1.89"
+# Neo4j over Bolt: the only backend today. Kept inside this crate so the app
+# binary does not link a driver for a library it does not call.
+neo4rs = "0.8.0"
