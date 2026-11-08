@@ -9,6 +9,40 @@ npm run changelog -- --from <上一个 tag> --to <本次 tag> --details --write
 条目按 Conventional Commits 的类型分组，作用域加粗；工作区里提交标题是英文、正文是中文，
 所以带 `--details` 时是中英对照。
 
+## [v2.9.3](https://github.com/xlbbb-cn/ai-chat/releases/tag/v2.9.3) — 2026-11-08
+
+### 新增
+
+- **mcp**: let the assistant build and run its own MCP servers ([`9656a3c`](https://github.com/xlbbb-cn/ai-chat/commit/9656a3c0fa8a97d22d0a4053010152252964700d))
+  - `mcp_self` tool (`tools/mcp_self.rs`): `list` / `write` / `enable` / `disable` / `test` / `restart` / `logs` / `remove`. The script lives in `<workspace>/.data/mcp/<slug>/` (`.bak.<n>` on update); the interpreter is picked by the backend from a whitelist (`python` / `node` / `shell`), never named by the model, so the tool can only turn workspace code into a server, not register an arbitrary command. Writes, enabling and removal ask the user once (`user_software`, pre-approvable via `auto_accept_confirm_kinds`).
+  - Two rosters merged on read: manually created servers stay in the app-data `mcp_servers.json`, self-built ones live next to their script in `<workspace>/.data/mcp.conf` (YAML, JSON tolerated). `load_effective_servers` merges them with the panel entry winning on an id clash; panel save/delete route by provenance, so a self-built row is edited through the workspace file and is never duplicated into app data. Startup migrates entries an earlier build wrote into app data.
+  - `AppState::mcp_revision` + `build_turn_tools`: the tool payload is rebuilt at each request boundary once the registry changed, so write -> enable -> call works inside one turn instead of the next conversation turn. Sub-agents and the main-agent helper drop `mcp_self` (`agents::drop_mcp_self`): they would race on the roster, an `AgentMcpSession` only reads servers at task start, and the confirmation dialog would block a mission.
+  - A start that fails `tools/list` leaves the server disabled so it cannot stall later requests, and the error carries the log tail; `logs` returns the tail on demand so the model can fix its own script.
+  - Profile export/import carries `workspace/mcp.conf` and now really restores the app-data `mcp_servers.json` (it was exported but ignored on import), then retires live stdio children so the restored roster takes effect.
+  - Docs: AGENTS.md (tool family, `.data` layout, self-evolution bullets, MCP warmup), DESIGN.md (provenance badge spec), the self-evolution system prompt, and the MCP panel provenance badge plus a refresh on `mcp-servers-changed`.
+
+### 性能
+
+- **prompt**: shrink the first request and stop preloading evolution facts ([`2c29981`](https://github.com/xlbbb-cn/ai-chat/commit/2c29981521279a9c35a35acb9eff73dcf0737db7))
+  - Tool schemas (`get_all_tools`, `mcp_self`, `skill_read`): rendered JSON for the 13 main-agent tools drops 28 731 -> ~23 600 characters (-18%) with the parameter shapes unchanged. `run_shell` reuses `run_cmd`'s risk-level wording, the MCP stdio contract is documented once in the `mcp_self` schema, and the timer/todo/background descriptions keep the mechanics while the system prompt keeps the policy.
+  - System prompt: `self_evolution_prompt` 4 475 -> 3 175 characters (-29%), plus compacted skills/agents lists (one line per entry), memory/timer/todo guidance, the explicit-invocation line and the active-skill context.
+  - Orchestration: selector, planner, supervisor and the sub-agent static/mission prompts lose duplicated sentences (-8%..-17%); the JSON contracts and the capability-fit rules stay verbatim.
+  - Evolution memory is no longer preloaded into any request (it could take the whole ~4,000-character budget on every turn): the prompt only tells the model to search the scope when a problem needs earlier experience. `render_evolution_context` stays as the `#[cfg(test)]` reference renderer; `EVOLUTION_CONTEXT_BUDGET_CHARS` still drives the panel's top tier and the `consolidate` plan.
+  - Memory panel and i18n (en / zh-CN / zh-TW): "in prompt" becomes "top tier"; AGENTS.md documents the on-demand policy instead of the VERIFIED FACTS block.
+
+### 重构
+
+- **kg**: extract the knowledge graph client into its own crate ([`fa6516f`](https://github.com/xlbbb-cn/ai-chat/commit/fa6516faa1ba7faa0058b7b399a4dec006a78b22))
+  - The app crate drops `neo4rs` and `async-trait` (only that client used them), so the binary no longer links a Neo4j driver for code it never calls.
+  - `lib.rs` stops declaring the module through `#[path = "utils/knowledge_graph/mod.rs"]`: `src/utils/` is a plain folder holding standalone crates, not a module.
+  - The crate's tests are targeted by package name (`cargo test -p knowledge-graph`), because the app crate's default build only covers the root package.
+
+### 文档
+
+- **changelog**: add the v2.9.2 section ([`b77a190`](https://github.com/xlbbb-cn/ai-chat/commit/b77a190c4ef92830ebeaf3995c35bbb0c1531422))
+
+**完整对比**：[v2.9.2...v2.9.3](https://github.com/xlbbb-cn/ai-chat/compare/v2.9.2...v2.9.3)
+
 ## [v2.9.2](https://github.com/xlbbb-cn/ai-chat/releases/tag/v2.9.2) — 2026-11-08
 
 ### 新增
