@@ -52,6 +52,7 @@ import type {
 } from "./types";
 import { extensionOf, supportsMentionName } from "./attachments";
 import { activeMentionQuery, resolveFileMentions, scoreWorkspaceFile } from "./fileMention";
+import type { MentionProgress, MentionResolution } from "./fileMention";
 import { activeSlashQuery, scoreSkillOption, toSkillOptions } from "./slashMention";
 import type { SkillMentionOption } from "./slashMention";
 import { isGenerationStopped, isLocale, stripGenerationStopped, useI18n } from "./i18n";
@@ -66,6 +67,7 @@ import {
   faRobot,
   faRotateRight,
   faScrewdriverWrench,
+  faSpinner,
   faStopwatch,
   faTriangleExclamation,
   faWandMagicSparkles,
@@ -358,6 +360,12 @@ export default function App() {
   } | null>(null);
   /** True once `chat-usage` arrived for the request currently streaming. */
   const [usageReady, setUsageReady] = useState(false);
+  /**
+   * PDF mention conversion in flight: `sendMessage` resolves mentions before the
+   * turn starts, and a long document would otherwise be a silent pause. Drives
+   * the strip above the input row; `null` whenever nothing is converting.
+   */
+  const [mentionProgress, setMentionProgress] = useState<MentionProgress | null>(null);
   const [maxTokens, setMaxTokens] = useState<number | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>(["gpt-4o-mini"]);
   const [selectedModel, setSelectedModel] = useState("gpt-4o-mini");
@@ -1798,9 +1806,22 @@ export default function App() {
     // `@path#lines` mentions are materialised here: the token stays in the body
     // (the model then sees which file was quoted) while the content travels
     // through the normal attachment pipeline.
-    const mentionResult = autoResume
-      ? { attachments: [] as Attachment[], problems: [] as string[] }
-      : await resolveFileMentions(rawText, selectedMetadata, selectedModel);
+    //
+    // Resolving a PDF mention is a real conversion, so its progress is shown
+    // while this await runs — the turn only appears once everything is read.
+    let mentionResult: MentionResolution = { attachments: [], problems: [] };
+    if (!autoResume) {
+      try {
+        mentionResult = await resolveFileMentions(
+          rawText,
+          selectedMetadata,
+          selectedModel,
+          setMentionProgress,
+        );
+      } finally {
+        setMentionProgress(null);
+      }
+    }
     const messageAttachments = mentionResult.attachments;
 
     const { content: apiContent } = buildMessageContent(rawText, messageAttachments);
@@ -3475,6 +3496,31 @@ export default function App() {
                   style={{ width: `${usagePercent}%` }}
                 />
               )}
+            </div>
+          )}
+          {/* A PDF mention converts before the turn starts: say which page the
+              backend is on instead of letting the composer look stuck. Same
+              recipe as the injection bar — one muted row, no fill, no border. */}
+          {mentionProgress && (
+            <div className="mention-progress" role="status" aria-live="polite">
+              <span className="mention-progress-text">
+                <FontAwesomeIcon icon={faSpinner} spin aria-hidden="true" />
+                {t("app.fileMention.pdfConverting", { name: mentionProgress.name })}
+              </span>
+              {mentionProgress.page > 0 && (
+                <span className="mention-progress-detail">
+                  {t("app.fileMention.pdfConvertingPage", {
+                    page: mentionProgress.page,
+                    total: mentionProgress.total,
+                  })}
+                </span>
+              )}
+              <span className="mention-progress-track" aria-hidden="true">
+                <span
+                  className="mention-progress-fill"
+                  style={{ width: `${mentionProgress.percent}%` }}
+                />
+              </span>
             </div>
           )}
           {pendingInjections.length > 0 && (

@@ -96,6 +96,8 @@ const zhTW: Messages = {
             readFailed: "無法讀取 {name}：{error}",
             rangeNotSupported: "{name} 不支援行區間，已附加整個檔案。",
             pdfFailed: "無法轉換 PDF {name}：{error}",
+            pdfConverting: "正在把 {name} 轉成 Markdown…",
+            pdfConvertingPage: "第 {page} / {total} 頁",
         },
         slashMention: {
             title: "插入技能參照",

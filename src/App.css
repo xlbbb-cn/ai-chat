@@ -1229,6 +1229,58 @@ body {
   color: var(--c-muted);
 }
 
+/* PDF mention conversion: `sendMessage` waits for the backend while a page range
+   is rendered, so the composer shows which page it is on and how far the whole
+   conversion got. Same recipe as `.injection-bar` — one muted 12px row, no fill,
+   no border — with the 2px accent track the usage bar already uses. */
+.mention-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 2px;
+  font-size: 12px;
+  color: var(--c-muted);
+}
+
+.mention-progress-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mention-progress-detail {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--c-placeholder);
+  font-variant-numeric: tabular-nums;
+}
+
+.mention-progress-track {
+  flex: 1;
+  min-width: 40px;
+  height: 2px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--c-border);
+}
+
+.mention-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--c-accent);
+  transition: width 120ms linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mention-progress-fill {
+    transition: none;
+  }
+}
 
 .toggle-switch {
   position: relative;

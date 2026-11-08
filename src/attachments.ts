@@ -110,3 +110,28 @@ export function supportsMentionName(
   if (extensionOf(name) === "pdf") return true;
   return supportsAttachmentKind(metadata, classifyName(name));
 }
+
+/**
+ * Attachments as they are written to the session history.
+ *
+ * A converted PDF mention carries the Markdown twice on the way out: once as
+ * `text_content` (what `buildMessageContent` inlines into the turn) and once as
+ * the path of its cache file. The Markdown also lands in the message `content`,
+ * which is what every later request replays — so the copy inside the attachment
+ * record is up to 60 000 characters of dead weight per mention. Storing the
+ * path instead keeps the provenance (and the file a tool can read) at the cost
+ * of one string.
+ *
+ * Live attachments keep their `text_content`: only the persisted copy is
+ * compacted, so sending never depends on a file that may since have been
+ * pruned. Attachments without a `path` (an `@notes.md#12` slice, which is read
+ * from the workspace on demand) are stored unchanged.
+ */
+export function compactAttachmentsForDb(attachments: Attachment[]): Attachment[] {
+  return attachments.map((att) => {
+    if (att.text_content === undefined || !att.path) return att;
+    const compact: Attachment = { ...att };
+    delete compact.text_content;
+    return compact;
+  });
+}

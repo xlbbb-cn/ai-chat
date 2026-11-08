@@ -108,6 +108,8 @@ const en = {
             rangeNotSupported:
                 "{name} cannot be sliced by lines — attached the whole file.",
             pdfFailed: "Could not convert the PDF {name}: {error}",
+            pdfConverting: "Converting {name} to Markdown…",
+            pdfConvertingPage: "page {page} / {total}",
         },
         slashMention: {
             title: "Insert skill reference",

@@ -28,6 +28,7 @@
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
+use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager};
 
 use crate::workspace;
@@ -68,6 +69,22 @@ pub struct PdfMention {
     pub total_pages: usize,
     /// The range or the character budget dropped content.
     pub truncated: bool,
+}
+
+/// One progress tick of a mention conversion, streamed to the composer.
+///
+/// `page`/`total` are what the pipeline is working on right now; both are 0
+/// outside the page loops (reading, rendering), which is why the composer falls
+/// back to a plain "converting…" label for those stages.
+#[derive(Debug, Clone, Serialize)]
+pub struct PdfMentionProgress {
+    /// Pipeline stage code: `reading`, `extracting`, `analysing`, `parsing`,
+    /// `cleaning`, `rendering` or `done`.
+    pub stage: String,
+    pub page: usize,
+    pub total: usize,
+    /// Overall completion in percent, as the pipeline computes it.
+    pub percent: u8,
 }
 
 /// Resolved page window of one mention.
@@ -246,6 +263,7 @@ fn convert_blocking(
     relative: &str,
     start: Option<usize>,
     end: Option<usize>,
+    progress: &mut dyn FnMut(PdfMentionProgress),
 ) -> Result<PdfMention, String> {
     let file = resolve_in_workspace(workspace_dir, relative)?;
     if !file
@@ -279,7 +297,17 @@ fn convert_blocking(
     // `$$…$$` around a centred line, so mention conversion opts in.
     options.formula.detect = true;
 
-    let conversion = pdf2md_rs::pipeline::convert_bytes(&bytes, &options, &mut |_| {})
+    // The library reports per-page and per-stage progress; forward it as-is so
+    // the composer can say "page 12 of 30" while the UI is otherwise idle.
+    let mut on_page = |update: pdf2md_rs::pipeline::Progress| {
+        progress(PdfMentionProgress {
+            stage: update.stage.as_str().to_string(),
+            page: update.page,
+            total: update.total,
+            percent: update.percent(),
+        });
+    };
+    let conversion = pdf2md_rs::pipeline::convert_bytes(&bytes, &options, &mut on_page)
         .map_err(|e| describe_error(relative, &e))?;
     if conversion.is_empty() {
         return Err(format!(
@@ -358,12 +386,17 @@ fn log_conversion(
 /// The Markdown is cached under `<workspace>/.data/tmp/pdf/` and also returned,
 /// so the caller can append it to the LLM request without touching the disk
 /// twice.
+///
+/// `on_progress` streams one message per visible step (`page 12 of 30`, then
+/// `parsing`, `rendering`…): a 60-page mention takes long enough that a silent
+/// composer looks broken.
 #[tauri::command]
 pub async fn convert_pdf_mention(
     app: AppHandle,
     path: String,
     start_page: Option<usize>,
     end_page: Option<usize>,
+    on_progress: Channel<PdfMentionProgress>,
 ) -> Result<PdfMention, String> {
     let workspace_dir = app
         .state::<AppState>()
@@ -377,7 +410,19 @@ pub async fn convert_pdf_mention(
     // mention unable to freeze the UI.
     tauri::async_runtime::spawn_blocking(move || {
         let started = std::time::Instant::now();
-        let outcome = convert_blocking(&workspace_dir, &path, start_page, end_page);
+        // The pipeline re-reports a stage it has already announced (once per
+        // page, then again on the stage change): one IPC message per visible
+        // change is enough and keeps a fast conversion at a few frames.
+        let mut last: Option<(String, usize, usize)> = None;
+        let mut progress = move |update: PdfMentionProgress| {
+            let key = (update.stage.clone(), update.page, update.total);
+            if last.as_ref() == Some(&key) {
+                return;
+            }
+            last = Some(key);
+            let _ = on_progress.send(update);
+        };
+        let outcome = convert_blocking(&workspace_dir, &path, start_page, end_page, &mut progress);
         log_conversion(&app, &path, &outcome, started.elapsed());
         outcome
     })
@@ -486,11 +531,52 @@ mod tests {
         }
     }
 
+    /// `convert_blocking` with the progress stream dropped on the floor.
+    fn convert(
+        workspace_dir: &Path,
+        relative: &str,
+        start: Option<usize>,
+        end: Option<usize>,
+    ) -> Result<PdfMention, String> {
+        convert_blocking(workspace_dir, relative, start, end, &mut |_| {})
+    }
+
+    #[test]
+    fn progress_reports_pages_then_the_finishing_stages() {
+        let ws = TempWorkspace::new();
+        ws.put("kk.pdf", &sample_pdf(3));
+
+        let mut ticks: Vec<(String, usize, usize, u8)> = Vec::new();
+        convert_blocking(&ws.dir, "kk.pdf", None, None, &mut |update| {
+            ticks.push((update.stage, update.page, update.total, update.percent));
+        })
+        .expect("convert");
+
+        // One tick per extracted page, in order, with the running page count.
+        let pages: Vec<usize> = ticks
+            .iter()
+            .filter(|(stage, page, total, _)| stage == "extracting" && *page > 0 && *total > 0)
+            .map(|(_, page, _, _)| *page)
+            .collect();
+        assert_eq!(pages, vec![1, 2, 3], "{ticks:?}");
+
+        // The stage stream ends with the finishing steps, and the percentage
+        // never walks backwards (the composer draws it as a bar).
+        let stages: Vec<&str> = ticks.iter().map(|(stage, _, _, _)| stage.as_str()).collect();
+        assert!(stages.contains(&"rendering"), "{stages:?}");
+        assert_eq!(stages.last().copied(), Some("done"), "{stages:?}");
+        let percentages: Vec<u8> = ticks.iter().map(|(_, _, _, percent)| *percent).collect();
+        assert!(
+            percentages.windows(2).all(|pair| pair[0] <= pair[1]),
+            "{percentages:?}"
+        );
+    }
+
     #[test]
     fn a_single_page_mention_converts_only_that_page() {
         let ws = TempWorkspace::new();
         ws.put("kk.pdf", &sample_pdf(3));
-        let mention = convert_blocking(&ws.dir, "kk.pdf", Some(2), Some(2)).expect("convert");
+        let mention = convert(&ws.dir, "kk.pdf", Some(2), Some(2)).expect("convert");
 
         assert_eq!((mention.start_page, mention.end_page, mention.total_pages), (2, 2, 3));
         assert!(mention.markdown.contains("Page 2 body text"), "{}", mention.markdown);
@@ -503,7 +589,7 @@ mod tests {
     fn an_open_ended_range_runs_to_the_last_page() {
         let ws = TempWorkspace::new();
         ws.put("kk.pdf", &sample_pdf(3));
-        let mention = convert_blocking(&ws.dir, "kk.pdf", Some(2), None).expect("convert");
+        let mention = convert(&ws.dir, "kk.pdf", Some(2), None).expect("convert");
 
         assert_eq!((mention.start_page, mention.end_page), (2, 3));
         assert!(mention.markdown.contains("Page 2 body text"));
@@ -514,7 +600,7 @@ mod tests {
     fn a_range_past_the_end_is_clamped() {
         let ws = TempWorkspace::new();
         ws.put("kk.pdf", &sample_pdf(2));
-        let mention = convert_blocking(&ws.dir, "kk.pdf", Some(1), Some(99)).expect("convert");
+        let mention = convert(&ws.dir, "kk.pdf", Some(1), Some(99)).expect("convert");
 
         assert_eq!(mention.end_page, 2);
         assert!(mention.truncated, "clamping must be reported");
@@ -524,7 +610,7 @@ mod tests {
     fn a_page_past_the_end_is_rejected() {
         let ws = TempWorkspace::new();
         ws.put("kk.pdf", &sample_pdf(2));
-        let error = convert_blocking(&ws.dir, "kk.pdf", Some(9), None).expect_err("out of range");
+        let error = convert(&ws.dir, "kk.pdf", Some(9), None).expect_err("out of range");
         assert!(error.contains("past the end"), "{error}");
     }
 
@@ -532,7 +618,7 @@ mod tests {
     fn a_non_pdf_mention_is_rejected() {
         let ws = TempWorkspace::new();
         ws.put("notes.md", b"# notes\n");
-        let error = convert_blocking(&ws.dir, "notes.md", None, None).expect_err("not a pdf");
+        let error = convert(&ws.dir, "notes.md", None, None).expect_err("not a pdf");
         assert!(error.contains("not a PDF"), "{error}");
     }
 
@@ -540,7 +626,7 @@ mod tests {
     fn the_markdown_is_cached_under_dot_data_tmp() {
         let ws = TempWorkspace::new();
         ws.put("papers/kk.pdf", &sample_pdf(3));
-        let mention = convert_blocking(&ws.dir, "papers/kk.pdf", Some(1), Some(1)).expect("convert");
+        let mention = convert(&ws.dir, "papers/kk.pdf", Some(1), Some(1)).expect("convert");
 
         assert!(mention.path.starts_with(".data/tmp/pdf/"), "{}", mention.path);
         assert!(mention.path.ends_with(".md"), "{}", mention.path);
@@ -555,9 +641,9 @@ mod tests {
     fn the_same_mention_reuses_one_cache_file() {
         let ws = TempWorkspace::new();
         ws.put("kk.pdf", &sample_pdf(3));
-        let first = convert_blocking(&ws.dir, "kk.pdf", Some(2), Some(2)).expect("first");
-        let second = convert_blocking(&ws.dir, "kk.pdf", Some(2), Some(2)).expect("second");
-        let other = convert_blocking(&ws.dir, "kk.pdf", Some(3), Some(3)).expect("other");
+        let first = convert(&ws.dir, "kk.pdf", Some(2), Some(2)).expect("first");
+        let second = convert(&ws.dir, "kk.pdf", Some(2), Some(2)).expect("second");
+        let other = convert(&ws.dir, "kk.pdf", Some(3), Some(3)).expect("other");
 
         assert_eq!(first.path, second.path);
         assert_ne!(first.path, other.path, "a different range is a different file");
@@ -582,7 +668,7 @@ mod tests {
             .expect("backdate stale");
 
         ws.put("kk.pdf", &sample_pdf(3));
-        let mention = convert_blocking(&ws.dir, "kk.pdf", Some(1), Some(1)).expect("convert");
+        let mention = convert(&ws.dir, "kk.pdf", Some(1), Some(1)).expect("convert");
 
         assert!(!stale.exists(), "a week-old conversion should be gone");
         assert!(unrelated.exists(), "only our own .md files are pruned");
