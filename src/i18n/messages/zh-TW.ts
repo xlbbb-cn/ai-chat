@@ -263,7 +263,7 @@ const zhTW: Messages = {
             themeDark: "深色",
             palette: "配色",
             paletteDefault: "預設",
-            paletteFig: "無花果",
+            paletteSakura: "櫻花粉",
             paletteCream: "乳白",
             paletteHint: "立即生效，並儲存至設定檔中。",
             language: "語言",

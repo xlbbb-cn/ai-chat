@@ -48,7 +48,7 @@ The interface has **two independent colour dimensions**, both set on `<html>`:
 | Attribute | Values | Meaning |
 |---|---|---|
 | `data-theme` | `light` / `dark` | Light vs. dark resolution. `auto` follows the OS and resolves to one of the two. |
-| `data-palette` | `default` / `fig` / `cream` | The colour scheme: which hues the surfaces, the accent and the semantic states wear. |
+| `data-palette` | `default` / `sakura` / `cream` | The colour scheme: which hues the surfaces, the accent and the semantic states wear. |
 
 Both are written by `applyTheme()` in `src/App.tsx` from `config.theme` and
 `config.palette`. Every palette therefore needs a **light *and* a dark token
@@ -58,7 +58,7 @@ finished as `cream` + `light`.
 | Palette | Light | Dark | Character |
 |---|---|---|---|
 | `default` | Pure White canvas, Electric Blue accent | Carbon Dark canvas, lifted Electric Blue | The monochrome-plus-one baseline. |
-| `fig` (无花果) | Frost-purple canvas `#B8A5D2`, panels in lavender-white, fig-red accent `#EFAFAD`, 艾背绿 code `#DFECD5`, 海天蓝 reasoning `#C6E6E8` | Deep plum canvas `#241E33`, lifted pastels | A pastel scheme. |
+| `sakura` (樱花粉) | 草莓牛奶 `#FFDDE9` canvas, `#FFF7FA` panels, 樱花粉 `#FF8FB1` accent with `#8E2450` as its legible twin, 薄荷奶绿 `#DFF5EA` code, 薰衣草紫 `#EDE4FF` reasoning — the pastel-pink group of Color Hunt (`#FFCED8` / `#FFDDDD` / `#FFF4DE` / `#FFE8C4`), cooled into a strawberry-milk scheme | Deep plum canvas `#2B1A23`, `#37212C` panels, lifted `#FFA6C2` accent | Cute. Soft pastel pink, deliberately the one palette that is not paper-white. |
 | `cream` (乳白) | The adjacent warm-white group — 蚌肉白 `#F9F1DB` canvas, 乳白 `#F9F4DC` panels, 奶油白 `#FFF8E7` alternate surface, 粉白 `#FBF2E3` secondary — washed with oklab gradients instead of flat fills | Deep umber canvas, the same tones as warm greys | Paper. The accent stays Electric Blue: this palette is about the neutrals. |
 
 ### Rules for a palette block
@@ -556,7 +556,7 @@ too. True modal dialogs (9999 layer) still cover the titlebar on purpose.
 
 `data-theme` and `data-palette` on `<html>` are set by `applyTheme()` in
 `src/App.tsx` from `config.theme` (`auto` / `light` / `dark`) and
-`config.palette` (`default` / `fig` / `cream`). Everything must work through the
+`config.palette` (`default` / `sakura` / `cream`). Everything must work through the
 token layer — no component should branch on the theme or the palette itself
 except where a literal is unavoidable (currently: the toggle knob in dark mode,
 and the monitor terminal).

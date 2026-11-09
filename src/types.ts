@@ -314,7 +314,7 @@ export type ThemeMode = "auto" | "light" | "dark";
  * light / dark mode. Each palette ships a light *and* a dark token set,
  * so the two dimensions are independent.
  */
-export type Palette = "default" | "fig" | "cream";
+export type Palette = "default" | "sakura" | "cream";
 
 /**
  * One extra HTTP header attached to every upstream model request
@@ -441,9 +441,9 @@ export interface AppConfig {
   theme?: ThemeMode;
   /**
    * Colour scheme layered on top of the light / dark mode: `default`
-   * (Pure White + Electric Blue), `fig` (无花果, a pastel scheme on a
-   * frost-purple canvas) or `cream` (乳白, the adjacent warm-white group
-   * washed with oklab gradients).
+   * (Pure White + Electric Blue), `sakura` (樱花, a pastel scheme on a
+   * strawberry-milk pink canvas) or `cream` (乳白, the adjacent warm-white
+   * group washed with oklab gradients).
    */
   palette?: Palette;
   /**

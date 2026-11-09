@@ -69,7 +69,7 @@
   --c-accent-hover: #3457C4;
   --c-accent-soft: rgba(62, 106, 225, 0.10);
   /* The same hue in its legible form: text, icons and hairlines. A pastel
-     accent (see the Fig palette) needs this darker twin — a light fill
+     accent (see the Sakura palette) needs this darker twin — a light fill
      cannot carry a label, or a 1px line, on a light surface. */
   --c-accent-text: var(--c-accent);
   /* Label colour that sits ON an accent fill. */
@@ -129,14 +129,14 @@
   --sw-default-2: #3E6AE1;
   --sw-default-3: #171A20;
   --sw-default-4: #F4F4F4;
-  --sw-fig-1: #B8A5D2;
-  /* 霜紫 — base */
-  --sw-fig-2: #EFAFAD;
-  /* 无花果红 — primary */
-  --sw-fig-3: #DFECD5;
-  /* 艾背绿 — secondary */
-  --sw-fig-4: #C6E6E8;
-  /* 海天蓝 — emphasis */
+  --sw-sakura-1: #FFDDE9;
+  /* 草莓牛奶 — base */
+  --sw-sakura-2: #FF8FB1;
+  /* 樱花粉 — primary */
+  --sw-sakura-3: #DFF5EA;
+  /* 薄荷奶绿 — secondary */
+  --sw-sakura-4: #EDE4FF;
+  /* 薰衣草紫 — emphasis */
   --sw-cream-1: #F9F1DB;
   /* 蚌肉白 */
   --sw-cream-2: #F9F4DC;
@@ -212,98 +212,103 @@
    token set — a palette never inherits from another one, so a missing
    token can never leak a neighbouring scheme's colour into the UI.
 
-     Fig   无花果 — a pastel scheme on a frost-purple canvas.
-     Cream 乳白   — the adjacent warm-white group, washed with oklab
+     Sakura 樱花 — a pastel scheme on a strawberry-milk pink canvas, with
+                    mint code blocks and lavender reasoning blocks (the pink
+                    pastels of Color Hunt: #FFCED8 / #FFDDDD / #FFF4DE /
+                    #FFE8C4 family, with #FF8FB1 as the primary accent).
+     Cream  乳白 — the adjacent warm-white group, washed with oklab
                     gradients instead of flat fills.
    ══════════════════════════════════════════════════════════════════════════ */
 
-/* ── Fig (无花果) — light ────────────────────────────────────────────────── */
-[data-palette="fig"] {
-  /* 霜紫 590 — the canvas */
-  --c-bg: #B8A5D2;
+/* ── Sakura (樱花) — light ───────────────────────────────────────────────── */
+[data-palette="sakura"] {
+  /* 草莓牛奶 — the canvas */
+  --c-bg: #FFDDE9;
   /* panels, popups, cards */
-  --c-surface: #F5F0FA;
+  --c-surface: #FFF7FA;
   /* alternate surface */
-  --c-surface-2: #E9E1F2;
-  --c-hover: rgba(43, 36, 56, 0.07);
-  --c-active: rgba(43, 36, 56, 0.13);
+  --c-surface-2: #FFEAF2;
+  --c-hover: rgba(74, 35, 51, 0.07);
+  --c-active: rgba(74, 35, 51, 0.13);
 
-  --c-text: #2B2438;
-  --c-body: #3A3348;
-  --c-muted: #5C5375;
-  --c-placeholder: #8F87A6;
-  --c-text-secondary: #5C5375;
+  --c-text: #4A2333;
+  --c-body: #5C3446;
+  --c-muted: #7C5265;
+  --c-placeholder: #A98495;
+  --c-text-secondary: #7C5265;
 
-  --c-border: rgba(43, 36, 56, 0.16);
-  --c-border-s: rgba(43, 36, 56, 0.09);
-  --c-border-i: rgba(43, 36, 56, 0.26);
-  --c-bg-secondary: #E9E1F2;
-  /* 艾背绿 498 — code blocks */
-  --c-code: #DFECD5;
-  /* 海天蓝 425 — reasoning blocks */
-  --c-reason: #C6E6E8;
-  --c-reason-b: rgba(43, 36, 56, 0.22);
-  --c-toolbar: rgba(245, 240, 250, 0.80);
+  --c-border: rgba(74, 35, 51, 0.16);
+  --c-border-s: rgba(74, 35, 51, 0.09);
+  --c-border-i: rgba(74, 35, 51, 0.26);
+  --c-bg-secondary: #FFEAF2;
+  /* 薄荷奶绿 — code blocks */
+  --c-code: #DFF5EA;
+  /* 薰衣草紫 — reasoning blocks */
+  --c-reason: #EDE4FF;
+  --c-reason-b: rgba(74, 35, 51, 0.22);
+  --c-toolbar: rgba(255, 247, 250, 0.80);
 
-  /* 无花果红 210 — the primary action */
-  --c-accent: #EFAFAD;
-  --c-accent-hover: #E79C9A;
-  --c-accent-soft: rgba(239, 175, 173, 0.30);
+  /* 樱花粉 — the primary action */
+  --c-accent: #FF8FB1;
+  --c-accent-hover: #FF7BA4;
+  --c-accent-soft: rgba(255, 143, 177, 0.30);
   /* the same hue, darkened so it can carry a label on the canvas */
-  --c-accent-text: #6E2826;
-  --c-on-accent: #3A2121;
+  --c-accent-text: #8E2450;
+  --c-on-accent: #4A1B2D;
 
-  --c-danger: #7A231C;
-  --c-danger-soft: rgba(122, 35, 28, 0.12);
-  --c-success: #1C4A23;
-  --c-success-soft: rgba(28, 74, 35, 0.12);
-  --c-warning: #5C3A05;
-  --c-warning-soft: rgba(92, 58, 5, 0.12);
+  --c-danger: #A61B3C;
+  --c-danger-soft: rgba(166, 27, 60, 0.12);
+  --c-success: #1B6B3A;
+  --c-success-soft: rgba(27, 107, 58, 0.12);
+  --c-warning: #8A5A00;
+  --c-warning-soft: rgba(138, 90, 0, 0.12);
 
   --c-bg-image: none;
   --c-code-image: none;
   --c-reason-image: none;
 }
 
-/* ── Fig (无花果) — dark ─────────────────────────────────────────────────── */
-[data-theme="dark"][data-palette="fig"] {
-  /* 霜紫, deepened for the dark canvas */
-  --c-bg: #241E33;
-  --c-surface: #2E2742;
-  --c-surface-2: #38304E;
+/* ── Sakura (樱花) — dark ────────────────────────────────────────────────── */
+[data-theme="dark"][data-palette="sakura"] {
+  /* 草莓牛奶, deepened into a plum night canvas */
+  --c-bg: #2B1A23;
+  --c-surface: #37212C;
+  --c-surface-2: #432A36;
   --c-hover: rgba(255, 255, 255, 0.06);
   --c-active: rgba(255, 255, 255, 0.10);
 
-  --c-text: #F0EAF8;
-  --c-body: #D8D0E6;
-  --c-muted: #A79EC0;
-  --c-placeholder: #7E7599;
-  --c-text-secondary: #A79EC0;
+  --c-text: #FDEAF2;
+  --c-body: #E7CCD8;
+  --c-muted: #BC9DAD;
+  --c-placeholder: #96737F;
+  --c-text-secondary: #BC9DAD;
 
   --c-border: rgba(255, 255, 255, 0.10);
   --c-border-s: rgba(255, 255, 255, 0.06);
   --c-border-i: rgba(255, 255, 255, 0.18);
-  --c-bg-secondary: #38304E;
-  /* 艾背绿, washed over the dark canvas */
-  --c-code: rgba(223, 236, 213, 0.13);
-  /* 海天蓝, washed over the dark canvas */
-  --c-reason: rgba(198, 230, 232, 0.12);
+  --c-bg-secondary: #432A36;
+  /* 薄荷奶绿, washed over the dark canvas */
+  --c-code: rgba(223, 245, 234, 0.14);
+  /* 薰衣草紫, washed over the dark canvas */
+  --c-reason: rgba(237, 228, 255, 0.12);
   --c-reason-b: rgba(255, 255, 255, 0.14);
-  --c-toolbar: rgba(46, 39, 66, 0.80);
+  --c-toolbar: rgba(55, 33, 44, 0.80);
 
-  /* 无花果红, lifted so the pastel still reads on a dark ground */
-  --c-accent: #F0B4B2;
-  --c-accent-hover: #F5C4C2;
-  --c-accent-soft: rgba(240, 180, 178, 0.20);
-  --c-accent-text: #F3C6C4;
-  --c-on-accent: #2A1420;
+  /* 樱花粉, lifted so the pastel still reads on a dark ground */
+  --c-accent: #FFA6C2;
+  --c-accent-hover: #FFBBD1;
+  --c-accent-soft: rgba(255, 166, 194, 0.20);
+  --c-accent-text: #FFB6CD;
+  --c-on-accent: #2A1220;
 
-  --c-danger: #E5796F;
-  --c-danger-soft: rgba(229, 121, 111, 0.16);
-  --c-success: #7FC98D;
-  --c-success-soft: rgba(127, 201, 141, 0.16);
-  --c-warning: #E0A94F;
-  --c-warning-soft: rgba(224, 169, 79, 0.16);
+  /* coral, not pink: on a 樱花 canvas the accent is already pink, so the
+     error state has to keep its own hue to stay recognisable. */
+  --c-danger: #F4877F;
+  --c-danger-soft: rgba(244, 135, 127, 0.16);
+  --c-success: #7FCB9B;
+  --c-success-soft: rgba(127, 203, 155, 0.16);
+  --c-warning: #E8B45C;
+  --c-warning-soft: rgba(232, 180, 92, 0.16);
 
   --c-bg-image: none;
   --c-code-image: none;

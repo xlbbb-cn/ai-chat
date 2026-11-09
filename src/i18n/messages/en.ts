@@ -294,7 +294,7 @@ const en = {
             themeDark: "Dark",
             palette: "Color scheme",
             paletteDefault: "Default",
-            paletteFig: "Fig",
+            paletteSakura: "Sakura",
             paletteCream: "Cream",
             paletteHint: "Applies immediately and is stored in your configuration.",
             language: "Language",

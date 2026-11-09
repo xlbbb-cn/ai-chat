@@ -263,7 +263,7 @@ const zhCN: Messages = {
             themeDark: "深色",
             palette: "配色",
             paletteDefault: "默认",
-            paletteFig: "无花果",
+            paletteSakura: "樱花粉",
             paletteCream: "乳白",
             paletteHint: "立即生效，并保存到配置中。",
             language: "语言",
