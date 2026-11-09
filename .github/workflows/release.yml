@@ -17,17 +17,13 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
-# 放在 workflow 顶层（而不是 job 内）：实测 tag 触发的运行里，job 内的 permissions
-# 会让 GITHUB_TOKEN 拿不到 contents: write，建 Release 直接 403
-# "Resource not accessible by integration"。
-permissions:
-  contents: write # tauri-action 创建 Release / 上传安装包需要
-  actions: write # 上传 Actions 产物（uploadWorkflowArtifacts）需要
-
 jobs:
   build:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.platform }}
+    permissions:
+      contents: write # tauri-action 创建 Release / 上传安装包需要
+      actions: write # 上传 Actions 产物（uploadWorkflowArtifacts）需要
     strategy:
       fail-fast: false # 某个平台失败不影响其它平台产出
       matrix:
@@ -127,92 +123,10 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      # Release 正文由「上一个 tag..本次 tag」的提交生成，省得每次手写更新说明。
-      # 四个平台各算一次、内容相同：谁先创建 Release 谁带上，其余平台更新成同一份正文。
-      - name: Generate release notes
-        if: github.event_name == 'push'
-        id: notes
-        shell: bash
-        run: |
-          prev="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" || true)"
-          if [ -n "$prev" ]; then
-            node scripts/gen-changelog.cjs --from "$prev" --to "$GITHUB_REF_NAME" --format body --output release-notes.md
-          else
-            printf '## 本次更新\n\n首个版本。\n' > release-notes.md
-          fi
-          # 多行值必须用定界符写进 $GITHUB_OUTPUT，直接 echo "body=$(...)" 会把换行吃掉。
-          {
-            echo 'body<<RELEASE_NOTES_EOF'
-            cat release-notes.md
-            echo 'RELEASE_NOTES_EOF'
-          } >> "$GITHUB_OUTPUT"
-
-      # tauri bundler 在打包阶段才现场下载工具链（Linux: AppRun / linuxdeploy，Windows: WiX），
-      # 而 GitHub 的 release 下载 CDN 今天多次 503 / 504，一次失败就废掉整个平台。
-      # 这里先把它们抓进 bundler 的缓存目录（带长重试），再用 actions/cache 跨运行复用；
-      # 预取失败也不致命 —— bundler 自己还会再试一次。
-      - name: Cache bundler toolchains
-        if: matrix.platform == 'ubuntu-22.04' || matrix.platform == 'windows-latest'
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/tauri
-            ~/AppData/Local/tauri
-          key: tauri-bundler-tools-${{ runner.os }}-v1
-
-      - name: Prefetch bundler toolchains
-        if: matrix.platform == 'ubuntu-22.04' || matrix.platform == 'windows-latest'
-        shell: bash
-        run: |
-          set -uo pipefail
-          fetch() {
-            out="$1"
-            url="$2"
-            if [ -s "$out" ]; then
-              echo "cache hit: $out"
-              return 0
-            fi
-            echo "download: $url"
-            curl -fL --retry 6 --retry-all-errors --retry-delay 6 \
-              --connect-timeout 20 --max-time 420 -o "$out.part" "$url" || return 1
-            mv "$out.part" "$out"
-          }
-          base=https://github.com/tauri-apps/binary-releases/releases/download
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            dir="$HOME/.cache/tauri"
-            mkdir -p "$dir"
-            fetch "$dir/AppRun-x86_64" "$base/apprun-old/AppRun-x86_64" \
-              || echo "::warning::AppRun 预取失败，交由 bundler 重试"
-            fetch "$dir/linuxdeploy-x86_64.AppImage" "$base/linuxdeploy/linuxdeploy-x86_64.AppImage" \
-              || echo "::warning::linuxdeploy 预取失败，交由 bundler 重试"
-            fetch "$dir/linuxdeploy-plugin-gtk.sh" \
-              "https://raw.githubusercontent.com/tauri-apps/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh" || true
-            fetch "$dir/linuxdeploy-plugin-gstreamer.sh" \
-              "https://raw.githubusercontent.com/tauri-apps/linuxdeploy-plugin-gstreamer/master/linuxdeploy-plugin-gstreamer.sh" || true
-            chmod +x "$dir/AppRun-x86_64" "$dir/linuxdeploy-x86_64.AppImage" 2>/dev/null || true
-          else
-            dir="$LOCALAPPDATA/tauri"
-            mkdir -p "$dir"
-            if fetch "$dir/wix314-binaries.zip" \
-              "https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip"; then
-              mkdir -p "$dir/WixTools314"
-              unzip -qo "$dir/wix314-binaries.zip" -d "$dir/WixTools314"
-              echo "WiX 已解压到 $dir/WixTools314"
-            else
-              echo "::warning::WiX 预取失败，交由 bundler 重试"
-            fi
-          fi
-
       # tauri build 会走 tauri.conf.json 的 beforeBuildCommand（npm run build），
       # 其中 sync-version:git-tag 把 package.json / Cargo.toml / tauri.conf.json 的版本对齐到 tag。
-      # 打包阶段 tauri bundler 还要现场下载工具链（Linux: AppRun / linuxdeploy，Windows: WiX），
-      # GitHub 的 release 下载 CDN 偶发 503 / 504，一次抖动就会毁掉整个平台的产出。
-      # 所以构建给两次机会：首次失败不中断 job，交给下面的 retry 步骤；此时 rust cache 已热，
-      # 重试一般 1~2 分钟就能重新走到打包，足以兜住工具链下载的瞬时故障。
       - name: Build installers
-        id: build1
         uses: tauri-apps/tauri-action@v1
-        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # 暂无 Apple 证书时用 ad-hoc 签名，避免 Apple Silicon 上提示「应用已损坏」。
@@ -225,10 +139,6 @@ jobs:
           releaseName: ${{ github.event_name == 'push' && 'AI Chat v__VERSION__' || '' }}
           releaseBody: |
             `AI Chat v__VERSION__` 由 GitHub Actions 自动构建。
-
-            ${{ steps.notes.outputs.body }}
-
-            ### 安装包
 
             - Windows：`.msi` / `-setup.exe`
             - macOS：`.dmg`（Apple Silicon `aarch64` / Intel `x86_64`）
@@ -243,45 +153,6 @@ jobs:
           prerelease: false
           uploadUpdaterJson: false # 未配置 updater，无需生成 latest.json
           uploadWorkflowArtifacts: true # 同时保留 Actions 运行产物，未发布也能下载
-          args: ${{ matrix.args }}
-
-      # 仅当上一次构建失败时执行（绝大多数情况就是上面那类工具链下载 503 / 504）。
-      # 两次都失败才算这个平台构建失败，避免一次网络抖动就要人工重跑整个发布。
-      - name: Cool down before retry
-        if: steps.build1.outcome == 'failure'
-        shell: bash
-        run: |
-          echo "首次构建失败，等 90 秒再重试，让 CDN 的瞬时故障有时间过去。"
-          sleep 90
-
-      - name: Build installers (retry)
-        if: steps.build1.outcome == 'failure'
-        uses: tauri-apps/tauri-action@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_SIGNING_IDENTITY: ${{ matrix.platform == 'macos-latest' && '-' || '' }}
-        with:
-          tagName: ${{ github.event_name == 'push' && github.ref_name || '' }}
-          releaseName: ${{ github.event_name == 'push' && 'AI Chat v__VERSION__' || '' }}
-          releaseBody: |
-            `AI Chat v__VERSION__` 由 GitHub Actions 自动构建。
-
-            ${{ steps.notes.outputs.body }}
-
-            ### 安装包
-
-            - Windows：`.msi` / `-setup.exe`
-            - macOS：`.dmg`（Apple Silicon `aarch64` / Intel `x86_64`）
-            - Linux：`.AppImage` / `.deb` / `.rpm`
-
-            首次打开若被系统拦截：Windows 选「仍要运行」；macOS 在「系统设置 → 隐私与安全性」中
-            选择「仍要打开」，或右键 App → 打开。
-          releaseDraft: false
-          prerelease: false
-          uploadUpdaterJson: false
-          # 首次尝试可能已经把同名产物传上去了，重试再传会 409 Conflict，这里关掉：
-          # 产物留在首次的那份里，重试只负责把构建和 Release 补齐。
-          uploadWorkflowArtifacts: false
           args: ${{ matrix.args }}
 
       # GitHub 的 releases/latest/download/<name> 要求文件名的版本号固定，而 Tauri 的
