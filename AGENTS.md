@@ -69,7 +69,8 @@ cargo check --manifest-path src-tauri/Cargo.toml \
 
 `.github/workflows/release.yml` (trigger: `v*` tag push, or manual `workflow_dispatch`) builds via
 `tauri-apps/tauri-action@v1` on 4 runners — `macos-latest` ×2 (`aarch64-apple-darwin`, `x86_64-apple-darwin`),
-`ubuntu-22.04`, `windows-latest` — and uploads `.dmg` / `.AppImage` + `.deb` + `.rpm` / `.msi` + NSIS `.exe`
+`ubuntu-22.04`, `windows-latest` — and uploads `.dmg` / `.AppImage` + `.deb` + `.rpm` / NSIS `.exe`
+(Windows ships the NSIS bundle only, no `.msi`)
 to a **published** (non-draft) GitHub Release for the tag (also kept as workflow artifacts).
 
 - **The tag drives the version.** `tauri build` runs `beforeBuildCommand` → `npm run build` → `sync-version:git-tag`, which reads the newest tag; a workflow step fails fast when the pushed tag is not the newest one.

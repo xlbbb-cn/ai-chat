@@ -56,9 +56,8 @@ jobs:
             rustTargets: ''
             stableAsset: AI-Chat-Windows-x64-setup.exe
             bundleGlob: src-tauri/target/release/bundle/nsis/*-setup.exe
-            # 默认同时产出 .msi 与 NSIS -setup.exe；若 Runner 上 MSI（light.exe / VBSCRIPT）不可用，
-            # 把 args 改成 '--bundles nsis' 只产出 NSIS 安装包即可。
-            args: ''
+            # Windows 只提供 NSIS -setup.exe（不再产出 .msi）。
+            args: '--bundles nsis'
           # 公开仓库可以再加一条 ARM64 Linux 构建（ubuntu-22.04-arm 目前仅公开仓库可用）：
           # - name: Linux (arm64)
           #   platform: ubuntu-22.04-arm
@@ -123,6 +122,29 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # Release 正文由「上一个 tag..本次 tag」的提交生成（与 `npm run changelog --
+      # --details --write` 写进 CHANGELOG.md 的条目同源），省得每次手写更新说明。
+      # 四个平台各算一次、内容相同：谁先创建 Release 谁带上，其余平台更新成同一份正文。
+      - name: Generate release notes
+        if: github.event_name == 'push'
+        id: notes
+        shell: bash
+        run: |
+          prev="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" || true)"
+          if [ -z "$prev" ]; then
+            printf '## 本次更新\n\n首个版本。\n' > release-notes.md
+          elif ! node scripts/gen-changelog.cjs --from "$prev" --to "$GITHUB_REF_NAME" --format body --details --output release-notes.md; then
+            # 说明生成失败不应阻塞安装包发布：错误已打印在日志里，正文退回占位文案。
+            echo "::warning::生成 Release 说明失败，已使用占位文案。"
+            printf '## 本次更新\n\n变更说明生成失败，请查看提交记录。\n' > release-notes.md
+          fi
+          # 多行值必须用定界符写进 $GITHUB_OUTPUT，直接 echo "body=$(...)" 会把换行吃掉。
+          {
+            echo 'body<<RELEASE_NOTES_EOF'
+            cat release-notes.md
+            echo 'RELEASE_NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
       # tauri build 会走 tauri.conf.json 的 beforeBuildCommand（npm run build），
       # 其中 sync-version:git-tag 把 package.json / Cargo.toml / tauri.conf.json 的版本对齐到 tag。
       - name: Build installers
@@ -138,9 +160,13 @@ jobs:
           tagName: ${{ github.event_name == 'push' && github.ref_name || '' }}
           releaseName: ${{ github.event_name == 'push' && 'AI Chat v__VERSION__' || '' }}
           releaseBody: |
-            `AI Chat v__VERSION__` 由 GitHub Actions 自动构建。
+            ${{ steps.notes.outputs.body }}
 
-            - Windows：`.msi` / `-setup.exe`
+            ---
+
+            ## 安装包
+
+            - Windows：`-setup.exe`（NSIS）
             - macOS：`.dmg`（Apple Silicon `aarch64` / Intel `x86_64`）
             - Linux：`.AppImage` / `.deb` / `.rpm`
 

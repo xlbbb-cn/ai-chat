@@ -256,7 +256,7 @@ Build artifacts are located in:
 
 ### C. Installation
 
-- Windows: `winget install --id Leonard.AIChat -e`, or run the NSIS / MSI installer from the bundle directory
+- Windows: `winget install --id Leonard.AIChat -e`, or run the NSIS installer from the bundle directory
 - macOS: Use .app / .dmg (depending on the build target)
 - Linux: Use .deb / .AppImage / .rpm (depending on the build target)
 
@@ -276,7 +276,7 @@ git push origin v2.0.0
 
 | Platform | Bundles |
 | --- | --- |
-| Windows | `.msi`, `-setup.exe` (NSIS) |
+| Windows | `-setup.exe` (NSIS) |
 | macOS | `.dmg` for Apple Silicon (`aarch64`) and Intel (`x86_64`) |
 | Linux | `.AppImage`, `.deb`, `.rpm` |
 

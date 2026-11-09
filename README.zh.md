@@ -256,7 +256,7 @@ npm run tauri build
 
 ### C. 安装方式
 
-- Windows：`winget install --id Leonard.AIChat -e`，或运行 bundle 目录中的 NSIS / MSI 安装包
+- Windows：`winget install --id Leonard.AIChat -e`，或运行 bundle 目录中的 NSIS 安装包
 - macOS：使用 .app / .dmg（按构建目标）
 - Linux：使用 .deb / .AppImage / .rpm（按构建目标）
 
@@ -276,7 +276,7 @@ git push origin v2.0.0
 
 | 平台 | 产物 |
 | --- | --- |
-| Windows | `.msi`、`-setup.exe`（NSIS） |
+| Windows | `-setup.exe`（NSIS） |
 | macOS | `.dmg`（Apple Silicon `aarch64` 与 Intel `x86_64` 各一份） |
 | Linux | `.AppImage`、`.deb`、`.rpm` |
 

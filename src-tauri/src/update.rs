@@ -549,8 +549,8 @@ mod tests {
         assert_eq!(classify_asset("AI.Chat.app.tar.gz.sig"), None);
     }
 
-    /// The CI uploads `-setup.exe`, `.msi`, `.dmg`, `.AppImage`, `.deb` and `.rpm`;
-    /// only the ones for this OS/arch may be flagged as recommended.
+    /// The CI uploads `-setup.exe`, `.dmg`, `.AppImage`, `.deb` and `.rpm`; older releases
+    /// may still carry `.msi`. Only the assets for this OS/arch may be flagged as recommended.
     #[test]
     fn recommends_only_matching_platform_assets() {
         let release = serde_json::json!({
