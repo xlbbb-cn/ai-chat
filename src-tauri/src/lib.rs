@@ -1858,6 +1858,7 @@ pub fn run() {
             db::list_interactions,
             db::get_interaction,
             db::clear_interactions,
+            db::get_session_stats,
             mcp::list_mcp_servers,
             mcp::save_mcp_server,
             mcp::delete_mcp_server,

@@ -415,6 +415,51 @@ This is the one place with a deliberate asymmetry:
 - Streaming states may animate a gradient sweep across a label, but must respect
   `prefers-reduced-motion`.
 
+### Interaction monitor
+
+The log dialog opened from Settings → Runtime & Debug. Chrome is the shared
+dialog recipe — `--c-toolbar` header with one hairline, `--c-surface` content,
+4px radius, no elevation — and it carries **no literal colour**: the dark box it
+used to be was the last hardcoded surface in the system.
+
+- **Panes (2/3 of the height).** List column `35%` / `min-width: 260px` with a
+  1px right hairline; the detail pane fills the rest. Rows: hover `--c-hover`,
+  selected `--c-accent-soft` plus a 2px `--c-accent-text` left border.
+- **Type badge is metadata, not state**: hairline `--c-border` + `--c-muted`,
+  4px. Only error rows (`llm_error` / `tool_error` / `mcp_call`) borrow
+  `--c-danger`. Never a filled pill.
+- **Session report (`flex: 0 0 33.3333%`)** fills exactly the bottom third of
+  the dialog, whatever its height (`min-height: 132px` keeps it usable on short
+  windows). Seven tiles — total tokens, cache hit, cache miss, context used,
+  requests, thinking per round, tool calls — each `--c-surface` + hairline:
+  label 11px `--c-muted`, value 15px/500 with tabular numerals, detail 11px.
+  Hit / miss / context add a 2px track (`--c-accent`, `--c-danger` from 85 %
+  context), the same weight the composer's usage bar uses. The ranking column
+  beside them lists the busiest tools (≤ 8 rows, failures in `--c-danger`) and
+  scrolls on its own; below 900px the report stacks under the tiles.
+- **Data** comes from `get_session_stats` (`src-tauri/src/db.rs`), aggregated in
+  SQL: tokens / cache / context from `api_requests`, tool traffic from
+  `interaction_log` (`mcp_call` is the *failure* row, `mcp_response` the success
+  one). The context ratio is `context_tokens / context_window`, with the window
+  resolved from `config.model_context_lengths` / `config.model_metadata` for the
+  newest request's model — unknown renders `—` and a hint, never a fake 0 %.
+- **Thinking per round** is `reasoning_ms` — the wait from sending the request
+  to the first *content* token, recorded only when the model streamed reasoning
+  first (`StreamTiming` in `llm_complete.rs`). A round without a thinking phase
+  stores NULL, so the average is never diluted by non-thinking models and the
+  tile reads `—` instead of `0.0s`. `first_token_ms` (any first delta) is its
+  detail line; both ride along in the `llm_api` interaction metadata.
+- **Contrast picks** (measured over all six palette × theme combinations, 11px
+  text ≥ 4.5:1): the accent wash of a selected row costs ~1.5 steps from meta
+  text, so `.selected` steps its badge / actor / time / preview up to
+  `--c-body`; the cache chip is a *figure*, not a state, so it is neutral
+  (`--c-surface-2` + `--c-border`, `--c-body`) — `--c-accent-text` on
+  `--c-accent-soft` sinks to 3.1:1 in five of six combinations; the error card
+  sits on `--c-surface` (not the tinted `--c-surface-2`) because `--c-danger`
+  on the tint lands at 4.35:1 in cream dark; and the maintenance status keeps
+  its `--c-success` tone on a dot, with the message itself in `--c-body`
+  (`--c-success` as text is 3.9:1 on the light toolbars).
+
 ---
 
 ## Layout and density
@@ -573,7 +618,7 @@ a board glued to the left edge.
 | `src/components/SettingsPanel.css` | Settings page (`--t-*` are aliases of `--c-*`) |
 | `src/components/ModelSelect.css` | Model picker trigger + portal popup |
 | `src/components/TitleBar.tsx` | Custom window chrome: drag region, window controls, `⋯` app menu (styles in `App.css`) |
-| `src/components/{Update,Monitor,AgentMission,Profile}Panel.css` | Feature surfaces, self-contained |
+| `src/components/{Update,Monitor,AgentMission,Profile}Panel.css` | Feature surfaces, self-contained — `MonitorPanel.css` also owns the two log panes and the session-report strip |
 
 ### Theme plumbing
 
@@ -581,8 +626,7 @@ a board glued to the left edge.
 `src/App.tsx` from `config.theme` (`auto` / `light` / `dark`) and
 `config.palette` (`default` / `sakura` / `cream`). Everything must work through the
 token layer — no component should branch on the theme or the palette itself
-except where a literal is unavoidable (currently: the toggle knob in dark mode,
-and the monitor terminal).
+except where a literal is unavoidable (currently: the toggle knob in dark mode).
 
 The Settings picker previews a change immediately but persists it with the
 form's **Save Changes**; `config.palette` rides along with `config.theme` in

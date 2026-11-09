@@ -17,7 +17,7 @@ Non-negotiables, repeated here so they are impossible to miss:
 - **Reuse the shared primitives.** `.close-btn`, `.btn-primary`, `.btn-secondary`, `.inline-edit-btn`, `.field-title-row` are defined once in `src/App.css` — never re-declare them in a component stylesheet (that is exactly how the Skills/MCP/Tools panels drifted apart).
 - **Compact zone = 34px controls** (chat input row, sidebar panels, Settings). Settings also uses 13px text. Do not introduce 40px inputs.
 - **Sentence case, weights 400/500 only, `letter-spacing: normal`.** No `text-transform: uppercase`, no negative tracking.
-- **Check light *and* dark** (`data-theme` is driven by `config.theme` via `applyTheme()` in `src/App.tsx`), plus `prefers-reduced-motion` for any animation. The colour scheme is a second, independent dimension: `data-palette` (`default` / `fig` / `cream`) comes from `config.palette`, and every palette ships a light *and* a dark token set — check all four combinations of a change.
+- **Check light *and* dark** (`data-theme` is driven by `config.theme` via `applyTheme()` in `src/App.tsx`), plus `prefers-reduced-motion` for any animation. The colour scheme is a second, independent dimension: `data-palette` (`default` / `sakura` / `cream`) comes from `config.palette`, and every palette ships a light *and* a dark token set — check all four combinations of a change.
 
 When a needed value has no token, **add a token** to `src/App.css` — do not hardcode it at the call site.
 

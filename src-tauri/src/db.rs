@@ -43,6 +43,17 @@ pub fn open_db(path: &Path) -> rusqlite::Result<Connection> {
         "ALTER TABLE api_requests ADD COLUMN cached_tokens INTEGER",
         [],
     );
+    // Streamed phase timings (see `StreamTiming` in `llm_complete.rs`).
+    // `reasoning_ms` stays NULL when the model answered without streaming
+    // reasoning, so "thought for 0 ms" never stands in for "does not think".
+    let _ = db.execute(
+        "ALTER TABLE api_requests ADD COLUMN reasoning_ms INTEGER",
+        [],
+    );
+    let _ = db.execute(
+        "ALTER TABLE api_requests ADD COLUMN first_token_ms INTEGER",
+        [],
+    );
     // Session meta: per-session title / favorite / archived flags.
     // Kept in a separate table so history rows stay append-only.
     db.execute(
@@ -74,6 +85,8 @@ pub fn open_db(path: &Path) -> rusqlite::Result<Connection> {
             finish_reason TEXT, \
             prompt_tokens INTEGER DEFAULT 0, \
             completion_tokens INTEGER DEFAULT 0, \
+            reasoning_ms INTEGER, \
+            first_token_ms INTEGER, \
             duration_ms INTEGER DEFAULT 0, \
             error TEXT\
         )",
@@ -1116,6 +1129,260 @@ pub fn clear_interactions(
     Ok(())
 }
 
+// ─── Session report (Monitor → bottom strip) ─────────────────────────────────
+
+/// Interaction types written by the tool dispatch path in `llm_complete`.
+/// `mcp_response` is the success row of an MCP call and `mcp_call` its failure
+/// row — the naming is historical, so both the membership list and the failure
+/// predicate have to spell them out.
+const TOOL_INTERACTION_TYPES: &str = "('tool_output','tool_error','mcp_response','mcp_call')";
+const TOOL_FAILURE_TYPES: &str = "('tool_error','mcp_call')";
+
+/// How many tools the report's ranking list keeps.
+const TOOL_RANKING_LIMIT: usize = 8;
+
+/// One tool's activity inside a session, for the report's ranking list.
+#[derive(Debug, Default, Serialize)]
+pub struct ToolUsageStat {
+    /// Tool name as logged in `action_name`.
+    pub name: String,
+    pub calls: i64,
+    /// Calls that ended in an error row.
+    pub failures: i64,
+    /// Summed wall clock of those calls.
+    pub duration_ms: i64,
+}
+
+/// Aggregated analysis of one chat session.
+///
+/// Token counters read `api_requests` instead of the `interaction_log`
+/// metadata: the metadata only carries usage when the provider reported prompt
+/// caching, while every successful request stores its usage in `api_requests`.
+#[derive(Debug, Default, Serialize)]
+pub struct SessionStats {
+    pub requests: i64,
+    /// Requests that ended with an error row.
+    pub failed_requests: i64,
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+    /// Prompt tokens served from the provider cache — the report's "hit" amount.
+    pub hit_tokens: i64,
+    /// Prompt tokens that had to be processed (`prompt_tokens - hit_tokens`).
+    pub miss_tokens: i64,
+    /// Requests that reported cache metrics at all. Endpoints without a cache
+    /// dialect report nothing, which is not the same as a 0 % hit.
+    pub cache_reported_requests: i64,
+    /// Requests whose prompt was at least partly served from the cache.
+    pub cache_hit_requests: i64,
+    /// Prompt tokens of the newest successful request — the context in use.
+    pub context_tokens: i64,
+    /// Context window of the model behind that request (`0` = unknown).
+    pub context_window: i64,
+    pub tool_calls: i64,
+    pub tool_failures: i64,
+    pub llm_errors: i64,
+    /// Interaction rows recorded for the session, all types.
+    pub interactions: i64,
+    pub total_request_ms: i64,
+    pub total_tool_ms: i64,
+    /// Rounds that reported a thinking phase (the model streamed reasoning
+    /// before its answer). Non-thinking models report none — the average must
+    /// not be diluted by rounds that never had a thinking phase.
+    pub reasoning_requests: i64,
+    /// Summed thinking phase over those rounds.
+    pub reasoning_ms_total: i64,
+    /// Rounds that reported a first-token latency, and its total.
+    pub first_token_requests: i64,
+    pub first_token_ms_total: i64,
+    /// Busiest tools, at most [`TOOL_RANKING_LIMIT`] rows.
+    pub tools: Vec<ToolUsageStat>,
+}
+
+/// Aggregate the session's request and interaction logs. `context_window` is
+/// resolved by the caller — it depends on the configured model, not on the DB.
+pub fn session_stats(
+    db: &rusqlite::Connection,
+    session_id: &str,
+    context_window: i64,
+) -> Result<SessionStats, String> {
+    let mut stats = SessionStats {
+        context_window,
+        ..Default::default()
+    };
+
+    db.query_row(
+        "SELECT COUNT(*), \
+         COALESCE(SUM(prompt_tokens),0), COALESCE(SUM(completion_tokens),0), \
+         COALESCE(SUM(COALESCE(cached_tokens,0)),0), \
+         COALESCE(SUM(CASE WHEN cached_tokens IS NOT NULL THEN 1 ELSE 0 END),0), \
+         COALESCE(SUM(CASE WHEN cached_tokens > 0 THEN 1 ELSE 0 END),0), \
+         COALESCE(SUM(CASE WHEN error IS NOT NULL AND error <> '' THEN 1 ELSE 0 END),0), \
+         COALESCE(SUM(duration_ms),0), \
+         COALESCE(SUM(CASE WHEN reasoning_ms IS NOT NULL THEN 1 ELSE 0 END),0), \
+         COALESCE(SUM(COALESCE(reasoning_ms,0)),0), \
+         COALESCE(SUM(CASE WHEN first_token_ms IS NOT NULL THEN 1 ELSE 0 END),0), \
+         COALESCE(SUM(COALESCE(first_token_ms,0)),0) \
+         FROM api_requests WHERE session_id = ?1",
+        rusqlite::params![session_id],
+        |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, i64>(6)?,
+                row.get::<_, i64>(7)?,
+                row.get::<_, i64>(8)?,
+                row.get::<_, i64>(9)?,
+                row.get::<_, i64>(10)?,
+                row.get::<_, i64>(11)?,
+            ))
+        },
+    )
+    .map(
+        |(
+            requests,
+            prompt,
+            completion,
+            hit,
+            reported,
+            hit_requests,
+            failed,
+            total_ms,
+            reasoning_requests,
+            reasoning_ms,
+            first_token_requests,
+            first_token_ms,
+        )| {
+            stats.requests = requests;
+            stats.prompt_tokens = prompt;
+            stats.completion_tokens = completion;
+            stats.hit_tokens = hit;
+            stats.miss_tokens = (prompt - hit).max(0);
+            stats.cache_reported_requests = reported;
+            stats.cache_hit_requests = hit_requests;
+            stats.failed_requests = failed;
+            stats.total_request_ms = total_ms;
+            stats.reasoning_requests = reasoning_requests;
+            stats.reasoning_ms_total = reasoning_ms;
+            stats.first_token_requests = first_token_requests;
+            stats.first_token_ms_total = first_token_ms;
+        },
+    )
+    .map_err(|e| e.to_string())?;
+
+    // Failed requests store no usage, so the context in use is the prompt of the
+    // newest row that actually reported one.
+    stats.context_tokens = db
+        .query_row(
+            "SELECT COALESCE(prompt_tokens,0) FROM api_requests \
+             WHERE session_id = ?1 AND prompt_tokens > 0 ORDER BY id DESC LIMIT 1",
+            rusqlite::params![session_id],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    db.query_row(
+        &format!(
+            "SELECT COUNT(*), \
+             COALESCE(SUM(CASE WHEN interaction_type = 'llm_error' THEN 1 ELSE 0 END),0), \
+             COALESCE(SUM(CASE WHEN interaction_type IN {TOOL_INTERACTION_TYPES} THEN 1 ELSE 0 END),0), \
+             COALESCE(SUM(CASE WHEN interaction_type IN {TOOL_FAILURE_TYPES} THEN 1 ELSE 0 END),0), \
+             COALESCE(SUM(CASE WHEN interaction_type IN {TOOL_INTERACTION_TYPES} \
+                 THEN duration_ms ELSE 0 END),0) \
+             FROM interaction_log WHERE session_id = ?1"
+        ),
+        rusqlite::params![session_id],
+        |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+            ))
+        },
+    )
+    .map(|(interactions, llm_errors, tool_calls, tool_failures, tool_ms)| {
+        stats.interactions = interactions;
+        stats.llm_errors = llm_errors;
+        stats.tool_calls = tool_calls;
+        stats.tool_failures = tool_failures;
+        stats.total_tool_ms = tool_ms;
+    })
+    .map_err(|e| e.to_string())?;
+
+    let mut stmt = db
+        .prepare(&format!(
+            "SELECT COALESCE(action_name,''), COUNT(*), \
+             COALESCE(SUM(CASE WHEN interaction_type IN {TOOL_FAILURE_TYPES} THEN 1 ELSE 0 END),0), \
+             COALESCE(SUM(duration_ms),0) \
+             FROM interaction_log WHERE session_id = ?1 \
+             AND interaction_type IN {TOOL_INTERACTION_TYPES} \
+             GROUP BY COALESCE(action_name,'') ORDER BY 2 DESC, 1 ASC LIMIT {TOOL_RANKING_LIMIT}"
+        ))
+        .map_err(|e| e.to_string())?;
+    stats.tools = stmt
+        .query_map(rusqlite::params![session_id], |row| {
+            Ok(ToolUsageStat {
+                name: row.get(0)?,
+                calls: row.get(1)?,
+                failures: row.get(2)?,
+                duration_ms: row.get(3)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|row| row.ok())
+        .collect();
+
+    Ok(stats)
+}
+
+/// Session analysis for the Monitor panel's bottom strip.
+#[tauri::command]
+pub fn get_session_stats(
+    session_id: String,
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<SessionStats, String> {
+    let (mut stats, model) = {
+        let db = state.db.lock().unwrap();
+        let model: String = db
+            .query_row(
+                "SELECT COALESCE(model,'') FROM api_requests WHERE session_id = ?1 \
+                 AND prompt_tokens > 0 ORDER BY id DESC LIMIT 1",
+                rusqlite::params![session_id],
+                |row| row.get(0),
+            )
+            .unwrap_or_default();
+        (session_stats(&db, &session_id, 0)?, model)
+    };
+    // The config guard is taken *after* the database guard is dropped: chat
+    // completion holds `config` while it locks `db`, so nesting them the other
+    // way round could deadlock two threads.
+    stats.context_window = {
+        let config = state.config.lock().unwrap();
+        let model = if model.is_empty() {
+            config.model.clone()
+        } else {
+            model
+        };
+        config
+            .model_context_lengths
+            .get(&model)
+            .copied()
+            .or_else(|| {
+                config
+                    .model_metadata
+                    .get(&model)
+                    .and_then(|meta| meta.context_length)
+            })
+            .unwrap_or(0) as i64
+    };
+    Ok(stats)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1406,5 +1673,103 @@ mod tests {
                 .unwrap(),
             1
         );
+    }
+
+    /// The Monitor's session report must read token usage from `api_requests`
+    /// (always written) and tool traffic from `interaction_log`, without
+    /// counting a session's rows from a different session.
+    #[test]
+    fn session_stats_aggregates_tokens_cache_and_tool_rows() {
+        let conn = test_conn();
+        conn.execute(
+            "CREATE TABLE api_requests (\
+                id INTEGER PRIMARY KEY, session_id TEXT, model TEXT, \
+                prompt_tokens INTEGER DEFAULT 0, completion_tokens INTEGER DEFAULT 0, \
+                cached_tokens INTEGER, reasoning_ms INTEGER, first_token_ms INTEGER, \
+                duration_ms INTEGER DEFAULT 0, error TEXT)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "CREATE TABLE interaction_log (\
+                id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, interaction_type TEXT NOT NULL, \
+                action_name TEXT, duration_ms INTEGER DEFAULT 0)",
+            [],
+        )
+        .unwrap();
+
+        let request = |session: &str,
+                       prompt: i64,
+                       completion: i64,
+                       cached: Option<i64>,
+                       reasoning: Option<i64>,
+                       first_token: Option<i64>,
+                       ms: i64| {
+            conn.execute(
+                "INSERT INTO api_requests \
+                 (session_id, model, prompt_tokens, completion_tokens, cached_tokens, \
+                  reasoning_ms, first_token_ms, duration_ms) \
+                 VALUES (?1, 'gpt-test', ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![session, prompt, completion, cached, reasoning, first_token, ms],
+            )
+            .unwrap();
+        };
+        request("s", 1000, 100, Some(800), Some(2400), Some(2100), 500);
+        request("s", 2000, 200, Some(1000), Some(3600), Some(2800), 700);
+        // A round without a thinking phase (non-reasoning model / tool round)
+        // must not be counted as a 0 ms think.
+        request("s", 500, 50, Some(0), None, Some(400), 200);
+        request("other", 9999, 999, Some(9999), Some(1), Some(1), 1);
+        // A failed request reports no usage, so it must not reset the context.
+        conn.execute(
+            "INSERT INTO api_requests (session_id, model, error) VALUES ('s', 'gpt-test', 'boom')",
+            [],
+        )
+        .unwrap();
+
+        let interaction = |session: &str, kind: &str, tool: &str, ms: i64| {
+            conn.execute(
+                "INSERT INTO interaction_log (session_id, interaction_type, action_name, duration_ms) \
+                 VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![session, kind, tool, ms],
+            )
+            .unwrap();
+        };
+        interaction("s", "llm_api", "chat_completion", 500);
+        interaction("s", "tool_output", "read_file", 30);
+        interaction("s", "tool_output", "read_file", 20);
+        interaction("s", "tool_error", "read_file", 10);
+        interaction("s", "mcp_call", "mcp_search", 40);
+        interaction("s", "llm_error", "chat_completion", 90);
+        interaction("other", "tool_output", "read_file", 10);
+
+        let stats = session_stats(&conn, "s", 128_000).unwrap();
+
+        assert_eq!(stats.requests, 4, "only this session's requests");
+        assert_eq!(stats.failed_requests, 1);
+        assert_eq!(stats.prompt_tokens, 3500);
+        assert_eq!(stats.completion_tokens, 350);
+        assert_eq!(stats.hit_tokens, 1800);
+        assert_eq!(stats.miss_tokens, 1700);
+        assert_eq!(stats.cache_reported_requests, 3);
+        assert_eq!(stats.cache_hit_requests, 2);
+        assert_eq!(stats.context_tokens, 500, "newest request that reported usage");
+        assert_eq!(stats.context_window, 128_000);
+        assert_eq!(stats.reasoning_requests, 2, "a round without thinking is not a 0 ms think");
+        assert_eq!(stats.reasoning_ms_total, 6000);
+        assert_eq!(stats.first_token_requests, 3);
+        assert_eq!(stats.first_token_ms_total, 5300);
+        assert_eq!(stats.interactions, 6);
+        assert_eq!(stats.llm_errors, 1);
+        assert_eq!(stats.tool_calls, 4);
+        assert_eq!(stats.tool_failures, 2);
+        assert_eq!(stats.total_tool_ms, 100);
+        assert_eq!(stats.tools.len(), 2);
+        assert_eq!(stats.tools[0].name, "read_file");
+        assert_eq!(stats.tools[0].calls, 3);
+        assert_eq!(stats.tools[0].failures, 1);
+        assert_eq!(stats.tools[0].duration_ms, 60);
+        assert_eq!(stats.tools[1].name, "mcp_search");
+        assert_eq!(stats.tools[1].failures, 1);
     }
 }
