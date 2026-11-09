@@ -16,6 +16,7 @@ import type {
 import { useI18n, type MessageKey } from "../i18n";
 import {
   FontAwesomeIcon,
+  faAnglesLeft,
   faCheck,
   faFolderOpen,
   faGear,
@@ -977,11 +978,11 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
 
   return (
     <div className="agents-panel">
-      <div className="agents-header">
+      <div className="panel-header">
         <h2>{t("agents.title")}</h2>
         <div className="agents-header-actions">
-          <button className="close-btn" onClick={onClose} aria-label={t("common.close")}>
-            <FontAwesomeIcon icon={faXmark} />
+          <button className="close-btn" onClick={onClose} aria-label={t("common.collapse")}>
+            <FontAwesomeIcon icon={faAnglesLeft} />
           </button>
         </div>
       </div>

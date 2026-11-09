@@ -9,6 +9,7 @@ const zhCN: Messages = {
         saved: "已保存",
         cancel: "取消",
         close: "关闭",
+        collapse: "收起面板",
         delete: "删除",
         edit: "编辑",
         apply: "应用",

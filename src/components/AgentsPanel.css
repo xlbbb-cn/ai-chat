@@ -6,25 +6,10 @@
     color: var(--c-body);
 }
 
-.agents-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 9px 12px;
-    border-bottom: 0.5px solid var(--c-border);
-    flex-shrink: 0;
-}
-
-.agents-header h2 {
-    margin: 0;
-    font-size: 15px;
-    color: var(--c-text);
-    letter-spacing: -0.01em;
-}
-
+/* The header bar itself is the shared `.panel-header` primitive (App.css). */
 .orchestration-settings {
     padding: 9px 12px;
-    border-bottom: 0.5px solid var(--c-border);
+    border-bottom: 1px solid var(--c-border);
     display: flex;
     flex-direction: column;
     gap: 10px;
@@ -49,7 +34,7 @@
 
 .orch-select {
     padding: 4px 24px 4px 8px;
-    border: 0.5px solid var(--c-border-i);
+    border: 1px solid var(--c-border-i);
     border-radius: var(--r-sm);
     background: var(--c-surface);
     color: var(--c-text);
@@ -73,7 +58,7 @@
 .orch-number {
     width: 60px;
     padding: 4px 8px;
-    border: 0.5px solid var(--c-border-i);
+    border: 1px solid var(--c-border-i);
     border-radius: var(--r-sm);
     background: var(--c-surface);
     color: var(--c-text);
@@ -110,7 +95,7 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
-    border-bottom: 0.5px solid var(--c-border);
+    border-bottom: 1px solid var(--c-border);
     flex-shrink: 0;
 }
 
@@ -137,7 +122,7 @@
    colour and not a fill that competes with the primary action. */
 .agents-status-filter {
     display: flex;
-    border: 0.5px solid var(--c-border-i);
+    border: 1px solid var(--c-border-i);
     border-radius: var(--r-sm);
     overflow: hidden;
 }
@@ -151,7 +136,7 @@
     min-height: 30px;
     padding: 0 6px;
     border: none;
-    border-right: 0.5px solid var(--c-border-i);
+    border-right: 1px solid var(--c-border-i);
     background: var(--c-surface);
     color: var(--c-body);
     font-family: inherit;
@@ -215,7 +200,7 @@
     border-radius: var(--r-sm);
     background: transparent;
     cursor: pointer;
-    border: 0.5px solid transparent;
+    border: 1px solid transparent;
     display: flex;
     flex-direction: column;
     align-items: stretch;
@@ -309,7 +294,7 @@
     background: var(--c-accent-soft);
     color: var(--c-accent-text);
     border-radius: var(--r-sm);
-    border: 0.5px solid var(--c-accent-soft);
+    border: 1px solid var(--c-accent-soft);
 }
 
 .agent-tool-tag.model {
@@ -374,7 +359,7 @@
 
 .agents-footer {
     padding: 9px 12px;
-    border-top: 0.5px solid var(--c-border);
+    border-top: 1px solid var(--c-border);
     flex-shrink: 0;
 }
 
@@ -401,7 +386,7 @@
 .agent-editor select {
     padding: 8px 12px;
     background: var(--c-surface);
-    border: 0.5px solid var(--c-border-i);
+    border: 1px solid var(--c-border-i);
     border-radius: var(--r-sm);
     color: var(--c-text);
     font-size: 13px;
@@ -448,7 +433,7 @@
     font-size: 12px;
     cursor: pointer;
     padding: 8px 10px;
-    border: 0.5px solid var(--c-border-i);
+    border: 1px solid var(--c-border-i);
     border-radius: var(--r-sm);
     transition: background-color 0.2s, border-color 0.2s, color 0.2s;
     background: var(--c-surface);
@@ -523,7 +508,7 @@
 
 .prompt-editor-header {
     padding: 9px 12px;
-    border-bottom: 0.5px solid var(--c-border);
+    border-bottom: 1px solid var(--c-border);
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -577,7 +562,7 @@
     min-height: 0;
     width: 100%;
     resize: none;
-    border: 0.5px solid var(--c-border-i);
+    border: 1px solid var(--c-border-i);
     border-radius: var(--r-md);
     padding: 10px;
     font-size: 13px;
@@ -598,7 +583,7 @@
     flex: 1;
     min-height: 0;
     overflow: auto;
-    border: 0.5px solid var(--c-border-i);
+    border: 1px solid var(--c-border-i);
     border-radius: var(--r-md);
     padding: 10px;
     font-size: 13px;
@@ -660,7 +645,7 @@
 .agent-type-switch {
     display: flex;
     gap: 0;
-    border: 0.5px solid var(--c-border-i);
+    border: 1px solid var(--c-border-i);
     border-radius: var(--r-sm);
     overflow: hidden;
     width: 100%;
@@ -671,7 +656,7 @@
     min-height: 32px;
     padding: 0 10px;
     border: none;
-    border-right: 0.5px solid var(--c-border-i);
+    border-right: 1px solid var(--c-border-i);
     background: var(--c-surface);
     color: var(--c-text);
     font-family: inherit;
@@ -704,7 +689,7 @@
     font-size: 10px;
     padding: 1px 6px;
     border-radius: var(--r-sm);
-    border: 0.5px solid var(--c-border-i);
+    border: 1px solid var(--c-border-i);
     color: var(--c-muted);
     background: var(--c-surface);
     text-transform: none;
@@ -744,7 +729,7 @@
 
 .agent-save-error {
     padding: 8px 10px;
-    border: 0.5px solid var(--c-danger);
+    border: 1px solid var(--c-danger);
     border-radius: var(--r-sm);
     color: var(--c-danger);
     font-size: 12px;
@@ -756,7 +741,7 @@
 .cli-agents-block {
     margin-top: 10px;
     padding: 10px;
-    border: 0.5px solid var(--c-border);
+    border: 1px solid var(--c-border);
     border-radius: var(--r-sm);
     background: var(--c-bg-secondary);
     display: flex;
@@ -794,7 +779,7 @@
     align-items: flex-start;
     gap: 8px;
     padding: 8px;
-    border: 0.5px solid var(--c-border);
+    border: 1px solid var(--c-border);
     border-radius: var(--r-sm);
     background: var(--c-surface);
     transition: border-color var(--t-dur) var(--t-ease);
@@ -848,7 +833,7 @@
     max-height: 55vh;
     overflow: auto;
     resize: vertical;
-    border: 0.5px solid var(--c-border-i);
+    border: 1px solid var(--c-border-i);
     border-radius: var(--r-sm);
     background: var(--c-code);
     color: var(--c-body);

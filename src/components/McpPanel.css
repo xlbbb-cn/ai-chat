@@ -6,23 +6,7 @@
     color: var(--c-body);
 }
 
-.mcp-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--c-border);
-    flex-shrink: 0;
-}
-
-.mcp-header h2 {
-    margin: 0;
-    font-size: 15px;
-    font-weight: 500;
-    color: var(--c-text);
-    letter-spacing: normal;
-}
-
+/* The header bar itself is the shared `.panel-header` primitive (App.css). */
 .mcp-desc {
     font-size: 13px;
     color: var(--c-muted);

@@ -121,6 +121,10 @@
   /* Layout — height of the custom window chrome. Fullscreen portals and the
      sidebar start below it so the drag region stays reachable. */
   --titlebar-h: 32px;
+  /* Height of a sidebar panel's header bar. Equal to the chat toolbar's
+     rendered height so the left column's hairline and the toolbar's hairline
+     land on the same row — the window chrome reads as one band across it. */
+  --panel-header-h: 49px;
 
   /* Palette swatch samples — the Settings palette picker shows each
      palette's own colours. They live here so that no component stylesheet
@@ -624,14 +628,31 @@ body {
   left: 0;
   bottom: 0;
   flex-shrink: 0;
-  border-right: 1px solid var(--c-border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
   background: var(--c-toolbar);
+  background-size: 100vw 100%;
+  background-repeat: no-repeat;
   -webkit-backdrop-filter: blur(20px);
   backdrop-filter: blur(20px);
   z-index: 900;
+}
+
+/* Divider between the panel and the chat area. It starts *below* the panel
+   header: inside the header's own band it is deliberately absent, because the
+   header and the chat toolbar carry the same `--c-toolbar` glass — a 1px
+   vertical line there cuts the window's chrome band in two and makes the
+   header read as a board glued to the left edge. */
+.sidebar::after {
+  content: '';
+  position: absolute;
+  top: var(--panel-header-h);
+  right: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--c-border);
+  pointer-events: none;
 }
 
 .sidebar-shell {
@@ -1494,8 +1515,17 @@ body {
   min-height: 34px;
   max-height: 140px;
   overflow-y: auto;
+  scrollbar-width: none; /* no gutter: the field keeps its full width */
+  -ms-overflow-style: none;
   line-height: 1.5;
   transition: border-color var(--t-dur) var(--t-ease);
+}
+
+/* The composer grows to `max-height` and then scrolls. A bar inside a 34px-tall
+   field covers the tail of every full line, so it is not drawn — wheel, keys and
+   drag-selection still scroll the textarea. */
+.chat-input::-webkit-scrollbar {
+  display: none;
 }
 
 .chat-input::placeholder {
@@ -2011,6 +2041,48 @@ body {
    only stayed consistent by accident. They live here once so the panels are
    identical by construction, and so a change lands in one place.
    ══════════════════════════════════════════════════════════════════ */
+
+/* Header bar of a sidebar panel: title left, dismiss right.
+
+   It carries the window chrome's frosted `--c-toolbar`, exactly like the
+   titlebar above it and the chat toolbar beside it, so the whole top of the
+   window reads as one band and the only division is the hairline underneath.
+   `--panel-header-h` puts that hairline on the same row as the chat toolbar's,
+   which is what keeps the left column from looking like a separate block glued
+   under the chrome. In the gradient palette (Cream) the token is pinned to the
+   viewport width so the header continues the titlebar's gradient instead of
+   restarting it inside a 400px box. */
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  min-height: var(--panel-header-h);
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-toolbar);
+  background-size: 100vw 100%;
+  background-repeat: no-repeat;
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.panel-header h2 {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--c-text);
+  letter-spacing: normal;
+}
 
 /* Icon-only dismiss control in every panel header. */
 .close-btn {

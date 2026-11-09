@@ -17,6 +17,7 @@ export { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 export type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
 
 export {
+    faAnglesLeft,
     faBolt,
     faBoxArchive,
     faBoxOpen,

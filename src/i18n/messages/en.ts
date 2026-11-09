@@ -18,6 +18,7 @@ const en = {
         saved: "Saved",
         cancel: "Cancel",
         close: "Close",
+        collapse: "Collapse panel",
         delete: "Delete",
         edit: "Edit",
         apply: "Apply",

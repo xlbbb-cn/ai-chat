@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { getConfig, saveConfig } from "../api";
 import type { AppConfig, AutoAcceptKind, ConfirmKind } from "../types";
 import { useI18n, type MessageKey } from "../i18n";
-import { FontAwesomeIcon, faChevronDown, faChevronUp, faXmark } from "../icons";
+import { FontAwesomeIcon, faAnglesLeft, faChevronDown, faChevronUp } from "../icons";
 import "./ToolsPanel.css";
 
 interface Props {
@@ -207,10 +207,10 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
 
     return (
         <div className="tools-panel">
-            <div className="tools-header">
+            <div className="panel-header">
                 <h2>{t("tools.title")}</h2>
-                <button className="close-btn" onClick={onClose} aria-label={t("common.close")}>
-                    <FontAwesomeIcon icon={faXmark} />
+                <button className="close-btn" onClick={onClose} aria-label={t("common.collapse")}>
+                    <FontAwesomeIcon icon={faAnglesLeft} />
                 </button>
             </div>
             <div className="tools-description">

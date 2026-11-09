@@ -6,23 +6,7 @@
   color: var(--c-body);
 }
 
-.skills-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--c-border);
-  flex-shrink: 0;
-}
-
-.skills-header h2 {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--c-text);
-  letter-spacing: normal;
-}
-
+/* The header bar itself is the shared `.panel-header` primitive (App.css). */
 .skills-list {
   flex: 1;
   overflow-y: auto;

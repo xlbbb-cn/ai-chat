@@ -9,23 +9,7 @@
     overflow-y: auto;
 }
 
-.tools-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--c-border);
-    flex-shrink: 0;
-}
-
-.tools-header h2 {
-    margin: 0;
-    font-size: 15px;
-    font-weight: 500;
-    color: var(--c-text);
-    letter-spacing: normal;
-}
-
+/* The header bar itself is the shared `.panel-header` primitive (App.css). */
 .tools-description {
     font-size: 13px;
     color: var(--c-muted);

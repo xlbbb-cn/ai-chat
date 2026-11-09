@@ -426,8 +426,9 @@ Nothing in between.
 |---|---|
 | Chat transcript (`.messages`) | `padding: 18px 16px 20px`, `gap: 16px` |
 | Chat input area | `padding: 10px 12px 12px`, `gap: 8px`; control row `gap: 6px` |
-| Sidebar | `width: 400px`, 1px right hairline |
-| Panel header / footer | `padding: 10px 12px`, 1px hairline |
+| Sidebar | `width: 400px`; 1px right hairline drawn by `.sidebar::after`, starting `--panel-header-h` down so it never crosses the header band |
+| Panel header | `.panel-header` (shared, `App.css`): `min-height: var(--panel-header-h)` = 49px so its hairline lands on the chat toolbar's, `padding: 6px 12px`, frosted `--c-toolbar`, 1px hairline, title + one `faAnglesLeft` collapse chevron and nothing else |
+| Panel footer | `padding: 10px 12px`, 1px hairline |
 | Panel list | `padding: 10px 12px`, `gap: 6px` |
 | Panel row | `padding: 10px 12px` |
 | Settings nav | `180px` column, item `min-height: 28px`, `font-size: 13px` |
@@ -472,6 +473,14 @@ Settings additionally drops to **13px** text. This is what keeps the app feeling
 like one instrument rather than three glued together — do not let a new form
 re-introduce 40px inputs.
 
+### Scrollbars
+
+Only the transcript and the panel lists draw a bar, and only while they are
+scrolling (`.scrolling-active`). Everything else that scrolls hides the bar:
+the composer (`.chat-input`) grows to its `max-height` and then scrolls
+invisibly — a bar inside a 34px field sits on top of the tail of every full
+line — and the sidebar divider/scroll treatment must not re-introduce one.
+
 ### Whitespace philosophy
 
 Whitespace is the frame, not leftover space. Prefer removing a border or a fill
@@ -500,6 +509,20 @@ The titlebar is `position: fixed` at `z-index: 2000`, above every overlay, so th
 window controls stay reachable while Settings or the Markdown editor is open.
 Fullscreen pages start at `top: var(--titlebar-h)`; the sidebar starts below it
 too. True modal dialogs (9999 layer) still cover the titlebar on purpose.
+
+The sidebar panel header (`.panel-header`) repeats the titlebar's frosted
+`--c-toolbar` and the chat toolbar's height, so the whole top of the window —
+titlebar, panel header, chat toolbar — reads as one glass band divided only by
+the hairline under the panel header. That shared height is what lands the
+hairline on the toolbar's own row, so the top of the window shows one
+horizontal line rather than two lines 7px apart. The header carries the title
+and the collapse control and nothing else.
+
+The 1px divider between the sidebar and the chat area is drawn by
+`.sidebar::after` and starts `--panel-header-h` below the top of the panel: in
+the header's own band it is deliberately absent, because a vertical line there
+would cut the glass band in two right next to the chevron and make the header read as
+a board glued to the left edge.
 
 ---
 

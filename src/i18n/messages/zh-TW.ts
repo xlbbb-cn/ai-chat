@@ -9,6 +9,7 @@ const zhTW: Messages = {
         saved: "已儲存",
         cancel: "取消",
         close: "關閉",
+        collapse: "收合面板",
         delete: "刪除",
         edit: "編輯",
         apply: "套用",
