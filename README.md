@@ -310,6 +310,9 @@ After running, a config.json file will be generated in the system app data direc
   "selected_tools": ["run_cmd", "file_actions"],
   "self_evolution_mode": false,
   "background_tools": false,
+  "main_agent_max_rounds": 40,
+  "main_agent_max_tool_calls": 120,
+  "tool_failure_limit": 3,
   "single_instance": true,
   "workspace_dir": "D:/projects/my-repo"
 }

@@ -77,6 +77,10 @@ const en = {
         viewUpdate: "View update",
         dismiss: "Dismiss",
         noticeDismiss: "Dismiss notice",
+        toolDisabledNotice:
+            "`{tool}` failed {limit} times in a row — disabled for this session.",
+        budgetExhaustedNotice:
+            "Tool budget spent ({rounds} rounds, {toolCalls} tool calls) — the assistant is wrapping up with the material it already has.",
 
         timers: {
             title: "Timers",
@@ -375,6 +379,15 @@ const en = {
             maxCompletionTokens: "Max Completion Tokens",
             placeholderDefault: "default",
             placeholderDefaultLimit: "default limit",
+            maxRounds: "Max rounds per turn",
+            maxRoundsHint:
+                "Model requests one chat turn may make. 0 = unlimited (hard cap 1000). When the budget is spent the turn sends a final request without tools, so the assistant answers with what it already has.",
+            maxToolCalls: "Max tool calls per turn",
+            maxToolCallsHint:
+                "Tool calls executed in one chat turn. 0 = unlimited (hard cap 5000). Calls beyond it are answered with a notice instead of running.",
+            toolFailureLimit: "Disable a tool after N failures",
+            toolFailureLimitHint:
+                "A tool (MCP tools included) that fails this many times in a row is disabled for the rest of the session and the model is told to switch approach. 0 = never disable (hard cap 50). One successful call resets the count.",
             dsFormat: "DS-Format (DeepSeek)",
             dsFormatHint: "Pass reasoning_content back on assistant messages as DeepSeek-family thinking models require. DeepSeek-family models enable this automatically; turn it on only for other endpoints that need the same pass-through.",
             dsFormatAuto: "Always on for {model}: DeepSeek-family models get DS-Format automatically, so reasoning_content is always passed back.",

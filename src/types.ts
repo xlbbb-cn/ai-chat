@@ -383,6 +383,24 @@ export interface AppConfig {
    * for them. Defaults to on.
    */
   sub_agent_main_help?: boolean;
+  /**
+   * Upper bound on model requests in one chat turn. `0` = unlimited; the
+   * backend clamps it to 1000. When the budget is spent the turn sends one last
+   * request without a tool list, so the assistant answers with what it has.
+   */
+  main_agent_max_rounds?: number;
+  /**
+   * Upper bound on tool calls executed in one chat turn. `0` = unlimited; the
+   * backend clamps it to 5000. Calls beyond it are answered with a notice
+   * instead of running.
+   */
+  main_agent_max_tool_calls?: number;
+  /**
+   * Disable a tool (or MCP tool) for the rest of the session after this many
+   * consecutive failures, and tell the model to switch approach. `0` = never
+   * disable; the backend clamps it to 50. A successful call resets the count.
+   */
+  tool_failure_limit?: number;
   workspace_dir?: string;
   logger_output?: "file" | "println";
   /**

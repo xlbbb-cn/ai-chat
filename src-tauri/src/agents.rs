@@ -4173,6 +4173,27 @@ async fn run_main_agent_helper_inner(
     let mut tokens_used: u32 = 0;
     let mut tool_calls_count: u32 = 0;
     let mut last_content = String::new();
+    // Same session-scoped failure guard as the chat turn and the sub-agents.
+    let failure_limit = config
+        .tool_failure_limit
+        .min(crate::turn_guard::MAX_TOOL_FAILURE_LIMIT);
+    // Tools the session gave up on in an earlier turn are dropped once, right
+    // here: `tools` is part of the prompt prefix, so it must stay identical
+    // across the rounds of one run (`turn_guard`).
+    let disabled_tools = app
+        .state::<AppState>()
+        .tool_guard
+        .disabled_tools(session_id);
+    let req_tools: Vec<Value> = tools_list
+        .iter()
+        .filter(|tool| {
+            tool["function"]["name"]
+                .as_str()
+                .map(|name| !disabled_tools.contains(name))
+                .unwrap_or(true)
+        })
+        .cloned()
+        .collect();
 
     for _ in 0..MAIN_HELPER_MAX_ITERATIONS {
         if cancelled.load(Ordering::SeqCst) {
@@ -4194,8 +4215,8 @@ async fn run_main_agent_helper_inner(
         if let Some(effort) = resolve_reasoning_effort(config, model) {
             req_body["reasoning_effort"] = json!(effort);
         }
-        if !tools_list.is_empty() {
-            req_body["tools"] = json!(tools_list);
+        if !req_tools.is_empty() {
+            req_body["tools"] = json!(req_tools);
             req_body["tool_choice"] = json!("auto");
         }
 
@@ -4290,7 +4311,16 @@ async fn run_main_agent_helper_inner(
                 None,
                 None,
             );
-            let result = if name == "use_skill" {
+            // A tool disabled for this session never runs again; the call is
+            // still answered so the request stays protocol-valid.
+            let blocked = app
+                .state::<AppState>()
+                .tool_guard
+                .blocked_notice(session_id, name, failure_limit);
+            let ran = blocked.is_none();
+            let mut result = if let Some(notice) = blocked {
+                notice
+            } else if name == "use_skill" {
                 let args_json: Value = serde_json::from_str(args).unwrap_or_default();
                 let skill_name = args_json["skill_name"].as_str().unwrap_or("");
                 let skills_dir = crate::workspace::skills_root(workspace_dir);
@@ -4370,6 +4400,32 @@ async fn run_main_agent_helper_inner(
                 )
                 .await
             };
+            let failed = crate::turn_guard::tool_output_is_error(&result);
+            if ran {
+                if let Some(trip) = app.state::<AppState>().tool_guard.record(
+                    session_id,
+                    name,
+                    failed,
+                    failure_limit,
+                ) {
+                    result.push_str("\n\n");
+                    result.push_str(&crate::turn_guard::disabled_notice(
+                        name,
+                        trip.failures,
+                        failure_limit,
+                        true,
+                    ));
+                    let _ = app.emit(
+                        "chat-notice",
+                        json!({
+                            "kind": "tool_disabled",
+                            "tool": name,
+                            "failures": trip.failures,
+                            "limit": failure_limit,
+                        }),
+                    );
+                }
+            }
             emit_agent_tool_state(
                 app,
                 &task.id,
@@ -4377,7 +4433,7 @@ async fn run_main_agent_helper_inner(
                 name,
                 Some(preview_text(&result, 160)),
                 Some(tool_started.elapsed().as_millis()),
-                Some(!result.trim_start().starts_with("Error")),
+                Some(!failed),
             );
 
             messages.push(json!({
@@ -4678,6 +4734,28 @@ async fn run_llm_agent_body(
     );
     let max_iterations = (agent.max_iterations > 0).then_some(agent.max_iterations);
     let mut iterations: u32 = 0;
+    // Session-scoped tool failure guard, shared with the main agent: a tool the
+    // chat already gave up on must not be retried by a sub-agent either.
+    let failure_limit = config
+        .tool_failure_limit
+        .min(crate::turn_guard::MAX_TOOL_FAILURE_LIMIT);
+    // Tools the session gave up on in an earlier turn are dropped once, before
+    // the first request: the tool list is part of the prompt prefix, so it must
+    // stay identical across this agent's rounds (`turn_guard`).
+    let disabled_tools = app
+        .state::<AppState>()
+        .tool_guard
+        .disabled_tools(session_id);
+    let req_tools: Vec<Value> = tools_list
+        .iter()
+        .filter(|tool| {
+            tool["function"]["name"]
+                .as_str()
+                .map(|name| !disabled_tools.contains(name))
+                .unwrap_or(true)
+        })
+        .cloned()
+        .collect();
 
     loop {
         if cancelled.load(Ordering::SeqCst) {
@@ -4923,8 +5001,8 @@ async fn run_llm_agent_body(
         if let Some(effort) = resolve_reasoning_effort(config, model) {
             req_body["reasoning_effort"] = json!(effort);
         }
-        if !tools_list.is_empty() {
-            req_body["tools"] = json!(tools_list);
+        if !req_tools.is_empty() {
+            req_body["tools"] = json!(req_tools);
             req_body["tool_choice"] = json!("auto");
         }
         log_agent_event(
@@ -4938,7 +5016,7 @@ async fn run_llm_agent_body(
                 iterations,
                 model,
                 working_memory.len(),
-                tools_list.len(),
+                req_tools.len(),
                 context_budget,
                 max_complete_tokens,
                 max_iterations.unwrap_or(0),
@@ -5163,6 +5241,14 @@ async fn run_llm_agent_body(
                     if let Some(bus) = mbus {
                         bus.mark_tool(&task.id, name);
                     }
+                    // Session-level gate: a tool disabled after repeated
+                    // failures never runs again. The call is still answered —
+                    // the protocol needs one `tool` message per `tool_call_id`.
+                    let blocked = app
+                        .state::<AppState>()
+                        .tool_guard
+                        .blocked_notice(session_id, name, failure_limit);
+                    let ran = blocked.is_none();
                     log_agent_event(
                         app,
                         "INFO",
@@ -5184,7 +5270,9 @@ async fn run_llm_agent_body(
                         None,
                         None,
                     );
-                    let result = if name == "mbus" {
+                    let mut result = if let Some(notice) = blocked {
+                        notice
+                    } else if name == "mbus" {
                         match mbus {
                             Some(bus) => {
                                 let parsed: Value = serde_json::from_str(args).unwrap_or_default();
@@ -5338,6 +5426,34 @@ async fn run_llm_agent_body(
                         )
                         .await
                     };
+                    // Count the failure; crossing the limit tells the model and
+                    // the UI, and disables the tool for the whole session.
+                    let failed = crate::turn_guard::tool_output_is_error(&result);
+                    if ran {
+                        if let Some(trip) = app.state::<AppState>().tool_guard.record(
+                            session_id,
+                            name,
+                            failed,
+                            failure_limit,
+                        ) {
+                            result.push_str("\n\n");
+                            result.push_str(&crate::turn_guard::disabled_notice(
+                                name,
+                                trip.failures,
+                                failure_limit,
+                                true,
+                            ));
+                            let _ = app.emit(
+                                "chat-notice",
+                                json!({
+                                    "kind": "tool_disabled",
+                                    "tool": name,
+                                    "failures": trip.failures,
+                                    "limit": failure_limit,
+                                }),
+                            );
+                        }
+                    }
                     emit_agent_tool_state(
                         app,
                         &task.id,
@@ -5345,11 +5461,11 @@ async fn run_llm_agent_body(
                         name,
                         Some(preview_text(&result, 160)),
                         Some(tool_started.elapsed().as_millis()),
-                        Some(!result.trim_start().starts_with("Error")),
+                        Some(!failed),
                     );
                     log_agent_event(
                         app,
-                        if result.trim_start().starts_with("Error") {
+                        if failed {
                             "WARN"
                         } else {
                             "INFO"

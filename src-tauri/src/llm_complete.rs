@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::{agents, db, mcp, skills, todos, tools, AppState};
+use crate::{agents, db, mcp, skills, todos, tools, turn_guard, AppState};
 
 fn log_event(state: &State<'_, AppState>, level: &str, message: String) {
     if let Ok(logger) = state.logger.lock() {
@@ -577,6 +577,14 @@ const CONTEXT_KEEP_RECENT_MESSAGES: usize = 12;
 const CONTEXT_SUMMARY_MARKER: &str = "INTERNAL CONTEXT - SESSION SUMMARY";
 const CONTEXT_TODO_MARKER: &str = "INTERNAL CONTEXT - ACTIVE TODO LIST";
 const CONTEXT_MISSION_MARKER: &str = "INTERNAL CONTEXT - MULTI-AGENT MISSION RESULTS";
+/// Marks the system message that turns the last budgeted request into a
+/// wrap-up request (no tools) once the turn's round / tool-call budget is
+/// spent. See `turn_guard`.
+const CONTEXT_BUDGET_MARKER: &str = "INTERNAL CONTEXT - TURN BUDGET";
+/// Answer used when the wrap-up request produced nothing at all, so the turn
+/// never ends silently.
+const BUDGET_FALLBACK_ANSWER: &str =
+    "The turn stopped after reaching its tool budget without a written answer. Narrow the request, or raise the limit in Settings → Advanced.";
 const CONTEXT_SUMMARY_MAX_LINES: usize = 120;
 const DEFAULT_MODEL_MAX_TOKENS: u32 = 524_288;
 const STREAM_MAX_RETRIES: usize = 3;
@@ -2926,6 +2934,48 @@ async fn run_chat_turn(
     // How many times this turn has been held open for background results.
     let mut background_hold_rounds: u32 = 0;
 
+    // ── Turn budget & tool failure guard ────────────────────────────────────
+    // The loop below is model-driven: it repeats for as long as the reply
+    // carries tool calls. `TurnBudget` bounds that (rounds + tool calls) and
+    // `ToolFailureGuard` disables a tool for the rest of the session after
+    // repeated failures. Both limits come from Settings → Advanced; `0` means
+    // "no limit". See `turn_guard`.
+    let mut budget = turn_guard::TurnBudget::new(
+        config.main_agent_max_rounds,
+        config.main_agent_max_tool_calls,
+    );
+    let failure_limit = config
+        .tool_failure_limit
+        .min(turn_guard::MAX_TOOL_FAILURE_LIMIT);
+    let guard = &state.tool_guard;
+    // `budget_stop` is set once a limit is spent; `wrap_up` marks the single
+    // final request that goes out with `tool_choice: "none"`.
+    let mut budget_stop: Option<turn_guard::BudgetStop> = None;
+    let mut wrap_up = false;
+
+    // ── Tools disabled by earlier turns ─────────────────────────────────────
+    // The failure guard remembers its verdict per session, so a tool that hit
+    // the limit in an earlier turn is not offered again. The snapshot is taken
+    // ONCE per turn on purpose: `tools` sits in front of the messages in the
+    // rendered prompt, so adding or removing a definition mid-turn would move
+    // every following token and throw away the KV / prefix cache the previous
+    // rounds built. Tools that get disabled *during* this turn therefore stay
+    // advertised until the next turn; their calls are refused in the tool loop
+    // below (`blocked_notice`) instead of being hidden.
+    let disabled_at_turn_start = guard.disabled_tools(&session_id);
+    let drop_disabled_tools = |list: &mut Vec<Value>| {
+        if disabled_at_turn_start.is_empty() {
+            return;
+        }
+        list.retain(|tool| {
+            tool["function"]["name"]
+                .as_str()
+                .map(|name| !disabled_at_turn_start.contains(name))
+                .unwrap_or(true)
+        });
+    };
+    drop_disabled_tools(&mut tools_list);
+
     loop {
         // ── MCP registry changed during this turn? ───────────────────────────
         // `mcp_self` can create and enable a server while the turn is running.
@@ -2947,6 +2997,9 @@ async fn run_chat_turn(
             tools_list = rebuilt.0;
             mcp_tool_map = rebuilt.1;
             tools_revision = rebuilt.2;
+            // A rebuild resurrects every tool the session disabled in an
+            // earlier turn; the snapshot taken at turn start still applies.
+            drop_disabled_tools(&mut tools_list);
             log_event(
                 &state,
                 "INFO",
@@ -3046,6 +3099,59 @@ async fn run_chat_turn(
             let _ = app.emit("chat-injected", json!({ "items": items }));
         }
 
+        // ── Turn budget ──────────────────────────────────────────────────────
+        // Count the request that is about to be sent. When the round or
+        // tool-call budget is spent the turn does not die mid-flight: one last
+        // request goes out with `tool_choice: "none"`, so the model has to
+        // answer with what it already collected instead of asking for more.
+        if budget_stop.is_none() {
+            budget_stop = budget.begin_round();
+        }
+        if let Some(stop) = budget_stop {
+            if !wrap_up {
+                wrap_up = true;
+                let (rounds, tool_calls) = budget.snapshot();
+                let reason = if stop == turn_guard::BudgetStop::ToolCalls {
+                    "the tool-call limit was reached"
+                } else {
+                    "the round limit was reached"
+                };
+                log_event(
+                    &state,
+                    "WARN",
+                    format!(
+                        "turn budget exhausted: session_id={}, reason={}, rounds={}, tool_calls={}",
+                        session_id,
+                        stop.as_str(),
+                        rounds,
+                        tool_calls
+                    ),
+                );
+                let _ = app.emit(
+                    "chat-notice",
+                    json!({
+                        "kind": "budget_exhausted",
+                        "reason": stop.as_str(),
+                        "rounds": rounds,
+                        "tool_calls": tool_calls,
+                    }),
+                );
+                // Appended at the tail as a `user` message: the prompt prefix
+                // stays byte-identical (only new tokens are uncached), and no
+                // strict chat template has to accept a `system` turn appearing
+                // after `tool` results.
+                all_messages.push(json!({
+                    "role": "user",
+                    "content": format!(
+                        "{CONTEXT_BUDGET_MARKER}\nThe tool budget for this turn is spent \
+({rounds} request(s), {tool_calls} tool call(s); {reason}). Do not call any tool. Answer now with \
+the best final answer you can give from the material already collected, and state plainly what is \
+still missing."
+                    ),
+                }));
+            }
+        }
+
         // Context window used for the usage gauge (`Tokens: X / Y`) and the
         // compression threshold. Same resolver as sub-agents: only the
         // per-model window counts, never an output-token cap.
@@ -3058,9 +3164,18 @@ async fn run_chat_turn(
             "stream": true,
             "stream_options": { "include_usage": true }
         });
+        // Never strip `tools` from a request. The array is rendered in front of
+        // the messages, so removing it would move every following token and
+        // throw away the whole prompt cache for this request. The wrap-up
+        // request keeps the identical list and only flips `tool_choice` to
+        // "none", which forbids calling them while the prefix stays cached.
         if !tools_list.is_empty() {
             req_body["tools"] = json!(tools_list);
-            req_body["tool_choice"] = json!("auto");
+            req_body["tool_choice"] = if wrap_up {
+                json!("none")
+            } else {
+                json!("auto")
+            };
         }
         if let Some(temp) = config.model_settings.temperature {
             req_body["temperature"] = json!(temp);
@@ -3215,7 +3330,25 @@ async fn run_chat_turn(
             }
         }
 
-        let sr = result?;
+        let sr = match result {
+            Ok(sr) => sr,
+            // A rejected wrap-up request (some gateways refuse
+            // `tool_choice: "none"`) must not fail the whole turn: close it with
+            // the answer the model already produced instead of an error.
+            Err(err) if wrap_up => {
+                log_event(
+                    &state,
+                    "WARN",
+                    format!(
+                        "wrap-up request failed, ending the turn: session_id={}, error={err}",
+                        session_id
+                    ),
+                );
+                final_answer = Some(BUDGET_FALLBACK_ANSWER.to_string());
+                break;
+            }
+            Err(err) => return Err(err),
+        };
 
         let total_tokens = sr.prompt_tokens.saturating_add(sr.completion_tokens);
         let ratio = total_tokens as f32 / effective_max_tokens as f32;
@@ -3242,6 +3375,20 @@ async fn run_chat_turn(
         }
 
         if sr.finish_reason == "cancelled" {
+            break;
+        }
+
+        // ── Wrap-up answer ───────────────────────────────────────────────────
+        // The budget was spent before this request, so it went out with
+        // `tool_choice: "none"`: whatever comes back is the answer for this
+        // turn. Never hold the turn open again for background results here —
+        // that is what `background_hold_rounds` would otherwise do.
+        if wrap_up {
+            final_answer = Some(if sr.content.trim().is_empty() {
+                BUDGET_FALLBACK_ANSWER.to_string()
+            } else {
+                sr.content.clone()
+            });
             break;
         }
 
@@ -3373,7 +3520,45 @@ async fn run_chat_turn(
                 memory_tool_called = true;
             }
             let background_args: Value = serde_json::from_str(args).unwrap_or_default();
-            let result = if name == BACKGROUND_TOOL_NAME {
+
+            // ── Failure guard / tool budget ──────────────────────────────────
+            // Two independent gates can keep this call from running:
+            //   1. the tool was disabled earlier in this session (its
+            //      consecutive-failure budget is spent), or
+            //   2. the turn's tool-call budget is spent.
+            // Either way the call is still *answered*: the protocol requires a
+            // `tool` message for every `tool_call_id` the assistant produced.
+            let blocked = match guard.blocked_notice(&session_id, name, failure_limit) {
+                Some(notice) => Some(notice),
+                None => match budget.record_tool_call() {
+                    Some(stop) => {
+                        budget_stop = Some(stop);
+                        Some(turn_guard::budget_notice(name))
+                    }
+                    None => None,
+                },
+            };
+            let ran = blocked.is_none();
+            if let Some(notice) = &blocked {
+                let reason = if notice.starts_with("⛔ TOOL DISABLED") {
+                    "disabled for this session"
+                } else {
+                    "turn tool budget spent"
+                };
+                let _ = app.emit("tool-call", format!("🚫 *{name}* — not executed ({reason})"));
+                log_event(
+                    &state,
+                    "WARN",
+                    format!(
+                        "tool call not executed: session_id={}, tool={}, reason={}",
+                        session_id, name, reason
+                    ),
+                );
+            }
+
+            let mut result = if let Some(notice) = blocked {
+                notice
+            } else if name == BACKGROUND_TOOL_NAME {
                 handle_background_task_tool(&state, &session_id, &background_args).await
             } else if config.background_tools
                 && background_requested(&background_args)
@@ -3704,7 +3889,7 @@ async fn run_chat_turn(
 
                 // Log tool execution
                 let db = state.db.lock().unwrap();
-                let is_error = tool_result.starts_with("⛔") || tool_result.starts_with("Error");
+                let is_error = turn_guard::tool_output_is_error(&tool_result);
                 log_interaction(
                     &db,
                     &session_id,
@@ -3729,6 +3914,43 @@ async fn run_chat_turn(
                 drop(db);
                 tool_result
             };
+
+            // The call ran: a failed result counts towards the tool's failure
+            // budget, and the failure that crosses the limit is announced to
+            // the model (appended to the very same result) and to the user.
+            if ran {
+                if let Some(trip) = guard.record(
+                    &session_id,
+                    name,
+                    turn_guard::tool_output_is_error(&result),
+                    failure_limit,
+                ) {
+                    result.push_str("\n\n");
+                    result.push_str(&turn_guard::disabled_notice(
+                        name,
+                        trip.failures,
+                        failure_limit,
+                        true,
+                    ));
+                    log_event(
+                        &state,
+                        "WARN",
+                        format!(
+                            "tool disabled for this session: session_id={}, tool={}, failures={}, limit={}",
+                            session_id, name, trip.failures, failure_limit
+                        ),
+                    );
+                    let _ = app.emit(
+                        "chat-notice",
+                        json!({
+                            "kind": "tool_disabled",
+                            "tool": name,
+                            "failures": trip.failures,
+                            "limit": failure_limit,
+                        }),
+                    );
+                }
+            }
 
             all_messages.push(json!({
                 "role": "tool",

@@ -68,6 +68,9 @@ const zhTW: Messages = {
         viewUpdate: "查看更新",
         dismiss: "略過",
         noticeDismiss: "關閉提示",
+        toolDisabledNotice: "`{tool}` 連續失敗 {limit} 次 —— 本工作階段內已停用。",
+        budgetExhaustedNotice:
+            "本輪工具預算已用盡（{rounds} 輪 / {toolCalls} 次工具呼叫）—— 助手將以現有資訊收尾。",
 
         timers: {
             title: "計時器",
@@ -343,6 +346,12 @@ const zhTW: Messages = {
             maxCompletionTokens: "最大補完 tokens",
             placeholderDefault: "預設",
             placeholderDefaultLimit: "預設上限",
+            maxRounds: "單輪最大輪數",
+            maxRoundsHint: "一次對話中最多送出多少次模型請求。0 = 不限（硬上限 1000）。用盡後會送出一輪不帶工具的收尾請求，讓助理以現有資訊作答。",
+            maxToolCalls: "單輪最大工具呼叫次數",
+            maxToolCallsHint: "一次對話中最多執行多少次工具呼叫。0 = 不限（硬上限 5000）。超出的呼叫只回覆提示而不執行。",
+            toolFailureLimit: "工具連續失敗次數上限",
+            toolFailureLimitHint: "同一個工具（含 MCP 工具）連續失敗達到此次數後，本工作階段內停用該工具並提示模型改用其他方案。0 = 不啟用（硬上限 50）。成功呼叫一次即歸零。",
             dsFormat: "DS-Format（DeepSeek 格式）",
             dsFormatHint: "按 DeepSeek 系思考模式模型的要求，在回傳 assistant 訊息時攜帶 reasoning_content。DeepSeek 系模型會自動開啟；僅當其他供應商同樣需要時才手動開啟。",
             dsFormatAuto: "{model} 已自動開啟：DeepSeek 系模型一律使用 DS-Format，reasoning_content 會自動回傳。",

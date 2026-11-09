@@ -25,6 +25,7 @@ mod pdf_mentions;
 mod process_guard;
 mod skills;
 mod tools;
+mod turn_guard;
 mod update;
 mod workspace;
 mod workspace_files;
@@ -274,12 +275,31 @@ pub(crate) fn apply_config(
     let mut config = config;
     config.strip_retired_tools();
     config.enforce_self_evolution_tools();
+    config.normalize_turn_limits();
 
     let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
     fs::write(&state.config_path, json).map_err(|e| e.to_string())?;
 
     let logger_output = config.logger_output.clone();
-    *state.config.lock().unwrap() = config;
+    // A changed failure limit must also release tools that were disabled under
+    // the old value: raising the limit is how a user un-breaks a session
+    // without restarting the app.
+    let previous_failure_limit = {
+        let mut current = state.config.lock().unwrap();
+        let previous = current.tool_failure_limit;
+        *current = config;
+        previous
+    };
+    let failure_limit_changed =
+        previous_failure_limit != state.config.lock().unwrap().tool_failure_limit;
+    if failure_limit_changed {
+        state.tool_guard.reset_all();
+        state
+            .logger
+            .lock()
+            .unwrap()
+            .log("INFO", "Tool failure guard reset (limit changed)");
+    }
 
     let new_workspace_path =
         resolve_workspace_path(app, state.config.lock().unwrap().workspace_dir.as_deref())?;
@@ -430,6 +450,22 @@ pub struct AppConfig {
     /// executable.
     #[serde(default = "update::default_true")]
     pub sub_agent_main_help: bool,
+    /// Upper bound on model requests in one chat turn (`0` = unlimited; values
+    /// above `turn_guard::MAX_MAIN_AGENT_ROUNDS` are clamped). A ReAct turn is
+    /// driven by the model, so without a cap a tool loop could run forever;
+    /// when the budget is spent the turn sends one last request *without*
+    /// tools, so the assistant has to summarise what it already has.
+    #[serde(default = "turn_guard::default_main_agent_max_rounds")]
+    pub main_agent_max_rounds: u32,
+    /// Upper bound on tool calls executed in one chat turn (`0` = unlimited).
+    /// Calls beyond it are answered with a notice instead of running, which
+    /// keeps every `tool_call_id` answered.
+    #[serde(default = "turn_guard::default_main_agent_max_tool_calls")]
+    pub main_agent_max_tool_calls: u32,
+    /// Disable a tool for the rest of the session after this many consecutive
+    /// failures (`0` = never disable). A successful call resets the count.
+    #[serde(default = "turn_guard::default_tool_failure_limit")]
+    pub tool_failure_limit: u32,
     #[serde(default)]
     pub workspace_dir: Option<String>,
     #[serde(default)]
@@ -488,6 +524,9 @@ impl Default for AppConfig {
             self_evolution_mode: false,
             background_tools: true,
             sub_agent_main_help: true,
+            main_agent_max_rounds: turn_guard::DEFAULT_MAIN_AGENT_MAX_ROUNDS,
+            main_agent_max_tool_calls: turn_guard::DEFAULT_MAIN_AGENT_MAX_TOOL_CALLS,
+            tool_failure_limit: turn_guard::DEFAULT_TOOL_FAILURE_LIMIT,
             workspace_dir: None,
             logger_output: LoggerOutput::default(),
             auto_accept_confirm_kinds: vec![],
@@ -526,6 +565,21 @@ impl AppConfig {
                 self.selected_tools.push(required.to_string());
             }
         }
+    }
+
+    /// Clamp the turn guards to their hard ceilings.
+    ///
+    /// Called on every config write (and on startup), so neither a hand-edited
+    /// `config.json` nor an imported profile can set a number the loops would
+    /// still have to iterate towards.
+    fn normalize_turn_limits(&mut self) {
+        self.main_agent_max_rounds = self
+            .main_agent_max_rounds
+            .min(turn_guard::MAX_MAIN_AGENT_ROUNDS);
+        self.main_agent_max_tool_calls = self
+            .main_agent_max_tool_calls
+            .min(turn_guard::MAX_MAIN_AGENT_TOOL_CALLS);
+        self.tool_failure_limit = self.tool_failure_limit.min(turn_guard::MAX_TOOL_FAILURE_LIMIT);
     }
 
     /// The tool ids actually offered to the model.
@@ -670,6 +724,11 @@ pub struct AppState {
     /// pending request at a time, so parallel agents must queue here instead of
     /// overwriting each other's dialog.
     pub external_agent_confirm_lock: tokio::sync::Mutex<()>,
+    /// Tools disabled for the rest of a chat session after repeated failures
+    /// (Settings → Advanced). Shared by the main agent, its helper and every
+    /// sub-agent of the session; in-memory only, cleared when the limit is
+    /// reconfigured or the app exits.
+    pub tool_guard: turn_guard::ToolFailureGuard,
 }
 
 impl AppState {
@@ -1430,6 +1489,7 @@ pub fn run() {
             let mut config = config;
             config.strip_retired_tools();
             config.enforce_self_evolution_tools();
+            config.normalize_turn_limits();
 
             // Resolve the active workspace first: the database, memory, todo
             // lists and skills all live in its hidden `.data` directory, so the
@@ -1492,6 +1552,7 @@ pub fn run() {
                 session_memories: Mutex::new(Default::default()),
                 external_agent_confirmed: Mutex::new(Default::default()),
                 external_agent_confirm_lock: tokio::sync::Mutex::new(()),
+                tool_guard: Default::default(),
             });
 
             // Delayed "continue the task" timers, mirrored to timers.json so a
@@ -1809,5 +1870,55 @@ mod tests {
         let tools = config.effective_tools();
         assert_eq!(tools.iter().filter(|tool| *tool == "memory").count(), 1);
         assert_eq!(tools.len(), 2);
+    }
+
+    /// An older `config.json` gets the turn-guard defaults, and absurd values
+    /// are clamped instead of trusted.
+    #[test]
+    fn turn_guards_default_and_clamp() {
+        let legacy: AppConfig = serde_json::from_str(
+            r#"{
+                "api_base_url": "https://api.openai.com/v1",
+                "api_key": "sk-test",
+                "model": "gpt-4o-mini"
+            }"#,
+        )
+        .expect("a config without the new fields still parses");
+        assert_eq!(
+            legacy.main_agent_max_rounds,
+            turn_guard::DEFAULT_MAIN_AGENT_MAX_ROUNDS
+        );
+        assert_eq!(
+            legacy.main_agent_max_tool_calls,
+            turn_guard::DEFAULT_MAIN_AGENT_MAX_TOOL_CALLS
+        );
+        assert_eq!(
+            legacy.tool_failure_limit,
+            turn_guard::DEFAULT_TOOL_FAILURE_LIMIT
+        );
+
+        let mut config = AppConfig::default();
+        config.main_agent_max_rounds = u32::MAX;
+        config.main_agent_max_tool_calls = 99_999;
+        config.tool_failure_limit = 999;
+        config.normalize_turn_limits();
+        assert_eq!(
+            config.main_agent_max_rounds,
+            turn_guard::MAX_MAIN_AGENT_ROUNDS
+        );
+        assert_eq!(
+            config.main_agent_max_tool_calls,
+            turn_guard::MAX_MAIN_AGENT_TOOL_CALLS
+        );
+        assert_eq!(config.tool_failure_limit, turn_guard::MAX_TOOL_FAILURE_LIMIT);
+
+        // `0` means "no limit" and must survive normalization.
+        config.main_agent_max_rounds = 0;
+        config.main_agent_max_tool_calls = 0;
+        config.tool_failure_limit = 0;
+        config.normalize_turn_limits();
+        assert_eq!(config.main_agent_max_rounds, 0);
+        assert_eq!(config.main_agent_max_tool_calls, 0);
+        assert_eq!(config.tool_failure_limit, 0);
     }
 }

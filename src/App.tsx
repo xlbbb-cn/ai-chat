@@ -1099,6 +1099,38 @@ export default function App() {
         0
       ) + 1;
     unlisteners.push(
+      // Turn-guard notices from the backend (`turn_guard`): a tool disabled for
+      // the rest of the session after repeated failures, or the turn's round /
+      // tool-call budget being spent. Both are informational — the turn keeps
+      // running — so they surface as a warning notice, never as a failed turn.
+      listen<{
+        kind: "tool_disabled" | "budget_exhausted";
+        tool?: string;
+        failures?: number;
+        limit?: number;
+        rounds?: number;
+        tool_calls?: number;
+      }>("chat-notice", (e) => {
+        const payload = e.payload;
+        if (!payload) return;
+        if (payload.kind === "tool_disabled") {
+          setError(
+            t("app.toolDisabledNotice", {
+              tool: payload.tool ?? "",
+              limit: payload.limit ?? 0,
+            }),
+            "warning",
+          );
+          return;
+        }
+        setError(
+          t("app.budgetExhaustedNotice", {
+            rounds: payload.rounds ?? 0,
+            toolCalls: payload.tool_calls ?? 0,
+          }),
+          "warning",
+        );
+      }),
       listen<AgentTaskEvent>("agent-task-start", (e) => {
         const { agent_id, agent_name, description, task_id, cwd } = e.payload;
         setAgentStatuses((prev) => ({

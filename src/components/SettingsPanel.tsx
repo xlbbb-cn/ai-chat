@@ -99,6 +99,17 @@ function normalizeConversationHeader(name: string | undefined): string | undefin
   return trimmed ? trimmed : undefined;
 }
 
+/**
+ * Turn-guard fields (rounds / tool calls / failure limit) are whole numbers
+ * where `0` means "no limit". An empty box clears the override so the backend
+ * default applies; anything unparsable is treated the same way.
+ */
+function parseLimitInput(value: string): number | undefined {
+  if (value.trim() === "") return undefined;
+  const parsed = Math.floor(Number(value));
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
 const SETTINGS_SECTIONS: { id: string; labelKey: MessageKey }[] = [
   { id: "appearance", labelKey: "settings.sections.appearance" },
   { id: "workspace", labelKey: "settings.sections.workspace" },
@@ -1057,6 +1068,70 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
                       }}
                       placeholder={t("settings.advanced.placeholderDefaultLimit")}
                     />
+                  </label>
+                </div>
+
+                <div className="settings-divider" />
+
+                <div className="settings-field-grid settings-field-grid-3">
+                  <label className="settings-field-row settings-field-row-stacked">
+                    <span className="settings-field-label">{t("settings.advanced.maxRounds")}</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={config.main_agent_max_rounds ?? ""}
+                      onChange={(e) =>
+                        setConfig((prev) => ({
+                          ...prev,
+                          main_agent_max_rounds: parseLimitInput(e.target.value),
+                        }))
+                      }
+                      placeholder="0"
+                    />
+                    <small className="settings-field-hint">
+                      {t("settings.advanced.maxRoundsHint")}
+                    </small>
+                  </label>
+
+                  <label className="settings-field-row settings-field-row-stacked">
+                    <span className="settings-field-label">{t("settings.advanced.maxToolCalls")}</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={config.main_agent_max_tool_calls ?? ""}
+                      onChange={(e) =>
+                        setConfig((prev) => ({
+                          ...prev,
+                          main_agent_max_tool_calls: parseLimitInput(e.target.value),
+                        }))
+                      }
+                      placeholder="0"
+                    />
+                    <small className="settings-field-hint">
+                      {t("settings.advanced.maxToolCallsHint")}
+                    </small>
+                  </label>
+
+                  <label className="settings-field-row settings-field-row-stacked">
+                    <span className="settings-field-label">{t("settings.advanced.toolFailureLimit")}</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={config.tool_failure_limit ?? ""}
+                      onChange={(e) =>
+                        setConfig((prev) => ({
+                          ...prev,
+                          tool_failure_limit: parseLimitInput(e.target.value),
+                        }))
+                      }
+                      placeholder="0"
+                    />
+                    <small className="settings-field-hint">
+                      {t("settings.advanced.toolFailureLimitHint")}
+                    </small>
                   </label>
                 </div>
 
