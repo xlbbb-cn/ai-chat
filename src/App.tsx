@@ -457,7 +457,6 @@ export default function App() {
   const inputAreaRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
-  const sidebarMotionTimerRef = useRef<number | null>(null);
   const themeRef = useRef<ThemeMode>("auto");
   const paletteRef = useRef<Palette>("default");
   const currentAssistantMessageIdRef = useRef<string | null>(null);
@@ -696,14 +695,6 @@ export default function App() {
     observer.observe(el);
     return () => observer.disconnect();
   }, [syncScrollEdges]);
-
-  useEffect(() => {
-    return () => {
-      if (sidebarMotionTimerRef.current !== null) {
-        window.clearTimeout(sidebarMotionTimerRef.current);
-      }
-    };
-  }, []);
 
   /**
    * Sliding toolbar selection.
@@ -2526,37 +2517,37 @@ export default function App() {
   );
 
   function toggleSidebar(panel: Sidebar) {
-    if (sidebar === panel) {
+    // Clicking the open panel's button closes it; clicking it while the close
+    // fade is still running reopens instead of waiting for it to finish.
+    if (sidebar === panel && sidebarMotion !== "closing") {
       closeSidebar();
       return;
     }
 
-    if (sidebarMotionTimerRef.current !== null) {
-      window.clearTimeout(sidebarMotionTimerRef.current);
-      sidebarMotionTimerRef.current = null;
-    }
-
+    // Reopening from closed (or mid-close) fades in. Switching to another
+    // panel while the sidebar is already visible swaps the shell in place:
+    // replaying the fade on every tab click would flash the whole surface.
     setSidebar(panel);
-    setSidebarMotion("opening");
-    sidebarMotionTimerRef.current = window.setTimeout(() => {
-      setSidebarMotion(null);
-      sidebarMotionTimerRef.current = null;
-    }, 180);
+    setSidebarMotion(
+      sidebar === null || sidebarMotion === "closing" ? "opening" : sidebarMotion,
+    );
   }
 
   function closeSidebar() {
-    if (!sidebar) return;
-
-    if (sidebarMotionTimerRef.current !== null) {
-      window.clearTimeout(sidebarMotionTimerRef.current);
-    }
-
+    if (!sidebar || sidebarMotion === "closing") return;
     setSidebarMotion("closing");
-    sidebarMotionTimerRef.current = window.setTimeout(() => {
-      setSidebar(null);
-      setSidebarMotion(null);
-      sidebarMotionTimerRef.current = null;
-    }, 180);
+  }
+
+  /**
+   * The fade owns the mount lifetime: `sidebar` stays in state until the
+   * closing animation reports completion, so no timer has to guess the CSS
+   * duration (the old 180 ms timer cut a 220 ms slide short and made it snap).
+   * Child animations bubble through the aside, hence the target guard.
+   */
+  function handleSidebarAnimationEnd(event: React.AnimationEvent<HTMLElement>) {
+    if (event.target !== event.currentTarget) return;
+    if (sidebarMotion === "closing") setSidebar(null);
+    setSidebarMotion(null);
   }
 
   function handleChatAreaClick(event: React.MouseEvent<HTMLDivElement>) {
@@ -3216,7 +3207,10 @@ export default function App() {
       )}
       {/* Sidebar */}
       {sidebar && (
-        <aside className={`sidebar ${sidebarMotion === "opening" ? "sidebar-opening" : ""} ${sidebarMotion === "closing" ? "sidebar-closing" : ""}`}>
+        <aside
+          className={`sidebar ${sidebarMotion === "opening" ? "sidebar-opening" : ""} ${sidebarMotion === "closing" ? "sidebar-closing" : ""}`}
+          onAnimationEnd={handleSidebarAnimationEnd}
+        >
           <div className={`sidebar-shell ${sidebar === "settings" ? "panel-settings" : ""} ${sidebar === "skills" ? "panel-skills" : ""} ${sidebar === "history" ? "panel-history" : ""} ${sidebar === "tools" ? "panel-tools" : ""} ${sidebar === "mcp" ? "panel-mcp" : ""} ${sidebar === "agents" ? "panel-agents" : ""}`} key={sidebar}>
             {sidebar === "skills" && (
               <SkillsPanel

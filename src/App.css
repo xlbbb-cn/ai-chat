@@ -117,6 +117,8 @@
      so each chunk must finish fading before the next render replaces its
      wrapper. Keep `STREAM_FLUSH_MS` in ChatMessage.tsx just above this. */
   --t-dur-stream: 0.2s;
+  /* Sidebar enter/exit crossfade (the animation classes below read it). */
+  --t-dur-sidebar: 0.18s;
 
   /* Layout — height of the custom window chrome. Fullscreen portals and the
      sidebar start below it so the drag region stays reachable. */
@@ -637,39 +639,48 @@ body {
   min-width: 0;
 }
 
+/* Enter/exit is a pure crossfade. The 400px frosted surface used to slide in
+   with an extra 1px blur on top of its 20px backdrop blur, which forced a
+   backdrop re-render on every frame and visibly stuttered; an opacity fade
+   keeps the compositor work bounded. */
 .sidebar-opening {
-  animation: sidebar-slide-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: sidebar-fade-in var(--t-dur-sidebar) var(--t-ease) both;
+  will-change: opacity;
 }
 
 .sidebar-closing {
-  animation: sidebar-slide-out 200ms cubic-bezier(0.4, 0, 1, 1) both;
+  animation: sidebar-fade-out var(--t-dur-sidebar) var(--t-ease) both;
+  will-change: opacity;
+  /* Do not let a fading-out overlay swallow a click meant for the chat. */
+  pointer-events: none;
 }
 
-@keyframes sidebar-slide-in {
+@keyframes sidebar-fade-in {
   from {
-    transform: translateX(-100%);
     opacity: 0;
-    filter: blur(1px);
   }
 
   to {
-    transform: translateX(0);
     opacity: 1;
-    filter: blur(0);
   }
 }
 
-@keyframes sidebar-slide-out {
+@keyframes sidebar-fade-out {
   from {
-    transform: translateX(0);
     opacity: 1;
-    filter: blur(0);
   }
 
   to {
-    transform: translateX(-100%);
     opacity: 0;
-    filter: blur(1px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Keep the animation at an effectively zero length instead of `none`, so
+     the `animationend` handler that unmounts the sidebar still runs. */
+  .sidebar-opening,
+  .sidebar-closing {
+    animation-duration: 1ms;
   }
 }
 
