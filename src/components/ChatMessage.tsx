@@ -479,11 +479,11 @@ const STREAM_INK_MAX_CHARS = 400;
  * Streaming arrives token by token, so `dangerouslySetInnerHTML` would be
  * rewritten dozens of times per second. Every rewrite replaces the whole
  * subtree — including the `.stream-ink` wrapper that is still fading — so the
- * new text never actually fades in, it pops. Rendering in ~9 commits/s gives
+ * new text never actually fades in, it pops. Rendering in ~4 commits/s gives
  * each chunk the full fade window before the next rebuild replaces it, while
- * the visible delay stays far below the model's own token cadence.
+ * the visible delay stays below the model's own token cadence.
  */
-const STREAM_FLUSH_MS = 110;
+const STREAM_FLUSH_MS = 220;
 
 /**
  * Throttle a streaming reply to one visible update per `STREAM_FLUSH_MS`.

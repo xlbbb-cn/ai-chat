@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills } from "./api";
 
@@ -261,7 +261,7 @@ interface MarkdownEditPayload {
 }
 
 export default function App() {
-  const { t, setLocale } = useI18n();
+  const { t, locale, setLocale } = useI18n();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   /**
@@ -301,6 +301,8 @@ export default function App() {
   const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
   const [sidebar, setSidebar] = useState<Sidebar>(null);
   const [sidebarMotion, setSidebarMotion] = useState<"opening" | "closing" | null>(null);
+  /** Geometry of the toolbar's sliding selection fill (measured from the active button). */
+  const [toolbarIndicator, setToolbarIndicator] = useState<{ left: number; width: number } | null>(null);
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
   /**
    * Per-workspace skill status (`<workspace>/.data/skills.status`): the
@@ -451,6 +453,7 @@ export default function App() {
    *  toggled imperatively — it tracks scroll position, not render state, so a
    *  class flip beats re-rendering the whole tree on every scroll event. */
   const toolbarRef = useRef<HTMLElement>(null);
+  const toolbarActionsRef = useRef<HTMLDivElement>(null);
   const inputAreaRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -701,6 +704,43 @@ export default function App() {
       }
     };
   }, []);
+
+  /**
+   * Sliding toolbar selection.
+   *
+   * One fill travels between the panel buttons instead of every `.active`
+   * button painting its own background. Geometry comes from the button, so a
+   * locale change or a count badge widening a button is picked up; closing the
+   * sidebar only fades the fill out, keeping its last position so reopening
+   * the same panel does not make it jump in from the left.
+   */
+  useLayoutEffect(() => {
+    const container = toolbarActionsRef.current;
+    if (!container) return;
+
+    const measure = () => {
+      const active = container.querySelector<HTMLButtonElement>(".toolbar-btn.active");
+      if (active) {
+        setToolbarIndicator({ left: active.offsetLeft, width: active.offsetWidth });
+      }
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    container.querySelectorAll<HTMLButtonElement>(".toolbar-btn").forEach((button) => {
+      observer.observe(button);
+    });
+    return () => observer.disconnect();
+  }, [
+    sidebar,
+    locale,
+    activeAgentCount,
+    activeMcpCount,
+    activeSkillIds.length,
+    activeToolCount,
+    useAgentsEnabled,
+  ]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -3275,7 +3315,17 @@ export default function App() {
             </button>
           </span>
 
-          <div className="toolbar-actions">
+          <div className="toolbar-actions" ref={toolbarActionsRef}>
+            {toolbarIndicator && (
+              <span
+                className={`toolbar-selection${sidebar ? " visible" : ""}`}
+                aria-hidden="true"
+                style={{
+                  transform: `translateX(${toolbarIndicator.left}px)`,
+                  width: toolbarIndicator.width,
+                }}
+              />
+            )}
             <button
               className={`toolbar-btn ${sidebar === "agents" ? "active" : ""}`}
               onClick={() => toggleSidebar("agents")}

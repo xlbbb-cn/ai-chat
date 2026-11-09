@@ -324,16 +324,21 @@
    length, so a chunk brightens from transparent before the next rebuild
    replaces the wrapper — new text materialises instead of popping. */
 .message-content .stream-ink {
-  animation: message-stream-ink var(--t-dur-stream) ease-out both;
+  animation: message-stream-ink var(--t-dur-stream) var(--t-ease) both;
 }
 
+/* A chunk materialises: it starts invisible and softly out of focus, then
+   resolves into sharp text. The blur is what makes the fade readable at a
+   glance, where opacity alone just looked like a slightly delayed pop. */
 @keyframes message-stream-ink {
   from {
     opacity: 0;
+    filter: blur(0.22em);
   }
 
   to {
     opacity: 1;
+    filter: blur(0);
   }
 }
 

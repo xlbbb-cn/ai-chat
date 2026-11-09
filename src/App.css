@@ -113,10 +113,10 @@
   /* Motion — one timing curve for every interactive state change. */
   --t-ease: cubic-bezier(0.5, 0, 0, 0.75);
   --t-dur: 0.33s;
-  /* Shorter fade for the streaming typewriter: replies are re-rendered a few
-     times a second, so each chunk must finish fading before the next render
-     replaces its wrapper. Keep in sync with `STREAM_FLUSH_MS`. */
-  --t-dur-stream: 0.1s;
+  /* Streaming typewriter fade: replies are re-rendered a few times a second,
+     so each chunk must finish fading before the next render replaces its
+     wrapper. Keep `STREAM_FLUSH_MS` in ChatMessage.tsx just above this. */
+  --t-dur-stream: 0.2s;
 
   /* Layout — height of the custom window chrome. Fullscreen portals and the
      sidebar start below it so the drag region stays reachable. */
@@ -716,9 +716,37 @@ body {
 }
 
 .toolbar-actions {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 2px;
+}
+
+/* One travelling fill for the toolbar's active panel. It sits behind the
+   buttons (opacity only, no elevation) and fades out when no panel is open. */
+.toolbar-selection {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 0;
+  border-radius: 4px;
+  background: var(--c-hover);
+  pointer-events: none;
+  opacity: 0;
+  transition: transform var(--t-dur) var(--t-ease),
+    width var(--t-dur) var(--t-ease),
+    opacity var(--t-dur) var(--t-ease);
+}
+
+.toolbar-selection.visible {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toolbar-selection {
+    transition: none;
+  }
 }
 
 /* `inline-flex` + gap lets every toolbar entry mix a Font Awesome glyph with
@@ -726,6 +754,7 @@ body {
    site's nav items: 14px/500, 4px radius, colour-only transitions. */
 .toolbar-btn {
   position: relative;
+  z-index: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -744,9 +773,15 @@ body {
   letter-spacing: normal;
 }
 
-.toolbar-btn:hover,
-.toolbar-btn.active {
+.toolbar-btn:hover {
   background: var(--c-hover);
+  color: var(--c-text);
+}
+
+/* The sliding fill owns the active state; the button itself stays clear so
+   the layer underneath remains visible. Hover still deepens it. */
+.toolbar-btn.active {
+  background: transparent;
   color: var(--c-text);
 }
 

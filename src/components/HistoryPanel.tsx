@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { listHistorySessions, loadSessionMessages, deleteHistory, listSessionMeta, updateSessionMeta } from "../api";
 import type { HistoryRecord, HistorySessionSummary, SessionMeta } from "../api";
 import type { Attachment, ChatInjection, Message, MessageContent, ToolCallEntry } from "../types";
@@ -144,6 +144,19 @@ export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, disable
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
+  /** Measured geometry of the sliding tab fill (see the layout effect below). */
+  const [tabIndicator, setTabIndicator] = useState<{ left: number; width: number } | null>(null);
+  /** Measured geometry of the session-list highlight, in list content space. */
+  const [selectionFrame, setSelectionFrame] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const tabsRef = useRef<HTMLDivElement>(null);
+  const tabRefs = useRef<Map<HistoryTab, HTMLButtonElement>>(new Map());
+  const listRef = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   useEffect(() => {
     listHistorySessions().then(setSummaries).catch(console.error);
@@ -201,6 +214,68 @@ export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, disable
       return matchIds?.has(sid) ?? false;
     });
   }, [searchKeyword, tabFilteredSessions, metaMap, contentMatches]);
+
+  /**
+   * Sliding tab selection.
+   *
+   * The fill is one absolutely positioned layer rather than a background on
+   * `.active`, so changing tabs makes it travel instead of blinking from one
+   * button to the other. Geometry is measured from the buttons because their
+   * widths depend on the locale.
+   */
+  useLayoutEffect(() => {
+    const measure = () => {
+      const active = tabRefs.current.get(activeTab);
+      if (!active) {
+        setTabIndicator(null);
+        return;
+      }
+      setTabIndicator({ left: active.offsetLeft, width: active.offsetWidth });
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    if (tabsRef.current) observer.observe(tabsRef.current);
+    tabRefs.current.forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  }, [activeTab]);
+
+  /**
+   * Sliding session selection.
+   *
+   * The highlight is a single layer *behind* the rows, positioned in the
+   * list's scrollable content coordinates: it scrolls with the list and
+   * animates between rows when the current session changes. Measuring also
+   * keeps it correct when filtering, renaming or a metadata edit changes the
+   * layout.
+   */
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+
+    const measure = () => {
+      const row = itemRefs.current.get(currentSessionId);
+      if (!row) {
+        setSelectionFrame(null);
+        return;
+      }
+      const listRect = list.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      setSelectionFrame({
+        top: rowRect.top - listRect.top + list.scrollTop,
+        left: rowRect.left - listRect.left + list.scrollLeft,
+        width: rowRect.width,
+        height: rowRect.height,
+      });
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(list);
+    const activeRow = itemRefs.current.get(currentSessionId);
+    if (activeRow) observer.observe(activeRow);
+    return () => observer.disconnect();
+  }, [currentSessionId, filteredSessions, renamingSessionId, metaMap]);
 
   function getSessionTitle(summary: HistorySessionSummary): string {
     const meta = metaMap.get(summary.session_id);
@@ -286,6 +361,56 @@ export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, disable
     }
   }
 
+  /**
+   * Keyboard traversal of the session list. Arrow keys move focus only —
+   * loading a session is a deliberate action (Enter / Space), because each
+   * load reads a full transcript from SQLite and replaces the chat.
+   */
+  function focusSessionAt(index: number) {
+    const target = filteredSessions[index];
+    if (!target) return;
+    const row = itemRefs.current.get(target.session_id);
+    if (!row) return;
+    row.focus({ preventScroll: true });
+    row.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+
+  function handleSessionKeyDown(
+    event: React.KeyboardEvent<HTMLDivElement>,
+    index: number,
+    sessionId: string,
+  ) {
+    // A row contains its own buttons and the rename input; never steal their
+    // keys (Enter on the trash can must delete, not reload the chat).
+    if ((event.target as HTMLElement).closest("button, input, textarea, select, a")) {
+      return;
+    }
+
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        focusSessionAt(index + 1);
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        focusSessionAt(index - 1);
+        break;
+      case "Home":
+        event.preventDefault();
+        focusSessionAt(0);
+        break;
+      case "End":
+        event.preventDefault();
+        focusSessionAt(filteredSessions.length - 1);
+        break;
+      case "Enter":
+      case " ":
+        event.preventDefault();
+        void handleLoad(sessionId);
+        break;
+    }
+  }
+
   return (
     <div className="history-panel">
       <div className="history-header">
@@ -307,7 +432,17 @@ export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, disable
         {disableSessionSwitch && (
           <p className="history-switch-hint">{t("history.switchHint")}</p>
         )}
-        <div className="history-tabs" role="tablist">
+        <div className="history-tabs" role="tablist" ref={tabsRef}>
+          {tabIndicator && (
+            <span
+              className="history-tabs-indicator"
+              aria-hidden="true"
+              style={{
+                transform: `translateX(${tabIndicator.left}px)`,
+                width: tabIndicator.width,
+              }}
+            />
+          )}
           {([
             ["all", t("history.tabAll"), faListCheck],
             ["favorites", t("history.tabFavorites"), faStar],
@@ -315,6 +450,10 @@ export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, disable
           ] as [HistoryTab, string, IconDefinition][]).map(([tab, label, icon]) => (
             <button
               key={tab}
+              ref={(el) => {
+                if (el) tabRefs.current.set(tab, el);
+                else tabRefs.current.delete(tab);
+              }}
               role="tab"
               aria-selected={activeTab === tab}
               className={`history-tab ${activeTab === tab ? "active" : ""}`}
@@ -327,7 +466,18 @@ export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, disable
         </div>
       </div>
 
-      <div className="history-list">
+      <div className="history-list" ref={listRef}>
+        {selectionFrame && (
+          <span
+            className="history-selection"
+            aria-hidden="true"
+            style={{
+              transform: `translate(${selectionFrame.left}px, ${selectionFrame.top}px)`,
+              width: selectionFrame.width,
+              height: selectionFrame.height,
+            }}
+          />
+        )}
         {summaries.length === 0 ? (
           <p className="history-empty">{t("history.empty")}</p>
         ) : filteredSessions.length === 0 ? (
@@ -339,7 +489,7 @@ export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, disable
                 : t("history.noArchived")}
           </p>
         ) : (
-          filteredSessions.map((summary) => {
+          filteredSessions.map((summary, index) => {
             const sid = summary.session_id;
             const meta = metaMap.get(sid);
             const isFavorite = !!meta?.favorite;
@@ -352,8 +502,15 @@ export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, disable
             return (
               <div
                 key={sid}
+                ref={(el) => {
+                  if (el) itemRefs.current.set(sid, el);
+                  else itemRefs.current.delete(sid);
+                }}
                 className={`history-item ${isCurrent ? "active" : ""} ${disableSessionSwitch ? "disabled" : ""} ${isArchived ? "archived" : ""} ${isLoading ? "loading" : ""}`}
+                tabIndex={disableSessionSwitch ? -1 : 0}
+                aria-current={isCurrent ? "true" : undefined}
                 onClick={() => void handleLoad(sid)}
+                onKeyDown={(event) => handleSessionKeyDown(event, index, sid)}
               >
                 <div className="history-head">
                   {isRenaming ? (
