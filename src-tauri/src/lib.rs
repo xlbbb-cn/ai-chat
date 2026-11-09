@@ -15,6 +15,7 @@ use tauri_plugin_opener::OpenerExt;
 pub mod agents;
 mod backup;
 mod db;
+mod instance;
 mod llm_complete;
 mod logger;
 // `src/utils/` is a plain folder holding standalone crates (workspace members
@@ -58,6 +59,13 @@ pub const RETIRED_TOOL_IDS: [&str; 1] = ["knowledge_graph"];
 /// switched off — not from the Tools panel, not by applying a profile, and not
 /// by hand-editing `config.json`.
 pub const SELF_EVOLUTION_REQUIRED_TOOLS: [&str; 2] = ["file_actions", "memory"];
+
+/// How many workspaces `AppConfig::workspace_history` keeps.
+///
+/// The Settings dropdown is a shortcut, not an archive: ten entries cover the
+/// handful of projects one usually moves between without becoming a list
+/// nobody scans.
+pub const WORKSPACE_HISTORY_LIMIT: usize = 10;
 
 #[derive(Debug, Clone, Serialize)]
 struct MarkdownEditPayload {
@@ -212,14 +220,21 @@ async fn app_import_profile(app: AppHandle, path: String) -> Result<(), String> 
         .map_err(|err| format!("Profile import task failed: {err}"))?
 }
 
-fn resolve_workspace_path(app: &AppHandle, workspace_dir: Option<&str>) -> Result<PathBuf, String> {
+fn resolve_workspace_path(
+    app: &AppHandle,
+    instance: &instance::Instance,
+    workspace_dir: Option<&str>,
+) -> Result<PathBuf, String> {
     Ok(match workspace_dir.filter(|s| !s.is_empty()) {
         Some(dir) => PathBuf::from(dir),
-        None => app
-            .path()
-            .app_data_dir()
-            .map_err(|e| e.to_string())?
-            .join("workspace"),
+        None => {
+            let app_workspace = app
+                .path()
+                .app_data_dir()
+                .map_err(|e| e.to_string())?
+                .join("workspace");
+            instance.default_workspace(app_workspace)
+        }
     })
 }
 
@@ -277,8 +292,23 @@ pub(crate) fn apply_config(
     config.enforce_self_evolution_tools();
     config.normalize_turn_limits();
 
+    // The workspace history lives in the persisted config, so the resolved
+    // path must be recorded *before* the file is written. Resolving it here
+    // (the switch logic below reuses the value) means every route that
+    // applies a config — Settings save, profile apply, backup restore — feeds
+    // the same list.
+    let new_workspace_path =
+        resolve_workspace_path(app, &state.instance, config.workspace_dir.as_deref())?;
+    config.remember_workspace(&new_workspace_path.to_string_lossy());
+
     let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
-    fs::write(&state.config_path, json).map_err(|e| e.to_string())?;
+    // `write_config` serialises writes to the *shared* config, so a shadow
+    // window merging its workspace history on exit cannot interleave with this
+    // read-modify-write (a shadow's own copy needs no lock).
+    state
+        .instance
+        .write_config(&state.config_path, &json)
+        .map_err(|e| e.to_string())?;
 
     let logger_output = config.logger_output.clone();
     // A changed failure limit must also release tools that were disabled under
@@ -301,8 +331,6 @@ pub(crate) fn apply_config(
             .log("INFO", "Tool failure guard reset (limit changed)");
     }
 
-    let new_workspace_path =
-        resolve_workspace_path(app, state.config.lock().unwrap().workspace_dir.as_deref())?;
     fs::create_dir_all(&new_workspace_path).ok();
     // Note: `<workspace>/.data/skills` is NOT created eagerly. Skills are
     // discovered by scanning; a missing folder simply yields no workspace
@@ -329,6 +357,12 @@ pub(crate) fn apply_config(
 
         reopen_workspace_db(state, &new_workspace_path)?;
 
+        // Timers resume a chat session that lives in this workspace's
+        // database, so the registry moves with the workspace: the current set
+        // is flushed back to the old file (it re-arms when that workspace is
+        // opened again) and the new file's set is armed here.
+        timer::rebase_workspace(app, workspace::timers_path(&new_workspace_path));
+
         // The active skill list is workspace-scoped too: skills that came from
         // the old workspace may not exist in the new one. Notify the UI so it
         // can reload `skills.status` and re-validate the selection.
@@ -341,7 +375,7 @@ pub(crate) fn apply_config(
     }
 
     if let Some(win) = app.get_webview_window("main") {
-        let title = format!("AI Chat — {}", new_workspace_path.display());
+        let title = state.instance.window_title(&new_workspace_path);
         let _ = win.set_title(&title);
     }
 
@@ -468,6 +502,12 @@ pub struct AppConfig {
     pub tool_failure_limit: u32,
     #[serde(default)]
     pub workspace_dir: Option<String>,
+    /// Workspaces that were actually activated, newest first (capped at
+    /// `WORKSPACE_HISTORY_LIMIT`). Recorded by `apply_config`, so every route
+    /// that switches the workspace (Settings save, profile apply, backup
+    /// restore) feeds the same list; the Settings row offers it as a dropdown.
+    #[serde(default)]
+    pub workspace_history: Vec<String>,
     #[serde(default)]
     pub logger_output: LoggerOutput,
     #[serde(default)]
@@ -528,6 +568,7 @@ impl Default for AppConfig {
             main_agent_max_tool_calls: turn_guard::DEFAULT_MAIN_AGENT_MAX_TOOL_CALLS,
             tool_failure_limit: turn_guard::DEFAULT_TOOL_FAILURE_LIMIT,
             workspace_dir: None,
+            workspace_history: vec![],
             logger_output: LoggerOutput::default(),
             auto_accept_confirm_kinds: vec![],
             theme: None,
@@ -580,6 +621,40 @@ impl AppConfig {
             .main_agent_max_tool_calls
             .min(turn_guard::MAX_MAIN_AGENT_TOOL_CALLS);
         self.tool_failure_limit = self.tool_failure_limit.min(turn_guard::MAX_TOOL_FAILURE_LIMIT);
+    }
+
+    /// Record `path` as the most recent workspace.
+    ///
+    /// Called on every config write and once at startup (for the workspace we
+    /// just opened), so the list holds the workspaces that were really active
+    /// rather than the ones somebody typed in a form.
+    /// Windows paths compare case-insensitively, so entries are deduplicated
+    /// on the lowercased form while keeping the caller's spelling.
+    ///
+    /// Returns whether the list changed, so a caller that persists afterwards
+    /// can skip a pointless write.
+    ///
+    /// `pub(crate)` because the multi-instance exit path (`instance.rs`) merges
+    /// a shadow window's history back into this list.
+    pub(crate) fn remember_workspace(&mut self, path: &str) -> bool {
+        let path = path.trim();
+        if path.is_empty() {
+            return false;
+        }
+        let key = path.to_lowercase();
+        let already_newest = self
+            .workspace_history
+            .first()
+            .map(|entry| entry.trim().to_lowercase() == key)
+            .unwrap_or(false);
+        if already_newest {
+            return false;
+        }
+        self.workspace_history
+            .retain(|entry| entry.trim().to_lowercase() != key);
+        self.workspace_history.insert(0, path.to_string());
+        self.workspace_history.truncate(WORKSPACE_HISTORY_LIMIT);
+        true
     }
 
     /// The tool ids actually offered to the model.
@@ -653,6 +728,9 @@ pub struct InjectUserMessageResult {
 pub struct AppState {
     pub config: Mutex<AppConfig>,
     pub config_path: PathBuf,
+    /// Which window this is — primary (owns the shared config) or a shadow
+    /// running on a private copy (see `instance.rs`).
+    pub instance: instance::Instance,
     pub workspace_dir: Mutex<PathBuf>,
     pub mcp_servers_path: PathBuf,
     pub agents_config_path: PathBuf,
@@ -1116,6 +1194,14 @@ fn get_workspace_dir(state: State<'_, AppState>) -> String {
         .to_string()
 }
 
+/// Which window this is: the primary, or a shadow running on a temporary copy
+/// of the configuration (see `instance.rs`). The Settings panel uses it to
+/// explain why this window's changes will not be remembered.
+#[tauri::command]
+fn get_instance_info(state: State<'_, AppState>) -> instance::InstanceInfo {
+    state.instance.info()
+}
+
 #[tauri::command]
 fn save_markdown_file(path: String, content: String) -> Result<(), String> {
     fs::write(PathBuf::from(path), content).map_err(|e| e.to_string())
@@ -1249,6 +1335,20 @@ fn apply_profile_config(
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
 
+/// `dirs::data_dir()/<identifier>` — the path `app.path().app_data_dir()`
+/// resolves to (Tauri's `PathResolver::app_data_dir` uses `dirs::data_dir()`,
+/// *not* the local variant; on Windows that is `%APPDATA%`, i.e. Roaming).
+///
+/// Needed *before* Tauri exists: the single-instance plugin and the primary
+/// lock are both decided at process start, long before `setup` runs. If this
+/// ever disagrees with Tauri, `setup` re-claims under the real directory — a
+/// mismatch here would otherwise read (and seed) a default config in a
+/// directory the app does not use.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn app_data_dir_before_tauri(identifier: &str) -> Option<PathBuf> {
+    dirs::data_dir().map(|dir| dir.join(identifier))
+}
+
 /// Just the one field the plugin wiring needs, so a config that is missing,
 /// half-written, or from an older version falls back to the default instead of
 /// failing to parse.
@@ -1263,15 +1363,15 @@ struct SingleInstanceProbe {
 ///
 /// The plugin decides at registration time whether a second process is
 /// terminated, so the flag cannot come from `AppState` (managed in `setup`,
-/// after the builder). `dirs::data_local_dir()/identifier` is the same path
+/// after the builder). `dirs::data_dir()/identifier` is the same path
 /// `app.path().app_data_dir()` resolves to.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[allow(dead_code)] // release-only: debug builds never register the plugin
 fn persisted_single_instance(identifier: &str) -> bool {
-    let Some(data_dir) = dirs::data_local_dir() else {
+    let Some(data_dir) = app_data_dir_before_tauri(identifier) else {
         return true;
     };
-    fs::read_to_string(data_dir.join(identifier).join("config.json"))
+    fs::read_to_string(data_dir.join("config.json"))
         .ok()
         .and_then(|raw| serde_json::from_str::<SingleInstanceProbe>(&raw).ok())
         .map(|probe| probe.single_instance)
@@ -1301,6 +1401,18 @@ fn focus_main_window(app: &AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let context = tauri::generate_context!();
+
+    // Multi-instance bookkeeping (see `instance.rs`): the first process takes
+    // the primary role and keeps the shared config; every later one has to run
+    // on a private copy. The role is settled here because the lock is the only
+    // thing that tells a second process not to write the shared file — but the
+    // shadow *directory* is only created in `setup`, so a launch the
+    // single-instance plugin aborts leaves nothing behind.
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    let claimed_instance = app_data_dir_before_tauri(context.config().identifier.as_str())
+        .map(instance::Instance::claim);
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    let claimed_instance: Option<instance::Instance> = None;
 
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default();
@@ -1369,7 +1481,7 @@ pub fn run() {
                 show_about(app);
             }
         })
-        .setup(|app| {
+        .setup(move |app| {
             let data_dir = app
                 .path()
                 .app_data_dir()
@@ -1472,10 +1584,36 @@ pub fn run() {
                 app.set_menu(menu).expect("failed to set app menu");
             }
 
+            // Multi-instance: drop copies left behind by killed windows, then
+            // settle this process's role. The primary keeps using the shared
+            // `config.json`; every later window gets a private snapshot so it
+            // can neither read nor move another window's workspace.
+            //
+            // The claim was taken before Tauri existed, from the same path
+            // `app_data_dir()` resolves to. Should the two ever diverge, release
+            // the wrong claim and take the real one: continuing with it would
+            // read and seed a config in a directory the app does not use.
+            let mut instance = match claimed_instance {
+                Some(instance) if instance.data_dir() == data_dir => instance,
+                Some(instance) => {
+                    instance.shutdown();
+                    instance::Instance::claim(data_dir.clone())
+                }
+                None => instance::Instance::claim(data_dir.clone()),
+            };
+            let swept = instance::collect_garbage(&data_dir);
+            // Reported to `app.log` below — the logger does not exist yet.
+            let mut prepare_error: Option<String> = None;
+            let config_path = instance.prepare().unwrap_or_else(|err| {
+                // Opening the app beats perfect isolation: fall back to the
+                // shared config instead of refusing to start.
+                prepare_error = Some(err);
+                instance.main_config_path()
+            });
+
             let mcp_servers_path = data_dir.join("mcp_servers.json");
             let agents_config_path = data_dir.join("sub_agents.json");
             let profiles_path = data_dir.join("profiles.json");
-            let config_path = data_dir.join("config.json");
             let config = if config_path.exists() {
                 fs::read_to_string(&config_path)
                     .ok()
@@ -1496,10 +1634,18 @@ pub fn run() {
             // workspace must be known before the database is opened.
             let workspace_dir = match config.workspace_dir.as_deref().filter(|s| !s.is_empty()) {
                 Some(dir) => PathBuf::from(dir),
-                None => data_dir.join("workspace"),
+                None => instance.default_workspace(data_dir.join("workspace")),
             };
             fs::create_dir_all(&workspace_dir).ok();
             workspace::ensure_data_layout(&workspace_dir).ok();
+            // Seed the history with the workspace we are about to open: on the
+            // first launch after the upgrade this is the only entry, and it
+            // becomes pickable again as soon as the user switches away once.
+            if config.remember_workspace(&workspace_dir.to_string_lossy()) {
+                if let Ok(json) = serde_json::to_string_pretty(&config) {
+                    instance.write_config(&config_path, &json).ok();
+                }
+            }
             // `<workspace>/.data/skills` is created on demand (e.g. by the Skills
             // panel or self-evolution); skill listing tolerates its absence.
 
@@ -1512,6 +1658,29 @@ pub fn run() {
                 data_dir.join("app.log"),
             );
             app_logger.log("INFO", "Logger initialized");
+
+            if swept > 0 {
+                app_logger.log(
+                    "INFO",
+                    &format!("Multi-instance: removed {swept} leftover shadow directory(ies)"),
+                );
+            }
+            if let Some(err) = prepare_error {
+                app_logger.log(
+                    "WARN",
+                    &format!("Multi-instance: {err}; using the shared config"),
+                );
+            }
+
+            // Timers used to live in the app data directory, shared by every
+            // workspace; they now sit next to the sessions they resume. Move
+            // the old file into the active workspace once.
+            let timers_path = workspace::timers_path(&workspace_dir);
+            if let Err(err) =
+                timer::migrate_legacy_file(&data_dir.join("timers.json"), &timers_path)
+            {
+                app_logger.log("WARN", &format!("Timer migration failed: {err}"));
+            }
 
             // Log retention: request/interaction rows are debugging data, so
             // drop anything past the retention window (Settings → Runtime &
@@ -1531,6 +1700,7 @@ pub fn run() {
             app.manage(AppState {
                 config: Mutex::new(config),
                 config_path,
+                instance,
                 workspace_dir: Mutex::new(workspace_dir.clone()),
                 db: Mutex::new(db),
                 logger: Mutex::new(app_logger),
@@ -1555,19 +1725,18 @@ pub fn run() {
                 tool_guard: Default::default(),
             });
 
-            // Delayed "continue the task" timers, mirrored to timers.json so a
-            // pending wait survives an app restart.
+            // Delayed "continue the task" timers, mirrored to
+            // `<workspace>/.data/timers.json` so a pending wait survives an app
+            // restart *and* stays with the workspace whose session it resumes.
             let sleep_lock = timer::SleepLock::new(app.handle().clone());
             app.manage(sleep_lock.clone());
-            app.manage(timer::TimerRegistry::load(
-                data_dir.join("timers.json"),
-                sleep_lock,
-            ));
+            app.manage(timer::TimerRegistry::load(timers_path, sleep_lock));
             timer::restore_on_startup(app.handle());
 
-            // Set window title to show current workspace directory
+            // Window title: the active workspace, tagged when this is a shadow
+            // window so two of them are distinguishable in the task bar.
             if let Some(win) = app.get_webview_window("main") {
-                let title = format!("AI Chat — {}", workspace_dir.display());
+                let title = app.state::<AppState>().instance.window_title(&workspace_dir);
                 let _ = win.set_title(&title);
             }
 
@@ -1615,12 +1784,25 @@ pub fn run() {
 
             Ok(())
         })
-        .on_window_event(|_window, event| {
+        .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
                 // The only window is closing, so the app is exiting. Tear down
                 // every child tree (MCP servers, serve processes, CLI agents)
                 // instead of only the MCP pool.
                 process_guard::kill_all();
+                // A shadow window merges its workspace history and deletes its
+                // temporary config; the primary releases its lock. Idempotent,
+                // because the exit hook below runs again on quits that never
+                // close a window.
+                if let Some(state) = window.app_handle().try_state::<AppState>() {
+                    if let Some(warning) = state.instance.shutdown() {
+                        state
+                            .logger
+                            .lock()
+                            .unwrap()
+                            .log("WARN", &format!("Multi-instance: {warning}"));
+                    }
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -1637,6 +1819,7 @@ pub fn run() {
             fetch_models,
             model_metadata::fetch_model_metadata,
             get_workspace_dir,
+            get_instance_info,
             workspace_files::list_workspace_files,
             workspace_files::read_workspace_file_range,
             workspace_files::read_workspace_file_bytes,
@@ -1712,12 +1895,21 @@ pub fn run() {
         ])
         .build(context)
         .expect("error while building tauri application")
-        .run(|_app_handle, event| {
+        .run(|app_handle, event| {
             // Normal quit path. `kill_all` is idempotent, so running it after
             // the window-close hook is harmless; it also covers tray/menu
             // quits that never emit `CloseRequested`.
             if let tauri::RunEvent::Exit = event {
                 process_guard::kill_all();
+                if let Some(state) = app_handle.try_state::<AppState>() {
+                    if let Some(warning) = state.instance.shutdown() {
+                        state
+                            .logger
+                            .lock()
+                            .unwrap()
+                            .log("WARN", &format!("Multi-instance: {warning}"));
+                    }
+                }
             }
         });
 }
@@ -1920,5 +2112,40 @@ mod tests {
         assert_eq!(config.main_agent_max_rounds, 0);
         assert_eq!(config.main_agent_max_tool_calls, 0);
         assert_eq!(config.tool_failure_limit, 0);
+    }
+
+    /// The workspace dropdown lists the workspaces that were really active:
+    /// newest first, no duplicates (Windows paths differ only in case), capped.
+    #[test]
+    fn workspace_history_is_deduped_and_capped() {
+        let mut config = AppConfig::default();
+
+        config.remember_workspace("D:\\projects\\alpha");
+        config.remember_workspace("D:\\projects\\beta");
+        assert_eq!(
+            config.workspace_history,
+            vec!["D:\\projects\\beta", "D:\\projects\\alpha"]
+        );
+
+        // Re-activating an entry moves it to the front instead of duplicating
+        // it, and the comparison ignores case.
+        config.remember_workspace("d:\\PROJECTS\\alpha");
+        assert_eq!(
+            config.workspace_history,
+            vec!["d:\\PROJECTS\\alpha", "D:\\projects\\beta"]
+        );
+
+        // Blank values (the "default workspace" form) are not history.
+        config.remember_workspace("   ");
+        assert_eq!(config.workspace_history.len(), 2);
+
+        for index in 0..WORKSPACE_HISTORY_LIMIT + 5 {
+            config.remember_workspace(&format!("C:\\tmp\\ws{index}"));
+        }
+        assert_eq!(config.workspace_history.len(), WORKSPACE_HISTORY_LIMIT);
+        assert_eq!(
+            config.workspace_history[0],
+            format!("C:\\tmp\\ws{}", WORKSPACE_HISTORY_LIMIT + 4)
+        );
     }
 }

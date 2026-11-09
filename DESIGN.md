@@ -261,6 +261,13 @@ transition: background-color var(--t-dur) var(--t-ease),
 White fill, `--c-body` label, 1px `--c-border-i` outline, 4px radius. Hover →
 `--c-surface-2` fill and `--c-muted` outline.
 
+### Tinted action
+
+`.settings-btn-tinted` — the secondary action that reloads state (fetching the
+model list). `--c-accent-soft` fill, `--c-accent-text` label, no outline. Hover
+→ `--c-accent` fill and `--c-on-accent` label. The soft tint never replaces the
+primary CTA; both may not appear in the same row.
+
 ### Nav / toolbar button
 
 Transparent, 14px/500, `--c-text`, 4px radius, `min-height: 32px`, `padding: 4px 12px`.

@@ -60,6 +60,7 @@ const en = {
         appMenu: "App menu",
         appMenuOpenDataDir: "Open app data directory",
         appMenuOpenWorkspaceDir: "Open workspace directory",
+        appMenuOpenDeliverables: "Open deliverables folder",
         appMenuSaveProfile: "Save profile…",
         appMenuRestoreProfile: "Restore profile…",
         appMenuMarkdownEdit: "Markdown edit…",
@@ -309,8 +310,8 @@ const en = {
             reset: "Reset",
             resetTitle: "Use the default workspace directory",
             resetAria: "Reset workspace directory to default",
-            openTmp: "Open deliverable exchange folder",
-            openTmpHint: "Sub-agent deliverables live under .data/tmp; clean them up here.",
+            historyPlaceholder: "Recent workspaces…",
+            historyTitle: "Switch to a workspace you used before",
             selfEvolution: "Enable Self-Evolution Mode",
             selfEvolutionHint:
                 "Let the assistant evolve its own skills inside the workspace. The file actions and memory tools stay enabled while the mode is on, and the assistant keeps verified facts (runtime environment, correct tool usage, file locations) in a dedicated evolution memory. The assistant may also build its own MCP servers (`mcp_self`) — scripts under .data/mcp, started as local processes after your confirmation.",
@@ -320,6 +321,10 @@ const en = {
             profileMeta: "{tools} tools · {agents} agents",
             applyTitle: "Apply this profile",
             deleteAria: "Delete profile {name}",
+            instancePrimaryHint:
+                "“Run a single instance” is off: launching AI Chat again opens a separate window with its own workspace and its own copy of this configuration.",
+            instanceShadowHint:
+                "This window runs on a temporary copy of the configuration — its workspace and settings are its own, and changes made here are discarded when you close it.",
         },
 
         api: {
@@ -404,7 +409,7 @@ const en = {
                 "Request and interaction logs older than this are deleted at startup and by the Interaction Monitor's “Compact DB”. 0 keeps logs forever. Chat history is never pruned. Change it and press Save to apply.",
             singleInstance: "Run a single instance",
             singleInstanceHint:
-                "Launching AI Chat again brings the running window to the front instead of opening a second copy. Applies after restarting the app.",
+                "Launching AI Chat again brings the running window to the front instead of opening a second copy. When off, every launch gets its own window on a temporary copy of this configuration. Applies after restarting the app.",
             backgroundTools: "Background execution",
             backgroundToolsHint:
                 "Let the assistant run slow tools as background tasks (`run_in_background: true`): `run_cmd`, `run_shell`, `file_actions` search, every MCP tool and `call_subagent`. The result is delivered automatically before the next request and the turn stays open until it arrives. Sub-agents never receive the flag.",
@@ -868,6 +873,9 @@ const en = {
             "Track external mission state, active tasks, and episodic summaries for this chat session.",
         autoRefresh: "Auto refresh",
         refresh: "Refresh",
+        openExchangeFolder: "Deliverables folder",
+        openExchangeFolderHint:
+            "Open the sub-agent deliverable exchange area (.data/tmp) for manual cleanup.",
         missions: "Missions ({count})",
         empty: "No mission state recorded for this session yet.",
         activeTasks: { one: "{count} active task", other: "{count} active tasks" },

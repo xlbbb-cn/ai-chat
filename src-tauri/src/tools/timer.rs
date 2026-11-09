@@ -20,7 +20,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -64,8 +64,9 @@ impl TimerEntry {
 /// Process-wide timer registry. Registered with `app.manage()` in `lib.rs`.
 pub struct TimerRegistry {
     timers: Mutex<HashMap<String, TimerEntry>>,
-    /// JSON mirror so pending timers survive an app restart.
-    path: PathBuf,
+    /// JSON mirror so pending timers survive an app restart. Re-pointed when the
+    /// workspace changes (`rebase`), hence the interior mutability.
+    path: Mutex<PathBuf>,
     /// Shared "system awake" lock, held while at least one timer is pending.
     sleep_lock: SleepLock,
     /// Parked guard for the sleep lock; exists exactly while the timer set is
@@ -721,22 +722,27 @@ impl Drop for SleepGuard {
     }
 }
 
+/// Read a `timers.json` mirror; a missing or corrupt file is an empty registry.
+fn read_entries(path: &Path) -> HashMap<String, TimerEntry> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Vec<TimerEntry>>(&raw).ok())
+        .map(|entries| {
+            entries
+                .into_iter()
+                .map(|entry| (entry.id.clone(), entry))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 impl TimerRegistry {
     /// Load the persisted timers (missing or corrupt file = empty registry).
     pub fn load(path: PathBuf, sleep_lock: SleepLock) -> Self {
-        let timers = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|raw| serde_json::from_str::<Vec<TimerEntry>>(&raw).ok())
-            .map(|entries| {
-                entries
-                    .into_iter()
-                    .map(|entry| (entry.id.clone(), entry))
-                    .collect::<HashMap<_, _>>()
-            })
-            .unwrap_or_default();
+        let timers = read_entries(&path);
         Self {
             timers: Mutex::new(timers),
-            path,
+            path: Mutex::new(path),
             sleep_lock,
             sleep_guard: Mutex::new(None),
         }
@@ -763,7 +769,8 @@ impl TimerRegistry {
         let mut list: Vec<&TimerEntry> = timers.values().collect();
         list.sort_by_key(|entry| entry.fire_at);
         if let Ok(json) = serde_json::to_string_pretty(&list) {
-            let _ = std::fs::write(&self.path, json);
+            let path = self.path.lock().unwrap();
+            let _ = std::fs::write(&*path, json);
         }
     }
 
@@ -807,6 +814,26 @@ impl TimerRegistry {
             self.sync_sleep_guard();
         }
         removed
+    }
+
+    /// Point the mirror at another workspace's `timers.json`.
+    ///
+    /// Timers are workspace-scoped: each one resumes a session of the workspace
+    /// that was open when it was created. A switch therefore flushes the current
+    /// set back to the old file (it re-arms when that workspace is opened again)
+    /// and replaces the in-memory set with the new file's entries. Sleepers that
+    /// are already armed for the old set become no-ops when they wake up: they
+    /// look their id up in the registry, which no longer holds it — the same
+    /// mechanism `cancel` relies on.
+    fn rebase(&self, path: PathBuf) {
+        {
+            let guard = self.timers.lock().unwrap();
+            self.persist(&guard);
+        }
+        let loaded = read_entries(&path);
+        *self.timers.lock().unwrap() = loaded;
+        *self.path.lock().unwrap() = path;
+        self.sync_sleep_guard();
     }
 }
 
@@ -945,6 +972,65 @@ pub fn restore_on_startup(app: &AppHandle) {
     for entry in pending {
         arm(app, entry);
     }
+}
+
+/// Re-point the registry after a workspace switch and re-arm that workspace's
+/// pending timers (overdue ones fire immediately, as on a restart).
+///
+/// Called from `apply_config`: the timers of the workspace being left stay in
+/// its own `timers.json` and come back the next time it is opened.
+pub fn rebase_workspace(app: &AppHandle, path: PathBuf) {
+    let registry = app.state::<TimerRegistry>();
+    registry.rebase(path);
+    let pending = registry.list();
+    if pending.is_empty() {
+        emit_state(app);
+        return;
+    }
+    if let Ok(logger) = app.state::<crate::AppState>().logger.lock() {
+        logger.log(
+            "INFO",
+            &format!("Re-armed {} timer(s) for the new workspace", pending.len()),
+        );
+    }
+    for entry in pending {
+        arm(app, entry);
+    }
+    emit_state(app);
+}
+
+/// Move the pre-workspace timer mirror into the workspace layout.
+///
+/// Timers used to be mirrored to the app data directory, where every workspace
+/// shared one file (so a timer could resume a session id that the open database
+/// does not contain). The file moves into the active workspace's `.data` once;
+/// if the target already exists the old file is parked as `timers.json.migrated`
+/// — renamed, never deleted — and the reason is returned for the app log.
+pub fn migrate_legacy_file(legacy: &Path, target: &Path) -> Result<(), String> {
+    if !legacy.exists() {
+        return Ok(());
+    }
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("failed to create '{}': {e}", parent.display()))?;
+    }
+    if !target.exists() {
+        // `rename` fails across volumes; fall back to copy + remove.
+        if std::fs::rename(legacy, target).is_err() {
+            std::fs::copy(legacy, target)
+                .map_err(|e| format!("failed to copy '{}': {e}", legacy.display()))?;
+            let _ = std::fs::remove_file(legacy);
+        }
+        return Ok(());
+    }
+    let parked = legacy.with_extension("json.migrated");
+    std::fs::rename(legacy, &parked)
+        .map_err(|e| format!("failed to park '{}': {e}", legacy.display()))?;
+    Err(format!(
+        "'{}' already exists; the legacy file was kept as '{}'",
+        target.display(),
+        parked.display()
+    ))
 }
 
 // ─── Commands ────────────────────────────────────────────────────────────────
@@ -1108,5 +1194,69 @@ mod tests {
         assert_eq!(transitions.load(Ordering::SeqCst), 1);
         registry.remove("b");
         assert_eq!(transitions.load(Ordering::SeqCst), 0);
+    }
+
+    /// A workspace switch moves the mirror: the old workspace keeps its own
+    /// file, and only the new workspace's pending timers stay in memory.
+    #[test]
+    fn rebase_moves_the_mirror_between_workspaces() {
+        let (backend, _) = counting_backend();
+        let lock = SleepLock::for_tests(backend);
+        let old_path = temp_path("rebase-old");
+        let registry = TimerRegistry::load(old_path.clone(), lock);
+        registry.insert(entry("old", now_ms() + 60_000));
+
+        let new_dir = std::env::temp_dir().join(format!(
+            "ai-chat-timer-rebase-new-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&new_dir).unwrap();
+        let new_path = new_dir.join("timers.json");
+        let pending = vec![entry("new", now_ms() + 60_000)];
+        std::fs::write(&new_path, serde_json::to_string_pretty(&pending).unwrap()).unwrap();
+
+        registry.rebase(new_path);
+        let ids: Vec<String> = registry.list().into_iter().map(|entry| entry.id).collect();
+        assert_eq!(ids, vec!["new".to_string()]);
+
+        // The timer created in the old workspace stays in its own file…
+        let old = read_entries(&old_path);
+        assert!(old.contains_key("old"));
+        assert!(!old.contains_key("new"));
+
+        // …and comes back when that workspace is opened again.
+        registry.rebase(old_path.clone());
+        let ids: Vec<String> = registry.list().into_iter().map(|entry| entry.id).collect();
+        assert_eq!(ids, vec!["old".to_string()]);
+        let _ = std::fs::remove_dir_all(&new_dir);
+        let _ = std::fs::remove_file(&old_path);
+    }
+
+    /// The legacy app-data mirror is moved once; a later one is parked instead
+    /// of overwriting the workspace copy.
+    #[test]
+    fn legacy_mirror_is_migrated_once() {
+        let dir = std::env::temp_dir().join(format!(
+            "ai-chat-timer-migrate-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let legacy = dir.join("timers.json");
+        let target = dir.join(".data").join("timers.json");
+        std::fs::write(&legacy, "[]").unwrap();
+
+        assert!(migrate_legacy_file(&legacy, &target).is_ok());
+        assert!(target.exists());
+        assert!(!legacy.exists());
+
+        std::fs::write(&legacy, "[]").unwrap();
+        assert!(
+            migrate_legacy_file(&legacy, &target).is_err(),
+            "an existing workspace mirror is never replaced"
+        );
+        assert!(dir.join("timers.json.migrated").exists());
+        assert!(target.exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

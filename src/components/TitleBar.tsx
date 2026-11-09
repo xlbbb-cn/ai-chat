@@ -23,6 +23,7 @@ import {
     openAppDataDir,
     openMarkdownFile,
     openWorkspaceDir,
+    openWorkspaceTmpDir,
 } from "../api";
 import { useI18n } from "../i18n";
 import { formatCountdown } from "../utils/time";
@@ -154,6 +155,9 @@ export function TitleBar({ sleepLock, turnStartedAt, now }: Props) {
 
     const handleOpenWorkspaceDir = () => run(openWorkspaceDir);
 
+    /** `<workspace>/.data/tmp` — the sub-agent deliverable exchange area. */
+    const handleOpenDeliverablesDir = () => run(openWorkspaceTmpDir);
+
     const handleSaveProfile = () =>
         run(async () => {
             const path = await saveDialog({
@@ -284,6 +288,14 @@ export function TitleBar({ sleepLock, turnStartedAt, now }: Props) {
                             onClick={handleOpenWorkspaceDir}
                         >
                             {t("app.appMenuOpenWorkspaceDir")}
+                        </button>
+                        <button
+                            type="button"
+                            role="menuitem"
+                            className="titlebar-menu-item"
+                            onClick={handleOpenDeliverablesDir}
+                        >
+                            {t("app.appMenuOpenDeliverables")}
                         </button>
                         <div className="titlebar-menu-sep" role="separator" />
                         <button

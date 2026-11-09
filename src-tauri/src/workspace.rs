@@ -18,14 +18,16 @@
 //!     mcp.conf                 self-built server roster (merged with the
 //!                              app-data mcp_servers.json)
 //!     skills.status            per-workspace skill enablement + metadata
+//!     timers.json              pending "continue the task" timers
 //! ```
 //!
 //! `.data` is part of the workspace: `file_actions` lists, searches, reads and
 //! writes it like any other folder (the SQLite database excepted — see
 //! `tools::paths`). On Windows the directory carries the file-system hidden
 //! attribute so it stays out of Explorer. Application-level files
-//! (config.json, app.log, MCP/sub-agent definitions, profiles, timers) remain
-//! in the OS app data directory.
+//! (config.json, app.log, MCP/sub-agent definitions, profiles) remain in the OS
+//! app data directory; timers live here because a timer resumes a chat session
+//! of *this* workspace.
 
 use std::path::{Path, PathBuf};
 
@@ -103,6 +105,16 @@ pub fn skills_status_path(workspace_dir: &Path) -> PathBuf {
     data_root(workspace_dir).join("skills.status")
 }
 
+/// Pending `timer_set` entries (`<workspace>/.data/timers.json`).
+///
+/// A timer re-injects a message into a chat session, and sessions live in this
+/// workspace's database — so the mirror belongs here, not in the app data
+/// directory (where every workspace shared one file and a timer could resume a
+/// session id that does not exist in the workspace that happened to be open).
+pub fn timers_path(workspace_dir: &Path) -> PathBuf {
+    data_root(workspace_dir).join("timers.json")
+}
+
 /// Create the workspace state directory and mark it hidden.
 ///
 /// Called at startup and whenever the active workspace changes. Individual
@@ -157,6 +169,7 @@ mod tests {
         assert_eq!(tmp_root(workspace), data.join("tmp"));
         assert_eq!(mcp_root(workspace), data.join("mcp"));
         assert_eq!(skills_status_path(workspace), data.join("skills.status"));
+        assert_eq!(timers_path(workspace), data.join("timers.json"));
     }
 
     #[test]

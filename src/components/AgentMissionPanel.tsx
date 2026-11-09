@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { listAgentMissions, listMissionBusMessages } from "../api";
+import { listAgentMissions, listMissionBusMessages, openWorkspaceTmpDir } from "../api";
 import type { AgentBusMessage, AgentMissionSnapshot } from "../types";
 import { useI18n, type Locale, type MessageKey, type TranslateVars } from "../i18n";
 import { FontAwesomeIcon, faSpinner, faXmark } from "../icons";
@@ -144,6 +144,14 @@ export function AgentMissionPanel({ sessionId, onClose }: Props) {
                     </label>
                     <button type="button" className="mission-monitor-refresh" onClick={() => void loadMissions()}>
                         {t("mission.refresh")}
+                    </button>
+                    <button
+                        type="button"
+                        className="mission-monitor-refresh"
+                        onClick={() => void openWorkspaceTmpDir()}
+                        title={t("mission.openExchangeFolderHint")}
+                    >
+                        {t("mission.openExchangeFolder")}
                     </button>
                     <button type="button" className="close-btn" onClick={onClose} aria-label={t("common.close")}>
                         <FontAwesomeIcon icon={faXmark} />

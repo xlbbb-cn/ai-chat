@@ -10,6 +10,9 @@ use std::path::Path;
 /// upgrades in place and a fresh one is created empty.
 pub fn open_db(path: &Path) -> rusqlite::Result<Connection> {
     let db = Connection::open(path)?;
+    // A second window can be pointed at this workspace by hand; wait for its
+    // write lock instead of failing immediately with `SQLITE_BUSY`.
+    db.busy_timeout(std::time::Duration::from_secs(5))?;
     db.execute("CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)", [])?;
     let _ = db.execute("ALTER TABLE history ADD COLUMN tool_calls TEXT", []);
     let _ = db.execute("ALTER TABLE history ADD COLUMN reasoning_content TEXT", []);

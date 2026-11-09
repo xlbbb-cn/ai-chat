@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { fetchModels, fetchModelMetadata, getAppVersion, getConfig, getWorkspaceDir, saveConfig, listProfiles, saveProfile, deleteProfile, applyProfile, listMcpServers, listSubAgents, getAgentOrchestration, openWorkspaceTmpDir } from "../api";
-import type { AppConfig, ModelMetadata, ModelSettings, Palette, Profile, RequestHeader } from "../types";
+import { fetchModels, fetchModelMetadata, getAppVersion, getConfig, getInstanceInfo, getWorkspaceDir, saveConfig, listProfiles, saveProfile, deleteProfile, applyProfile, listMcpServers, listSubAgents, getAgentOrchestration } from "../api";
+import type { AppConfig, InstanceInfo, ModelMetadata, ModelSettings, Palette, Profile, RequestHeader } from "../types";
 import { LOCALE_LABELS, LOCALES, useI18n, type Locale, type MessageKey } from "../i18n";
 import { matchModelCatalog, isDeepSeekModel } from "../utils/modelMetadata";
 import { FontAwesomeIcon, faCaretDown, faCheck, faXmark } from "../icons";
@@ -99,6 +99,11 @@ function normalizeConversationHeader(name: string | undefined): string | undefin
   return trimmed ? trimmed : undefined;
 }
 
+/** Windows paths differ only in case and separator style. */
+function samePath(a: string, b: string): boolean {
+  return a.replace(/\\/g, "/").toLowerCase() === b.replace(/\\/g, "/").toLowerCase();
+}
+
 /**
  * Turn-guard fields (rounds / tool calls / failure limit) are whole numbers
  * where `0` means "no limit". An empty box clears the override so the backend
@@ -152,6 +157,12 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
   const [manualModel, setManualModel] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(true);
   const [workspaceDirActual, setWorkspaceDirActual] = useState("");
+  /**
+   * Which window this is. A shadow window runs on a temporary copy of the
+   * configuration (see `src-tauri/src/instance.rs`), so its changes are gone
+   * when it closes — the workspace row has to say so.
+   */
+  const [instanceInfo, setInstanceInfo] = useState<InstanceInfo | null>(null);
   const [pickingWorkspace, setPickingWorkspace] = useState(false);
   const [isMessageEditorOpen, setIsMessageEditorOpen] = useState(false);
   const [messageDraft, setMessageDraft] = useState("");
@@ -188,6 +199,7 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
 
   useEffect(() => {
     getWorkspaceDir().then(setWorkspaceDirActual).catch(console.error);
+    getInstanceInfo().then(setInstanceInfo).catch(console.error);
     listProfiles().then(setProfiles).catch(console.error);
     getAppVersion().then(setAppVersion).catch(console.error);
   }, []);
@@ -219,6 +231,16 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
    * pretending the user can turn it off.
    */
   const dsFormatAuto = isDeepSeekModel(config.model, currentMetadata);
+
+  /** The active workspace (`""` while the default app-data one is in use). */
+  const currentWorkspace = config.workspace_dir ?? workspaceDirActual;
+  /**
+   * History entries other than the active workspace. The dropdown is a
+   * shortcut, so it stays hidden until there is somewhere else to switch to.
+   */
+  const otherWorkspaces = (config.workspace_history ?? []).filter(
+    (dir) => dir.trim() !== "" && !samePath(dir, currentWorkspace)
+  );
 
   async function handlePickWorkspace() {
     if (pickingWorkspace) return;
@@ -354,6 +376,11 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
       };
       await saveConfig(normalized);
       setConfig(normalized);
+      // The backend records the just-saved workspace in `workspace_history`
+      // while writing the file, so pick that up instead of leaving the
+      // dropdown stale until the panel is reopened.
+      const fresh = await getConfig();
+      setConfig((prev) => ({ ...prev, workspace_history: fresh.workspace_history ?? [] }));
       setSaved(true);
       onConfigSaved?.(normalized);
       setTimeout(() => setSaved(false), 2000);
@@ -606,6 +633,28 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
               <div className="settings-field-row settings-field-row-stacked">
                 <span className="settings-field-label">{t("settings.workspace.dirLabel")}</span>
                 <div className="workspace-dir-row">
+                  {otherWorkspaces.length > 0 && (
+                    <select
+                      className="workspace-dir-history"
+                      value=""
+                      title={t("settings.workspace.historyTitle")}
+                      aria-label={t("settings.workspace.historyTitle")}
+                      onChange={(e) => {
+                        const dir = e.target.value;
+                        if (!dir) return;
+                        // Staged only, like the directory picker: the row still
+                        // applies with "Save Changes".
+                        setConfig((prev) => ({ ...prev, workspace_dir: dir }));
+                      }}
+                    >
+                      <option value="">{t("settings.workspace.historyPlaceholder")}</option>
+                      {otherWorkspaces.map((dir) => (
+                        <option key={dir} value={dir} title={dir}>
+                          {dir}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                   <input
                     type="text"
                     readOnly
@@ -641,24 +690,15 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
                     </button>
                   )}
                 </div>
-              </div>
-
-              <div className="settings-field-row settings-field-row-stacked">
-                <span className="settings-field-label">
-                  {t("settings.workspace.openTmp")}
-                </span>
-                <div className="workspace-dir-row">
-                  <button
-                    type="button"
-                    className="settings-btn"
-                    onClick={() => void openWorkspaceTmpDir()}
-                  >
-                    {t("settings.workspace.openTmp")}
-                  </button>
-                </div>
-                <small className="settings-field-hint">
-                  {t("settings.workspace.openTmpHint")}
-                </small>
+                {instanceInfo?.role === "shadow" ? (
+                  <small className="settings-field-hint">
+                    {t("settings.workspace.instanceShadowHint")}
+                  </small>
+                ) : instanceInfo && !(config.single_instance ?? true) ? (
+                  <small className="settings-field-hint">
+                    {t("settings.workspace.instancePrimaryHint")}
+                  </small>
+                ) : null}
               </div>
 
               <label className="settings-checkbox">
@@ -789,7 +829,7 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
               <div className="settings-field-grid">
                 <div className="settings-field-row settings-field-row-stacked">
                   <span className="settings-field-label">{t("settings.api.modelCatalog")}</span>
-                  <button type="button" className="settings-btn" onClick={handleFetchModels} disabled={loadingModels}>
+                  <button type="button" className="settings-btn settings-btn-tinted" onClick={handleFetchModels} disabled={loadingModels}>
                     {loadingModels ? t("settings.api.loadingModels") : t("settings.api.fetchModels")}
                   </button>
                   {modelsError && <div className="settings-error">{modelsError}</div>}

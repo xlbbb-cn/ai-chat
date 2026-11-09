@@ -51,6 +51,7 @@ const zhCN: Messages = {
         appMenu: "应用菜单",
         appMenuOpenDataDir: "打开应用数据目录",
         appMenuOpenWorkspaceDir: "打开工作区目录",
+        appMenuOpenDeliverables: "打开交付物文件夹",
         appMenuSaveProfile: "导出配置…",
         appMenuRestoreProfile: "恢复配置…",
         appMenuMarkdownEdit: "Markdown 编辑…",
@@ -278,8 +279,8 @@ const zhCN: Messages = {
             reset: "重置",
             resetTitle: "使用默认工作区目录",
             resetAria: "将工作区目录重置为默认值",
-            openTmp: "打开交付物交换区",
-            openTmpHint: "子 agent 的交付物保存在 .data/tmp 下，可在这里手动清理。",
+            historyPlaceholder: "最近使用的工作区…",
+            historyTitle: "切换到之前用过的工作区",
             selfEvolution: "启用自我进化模式",
             selfEvolutionHint: "允许助手在工作区内自行演进技能。开启期间“文件操作”和“记忆”工具会强制启用并锁定，助手还会把已验证的关键事实（运行环境、正确的工具用法、常用文件位置）记录到专属的自进化记忆区。助手还可以自建 MCP 服务器（`mcp_self`）：脚本存放在 .data/mcp，经你确认后作为本地进程启动。",
             profilesTitle: "配置方案",
@@ -288,6 +289,10 @@ const zhCN: Messages = {
             profileMeta: "{tools} 个工具 · {agents} 个智能体",
             applyTitle: "应用此配置",
             deleteAria: "删除配置 {name}",
+            instancePrimaryHint:
+                "已关闭「单实例运行」：再次启动会打开独立窗口，各自使用独立工作区与本配置的独立副本。",
+            instanceShadowHint:
+                "本窗口运行在配置的临时副本上：工作区与设置互不影响，关闭窗口后这里的改动不会保留。",
         },
 
         api: {
@@ -368,7 +373,7 @@ const zhCN: Messages = {
                 "早于该时限的请求日志与交互日志会在启动时以及由交互监视器执行“压缩数据库”时删除。0 表示永久保留。聊天历史不会被清理。修改后请点击保存生效。",
             singleInstance: "单实例运行",
             singleInstanceHint:
-                "再次启动时聚焦已运行的窗口，而不是打开第二个实例。重启应用后生效。",
+                "再次启动时聚焦已运行的窗口，而不是打开第二个实例。关闭该选项后，每次启动都会打开独立窗口，并使用本配置的临时副本。重启应用后生效。",
             backgroundTools: "后台执行",
             backgroundToolsHint:
                 "允许助手把耗时工具放到后台运行（`run_in_background: true`）：`run_cmd`、`run_shell`、`file_actions` 搜索、所有 MCP 工具和 `call_subagent`。结果会在下一个请求前自动送达，本轮保持开启直到结果到齐；子代理不会收到该参数。",
@@ -811,6 +816,8 @@ const zhCN: Messages = {
         subtitle: "跟踪当前聊天会话的外部任务状态、进行中的任务与阶段性摘要。",
         autoRefresh: "自动刷新",
         refresh: "刷新",
+        openExchangeFolder: "交付物文件夹",
+        openExchangeFolderHint: "打开子 agent 的交付物交换区（.data/tmp），可手动清理。",
         missions: "任务（{count}）",
         empty: "该会话暂无任务状态记录。",
         activeTasks: "{count} 个进行中的任务",

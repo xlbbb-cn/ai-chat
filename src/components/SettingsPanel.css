@@ -42,6 +42,7 @@
   --t-accent: var(--c-accent);
   --t-accent-hover: var(--c-accent-hover);
   --t-accent-text: var(--c-accent-text);
+  --t-accent-soft: var(--c-accent-soft);
   --t-danger: var(--c-danger);
 }
 
@@ -512,6 +513,15 @@
   padding: 4px 10px !important;
 }
 
+/* Recent workspaces: an action picker next to the directory field. It never
+   holds the value (it stays on its placeholder), so it only needs room for the
+   ellipsised path. */
+.workspace-dir-history {
+  flex: 0 1 200px;
+  min-width: 120px;
+  text-overflow: ellipsis;
+}
+
 /* ===================================================================
    Buttons — 4px radius, 34px height, colour-only transitions at
    var(--t-dur). No shadows, no scale transforms. Rows that need a
@@ -559,6 +569,20 @@
 
 .settings-btn-primary:hover:not(:disabled) {
   background: var(--t-accent-hover);
+  color: var(--c-on-accent);
+}
+
+/* Accent-tinted action: the soft Electric Blue fill marks a secondary action
+   that reloads state (model list, capability catalogue). The label uses
+   --t-accent-text so a pastel palette stays legible, and hover promotes it to
+   the accent fill. */
+.settings-btn-tinted {
+  background: var(--t-accent-soft);
+  color: var(--t-accent-text);
+}
+
+.settings-btn-tinted:hover:not(:disabled) {
+  background: var(--t-accent);
   color: var(--c-on-accent);
 }
 

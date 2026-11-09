@@ -325,6 +325,24 @@ export interface RequestHeader {
   value: string;
 }
 
+/**
+ * Which window the backend is running (`get_instance_info`).
+ *
+ * `single_instance` decides whether launching the app again focuses the running
+ * window or starts a second process. A second process runs as a *shadow*: it
+ * copies the configuration, works in its own workspace and deletes the copy
+ * when it closes, so its settings never move another window's workspace.
+ */
+export interface InstanceInfo {
+  role: "primary" | "shadow";
+  /** Shadow directory id (`20260101T101530-a1b2c3d4`); empty for the primary. */
+  shadow_id: string;
+  /** Config file this window actually reads and writes. */
+  config_path: string;
+  /** Shared config file — the same for every window. */
+  main_config_path: string;
+}
+
 export interface AppConfig {
   api_base_url: string;
   api_key: string;
@@ -401,7 +419,21 @@ export interface AppConfig {
    * disable; the backend clamps it to 50. A successful call resets the count.
    */
   tool_failure_limit?: number;
+  /**
+   * Active workspace of *this window*. Instance-scoped: the primary persists it
+   * in the shared `config.json`, a shadow window only in its temporary copy
+   * (which is discarded when it closes).
+   */
   workspace_dir?: string;
+  /**
+   * Workspaces activated so far, most recent first (the backend caps the list
+   * at 10 and dedupes it case-insensitively). Filled by `apply_config`, so it
+   * also reflects switches made through profiles or a backup restore; the
+   * Settings workspace row offers it as a dropdown shortcut. A shadow window
+   * merges the entries it collected back into the shared config on exit, so
+   * every window's dropdown sees the workspaces the others opened.
+   */
+  workspace_history?: string[];
   logger_output?: "file" | "println";
   /**
    * Light / dark resolution of the interface. `auto` follows the OS.
@@ -427,7 +459,8 @@ export interface AppConfig {
    * Keep a single running instance: launching the app again focuses the
    * window that is already open instead of starting a second process.
    * Read from `config.json` at process start, so a change applies after the
-   * app is restarted.
+   * app is restarted. When off, every later launch gets its own window on a
+   * temporary config copy — see `InstanceInfo`.
    */
   single_instance?: boolean;
   /**

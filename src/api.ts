@@ -6,6 +6,7 @@ import type {
   Attachment,
   ArchivedSkill,
   EvolutionMemoryEntry,
+  InstanceInfo,
   Message,
   MessageContent,
   ModelMetadata,
@@ -35,6 +36,14 @@ import type {
 
 export async function getConfig(): Promise<AppConfig> {
   return invoke("get_config");
+}
+
+/**
+ * Which window the backend is: the primary that owns the shared config, or a
+ * shadow running on a temporary copy for this window only.
+ */
+export async function getInstanceInfo(): Promise<InstanceInfo> {
+  return invoke("get_instance_info");
 }
 
 export async function confirmCommand(
