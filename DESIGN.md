@@ -493,6 +493,7 @@ every other surface — no shadow, one hairline, one accent.
 | Window buttons | 34×28, 4px radius, `--c-muted` glyph at 12px; hover `--c-hover` + `--c-text`; active `--c-active` |
 | Close button | Destructive variant: hover is `--c-danger-soft` fill + `--c-danger` glyph |
 | App menu (`⋯`) | `--c-surface`, 1px `--c-border-i`, 4px radius, no shadow; rows 32px, 13px/400, hover `--c-hover` |
+| Workspace label | 12px `--c-muted`, ellipsized; 1px `--c-danger` underline at a 2px offset marks the active workspace |
 | Placement | Windows/Linux: minimize / maximize / close on the right; macOS: close / minimize / maximize on the left |
 
 The titlebar is `position: fixed` at `z-index: 2000`, above every overlay, so the

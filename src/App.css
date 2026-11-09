@@ -479,7 +479,8 @@ body {
 }
 
 /* The only elastic item in the title cluster: when the window narrows, the
-   workspace name ellipsizes while the title and the sleep badge stay intact. */
+   workspace name ellipsizes while the title and the sleep badge stay intact.
+   The red hairline marks the active workspace — see DESIGN.md → Window chrome. */
 .titlebar-workspace {
   flex: 0 1 auto;
   min-width: 0;
@@ -488,6 +489,11 @@ body {
   white-space: nowrap;
   font-size: 12px;
   color: var(--c-muted);
+  text-decoration: underline;
+  text-decoration-color: var(--c-danger);
+  text-decoration-thickness: 1px;
+  text-decoration-skip-ink: none;
+  text-underline-offset: 2px;
 }
 
 /* "Sleep blocked" badge: the cross-platform lock holds while a timer is
