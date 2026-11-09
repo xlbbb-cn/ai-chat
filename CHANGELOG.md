@@ -9,6 +9,20 @@ npm run changelog -- --from <上一个 tag> --to <本次 tag> --details --write
 条目按 Conventional Commits 的类型分组，作用域加粗；工作区里提交标题是英文、正文是中文，
 所以带 `--details` 时是中英对照。
 
+## [v2.9.4](https://github.com/xlbbb-cn/ai-chat/releases/tag/v2.9.4) — 2026-11-09
+
+### 新增
+
+- **release**: generate release notes and drop the Windows MSI bundle ([`4701f4b`](https://github.com/xlbbb-cn/ai-chat/commit/4701f4bcdbd50612affe9df1af377024bcc8ab41))
+- **agent**: cap the turn budget and disable a failing tool for the session ([`fdf28bd`](https://github.com/xlbbb-cn/ai-chat/commit/fdf28bd26cbde4fd5eee20c3e19e1ecc2e1a0b0e))
+  - turn_guard.rs: TurnBudget caps requests and tool calls per turn, ToolFailureGuard disables a tool after N consecutive failures for the rest of the session. Both are pure logic and unit tested.
+  - The main loop, the sub-agent loop and run_main_agent_helper share the guard, so a tool the chat gave up on stays disabled for its sub-agents too.
+  - When the budget is spent the turn sends one wrap-up request that keeps the identical tool list and only sets tool_choice=none, so the prompt prefix and its KV cache survive; a rejected wrap-up ends the turn with a fallback answer instead of an error.
+  - Tools disabled mid-turn stay advertised until the next turn and are refused by the tool loop, for the same prefix-cache reason.
+  - Settings -> Advanced gains main_agent_max_rounds (40), main_agent_max_tool_calls (120) and tool_failure_limit (3); 0 means unlimited and every value is clamped on save.
+
+**完整对比**：[v2.9.3...v2.9.4](https://github.com/xlbbb-cn/ai-chat/compare/v2.9.3...v2.9.4)
+
 ## [v2.9.3](https://github.com/xlbbb-cn/ai-chat/releases/tag/v2.9.3) — 2026-11-08
 
 ### 新增
