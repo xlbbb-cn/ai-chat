@@ -73,6 +73,20 @@ pub fn open_db(path: &Path) -> rusqlite::Result<Connection> {
         )",
         [],
     )?;
+    // Coverage bookkeeping for cross-turn summary replacement: a compression
+    // records how many UI history messages the summary stands in for
+    // (`covered_messages`) and the flattened prefix of the last covered
+    // message (`boundary_text`), which the next turn verifies before dropping
+    // that prefix. Lazy ALTER so existing databases upgrade in place; NULL on
+    // legacy rows means the old additive-only behavior.
+    let _ = db.execute(
+        "ALTER TABLE session_summaries ADD COLUMN covered_messages INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = db.execute(
+        "ALTER TABLE session_summaries ADD COLUMN boundary_text TEXT NOT NULL DEFAULT ''",
+        [],
+    );
     db.execute(
         "CREATE TABLE IF NOT EXISTS api_requests (\
             id INTEGER PRIMARY KEY AUTOINCREMENT, \
@@ -598,12 +612,40 @@ pub fn delete_session_meta(
     Ok(())
 }
 
-pub fn get_session_summary(db: &Connection, session_id: &str) -> Result<Option<String>, String> {
+/// A persisted session summary plus the coverage bookkeeping written by the
+/// context compressor (`llm_complete.rs`): `covered_messages` counts the UI
+/// history messages the summary replaces and `boundary_text` is the flattened
+/// prefix of the last covered message, re-verified before that prefix is
+/// dropped from a later turn's history.
+#[derive(Debug, Clone)]
+pub struct SessionSummaryRow {
+    pub body: String,
+    pub covered_messages: i64,
+    pub boundary_text: String,
+}
+
+pub fn get_session_summary(
+    db: &Connection,
+    session_id: &str,
+) -> Result<Option<SessionSummaryRow>, String> {
     let mut stmt = db
-        .prepare("SELECT summary FROM session_summaries WHERE session_id = ?1 LIMIT 1")
+        .prepare(
+            "SELECT summary, covered_messages, boundary_text \
+             FROM session_summaries WHERE session_id = ?1 LIMIT 1",
+        )
         .map_err(|e| e.to_string())?;
 
-    let result = stmt.query_row(rusqlite::params![session_id], |row| row.get::<_, String>(0));
+    let result = stmt.query_row(rusqlite::params![session_id], |row| {
+        // Rows written before the coverage columns existed report NULL —
+        // the legacy "additive summary" shape (never trim history).
+        let covered: Option<i64> = row.get(1)?;
+        let boundary: Option<String> = row.get(2)?;
+        Ok(SessionSummaryRow {
+            body: row.get(0)?,
+            covered_messages: covered.unwrap_or(0),
+            boundary_text: boundary.unwrap_or_default(),
+        })
+    });
     match result {
         Ok(summary) => Ok(Some(summary)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -614,13 +656,19 @@ pub fn get_session_summary(db: &Connection, session_id: &str) -> Result<Option<S
 pub fn save_session_summary(
     db: &Connection,
     session_id: &str,
-    summary: &str,
+    body: &str,
+    covered_messages: i64,
+    boundary_text: &str,
 ) -> Result<(), String> {
     db.execute(
-        "INSERT INTO session_summaries (session_id, summary, updated_at) \
-         VALUES (?1, ?2, CURRENT_TIMESTAMP) \
-         ON CONFLICT(session_id) DO UPDATE SET summary = excluded.summary, updated_at = CURRENT_TIMESTAMP",
-        rusqlite::params![session_id, summary],
+        "INSERT INTO session_summaries (session_id, summary, covered_messages, boundary_text, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, CURRENT_TIMESTAMP) \
+         ON CONFLICT(session_id) DO UPDATE SET \
+             summary = excluded.summary, \
+             covered_messages = excluded.covered_messages, \
+             boundary_text = excluded.boundary_text, \
+             updated_at = CURRENT_TIMESTAMP",
+        rusqlite::params![session_id, body, covered_messages, boundary_text],
     )
     .map_err(|e| e.to_string())?;
     Ok(())

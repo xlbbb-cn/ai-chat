@@ -516,6 +516,222 @@ mod tests {
         // 400 characters of payload plus the fence characters.
         assert!(block.chars().count() < 450);
     }
+
+    #[test]
+    fn summary_body_round_trips_the_marker_and_framing() {
+        let body = "1. Primary Request and Intent: do X";
+        let content = render_summary_message_body(body);
+        assert!(content.starts_with(CONTEXT_SUMMARY_MARKER));
+        assert_eq!(extract_summary_body(&content).as_deref(), Some(body));
+
+        // Legacy rows: marker + body, no continuation framing.
+        let legacy = format!("{CONTEXT_SUMMARY_MARKER}\n{body}");
+        assert_eq!(extract_summary_body(&legacy).as_deref(), Some(body));
+
+        // A marker with no body is not a summary.
+        assert_eq!(extract_summary_body(CONTEXT_SUMMARY_MARKER), None);
+        assert_eq!(extract_summary_body("not a summary"), None);
+    }
+
+    #[test]
+    fn frontend_user_messages_exclude_backend_notices() {
+        assert!(is_frontend_user_message(
+            &json!({ "role": "user", "content": "please fix the bug" })
+        ));
+
+        for notice in [
+            format!("{MID_TURN_INJECTION_PREFIX}\nstop"),
+            format!("{BACKGROUND_RESULT_PREFIX}\noutput"),
+            format!("{CONTEXT_BUDGET_MARKER}\nstop"),
+        ] {
+            assert!(
+                !is_frontend_user_message(&json!({ "role": "user", "content": notice })),
+                "backend notice must not count as frontend history: {notice}"
+            );
+        }
+
+        // Only user-role messages can be frontend messages.
+        assert!(!is_frontend_user_message(
+            &json!({ "role": "assistant", "content": "hi" })
+        ));
+    }
+
+    #[test]
+    fn clean_split_boundaries_exclude_tool_rounds() {
+        assert!(is_clean_split_boundary(
+            &json!({ "role": "user", "content": "hi" })
+        ));
+        assert!(is_clean_split_boundary(
+            &json!({ "role": "assistant", "content": "done" })
+        ));
+        assert!(!is_clean_split_boundary(
+            &json!({ "role": "tool", "tool_call_id": "1", "content": "x" })
+        ));
+        assert!(!is_clean_split_boundary(&json!({
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [{ "id": "1", "type": "function", "function": { "name": "f", "arguments": "{}" } }]
+        })));
+    }
+
+    #[test]
+    fn summary_trim_count_verifies_the_boundary() {
+        let boundary = "the last covered message";
+        assert_eq!(summary_trim_count(2, boundary, Some(boundary)), Some(2));
+        // Mismatch (history edited) → no trim.
+        assert_eq!(
+            summary_trim_count(2, boundary, Some("something else")),
+            None
+        );
+        // Covered beyond the history → no trim.
+        assert_eq!(summary_trim_count(2, boundary, None), None);
+        // Legacy summary without coverage → no trim.
+        assert_eq!(summary_trim_count(0, "", Some(boundary)), None);
+        // Empty boundary is unverifiable → no trim.
+        assert_eq!(summary_trim_count(2, "   ", Some(boundary)), None);
+    }
+
+    #[test]
+    fn mechanical_summary_renders_a_tool_ledger() {
+        let older = vec![
+            json!({ "role": "user", "content": "read the config" }),
+            json!({
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{ "id": "c1", "type": "function",
+                    "function": { "name": "file_actions", "arguments": "{\"action\":\"read\",\"path\":\"a.txt\"}" } }]
+            }),
+            json!({ "role": "tool", "tool_call_id": "c1", "content": "the file contents\n".repeat(80) }),
+        ];
+        let lines = summarize_older_mechanically(&older);
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].starts_with("- user: read the config"));
+        assert!(lines[1].starts_with("- tool file_actions("));
+        assert!(lines[1].contains("chars total"));
+        // Ledger rows stay one line: newlines in results are flattened.
+        assert!(!lines[1].contains('\n'));
+    }
+
+    #[test]
+    fn transcript_renders_tool_rounds_with_their_identity() {
+        let messages = vec![
+            json!({ "role": "user", "content": "run the build" }),
+            json!({
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{ "id": "c9", "type": "function",
+                    "function": { "name": "run_cmd", "arguments": "{\"command\":\"npm build\"}" } }]
+            }),
+            json!({ "role": "tool", "tool_call_id": "c9", "content": "build ok" }),
+        ];
+        let transcript = build_summary_transcript(&messages);
+        assert!(transcript.contains("[user] run the build"));
+        assert!(transcript.contains("[tool] run_cmd("));
+        assert!(transcript.contains("→ build ok"));
+    }
+
+    #[test]
+    fn cap_transcript_keeps_the_tail_at_a_line_boundary() {
+        let short = "short transcript";
+        assert_eq!(cap_transcript(short), short);
+
+        let long = "line\n".repeat(30_000);
+        let capped = cap_transcript(&long);
+        assert!(capped.starts_with("(earlier messages omitted)"));
+        assert!(capped.chars().count() <= CONTEXT_SUMMARY_INPUT_CHARS + 64);
+        // The tail survives and the cut landed on a line boundary.
+        assert!(capped.trim_end().ends_with("line"));
+    }
+
+    #[test]
+    fn split_keeps_tool_rounds_together_and_counts_frontend_messages() {
+        let messages = vec![
+            json!({ "role": "system", "content": "system prompt" }),
+            json!({ "role": "user", "content": "first request" }),
+            json!({
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{ "id": "c1", "type": "function",
+                    "function": { "name": "f", "arguments": "{}" } }]
+            }),
+            json!({ "role": "tool", "tool_call_id": "c1", "content": "result" }),
+            json!({ "role": "assistant", "content": "answer one" }),
+            json!({ "role": "user", "content": "second request" }),
+        ];
+        let split = split_context_for_compression(messages, 2);
+
+        assert_eq!(split.pinned.len(), 1);
+        assert_eq!(split.recent.len(), 2);
+        assert_eq!(split.older.len(), 3);
+        // Only the user message counts as frontend history in `older`; the
+        // tool round is backend-only.
+        assert_eq!(split.covered_frontend, 1);
+        assert_eq!(split.boundary_text, "first request");
+    }
+
+    #[test]
+    fn split_advances_past_an_incomplete_tool_round() {
+        let messages = vec![
+            json!({ "role": "user", "content": "u1" }),
+            json!({ "role": "assistant", "content": "a1" }),
+            json!({ "role": "user", "content": "u2" }),
+            json!({
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{ "id": "c", "type": "function",
+                    "function": { "name": "f", "arguments": "{}" } }]
+            }),
+            json!({ "role": "tool", "tool_call_id": "c", "content": "r" }),
+        ];
+        let split = split_context_for_compression(messages, 2);
+        // The recent window may not start inside the tool round, so the whole
+        // array is summarized rather than keeping an orphaned assistant.
+        assert!(split.recent.is_empty());
+        assert_eq!(split.older.len(), 5);
+        assert_eq!(split.covered_frontend, 3);
+    }
+
+    #[test]
+    fn rebuild_places_the_summary_as_a_user_message() {
+        let rebuilt = rebuild_context_messages(
+            vec![json!({ "role": "system", "content": "sys" })],
+            Some("summary body".to_string()),
+            None,
+            vec![json!({ "role": "user", "content": "tail" })],
+        );
+        assert_eq!(rebuilt.len(), 3);
+        assert_eq!(rebuilt[1]["role"], json!("user"));
+        let content = rebuilt[1]["content"].as_str().unwrap();
+        assert_eq!(extract_summary_body(content).as_deref(), Some("summary body"));
+    }
+
+    #[test]
+    fn context_overflow_errors_are_recognized() {
+        assert!(is_context_overflow_error(
+            "This model's maximum context length is 131072 tokens"
+        ));
+        assert!(is_context_overflow_error(
+            "400 {\"error\":{\"code\":\"context_length_exceeded\"}}"
+        ));
+        assert!(is_context_overflow_error("Request too large for the model"));
+        assert!(!is_context_overflow_error("Insufficient account funds"));
+        assert!(!is_context_overflow_error("connection reset by peer"));
+    }
+
+    #[test]
+    fn estimate_prompt_tokens_counts_messages_and_tools() {
+        let messages = vec![
+            json!({ "role": "user", "content": "abcdefgh" }),
+            json!({ "role": "assistant", "content": "ijkl" }),
+        ];
+        let tools = vec![json!({ "type": "function", "function": { "name": "t", "description": "xy" } })];
+        let expected_chars = 12 + tools[0].to_string().chars().count();
+        assert_eq!(
+            estimate_prompt_tokens(&messages, &tools),
+            expected_chars / TOKEN_ESTIMATE_CHARS_PER_TOKEN
+        );
+        assert_eq!(estimate_prompt_tokens(&[], &[]), 0);
+    }
 }
 
 pub struct StreamResult {
@@ -632,7 +848,21 @@ pub struct StreamOptions<'a> {
 
 const CONTEXT_COMPRESSION_THRESHOLD: f32 = 0.8;
 const CONTEXT_KEEP_RECENT_MESSAGES: usize = 12;
+/// Keep-window for the reactive compression — a provider that hard-rejected
+/// the request as over-window needs a much smaller tail than the predictive
+/// path, because the retry must fit whatever the cap actually is.
+const CONTEXT_REACTIVE_KEEP_RECENT_MESSAGES: usize = 6;
 const CONTEXT_SUMMARY_MARKER: &str = "INTERNAL CONTEXT - SESSION SUMMARY";
+/// Framing line under the marker, mirroring Claude Code's compact user
+/// message ("This session is being continued from a previous conversation…").
+/// The marker stays the FIRST line so `extract_summary_body` keeps parsing
+/// both new and legacy rows.
+const CONTEXT_SUMMARY_CONTINUATION_PREFIX: &str = "[This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.]";
+/// Marks the backend continuation nudge pushed after a mid-turn compression.
+/// A user-role message (strict gateways reject mid-conversation `system`
+/// turns), but never part of the UI history — `is_frontend_user_message`
+/// excludes it from coverage counting.
+const CONTEXT_CONTINUE_MARKER: &str = "INTERNAL CONTEXT - CONTEXT COMPRESSED";
 const CONTEXT_TODO_MARKER: &str = "INTERNAL CONTEXT - ACTIVE TODO LIST";
 const CONTEXT_MISSION_MARKER: &str = "INTERNAL CONTEXT - MULTI-AGENT MISSION RESULTS";
 /// Marks the system message that turns the last budgeted request into a
@@ -644,6 +874,31 @@ const CONTEXT_BUDGET_MARKER: &str = "INTERNAL CONTEXT - TURN BUDGET";
 const BUDGET_FALLBACK_ANSWER: &str =
     "The turn stopped after reaching its tool budget without a written answer. Narrow the request, or raise the limit in Settings → Advanced.";
 const CONTEXT_SUMMARY_MAX_LINES: usize = 120;
+/// Hard cap on a generated (LLM) summary. Dense output; cutting further is
+/// the sign the summarizer ignored the prompt — better a truncated summary
+/// than an unbounded one.
+const CONTEXT_SUMMARY_MAX_CHARS: usize = 8_000;
+/// Degenerate-output guard for the LLM summary: shorter answers are treated
+/// as a failure and the mechanical fallback runs instead.
+const CONTEXT_SUMMARY_MIN_CHARS: usize = 80;
+/// Input budget (characters) for the transcript fed to the LLM summarizer,
+/// ≈ 24k tokens at ~4 chars/token — roughly half of a 200K-class window.
+/// The mechanical fallback is bounded by `CONTEXT_SUMMARY_MAX_LINES` instead.
+const CONTEXT_SUMMARY_INPUT_CHARS: usize = 96_000;
+/// Per-message budget in the summary transcript (user/assistant text).
+const CONTEXT_LEDGER_MSG_CHARS: usize = 2_000;
+/// Tool-result preview kept in the tool ledger / mechanical summary.
+const CONTEXT_LEDGER_RESULT_CHARS: usize = 200;
+/// Tool-argument preview kept in the tool ledger.
+const CONTEXT_LEDGER_ARG_CHARS: usize = 120;
+/// Rough prompt-token estimate: ≈4 characters per token for English + code.
+/// CJK text runs denser (~1.5–2 chars/token), so the estimate UNDER-counts
+/// CJK-heavy prompts — this pre-check is best-effort and the post-response
+/// usage ratio remains the precise backstop.
+const TOKEN_ESTIMATE_CHARS_PER_TOKEN: usize = 4;
+/// Predictive pre-check trigger, as a fraction of the context window. Fires
+/// before a request whose estimated prompt already approaches the cap.
+const CONTEXT_PRECHECK_RATIO: f32 = 0.9;
 const DEFAULT_MODEL_MAX_TOKENS: u32 = 524_288;
 const STREAM_MAX_RETRIES: usize = 3;
 const STREAM_RETRY_BACKOFF_MS: [u64; 2] = [300, 900];
@@ -1534,6 +1789,12 @@ fn truncate_text(value: &str, max_chars: usize) -> String {
     value.chars().take(max_chars).collect::<String>()
 }
 
+/// Collapse every whitespace run to a single space — summary lines, ledger
+/// rows and boundary texts must all stay single-line.
+fn flatten_text(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 fn summarize_message_for_context(msg: &Value) -> Option<String> {
     let role = msg
         .get("role")
@@ -1552,12 +1813,7 @@ fn summarize_message_for_context(msg: &Value) -> Option<String> {
         return None;
     }
 
-    let content = msg
-        .get("content")
-        .map(content_to_text)
-        .unwrap_or_default()
-        .trim()
-        .replace('\n', " ");
+    let content = flatten_text(&msg.get("content").map(content_to_text).unwrap_or_default());
 
     if content.is_empty() {
         return None;
@@ -1579,19 +1835,116 @@ fn is_pinned_context_message(msg: &Value) -> bool {
         .unwrap_or(false)
 }
 
+/// Body of a session-summary message: the marker stays on the first line
+/// (stable parse target), followed by the continuation framing, then the
+/// summary itself.
+fn render_summary_message_body(body: &str) -> String {
+    format!("{CONTEXT_SUMMARY_MARKER}\n{CONTEXT_SUMMARY_CONTINUATION_PREFIX}\n\n{body}")
+}
+
 fn extract_summary_body(content: &str) -> Option<String> {
-    if !content.starts_with(CONTEXT_SUMMARY_MARKER) {
-        return None;
-    }
-    let body = content
-        .split_once('\n')
-        .map(|(_, rest)| rest.trim().to_string())
-        .unwrap_or_default();
+    let rest = content.strip_prefix(CONTEXT_SUMMARY_MARKER)?;
+    // Skip the continuation framing when present; legacy rows go straight
+    // from the marker line to the body.
+    let rest = rest.trim_start_matches('\n');
+    let rest = rest
+        .strip_prefix(CONTEXT_SUMMARY_CONTINUATION_PREFIX)
+        .unwrap_or(rest);
+    let body = rest.trim();
     if body.is_empty() {
         None
     } else {
-        Some(body)
+        Some(body.to_string())
     }
+}
+
+/// Is this user-role message one the USER actually wrote, as opposed to a
+/// backend-generated notice? Pinned blocks (skills context, summaries, todo
+/// lists, mission reports) are classified before this check; what remains to
+/// exclude are the mid-turn injection, background results, the turn-budget
+/// marker and the post-compression continuation nudge, each with a stable
+/// text prefix.
+fn is_frontend_user_message(msg: &Value) -> bool {
+    if msg.get("role").and_then(|v| v.as_str()) != Some("user") {
+        return false;
+    }
+    let text = content_to_text(msg.get("content").unwrap_or(&Value::Null));
+    !text.starts_with(MID_TURN_INJECTION_PREFIX)
+        && !text.starts_with(BACKGROUND_RESULT_PREFIX)
+        && !text.starts_with(CONTEXT_BUDGET_MARKER)
+        && !text.starts_with(CONTEXT_CONTINUE_MARKER)
+}
+
+/// Count the frontend (UI) messages inside a message slice — the coverage a
+/// persisted summary stands in for — and record the flattened prefix of the
+/// LAST one. That boundary text is what a later turn re-verifies before
+/// dropping the covered prefix of its history.
+fn count_frontend_messages(messages: &[Value]) -> (usize, String) {
+    let mut covered = 0usize;
+    let mut boundary = String::new();
+    for msg in messages {
+        let is_frontend = match msg.get("role").and_then(|v| v.as_str()) {
+            Some("user") => is_frontend_user_message(msg),
+            // Assistant messages without tool calls: the UI history carries
+            // one final assistant message per turn. Backend-only interim
+            // messages (background holds) can slip in here — the boundary
+            // verification turns any such miscount into a SAFE fallback
+            // (summary discarded, full history replayed), never into lost
+            // context.
+            Some("assistant") => msg
+                .get("tool_calls")
+                .and_then(|v| v.as_array())
+                .map(|calls| calls.is_empty())
+                .unwrap_or(true),
+            _ => false,
+        };
+        if is_frontend {
+            covered += 1;
+            boundary = truncate_text(
+                &flatten_text(&content_to_text(msg.get("content").unwrap_or(&Value::Null))),
+                CONTEXT_LEDGER_MSG_CHARS,
+            );
+        }
+    }
+    (covered, boundary)
+}
+
+/// May a persisted summary replace the first `covered` messages of the
+/// incoming history? Pure decision over the recorded coverage: `covered` and
+/// `boundary` come from the saved row, `boundary_message_text` is the raw
+/// text of `history[covered - 1]` (None when covered runs past the history —
+/// the summary is stale). Returns the trim count on a verified match.
+fn summary_trim_count(
+    covered: usize,
+    boundary: &str,
+    boundary_message_text: Option<&str>,
+) -> Option<usize> {
+    if covered == 0 || boundary.trim().is_empty() {
+        return None;
+    }
+    let text = flatten_text(boundary_message_text?);
+    if text.starts_with(boundary.trim()) {
+        Some(covered)
+    } else {
+        None
+    }
+}
+
+/// A recent window may only start on a message that is not itself part of a
+/// tool round — otherwise the kept tail would begin with an orphaned `tool`
+/// message or an assistant whose tool results were summarized away, and
+/// `sanitize_tool_pairs` would silently drop them on the next request.
+fn is_clean_split_boundary(msg: &Value) -> bool {
+    let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("");
+    if role == "tool" {
+        return false;
+    }
+    let has_calls = msg
+        .get("tool_calls")
+        .and_then(|v| v.as_array())
+        .map(|calls| !calls.is_empty())
+        .unwrap_or(false);
+    !has_calls
 }
 
 fn merge_summary_lines(existing_summary: Option<&str>, new_lines: &[String]) -> String {
@@ -1692,43 +2045,38 @@ pub fn sanitize_tool_pairs(all_messages: &mut Vec<Value>) {
     *all_messages = cleaned;
 }
 
-fn rebuild_without_compression(
-    all_messages: &mut Vec<Value>,
+/// Classification of one compression pass over the message list.
+struct ContextSplit {
+    /// System prompt + pinned INTERNAL CONTEXT blocks — always kept verbatim.
     pinned: Vec<Value>,
-    compressible: Vec<Value>,
+    /// Summarized region: user/assistant history INCLUDING tool rounds, so
+    /// the summary can preserve what was actually done.
+    older: Vec<Value>,
+    /// Recent tail kept verbatim (starts on a clean round boundary).
+    recent: Vec<Value>,
     existing_summary_body: Option<String>,
     todo_block: Option<Value>,
-) {
-    let mut rebuilt = Vec::with_capacity(pinned.len() + compressible.len() + 2);
-    rebuilt.extend(pinned);
-    if let Some(body) = existing_summary_body {
-        rebuilt.push(
-            json!({ "role": "system", "content": format!("{CONTEXT_SUMMARY_MARKER}\n{body}") }),
-        );
-    }
-    if let Some(todo) = todo_block {
-        rebuilt.push(todo);
-    }
-    rebuilt.extend(compressible);
-    *all_messages = rebuilt;
+    /// Frontend (UI) messages inside `older` — the coverage a persisted
+    /// summary stands in for on later turns.
+    covered_frontend: usize,
+    /// Flattened prefix of the last covered frontend message.
+    boundary_text: String,
 }
 
-fn compress_session_context(all_messages: &mut Vec<Value>) -> Option<String> {
-    if all_messages.len() <= CONTEXT_KEEP_RECENT_MESSAGES + 2 {
-        return None;
-    }
-
+/// Classify the message list for compression. Unlike the pre-LLM summarizer,
+/// tool rounds stay in `older` instead of being dropped without a trace.
+fn split_context_for_compression(all_messages: Vec<Value>, keep_recent: usize) -> ContextSplit {
     let mut pinned: Vec<Value> = Vec::new();
     let mut compressible: Vec<Value> = Vec::new();
     let mut existing_summary_body: Option<String> = None;
     let mut todo_block: Option<Value> = None;
 
-    for msg in all_messages.drain(..) {
-        let existing_summary = msg
+    for msg in all_messages {
+        if let Some(summary_body) = msg
             .get("content")
             .map(content_to_text)
-            .and_then(|s| extract_summary_body(&s));
-        if let Some(summary_body) = existing_summary {
+            .and_then(|s| extract_summary_body(&s))
+        {
             existing_summary_body = Some(summary_body);
             continue;
         }
@@ -1746,17 +2094,6 @@ fn compress_session_context(all_messages: &mut Vec<Value>) -> Option<String> {
             continue;
         }
 
-        let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or_default();
-        let has_tool_calls = msg
-            .get("tool_calls")
-            .and_then(|v| v.as_array())
-            .map(|calls| !calls.is_empty())
-            .unwrap_or(false);
-
-        if role == "tool" || has_tool_calls {
-            continue;
-        }
-
         if is_pinned_context_message(&msg) {
             pinned.push(msg);
         } else {
@@ -1764,51 +2101,483 @@ fn compress_session_context(all_messages: &mut Vec<Value>) -> Option<String> {
         }
     }
 
-    if compressible.len() <= CONTEXT_KEEP_RECENT_MESSAGES + 2 {
-        rebuild_without_compression(
-            all_messages,
+    if compressible.len() <= keep_recent + 2 {
+        return ContextSplit {
             pinned,
-            compressible,
+            older: Vec::new(),
+            recent: compressible,
             existing_summary_body,
             todo_block,
-        );
-        return None;
+            covered_frontend: 0,
+            boundary_text: String::new(),
+        };
     }
 
-    let split_idx = compressible
-        .len()
-        .saturating_sub(CONTEXT_KEEP_RECENT_MESSAGES);
-    let summary_lines: Vec<String> = compressible[..split_idx]
-        .iter()
-        .filter_map(summarize_message_for_context)
-        .collect();
-
-    if summary_lines.is_empty() {
-        rebuild_without_compression(
-            all_messages,
-            pinned,
-            compressible,
-            existing_summary_body,
-            todo_block,
-        );
-        return None;
+    let mut split_idx = compressible.len() - keep_recent;
+    while split_idx < compressible.len() && !is_clean_split_boundary(&compressible[split_idx]) {
+        split_idx += 1;
     }
-
     let recent = compressible.split_off(split_idx);
-    let merged_summary = merge_summary_lines(existing_summary_body.as_deref(), &summary_lines);
-    let summary_message = json!({
-        "role": "system",
-        "content": format!("{CONTEXT_SUMMARY_MARKER}\n{merged_summary}")
-    });
-    let mut rebuilt = Vec::with_capacity(pinned.len() + 2 + recent.len());
+    let older = compressible;
+    let (covered_frontend, boundary_text) = count_frontend_messages(&older);
+
+    ContextSplit {
+        pinned,
+        older,
+        recent,
+        existing_summary_body,
+        todo_block,
+        covered_frontend,
+        boundary_text,
+    }
+}
+
+/// Reassemble the message list after a (non-)compression pass. The summary is
+/// a `user` message with continuation framing — mid-conversation `system`
+/// messages are rejected by strict OpenAI-compatible gateways (the same
+/// reason `MID_TURN_INJECTION_PREFIX` is a user message).
+fn rebuild_context_messages(
+    pinned: Vec<Value>,
+    existing_summary_body: Option<String>,
+    todo_block: Option<Value>,
+    rest: Vec<Value>,
+) -> Vec<Value> {
+    let mut rebuilt = Vec::with_capacity(pinned.len() + rest.len() + 2);
     rebuilt.extend(pinned);
-    rebuilt.push(summary_message);
+    if let Some(body) = existing_summary_body {
+        rebuilt.push(json!({
+            "role": "user",
+            "content": render_summary_message_body(&body)
+        }));
+    }
     if let Some(todo) = todo_block {
         rebuilt.push(todo);
     }
-    rebuilt.extend(recent);
-    *all_messages = rebuilt;
-    Some(merged_summary)
+    rebuilt.extend(rest);
+    rebuilt
+}
+
+/// Render the summarized region as a compact transcript for the LLM
+/// summarizer: user/assistant text kept at length, tool rounds folded into a
+/// one-line ledger (`name(args) → result preview`) so what was DONE survives
+/// as summarizer input. Chronological; `cap_transcript` bounds the size.
+fn build_summary_transcript(messages: &[Value]) -> String {
+    let mut out = String::new();
+    // tool_call_id -> (name, arguments) from the assistant round that
+    // declared them, so each `tool` message renders with its tool's identity.
+    let mut pending_calls: std::collections::HashMap<&str, (&str, &str)> =
+        std::collections::HashMap::new();
+    for msg in messages {
+        let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("");
+        match role {
+            "assistant" => {
+                if let Some(calls) = msg.get("tool_calls").and_then(|v| v.as_array()) {
+                    for tc in calls {
+                        let id = tc.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                        let name = tc
+                            .pointer("/function/name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let args = tc
+                            .pointer("/function/arguments")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        if !id.is_empty() {
+                            pending_calls.insert(id, (name, args));
+                        }
+                    }
+                }
+                let content =
+                    flatten_text(&content_to_text(msg.get("content").unwrap_or(&Value::Null)));
+                if !content.is_empty() {
+                    out.push_str(&format!(
+                        "[assistant] {}\n\n",
+                        truncate_text(&content, CONTEXT_LEDGER_MSG_CHARS)
+                    ));
+                }
+            }
+            "user" => {
+                let content =
+                    flatten_text(&content_to_text(msg.get("content").unwrap_or(&Value::Null)));
+                if !content.is_empty() {
+                    out.push_str(&format!(
+                        "[user] {}\n\n",
+                        truncate_text(&content, CONTEXT_LEDGER_MSG_CHARS)
+                    ));
+                }
+            }
+            "tool" => {
+                let id = msg.get("tool_call_id").and_then(|v| v.as_str()).unwrap_or("");
+                let (name, args) = match pending_calls.remove(id) {
+                    Some(pair) => pair,
+                    None => ("", ""),
+                };
+                let result =
+                    flatten_text(&content_to_text(msg.get("content").unwrap_or(&Value::Null)));
+                let total_chars = result.chars().count();
+                let suffix = if total_chars > CONTEXT_LEDGER_RESULT_CHARS {
+                    format!(" …({total_chars} chars total)")
+                } else {
+                    String::new()
+                };
+                out.push_str(&format!(
+                    "[tool] {}({}) → {}{}\n\n",
+                    name,
+                    truncate_text(args, CONTEXT_LEDGER_ARG_CHARS),
+                    truncate_text(&result, CONTEXT_LEDGER_RESULT_CHARS),
+                    suffix
+                ));
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Keep the transcript within the summarizer's input budget by dropping the
+/// OLDEST content (the tail matters most), cut at a line boundary.
+fn cap_transcript(transcript: &str) -> String {
+    let total = transcript.chars().count();
+    if total <= CONTEXT_SUMMARY_INPUT_CHARS {
+        return transcript.to_string();
+    }
+    let suffix: String = transcript
+        .chars()
+        .skip(total - CONTEXT_SUMMARY_INPUT_CHARS)
+        .collect();
+    let trimmed = match suffix.split_once('\n') {
+        Some((_, rest)) => rest,
+        None => suffix.as_str(),
+    };
+    format!("(earlier messages omitted)\n\n{trimmed}")
+}
+
+/// Mechanical fallback summarizer: one line per message. Tool rounds render
+/// as a compact ledger (`- tool name(args) → result preview`) so even without
+/// the LLM path the summary preserves which tools ran and what came back.
+fn summarize_older_mechanically(older: &[Value]) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut pending_calls: std::collections::HashMap<String, (String, String)> =
+        std::collections::HashMap::new();
+    for msg in older {
+        let role = msg
+            .get("role")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string();
+        match role.as_str() {
+            "assistant" => {
+                if let Some(calls) = msg.get("tool_calls").and_then(|v| v.as_array()) {
+                    for tc in calls {
+                        let id = tc.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                        let name = tc
+                            .pointer("/function/name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let args = tc
+                            .pointer("/function/arguments")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        if !id.is_empty() {
+                            pending_calls.insert(id.to_string(), (name, args));
+                        }
+                    }
+                }
+                if let Some(line) = summarize_message_for_context(msg) {
+                    lines.push(line);
+                }
+            }
+            "tool" => {
+                let id = msg.get("tool_call_id").and_then(|v| v.as_str()).unwrap_or("");
+                let (name, args) = pending_calls
+                    .remove(id)
+                    .unwrap_or_else(|| (String::new(), String::new()));
+                let result =
+                    flatten_text(&content_to_text(msg.get("content").unwrap_or(&Value::Null)));
+                let total_chars = result.chars().count();
+                let suffix = if total_chars > CONTEXT_LEDGER_RESULT_CHARS {
+                    format!(" …({total_chars} chars total)")
+                } else {
+                    String::new()
+                };
+                lines.push(format!(
+                    "- tool {}({}) → {}{}",
+                    name,
+                    truncate_text(&args, CONTEXT_LEDGER_ARG_CHARS),
+                    truncate_text(&result, CONTEXT_LEDGER_RESULT_CHARS),
+                    suffix
+                ));
+            }
+            _ => {
+                if let Some(line) = summarize_message_for_context(msg) {
+                    lines.push(line);
+                }
+            }
+        }
+    }
+    lines
+}
+
+/// Structured-summary system prompt, adapted from Claude Code's compact
+/// prompt (`services/compact/prompt.ts`): the numbered sections keep user
+/// intent, exact file paths and the error→fix history alive across
+/// compression. Section 6 (all user messages) is the critical one — user
+/// feedback must never dissolve into a paraphrase.
+const CONTEXT_SUMMARY_SYSTEM_PROMPT: &str = "You compress a conversation transcript into a durable working summary for an AI coding assistant. Respond with TEXT ONLY. Do NOT call any tools. Produce plain text with exactly these numbered sections:\n\n\
+1. Primary Request and Intent: the user's explicit requests and the goal driving them\n\
+2. Key Technical Concepts: technologies, constraints, decisions and their reasons\n\
+3. Files and Code Sections: every file touched or read, with exact paths and what was done or found\n\
+4. Errors and Fixes: each error hit and how it was resolved, so it is not repeated\n\
+5. Problem Solving: approaches tried, what worked, what did not\n\
+6. All User Messages: list every user message, condensed but never dropped\n\
+7. Pending Tasks: what is not finished yet\n\
+8. Current Work: precisely what was being done when this summary was requested\n\
+9. Next Step: the immediate next action, quoting the instruction that drives it\n\n\
+Keep file paths, commands, identifiers and code references EXACT. Be dense and factual; no preamble, no closing remarks.";
+
+/// Everything the context compressor needs to run its (optional) LLM
+/// summarizer. The summary call reuses the main streaming helper with every
+/// UI event off: it is an internal step, never a chat turn of its own.
+struct ContextCompressor<'a> {
+    app: &'a AppHandle,
+    client: &'a Client,
+    url: &'a str,
+    api_key: &'a str,
+    model: &'a str,
+    ds_format: bool,
+    headers: &'a [(String, String)],
+    cancelled: &'a AtomicBool,
+}
+
+/// Bookkeeping threaded through a turn: how many frontend messages the
+/// currently-injected summary already covers (`offset`) and the boundary
+/// text recorded with it.
+#[derive(Default, Clone)]
+struct CoverageState {
+    offset: usize,
+    boundary: String,
+}
+
+/// Result of one successful compression pass.
+struct CompressionOutcome {
+    summary: String,
+    /// Total frontend messages covered (previous offset + this pass).
+    covered_messages: usize,
+    /// Boundary text to persist alongside the summary.
+    boundary_text: String,
+}
+
+impl ContextCompressor<'_> {
+    /// Structured conversation summary via the main model. Returns `None` on
+    /// cancellation, upstream failure or a degenerate answer — the caller
+    /// then falls back to the mechanical line summarizer, so compression can
+    /// never fail the turn.
+    async fn summarize(&self, transcript: &str, existing_summary: Option<&str>) -> Option<String> {
+        if self.cancelled.load(Ordering::SeqCst) {
+            return None;
+        }
+        let existing_block = existing_summary
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| {
+                format!("Previous summary (merge it — do not lose its information):\n\n{s}\n\n")
+            })
+            .unwrap_or_default();
+        let req_body = json!({
+            "model": self.model,
+            "messages": [
+                { "role": "system", "content": CONTEXT_SUMMARY_SYSTEM_PROMPT },
+                { "role": "user", "content": format!(
+                    "{existing_block}Transcript to summarize:\n\n{transcript}"
+                ) },
+            ],
+            "stream": true,
+        });
+        let result = stream_llm_request(
+            self.app,
+            self.client,
+            self.url,
+            self.api_key,
+            req_body,
+            self.cancelled,
+            StreamOptions {
+                token_event: "chat-token",
+                task_id: None,
+                reasoning_event: None,
+                emit_usage: false,
+                emit_tokens: false,
+                emit_errors: false,
+                usage_max_tokens: None,
+                ds_format: self.ds_format,
+                headers: self.headers,
+            },
+        )
+        .await;
+
+        let sr = match result {
+            Ok(sr) => sr,
+            Err(err) => {
+                log_event(
+                    &self.app.state::<AppState>(),
+                    "WARN",
+                    format!("LLM context summary failed, falling back to line summary: {err}"),
+                );
+                return None;
+            }
+        };
+        if sr.finish_reason == "cancelled" {
+            return None;
+        }
+        let text = sr.content.trim();
+        if text.chars().count() < CONTEXT_SUMMARY_MIN_CHARS {
+            log_event(
+                &self.app.state::<AppState>(),
+                "WARN",
+                format!(
+                    "LLM context summary degenerate ({} chars), falling back to line summary",
+                    text.chars().count()
+                ),
+            );
+            return None;
+        }
+        Some(truncate_text(text, CONTEXT_SUMMARY_MAX_CHARS))
+    }
+
+    /// One compression pass: split the context, summarize the older region
+    /// (LLM first, mechanical fallback), rebuild the message list and report
+    /// the updated coverage. `None` = nothing to compress, `*all_messages`
+    /// left normalized but unchanged in content.
+    async fn compress(
+        &self,
+        all_messages: &mut Vec<Value>,
+        keep_recent: usize,
+        coverage: &CoverageState,
+    ) -> Option<CompressionOutcome> {
+        if all_messages.len() <= keep_recent + 2 {
+            return None;
+        }
+
+        let split = split_context_for_compression(std::mem::take(all_messages), keep_recent);
+
+        if split.older.is_empty() {
+            *all_messages = rebuild_context_messages(
+                split.pinned,
+                split.existing_summary_body,
+                split.todo_block,
+                split.recent,
+            );
+            return None;
+        }
+
+        let transcript = cap_transcript(&build_summary_transcript(&split.older));
+        let llm_summary = self
+            .summarize(&transcript, split.existing_summary_body.as_deref())
+            .await;
+
+        let merged_summary = match llm_summary {
+            Some(summary) => summary,
+            None => {
+                let new_lines = summarize_older_mechanically(&split.older);
+                if new_lines.is_empty() {
+                    *all_messages = rebuild_context_messages(
+                        split.pinned,
+                        split.existing_summary_body,
+                        split.todo_block,
+                        split.recent,
+                    );
+                    return None;
+                }
+                merge_summary_lines(split.existing_summary_body.as_deref(), &new_lines)
+            }
+        };
+
+        let covered_messages = coverage.offset + split.covered_frontend;
+        let boundary_text = if split.covered_frontend > 0 {
+            split.boundary_text
+        } else {
+            coverage.boundary.clone()
+        };
+
+        let summary_message = json!({
+            "role": "user",
+            "content": render_summary_message_body(&merged_summary)
+        });
+        let mut rebuilt =
+            Vec::with_capacity(split.pinned.len() + 2 + split.recent.len());
+        rebuilt.extend(split.pinned);
+        rebuilt.push(summary_message);
+        if let Some(todo) = split.todo_block {
+            rebuilt.push(todo);
+        }
+        rebuilt.extend(split.recent);
+        *all_messages = rebuilt;
+
+        Some(CompressionOutcome {
+            summary: merged_summary,
+            covered_messages,
+            boundary_text,
+        })
+    }
+}
+
+/// Rough prompt size estimate in tokens (≈4 chars/token), tools payload
+/// included — the `tools` array is rendered before the messages in the
+/// prompt, so its JSON counts toward every request.
+fn estimate_prompt_tokens(messages: &[Value], tools: &[Value]) -> usize {
+    let mut chars: usize = 0;
+    for msg in messages {
+        chars += content_to_text(msg.get("content").unwrap_or(&Value::Null)).chars().count();
+        if let Some(calls) = msg.get("tool_calls").and_then(|v| v.as_array()) {
+            for tc in calls {
+                chars += tc.to_string().chars().count();
+            }
+        }
+    }
+    for tool in tools {
+        chars += tool.to_string().chars().count();
+    }
+    chars / TOKEN_ESTIMATE_CHARS_PER_TOKEN
+}
+
+/// Does an upstream error mean the request exceeded the model's context
+/// window? Providers phrase it a dozen ways; a false positive costs one
+/// harmless compression+retry, a false negative fails the turn.
+fn is_context_overflow_error(err: &str) -> bool {
+    let lower = err.to_ascii_lowercase();
+    const PATTERNS: &[&str] = &[
+        "context_length_exceeded",
+        "maximum context length",
+        "context length exceeded",
+        "context window",
+        "too many tokens",
+        "prompt is too long",
+        "request too large",
+        "payload too large",
+        "exceeds the context",
+        "input length exceeds",
+        "token limit",
+    ];
+    PATTERNS.iter().any(|pattern| lower.contains(pattern))
+}
+
+/// Persist a compression outcome (summary + coverage bookkeeping) for the
+/// session. Best-effort: a failed write only means the next turn replays the
+/// full history (the old additive behavior).
+fn persist_session_summary(
+    state: &State<'_, AppState>,
+    session_id: &str,
+    outcome: &CompressionOutcome,
+) {
+    if let Ok(db_guard) = state.db.lock() {
+        let _ = db::save_session_summary(
+            &db_guard,
+            session_id,
+            &outcome.summary,
+            outcome.covered_messages as i64,
+            &outcome.boundary_text,
+        );
+    }
 }
 
 // ─── Thinking-mode `reasoning_content` pass-through ──────────────────────────
@@ -2870,10 +3639,11 @@ async fn run_chat_turn(
     }
 
     // ── Message layout (prompt-cache conscious) ─────────────────────────────
-    // Static prefix first (system prompt, skill context, conversation history),
-    // dynamic blocks (session summary, todo list) last — right before the
-    // latest user message — so turn-to-turn changes invalidate as little
-    // cached prefix as possible.
+    // Static prefix first (system prompt, skill context), then the persisted
+    // summary (stable across turns — only a new compression rewrites it), then
+    // the append-only conversation history. Dynamic per-turn blocks (todo
+    // list, mission report) come last, right before the latest user message,
+    // so turn-to-turn changes invalidate as little cached prefix as possible.
     if !system_content.is_empty() {
         all_messages.push(json!({ "role": "system", "content": system_content }));
     }
@@ -2897,10 +3667,74 @@ async fn run_chat_turn(
     }
 
     // Conversation history, keeping the latest user message for the tail.
-    let (history, last_user_msg) = match messages.last() {
+    let (mut history, last_user_msg) = match messages.last() {
         Some(m) if m.role == "user" => (&messages[..messages.len() - 1], Some(m)),
         _ => (&messages[..], None),
     };
+
+    // ── Persisted session summary: replace the history it covers ────────────
+    // A summary written by an earlier compression records how many frontend
+    // messages it covers plus the flattened prefix of the last one (the
+    // boundary). When the incoming history still matches that boundary, the
+    // covered prefix is dropped and the summary stands in for it — Claude
+    // Code's compact semantics, where the summary REPLACES the old transcript
+    // instead of being replayed on top of it. On any mismatch (history edited,
+    // truncated, restored differently) the stale summary is discarded and the
+    // full history is replayed — the old, always-safe additive behavior.
+    let mut summary_block: Option<db::SessionSummaryRow> = None;
+    let mut summary_coverage = CoverageState::default();
+    if let Ok(db_guard) = state.db.lock() {
+        match db::get_session_summary(&db_guard, &session_id) {
+            Ok(Some(saved)) if !saved.body.trim().is_empty() => {
+                let covered = usize::try_from(saved.covered_messages).unwrap_or(0);
+                let mut valid = true;
+                if covered > 0 {
+                    let boundary_message_text = covered
+                        .checked_sub(1)
+                        .and_then(|idx| history.get(idx))
+                        .map(|m| content_to_text(&m.content));
+                    match summary_trim_count(
+                        covered,
+                        &saved.boundary_text,
+                        boundary_message_text.as_deref(),
+                    ) {
+                        Some(count) => {
+                            history = &history[count..];
+                            summary_coverage.offset = count;
+                            summary_coverage.boundary = saved.boundary_text.clone();
+                        }
+                        None => valid = false,
+                    }
+                }
+                if valid {
+                    summary_block = Some(saved);
+                } else {
+                    let _ = db::delete_session_summary(&db_guard, &session_id);
+                    log_event(
+                        &state,
+                        "INFO",
+                        format!(
+                            "stale session summary discarded (history boundary mismatch): session_id={session_id}"
+                        ),
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // The summary goes BEFORE the remaining history: it is stable across
+    // turns (only a new compression rewrites it), so everything after it is
+    // an append-only region — the best layout for the prompt cache. Claude
+    // Code places the compact summary at the start of the continuation for
+    // the same reason.
+    if let Some(saved) = &summary_block {
+        all_messages.push(json!({
+            "role": "user",
+            "content": render_summary_message_body(&saved.body)
+        }));
+    }
+
     for m in history {
         let mut msg = json!({ "role": m.role, "content": m.content });
         if let Some(rc) = &m.reasoning_content {
@@ -2912,16 +3746,6 @@ async fn run_chat_turn(
     }
 
     // ── Dynamic blocks (change between turns → placed near the tail) ────────
-    if let Ok(db_guard) = state.db.lock() {
-        if let Ok(Some(saved_summary)) = db::get_session_summary(&db_guard, &session_id) {
-            if !saved_summary.trim().is_empty() {
-                all_messages.push(json!({
-                    "role": "system",
-                    "content": format!("{CONTEXT_SUMMARY_MARKER}\n{}", saved_summary)
-                }));
-            }
-        }
-    }
 
     // Inject the active todo list (if any) so the assistant can always
     // re-orient itself to the current plan, even mid-turn.
@@ -2989,6 +3813,27 @@ async fn run_chat_turn(
         .map(|m| m.trim().to_string())
         .filter(|m| !m.is_empty())
         .unwrap_or_else(|| config.model.clone());
+
+    // Everything the context compressor needs; created once per turn so the
+    // summary call uses the same model, headers and cancel flag as the chat.
+    let compressor = ContextCompressor {
+        app: &app,
+        client: &client,
+        url: &url,
+        api_key: &config.api_key,
+        model: &active_model,
+        ds_format: config.ds_format_for(&active_model),
+        headers: &request_headers,
+        cancelled: turn_cancelled.as_ref(),
+    };
+    // The reactive (context-overflow) compression may retry the request once
+    // per turn; the flag keeps that retry from looping.
+    let mut reactive_compress_used = false;
+    // Set when a predictive compression ran but the estimate stayed above the
+    // threshold — the static payload (system prompt + tool definitions) is
+    // itself near the cap, so further pre-checks would only burn summary
+    // calls. Reactive / post-response paths still cover the rest of the turn.
+    let mut predictive_compress_saturated = false;
 
     let (mut tools_list, mut mcp_tool_map, mut tools_revision) = build_turn_tools(
         &state,
@@ -3235,6 +4080,53 @@ still missing."
         let effective_max_tokens =
             resolve_context_window(&config, &active_model, DEFAULT_MODEL_MAX_TOKENS);
 
+        // ── Predictive compression pre-check ────────────────────────────────
+        // The post-response ratio check can only fire once a request came
+        // back with usage figures. A single request carrying large tool
+        // results can still jump past the window and be rejected outright.
+        // Estimate the prompt size (≈4 chars/token, tools payload included)
+        // and compress BEFORE sending when the estimate approaches the cap.
+        if !predictive_compress_saturated {
+            let estimated_prompt_tokens = estimate_prompt_tokens(&all_messages, &tools_list);
+            let precheck_threshold =
+                (effective_max_tokens as f32 * CONTEXT_PRECHECK_RATIO) as usize;
+            if estimated_prompt_tokens >= precheck_threshold {
+                if let Some(outcome) = compressor
+                    .compress(
+                        &mut all_messages,
+                        CONTEXT_KEEP_RECENT_MESSAGES,
+                        &summary_coverage,
+                    )
+                    .await
+                {
+                    persist_session_summary(&state, &session_id, &outcome);
+                    summary_coverage.offset = outcome.covered_messages;
+                    summary_coverage.boundary = outcome.boundary_text;
+                    log_event(
+                        &state,
+                        "INFO",
+                        format!(
+                            "predictive context compression: session_id={}, estimated_prompt_tokens={}, max_tokens={}",
+                            session_id, estimated_prompt_tokens, effective_max_tokens
+                        ),
+                    );
+                    // If the estimate is still above the threshold after
+                    // summarizing everything summarizable, the remaining bulk
+                    // is static — stop pre-checking this turn.
+                    if estimate_prompt_tokens(&all_messages, &tools_list) >= precheck_threshold {
+                        predictive_compress_saturated = true;
+                        log_event(
+                            &state,
+                            "WARN",
+                            format!(
+                                "predictive compression saturated (static payload dominates the window): session_id={session_id}"
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+
         let mut req_body = json!({
             "model": active_model,
             "messages": all_messages,
@@ -3437,28 +4329,66 @@ still missing."
                 final_answer = Some(BUDGET_FALLBACK_ANSWER.to_string());
                 break;
             }
-            Err(err) => return Err(err),
+            Err(err) => {
+                // ── Reactive compression (context-overflow recovery) ────────
+                // Last line of defense, mirroring Claude Code's 413 recovery:
+                // a provider that hard-rejects an over-window request instead
+                // of streaming an answer. Compress with a smaller keep-window
+                // and retry once — the flag keeps the retry from looping.
+                if !reactive_compress_used && is_context_overflow_error(&err) {
+                    reactive_compress_used = true;
+                    log_event(
+                        &state,
+                        "WARN",
+                        format!(
+                            "context overflow from provider, compressing and retrying once: session_id={}, error={err}",
+                            session_id
+                        ),
+                    );
+                    if let Some(outcome) = compressor
+                        .compress(
+                            &mut all_messages,
+                            CONTEXT_REACTIVE_KEEP_RECENT_MESSAGES,
+                            &summary_coverage,
+                        )
+                        .await
+                    {
+                        persist_session_summary(&state, &session_id, &outcome);
+                        summary_coverage.offset = outcome.covered_messages;
+                        summary_coverage.boundary = outcome.boundary_text;
+                        continue;
+                    }
+                }
+                return Err(err);
+            }
         };
 
         let total_tokens = sr.prompt_tokens.saturating_add(sr.completion_tokens);
         let ratio = total_tokens as f32 / effective_max_tokens as f32;
         let mut compressed_this_turn = false;
         if ratio >= CONTEXT_COMPRESSION_THRESHOLD {
-            if let Some(merged_summary) = compress_session_context(&mut all_messages) {
-                if let Ok(db_guard) = state.db.lock() {
-                    let _ = db::save_session_summary(&db_guard, &session_id, &merged_summary);
-                }
+            if let Some(outcome) = compressor
+                .compress(
+                    &mut all_messages,
+                    CONTEXT_KEEP_RECENT_MESSAGES,
+                    &summary_coverage,
+                )
+                .await
+            {
+                persist_session_summary(&state, &session_id, &outcome);
+                summary_coverage.offset = outcome.covered_messages;
+                summary_coverage.boundary = outcome.boundary_text;
                 log_event(
                     &state,
                     "INFO",
                     format!(
-                        "session context compressed: session_id={}, total_tokens={}, max_tokens={}, ratio={:.3}",
-                        session_id, total_tokens, effective_max_tokens, ratio
+                        "session context compressed: session_id={}, total_tokens={}, max_tokens={}, ratio={:.3}, summary_covers={} message(s)",
+                        session_id, total_tokens, effective_max_tokens, ratio, outcome.covered_messages
                     ),
                 );
                 let _ = app.emit(
                     "chat-token",
-                    "\n\n[System] Context compressed (tool-call traces discarded) and persisted for next turns.\n\n",
+                    "\n\n[System] Context compressed (older messages summarized) and persisted for next turns.\n\n",
                 );
                 compressed_this_turn = true;
             }
@@ -3501,8 +4431,10 @@ still missing."
                 all_messages.push(assistant_msg);
             }
             all_messages.push(json!({
-                "role": "system",
-                "content": "Context was just compressed to free up space. Review the session summary and your previous response, then continue the task if it is not yet complete; otherwise provide your final answer.",
+                "role": "user",
+                "content": format!(
+                    "{CONTEXT_CONTINUE_MARKER}\nContext was just compressed to free up space. Review the session summary and your previous response, then continue the task if it is not yet complete; otherwise provide your final answer."
+                ),
             }));
             log_event(
                 &state,
