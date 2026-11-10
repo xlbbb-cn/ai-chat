@@ -473,20 +473,38 @@ function InjectedNote({ injection }: { injection: ChatInjection }) {
  * mid-stream markdown rewrite (an opening `**` turning into real bold) changes
  * a whole paragraph; without the cap that paragraph would re-fade at once.
  */
-const STREAM_INK_MAX_CHARS = 400;
+const STREAM_ANIMATED_CHARS = 400;
 
 /**
- * Streaming arrives token by token, so `dangerouslySetInnerHTML` would be
- * rewritten dozens of times per second. Every rewrite replaces the whole
- * subtree — including the `.stream-ink` wrapper that is still fading — so the
- * new text never actually fades in, it pops. Rendering in ~4 commits/s gives
- * each chunk the full fade window before the next rebuild replaces it, while
- * the visible delay stays below the model's own token cadence.
+ * How often the streamed markdown is parsed and committed. Unlike the old
+ * typewriter this is not tied to the fade length: each character carries its
+ * own start time on a timeline that survives the next `innerHTML` rebuild, so
+ * a commit only decides how often new text is picked up.
  */
-const STREAM_FLUSH_MS = 220;
+const STREAM_FLUSH_MS = 110;
+
+/** Fade length per character. Mirrors `--t-dur-stream` in App.css. */
+const STREAM_CHAR_FADE_MS = 200;
 
 /**
- * Throttle a streaming reply to one visible update per `STREAM_FLUSH_MS`.
+ * Longest spread between the first and last character of one commit. Kept
+ * below `STREAM_FLUSH_MS` so the next commit always starts after every
+ * character of this one has started — reading order never inverts.
+ */
+const STREAM_CHAR_SPREAD_MS = 90;
+
+/** Per-character delay cap; larger commits compress to stay inside the spread. */
+const STREAM_CHAR_STAGGER_MS = 14;
+
+/**
+ * Upper bound on the spans built per commit. A burst that delivers a whole
+ * paragraph shares one span between adjacent characters instead of creating
+ * hundreds of animated elements.
+ */
+const STREAM_CHAR_SPAN_LIMIT = 120;
+
+/**
+ * Throttle a streaming reply to one markdown commit per `STREAM_FLUSH_MS`.
  * State is updated from an interval that always reads the latest prop, so the
  * timer never restarts as tokens arrive. When the turn ends the full text is
  * returned immediately instead of waiting for the next tick.
@@ -654,16 +672,26 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
   const appliedSkillNamesRef = useRef("");
   const writingPenRef = useRef<HTMLSpanElement | null>(null);
   const writingStartRef = useRef(0);
+  // Per-character reveal schedule. `starts[i]` is the absolute time at which
+  // character `base + i` of the rendered text begins to fade in. It outlives
+  // the innerHTML rebuild: a character still fading when the next commit
+  // replaces the subtree is re-wrapped with a negative animation delay, which
+  // resumes it at the frame it had reached instead of snapping to full opacity.
+  const streamRevealRef = useRef<{ base: number; starts: number[] }>({
+    base: 0,
+    starts: [],
+  });
   useLayoutEffect(() => {
     const el = contentRef.current;
     if (!el) return;
 
-    // `dangerouslySetInnerHTML` is re-applied on every parent render, and
-    // tokens arrive several times faster than the visible flush — each write
-    // would destroy the `.stream-ink` wrapper that is still fading. Writing
-    // the HTML only when it actually changed keeps the streaming DOM stable
-    // between flushes, so a chunk's fade can finish.
-    if (renderedHtmlRef.current !== renderedMainContent) {
+    // The markdown subtree is owned imperatively (the JSX renders this div
+    // empty), so React never touches it. Tokens still arrive faster than the
+    // visible flush, and each rebuild destroys the reveal spans mid-fade, so
+    // the HTML is replaced only when it actually changed; the schedule below
+    // re-wraps whatever was still fading.
+    const htmlChanged = renderedHtmlRef.current !== renderedMainContent;
+    if (htmlChanged) {
       el.innerHTML = renderedMainContent;
       renderedHtmlRef.current = renderedMainContent;
       // The user's body never changes, so this runs once per turn.
@@ -708,30 +736,143 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
     const current = el.textContent ?? "";
     const previous = streamedTextRef.current;
     streamedTextRef.current = current;
-    if (!message.streaming || current.length === 0 || current === previous) return;
 
-    // Longest shared prefix: everything past it is what just arrived. The
-    // prefix (not a plain `startsWith`) is what makes this work with markdown —
-    // every rendered block ends with a newline, so appending inside a paragraph
-    // moves that newline to the right.
-    let pivot = 0;
-    const shared = Math.min(previous.length, current.length);
-    while (pivot < shared && previous.charCodeAt(pivot) === current.charCodeAt(pivot)) {
-      pivot += 1;
+    if (!message.streaming) {
+      streamRevealRef.current.base = 0;
+      streamRevealRef.current.starts.length = 0;
+      return;
     }
-    // Cap a markdown rewrite (`**` turning into real bold) so it never fades a
-    // whole long reply at once.
-    pivot = Math.max(pivot, current.length - STREAM_INK_MAX_CHARS);
-    if (pivot >= current.length) return;
+    if (!htmlChanged || current.length === 0) return;
 
-    // Never split a surrogate pair (emoji) between two text nodes.
-    if (pivot > 0) {
-      const before = current.charCodeAt(pivot - 1);
-      const after = current.charCodeAt(pivot);
+    // Longest shared prefix and suffix. The prefix is the text that only grew
+    // (usually an append); the suffix matters when markdown syntax closes and
+    // removes characters from the middle (`**bold**` losing its asterisks) —
+    // everything after that marker is unchanged and must not fade again.
+    let prefix = 0;
+    const shared = Math.min(previous.length, current.length);
+    while (prefix < shared && previous.charCodeAt(prefix) === current.charCodeAt(prefix)) {
+      prefix += 1;
+    }
+    // Cap a large rewrite so it never re-fades a whole long reply at once.
+    prefix = Math.min(previous.length, Math.max(prefix, current.length - STREAM_ANIMATED_CHARS));
+    if (prefix > 0) {
+      // Never start a run in the middle of a surrogate pair (emoji).
+      const before = current.charCodeAt(prefix - 1);
+      const after = current.charCodeAt(prefix);
       if (before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff) {
-        pivot -= 1;
+        prefix -= 1;
       }
     }
+
+    let suffix = 0;
+    const suffixLimit = Math.min(previous.length, current.length) - prefix;
+    while (
+      suffix < suffixLimit &&
+      previous.charCodeAt(previous.length - 1 - suffix) ===
+        current.charCodeAt(current.length - 1 - suffix)
+    ) {
+      suffix += 1;
+    }
+    const suffixStart = current.length - suffix;
+
+    const now = performance.now();
+    const schedule = streamRevealRef.current;
+    const oldBase = schedule.base;
+    const oldStarts = schedule.starts;
+    const visibleAt = now - STREAM_CHAR_FADE_MS - 1;
+
+    // Only the tail is animated; older text is already visible and never needs
+    // a wrapper. The window also bounds the schedule array's size.
+    let windowStart = Math.max(0, current.length - STREAM_ANIMATED_CHARS);
+    if (windowStart > 0) {
+      // Never begin the window in the middle of a surrogate pair (emoji).
+      const before = current.charCodeAt(windowStart - 1);
+      const after = current.charCodeAt(windowStart);
+      if (before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff) {
+        windowStart -= 1;
+      }
+    }
+    const starts = new Array<number>(current.length - windowStart).fill(visibleAt);
+
+    // Shared prefix: keep every start that is still inside the window.
+    for (let index = windowStart; index < prefix; index += 1) {
+      const oldOffset = index - oldBase;
+      if (oldOffset >= 0 && oldOffset < oldStarts.length) {
+        starts[index - windowStart] = oldStarts[oldOffset];
+      }
+    }
+
+    // Shared suffix: characters that already existed keep their original
+    // start (or stay visible), even though the middle before them changed.
+    const suffixStartOld = previous.length - suffix;
+    for (let index = Math.max(suffixStart, windowStart); index < current.length; index += 1) {
+      const oldOffset = suffixStartOld + (index - suffixStart) - oldBase;
+      if (oldOffset >= 0 && oldOffset < oldStarts.length) {
+        starts[index - windowStart] = oldStarts[oldOffset];
+      }
+    }
+
+    // The rewritten/new middle gets fresh starts. A small commit gets the full
+    // stagger (a visible character-by-character cascade); a burst compresses
+    // its delay and groups adjacent characters so it still lands inside the
+    // spread.
+    const middleFrom = Math.max(prefix, windowStart);
+    const middleCount = Math.max(0, suffixStart - middleFrom);
+    let groupSize = 1;
+    if (middleCount > 0) {
+      groupSize = Math.max(1, Math.ceil(middleCount / STREAM_CHAR_SPAN_LIMIT));
+      const groups = Math.ceil(middleCount / groupSize);
+      const step =
+        groups > 1
+          ? Math.min(STREAM_CHAR_STAGGER_MS, STREAM_CHAR_SPREAD_MS / (groups - 1))
+          : 0;
+      let offset = 0;
+      let group = 0;
+      while (offset < middleCount) {
+        let end = Math.min(offset + groupSize, middleCount);
+        if (end < middleCount) {
+          // A run must not end between a high and a low surrogate.
+          const before = current.charCodeAt(middleFrom + end - 1);
+          const after = current.charCodeAt(middleFrom + end);
+          if (before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff) {
+            end += 1;
+          }
+        }
+        if (end <= offset) end = Math.min(offset + 2, middleCount);
+        const startedAt = now + group * step;
+        for (let index = offset; index < end; index += 1) {
+          starts[middleFrom - windowStart + index] = startedAt;
+        }
+        offset = end;
+        group += 1;
+      }
+    }
+
+    // Forget characters whose fade has already finished; they are plain visible
+    // text now and never need a wrapper again.
+    const firstActive = starts.findIndex(
+      (startedAt) => startedAt + STREAM_CHAR_FADE_MS > now,
+    );
+    if (firstActive === -1) {
+      schedule.base = current.length;
+      schedule.starts.length = 0;
+      return;
+    }
+    schedule.base = windowStart + firstActive;
+    schedule.starts = starts.slice(firstActive);
+
+    let activeFrom = schedule.base;
+    if (activeFrom > 0 && activeFrom < current.length) {
+      // Do not let the split point fall between a high and a low surrogate.
+      const before = current.charCodeAt(activeFrom - 1);
+      const after = current.charCodeAt(activeFrom);
+      if (before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff) {
+        schedule.base = activeFrom - 1;
+        schedule.starts.unshift(schedule.starts[0]);
+        activeFrom = schedule.base;
+      }
+    }
+    if (activeFrom >= current.length) return;
 
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
     const textNodes: Array<{ node: Text; start: number }> = [];
@@ -743,18 +884,48 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
     }
 
     for (const { node, start } of textNodes) {
-      if (start + node.data.length <= pivot) continue;
+      if (start + node.data.length <= activeFrom) continue;
       if (!node.data.trim()) continue;
       // Code, formulas and controls already carry their own markup; a wrapper
       // there would fight highlight.js / KaTeX or animate a button label.
       if (node.parentElement?.closest("pre, svg, math, annotation, button, a, .katex")) continue;
-      const tail = start < pivot ? node.splitText(pivot - start) : node;
+
+      let tail = node;
+      let tailStart = start;
+      if (start < activeFrom) {
+        tail = node.splitText(activeFrom - start);
+        tailStart = activeFrom;
+      }
       const parent = tail.parentNode;
       if (!parent) continue;
-      const ink = document.createElement("span");
-      ink.className = "stream-ink";
-      parent.insertBefore(ink, tail);
-      ink.appendChild(tail);
+
+      const text = tail.data;
+      const fragment = document.createDocumentFragment();
+      let local = 0;
+      while (local < text.length) {
+        let end = Math.min(local + groupSize, text.length);
+        // Extend a run that would otherwise end between a high and a low
+        // surrogate, so an emoji never fades in two pieces.
+        if (end < text.length) {
+          const before = text.charCodeAt(end - 1);
+          const after = text.charCodeAt(end);
+          if (before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff) {
+            end += 1;
+          }
+        }
+        if (end <= local) end = Math.min(local + 2, text.length);
+
+        const startedAt = schedule.starts[tailStart + local - schedule.base];
+        const char = document.createElement("span");
+        char.className = "stream-char";
+        // Negative delays resume a fade that the previous DOM had already
+        // started; positive ones hold a character back until its turn.
+        char.style.animationDelay = `${Math.round(startedAt - now)}ms`;
+        char.textContent = text.slice(local, end);
+        fragment.appendChild(char);
+        local = end;
+      }
+      parent.replaceChild(fragment, tail);
     }
   });
 

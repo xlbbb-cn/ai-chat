@@ -319,18 +319,19 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Gradient typewriter: only the text that arrived in the latest render carries
-   this class (see ChatMessage.tsx), and the render is throttled to the fade
-   length, so a chunk brightens from transparent before the next rebuild
-   replaces the wrapper — new text materialises instead of popping. */
-.message-content .stream-ink {
-  animation: message-stream-ink var(--t-dur-stream) var(--t-ease) both;
+/* Per-character typewriter: every character that was not fully revealed when
+   the last commit replaced the markdown subtree is wrapped in `.stream-char`
+   with a start time relative to now (negative = resume mid-fade, positive =
+   wait its turn). The result is a continuous character-by-character
+   materialisation instead of a whole chunk fading in at once. */
+.message-content .stream-char {
+  animation: message-stream-char var(--t-dur-stream) var(--t-ease) both;
 }
 
-/* A chunk materialises: it starts invisible and softly out of focus, then
-   resolves into sharp text. The blur is what makes the fade readable at a
-   glance, where opacity alone just looked like a slightly delayed pop. */
-@keyframes message-stream-ink {
+/* A character materialises: it starts invisible and softly out of focus, then
+   resolves into sharp text. The stagger between characters (set inline by
+   ChatMessage.tsx) is what makes the typing read as one continuous line. */
+@keyframes message-stream-char {
   from {
     opacity: 0;
     filter: blur(0.22em);
@@ -343,7 +344,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .message-content .stream-ink {
+  .message-content .stream-char {
     animation: none;
   }
 }

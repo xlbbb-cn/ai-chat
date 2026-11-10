@@ -113,9 +113,9 @@
   /* Motion — one timing curve for every interactive state change. */
   --t-ease: cubic-bezier(0.5, 0, 0, 0.75);
   --t-dur: 0.33s;
-  /* Streaming typewriter fade: replies are re-rendered a few times a second,
-     so each chunk must finish fading before the next render replaces its
-     wrapper. Keep `STREAM_FLUSH_MS` in ChatMessage.tsx just above this. */
+  /* Streaming typewriter: per-character fade length. `STREAM_CHAR_FADE_MS`
+     in ChatMessage.tsx mirrors this value, because the reveal schedule uses it
+     to decide which characters still need to be re-wrapped after a rebuild. */
   --t-dur-stream: 0.2s;
   /* Sidebar enter/exit crossfade (the animation classes below read it). */
   --t-dur-sidebar: 0.18s;
