@@ -85,6 +85,8 @@ Full usage guides live in the GitHub Wiki:
 - [English Wiki](https://github.com/xlbbb-cn/ai-chat/wiki) — installation, chat and models, workspace, skills, tools, memory/todos/timers, MCP, sub-agents, prompts and context, configuration/backup, monitoring, updates, security, development and FAQ.
 - [简体中文 Wiki](https://github.com/xlbbb-cn/ai-chat/wiki/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87) — complete Simplified Chinese translation of every page.
 
+The repository also carries a one-page [architecture map](docs/architecture.html): the layers, one chat turn and the sub-agent pipeline, drawn as a single self-contained HTML file — open it in any browser, no build step. Regenerate it with `python3 docs/gen.py` when the architecture changes.
+
 ---
 
 ## Core Features
@@ -206,6 +208,8 @@ Think of it as:
 
 - Frontend invokes Rust commands via `invoke`
 - Rust pushes events to the frontend (chat-token / chat-done / chat-error / chat-usage)
+
+The full picture — layers, the request pipeline inside one turn, and the sub-agent flow — is drawn in [docs/architecture.html](docs/architecture.html).
 
 ---
 
@@ -344,6 +348,7 @@ ai-chat/
 │  ├─ src/tools/        # tools module (memory, file_actions, patch, risk, ...)
 │  ├─ src/mcp.rs        # MCP transports; main pool + per-agent AgentMcpSession
 │  └─ src/db.rs
+├─ docs/                # architecture.html (layers / one turn / sub-agents) + gen.py
 └─ README.md
 ```
 
