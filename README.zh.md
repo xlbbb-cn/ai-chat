@@ -146,10 +146,11 @@ AI Chat 是一个桌面端 AI 助手应用，支持接入任意 OpenAI 兼容模
 ### 6) 本地持久化与运维
 
 - config.json 保存模型与工具配置
-- 工作区状态存放在隐藏目录 `<workspace>/.data`：SQLite 数据库、记忆、待办、技能与技能状态
+- 工作区状态存放在隐藏目录 `<workspace>/.data`：SQLite 数据库、记忆、待办、技能、技能状态与挂起的延时定时器
 - SQLite 保存聊天历史与 API 请求监控数据（随工作区切换）
 - 请求监控面板支持列表、详情与删除
 - 支持通过 zip 导出/恢复 Profile（配置、工具、智能体及其 `agents/` 定义、MCP 服务、工作区记忆/待办/技能）
+- 多窗口以「影子实例」运行：每个窗口只写自己分叉的配置副本并使用独立的工作区，共享配置始终属于主窗口
 - 支持在设置中管理工作目录
 
 ---
@@ -348,10 +349,12 @@ ai-chat/
 
 ```text
 <应用数据目录>/            config.json、app.log、mcp_servers.json、sub_agents.json、
-                          profiles.json、timers.json、agents/（llm 定义 +
-                          index.yaml 发现清单）、workspace/（默认工作区）
+                          profiles.json、agents/（llm 定义 + index.yaml 发现清单）、
+                          shadow/（多窗口配置分叉）、workspace/（默认工作区）
 <workspace>/.data/         chat.db、memory/{user,repo,evolution}/、todos/、skills/、
-                          skills.status                                          （隐藏）
+                          skills.status、scripts/（run_cmd 脚本库）、tmp/（子代理
+                          交付物）、mcp/ + mcp.conf（自建 MCP 服务器）、timers.json
+                          （挂起的延时定时器，按工作区隔离）                       （隐藏）
 ```
 
 ---

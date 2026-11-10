@@ -9,6 +9,37 @@ npm run changelog -- --from <上一个 tag> --to <本次 tag> --details --write
 条目按 Conventional Commits 的类型分组，作用域加粗；工作区里提交标题是英文、正文是中文，
 所以带 `--details` 时是中英对照。
 
+## [v2.9.5](https://github.com/xlbbb-cn/ai-chat/releases/tag/v2.9.5) — 2026-11-10
+
+### 新增
+
+- add hopping smiley face animation to the empty chat state ([`5b7b4a5`](https://github.com/xlbbb-cn/ai-chat/commit/5b7b4a5b265bf17dde7a25652a7b4246aac3650b))
+- **monitor**: give the panel a light theme and a session report ([`5222b34`](https://github.com/xlbbb-cn/ai-chat/commit/5222b34549a0a04a270dae3d75c8aa3ae122a28a))
+- **instance**: run extra windows on forked configs and scope timers per workspace ([`6db0fbc`](https://github.com/xlbbb-cn/ai-chat/commit/6db0fbcb83680f561fbb99d04929e15f61a8bd70))
+  - shadow windows copy config.json into shadow/config-<ts>-<id>/ with a private workspace and merge only workspace_history back on exit
+  - record workspace_history in apply_config and expose it as a Settings dropdown
+  - move timers.json into <workspace>/.data and rebase the registry on workspace switch
+  - fix the pre-Tauri app-data lookup to dirs::data_dir() (Roaming on Windows) so startup reads the real config.json again; setup re-claims if it ever diverges
+  - keep a shadow's cleared workspace_dir inside its own fork
+
+### 重构
+
+- **palette**: rename the fig palette to sakura ([`26f083d`](https://github.com/xlbbb-cn/ai-chat/commit/26f083dcf4b146ef7d9b3d3607e30f24b8053e41))
+
+### 杂项
+
+- bump version to 2.9.5 ([`307624a`](https://github.com/xlbbb-cn/ai-chat/commit/307624a14221c4154e65dcc84fdfbe5f8122f2c6))
+
+### 其它
+
+- **chat**: reveal streamed replies character by character ([`65940df`](https://github.com/xlbbb-cn/ai-chat/commit/65940df786f433dd6c42f2445e575668111ae057))
+- **panel**: unify the side panel header chrome ([`ddb3891`](https://github.com/xlbbb-cn/ai-chat/commit/ddb389152fe1947ff0b23177aa625ed7fb45aea9))
+- **sidebar**: crossfade panels instead of sliding the frosted surface ([`a284336`](https://github.com/xlbbb-cn/ai-chat/commit/a284336501fb099ad5bc5c57f2b01ee5251ae174))
+- **chat**: slide the panel selection and deepen the typewriter fade ([`2a7eb51`](https://github.com/xlbbb-cn/ai-chat/commit/2a7eb51787cc84b035b1494dee06b0e1d00e0fd5))
+- **titlebar**: underline the active workspace label in red ([`04cd90a`](https://github.com/xlbbb-cn/ai-chat/commit/04cd90a676078b4a43537f925cdd59ebf83792e2))
+
+**完整对比**：[v2.9.4...v2.9.5](https://github.com/xlbbb-cn/ai-chat/compare/v2.9.4...v2.9.5)
+
 ## [v2.9.4](https://github.com/xlbbb-cn/ai-chat/releases/tag/v2.9.4) — 2026-11-09
 
 ### 新增

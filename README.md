@@ -146,10 +146,11 @@ Three execution tools with deliberately different scopes:
 ### 6) Local Persistence & Operations
 
 - config.json for model and tool configurations
-- Per-workspace state in a hidden `<workspace>/.data` directory: SQLite database, memory, todos, skills and skill status
+- Per-workspace state in a hidden `<workspace>/.data` directory: SQLite database, memory, todos, skills, skill status and pending delay timers
 - SQLite for chat history and API request monitoring data (switches with the workspace)
 - Request monitoring panel for listing, details, and deletion
 - Profile export/import via zip archives (config, tools, agents and their `agents/` definitions, MCP servers, workspace memory/todos/skills)
+- Extra windows run as shadow instances: each writes only a forked config copy with its own workspace, while the shared config stays with the primary window
 - Workspace directory setting in the UI
 
 ---
@@ -350,10 +351,14 @@ Runtime layout — app data holds the application files, the workspace holds its
 
 ```text
 <app data>/                 config.json, app.log, mcp_servers.json, sub_agents.json,
-                            profiles.json, timers.json, agents/ (llm definitions +
-                            index.yaml discovery manifest), workspace/ (default workspace)
+                            profiles.json, agents/ (llm definitions + index.yaml
+                            discovery manifest), shadow/ (per-window config forks),
+                            workspace/ (default workspace)
 <workspace>/.data/          chat.db, memory/{user,repo,evolution}/, todos/, skills/,
-                            skills.status                                              (hidden)
+                            skills.status, scripts/ (run_cmd script library),
+                            tmp/ (sub-agent deliverables), mcp/ + mcp.conf
+                            (self-built MCP servers), timers.json (pending delay
+                            timers, per workspace)                                    (hidden)
 ```
 
 ---
