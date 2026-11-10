@@ -1025,3 +1025,18 @@ export interface TodoStateEvent {
   summary?: TodoListSummary;
   todo?: TodoRecord;
 }
+
+/**
+ * Payload of `evolution-maintenance-state`.
+ *
+ * The silent maintenance turn (the empty-state "nap face") announces itself
+ * here instead of using the `chat-*` stream, so it can never settle a real chat
+ * reply. `running: false` always carries an outcome; `error` is present only
+ * for `outcome: "error"` and `summary` is the model's final report for `done`.
+ */
+export interface EvolutionMaintenanceState {
+  running: boolean;
+  outcome?: "done" | "stopped" | "error";
+  error?: string;
+  summary?: string;
+}

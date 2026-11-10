@@ -5032,6 +5032,12 @@ pub async fn chat_completion(
     use_agents: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    // The user's own turn always wins over the background evolution
+    // maintenance pass: stop it before this turn installs its own cancel flag.
+    // The maintenance turn uses a separate slot, so this is an explicit
+    // hand-off rather than the shared `chat_cancelled` supersede rule.
+    crate::evolution_maintenance::cancel(&state);
+
     // This turn keeps the system awake (a long streaming answer or a slow
     // sub-agent mission is exactly the kind of idle-looking stretch during
     // which Windows/macOS would suspend the machine). RAII: released on every

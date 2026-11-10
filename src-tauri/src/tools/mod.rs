@@ -11,6 +11,7 @@ use self::search::{run_integrated_search, SearchOptions, SEARCH_MAX_MATCHES};
 mod file_actions;
 pub(crate) mod memory;
 pub(crate) mod mcp_self;
+pub(crate) mod skill_admin;
 mod patch;
 mod paths;
 mod process;
@@ -3413,6 +3414,18 @@ pub async fn execute_tool(
                 cancel,
             )
             .await
+        }
+        "skill_merge" => {
+            // Maintenance-only: the tool is advertised solely by the evolution
+            // maintenance loop, and the mission id makes a hand-crafted call
+            // from the main agent or a sub-agent fail instead of merging
+            // skills behind the user's back.
+            if mission_id != Some(crate::evolution_maintenance::MISSION_ID) {
+                "Error: skill_merge is only available to the evolution maintenance turn."
+                    .to_string()
+            } else {
+                skill_admin::handle_skill_merge(app, &args, &workspace_dir, config, mission_id)
+            }
         }
         _ => format!("Unknown tool: {}", name),
     };

@@ -15,6 +15,7 @@ use tauri_plugin_opener::OpenerExt;
 pub mod agents;
 mod backup;
 mod db;
+mod evolution_maintenance;
 mod instance;
 mod llm_complete;
 mod logger;
@@ -339,6 +340,15 @@ pub(crate) fn apply_config(
         &mut *state.workspace_dir.lock().unwrap(),
         new_workspace_path.clone(),
     );
+
+    // A silent maintenance pass belongs to the workspace (and to the mode) it
+    // started in. A switch or turning self-evolution off cancels it, so it can
+    // never keep writing into a workspace the user just left.
+    if previous_workspace_path != new_workspace_path
+        || !state.config.lock().unwrap().self_evolution_mode
+    {
+        evolution_maintenance::cancel(state);
+    }
 
     // The database, memories, todo lists and skills are all workspace-scoped
     // (`<workspace>/.data`), so a workspace switch must re-point the SQLite
@@ -745,6 +755,12 @@ pub struct AppState {
     /// pressed while idle cannot leak into the next turn (the next turn
     /// installs its own flag anyway).
     pub chat_cancelled: Mutex<Arc<AtomicBool>>,
+    /// Cancellation slot of the silent evolution-maintenance turn (the
+    /// empty-state "nap face"). `Some(flag)` while a pass is running; a new
+    /// pass is refused until it clears. Separate from `chat_cancelled` on
+    /// purpose: the maintenance turn must never share a cancel flag or the
+    /// `chat-*` event stream with a real chat turn.
+    pub evolution_maintenance: Mutex<Option<Arc<AtomicBool>>>,
     /// Monotonic id for the injection window of every chat turn.
     pub turn_seq: AtomicU64,
     /// `(turn_id, session_id)` of the turn currently executing, or `None`.
@@ -1708,6 +1724,7 @@ pub fn run() {
                 agents_config_path,
                 profiles_path,
                 chat_cancelled: Mutex::new(Arc::new(AtomicBool::new(false))),
+                evolution_maintenance: Mutex::new(None),
                 turn_seq: AtomicU64::new(1),
                 active_turn: Mutex::new(None),
                 turn_inbox: Mutex::new(Vec::new()),
@@ -1808,6 +1825,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             llm_complete::chat_completion,
             stop_chat_completion,
+            evolution_maintenance::start_evolution_maintenance,
+            evolution_maintenance::stop_evolution_maintenance,
+            evolution_maintenance::get_evolution_maintenance_state,
             inject_user_message,
             list_background_tasks,
             cancel_background_task,

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills } from "./api";
+import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState } from "./api";
 
 import { ChatMessage } from "./components/ChatMessage";
 import { ToolCallGroup } from "./components/ToolCallGroup";
@@ -76,6 +76,38 @@ import {
 import "./App.css";
 
 type Sidebar = "settings" | "skills" | "history" | "tools" | "mcp" | "agents" | null;
+
+/**
+ * Glyphs shown in the napping face's speech bubble. Kept as plain Unicode so
+ * the ticker needs no image asset and inherits the current text colour. A new
+ * random sequence is generated every time the maintenance pass starts, so the
+ * "dream" never looks like the same loop twice.
+ */
+const DREAM_GLYPHS = "·✦✧⋆﹡※∞∑≈◇○●□■△▽☆★☾☽⌁⌘⊹⋰".split("");
+
+function makeDreamGlyphs(count = 18): string[] {
+  return Array.from(
+    { length: count },
+    () => DREAM_GLYPHS[Math.floor(Math.random() * DREAM_GLYPHS.length)],
+  );
+}
+
+/**
+ * The round face (no mouth, no other features) that hops back and forth. The
+ * eyes are tall ellipses (token cutouts) inside a gaze group — the group
+ * glances toward the travel direction while each eye blinks on its own
+ * transform. Shared by the interactive button and the plain decorative div so
+ * both states stay pixel-identical.
+ */
+const DREAM_FACE = (
+  <svg viewBox="0 0 64 64" role="presentation" focusable="false">
+    <ellipse className="rabbit-hop-head" cx="32" cy="32" rx="17" ry="16" />
+    <g className="rabbit-hop-eyes">
+      <ellipse className="rabbit-hop-eye" cx="25.5" cy="30.5" rx="2.4" ry="4.6" />
+      <ellipse className="rabbit-hop-eye" cx="38.5" cy="30.5" rx="2.4" ry="4.6" />
+    </g>
+  </svg>
+);
 
 /**
  * Paint the current theme + palette on `<html>`.
@@ -298,6 +330,24 @@ export default function App() {
   const slashSkillsRef = useRef<{ at: number; options: SkillMentionOption[] } | null>(null);
   const slashSkillsPendingRef = useRef(false);
   const [streaming, setStreaming] = useState(false);
+  /**
+   * The empty-state smiley's silent maintenance pass. `running` is driven by
+   * `evolution-maintenance-state` (and restored by `get_..._state` after a
+   * webview reload); it never touches `messages` or `streaming`, so the empty
+   * state stays on screen while the face naps.
+   */
+  const [selfEvolutionMode, setSelfEvolutionMode] = useState(false);
+  const [dreamState, setDreamState] = useState<"idle" | "running">("idle");
+  const [dreamGlyphs, setDreamGlyphs] = useState<string[]>(() => makeDreamGlyphs());
+  /** A terminal event already arrived; a late `get_state` must not revive it. */
+  const dreamEventSeenRef = useRef(false);
+  /**
+   * Timestamp of the previous click while napping. Two clicks inside the
+   * double-click window stop the pass; the first click after an idle start is
+   * deliberately ignored, so double-clicking the hopping face starts the pass
+   * instead of starting and immediately cancelling it.
+   */
+  const lastDreamClickRef = useRef(0);
   const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
   const [sidebar, setSidebar] = useState<Sidebar>(null);
   const [sidebarMotion, setSidebarMotion] = useState<"opening" | "closing" | null>(null);
@@ -523,6 +573,7 @@ export default function App() {
     setModelMetadata(cfg.model_metadata ?? {});
     setReasoningEfforts(cfg.model_reasoning_effort ?? {});
     setActiveToolCount((cfg.selected_tools ?? []).length);
+    setSelfEvolutionMode(cfg.self_evolution_mode ?? false);
     // The config is the source of truth for the UI language (localStorage is
     // only a first-paint cache), so a profile import can switch it too.
     if (isLocale(cfg.language)) setLocale(cfg.language);
@@ -905,6 +956,35 @@ export default function App() {
       unlisten.then((fn) => fn());
     };
   }, [applyConfigToUi, loadSkillStatus]);
+
+  // The silent maintenance turn (the empty-state nap face) has its own event
+  // stream — never `chat-*` — so a maintenance finish cannot settle a real chat
+  // reply. `get_..._state` restores the napping face after a webview reload;
+  // `dreamEventSeenRef` keeps a late query from reviving a run that already
+  // reported its terminal state.
+  useEffect(() => {
+    const unlisten = onEvolutionMaintenanceState((state) => {
+      dreamEventSeenRef.current = true;
+      if (state.running) {
+        setDreamState("running");
+        return;
+      }
+      setDreamState("idle");
+      if (state.outcome === "error" && state.error) {
+        setError(t("app.dream.failed", { error: state.error }), "warning");
+      }
+    });
+    getEvolutionMaintenanceState()
+      .then((running) => {
+        if (running && !dreamEventSeenRef.current) {
+          setDreamState("running");
+        }
+      })
+      .catch(console.error);
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [setError, t]);
 
   useEffect(() => {
     const unlisteners: Promise<() => void>[] = [];
@@ -2143,6 +2223,76 @@ export default function App() {
   }, [input, messages, streaming, profileExporting, activeSkillIds, sessionId, selectedModel, selectedMetadata, useAgentsEnabled, t, flushUndeliveredInjections]);
 
   /**
+   * Start the silent evolution-maintenance pass from the empty-state face.
+   * The command returns as soon as the backend claimed the run; the terminal
+   * `evolution-maintenance-state` event clears `dreamState`.
+   */
+  const startDream = useCallback(async () => {
+    if (!selfEvolutionMode || dreamState === "running" || streaming || profileExporting) {
+      return;
+    }
+    setDreamGlyphs(makeDreamGlyphs());
+    lastDreamClickRef.current = 0;
+    setDreamState("running");
+    try {
+      await startEvolutionMaintenance(selectedModel);
+    } catch (err) {
+      // A concurrent run (another window, or a state race) is already napping:
+      // restore that state instead of pretending the start failed.
+      try {
+        if (await getEvolutionMaintenanceState()) return;
+      } catch {
+        /* fall through to the warning */
+      }
+      setDreamState("idle");
+      setError(t("app.dream.failed", { error: String(err) }), "warning");
+    }
+  }, [
+    selfEvolutionMode,
+    dreamState,
+    streaming,
+    profileExporting,
+    selectedModel,
+    setError,
+    t,
+  ]);
+
+  /** Double-click on the napping face: stop the running pass. */
+  const stopDream = useCallback(async () => {
+    if (dreamState !== "running") return;
+    try {
+      await stopEvolutionMaintenance();
+    } catch (err) {
+      console.error("Failed to stop evolution maintenance", err);
+    }
+  }, [dreamState]);
+
+  const handleDreamClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      if (dreamState === "running") {
+        // Keyboard activation has detail === 0 and is the accessible stop.
+        if (event.detail === 0) {
+          void stopDream();
+          return;
+        }
+        // Two clicks inside the double-click window stop the pass. The first
+        // click only arms the timer, so a double-click on the *hopping* face
+        // (whose first click just started the pass) never cancels it.
+        const now = Date.now();
+        if (now - lastDreamClickRef.current <= 320) {
+          lastDreamClickRef.current = 0;
+          void stopDream();
+        } else {
+          lastDreamClickRef.current = now;
+        }
+        return;
+      }
+      void startDream();
+    },
+    [dreamState, startDream, stopDream],
+  );
+
+  /**
    * Resume a partial reply. The normal send path keeps interrupted assistant
    * messages that still have visible output, so the model sees what it had
    * already reasoned/generated and continues instead of starting over.
@@ -3196,6 +3346,7 @@ export default function App() {
                 setActiveToolCount((cfg.selected_tools ?? []).length);
                 setModelMetadata(cfg.model_metadata ?? {});
                 setReasoningEfforts(cfg.model_reasoning_effort ?? {});
+                setSelfEvolutionMode(cfg.self_evolution_mode ?? false);
                 themeRef.current = cfg.theme ?? "auto";
                 paletteRef.current = cfg.palette ?? "default";
                 applyTheme(cfg.theme, cfg.palette);
@@ -3466,21 +3617,57 @@ export default function App() {
         <div className="messages" ref={messagesRef} onScroll={handleMessagesScroll}>
           {messages.length === 0 && (
             <div className="empty-state">
-              <div className="rabbit-hop" aria-hidden="true">
+              <div
+                className={`rabbit-hop${selfEvolutionMode && dreamState === "running" ? " rabbit-hop--sleeping" : ""}`}
+                aria-hidden={selfEvolutionMode ? undefined : true}
+              >
+                {/* Visual affordance only: the button's aria-label carries the
+                    same sentence for assistive technology. Both the hint and
+                    the button disappear when self-evolution mode is off — the
+                    face is then a plain decorative div with no hover/click. */}
+                {selfEvolutionMode && (
+                  <span className="rabbit-hop-hint" aria-hidden="true">
+                    {dreamState === "running"
+                      ? `${t("app.dream.sleeping")} · ${t("app.dream.cancelHint")}`
+                      : t("app.dream.hint")}
+                  </span>
+                )}
+                {selfEvolutionMode && dreamState === "running" && (
+                  <>
+                    <div className="rabbit-hop-bubble" aria-hidden="true">
+                      <div className="rabbit-hop-bubble-clip">
+                        <div className="rabbit-hop-dream-track">
+                          {[...dreamGlyphs, ...dreamGlyphs].map((glyph, index) => (
+                            <span key={index}>{glyph}</span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="rabbit-hop-zzz" aria-hidden="true">
+                      <span>z</span>
+                      <span>z</span>
+                      <span>z</span>
+                    </div>
+                  </>
+                )}
                 <div className="rabbit-hop-runner">
-                  <div className="rabbit-hop-bunny">
-                    {/* A round face (no mouth, no other features) that hops back
-                        and forth. The eyes are tall ellipses (token cutouts)
-                        inside a gaze group — the group glances toward the travel
-                        direction while each eye blinks on its own transform. */}
-                    <svg viewBox="0 0 64 64" role="presentation" focusable="false">
-                      <ellipse className="rabbit-hop-head" cx="32" cy="32" rx="17" ry="16" />
-                      <g className="rabbit-hop-eyes">
-                        <ellipse className="rabbit-hop-eye" cx="25.5" cy="30.5" rx="2.4" ry="4.6" />
-                        <ellipse className="rabbit-hop-eye" cx="38.5" cy="30.5" rx="2.4" ry="4.6" />
-                      </g>
-                    </svg>
-                  </div>
+                  {selfEvolutionMode ? (
+                    <button
+                      type="button"
+                      className="rabbit-hop-bunny"
+                      aria-label={
+                        dreamState === "running"
+                          ? t("app.dream.ariaRunning")
+                          : t("app.dream.ariaStart")
+                      }
+                      aria-busy={dreamState === "running"}
+                      onClick={handleDreamClick}
+                    >
+                      {DREAM_FACE}
+                    </button>
+                  ) : (
+                    <div className="rabbit-hop-bunny">{DREAM_FACE}</div>
+                  )}
                 </div>
               </div>
               <p>{t("app.emptyStart")}</p>

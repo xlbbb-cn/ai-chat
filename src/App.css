@@ -1065,12 +1065,17 @@ body {
    --c-bg), no shadow. Nested layers keep the transforms independent: shuttle
    (runner) / hop squash (bunny) / gaze (eyes group) / blink (each eye). The
    gaze keyframes mirror the shuttle percentages so the face looks where it is
-   going. prefers-reduced-motion parks it, eyes open. */
+   going. prefers-reduced-motion parks it, eyes open.
+
+   The same face is the entry point of the silent evolution-maintenance turn:
+   hovering it shows a small tooltip, clicking starts the pass, and while it
+   runs the face naps (closed eyes, breathing) under a 4px speech bubble
+   whose random-symbol ticker and floating `z`s are pure decoration. */
 .rabbit-hop {
+  position: relative;
   display: flex;
   justify-content: center;
   height: 56px;
-  /* margin-bottom: 3px; */
   color: var(--c-muted);
 }
 
@@ -1087,8 +1092,26 @@ body {
   bottom: 0;
   width: 48px;
   height: 48px;
+  border-radius: var(--r-sm);
+  color: inherit;
   transform-origin: 50% 100%;
   animation: rabbit-hop-hop 0.62s ease-in-out infinite alternate;
+}
+
+/* Only the interactive button resets the native chrome and shows a pointer.
+   The decorative div (self-evolution mode off) keeps the default arrow and has
+   no hover/click affordance. */
+button.rabbit-hop-bunny {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  appearance: none;
+}
+
+button.rabbit-hop-bunny:focus-visible {
+  outline: 1px solid var(--c-border-i);
+  outline-offset: 3px;
 }
 
 .rabbit-hop svg {
@@ -1117,6 +1140,168 @@ body {
   transform-box: fill-box;
   transform-origin: 50% 50%;
   animation: rabbit-hop-blink 4.6s linear infinite;
+}
+
+/* Hover / keyboard-focus hint. Opacity only — the position never moves, so the
+   shared "colour/border transitions only" rule is respected. */
+.rabbit-hop-hint {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  z-index: 2;
+  transform: translateX(-50%);
+  padding: 5px 10px;
+  border: 1px solid var(--c-border-i);
+  border-radius: var(--r-sm);
+  background: var(--c-surface);
+  color: var(--c-body);
+  font-size: 12px;
+  line-height: 1.4;
+  max-width: min(360px, calc(100vw - 32px));
+  text-align: center;
+  white-space: normal;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--t-dur) var(--t-ease), visibility 0s linear var(--t-dur);
+}
+
+/* Speech-bubble tail, matching the nap bubble above the face. */
+.rabbit-hop-hint::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  width: 8px;
+  height: 8px;
+  background: var(--c-surface);
+  border-right: 1px solid var(--c-border-i);
+  border-bottom: 1px solid var(--c-border-i);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.rabbit-hop:hover .rabbit-hop-hint,
+.rabbit-hop:focus-within .rabbit-hop-hint {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity var(--t-dur) var(--t-ease);
+}
+
+.rabbit-hop--sleeping .rabbit-hop-hint {
+  bottom: calc(100% + 54px);
+}
+
+/* Nap bubble: 4px radius, hairline + surface, no elevation. The clip layer
+   keeps the scrolling track inside the rounded box; the tail is a rotated
+   square on the outer element. */
+.rabbit-hop-bubble {
+  position: absolute;
+  left: 50%;
+  bottom: 54px;
+  z-index: 1;
+  width: 100px;
+  height: 46px;
+  transform: translateX(-50%);
+  border: 1px solid var(--c-border-i);
+  border-radius: var(--r-sm);
+  background: var(--c-surface);
+  pointer-events: none;
+  opacity: 0;
+  animation: rabbit-hop-bubble-in var(--t-dur) var(--t-ease) forwards;
+}
+
+.rabbit-hop-bubble::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  width: 8px;
+  height: 8px;
+  background: var(--c-surface);
+  border-right: 1px solid var(--c-border-i);
+  border-bottom: 1px solid var(--c-border-i);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.rabbit-hop-bubble-clip {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 3px 8px;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+/* A single horizontal row; the glyph list is rendered twice and -50% lands
+   exactly on the second copy, so the ticker loops without a visible jump.
+   Padding (not gap) spaces the glyphs, keeping the two halves identical. */
+.rabbit-hop-dream-track {
+  display: flex;
+  flex: none;
+  flex-direction: row;
+  align-items: center;
+  white-space: nowrap;
+  animation: rabbit-hop-dream-scroll 4.2s linear infinite;
+}
+
+.rabbit-hop-dream-track span {
+  padding: 0 3px;
+  color: var(--c-muted);
+  font-size: 12px;
+  line-height: 14px;
+}
+
+/* Three `z`s drifting up to the right of the bubble. */
+.rabbit-hop-zzz {
+  position: absolute;
+  left: calc(50% + 50px);
+  bottom: 54px;
+  z-index: 1;
+  width: 24px;
+  height: 24px;
+  pointer-events: none;
+}
+
+.rabbit-hop-zzz span {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  color: var(--c-muted);
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0;
+  animation: rabbit-hop-zzz 2.6s ease-out infinite;
+}
+
+.rabbit-hop-zzz span:nth-child(2) {
+  font-size: 11px;
+  animation-delay: 0.8s;
+}
+
+.rabbit-hop-zzz span:nth-child(3) {
+  font-size: 9px;
+  animation-delay: 1.6s;
+}
+
+/* Sleeping: the shuttle parks in the middle, the hop becomes a slow breath,
+   the gaze stops and each eye squashes into a thin closed line. */
+.rabbit-hop--sleeping .rabbit-hop-runner {
+  animation: none;
+  transform: translateX(36px);
+}
+
+.rabbit-hop--sleeping .rabbit-hop-bunny {
+  animation: rabbit-hop-breathe 3.4s ease-in-out infinite alternate;
+}
+
+.rabbit-hop--sleeping .rabbit-hop-eyes {
+  animation: none;
+}
+
+.rabbit-hop--sleeping .rabbit-hop-eye {
+  animation: none;
+  transform: scaleY(0.12);
+  transition: transform var(--t-dur) var(--t-ease);
 }
 
 @keyframes rabbit-hop-path {
@@ -1152,12 +1337,71 @@ body {
   }
 }
 
+@keyframes rabbit-hop-breathe {
+  from { transform: scale(1.02, 0.97); }
+  to { transform: scale(0.98, 1.02); }
+}
+
+@keyframes rabbit-hop-bubble-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* The track is the glyph list twice; -50% lands exactly on the second copy,
+   so the ticker loops without a visible jump. */
+@keyframes rabbit-hop-dream-scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+@keyframes rabbit-hop-zzz {
+  0% { opacity: 0; transform: translate(0, 0) scale(0.9); }
+  15% { opacity: 0.9; }
+  100% { opacity: 0; transform: translate(8px, -20px) scale(1.15); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .rabbit-hop-runner,
   .rabbit-hop-bunny,
   .rabbit-hop .rabbit-hop-eyes,
-  .rabbit-hop .rabbit-hop-eye {
+  .rabbit-hop .rabbit-hop-eye,
+  .rabbit-hop-bubble,
+  .rabbit-hop-dream-track,
+  .rabbit-hop-zzz span {
     animation: none;
+  }
+
+  .rabbit-hop-hint {
+    transition: none;
+  }
+
+  .rabbit-hop--sleeping .rabbit-hop-runner {
+    transform: translateX(36px);
+  }
+
+  .rabbit-hop--sleeping .rabbit-hop-bunny {
+    animation: none;
+    transform: none;
+  }
+
+  .rabbit-hop--sleeping .rabbit-hop-eye {
+    transform: scaleY(0.12);
+  }
+
+  .rabbit-hop-bubble {
+    opacity: 1;
+  }
+
+  .rabbit-hop-zzz span {
+    opacity: 0.7;
+  }
+
+  .rabbit-hop-zzz span:nth-child(2) {
+    transform: translate(4px, -8px);
+  }
+
+  .rabbit-hop-zzz span:nth-child(3) {
+    transform: translate(8px, -16px);
   }
 }
 

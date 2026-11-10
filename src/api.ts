@@ -27,6 +27,7 @@ import type {
   SleepLockState,
   TimerEntry,
   BackgroundTaskState,
+  EvolutionMaintenanceState,
   TodoListSummary,
   UpdateInfo,
   UpdateDownloadProgress,
@@ -293,6 +294,35 @@ export async function onUpdateDownloadProgress(
 
 export async function stopChatCompletion(): Promise<void> {
   return invoke("stop_chat_completion");
+}
+
+// ─── Evolution maintenance (the empty-state "nap face") ─────────────────────
+
+/**
+ * Start a silent maintenance pass. Returns as soon as the backend claimed the
+ * run; the outcome arrives through `onEvolutionMaintenanceState`.
+ */
+export async function startEvolutionMaintenance(modelOverride?: string): Promise<void> {
+  return invoke("start_evolution_maintenance", { modelOverride });
+}
+
+/** Stop the running maintenance pass (double-click on the napping face). */
+export async function stopEvolutionMaintenance(): Promise<void> {
+  return invoke("stop_evolution_maintenance");
+}
+
+/** Whether a maintenance pass is running (used to restore the napping face). */
+export async function getEvolutionMaintenanceState(): Promise<boolean> {
+  return invoke("get_evolution_maintenance_state");
+}
+
+/** Subscribe to the maintenance turn's start / terminal state. */
+export async function onEvolutionMaintenanceState(
+  cb: (state: EvolutionMaintenanceState) => void,
+): Promise<UnlistenFn> {
+  return listen<EvolutionMaintenanceState>("evolution-maintenance-state", (e) =>
+    cb(e.payload),
+  );
 }
 
 // ─── Delay timers ────────────────────────────────────────────────────────────

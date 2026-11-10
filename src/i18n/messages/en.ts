@@ -69,6 +69,14 @@ const en = {
 
         emptyStart: "Start a conversation",
         emptyHint: "Use {skills} to set a system prompt, or configure the API in {settings}.",
+        dream: {
+            hint: "Click to let me take a short nap",
+            sleeping: "Napping while tidying skills and memory…",
+            cancelHint: "Double-click to stop (not recommended)",
+            ariaStart: "Click to let me take a short nap and tidy skills and memory",
+            ariaRunning: "Napping while tidying skills and memory; double-click to stop, not recommended",
+            failed: "Memory maintenance failed: {error}",
+        },
 
         profileExportLabel: "Exporting and compressing profile...",
         profileExportPreparing: "Preparing profile export...",

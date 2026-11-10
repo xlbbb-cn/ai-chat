@@ -60,6 +60,14 @@ const zhTW: Messages = {
 
         emptyStart: "開始一段對話",
         emptyHint: "使用{skills}設定系統提示詞，或在{settings}中設定 API。",
+        dream: {
+            hint: "點擊讓我小憩一下",
+            sleeping: "正在小憩，整理技能與記憶…",
+            cancelHint: "雙擊可終止（不建議）",
+            ariaStart: "點擊讓我小憩一下，整理技能與記憶",
+            ariaRunning: "正在小憩並整理技能與記憶，雙擊可終止，不建議",
+            failed: "記憶整理失敗：{error}",
+        },
 
         profileExportLabel: "正在匯出並壓縮設定檔…",
         profileExportPreparing: "正在準備匯出設定檔…",

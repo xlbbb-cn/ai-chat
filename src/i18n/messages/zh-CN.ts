@@ -60,6 +60,14 @@ const zhCN: Messages = {
 
         emptyStart: "开始一段对话",
         emptyHint: "使用{skills}设置系统提示词，或在{settings}中配置 API。",
+        dream: {
+            hint: "点击让我小憩一下",
+            sleeping: "正在小憩，整理技能与记忆…",
+            cancelHint: "双击可终止（不建议）",
+            ariaStart: "点击让我小憩一下，整理技能与记忆",
+            ariaRunning: "正在小憩并整理技能与记忆，双击可终止，不建议",
+            failed: "记忆整理失败：{error}",
+        },
 
         profileExportLabel: "正在导出并压缩配置…",
         profileExportPreparing: "正在准备导出配置…",

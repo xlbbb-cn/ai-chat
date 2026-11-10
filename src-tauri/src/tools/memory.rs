@@ -26,6 +26,16 @@ use super::truncate_tool_output;
 /// self-evolution mode is on.
 pub const EVOLUTION_SCOPE: &str = "evolution";
 
+/// Stable key of the evolution-maintenance resume note.
+///
+/// The silent maintenance turn writes this entry before it stops (user
+/// double-click, budget exhaustion, upstream error). The next pass reads it
+/// from its inventory, verifies what is already saved and continues from
+/// there. It is deliberately excluded from consolidation clusters and cannot
+/// be archived or deleted by the `memory` tool; only the maintenance turn
+/// clears it after a completed pass.
+pub const MAINTENANCE_PROGRESS_KEY: &str = "evolution-maintenance-progress";
+
 /// Budget (in characters) of one rendered block of the self-evolution memory
 /// area — what the panel shows as the top tier and what a `plan` consolidation
 /// measures its clusters against. Nothing is preloaded into a request, so this
@@ -919,6 +929,16 @@ pub fn upsert_evolution_entry(
     )
 }
 
+/// Remove one evolution entry by key. Returns `false` when it did not exist.
+///
+/// Used by the maintenance turn to clear its own resume note after a completed
+/// pass; the `memory` tool's `delete` action refuses the same key.
+pub fn clear_evolution_entry(workspace_dir: &Path, key: &str) -> bool {
+    let dir = evolution_dir(workspace_dir);
+    let path = dir.join(format!("{}.md", safe_memory_key(key)));
+    fs::remove_file(path).is_ok()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn upsert_evolution_entry_with_source(
     workspace_dir: &Path,
@@ -941,10 +961,15 @@ fn upsert_evolution_entry_with_source(
     let mut index = resolve_entry_index(&existing_entries, key);
     if index.is_none() && merge && !title.trim().is_empty() {
         if let Some(found) = find_similar(&existing_entries, title, tags) {
-            if existing_entries[found].meta.key != key {
-                merged_into = Some(existing_entries[found].meta.key.clone());
+            // Never fold another fact into the maintenance resume note; it is
+            // a task note, not knowledge. The maintenance turn writes it by
+            // key, so the normal upsert path still works.
+            if existing_entries[found].meta.key != MAINTENANCE_PROGRESS_KEY {
+                if existing_entries[found].meta.key != key {
+                    merged_into = Some(existing_entries[found].meta.key.clone());
+                }
+                index = Some(found);
             }
-            index = Some(found);
         }
     }
 
@@ -1160,6 +1185,12 @@ fn cluster_similarity(left: &EvolutionEntry, right: &EvolutionEntry) -> bool {
 /// Group entries into candidate skill clusters (connected components above the
 /// size threshold). Deterministic and LLM-free.
 pub fn plan_clusters(ranked: &[ScoredEntry], budget_chars: usize) -> Vec<EvolutionCluster> {
+    // The maintenance resume note is not knowledge to consolidate; keep it out
+    // of every cluster so `plan`/`apply` can never archive it.
+    let ranked: Vec<&ScoredEntry> = ranked
+        .iter()
+        .filter(|scored| scored.entry.meta.key != MAINTENANCE_PROGRESS_KEY)
+        .collect();
     let count = ranked.len();
     if count == 0 {
         return Vec::new();
@@ -1336,6 +1367,11 @@ pub fn apply_consolidation(
 ) -> Result<String, String> {
     if keys.is_empty() {
         return Err("'keys' is required for phase 'apply' — copy them from the plan.".to_string());
+    }
+    if keys.iter().any(|key| key == MAINTENANCE_PROGRESS_KEY) {
+        return Err(format!(
+            "The '{MAINTENANCE_PROGRESS_KEY}' entry is the maintenance resume note and cannot be archived. Finish the maintenance pass first."
+        ));
     }
 
     let skill = crate::skills::parse_skill_md(skill_md)?;
@@ -2360,6 +2396,9 @@ fn handle_evolution_scope(
         "delete" => {
             if key.is_empty() {
                 return "Error: 'key' is required for memory delete.".to_string();
+            }
+            if key == MAINTENANCE_PROGRESS_KEY {
+                return "The evolution-maintenance progress entry is the resume note and cannot be deleted manually. Run the maintenance again to complete it.".to_string();
             }
             let safe_key = safe_memory_key(key);
             let path = dir.join(format!("{safe_key}.md"));

@@ -395,6 +395,42 @@ reserves no space.
   failure bubble. The turn stays on disk with its `status: "error"` for history
   and for the retry path, but the user-facing report is the notice alone.
 
+#### Empty-state nap face (evolution maintenance)
+
+The smiley above the empty-state greeting is an action while
+`self_evolution_mode` is on. It is a real `<button>` around the same SVG (the
+hopping animation is unchanged); the decorative hint/bubble layers sit beside
+it and are `aria-hidden`, while the button's `aria-label` carries the action.
+When the mode is off the same face is rendered as a plain decorative `<div>`:
+no hint, no hover treatment, no click handler and no focus target.
+
+- **Idle:** hovering or focusing shows a 12px speech bubble — `--c-surface`,
+  1px `--c-border-i`, 4px radius and a rotated 8px square tail pointing at the
+  face — "点击让我小憩一下", fading in on `--t-dur` / `--t-ease` (opacity only,
+  no movement). The face keeps hopping.
+- **Running (the `rabbit-hop--sleeping` modifier):** the shuttle parks at
+  `translateX(36px)` (centred in its 120px lane), the hop is replaced by a slow
+  `scale` breathing loop, the gaze stops and each eye squashes to
+  `scaleY(0.12)` — a closed line. The hint bubble moves above the nap bubble
+  and reads "正在小憩，整理技能与记忆… · 双击可终止（不建议）".
+- **Bubble:** 100×46px, `--c-surface` + 1px `--c-border-i`, 4px radius, no
+  shadow; a rotated 8px square forms the tail. Inside, one horizontal row of
+  random glyphs (`--c-muted`, 12px) scrolls left on a 4.2s linear loop; the
+  glyph list is rendered twice and the track translates `-50%`, so the loop is
+  seamless. Three `z` glyphs (13/11/9px) drift up to the right of the bubble.
+- **Cancel:** two clicks inside a 320ms window on the napping face stop the
+  pass; a keyboard activation (`detail === 0`) stops it immediately. A
+  double-click on the *hopping* face only starts the pass (the first click's
+  start is deliberately not treated as a cancel).
+- **Done / stopped / error:** the terminal event removes the bubble and
+  restores the hop. An error also surfaces through the normal `ChatNotice`
+  warning. Nothing is added to the transcript.
+- **Tokens only:** face `--c-muted`, eyes `--c-bg`, bubble/hint `--c-surface`
+  with `--c-border-i`; no accent, no literal hex, no elevation.
+- **`prefers-reduced-motion: reduce`:** every loop stops — the face is parked
+  and breathing-less, eyes stay closed, the ticker is static and the `z`s are
+  visible at their offset positions.
+
 ### Chat transcript
 
 This is the one place with a deliberate asymmetry:
