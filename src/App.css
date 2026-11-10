@@ -1058,6 +1058,109 @@ body {
   color: var(--c-muted);
 }
 
+/* Idle face — a round face with two tall blinking eyes (no mouth or other
+   features) that hops back and forth above the empty-state greeting while the
+   conversation is empty; class names keep the hopping motion. Pure CSS/SVG:
+   no image asset, token colours only (currentColor → --c-muted face, eyes →
+   --c-bg), no shadow. Nested layers keep the transforms independent: shuttle
+   (runner) / hop squash (bunny) / gaze (eyes group) / blink (each eye). The
+   gaze keyframes mirror the shuttle percentages so the face looks where it is
+   going. prefers-reduced-motion parks it, eyes open. */
+.rabbit-hop {
+  display: flex;
+  justify-content: center;
+  height: 56px;
+  /* margin-bottom: 3px; */
+  color: var(--c-muted);
+}
+
+.rabbit-hop-runner {
+  position: relative;
+  width: 120px;
+  height: 56px;
+  animation: rabbit-hop-path 7s var(--t-ease) infinite;
+}
+
+.rabbit-hop-bunny {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 48px;
+  height: 48px;
+  transform-origin: 50% 100%;
+  animation: rabbit-hop-hop 0.62s ease-in-out infinite alternate;
+}
+
+.rabbit-hop svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.rabbit-hop .rabbit-hop-head {
+  fill: currentColor;
+}
+
+.rabbit-hop .rabbit-hop-eye {
+  fill: var(--c-bg);
+}
+
+/* Gaze rides on the eyes group so it composes with each eye's blink. */
+.rabbit-hop .rabbit-hop-eyes {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: rabbit-hop-gaze 7s linear infinite;
+}
+
+/* Each eye is a tall ellipse; blink squashes it around its own centre. */
+.rabbit-hop .rabbit-hop-eye {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: rabbit-hop-blink 4.6s linear infinite;
+}
+
+@keyframes rabbit-hop-path {
+  0%, 10% { transform: translateX(0); }
+  46%, 54% { transform: translateX(72px); }
+  90%, 100% { transform: translateX(0); }
+}
+
+/* Same 7s timeline as the shuttle: centre while resting, glance toward the
+   direction of travel while crossing, back to centre at each end. */
+@keyframes rabbit-hop-gaze {
+  0%, 10% { transform: translateX(0); }
+  14%, 42% { transform: translateX(2.2px); }
+  46%, 54% { transform: translateX(0); }
+  58%, 86% { transform: translateX(-2.2px); }
+  90%, 100% { transform: translateX(0); }
+}
+
+/* Quick squash to a thin line, then open again — about once per 4.6s. */
+@keyframes rabbit-hop-blink {
+  0%, 91%, 100% { transform: scaleY(1); }
+  94.5% { transform: scaleY(0.1); }
+  98% { transform: scaleY(1); }
+}
+
+/* Landing squash (scale) at the ground, stretch and tilt at the top. */
+@keyframes rabbit-hop-hop {
+  from {
+    transform: translateY(0) scale(1.06, 0.92);
+  }
+  to {
+    transform: translateY(-14px) scale(0.98, 1.04) rotate(-7deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rabbit-hop-runner,
+  .rabbit-hop-bunny,
+  .rabbit-hop .rabbit-hop-eyes,
+  .rabbit-hop .rabbit-hop-eye {
+    animation: none;
+  }
+}
+
 /* Transient notices — warnings and errors float over the chat window's
    top-left corner instead of living in the transcript (a bar inside the
    message flow pushed the conversation around and stayed until the next

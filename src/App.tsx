@@ -3466,6 +3466,23 @@ export default function App() {
         <div className="messages" ref={messagesRef} onScroll={handleMessagesScroll}>
           {messages.length === 0 && (
             <div className="empty-state">
+              <div className="rabbit-hop" aria-hidden="true">
+                <div className="rabbit-hop-runner">
+                  <div className="rabbit-hop-bunny">
+                    {/* A round face (no mouth, no other features) that hops back
+                        and forth. The eyes are tall ellipses (token cutouts)
+                        inside a gaze group — the group glances toward the travel
+                        direction while each eye blinks on its own transform. */}
+                    <svg viewBox="0 0 64 64" role="presentation" focusable="false">
+                      <ellipse className="rabbit-hop-head" cx="32" cy="32" rx="17" ry="16" />
+                      <g className="rabbit-hop-eyes">
+                        <ellipse className="rabbit-hop-eye" cx="25.5" cy="30.5" rx="2.4" ry="4.6" />
+                        <ellipse className="rabbit-hop-eye" cx="38.5" cy="30.5" rx="2.4" ry="4.6" />
+                      </g>
+                    </svg>
+                  </div>
+                </div>
+              </div>
               <p>{t("app.emptyStart")}</p>
               <p className="empty-hint">
                 {t("app.emptyHint", {
