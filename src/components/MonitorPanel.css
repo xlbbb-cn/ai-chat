@@ -1,23 +1,28 @@
+/* Interaction monitor: two-pane log view (list + detail) over a session
+   report strip that fills the bottom third of the dialog.
+
+   Every colour comes from the palette tokens in `src/App.css` (DESIGN.md), so
+   the panel wears the same light/dark surfaces as the rest of the app instead
+   of the hardcoded dark box it used to be. No literal hex lives here. */
+
 .monitor-overlay {
     position: fixed;
     /* The titlebar is fixed above every overlay, so start below it — otherwise
        the shell's top border and header are hidden behind the window chrome. */
     inset: var(--titlebar-h) 0 0 0;
-    background-color: rgba(0, 0, 0, 0.45);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
-    backdrop-filter: blur(20px) saturate(180%);
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 1000;
     padding: 12px;
+    z-index: 1000;
+    /* Modal backdrop (DESIGN.md → Overlays and popups). */
+    background: rgba(128, 128, 128, 0.65);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
     animation: fade-in 200ms ease;
 }
 
 .monitor-shell {
-    background-color: #1e1e1e;
-    border: 0.5px solid rgba(255, 255, 255, 0.08);
-    border-radius: 14px;
     display: flex;
     flex-direction: column;
     /* Same dialog cap as the agent mission monitor. */
@@ -30,132 +35,171 @@
     min-height: 0;
     max-width: 100%;
     max-height: 100%;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 0 0.5px rgba(255, 255, 255, 0.04);
+    background: var(--c-bg);
+    border: 1px solid var(--c-border-i);
+    border-radius: var(--r-sm);
     overflow: hidden;
 }
 
 .monitor-header {
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-shrink: 0;
     padding: 9px 12px;
-    border-bottom: 0.5px solid rgba(255, 255, 255, 0.08);
-    background-color: rgba(45, 45, 45, 0.85);
+    background: var(--c-toolbar);
     -webkit-backdrop-filter: blur(20px) saturate(180%);
     backdrop-filter: blur(20px) saturate(180%);
-    border-radius: 14px 14px 0 0;
+    border-bottom: 1px solid var(--c-border);
 }
 
 .monitor-header h2 {
     margin: 0;
+    color: var(--c-text);
     font-size: 15px;
-    color: #fff;
-    letter-spacing: -0.01em;
+    font-weight: 500;
+    letter-spacing: normal;
 }
 
 .monitor-controls {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
 }
 
 .monitor-checkbox {
     display: flex;
     align-items: center;
     gap: 6px;
-    cursor: pointer;
+    color: var(--c-muted);
     font-size: 12px;
-    color: #b0b0b0;
+    cursor: pointer;
     user-select: none;
 }
 
 .monitor-checkbox input {
-    cursor: pointer;
-    accent-color: #0A84FF;
     width: 14px;
     height: 14px;
+    cursor: pointer;
+    accent-color: var(--c-accent);
 }
 
 /* Maintenance actions (clear logs / compact database) + their result text. */
 .monitor-status {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
     max-width: 320px;
+    /* `--c-success` as text only reaches 3.9:1 on the light toolbars, so the
+       tone rides on a dot and the message itself stays body-legible (8.8:1+). */
+    color: var(--c-body);
     font-size: 11px;
-    color: #9fd39f;
-    text-align: right;
     line-height: 1.3;
+    text-align: right;
+}
+
+.monitor-status::before {
+    content: "";
+    flex: none;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--c-success);
 }
 
 .monitor-action-btn {
-    background: rgba(255, 255, 255, 0.06);
-    border: 0.5px solid rgba(255, 255, 255, 0.14);
-    color: #d5d5d5;
-    font-size: 12px;
     padding: 4px 10px;
-    border-radius: 6px;
-    cursor: pointer;
+    background: var(--c-surface);
+    border: 1px solid var(--c-border-i);
+    border-radius: var(--r-sm);
+    color: var(--c-text);
+    font-family: inherit;
+    font-size: 12px;
     white-space: nowrap;
-    transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+    cursor: pointer;
+    transition: background-color var(--t-dur) var(--t-ease),
+        border-color var(--t-dur) var(--t-ease);
 }
 
 .monitor-action-btn:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.12);
-    color: #fff;
-    border-color: rgba(255, 255, 255, 0.25);
+    background: var(--c-hover);
+    border-color: var(--c-muted);
 }
 
 .monitor-action-btn:disabled {
-    opacity: 0.5;
+    opacity: 0.55;
     cursor: default;
 }
 
-.close-btn:hover {
-    color: #fff;
-    background: rgba(255, 255, 255, 0.08);
+/* The shared `.close-btn` lives in `App.css`; only the panel's hover state is
+   local to the dialog (never a bare `.close-btn:hover`, which would leak). */
+.monitor-shell .close-btn {
+    background: transparent;
+    border: none;
+    color: var(--c-muted);
+    font-size: 18px;
+    line-height: 1;
+    padding: 4px 8px;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    transition: background-color var(--t-dur) var(--t-ease),
+        color var(--t-dur) var(--t-ease);
 }
 
-.close-btn:active {
-    transform: scale(0.92);
-    background: rgba(255, 255, 255, 0.12);
+.monitor-shell .close-btn:hover {
+    background: var(--c-hover);
+    color: var(--c-text);
 }
 
 .monitor-body {
     display: flex;
+    flex-direction: column;
     flex: 1;
+    min-height: 0;
     overflow: hidden;
-    gap: 0;
+}
+
+/* Log view — 2/3 of the dialog. */
+.monitor-panes {
+    display: flex;
+    flex: 2 1 0;
+    min-height: 0;
+    overflow: hidden;
 }
 
 .monitor-list-panel {
     display: flex;
     flex-direction: column;
     width: 35%;
-    border-right: 0.5px solid rgba(255, 255, 255, 0.08);
-    background-color: #1e1e1e;
-    min-width: 280px;
+    min-width: 260px;
+    min-height: 0;
+    background: var(--c-bg);
+    border-right: 1px solid var(--c-border);
 }
 
 .monitor-list-header {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    padding: 9px 12px;
-    background-color: rgba(45, 45, 45, 0.6);
-    border-bottom: 0.5px solid rgba(255, 255, 255, 0.08);
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--c-surface-2);
+    border-bottom: 1px solid var(--c-border);
 }
 
 .monitor-list-header h3 {
     margin: 0;
+    color: var(--c-text);
     font-size: 12px;
-    color: #ddd;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    font-weight: 500;
+    letter-spacing: normal;
 }
 
 /* The spinner glyph is a Font Awesome icon that animates itself. */
 .loading-spinner {
     display: inline-flex;
     align-items: center;
-    color: #888;
+    color: var(--c-muted);
 }
 
 .monitor-list {
@@ -166,19 +210,30 @@
 
 .monitor-item {
     padding: 9px 12px;
-    border-bottom: 0.5px solid rgba(255, 255, 255, 0.04);
+    border-bottom: 1px solid var(--c-border-s);
+    border-left: 2px solid transparent;
     cursor: pointer;
-    transition: background-color 0.15s;
-    border-left: 3px solid transparent;
+    transition: background-color var(--t-dur) var(--t-ease);
 }
 
 .monitor-item:hover {
-    background-color: rgba(255, 255, 255, 0.05);
+    background: var(--c-hover);
 }
 
 .monitor-item.selected {
-    background-color: rgba(10, 132, 255, 0.18);
-    border-left-color: #0A84FF;
+    background: var(--c-accent-soft);
+    border-left-color: var(--c-accent-text);
+}
+
+/* The accent wash behind the selected row costs ~1.5 contrast steps from 11px
+   meta text (`--c-muted` lands at 2.9–4.4:1 depending on the palette, below the
+   4.5:1 floor), so on that one row the meta steps up to `--c-body` (5.9–8.9:1
+   in every palette, light and dark). Selection must not make text worse. */
+.monitor-item.selected .monitor-type-badge,
+.monitor-item.selected .monitor-actor,
+.monitor-item.selected .monitor-item-time,
+.monitor-item.selected .monitor-item-preview {
+    color: var(--c-body);
 }
 
 .monitor-item-header {
@@ -188,102 +243,115 @@
     margin-bottom: 5px;
 }
 
+/* Type is metadata, not a state: a hairline badge (no fill, no accent). Only
+   the error rows borrow the danger tone. */
 .monitor-type-badge {
     display: inline-block;
-    padding: 2px 9px;
-    border-radius: 999px;
+    padding: 0 5px;
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-sm);
+    color: var(--c-muted);
     font-size: 11px;
-    color: #fff;
-    letter-spacing: 0.01em;
+    line-height: 15px;
+}
+
+.monitor-type-badge.is-error {
+    border-color: var(--c-danger);
+    color: var(--c-danger);
 }
 
 .monitor-actor {
+    color: var(--c-muted);
     font-size: 12px;
-    color: #888;
 }
 
-/* Prompt-cache chips: per-row hit of an `llm_api` request and the weighted
-   aggregate beside the list header. Token-only colours because both labels
-   describe a status, never a primary action. */
+/* Prompt-cache chip: the per-row hit of an `llm_api` request. It reports a
+   figure, so it stays neutral — `--c-accent-text` on `--c-accent-soft` sinks to
+   3.1:1 in five of the six palette/theme combinations (that pairing is for
+   selection and primary actions, not for metadata). */
 .monitor-cache-chip {
     margin-left: auto;
     padding: 2px 7px;
-    border-radius: 4px;
+    background: var(--c-surface-2);
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-sm);
+    color: var(--c-body);
     font-size: 11px;
-    background-color: var(--c-accent-soft);
-    color: var(--c-accent-text);
     white-space: nowrap;
 }
 
 .monitor-cache-avg {
-    font-size: 11px;
+    margin-left: auto;
     color: var(--c-muted);
+    font-size: 11px;
     white-space: nowrap;
 }
 
 .monitor-item-title {
+    color: var(--c-text);
     font-size: 13px;
-    color: #e0e0e0;
     margin-bottom: 4px;
 }
 
 .monitor-item-time {
+    color: var(--c-muted);
     font-size: 11px;
-    color: #888;
     margin-bottom: 4px;
 }
 
 .monitor-item-error {
+    color: var(--c-danger);
     font-size: 11px;
-    color: #FF6B6B;
     margin-bottom: 4px;
 }
 
 .monitor-item-preview {
+    max-height: 20px;
+    color: var(--c-muted);
     font-size: 11px;
-    color: #999;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-height: 20px;
 }
 
 .monitor-empty {
     padding: 24px 16px;
-    text-align: center;
-    color: #888;
+    color: var(--c-muted);
     font-size: 13px;
+    text-align: center;
 }
 
 .monitor-detail-panel {
-    flex: 1;
     display: flex;
     flex-direction: column;
-    background-color: #1e1e1e;
-    overflow: hidden;
+    flex: 1;
     min-width: 0;
+    min-height: 0;
+    background: var(--c-bg);
+    overflow: hidden;
 }
 
 .monitor-detail-header {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    padding: 9px 12px;
-    background-color: rgba(45, 45, 45, 0.6);
-    border-bottom: 0.5px solid rgba(255, 255, 255, 0.08);
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--c-surface-2);
+    border-bottom: 1px solid var(--c-border);
 }
 
 .monitor-detail-header h3 {
     margin: 0;
+    color: var(--c-text);
     font-size: 12px;
-    color: #ddd;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    font-weight: 500;
+    letter-spacing: normal;
 }
 
 .monitor-detail-id {
+    color: var(--c-muted);
     font-size: 11px;
-    color: #888;
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
@@ -299,68 +367,274 @@
 
 .detail-label {
     display: block;
-    font-size: 11px;
-    color: #ddd;
     margin-bottom: 5px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    color: var(--c-muted);
+    font-size: 11px;
+    letter-spacing: normal;
 }
 
 .detail-value {
-    font-size: 13px;
-    color: #e0e0e0;
-    word-break: break-all;
     padding: 8px 10px;
-    background-color: rgba(45, 45, 45, 0.6);
-    border-radius: 8px;
-    border-left: 2px solid #0A84FF;
+    background: var(--c-surface-2);
+    border-left: 2px solid var(--c-accent-text);
+    border-radius: var(--r-sm);
+    color: var(--c-body);
+    font-size: 13px;
+    overflow-wrap: anywhere;
 }
 
 .error-section .detail-value {
-    border-left-color: #FF6B6B;
+    /* `--c-surface` instead of the tinted `--c-surface-2` card: the danger tone
+       needs the plain surface to stay ≥4.8:1 in every palette (cream dark lands
+       at 4.35 on the tint). */
+    background: var(--c-surface);
+    border-left-color: var(--c-danger);
 }
 
 .error-text {
-    color: #FF6B6B;
+    color: var(--c-danger);
 }
 
 .detail-code {
-    font-size: 12px;
-    color: #CE9178;
-    background-color: rgba(45, 45, 45, 0.6);
-    border-radius: 8px;
-    padding: 12px;
-    border-left: 2px solid #0A84FF;
-    overflow-x: auto;
-    white-space: pre-wrap;
-    word-break: break-word;
     margin: 0;
+    padding: 12px;
+    background: var(--c-code);
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-sm);
+    color: var(--c-body);
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    line-height: 1.55;
+    font-size: 13px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    overflow-x: auto;
 }
+
+/* ─── Session report (bottom third) ─────────────────────────────────────────── */
+
+.monitor-report {
+    display: flex;
+    flex-direction: column;
+    /* The dialog's bottom third, whatever its height. */
+    flex: 0 0 33.3333%;
+    min-height: 132px;
+    background: var(--c-bg);
+    border-top: 1px solid var(--c-border);
+    overflow: hidden;
+}
+
+.monitor-report-header {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-shrink: 0;
+    padding: 7px 12px;
+    background: var(--c-surface-2);
+    border-bottom: 1px solid var(--c-border);
+}
+
+.monitor-report-header h3 {
+    margin: 0;
+    color: var(--c-text);
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: normal;
+}
+
+.monitor-report-hint {
+    margin-left: auto;
+    color: var(--c-muted);
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.monitor-report-empty {
+    padding: 24px 12px;
+    color: var(--c-muted);
+    font-size: 13px;
+    text-align: center;
+}
+
+.monitor-report-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(170px, 230px);
+    gap: 12px;
+    flex: 1;
+    min-height: 0;
+    padding: 10px 12px;
+    overflow-y: auto;
+}
+
+.monitor-report-tiles {
+    display: grid;
+    /* 120px minimum fits all seven tiles on one row at the dialog's default
+       width and reflows to two rows as the window narrows. */
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 8px;
+    align-content: start;
+    min-width: 0;
+}
+
+.report-tile {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    padding: 8px 10px;
+    background: var(--c-surface);
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-sm);
+}
+
+.report-tile-label {
+    color: var(--c-muted);
+    font-size: 11px;
+}
+
+.report-tile-value {
+    color: var(--c-text);
+    font-size: 15px;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+}
+
+/* 2px usage track — the same weight as the chat input's context bar. */
+.report-tile-meter {
+    display: block;
+    height: 2px;
+    margin: 3px 0 2px;
+    background: var(--c-border);
+}
+
+.report-tile-meter > span {
+    display: block;
+    height: 100%;
+    background: var(--c-accent);
+    transition: width var(--t-dur) var(--t-ease);
+}
+
+.report-tile-meter.is-danger > span {
+    background: var(--c-danger);
+}
+
+.report-tile-detail {
+    color: var(--c-muted);
+    font-size: 11px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+/* Tool ranking — neutral rows, error counts borrow the danger tone. */
+.monitor-report-tools {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.monitor-report-tools h4 {
+    margin: 0 0 4px;
+    color: var(--c-muted);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: normal;
+}
+
+.report-tool-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.report-tool-row {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 3px 0;
+    border-bottom: 1px solid var(--c-border-s);
+    font-size: 12px;
+}
+
+.report-tool-name {
+    min-width: 0;
+    color: var(--c-body);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.report-tool-calls {
+    margin-left: auto;
+    color: var(--c-muted);
+    font-size: 11px;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.report-tool-failures {
+    color: var(--c-danger);
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.monitor-report-none {
+    margin: 0;
+    color: var(--c-muted);
+    font-size: 12px;
+}
+
+/* Narrow windows: the report stacks under the tiles instead of squeezing the
+   ranking into a 170px column. */
+@media (max-width: 900px) {
+    .monitor-report-body {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .monitor-report-tools {
+        overflow: visible;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .report-tile-meter > span {
+        transition: none;
+    }
+}
+
+/* ─── Scrollbars ───────────────────────────────────────────────────────────── */
 
 .monitor-list::-webkit-scrollbar,
 .monitor-detail-content::-webkit-scrollbar,
-.detail-code::-webkit-scrollbar {
+.detail-code::-webkit-scrollbar,
+.monitor-report-body::-webkit-scrollbar,
+.monitor-report-tools::-webkit-scrollbar {
     width: 8px;
     height: 8px;
 }
 
 .monitor-list::-webkit-scrollbar-track,
 .monitor-detail-content::-webkit-scrollbar-track,
-.detail-code::-webkit-scrollbar-track {
+.detail-code::-webkit-scrollbar-track,
+.monitor-report-body::-webkit-scrollbar-track,
+.monitor-report-tools::-webkit-scrollbar-track {
     background: transparent;
 }
 
 .monitor-list::-webkit-scrollbar-thumb,
 .monitor-detail-content::-webkit-scrollbar-thumb,
-.detail-code::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.12);
-    border-radius: 4px;
+.detail-code::-webkit-scrollbar-thumb,
+.monitor-report-body::-webkit-scrollbar-thumb,
+.monitor-report-tools::-webkit-scrollbar-thumb {
+    background: var(--c-border-i);
+    border-radius: var(--r-sm);
 }
 
 .monitor-list::-webkit-scrollbar-thumb:hover,
 .monitor-detail-content::-webkit-scrollbar-thumb:hover,
-.detail-code::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.22);
+.detail-code::-webkit-scrollbar-thumb:hover,
+.monitor-report-body::-webkit-scrollbar-thumb:hover,
+.monitor-report-tools::-webkit-scrollbar-thumb:hover {
+    background: var(--c-muted);
 }

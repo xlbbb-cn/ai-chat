@@ -845,6 +845,60 @@ export async function clearInteractions(sessionId: string): Promise<void> {
   return invoke("clear_interactions", { sessionId });
 }
 
+/**
+ * One tool's traffic inside a session (Monitor → session report ranking).
+ * Mirrors `ToolUsageStat` in `src-tauri/src/db.rs`.
+ */
+export interface ToolUsageStat {
+  name: string;
+  calls: number;
+  /** Calls that ended in a `tool_error` / `mcp_call` row. */
+  failures: number;
+  duration_ms: number;
+}
+
+/**
+ * Aggregated analysis of one chat session, rendered in the Monitor panel's
+ * bottom strip. Mirrors `SessionStats` in `src-tauri/src/db.rs`.
+ */
+export interface SessionStats {
+  requests: number;
+  failed_requests: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  /** Prompt tokens served from the provider cache — the report's "hit" amount. */
+  hit_tokens: number;
+  /** Prompt tokens processed from scratch (`prompt_tokens - hit_tokens`). */
+  miss_tokens: number;
+  /** Requests that reported cache metrics at all (`0` hit ≠ no feedback). */
+  cache_reported_requests: number;
+  cache_hit_requests: number;
+  /** Prompt tokens of the newest successful request — the context in use. */
+  context_tokens: number;
+  /** Context window of the model behind it (`0` = unknown). */
+  context_window: number;
+  tool_calls: number;
+  tool_failures: number;
+  llm_errors: number;
+  /** Interaction rows recorded for the session, all types. */
+  interactions: number;
+  total_request_ms: number;
+  total_tool_ms: number;
+  /** Rounds that streamed a thinking phase before answering. */
+  reasoning_requests: number;
+  /** Summed thinking phase of those rounds (ms). */
+  reasoning_ms_total: number;
+  /** Rounds that reported a first-token latency, and its total (ms). */
+  first_token_requests: number;
+  first_token_ms_total: number;
+  tools: ToolUsageStat[];
+}
+
+/** Session analysis report: token usage, cache hit/miss, context and tools. */
+export async function getSessionStats(sessionId: string): Promise<SessionStats> {
+  return invoke("get_session_stats", { sessionId });
+}
+
 export async function saveMarkdownFile(path: string, content: string): Promise<void> {
   return invoke("save_markdown_file", { path, content });
 }

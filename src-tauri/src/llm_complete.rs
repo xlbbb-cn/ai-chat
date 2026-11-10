@@ -530,6 +530,64 @@ pub struct StreamResult {
     /// (a guaranteed miss, e.g. the first request of a session) and keeps
     /// cache-hit-rate metrics honest, so it must not collapse to `None`.
     pub cached_tokens: Option<u32>,
+    /// Streamed phase timings of the round (see [`StreamTiming`]).
+    pub timing: StreamTiming,
+}
+
+/// Wall-clock phases of one streamed request, measured from the moment the HTTP
+/// request is sent. Both are `Option` so "this phase never happened" (a model
+/// that answers without reasoning) is not reported as `0 ms` — the session
+/// report has to tell a fast thinker from a non-thinking model.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct StreamTiming {
+    /// Time to the first streamed delta of any kind (reasoning, content or tool
+    /// call) — the latency the user waits through before output appears.
+    pub first_token_ms: Option<u32>,
+    /// Time to the first *content* delta when the model streamed reasoning
+    /// first: the thinking phase of the round ("推理时长").
+    pub reasoning_ms: Option<u32>,
+}
+
+/// Accumulates [`StreamTiming`] while the SSE deltas arrive.
+pub struct StreamMeter {
+    started: std::time::Instant,
+    saw_reasoning: bool,
+    timing: StreamTiming,
+}
+
+impl StreamMeter {
+    fn new() -> Self {
+        Self {
+            started: std::time::Instant::now(),
+            saw_reasoning: false,
+            timing: StreamTiming::default(),
+        }
+    }
+
+    fn elapsed_ms(&self) -> u32 {
+        self.started.elapsed().as_millis().min(u32::MAX as u128) as u32
+    }
+
+    /// First streamed delta of any kind.
+    fn mark_output(&mut self) {
+        if self.timing.first_token_ms.is_none() {
+            self.timing.first_token_ms = Some(self.elapsed_ms());
+        }
+    }
+
+    fn mark_reasoning(&mut self) {
+        self.saw_reasoning = true;
+        self.mark_output();
+    }
+
+    /// First answer token: closes the thinking phase when reasoning was
+    /// streamed before it.
+    fn mark_content(&mut self) {
+        self.mark_output();
+        if self.timing.reasoning_ms.is_none() && self.saw_reasoning {
+            self.timing.reasoning_ms = Some(self.elapsed_ms());
+        }
+    }
 }
 
 /// Options controlling how a streaming LLM request behaves.
@@ -1322,6 +1380,7 @@ fn process_stream_chunk(
     completion_tokens: &mut u32,
     cached_tokens: &mut Option<u32>,
     got_tool_calls: &mut bool,
+    meter: &mut StreamMeter,
 ) {
     // Always parse usage so every caller (sub-agents, the main-agent helper and
     // the planner supervisor) gets accurate token counts. Only the main chat
@@ -1393,6 +1452,9 @@ fn process_stream_chunk(
         .or_else(|| delta.get("reasoning"))
         .and_then(|v| v.as_str())
     {
+        if !reasoning.is_empty() {
+            meter.mark_reasoning();
+        }
         reasoning_content.push_str(reasoning);
         if let Some(event) = opts.reasoning_event {
             if let Some(task_id) = opts.task_id {
@@ -1404,6 +1466,9 @@ fn process_stream_chunk(
     }
 
     if let Some(tcs) = delta["tool_calls"].as_array() {
+        if !tcs.is_empty() {
+            meter.mark_output();
+        }
         for tc in tcs {
             let idx = tc["index"].as_u64().unwrap_or(0) as usize;
             while tool_calls.len() <= idx {
@@ -1427,6 +1492,9 @@ fn process_stream_chunk(
     }
 
     if let Some(token) = delta["content"].as_str() {
+        if !token.is_empty() {
+            meter.mark_content();
+        }
         content.push_str(token);
         if opts.emit_tokens {
             if let Some(task_id) = opts.task_id {
@@ -1812,6 +1880,10 @@ pub async fn stream_llm_request(
     let mut last_err: Option<String> = None;
 
     for attempt in 1..=STREAM_MAX_RETRIES {
+        // Started before the request goes out, so the first delta's latency
+        // includes the upstream round trip (that wait is what "thinking time"
+        // feels like to the user).
+        let mut meter = StreamMeter::new();
         let mut request = client
             .post(url)
             .header(reqwest::header::ACCEPT, "text/event-stream");
@@ -1871,6 +1943,7 @@ pub async fn stream_llm_request(
                     prompt_tokens,
                     completion_tokens,
                     cached_tokens,
+                    timing: meter.timing,
                 });
             }
             let bytes = match chunk {
@@ -1903,6 +1976,7 @@ pub async fn stream_llm_request(
                         prompt_tokens,
                         completion_tokens,
                         cached_tokens,
+                        timing: meter.timing,
                     });
                 }
                 let line = line.trim();
@@ -1930,6 +2004,7 @@ pub async fn stream_llm_request(
                     &mut completion_tokens,
                     &mut cached_tokens,
                     &mut got_tool_calls,
+                    &mut meter,
                 );
             }
         }
@@ -1950,6 +2025,7 @@ pub async fn stream_llm_request(
                         &mut completion_tokens,
                         &mut cached_tokens,
                         &mut got_tool_calls,
+                        &mut meter,
                     );
                 }
             }
@@ -1978,6 +2054,7 @@ pub async fn stream_llm_request(
             prompt_tokens,
             completion_tokens,
             cached_tokens,
+            timing: meter.timing,
         });
     }
 
@@ -3235,8 +3312,8 @@ still missing."
                 // storing a second copy doubled the database size
                 // (~92 KiB per request). This table keeps the metrics.
                 let _ = db.execute(
-                    "INSERT INTO api_requests (session_id, model, response_content, reasoning_content, tool_calls, finish_reason, prompt_tokens, completion_tokens, cached_tokens, duration_ms) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                    "INSERT INTO api_requests (session_id, model, response_content, reasoning_content, tool_calls, finish_reason, prompt_tokens, completion_tokens, cached_tokens, reasoning_ms, first_token_ms, duration_ms) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                     rusqlite::params![
                         session_id,
                         active_model.as_str(),
@@ -3247,6 +3324,8 @@ still missing."
                         sr.prompt_tokens,
                         sr.completion_tokens,
                         sr.cached_tokens.map(i64::from),
+                        sr.timing.reasoning_ms.map(i64::from),
+                        sr.timing.first_token_ms.map(i64::from),
                         duration_ms,
                     ],
                 );
@@ -3255,19 +3334,30 @@ still missing."
                 let response_display = sr.content.clone();
                 // Cache-hit metrics travel in the interaction metadata so the
                 // Monitor detail view (and the list chip) can show them without
-                // touching the interaction schema.
-                let usage_metadata = sr.cached_tokens.map(|cached| {
-                    json!({
-                        "prompt_tokens": sr.prompt_tokens,
-                        "cached_tokens": cached,
-                        "hit_ratio": if sr.prompt_tokens > 0 {
-                            ((cached as f64) / (sr.prompt_tokens as f64)).clamp(0.0, 1.0)
-                        } else {
-                            0.0
-                        }
-                    })
-                    .to_string()
-                });
+                // touching the interaction schema. The round's streamed phase
+                // timings ride along so the detail pane can explain the wait.
+                let usage_metadata = {
+                    let mut meta = serde_json::Map::new();
+                    if let Some(cached) = sr.cached_tokens {
+                        meta.insert("prompt_tokens".into(), json!(sr.prompt_tokens));
+                        meta.insert("cached_tokens".into(), json!(cached));
+                        meta.insert(
+                            "hit_ratio".into(),
+                            json!(if sr.prompt_tokens > 0 {
+                                ((cached as f64) / (sr.prompt_tokens as f64)).clamp(0.0, 1.0)
+                            } else {
+                                0.0
+                            }),
+                        );
+                    }
+                    if let Some(ms) = sr.timing.reasoning_ms {
+                        meta.insert("reasoning_ms".into(), json!(ms));
+                    }
+                    if let Some(ms) = sr.timing.first_token_ms {
+                        meta.insert("first_token_ms".into(), json!(ms));
+                    }
+                    (!meta.is_empty()).then(|| Value::Object(meta).to_string())
+                };
                 log_interaction(
                     &db,
                     &session_id,

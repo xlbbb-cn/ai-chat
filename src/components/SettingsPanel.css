@@ -792,20 +792,20 @@
   background: var(--sw-default-4);
 }
 
-.palette-swatch-fig .palette-chip:nth-child(1) {
-  background: var(--sw-fig-1);
+.palette-swatch-sakura .palette-chip:nth-child(1) {
+  background: var(--sw-sakura-1);
 }
 
-.palette-swatch-fig .palette-chip:nth-child(2) {
-  background: var(--sw-fig-2);
+.palette-swatch-sakura .palette-chip:nth-child(2) {
+  background: var(--sw-sakura-2);
 }
 
-.palette-swatch-fig .palette-chip:nth-child(3) {
-  background: var(--sw-fig-3);
+.palette-swatch-sakura .palette-chip:nth-child(3) {
+  background: var(--sw-sakura-3);
 }
 
-.palette-swatch-fig .palette-chip:nth-child(4) {
-  background: var(--sw-fig-4);
+.palette-swatch-sakura .palette-chip:nth-child(4) {
+  background: var(--sw-sakura-4);
 }
 
 .palette-swatch-cream .palette-chip:nth-child(1) {

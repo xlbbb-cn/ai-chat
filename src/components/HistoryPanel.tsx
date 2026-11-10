@@ -5,6 +5,7 @@ import type { Attachment, ChatInjection, Message, MessageContent, ToolCallEntry 
 import { useI18n, type Locale } from "../i18n";
 import {
   FontAwesomeIcon,
+  faAnglesLeft,
   faBoxArchive,
   faBoxOpen,
   faListCheck,
@@ -12,7 +13,6 @@ import {
   faStar,
   faStarOutline,
   faTrash,
-  faXmark,
   type IconDefinition,
 } from "../icons";
 import "./HistoryPanel.css";
@@ -413,10 +413,10 @@ export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, disable
 
   return (
     <div className="history-panel">
-      <div className="history-header">
+      <div className="panel-header">
         <h2>{t("history.title")}</h2>
-        <button className="close-btn" onClick={onClose} aria-label={t("common.close")}>
-          <FontAwesomeIcon icon={faXmark} />
+        <button className="close-btn" onClick={onClose} aria-label={t("common.collapse")}>
+          <FontAwesomeIcon icon={faAnglesLeft} />
         </button>
       </div>
 

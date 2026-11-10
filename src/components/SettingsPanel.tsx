@@ -27,7 +27,7 @@ interface Props {
  */
 const PALETTES: { id: Palette; labelKey: MessageKey }[] = [
   { id: "default", labelKey: "settings.appearance.paletteDefault" },
-  { id: "fig", labelKey: "settings.appearance.paletteFig" },
+  { id: "sakura", labelKey: "settings.appearance.paletteSakura" },
   { id: "cream", labelKey: "settings.appearance.paletteCream" },
 ];
 

@@ -28,7 +28,7 @@
 
 .update-panel {
     /* Aliases of the global tokens, so the dialog follows the active
-       palette (light, dark, Fig, Cream) instead of carrying a copy of
+       palette (light, dark, Sakura, Cream) instead of carrying a copy of
        it. See DESIGN.md, "Theme plumbing". */
     --t-bg: var(--c-surface);
     --t-bg-soft: var(--c-surface-2);

@@ -515,7 +515,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub theme: Option<String>,
     /// Colour scheme layered on top of the light / dark theme
-    /// (`default`, `fig`, `cream`). Persisted like `theme`; the backend never
+    /// (`default`, `sakura`, `cream`). Persisted like `theme`; the backend never
     /// interprets the value — the frontend turns it into `data-palette`.
     #[serde(default)]
     pub palette: Option<String>,
@@ -1858,6 +1858,7 @@ pub fn run() {
             db::list_interactions,
             db::get_interaction,
             db::clear_interactions,
+            db::get_session_stats,
             mcp::list_mcp_servers,
             mcp::save_mcp_server,
             mcp::delete_mcp_server,

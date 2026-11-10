@@ -14,6 +14,7 @@ import type { McpServer, McpTransport, McpLogEntry } from "../types";
 import { useI18n } from "../i18n";
 import {
     FontAwesomeIcon,
+    faAnglesLeft,
     faBolt,
     faCircleCheck,
     faCircleXmark,
@@ -274,7 +275,7 @@ export function McpPanel({ onClose, onServersChange }: Props) {
     if (editing) {
         return (
             <div className="mcp-panel">
-                <div className="mcp-header">
+                <div className="panel-header">
                     <h2>{servers.some((s) => s.id === editing.id) ? t("mcp.editTitle") : t("mcp.addTitle")}</h2>
                     <button className="close-btn" onClick={() => setEditing(null)} aria-label={t("common.close")}>
                         <FontAwesomeIcon icon={faXmark} />
@@ -371,10 +372,10 @@ export function McpPanel({ onClose, onServersChange }: Props) {
 
     return (
         <div className="mcp-panel">
-            <div className="mcp-header">
+            <div className="panel-header">
                 <h2>{t("mcp.title")}</h2>
-                <button className="close-btn" onClick={onClose} aria-label={t("common.close")}>
-                    <FontAwesomeIcon icon={faXmark} />
+                <button className="close-btn" onClick={onClose} aria-label={t("common.collapse")}>
+                    <FontAwesomeIcon icon={faAnglesLeft} />
                 </button>
             </div>
 

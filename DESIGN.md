@@ -48,7 +48,7 @@ The interface has **two independent colour dimensions**, both set on `<html>`:
 | Attribute | Values | Meaning |
 |---|---|---|
 | `data-theme` | `light` / `dark` | Light vs. dark resolution. `auto` follows the OS and resolves to one of the two. |
-| `data-palette` | `default` / `fig` / `cream` | The colour scheme: which hues the surfaces, the accent and the semantic states wear. |
+| `data-palette` | `default` / `sakura` / `cream` | The colour scheme: which hues the surfaces, the accent and the semantic states wear. |
 
 Both are written by `applyTheme()` in `src/App.tsx` from `config.theme` and
 `config.palette`. Every palette therefore needs a **light *and* a dark token
@@ -58,7 +58,7 @@ finished as `cream` + `light`.
 | Palette | Light | Dark | Character |
 |---|---|---|---|
 | `default` | Pure White canvas, Electric Blue accent | Carbon Dark canvas, lifted Electric Blue | The monochrome-plus-one baseline. |
-| `fig` (无花果) | Frost-purple canvas `#B8A5D2`, panels in lavender-white, fig-red accent `#EFAFAD`, 艾背绿 code `#DFECD5`, 海天蓝 reasoning `#C6E6E8` | Deep plum canvas `#241E33`, lifted pastels | A pastel scheme. |
+| `sakura` (樱花粉) | 草莓牛奶 `#FFDDE9` canvas, `#FFF7FA` panels, 樱花粉 `#FF8FB1` accent with `#8E2450` as its legible twin, 薄荷奶绿 `#DFF5EA` code, 薰衣草紫 `#EDE4FF` reasoning — the pastel-pink group of Color Hunt (`#FFCED8` / `#FFDDDD` / `#FFF4DE` / `#FFE8C4`), cooled into a strawberry-milk scheme | Deep plum canvas `#2B1A23`, `#37212C` panels, lifted `#FFA6C2` accent | Cute. Soft pastel pink, deliberately the one palette that is not paper-white. |
 | `cream` (乳白) | The adjacent warm-white group — 蚌肉白 `#F9F1DB` canvas, 乳白 `#F9F4DC` panels, 奶油白 `#FFF8E7` alternate surface, 粉白 `#FBF2E3` secondary — washed with oklab gradients instead of flat fills | Deep umber canvas, the same tones as warm greys | Paper. The accent stays Electric Blue: this palette is about the neutrals. |
 
 ### Rules for a palette block
@@ -415,6 +415,51 @@ This is the one place with a deliberate asymmetry:
 - Streaming states may animate a gradient sweep across a label, but must respect
   `prefers-reduced-motion`.
 
+### Interaction monitor
+
+The log dialog opened from Settings → Runtime & Debug. Chrome is the shared
+dialog recipe — `--c-toolbar` header with one hairline, `--c-surface` content,
+4px radius, no elevation — and it carries **no literal colour**: the dark box it
+used to be was the last hardcoded surface in the system.
+
+- **Panes (2/3 of the height).** List column `35%` / `min-width: 260px` with a
+  1px right hairline; the detail pane fills the rest. Rows: hover `--c-hover`,
+  selected `--c-accent-soft` plus a 2px `--c-accent-text` left border.
+- **Type badge is metadata, not state**: hairline `--c-border` + `--c-muted`,
+  4px. Only error rows (`llm_error` / `tool_error` / `mcp_call`) borrow
+  `--c-danger`. Never a filled pill.
+- **Session report (`flex: 0 0 33.3333%`)** fills exactly the bottom third of
+  the dialog, whatever its height (`min-height: 132px` keeps it usable on short
+  windows). Seven tiles — total tokens, cache hit, cache miss, context used,
+  requests, thinking per round, tool calls — each `--c-surface` + hairline:
+  label 11px `--c-muted`, value 15px/500 with tabular numerals, detail 11px.
+  Hit / miss / context add a 2px track (`--c-accent`, `--c-danger` from 85 %
+  context), the same weight the composer's usage bar uses. The ranking column
+  beside them lists the busiest tools (≤ 8 rows, failures in `--c-danger`) and
+  scrolls on its own; below 900px the report stacks under the tiles.
+- **Data** comes from `get_session_stats` (`src-tauri/src/db.rs`), aggregated in
+  SQL: tokens / cache / context from `api_requests`, tool traffic from
+  `interaction_log` (`mcp_call` is the *failure* row, `mcp_response` the success
+  one). The context ratio is `context_tokens / context_window`, with the window
+  resolved from `config.model_context_lengths` / `config.model_metadata` for the
+  newest request's model — unknown renders `—` and a hint, never a fake 0 %.
+- **Thinking per round** is `reasoning_ms` — the wait from sending the request
+  to the first *content* token, recorded only when the model streamed reasoning
+  first (`StreamTiming` in `llm_complete.rs`). A round without a thinking phase
+  stores NULL, so the average is never diluted by non-thinking models and the
+  tile reads `—` instead of `0.0s`. `first_token_ms` (any first delta) is its
+  detail line; both ride along in the `llm_api` interaction metadata.
+- **Contrast picks** (measured over all six palette × theme combinations, 11px
+  text ≥ 4.5:1): the accent wash of a selected row costs ~1.5 steps from meta
+  text, so `.selected` steps its badge / actor / time / preview up to
+  `--c-body`; the cache chip is a *figure*, not a state, so it is neutral
+  (`--c-surface-2` + `--c-border`, `--c-body`) — `--c-accent-text` on
+  `--c-accent-soft` sinks to 3.1:1 in five of six combinations; the error card
+  sits on `--c-surface` (not the tinted `--c-surface-2`) because `--c-danger`
+  on the tint lands at 4.35:1 in cream dark; and the maintenance status keeps
+  its `--c-success` tone on a dot, with the message itself in `--c-body`
+  (`--c-success` as text is 3.9:1 on the light toolbars).
+
 ---
 
 ## Layout and density
@@ -426,8 +471,9 @@ Nothing in between.
 |---|---|
 | Chat transcript (`.messages`) | `padding: 18px 16px 20px`, `gap: 16px` |
 | Chat input area | `padding: 10px 12px 12px`, `gap: 8px`; control row `gap: 6px` |
-| Sidebar | `width: 400px`, 1px right hairline |
-| Panel header / footer | `padding: 10px 12px`, 1px hairline |
+| Sidebar | `width: 400px`; 1px right hairline drawn by `.sidebar::after`, starting `--panel-header-h` down so it never crosses the header band |
+| Panel header | `.panel-header` (shared, `App.css`): `min-height: var(--panel-header-h)` = 49px so its hairline lands on the chat toolbar's, `padding: 6px 12px`, frosted `--c-toolbar`, 1px hairline, title + one `faAnglesLeft` collapse chevron and nothing else |
+| Panel footer | `padding: 10px 12px`, 1px hairline |
 | Panel list | `padding: 10px 12px`, `gap: 6px` |
 | Panel row | `padding: 10px 12px` |
 | Settings nav | `180px` column, item `min-height: 28px`, `font-size: 13px` |
@@ -472,6 +518,14 @@ Settings additionally drops to **13px** text. This is what keeps the app feeling
 like one instrument rather than three glued together — do not let a new form
 re-introduce 40px inputs.
 
+### Scrollbars
+
+Only the transcript and the panel lists draw a bar, and only while they are
+scrolling (`.scrolling-active`). Everything else that scrolls hides the bar:
+the composer (`.chat-input`) grows to its `max-height` and then scrolls
+invisibly — a bar inside a 34px field sits on top of the tail of every full
+line — and the sidebar divider/scroll treatment must not re-introduce one.
+
 ### Whitespace philosophy
 
 Whitespace is the frame, not leftover space. Prefer removing a border or a fill
@@ -500,6 +554,20 @@ The titlebar is `position: fixed` at `z-index: 2000`, above every overlay, so th
 window controls stay reachable while Settings or the Markdown editor is open.
 Fullscreen pages start at `top: var(--titlebar-h)`; the sidebar starts below it
 too. True modal dialogs (9999 layer) still cover the titlebar on purpose.
+
+The sidebar panel header (`.panel-header`) repeats the titlebar's frosted
+`--c-toolbar` and the chat toolbar's height, so the whole top of the window —
+titlebar, panel header, chat toolbar — reads as one glass band divided only by
+the hairline under the panel header. That shared height is what lands the
+hairline on the toolbar's own row, so the top of the window shows one
+horizontal line rather than two lines 7px apart. The header carries the title
+and the collapse control and nothing else.
+
+The 1px divider between the sidebar and the chat area is drawn by
+`.sidebar::after` and starts `--panel-header-h` below the top of the panel: in
+the header's own band it is deliberately absent, because a vertical line there
+would cut the glass band in two right next to the chevron and make the header read as
+a board glued to the left edge.
 
 ---
 
@@ -550,16 +618,15 @@ too. True modal dialogs (9999 layer) still cover the titlebar on purpose.
 | `src/components/SettingsPanel.css` | Settings page (`--t-*` are aliases of `--c-*`) |
 | `src/components/ModelSelect.css` | Model picker trigger + portal popup |
 | `src/components/TitleBar.tsx` | Custom window chrome: drag region, window controls, `⋯` app menu (styles in `App.css`) |
-| `src/components/{Update,Monitor,AgentMission,Profile}Panel.css` | Feature surfaces, self-contained |
+| `src/components/{Update,Monitor,AgentMission,Profile}Panel.css` | Feature surfaces, self-contained — `MonitorPanel.css` also owns the two log panes and the session-report strip |
 
 ### Theme plumbing
 
 `data-theme` and `data-palette` on `<html>` are set by `applyTheme()` in
 `src/App.tsx` from `config.theme` (`auto` / `light` / `dark`) and
-`config.palette` (`default` / `fig` / `cream`). Everything must work through the
+`config.palette` (`default` / `sakura` / `cream`). Everything must work through the
 token layer — no component should branch on the theme or the palette itself
-except where a literal is unavoidable (currently: the toggle knob in dark mode,
-and the monitor terminal).
+except where a literal is unavoidable (currently: the toggle knob in dark mode).
 
 The Settings picker previews a change immediately but persists it with the
 form's **Save Changes**; `config.palette` rides along with `config.theme` in
