@@ -1058,6 +1058,94 @@ body {
   color: var(--c-muted);
 }
 
+/* While the nap runs, the greeting's two lines become one live status block:
+   the same 17px/500 title plus a 14px muted detail, so the empty state keeps
+   its size when the greeting is swapped back in. Counts use tabular figures so
+   a changing round/tool number never shifts the line. */
+.empty-dream-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Completed-pass result bubble, shown in the greeting's place. A clickable
+   speech bubble whose tail points up at the face; it stays until clicked, so
+   the report is readable. The outer element owns the tail, leaving the inner
+   scroll container free to clip a long report without clipping the tail. */
+.empty-dream-result {
+  position: relative;
+  width: min(420px, calc(100vw - 48px));
+  margin: 10px auto 0;
+  opacity: 0;
+  animation: rabbit-hop-bubble-in var(--t-dur) var(--t-ease) forwards;
+}
+
+.empty-dream-result::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -5px;
+  width: 8px;
+  height: 8px;
+  background: var(--c-surface);
+  border-left: 1px solid var(--c-border-i);
+  border-top: 1px solid var(--c-border-i);
+  transform: translateX(-50%) rotate(45deg);
+  transition: border-color var(--t-dur) var(--t-ease);
+}
+
+.empty-dream-result-bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  max-height: min(260px, 45vh);
+  overflow-y: auto;
+  padding: 9px 12px 8px;
+  border: 1px solid var(--c-border-i);
+  border-radius: var(--r-sm);
+  background: var(--c-surface);
+  color: var(--c-body);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.55;
+  text-align: left;
+  cursor: pointer;
+  appearance: none;
+  transition: border-color var(--t-dur) var(--t-ease);
+}
+
+.empty-dream-result-bubble:hover,
+.empty-dream-result-bubble:focus-visible {
+  border-color: var(--c-muted);
+}
+
+.empty-dream-result-bubble:focus-visible {
+  outline: 1px solid var(--c-border-i);
+  outline-offset: 3px;
+}
+
+.empty-dream-result:hover::before,
+.empty-dream-result:focus-within::before {
+  border-color: var(--c-muted);
+}
+
+.empty-dream-result-title {
+  color: var(--c-text);
+  font-weight: 500;
+}
+
+.empty-dream-result-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.empty-dream-result-dismiss {
+  color: var(--c-muted);
+  font-size: 11px;
+}
+
 /* Idle face — a round face with two tall blinking eyes (no mouth or other
    features) that hops back and forth above the empty-state greeting while the
    conversation is empty; class names keep the hopping motion. Pure CSS/SVG:
@@ -1367,8 +1455,13 @@ button.rabbit-hop-bunny:focus-visible {
   .rabbit-hop .rabbit-hop-eye,
   .rabbit-hop-bubble,
   .rabbit-hop-dream-track,
-  .rabbit-hop-zzz span {
+  .rabbit-hop-zzz span,
+  .empty-dream-result {
     animation: none;
+  }
+
+  .empty-dream-result {
+    opacity: 1;
   }
 
   .rabbit-hop-hint {

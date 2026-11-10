@@ -47,6 +47,7 @@ import type {
   ThemeMode,
   TimerEntry,
   BackgroundTaskState,
+  EvolutionMaintenancePhase,
   UpdateInfo,
   WorkspaceFileEntry,
 } from "./types";
@@ -108,6 +109,15 @@ const DREAM_FACE = (
     </g>
   </svg>
 );
+
+/** Status-line label for each maintenance phase (see `EvolutionMaintenancePhase`). */
+const DREAM_PHASE_KEYS = {
+  inventory: "app.dream.phase.inventory",
+  files: "app.dream.phase.files",
+  skills: "app.dream.phase.skills",
+  memory: "app.dream.phase.memory",
+  wrap_up: "app.dream.phase.wrap_up",
+} as const;
 
 /**
  * Paint the current theme + palette on `<html>`.
@@ -339,6 +349,18 @@ export default function App() {
   const [selfEvolutionMode, setSelfEvolutionMode] = useState(false);
   const [dreamState, setDreamState] = useState<"idle" | "running">("idle");
   const [dreamGlyphs, setDreamGlyphs] = useState<string[]>(() => makeDreamGlyphs());
+  /** Live phase/round/tool count shown instead of the idle greeting. */
+  const [dreamProgress, setDreamProgress] = useState<{
+    phase: EvolutionMaintenancePhase;
+    round: number;
+    toolCalls: number;
+  } | null>(null);
+  /**
+   * Final report of the last completed pass. It is shown in a clickable bubble
+   * under the face until dismissed, so a finish is readable instead of being
+   * swallowed by the empty state.
+   */
+  const [dreamResult, setDreamResult] = useState<string | null>(null);
   /** A terminal event already arrived; a late `get_state` must not revive it. */
   const dreamEventSeenRef = useRef(false);
   /**
@@ -574,6 +596,9 @@ export default function App() {
     setReasoningEfforts(cfg.model_reasoning_effort ?? {});
     setActiveToolCount((cfg.selected_tools ?? []).length);
     setSelfEvolutionMode(cfg.self_evolution_mode ?? false);
+    // A result bubble belongs to the workspace/config it was produced in; a
+    // reload, profile import or workspace switch must not carry it over.
+    setDreamResult(null);
     // The config is the source of truth for the UI language (localStorage is
     // only a first-paint cache), so a profile import can switch it too.
     if (isLocale(cfg.language)) setLocale(cfg.language);
@@ -967,9 +992,21 @@ export default function App() {
       dreamEventSeenRef.current = true;
       if (state.running) {
         setDreamState("running");
+        setDreamResult(null);
+        setDreamProgress((previous) => ({
+          phase: state.phase ?? previous?.phase ?? "inventory",
+          round: state.round ?? previous?.round ?? 1,
+          toolCalls: state.toolCalls ?? previous?.toolCalls ?? 0,
+        }));
         return;
       }
       setDreamState("idle");
+      setDreamProgress(null);
+      setDreamResult(
+        state.outcome === "done" && state.summary?.trim()
+          ? state.summary.trim()
+          : null,
+      );
       if (state.outcome === "error" && state.error) {
         setError(t("app.dream.failed", { error: state.error }), "warning");
       }
@@ -978,6 +1015,7 @@ export default function App() {
       .then((running) => {
         if (running && !dreamEventSeenRef.current) {
           setDreamState("running");
+          setDreamProgress({ phase: "inventory", round: 1, toolCalls: 0 });
         }
       })
       .catch(console.error);
@@ -1941,6 +1979,10 @@ export default function App() {
     const rawText = (overrideText ?? input).trim();
     if (!rawText || streaming) return;
 
+    // The conversation is starting, so a maintenance report bubble has done
+    // its job; it must not reappear over a later empty chat.
+    setDreamResult(null);
+
     // Sending is an explicit "show me what happens next": re-arm the follow so
     // the new turn is pinned into view even if the user was reading further
     // up. A timer resume is not a user action and leaves the view alone.
@@ -2234,6 +2276,8 @@ export default function App() {
     setDreamGlyphs(makeDreamGlyphs());
     lastDreamClickRef.current = 0;
     setDreamState("running");
+    setDreamProgress({ phase: "inventory", round: 1, toolCalls: 0 });
+    setDreamResult(null);
     try {
       await startEvolutionMaintenance(selectedModel);
     } catch (err) {
@@ -2245,6 +2289,7 @@ export default function App() {
         /* fall through to the warning */
       }
       setDreamState("idle");
+      setDreamProgress(null);
       setError(t("app.dream.failed", { error: String(err) }), "warning");
     }
   }, [
@@ -2266,6 +2311,11 @@ export default function App() {
       console.error("Failed to stop evolution maintenance", err);
     }
   }, [dreamState]);
+
+  /** Click on the result bubble: drop it and restore the greeting. */
+  const dismissDreamResult = useCallback(() => {
+    setDreamResult(null);
+  }, []);
 
   const handleDreamClick = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -2715,6 +2765,7 @@ export default function App() {
     setUsage(null);
     setUsageReady(false);
     setPendingRetryMessageId(null);
+    setDreamResult(null);
     setSessionId(crypto.randomUUID());
   }
 
@@ -3670,13 +3721,46 @@ export default function App() {
                   )}
                 </div>
               </div>
-              <p>{t("app.emptyStart")}</p>
-              <p className="empty-hint">
-                {t("app.emptyHint", {
-                  skills: t("app.toolbarSkills"),
-                  settings: t("app.toolbarSettings"),
-                })}
-              </p>
+              {dreamState === "running" ? (
+                <div className="empty-dream-status" role="status" aria-live="polite">
+                  <p className="empty-dream-title">{t("app.dream.statusTitle")}</p>
+                  <p
+                    className="empty-hint"
+                    title={t(DREAM_PHASE_KEYS[dreamProgress?.phase ?? "inventory"])}
+                  >
+                    {t("app.dream.statusDetail", {
+                      round: dreamProgress?.round ?? 1,
+                      tools: dreamProgress?.toolCalls ?? 0,
+                    })}
+                  </p>
+                </div>
+              ) : dreamResult && selfEvolutionMode ? (
+                <div className="empty-dream-result">
+                  <button
+                    type="button"
+                    className="empty-dream-result-bubble"
+                    onClick={dismissDreamResult}
+                  >
+                    <span className="empty-dream-result-title">
+                      {t("app.dream.resultTitle")}
+                    </span>
+                    <span className="empty-dream-result-body">{dreamResult}</span>
+                    <span className="empty-dream-result-dismiss">
+                      {t("app.dream.resultDismiss")}
+                    </span>
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <p>{t("app.emptyStart")}</p>
+                  <p className="empty-hint">
+                    {t("app.emptyHint", {
+                      skills: t("app.toolbarSkills"),
+                      settings: t("app.toolbarSettings"),
+                    })}
+                  </p>
+                </>
+              )}
             </div>
           )}
           {messages.map((m) =>

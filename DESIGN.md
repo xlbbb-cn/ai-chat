@@ -413,6 +413,23 @@ no hint, no hover treatment, no click handler and no focus target.
   `scale` breathing loop, the gaze stops and each eye squashes to
   `scaleY(0.12)` — a closed line. The hint bubble moves above the nap bubble
   and reads "正在小憩，整理技能与记忆… · 双击可终止（不建议）".
+- **Status block:** while the pass runs, the greeting's two lines are replaced
+  by a two-line live status: a 17px/500 `--c-text` title ("正在整理技能与记忆…")
+  and a 14px `--c-muted` detail ("Dreaming Scene N/M", where N is the current
+  round and M the executed tool-call count). The phase from
+  `evolution-maintenance-state` (`inventory` / `files` / `skills` / `memory` /
+  `wrap_up`) is kept as the detail line's `title` tooltip. Round and tool-call
+  counts use tabular figures so changing numbers never shift the line.
+- **Result bubble:** a completed pass replaces the greeting with a clickable
+  speech bubble in the same slot: `--c-surface`, 1px `--c-border-i`, 4px
+  radius, a rotated 8px tail pointing up at the face, 13px `--c-body` text
+  (the model's report, `pre-wrap`), a 13px/500 `--c-text` title and an 11px
+  `--c-muted` "点击关闭" line. It is capped at 420px wide / `min(260px, 45vh)`
+  tall with its own scroll area (the tail sits on the outer wrapper so scrolling
+  cannot clip it). Clicking anywhere in the bubble dismisses it and restores the
+  greeting; starting a new pass also clears it. It fades in on `--t-dur` /
+  `--t-ease` (opacity only) and is static under `prefers-reduced-motion`. No
+  extra colours, no elevation.
 - **Bubble:** 100×46px, `--c-surface` + 1px `--c-border-i`, 4px radius, no
   shadow; a rotated 8px square forms the tail. Inside, one horizontal row of
   random glyphs (`--c-muted`, 12px) scrolls left on a 4.2s linear loop; the

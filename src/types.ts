@@ -1027,16 +1027,32 @@ export interface TodoStateEvent {
 }
 
 /**
+ * Phase of the silent maintenance pass, as announced by
+ * `evolution-maintenance-state` while `running` is true. The empty state maps
+ * it to a short status line instead of showing the idle greeting.
+ */
+export type EvolutionMaintenancePhase =
+  | "inventory"
+  | "files"
+  | "skills"
+  | "memory"
+  | "wrap_up";
+
+/**
  * Payload of `evolution-maintenance-state`.
  *
  * The silent maintenance turn (the empty-state "nap face") announces itself
  * here instead of using the `chat-*` stream, so it can never settle a real chat
  * reply. `running: false` always carries an outcome; `error` is present only
  * for `outcome: "error"` and `summary` is the model's final report for `done`.
+ * Running events also carry the live phase / round / tool-call count.
  */
 export interface EvolutionMaintenanceState {
   running: boolean;
   outcome?: "done" | "stopped" | "error";
   error?: string;
   summary?: string;
+  phase?: EvolutionMaintenancePhase;
+  round?: number;
+  toolCalls?: number;
 }

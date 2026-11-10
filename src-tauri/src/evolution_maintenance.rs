@@ -68,6 +68,34 @@ fn budget_is_low(round: u32, tool_calls: u32) -> bool {
     round >= MAX_ROUNDS || tool_calls.saturating_add(2) >= MAX_TOOL_CALLS
 }
 
+/// Status phase announced while a tool is running. `None` for a tool the
+/// maintenance turn does not allow, so the previous phase stays on screen.
+fn phase_for_tool(name: &str) -> Option<&'static str> {
+    match name {
+        "skill_merge" => Some("skills"),
+        "memory" => Some("memory"),
+        "file_actions" => Some("files"),
+        _ => None,
+    }
+}
+
+/// Announce live progress on the same event stream the face listens to.
+///
+/// `running: true` keeps the face napping; `phase`, `round` and `toolCalls`
+/// drive the two-line status block that replaces the empty-state greeting
+/// while the pass runs. The terminal event (`running: false`) restores it.
+fn emit_progress(app: &AppHandle, phase: &str, round: u32, tool_calls: u32) {
+    let _ = app.emit(
+        "evolution-maintenance-state",
+        json!({
+            "running": true,
+            "phase": phase,
+            "round": round,
+            "toolCalls": tool_calls,
+        }),
+    );
+}
+
 /// Save a resume note into the evolution memory before a partial pass ends.
 ///
 /// The note is a normal evolution entry with a stable key, so the next pass
@@ -260,7 +288,15 @@ pub fn start_evolution_maintenance(
         *slot = Some(cancel.clone());
     }
 
-    let _ = app.emit("evolution-maintenance-state", json!({ "running": true }));
+    let _ = app.emit(
+        "evolution-maintenance-state",
+        json!({
+            "running": true,
+            "phase": "inventory",
+            "round": 1,
+            "toolCalls": 0,
+        }),
+    );
 
     let app_for_task = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -369,6 +405,7 @@ async fn run_inner(
     let mut total_tokens: u32 = 0;
     let mut tool_calls_count: u32 = 0;
     let mut budget_wrap_up_sent = false;
+    let mut phase = "inventory";
 
     log(
         state,
@@ -414,6 +451,10 @@ async fn run_inner(
         // `tool_choice: "none"`. The pass then ends with a summary (and any
         // work already saved) instead of a "failed after N rounds" error.
         let budget_low = budget_is_low(round, tool_calls_count);
+        if budget_low {
+            phase = "wrap_up";
+        }
+        emit_progress(app, phase, round, tool_calls_count);
         if budget_low && !budget_wrap_up_sent {
             working_memory.push(json!({
                 "role": "user",
@@ -661,6 +702,10 @@ async fn run_inner(
                 continue;
             }
             tool_calls_count = tool_calls_count.saturating_add(1);
+            if let Some(next_phase) = phase_for_tool(name) {
+                phase = next_phase;
+                emit_progress(app, phase, round, tool_calls_count);
+            }
 
             let tool_result = if !ALLOWED_TOOLS.contains(&name.as_str()) {
                 format!(
@@ -1042,6 +1087,14 @@ mod tests {
         assert!(!budget_is_low(1, MAX_TOOL_CALLS - 3));
         assert!(budget_is_low(1, MAX_TOOL_CALLS - 2));
         assert!(budget_is_low(MAX_ROUNDS, 0));
+    }
+
+    #[test]
+    fn tool_names_map_to_progress_phases() {
+        assert_eq!(phase_for_tool("skill_merge"), Some("skills"));
+        assert_eq!(phase_for_tool("memory"), Some("memory"));
+        assert_eq!(phase_for_tool("file_actions"), Some("files"));
+        assert_eq!(phase_for_tool("run_cmd"), None);
     }
 
     #[test]
