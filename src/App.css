@@ -1807,6 +1807,29 @@ button.rabbit-hop-bunny:focus-visible {
   box-shadow: var(--shadow-scroll-bottom);
 }
 
+/* Drop target: a file dragged in from the OS is about to be attached — copied
+   into `<workspace>/.data/tmp/`, or referenced in place when it already lives
+   in the workspace — and mentioned in the composer. It covers the input area
+   only — the transcript stays readable while the pointer is over the
+   window — and takes no pointer events, so the drop still reaches the native
+   handler that owns it. */
+.composer-drop {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px dashed var(--c-accent);
+  border-radius: var(--r-sm);
+  background: var(--glass-backdrop);
+  color: var(--c-accent);
+  font-size: 13px;
+  font-weight: 500;
+  pointer-events: none;
+}
+
 /* 2px context-usage bar, pinned flush to the input area's top border
    (absolutely positioned over it — no layout shift, always touching the
    border line). Solid fill once the request's usage is known; a moving accent

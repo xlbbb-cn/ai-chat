@@ -131,6 +131,16 @@ const zhTW: Messages = {
             listFailed: "無法列出工作區技能：{error}",
         },
         attachmentUnsupported: "已跳過 {names}：「{model}」無法讀取該檔案類型。",
+        composer: {
+            dropHint: "放開即可加入對話（檔案存入 .data/tmp 並插入 @ 引用）",
+            busy: "助理正在回覆：等這一輪結束再加入檔案。",
+            tooLarge: "{name} 太大，無法加入（上限 24 MB）。",
+            empty: "{name} 沒有內容（剪貼簿沒有提供檔案資料）。",
+            unreadable: "無法讀取 {name}：{error}",
+            saveFailed: "無法儲存 {name}：{error}",
+            dropFailed: "無法加入拖入的檔案：{error}",
+        },
+        messageRenderFailed: "這則訊息無法渲染：{error}",
         inputPlaceholder: "輸入訊息…（@ 引用檔案，/ 引用技能，Enter 送出，Shift+Enter 換行）",
         injections: {
             title: "本輪內追加",

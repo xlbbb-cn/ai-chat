@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { listen } from "@tauri-apps/api/event";
-import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState, setWindowVibrancy } from "./api";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState, setWindowVibrancy, savePastedFile, importWorkspacePaths } from "./api";
 
-import { ChatMessage } from "./components/ChatMessage";
+import { ChatMessage, ChatMessageBoundary } from "./components/ChatMessage";
 import { ToolCallGroup } from "./components/ToolCallGroup";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { ModelSelect } from "./components/ModelSelect";
@@ -56,6 +57,12 @@ import type {
 import { extensionOf, supportsMentionName } from "./attachments";
 import { activeMentionQuery, resolveFileMentions, scoreWorkspaceFile } from "./fileMention";
 import type { MentionProgress, MentionResolution } from "./fileMention";
+import {
+  insertMentionTokens,
+  mentionTokenForPath,
+  partitionByModelSupport,
+  preparePastedFiles,
+} from "./composerFiles";
 import { activeSlashQuery, scoreSkillOption, toSkillOptions } from "./slashMention";
 import type { SkillMentionOption } from "./slashMention";
 import { isGenerationStopped, isLocale, stripGenerationStopped, useI18n } from "./i18n";
@@ -65,6 +72,7 @@ import {
   faBrain,
   faClockRotateLeft,
   faGear,
+  faPaperclip,
   faPenToSquare,
   faPlug,
   faRobot,
@@ -587,6 +595,15 @@ export default function App() {
   const toolbarActionsRef = useRef<HTMLDivElement>(null);
   const inputAreaRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  /**
+   * The draft as it exists *now*. A paste or a drop resolves its insertion
+   * point from an event callback, which may run before React has committed the
+   * last keystroke — reading `input` there would splice into a stale string.
+   */
+  const composerDraftRef = useRef(input);
+  composerDraftRef.current = input;
+  /** True while a file is dragged over the window (native drag-drop). */
+  const [dropActive, setDropActive] = useState(false);
   const cleanupRef = useRef<(() => void) | null>(null);
   const themeRef = useRef<ThemeMode>("auto");
   const paletteRef = useRef<Palette>("default");
@@ -3340,6 +3357,182 @@ export default function App() {
     return Array.from(names).sort();
   }, [slashSkills, skillStatus]);
 
+  // ─── Files pasted / dropped onto the composer ─────────────────────────────
+
+  /**
+   * Insert `@.data/tmp/…` mentions for files the backend just wrote.
+   *
+   * A pasted or dropped file has no attachment channel of its own: it becomes a
+   * workspace file in `.data/tmp/` and is then referenced like any other
+   * mention, so the model sees both the token and the content. Files the
+   * selected model cannot consume are reported instead of being silently
+   * attached.
+   */
+  const insertMentionPaths = useCallback(
+    (paths: string[]) => {
+      if (paths.length === 0) return;
+      const { supported, unsupported } = partitionByModelSupport(paths, selectedMetadata);
+      if (unsupported.length > 0) {
+        setError(
+          t("app.attachmentUnsupported", {
+            names: unsupported.join(", "),
+            model: selectedModel,
+          }),
+          "warning",
+        );
+      }
+      if (supported.length === 0) return;
+
+      const el = textareaRef.current;
+      const draft = composerDraftRef.current;
+      const caret = el?.selectionStart ?? draft.length;
+      const { value, caret: next } = insertMentionTokens(
+        draft,
+        caret,
+        supported.map(mentionTokenForPath),
+      );
+      // Mirror the new draft immediately: a second paste can land before React
+      // commits this one, and it must splice into the text it just produced.
+      composerDraftRef.current = value;
+      setInput(value);
+      closeMention();
+      closeSlash();
+      requestAnimationFrame(() => {
+        el?.focus();
+        el?.setSelectionRange(next, next);
+      });
+    },
+    [closeMention, closeSlash, selectedMetadata, selectedModel, setError, t],
+  );
+
+  /**
+   * The `@` popup walks the workspace on a 15 s cache; a paste changes what is
+   * on disk, so the cache is dropped here.
+   */
+  const invalidateWorkspaceFileCache = useCallback(() => {
+    workspaceFilesRef.current = null;
+    setWorkspaceFiles(null);
+  }, []);
+
+  /**
+   * Copy files dropped from the OS into `<workspace>/.data/tmp/` and mention
+   * them.
+   *
+   * Tauri hands the drop over as real paths (the webview never sees the bytes),
+   * so this is one IPC round trip per drop.
+   */
+  const importDroppedPaths = useCallback(
+    async (paths: string[]) => {
+      if (profileExporting) return;
+      if (streaming) {
+        setError(t("app.composer.busy"), "warning");
+        return;
+      }
+      try {
+        const result = await importWorkspacePaths(paths);
+        // A drop can be partly refused (a folder, an oversized file): the files
+        // that arrived are attached, the rest is reported.
+        if (result.problems.length > 0) {
+          setError(result.problems.join("\n"), "warning");
+        }
+        insertMentionPaths(result.imported);
+        if (result.imported.length > 0) invalidateWorkspaceFileCache();
+      } catch (err) {
+        setError(t("app.composer.dropFailed", { error: String(err) }), "warning");
+      }
+    },
+    [profileExporting, streaming, insertMentionPaths, invalidateWorkspaceFileCache, setError, t],
+  );
+
+  /**
+   * `Ctrl+V` with files in the clipboard.
+   *
+   * Only a paste that actually carries files is intercepted — text pasting keeps
+   * the browser's own undo history and caret behaviour. Each file is written to
+   * `.data/tmp/` and then shows up as an `@.data/tmp/…` mention in the draft.
+   */
+  const handleComposerPaste = useCallback(
+    (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const data = event.clipboardData;
+      if (!data) return;
+      const files = Array.from(data.items)
+        .filter((item) => item.kind === "file")
+        .map((item) => item.getAsFile())
+        .filter((file): file is File => file !== null);
+      // A plain text paste is none of our business.
+      if (files.length === 0) return;
+      event.preventDefault();
+
+      if (profileExporting) return;
+      if (streaming) {
+        // While a turn runs the composer is an injection channel, and injected
+        // text carries no attachments: the file would be saved but never sent.
+        setError(t("app.composer.busy"), "warning");
+        return;
+      }
+
+      void (async () => {
+        const { ready, problems } = await preparePastedFiles(files, (kind, name, error) =>
+          kind === "tooLarge"
+            ? t("app.composer.tooLarge", { name })
+            : kind === "empty"
+              ? t("app.composer.empty", { name })
+              : t("app.composer.unreadable", { name, error: error ?? "" }),
+        );
+        if (problems.length > 0) setError(problems.join("\n"), "warning");
+
+        const saved: string[] = [];
+        const failures: string[] = [];
+        for (const item of ready) {
+          try {
+            saved.push(await savePastedFile(item.name, item.dataUrl));
+          } catch (err) {
+            failures.push(t("app.composer.saveFailed", { name: item.name, error: String(err) }));
+          }
+        }
+        if (failures.length > 0) setError(failures.join("\n"), "warning");
+        insertMentionPaths(saved);
+        if (saved.length > 0) invalidateWorkspaceFileCache();
+      })();
+    },
+    [
+      profileExporting,
+      streaming,
+      insertMentionPaths,
+      invalidateWorkspaceFileCache,
+      setError,
+      t,
+    ],
+  );
+
+  // Native drag-drop. Tauri intercepts HTML5 drops (`dragDropEnabled`), so the
+  // only way to learn about a file dragged in from Explorer is this event; it
+  // also means the overlay must be driven from here rather than from `dragover`.
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    getCurrentWebview()
+      .onDragDropEvent((event) => {
+        const payload = event.payload;
+        if (payload.type === "enter" || payload.type === "over") {
+          setDropActive(true);
+          return;
+        }
+        setDropActive(false);
+        if (payload.type === "leave") return;
+        if (payload.paths.length > 0) void importDroppedPaths(payload.paths);
+      })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch((err) => console.error("Failed to watch drag-drop", err));
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [importDroppedPaths]);
+
   // The todo panel belongs to the newest assistant message only (like the
   // background-task group). A turn can end on a tool_group message, so scan
   // backwards for the last assistant message instead of taking the tail.
@@ -3840,30 +4033,33 @@ export default function App() {
             m.role === "tool_group" ? (
               <ToolCallGroup key={m.id} message={m} onConfirm={respondToolCallConfirm} onCancelBackground={handleCancelBackgroundTask} />
             ) : (
-              <ChatMessage
-                key={m.id}
-                message={m}
-                showRetry={m.role === "user" && m.id === pendingRetryMessageId && !streaming}
-                onRetry={retryPendingUserMessage}
-                onDelete={handleDeleteMessage}
-                onFork={handleForkMessage}
-                dbId={m.dbId}
-                onConfirm={respondToolCallConfirm}
-                onCancelBackground={handleCancelBackgroundTask}
-                backgroundTasks={
-                  m.role === "assistant" && m.id === messages[messages.length - 1]?.id
-                    ? backgroundTasks
-                    : undefined
-                }
-                backgroundWaiting={
-                  m.role === "assistant" && m.id === messages[messages.length - 1]?.id
-                    ? backgroundWaiting
-                    : undefined
-                }
-                sessionId={sessionId}
-                todoActive={m.role === "assistant" && m.id === todoMessageId}
-                skillNames={knownSkillNames}
-              />
+              // One row failing to render must not blank the transcript, so
+              // every message gets its own boundary.
+              <ChatMessageBoundary key={m.id}>
+                <ChatMessage
+                  message={m}
+                  showRetry={m.role === "user" && m.id === pendingRetryMessageId && !streaming}
+                  onRetry={retryPendingUserMessage}
+                  onDelete={handleDeleteMessage}
+                  onFork={handleForkMessage}
+                  dbId={m.dbId}
+                  onConfirm={respondToolCallConfirm}
+                  onCancelBackground={handleCancelBackgroundTask}
+                  backgroundTasks={
+                    m.role === "assistant" && m.id === messages[messages.length - 1]?.id
+                      ? backgroundTasks
+                      : undefined
+                  }
+                  backgroundWaiting={
+                    m.role === "assistant" && m.id === messages[messages.length - 1]?.id
+                      ? backgroundWaiting
+                      : undefined
+                  }
+                  sessionId={sessionId}
+                  todoActive={m.role === "assistant" && m.id === todoMessageId}
+                  skillNames={knownSkillNames}
+                />
+              </ChatMessageBoundary>
             )
           )}
         </div>
@@ -3975,6 +4171,15 @@ export default function App() {
             </div>
           )}
           {renderConfirmDialog()}
+          {/* Dragging a file in from the OS: say what is about to happen. The
+              drop itself is handled by the native event (see the effect above),
+              so this layer never needs pointer events. */}
+          {dropActive && (
+            <div className="composer-drop" role="status" aria-live="polite">
+              <FontAwesomeIcon icon={faPaperclip} aria-hidden="true" />
+              <span>{t("app.composer.dropHint")}</span>
+            </div>
+          )}
           <div className="input-row">
             <SlashMentionPopup
               open={slashState.open}
@@ -4006,6 +4211,7 @@ export default function App() {
                 syncSlashFromInput(value, e.target.selectionStart ?? value.length);
               }}
               onKeyDown={handleKeyDown}
+              onPaste={handleComposerPaste}
               // A real blur (clicking elsewhere) dismisses the popup; the popup
               // itself accepts on `mousedown` + `preventDefault`, so choosing a
               // row never blurs the textarea.

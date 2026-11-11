@@ -69,11 +69,17 @@ pub fn scripts_root(workspace_dir: &Path) -> PathBuf {
     data_root(workspace_dir).join("scripts")
 }
 
-/// Sub-agent deliverable exchange root (`<workspace>/.data/tmp`).
+/// The workspace scratch root (`<workspace>/.data/tmp`).
 ///
-/// Every mission (or direct `call_subagent` call) gets one batch directory
-/// below it; see `agents::exchange`. The area is permanent and the user
-/// cleans it manually, so it is deliberately not pruned at startup.
+/// Three writers share it, and its top level is the only namespace they have in
+/// common: every mission (or direct `call_subagent` call) gets one batch
+/// directory here (`<stamp>-<8hex>/`, see `agents::exchange`), a PDF mention
+/// caches its Markdown under `pdf/` (`pdf_mentions`), and a file pasted or
+/// dropped into the composer lands as `paste-<stamp>-<name>` (`workspace_files`).
+/// Each of the three owns its own lifetime: a paste expires after 24 h (swept on
+/// the way into the next one), the PDF cache drops entries older than a week
+/// when the next conversion is written, and batch directories are permanent —
+/// the user cleans those manually through "open the exchange folder".
 pub fn tmp_root(workspace_dir: &Path) -> PathBuf {
     data_root(workspace_dir).join("tmp")
 }

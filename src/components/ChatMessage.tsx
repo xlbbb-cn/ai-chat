@@ -1,5 +1,13 @@
 import type { BackgroundTaskState, ChatInjection, Message, MessageContent } from "../types";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  Component,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { BackgroundTaskGroup } from "./BackgroundTaskGroup";
 import { ToolCallGroup } from "./ToolCallGroup";
 import { TodoList } from "./TodoList";
@@ -40,41 +48,110 @@ const escapeHtml = (value: string): string =>
     .replace(/\"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
-const md = new MarkdownIt({
-  // Disable raw HTML and auto-linking to prevent navigation vectors.
-  html: false,
-  linkify: false,
-  typographer: true,
-  breaks: true,
-});
+/**
+ * Image sources a reply may embed.
+ *
+ * A markdown image is the one construct that turns text into a live element
+ * that fetches something, so it is limited to what cannot reach a local file:
+ * http(s) and an inline raster. Anything else is shown as its alt text.
+ */
+const SAFE_IMAGE_SRC = /^(?:https?:\/\/|data:image\/(?:png|jpe?g|gif|webp|bmp);base64,)/i;
 
-md.renderer.rules.fence = (tokens, idx) => {
-  const token = tokens[idx];
-  const info = token.info ? token.info.trim().split(/\s+/g)[0] : "";
-  const language = info && hljs.getLanguage(info) ? info : "";
-  const code = escapeHtml(token.content);
-  const highlighted = language
-    ? hljs.highlight(token.content, { language }).value
-    : code;
-  const className = language ? `language-${md.utils.escapeHtml(language)}` : "";
+/**
+ * Build a markdown renderer.
+ *
+ * Two profiles exist because the transcript hosts two different kinds of text:
+ *
+ * * a **reply** may draw (fenced code, KaTeX, a remote image inside the safe
+ *   source list);
+ * * what a **user typed** must stay literal, so image syntax is not a rule at
+ *   all — typing `![a](b)` shows those characters instead of injecting an
+ *   `<img>` into the user's own bubble. Raw HTML is off for both.
+ */
+function createMarkdown(profile: { images: boolean }): MarkdownIt {
+  const instance = new MarkdownIt({
+    // Disable raw HTML and auto-linking to prevent navigation vectors.
+    html: false,
+    linkify: false,
+    typographer: true,
+    breaks: true,
+  });
 
-  return `
-    <div class="code-block-wrapper">
-      <div class="code-block-toolbar">
-        <button type="button" class="code-copy-btn">${escapeHtml(text("common.copy"))}</button>
+  instance.renderer.rules.fence = (tokens, idx) => {
+    const token = tokens[idx];
+    const info = token.info ? token.info.trim().split(/\s+/g)[0] : "";
+    const language = info && hljs.getLanguage(info) ? info : "";
+    const code = escapeHtml(token.content);
+    const highlighted = language
+      ? hljs.highlight(token.content, { language }).value
+      : code;
+    const className = language
+      ? `language-${instance.utils.escapeHtml(language)}`
+      : "";
+
+    return `
+      <div class="code-block-wrapper">
+        <div class="code-block-toolbar">
+          <button type="button" class="code-copy-btn">${escapeHtml(text("common.copy"))}</button>
+        </div>
+        <pre class="hljs"><code class="${className}">${highlighted}</code></pre>
       </div>
-      <pre class="hljs"><code class="${className}">${highlighted}</code></pre>
-    </div>
-  `;
-};
+    `;
+  };
 
-// Remove markdown link parsing entirely ([text](url), autolink) and strip any fallback anchor tokens.
-md.disable(["link", "autolink"]);
-md.renderer.rules.link_open = () => "<span>";
-md.renderer.rules.link_close = () => "</span>";
+  // Remove markdown link parsing entirely ([text](url), autolink) and strip any
+  // fallback anchor tokens.
+  instance.disable(["link", "autolink"]);
+  instance.renderer.rules.link_open = () => "<span>";
+  instance.renderer.rules.link_close = () => "</span>";
 
-// Render `$...$` / `$$...$$` formulas with KaTeX.
-md.use(katexMathPlugin);
+  if (profile.images) {
+    // `image` is the one markdown rule that emits a live element from text, so
+    // its source is vetted here instead of relying on link validation.
+    instance.renderer.rules.image = (tokens, idx, options, _env, self) => {
+      const token = tokens[idx];
+      const src = token.attrGet("src") ?? "";
+      const alt = token.content ?? "";
+      if (!SAFE_IMAGE_SRC.test(src)) return escapeHtml(alt || src);
+      token.attrSet("alt", alt);
+      token.attrSet("loading", "lazy");
+      token.attrSet("referrerpolicy", "no-referrer");
+      token.attrJoin("class", "message-image");
+      return self.renderToken(tokens, idx, options);
+    };
+  } else {
+    instance.disable("image");
+  }
+
+  // Render `$...$` / `$$...$$` formulas with KaTeX.
+  instance.use(katexMathPlugin);
+  return instance;
+}
+
+/** Reply body: may draw, may embed a vetted image. */
+const md = createMarkdown({ images: true });
+/**
+ * User body: the same text rules without the one rule that manufactures HTML,
+ * so a typed symbol can never become an element.
+ */
+const mdLiteral = createMarkdown({ images: false });
+
+/**
+ * Render markdown without letting a renderer failure escape.
+ *
+ * markdown-it, highlight.js and KaTeX are all driven by the message text, and a
+ * throw here would blank the whole transcript (React unmounts the tree on an
+ * uncaught render error). A failure therefore degrades to the escaped literal
+ * text: the message stays readable and nothing it contains becomes markup.
+ */
+function renderMarkdown(instance: MarkdownIt, source: string): string {
+  try {
+    return instance.render(source);
+  } catch (error) {
+    console.error("Markdown rendering failed", error);
+    return `<pre class="markdown-fallback">${escapeHtml(source)}</pre>`;
+  }
+}
 
 function buildPrintableMessageHtml(contentHtml: string, exportedAt: string): string {
   return `<!DOCTYPE html>
@@ -705,7 +782,9 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
   const mainContent = message.reasoning_content
     ? displayContent
     : embeddedThought.mainContent;
-  const renderedReasoningContent = reasoningContent ? md.render(reasoningContent) : "";
+  const renderedReasoningContent = reasoningContent
+    ? renderMarkdown(md, reasoningContent)
+    : "";
   // The reply body is throttled while it streams: see `useStreamedText`.
   const streamedMainContent = useStreamedText(
     mainContent,
@@ -718,9 +797,13 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
   // snippet in the composer is still code.
   const replyStreaming = isAssistant && Boolean(message.streaming);
   const rendered = useMemo<{ html: string; figures: FigureSpec[] }>(() => {
-    if (!isAssistant) return { html: md.render(streamedMainContent), figures: [] };
+    // The user's own text is rendered by the literal profile: no image rule, so
+    // a typed `![a](b)` stays those characters instead of becoming an element.
+    if (!isAssistant) {
+      return { html: renderMarkdown(mdLiteral, streamedMainContent), figures: [] };
+    }
     const extracted = extractFigures(streamedMainContent, { streaming: replyStreaming });
-    return { html: md.render(extracted.markdown), figures: extracted.figures };
+    return { html: renderMarkdown(md, extracted.markdown), figures: extracted.figures };
   }, [streamedMainContent, replyStreaming, isAssistant]);
   const renderedMainContent = rendered.html;
   const figures = rendered.figures;
@@ -782,11 +865,21 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
       renderedHtmlRef.current = renderedMainContent;
       // A figure card is cached by its source hash, so the rebuild a streamed
       // token causes re-inserts the same canvas — the orbit angle a user just
-      // dragged is not reset on every token.
-      mountFigures(el, figures, { messageId: String(message.id) });
+      // dragged is not reset on every token. A card that fails to mount (a
+      // three.js chunk that did not load, a malformed spec) must not cost the
+      // whole message: the text is already painted, so the slot stays empty.
+      try {
+        mountFigures(el, figures, { messageId: String(message.id) });
+      } catch (error) {
+        console.error("Figure card failed to mount", error);
+      }
       // The user's body never changes, so this runs once per turn.
       if (isUser) {
-        highlightFileMentions(el);
+        try {
+          highlightFileMentions(el);
+        } catch (error) {
+          console.error("Mention highlighting failed", error);
+        }
         // A freshly painted body carries no `/skill` spans yet.
         appliedSkillNamesRef.current = "";
       }
@@ -1232,4 +1325,43 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
       )}
     </div>
   );
+}
+
+/**
+ * Keeps one broken message from taking the transcript down with it.
+ *
+ * The markdown pipeline already degrades to literal text when a renderer
+ * throws, but an error raised *while React renders* this component (a malformed
+ * figure spec, a plugin that throws outside `render`) would otherwise unmount
+ * the whole tree — the window goes blank and the console shows the stack. The
+ * boundary turns that into one readable row.
+ */
+export class ChatMessageBoundary extends Component<
+  { children: ReactNode },
+  { error: string | null }
+> {
+  state: { error: string | null } = { error: null };
+
+  static getDerivedStateFromError(error: unknown): { error: string } {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+
+  componentDidCatch(error: unknown): void {
+    console.error("Message rendering failed", error);
+  }
+
+  render(): ReactNode {
+    if (this.state.error === null) return this.props.children;
+    return (
+      <div className="chat-message-shell assistant">
+        <div className="chat-message assistant">
+          <div className="message-content">
+            <pre className="markdown-fallback">
+              {text("app.messageRenderFailed", { error: this.state.error })}
+            </pre>
+          </div>
+        </div>
+      </div>
+    );
+  }
 }

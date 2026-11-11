@@ -145,6 +145,16 @@ const en = {
         },
         attachmentUnsupported:
             "Skipped {names}: “{model}” cannot read that file type.",
+        composer: {
+            dropHint: "Drop to attach — copied to .data/tmp (or referenced in place) and inserted as @",
+            busy: "The assistant is replying: add files once this turn ends.",
+            tooLarge: "{name} is too large to attach (24 MB limit).",
+            empty: "{name} has no content (the clipboard provided no file data).",
+            unreadable: "Could not read {name}: {error}",
+            saveFailed: "Could not save {name}: {error}",
+            dropFailed: "Could not attach the dropped file: {error}",
+        },
+        messageRenderFailed: "This message could not be rendered: {error}",
         inputPlaceholder: "Type a message… (@ to reference a file, / for a skill, Enter to send)",
         injections: {
             title: "Added mid-turn",

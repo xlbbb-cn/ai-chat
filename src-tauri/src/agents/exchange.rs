@@ -14,6 +14,11 @@
 //! producer and its consumers can exchange large artifacts without pasting
 //! them into prompts. It is permanent (the user cleans it manually) and is not
 //! part of the profile backup.
+//!
+//! The top level of `.data/tmp` is shared with `pdf/` (the PDF mention cache) and
+//! `paste-…` (composer pastes; the only shape the composer's 24 h sweep deletes).
+//! A batch id is `<stamp>-<8hex>`, so it can neither collide with those names nor
+//! be mistaken for an expired paste.
 
 use std::collections::{HashMap, HashSet};
 use std::fs;

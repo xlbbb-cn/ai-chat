@@ -131,6 +131,16 @@ const zhCN: Messages = {
             listFailed: "无法列出工作区技能：{error}",
         },
         attachmentUnsupported: "已跳过 {names}：“{model}” 无法读取该文件类型。",
+        composer: {
+            dropHint: "松开即可加入对话（文件存入 .data/tmp 并插入 @ 引用）",
+            busy: "助手正在回复：等这一轮结束再添加文件。",
+            tooLarge: "{name} 太大，无法加入（上限 24 MB）。",
+            empty: "{name} 没有内容（剪贴板没有提供文件数据）。",
+            unreadable: "无法读取 {name}：{error}",
+            saveFailed: "无法保存 {name}：{error}",
+            dropFailed: "无法加入拖入的文件：{error}",
+        },
+        messageRenderFailed: "这条消息无法渲染：{error}",
         inputPlaceholder: "输入消息…（@ 引用文件，/ 引用技能，Enter 发送，Shift+Enter 换行）",
         injections: {
             title: "本轮内追加",

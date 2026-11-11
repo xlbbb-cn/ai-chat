@@ -164,8 +164,11 @@ fn app_open_workspace_dir(app: AppHandle) -> Result<(), String> {
     open_workspace_dir(&app)
 }
 
-/// Open `<workspace>/.data/tmp` — the sub-agent deliverable exchange area.
-/// It is permanent, so this is the manual cleanup entry point.
+/// Open `<workspace>/.data/tmp` — the workspace scratch root.
+///
+/// It holds the sub-agent deliverable exchange (permanent), the PDF conversion
+/// cache (expires on its own) and the composer pastes (24 h), so this is the
+/// manual cleanup entry point for the batches.
 #[tauri::command]
 fn app_open_workspace_tmp_dir(app: AppHandle) -> Result<(), String> {
     let workspace = app
@@ -1979,6 +1982,8 @@ pub fn run() {
             workspace_files::list_workspace_files,
             workspace_files::read_workspace_file_range,
             workspace_files::read_workspace_file_bytes,
+            workspace_files::save_pasted_file,
+            workspace_files::import_workspace_paths,
             pdf_mentions::convert_pdf_mention,
             save_markdown_file,
             figures::save_figure,

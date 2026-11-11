@@ -319,6 +319,31 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Last-resort body: a message the markdown pipeline could not process
+   (`renderMarkdown`) or one a boundary had to replace. It is literal text, so
+   it must not pretend to be prose — monospace, wrapped, muted. */
+.markdown-fallback {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--c-border-s);
+  border-radius: var(--r-sm);
+  background: var(--c-surface-2);
+  color: var(--c-muted);
+  font-family: "RazerF5", "Cascadia Code", Consolas, "Microsoft YaHei", monospace;
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* An image a reply embedded (see `SAFE_IMAGE_SRC`): it must never widen the
+   bubble past the transcript column. */
+.message-content img.message-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--r-sm);
+}
+
 /* Per-character typewriter: every character that was not fully revealed when
    the last commit replaced the markdown subtree is wrapped in `.stream-char`
    with a start time relative to now (negative = resume mid-fade, positive =

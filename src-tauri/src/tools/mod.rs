@@ -336,7 +336,7 @@ pub fn get_all_tools(
             "type": "function",
             "function": {
                 "name": "file_actions",
-                "description": "File operations strictly inside the workspace. Use `./...` paths (e.g. `./src/App.tsx`) or `.` for the root; absolute paths inside the workspace work, anything resolving outside is rejected — use `run_shell` only when external access is genuinely required. `.data` is part of the workspace and writable: skills under `./.data/skills/...`, the `run_cmd` script library under `./.data/scripts/...`, memory/todos/status — everything except `.data/chat.db`. Protected self-evolution targets get an automatic `.bak.<n>` backup before mutation.",
+                "description": "File operations strictly inside the workspace. Use `./...` paths (e.g. `./src/App.tsx`) or `.` for the root; absolute paths inside the workspace work, anything resolving outside is rejected — use `run_shell` only when external access is genuinely required. `.data` is part of the workspace and writable: skills under `./.data/skills/...`, the `run_cmd` script library under `./.data/scripts/...`, memory/todos/status — everything except `.data/chat.db`. Temporary and scratch output belongs in `./.data/tmp/` (the shared workspace tmp area: sub-agent deliverables, the PDF cache and composer pastes live there; only `paste-*` files expire). Protected self-evolution targets get an automatic `.bak.<n>` backup before mutation.",
                 "parameters": {
                     "type": "object",
                     "properties": {

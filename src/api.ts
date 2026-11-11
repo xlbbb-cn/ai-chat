@@ -95,6 +95,42 @@ export async function readWorkspaceFileBytes(path: string): Promise<string> {
 }
 
 /**
+ * Store one file pasted into the composer (`Ctrl+V`, or a drop of file bytes)
+ * under `<workspace>/.data/tmp/` and return its workspace-relative path.
+ *
+ * The path is what the composer inserts as an `@.data/tmp/…` mention, so the
+ * file is attached by the normal mention pipeline when the turn is sent — no
+ * separate attachment channel, and nothing typed by the user is turned into
+ * HTML.
+ */
+export async function savePastedFile(
+  name: string,
+  dataBase64: string,
+): Promise<string> {
+  return invoke("save_pasted_file", { name, dataBase64 });
+}
+
+/**
+ * Copy files dropped onto the composer (real OS paths, from Tauri's native
+ * drag-drop event) into `<workspace>/.data/tmp/`.
+ *
+ * `imported` holds the workspace-relative paths of the copies that were made
+ * (the composer turns them into `@.data/tmp/…` mentions) and `problems` holds one
+ * line per refused path — a folder, an oversized file, an unreadable one — so a
+ * partial drop still attaches what arrived.
+ */
+export interface ImportedWorkspacePaths {
+  imported: string[];
+  problems: string[];
+}
+
+export async function importWorkspacePaths(
+  paths: string[],
+): Promise<ImportedWorkspacePaths> {
+  return invoke("import_workspace_paths", { paths });
+}
+
+/**
  * Write one rendered figure into `<workspace>/figures/`.
  *
  * `pngBase64` is the rasterised image without the `data:` prefix (the backend
