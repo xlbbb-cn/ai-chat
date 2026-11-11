@@ -152,6 +152,13 @@
   --glass-blur-scrim: 8px;
   --glass-saturate: 180%;
   --glass-backdrop: var(--c-toolbar);
+  /* The reading column. It keeps its own fill instead of `--glass-backdrop`
+     because it is the one surface that must also *be* the page: it holds a wall
+     of 13px text and it is the element that scrolls. Here — with nothing behind
+     it but the canvas it already is — that fill is the canvas, wash included;
+     only the vibrancy block turns it into glass. */
+  --glass-transcript: var(--c-bg);
+  --glass-transcript-image: var(--c-bg-image);
   /* Canvas of a panel mounted inside the glass sidebar. Panels must not paint
      an opaque sheet here or the sidebar's tint and blur are covered and the
      transcript underneath is never faintly visible; their cards keep
@@ -514,11 +521,11 @@
    today's opaque canvas, because a transparent window with no backdrop would
    show a raw, unblurred desktop.
 
-   Only the window *frame* is translucent: the titlebar, sidebar, toolbar,
+   The window frame is the thinnest glass: the titlebar, sidebar, toolbar,
    input area and panel headers read `--c-window` through `--glass-backdrop`
-   and let the blurred desktop through, while the transcript keeps its opaque
-   `--c-bg` canvas — so text stays on a solid surface and scrolling never
-   re-composites the whole window.
+   and let the blurred desktop through. The transcript is glass too, but it
+   cannot use that tint — it holds a wall of 13px text and it scrolls — so it
+   takes a floor of its own (`--glass-transcript`, see below).
    ══════════════════════════════════════════════════════════════════════════ */
 html[data-vibrancy] {
   /* The window's base tint, derived from the palette's own surface so every
@@ -543,9 +550,18 @@ html[data-vibrancy] {
      dense — but on the canvas colour, which keeps its cards (opaque
      `--c-surface`) a shade above the shell, the way the opaque design did. */
   --c-panel: color-mix(in srgb, var(--c-bg) 75%, transparent);
-  /* Floating cards sit over the opaque transcript, not over the desktop: they
-     keep most of their body and blur what is behind them. */
+  /* Floating cards sit over the reading column, not over the desktop: they keep
+     most of their body and blur what is behind them. */
   --c-popup: color-mix(in srgb, var(--c-surface) 84%, transparent);
+
+  /* The transcript's floor. It cannot borrow `--c-window`: 24–58% of the
+     surface under a wall of 13px text loses the palette's contrast guarantee
+     against a busy desktop. It sits at the density of the Settings sheet (94%)
+     and paints no `backdrop-filter` — a webview cannot filter the desktop, and
+     DWM has already blurred it. Measured worst cases live in DESIGN.md
+     ("PATCH v1.4"). */
+  --glass-transcript: color-mix(in srgb, var(--c-bg) 94%, transparent);
+  --glass-transcript-image: none;
 }
 
 /* A dark fill hides what is behind it sooner than a light one, so the same
@@ -570,7 +586,9 @@ html[data-vibrancy] body {
   background-image: none;
 }
 
-/* The reading column stays a solid sheet: only the frame around it is glass. */
+/* The canvas drops out so the desktop is what the transcript's tint sits on.
+   `.messages` still paints its own fill (`--glass-transcript`), so the column
+   never reads as a hole punched in the window. */
 html[data-vibrancy] .chat-area {
   background: transparent;
 }
@@ -1182,8 +1200,15 @@ body {
   flex-shrink: 0;
 }
 
-/* Messages — the gallery floor. Text sits directly on the white canvas and
-   is separated by whitespace, not by containers. */
+/* Messages — the gallery floor. Text sits directly on the surface and is
+   separated by whitespace, not by containers. The fill is the one thing that
+   changes between worlds: normally it is the palette canvas — colour first,
+   `--c-bg-image` after, so Cream's wash runs behind the column instead of
+   stopping at the toolbar hairline — and under `data-vibrancy` it becomes the
+   glass sheet (`--glass-transcript`, see that block). Painting it *here* rather
+   than inheriting `.chat-area` is what keeps the column solid where that one
+   drops its canvas. The longhands are deliberate: the `background` shorthand
+   resets the image. */
 .messages {
   flex: 1;
   overflow-y: auto;
@@ -1191,7 +1216,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  background: var(--c-bg);
+  background-color: var(--glass-transcript);
+  background-image: var(--glass-transcript-image);
 }
 
 .empty-state {

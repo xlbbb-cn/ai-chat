@@ -111,6 +111,8 @@ decision, and `off` is a supported look rather than a broken one.
 | `--glass-blur-scrim` | `8px` | Blur of modal backdrops — a smaller radius keeps a full-window scrim cheap |
 | `--glass-saturate` | `180%` | Saturation boost paired with the blur on **every** glass surface, so a tinted band lifts the colour behind it instead of greying it out. `off` sets `100%` |
 | `--glass-backdrop` | `var(--c-toolbar)` | The fill the glass sits on |
+| `--glass-transcript` | `var(--c-bg)` | Fill of the reading column. The canvas at every glass level — a translucent sheet over the canvas it already is cannot be seen, it can only flatten Cream's wash — and `color-mix(in srgb, var(--c-bg) 94%, transparent)` under `data-vibrancy`, where the desktop is behind it |
+| `--glass-transcript-image` | `var(--c-bg-image)` | The palette wash under the transcript; `none` while the sheet is translucent |
 | `--glass-canvas` | `transparent` | Canvas of a panel mounted in the glass sidebar |
 | `--glass-edge` | `inset 0 1px 0 rgba(255,255,255,.55)` | The specular 1px inner highlight, window top edge only (dark: `.07`) |
 | `--c-window` | `color-mix(in srgb, var(--c-surface) 40%, transparent)` | Window-frame tint, only defined under `html[data-vibrancy]` (see *Window vibrancy*) |
@@ -126,6 +128,12 @@ later wins):
 | `subtle` | `12px` | `6px` | |
 | `standard` | `20px` | `8px` | `:root` value, used when the config has no entry |
 | `strong` | `32px` | `14px` | |
+
+The transcript is the one surface that does **not** follow this ladder. Its
+backdrop is either the canvas it already paints or — under `data-vibrancy` — the
+desktop, so a level-scaled tint would be invisible in the first case and cost
+the palette its canvas in the second (see *Chat transcript*). Its fill follows
+`data-vibrancy` only.
 
 #### Window vibrancy (`data-vibrancy`)
 
@@ -147,11 +155,19 @@ Without the attribute every vibrancy rule is inert and the app keeps its opaque
 canvas, because a transparent window with no backdrop would show a raw,
 unblurred desktop. `off` clears the backdrop.
 
-Only the frame is translucent: `html[data-vibrancy]` points `--glass-backdrop`
-at `--c-window`, so the titlebar, sidebar, toolbar, input area and panel
-headers let the desktop through, while `.chat-area` drops its canvas and
-`.messages` keeps its opaque `--c-bg`. The transcript therefore stays a solid
-sheet — reading contrast and scroll cost are unchanged.
+The frame is the thinnest glass: `html[data-vibrancy]` points `--glass-backdrop`
+at `--c-window`, so the titlebar, sidebar, toolbar, input area and panel headers
+let the desktop through, while `.chat-area` drops its canvas. The transcript is
+glass too, but it cannot take `--c-window`: it holds a wall of 13px text over
+whatever the user has on their desktop, so it takes a floor of its own —
+`--glass-transcript: color-mix(in srgb, var(--c-bg) 94%, transparent)`, the
+density of the Settings sheet — and no `backdrop-filter`, because the
+compositor has already blurred what is behind it. Measured over the worst
+backdrops (black behind the light palettes, white behind the dark ones), 94%
+keeps `--c-text` ≥ 9.3:1, `--c-body` ≥ 7.2:1 and `--c-muted` ≥ 4.5:1 across all
+six palette × theme pairs; at 90% `--c-muted` already falls to 4.0:1 on the dark
+palettes. The alpha does not follow the level ladder — it is a readability
+floor, not decoration.
 
 | `data-glass` | `--c-window` | Note |
 |---|---|---|
@@ -186,7 +202,7 @@ design already had, where a field was filled with the page colour. `--c-btn`
 stays one step denser than the band, so a tonal fill still reads as a patch
 rather than as a hairline. Popups keep most of their body and pick up
 `backdrop-filter: blur(var(--glass-blur-scrim))` under vibrancy: they open over
-the opaque transcript, so CSS *can* blur what is behind them even though it can
+the reading column, so CSS *can* blur what is behind them even though it can
 never blur the desktop. Hover fills on a glass surface use `--c-active`, which is
 alpha-based in both themes and therefore never turns into a solid block.
 
@@ -258,7 +274,7 @@ only sanctioned exception to "one accent". Never use them decoratively.
 
 | Token | Default | Role |
 |---|---|---|
-| `--c-bg-image` | `none` | Optional wash over the canvas (`body`, `.chat-area`) |
+| `--c-bg-image` | `none` | Optional wash over the canvas (`body`, `.chat-area`, `.messages`) |
 | `--c-code-image` | `none` | Optional wash over code blocks |
 | `--c-reason-image` | `none` | Optional wash over reasoning / quote surfaces |
 
@@ -580,6 +596,17 @@ no hint, no hover treatment, no click handler and no focus target.
 
 This is the one place with a deliberate asymmetry:
 
+- **The transcript is the palette canvas, and glass under the desktop.**
+  `.messages` paints `background-color: var(--glass-transcript)` then
+  `background-image: var(--glass-transcript-image)`. Both resolve to the canvas
+  (`--c-bg` + `--c-bg-image`, the pair `.chat-area` paints) at every glass
+  level, so a palette with a canvas wash (Cream) runs behind the transcript and
+  behind both frosted bars instead of stopping at the toolbar hairline; under
+  `data-vibrancy` the fill becomes a 94% sheet of the canvas and lets the
+  desktop tint the column. The longhands are required: the `background`
+  shorthand resets the image. The transcript draws it *itself* rather than
+  inheriting it from `.chat-area`, which is what keeps the column solid where
+  that one drops its canvas.
 - **Assistant turn is transparent.** Its text sits directly on the canvas and is
   separated by whitespace — not boxed. This is the closest analogue to the
   product-copy-on-white discipline of the source language.
@@ -765,7 +792,7 @@ implemented with a token, or listed as a deliberate refusal.
 | Principle | Implementation |
 |---|---|
 | 通透与层级 — translucency carries the hierarchy | `--glass-backdrop` + `blur(--glass-blur)` + `saturate(--glass-saturate)` + `--glass-edge`, scaled globally by `data-glass`, with the DWM backdrop under `data-vibrancy`. A coloured block where a tinted surface would do is a regression. |
-| 克制与聚焦 — the conversation is the interface | One accent (`--c-accent`); the transcript stays opaque `--c-bg`; the chrome stays neutral. |
+| 克制与聚焦 — the conversation is the interface | One accent (`--c-accent`); the transcript stays the canvas `--c-bg` (it is glass only where a desktop is behind it); the chrome stays neutral. |
 | 细腻的光影 — specular detail | `--glass-edge` (1px inner top highlight), `--c-border` hairlines, and the two sanctioned shades: the scroll edge and `--shadow-side`. Nothing else. |
 
 ### Material (spec §2)
@@ -851,6 +878,44 @@ const SIDEBAR_HIDDEN = { opacity: 0, x: -20, pointerEvents: "none" };
 removed with it. `AnimatePresence` owns the exit, and `sidebar` state drops to
 `null` the moment it closes — Escape, the window title and chat-click handling
 never see a half-open panel.
+
+---
+
+## PATCH v1.3 — the transcript sits on the palette canvas
+
+`.messages` carried `background: var(--c-bg)`, the shorthand, which resets
+`background-image` to `none`. On the Cream palette — the one palette whose
+`--c-bg-image` is an oklab wash — the toolbar and the input area read as a
+gradient frosted band while the transcript underneath them went flat: the wash
+was painted by `.chat-area` and then covered by its own child. The transcript
+now paints the same canvas pair, colour first, image second.
+
+| Spec says | Here, and why |
+|---|---|
+| the transcript is opaque | **kept.** It stays opaque: the Cream wash is built from opaque canvas colours, so neither the reading contrast nor the scroll cost moves, and `data-vibrancy` still gets a solid sheet |
+| the transcript is the same canvas as the chrome | **the fix.** Two longhands on `.messages`, no new token and no new gradient — it consumes the palette's existing `--c-bg-image`, which is the sanctioned surface wash |
+| the frame is glass, so the transcript should be glass too | **refused.** `--glass-backdrop` resolves to `--c-surface` at `data-glass="off"` (the transcript would become a panel) and to `--c-window` under `data-vibrancy` (the transcript would show the desktop, lose its contrast guarantee and re-composite on every scroll frame). It would cost per-level `--c-transcript` tokens and a reversal of "the transcript stays a solid sheet" |
+| `.messages` could just inherit `.chat-area` | **refused.** Under `data-vibrancy` `.chat-area` is transparent, so an inherited canvas would leak the desktop into the transcript |
+
+---
+
+## PATCH v1.4 — the transcript is glass
+
+v1.3 refused a glass transcript. The refusal is reversed in the one place glass
+can exist — `data-vibrancy`, where the desktop is behind the column — and kept
+everywhere else, because a translucent sheet over the canvas it already is
+cannot be seen: it can only flatten Cream's wash, and pulling the fill toward
+the bars' white would cost each palette its canvas (Sakura would lose the pink
+the palette is named for). Glass is a *material* the column shares; the colour
+it shares is the canvas.
+
+| v1.3 said | Here, and why |
+|---|---|
+| `--glass-backdrop` resolves to `--c-surface` at `off`, so the transcript would become a panel | **accepted.** The transcript does not use `--glass-backdrop`. Its fill is `--glass-transcript`, which is `--c-bg` at every glass level, so `off` — and every level without a desktop behind it — is byte-identical to v1.3 |
+| under vibrancy `--glass-backdrop` is `--c-window`, and the column would lose its contrast guarantee | **accepted, answered with a floor.** The column carries its own alpha: 94% of `--c-bg`, the density of the Settings sheet. Measured over a black desktop (light palettes) and a white one (dark palettes): `--c-text` ≥ 9.3:1, `--c-body` ≥ 7.2:1, `--c-muted` ≥ 4.5:1 across all six palette × theme pairs. At 90% the dark palettes' meta text lands at 4.0:1 |
+| it would re-composite on every scroll frame | **not applicable.** The column paints no `backdrop-filter`. Without vibrancy the only thing behind it is the flat canvas; under vibrancy the compositor has already blurred the desktop, so a CSS blur would filter a filtered image. A translucent fill scrolls like any other background |
+| simply copy the bars' fill, which is what “adapt the message background to the toolbar” reads as | **refused.** `--glass-backdrop` is a gradient in Cream and a near-white in Sakura: copying it turns the column into another band and buries the palette's canvas. The transcript borrows the material and the frame's tint family, not its density |
+| follow the `data-glass` ladder like `--c-window` does | **refused.** The floor is a readability constraint, not decoration: 24–58% under a wall of 13px text is what v1.3 was right about. The transcript is the densest glass in the app and stays there at every level |
 
 ---
 
