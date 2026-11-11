@@ -285,6 +285,16 @@ function buildPrintableMessageHtml(contentHtml: string, exportedAt: string): str
         max-height: 420px;
       }
 
+      /* A dynamic figure prints as the frame it is; the height was measured
+         live and pinned on the clone, so the page is laid out before the
+         fragment finishes loading. */
+      .chat-figure-frame {
+        display: block;
+        width: 100%;
+        border: 0;
+        break-inside: avoid;
+      }
+
       .chat-figure-bar {
         margin-top: 4px;
         font-size: 11px;
@@ -334,6 +344,19 @@ async function printableMessageHtml(root: HTMLElement | null, fallback: string):
         return;
       }
       copies[i]?.replaceWith(image);
+    });
+  }
+  // A dynamic figure is a frame, and a clone carries only its attributes: the
+  // print page reloads the fragment on its own. Its height was measured live, so
+  // it is pinned here — otherwise the card would print at the CSS floor and clip
+  // the drawing.
+  const frames = Array.from(root.querySelectorAll<HTMLIFrameElement>(".chat-figure-frame"));
+  if (frames.length > 0) {
+    const copies = Array.from(clone.querySelectorAll<HTMLIFrameElement>(".chat-figure-frame"));
+    frames.forEach((frame, i) => {
+      const copy = copies[i];
+      if (!copy) return;
+      copy.setAttribute("height", String(Math.round(frame.getBoundingClientRect().height)));
     });
   }
   try {
@@ -912,6 +935,8 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
   const contentRef = useRef<HTMLDivElement>(null);
   const streamedTextRef = useRef("");
   const renderedHtmlRef = useRef("");
+  /** The streaming flag the mounted cards were built with (see the rebuild below). */
+  const mountedStreamingRef = useRef(false);
   const appliedSkillNamesRef = useRef("");
   const appliedAgentTokensRef = useRef("");
   const writingPenRef = useRef<HTMLSpanElement | null>(null);
@@ -935,16 +960,25 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
     // the HTML is replaced only when it actually changed; the schedule below
     // re-wraps whatever was still fading.
     const htmlChanged = renderedHtmlRef.current !== renderedMainContent;
-    if (htmlChanged) {
+    // A reply that just stopped streaming is rebuilt once more even when its
+    // text did not change: a dynamic figure is a frame element, Chromium reloads
+    // a re-inserted frame, so it waits for the commit nothing follows instead of
+    // restarting on every token. Its slots only exist in a freshly written tree.
+    const streamingChanged = mountedStreamingRef.current !== replyStreaming;
+    if (htmlChanged || streamingChanged) {
       el.innerHTML = renderedMainContent;
       renderedHtmlRef.current = renderedMainContent;
+      mountedStreamingRef.current = replyStreaming;
       // A figure card is cached by its source hash, so the rebuild a streamed
       // token causes re-inserts the same canvas — the orbit angle a user just
       // dragged is not reset on every token. A card that fails to mount (a
       // three.js chunk that did not load, a malformed spec) must not cost the
       // whole message: the text is already painted, so the slot stays empty.
       try {
-        mountFigures(el, figures, { messageId: String(message.id) });
+        mountFigures(el, figures, {
+          messageId: String(message.id),
+          streaming: replyStreaming,
+        });
       } catch (error) {
         console.error("Figure card failed to mount", error);
       }

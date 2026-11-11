@@ -771,11 +771,80 @@ The assistant can draw. A reply may carry a 2D figure (an inline `<svg>`) or a
 - **Motion**: no auto-rotation. Orbiting is pointer-driven only, so a reply is
   static unless the user touches it.
 
+#### Dynamic figures (`html-fig`)
+
+A drawing that has to *move* — a physics sketch that animates, a plot the user
+can drag, a canvas loop — is a small document rather than a picture. A reply may
+carry one as a fenced `html-fig` block or an inline `<html-fig>…</html-fig>`,
+and it is the same card as the other two kinds. What differs is where it runs:
+the fragment never touches the transcript's own document. It is assembled into a
+complete page (`src/utils/htmlFigure.ts`) and handed to a sandboxed frame.
+
+- **The frame is a separate origin.** `sandbox="allow-scripts"` *without*
+  `allow-same-origin`: the origin is opaque, so `parent.document` throws,
+  `localStorage` throws, no app cookie is readable, and the frame cannot
+  navigate the window. `allow-scripts` is the only permission — no popups, no
+  forms, no modals, no top navigation.
+- **The network is shut by policy — except navigation.** The wrapper carries
+  `default-src 'none'`, with inline `style` / `script` open (that *is* what a
+  dynamic figure is) and `img-src data: blob:`. Measured on WebKitGTK, fourteen
+  channels tried (`fetch`, `XHR`, beacon, `WebSocket`, `EventSource`, `img`,
+  `script`, stylesheet, `@import`, `@font-face`, `url()`, media, child frame):
+  zero requests reached a listening server, and a saved file still works offline.
+  The app document itself ships without a CSP, so this is the second wall rather
+  than a copy of the first. `navigate-to` never shipped, though, so a fragment
+  that assigns `location` *does* get a request out — the URL is the payload. The
+  sandbox still applies to the document that arrives; the card counts the frame's
+  loads and closes the figure on the second one instead of drawing an outside
+  page inside a reply.
+- **Execution is tiered by what the fragment can do, consented for script.**
+  Markup, CSS and SVG animation cannot block the thread they share with the
+  transcript, so a script-less fragment starts on the settle commit and the
+  reader sees the animation without a click. A fragment that *could* run script
+  (`<script>`, an `on…` attribute, a `javascript:` URL — `htmlFigure.hasInlineScript`)
+  waits behind a poster (`Play dynamic figure` / `Contains script · runs
+  sandboxed · no network`), because a sandboxed frame shares the web process
+  with the transcript in **both** engines: one `while (true) {}` freezes the
+  whole window, and no watchdog can end it because the watchdog runs on the
+  frozen thread (measured — a 2 s loop left a 2041 ms hole in the parent's
+  50 ms timer on WebKitGTK and 2022 ms on Chromium). The poster offers a second
+  button, `Play automatically this session`: it records consent in
+  `sessionStorage` — surviving a reload, dying with the app, unreadable and
+  unwritable by the frame (opaque origin) — and every gate that is still up
+  lifts at that reply's next rebuild. Never auto-run script without that record,
+  and never "improve" the tiers into autoplay for everything.
+- **The wrapper is authored here, the fragment is not.** The fragment is parsed
+  once and its nodes are *imported* into the wrapper, never concatenated into a
+  template string — a `</style>` inside the model's CSS would reopen the
+  wrapper's markup. `base` / `link` / `meta` / `title` from the fragment's head
+  are dropped; its scripts move into the body, after the reporter, so one that
+  throws cannot cost the card its height.
+- **Tokens cross the boundary as a message.** Custom properties do not inherit
+  through a frame element, so the sheet is baked into the frame's `:root` when
+  it is built and *re-sent* on a theme or palette switch: the animation keeps its
+  place instead of restarting.
+- **The card measures the frame, not the reverse.** The viewport is
+  `padding: 0` — the frame *is* the sheet — and a reporter inside the wrapper
+  measures `body`'s border box and posts it; the card clamps it to `120–560px`.
+  Measuring `documentElement` would echo the height the card just set and the
+  message would be a loop.
+- **It plays when the reply settles.** Chromium reloads a frame whenever the
+  element is re-inserted, and a commit replaces the transcript subtree, so a
+  frame mounted mid-stream would restart on every token. The card waits for the
+  commit nothing follows; until then it reads `Plays when the reply finishes` in
+  `--c-muted` with the accent glyph, never an empty box.
+- **Saving writes `.html`, not PNG.** An animation has no single frame and a
+  cross-origin frame cannot be captured, so the save writes a self-contained
+  document to `<workspace>/figures/<slug>.html` with the tokens baked in — the
+  figure opens by double-clicking it.
+- **A fragment over the cap shows its source** (`htmlTooLarge` in the status
+  line) instead of running, exactly as an undrawable `svg` does.
+
 #### Mermaid diagrams
 
 With `enhanced_figures` off (Settings → Advanced) the prompt asks for a fenced
-`mermaid` block instead of hand-written `svg` / `carve`, and the transcript
-renders those diagrams too — as the same card.
+`mermaid` block instead of hand-written `svg` / `carve` / `html-fig`, and the
+transcript renders those diagrams too — as the same card.
 
 - **Same frame, no save action.** The card is `.chat-figure` *plus*
   `.chat-mermaid`: frame, caption bar, `Drawing…` and the invalid state are the
@@ -1103,12 +1172,60 @@ one decision.
 | Tempting | Here, and why |
 |---|---|
 | enable raw HTML so a `<svg>` just works | **refused.** `html: false` is the only thing between a model reply and a script host. The slot-token path reaches the same result while keeping every element the model wrote out of the document until it has been sanitised |
-| make `<carve>` a `<canvas>` the model draws into with script | **refused, same rule.** Executing model-authored JavaScript in the transcript is raw HTML with extra steps. `<carve>` is a declarative scene — JSON primitives, transforms, token colour names — drawn by three.js |
+| make `<carve>` a `<canvas>` the model draws into with script | **refused, same rule.** Executing model-authored JavaScript in the transcript is raw HTML with extra steps. `<carve>` is a declarative scene — JSON primitives, transforms, token colour names — drawn by three.js. A fragment that genuinely has to *run* is a different feature with a different boundary, not a change to `<carve>`: see PATCH v1.6, where the frame's opaque origin — not a sanitiser — is what keeps it out of the app |
 | one `WebGLRenderer` per figure | **refused.** A renderer per card exhausts the browser's ~16 context limit after a few scenes, and every rebuild leaks one. One shared off-screen renderer blits each scene into the figure's own 2D canvas: unbounded figures, one context, and the canvas is already a PNG source |
 | let the card rebuild with the transcript | **refused.** The subtree is replaced on every streamed token; a rebuilt card would drop its pixels and the orbit angle the user just dragged. Cards are cached by source hash and *moved* back into the new tree |
 | keep `<style>` inside the sanitised SVG — drawings lean on it | **refused.** Inside an inline SVG those rules style the whole document, so a reply could restyle app UI (hide the confirm dialog's buttons, fake one) with selectors no text screen can tell apart from drawing styles. The element is dropped; drawings carry their look in presentation attributes, which is what the prompt asks for anyway. The *root's* `style` attribute is dropped too — the root is the one element that generates a CSS box, so `position: fixed` there would lift the drawing out over the window — and the viewport gets `contain: layout paint` as the belt to that braces |
 | save the PNG at 1× | **refused.** A chart pasted into a document has to be sharp: 2× backing store, capped so a huge figure cannot allocate a 100-megapixel canvas, with the computed styles inlined so the file does not depend on this app's CSS variables |
 | encode the PNG in Rust | **not possible here, and not needed.** There is no `image` / `resvg` dependency and the pixels only exist in the webview; the backend validates the payload (PNG magic, 12 MiB cap, whitelisted slug) and writes `<workspace>/figures/<slug>.png` — not `.data/`, because the file belongs to the user |
+
+---
+
+## PATCH v1.6 — a figure can move
+
+v1.5 refused to execute model-authored JavaScript, and that refusal still stands
+for one document: **this** document. A drawing that animates needs script, so
+the escape is not a weaker parser but a stronger boundary — the fragment runs in
+a frame with its own, opaque origin. "Raw HTML with extra steps" was the right
+call while the only alternative was the transcript's own scope; a separate
+origin is a different thing.
+
+| Tempting | Here, and why |
+|---|---|
+| run the fragment inline, sanitised like an SVG | **refused.** A document-wide allowlist for arbitrary HTML + CSS is a filter, not a boundary: one missed `style` rule restyles the app, one missed attribute is a handler. The frame's origin is the boundary, and a filter cannot replace it |
+| `sandbox="allow-scripts allow-same-origin"` so the parent can inject the document, read pixels, or resize cheaply | **refused, and it is the classic escape.** Those two flags together mean "same origin" — the frame could reach `parent.document`, the app's storage and its cookies, which is exactly what the sandbox exists to prevent. The frame stays opaque; communication is `postMessage` in both directions, and `event.source` is checked |
+| give the frame a network-capable CSP so a fragment can load a CDN library | **refused.** `default-src 'none'` is what makes a saved file safe to open and a reply unable to exfiltrate. Charts draw with inline `<canvas>` / `<svg>`, not with a download |
+| capture the frame to PNG for the save button and the PDF | **not possible.** A cross-origin frame cannot be drawn into a canvas, and an animation has no single frame worth keeping. The save writes the *document* (`<slug>.html`), tokens baked in, and the PDF keeps the frame |
+| rewrite `srcdoc` on a theme switch | **refused.** A rewrite reloads the document and restarts the animation. The tokens are re-sent as one message and written to `:root` in place |
+| measure `documentElement` for the height | **refused.** The root element fills the frame viewport, so it would report the height the card just set; the reporter measures `body`'s border box instead |
+| mount the frame as soon as its source is complete | **refused.** Chromium reloads a frame on re-insertion and a commit replaces the subtree, so a frame in a still-streaming reply restarts on every token. It becomes *available* on the settle commit (the one nothing follows) and the card says so until then |
+| start the animation on its own — the reader asked for a drawing, after all | **refused.** On WebKitGTK the frame shares the web process with the transcript: a 2 s `while` froze the parent's 50 ms timer for 2.041 s, so a `while (true) {}` would take the window down. The poster makes execution the reader's click, which needs no setting and no trust in the model — *revised by PATCH v1.7: script-less fragments auto-run; only script waits for the click* |
+| let a watchdog stop a runaway fragment | **refused, it cannot work.** The watchdog runs on the thread the fragment blocks, so it fires only after the loop ends — and it never ends. A timer that fires 2 s late cannot interrupt anything; only *not starting* the script is a real boundary |
+| read `default-src 'none'` as "a fragment cannot reach the network" | **half true, so stated as such.** It refuses every request the frame itself makes (fourteen channels measured, zero hits), but navigation is not a request in CSP's sense: `location = 'https://…?d=' + payload` leaves. The card counts frame loads and closes the figure on the second one |
+| trust the serialiser to keep a fragment's `</style>` inside its element | **not reachable, and still guarded.** A literal closing tag ends the element during the first parse, and raw-text elements do not decode entities (`&lt;/style&gt;` stays text — checked), so no parsed text node can hold one. `defuseRawText` remains as the belt for the day this module writes text into a `<style>` itself |
+| let a saved file drop the CSP because it is "just a local file" | **refused.** The file is the same fragment. It keeps the policy, so double-clicking it cannot phone home either |
+
+PATCH v1.7 revises one of those rows — *start the animation on its own* — after
+measuring both engines and splitting the question it answered too coarsely:
+
+## PATCH v1.7 — auto-run what cannot hang the window
+
+The v1.6 gate asked the same question of every dynamic figure, which made CSS
+animation — the common case — cost a click it did not need. The measure that
+decided it: a sandboxed frame shares the web process with the transcript on
+WebKitGTK **and** on Chromium (a 2 s `while` in the frame left a 2 s hole in the
+parent's 50 ms timer on both), so the dangerous thing is not "a dynamic figure"
+but *script on that thread*. Markup, CSS and SVG animation cannot block it.
+
+| Tempting | Here, and why |
+|---|---|
+| auto-run every figure, because the reader asked for a drawing | **refused, now for a precise reason.** A fragment that runs script shares the thread with the transcript in both engines; the gate stays for exactly that case |
+| auto-run only the fragments that have no script (`htmlFigure.hasInlineScript` — `<script>` elements, `on…` attributes, `javascript:` URLs) | **this is the tier.** No script, no blocking: CSS animation starts on the settle commit, no click. A fragment that cannot be parsed counts as scripted and takes the gate |
+| keep asking per figure, forever | **refused.** The poster's second button, `Play automatically this session`, records consent in `sessionStorage` (dies with the app, unreadable by the frame) and lifts every standing gate at that reply's next rebuild |
+| keep consent in `localStorage` so it outlives the restart | **refused.** "May this app run model-authored script" is a per-session answer; `sessionStorage` asks it again every launch |
+| run a script figure's code in a Web Worker to make autoplay safe | **not a transparent upgrade.** The fragment's script touches the DOM; a DOM proxy over `postMessage` is a library-sized shim the model cannot be relied on to write to. OffscreenCanvas covers only canvas figures. Revisit only as an explicit *flavour*, never as a silent rewrite |
+| isolate the frame in its own process (multi-webview) | **unavailable.** Tauri's multi-webview is `unstable` and not supported on Linux, which is the engine in question; and the same thread is shared on Chromium too |
+| reset a load counter only when the frame document starts | **wrong — the move also reloads.** A cached card is re-inserted on rebuild and the reload fires a load that is not the fragment navigating away, so a settled CSS figure got closed as "navigated". `beforeMount` zeroes the counter before the move, and only a card still in the `gate` state may auto-lift — a card the guard blocked stays blocked |
 
 ---
 
@@ -1152,8 +1269,9 @@ one decision.
 |---|---|
 | `src/App.css` | **All tokens**, app shell, toolbar, **titlebar / window chrome**, transcript, **floating chat notices**, input row, dialogs, markdown editor, scrollbars, shared primitives |
 | `src/components/ChatMessage.css` | Transcript turns, reasoning, code blocks, tables (`--ts-*` are aliases of `--c-*`) |
-| `src/utils/figures.ts` | Figure extraction (`svg` / `carve` fences, raw tags) — slot tokens handed to the transcript |
-| `src/utils/figureCard.ts` | The `.chat-figure` card: sanitised SVG, three.js canvas, save action, per-source cache |
+| `src/utils/figures.ts` | Figure extraction (`svg` / `carve` / `html-fig` fences, raw tags) — slot tokens handed to the transcript |
+| `src/utils/figureCard.ts` | The `.chat-figure` card: sanitised SVG, three.js canvas, sandboxed frame, save action, per-source cache |
+| `src/utils/htmlFigure.ts` | `<html-fig>`: the frame document (CSP, token `:root`, height reporter), its message protocol, and the standalone document a save writes |
 | `src/utils/carve3d.ts` | `<carve>` scene parsing and the shared off-screen `WebGLRenderer` |
 | `src/utils/figurePng.ts` | SVG / canvas → base64 PNG (computed styles inlined, 2× backing store) |
 | `src/utils/svgSanitize.ts` | Element allowlist and attribute blocklist for model-authored SVG |

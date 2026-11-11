@@ -2026,6 +2026,7 @@ pub fn run() {
             pdf_mentions::convert_pdf_mention,
             save_markdown_file,
             figures::save_figure,
+            figures::save_figure_html,
             figures::app_open_figures_dir,
             app_open_data_dir,
             app_open_workspace_dir,

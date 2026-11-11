@@ -34,6 +34,11 @@ const MAX_PNG_BYTES: usize = 12 * 1024 * 1024;
 /// never reaches the decoder.
 const MAX_BASE64_LEN: usize = MAX_PNG_BYTES / 3 * 4 + 8;
 
+/// Largest accepted dynamic figure (2 MiB of UTF-8). A fragment of markup, style
+/// and script is far smaller; the cap keeps a runaway payload out of the
+/// workspace, the same way [`MAX_PNG_BYTES`] does for an image.
+const MAX_HTML_BYTES: usize = 2 * 1024 * 1024;
+
 const MAX_SLUG_LEN: usize = 64;
 
 const PNG_MAGIC: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
@@ -120,24 +125,53 @@ pub(crate) fn decode_png(payload: &str) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
+/// Accept a dynamic figure payload only if it is a standalone document.
+///
+/// This is a shape check, not a sanitiser: the fragment ran in a sandbox before
+/// it got here (see `htmlFigure.ts` on the frontend), and the sandbox is what
+/// makes it safe. The check is about the *file*: what lands in `figures/` must be
+/// something a browser can open on its own, so the builder's doctype is required
+/// and an oversized or empty payload is refused before it touches the disk.
+pub(crate) fn check_html_document(html: &str) -> Result<String, String> {
+    let trimmed = html.trim_start();
+    if trimmed.is_empty() {
+        return Err("dynamic figure is empty".to_string());
+    }
+    if html.len() > MAX_HTML_BYTES {
+        return Err(format!(
+            "dynamic figure is too large ({} bytes, limit {MAX_HTML_BYTES})",
+            html.len()
+        ));
+    }
+    let head: String = trimmed
+        .chars()
+        .take(16)
+        .collect::<String>()
+        .to_ascii_lowercase();
+    if !head.starts_with("<!doctype") {
+        return Err("dynamic figure is not a standalone HTML document".to_string());
+    }
+    Ok(trimmed.to_string())
+}
+
 /// `<slug>.png`, or the first free `<slug>-<n>.png`.
 ///
 /// Saving the same figure twice must not overwrite the first file: the user
 /// may have kept it, and the two may differ (an orbited `carve` scene, a
 /// re-drawn chart).
-fn next_free_name(root: &Path, slug: &str) -> (String, bool) {
-    let first = format!("{slug}.png");
+fn next_free_name(root: &Path, slug: &str, extension: &str) -> (String, bool) {
+    let first = format!("{slug}.{extension}");
     if !root.join(&first).exists() {
         return (first, false);
     }
     for n in 2..=99u32 {
-        let candidate = format!("{slug}-{n}.png");
+        let candidate = format!("{slug}-{n}.{extension}");
         if !root.join(&candidate).exists() {
             return (candidate, true);
         }
     }
     // 99 saves of one figure: overwrite the last slot instead of failing.
-    (format!("{slug}-99.png"), true)
+    (format!("{slug}-99.{extension}"), true)
 }
 
 /// Write one validated PNG into `<workspace>/figures/`.
@@ -146,18 +180,32 @@ pub(crate) fn write_figure(
     slug: &str,
     png: &[u8],
 ) -> Result<SavedFigure, String> {
+    write_figure_file(workspace, slug, "png", png)
+}
+
+/// Write one figure file into `<workspace>/figures/<slug>.<extension>`.
+///
+/// The extension is picked by the caller, never by the payload: a PNG for a
+/// rasterised drawing, `html` for a `<html-fig>` (a dynamic figure has no single
+/// frame, so the file *is* the figure).
+pub(crate) fn write_figure_file(
+    workspace: &Path,
+    slug: &str,
+    extension: &str,
+    bytes: &[u8],
+) -> Result<SavedFigure, String> {
     let root = figures_root(workspace);
     std::fs::create_dir_all(&root).map_err(|e| format!("{}: {e}", root.display()))?;
-    let (file_name, renamed) = next_free_name(&root, slug);
+    let (file_name, renamed) = next_free_name(&root, slug, extension);
     let relative = format!("figures/{file_name}");
     // Last line of defence: the id was whitelisted and the name built here, but
     // the path still goes through the same workspace sandbox every other write
     // uses, so a future change to the naming cannot escape the workspace.
     let target = crate::tools::paths::resolve_safe_path(workspace, &relative)?;
-    std::fs::write(&target, png).map_err(|e| format!("{relative}: {e}"))?;
+    std::fs::write(&target, bytes).map_err(|e| format!("{relative}: {e}"))?;
     Ok(SavedFigure {
         path: relative,
-        bytes: png.len() as u64,
+        bytes: bytes.len() as u64,
         renamed,
     })
 }
@@ -177,6 +225,27 @@ pub fn save_figure(
     let slug = sanitize_slug(&id)?;
     let png = decode_png(&png_base64)?;
     write_figure(&workspace, &slug, &png)
+}
+
+/// Save one dynamic figure (`<html-fig>`) as a standalone document.
+///
+/// There is no PNG here on purpose: an animation has no single frame, and a
+/// sandboxed frame cannot be rasterised from the app. What the user gets is the
+/// figure itself — a complete `.html` that opens in any browser.
+#[tauri::command]
+pub fn save_figure_html(
+    state: State<'_, AppState>,
+    id: String,
+    html: String,
+) -> Result<SavedFigure, String> {
+    let workspace = state
+        .workspace_dir
+        .lock()
+        .map(|dir| dir.clone())
+        .map_err(|_| "workspace directory lock poisoned".to_string())?;
+    let slug = sanitize_slug(&id)?;
+    let document = check_html_document(&html)?;
+    write_figure_file(&workspace, &slug, "html", document.as_bytes())
 }
 
 /// Open `<workspace>/figures` in the OS file manager.
@@ -216,9 +285,23 @@ pub fn prompt_block() -> String {
      `plane` (`size`), `line` (`points`). Optional per object: `rot: [x,y,z]`, \
      `color: accent|success|warning|danger|text|muted`, `opacity`, `wireframe`. \
      It renders with three.js in a canvas the user can orbit by dragging.\n\
-     - Both accept a title after the language on the fence line (`svg 抛体轨迹`) and a \
+     - Dynamic (motion or interaction): a fenced `html-fig` block (or an inline \
+     `<html-fig>…</html-fig>`) holding one self-contained HTML5 fragment — markup, \
+     `<style>` and `<script>`, with no external files: the frame's CSP blocks the \
+     network and every external `src`/`href`. It runs in a sandboxed frame whose \
+     `:root` already carries the app's tokens (`--c-bg`, `--c-surface`, \
+     `--c-surface-2`, `--c-text`, `--c-body`, `--c-muted`, `--c-border`, \
+     `--c-border-i`, `--c-accent`, `--c-accent-soft`, `--c-on-accent`, \
+     `--c-success`, `--c-warning`, `--c-danger`, `--c-code`), a 13px body on \
+     `--c-surface`, and `@media (prefers-reduced-motion: reduce)` is honoured. Size \
+     the drawing by its content — never `height: 100vh`, the card measures the frame \
+     and grows with it. Use it \
+     only when the figure must move or be touched; a static chart stays an `svg`, \
+     and an `html-fig` is saved as `.html` rather than PNG.\n\
+     - All three accept a title after the language on the fence line (`svg 抛体轨迹`) and a \
      `#name` token used for the PNG file name (`carve #orbit 椭圆轨道`).\n\
-     - Every figure gets a save button; PNGs land in `<workspace>/figures/`."
+     - Every figure gets a save button; images land in `<workspace>/figures/` as PNG, \
+     dynamic figures as `.html`."
         .to_string()
 }
 
@@ -334,11 +417,42 @@ mod tests {
     }
 
     #[test]
-    fn prompt_block_names_both_markups() {
+    fn prompt_block_names_every_markup() {
         let block = prompt_block();
         assert!(block.contains("svg"));
         assert!(block.contains("carve"));
+        assert!(block.contains("html-fig"));
         assert!(block.contains("figures/"));
+    }
+
+    #[test]
+    fn a_dynamic_figure_is_saved_as_a_document() {
+        let root = std::env::temp_dir().join(format!("figures-html-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        let document =
+            check_html_document("<!DOCTYPE html>\n<html><body>hi</body></html>").unwrap();
+        let saved = write_figure_file(&root, "fig-2", "html", document.as_bytes()).unwrap();
+        assert_eq!(saved.path, "figures/fig-2.html");
+        let on_disk = std::fs::read_to_string(root.join("figures/fig-2.html")).unwrap();
+        assert!(on_disk.starts_with("<!DOCTYPE html>"));
+
+        // The extension is the caller's, never the payload's: the same call
+        // cannot be talked into writing a second PNG.
+        let again = write_figure_file(&root, "fig-2", "html", document.as_bytes()).unwrap();
+        assert_eq!(again.path, "figures/fig-2-2.html");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn refuses_a_payload_that_is_not_a_document() {
+        assert!(check_html_document("").is_err());
+        assert!(check_html_document("   ").is_err());
+        assert!(check_html_document("<div>hi</div>").is_err());
+        let huge = format!("<!DOCTYPE html>{}", "x".repeat(MAX_HTML_BYTES));
+        assert!(check_html_document(&huge).is_err());
     }
 
     #[test]

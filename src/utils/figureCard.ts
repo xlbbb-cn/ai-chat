@@ -12,7 +12,7 @@
  * the canvas keeps its pixels and the listeners stay attached.
  */
 
-import { openFiguresDir, saveFigure } from "../api";
+import { openFiguresDir, saveFigure, saveFigureHtml } from "../api";
 import { t as text } from "../i18n";
 import {
   defaultView,
@@ -24,12 +24,55 @@ import {
 } from "./carve3d";
 import { canvasToPngBase64, svgToPngBase64 } from "./figurePng";
 import { figureSlug, type FigureSpec } from "./figures";
+import {
+  FRAME_MESSAGE_TAG,
+  MAX_FRAME_HEIGHT,
+  MAX_HTML_SOURCE,
+  MIN_FRAME_HEIGHT,
+  buildFrameDocument,
+  buildStandaloneDocument,
+  hasInlineScript,
+  postFigureTokens,
+  readFigureTokens,
+} from "./htmlFigure";
 import { expandSlots, hashSource, slotHost } from "./slotTokens";
 import { sanitizeSvg } from "./svgSanitize";
 
 export interface MountFiguresOptions {
   /** Stable identity of the reply, so a cached card is reused. */
   messageId: string;
+  /**
+   * Is this reply still streaming? A frame is a whole document, so the answer
+   * decides *when* a dynamic figure may run — see `buildHtmlCard`.
+   */
+  streaming?: boolean;
+}
+
+/**
+ * Session consent for running a fragment's script without a click.
+ *
+ * `sessionStorage` on purpose: it survives a reload but not a restart, so the
+ * answer to "may this app run model-authored script while I read" is asked
+ * again every time the app starts — the same question, asked once per session
+ * instead of once per figure. The frame cannot read or write it (opaque
+ * origin), and a figure that is refused never touches it.
+ */
+const AUTOPLAY_KEY = "figures.autoplayScripts";
+
+function autoplayConsented(): boolean {
+  try {
+    return window.sessionStorage.getItem(AUTOPLAY_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function rememberAutoplayConsent(): void {
+  try {
+    window.sessionStorage.setItem(AUTOPLAY_KEY, "1");
+  } catch {
+    /* private mode: consent is then asked again on every figure */
+  }
 }
 
 interface FigureHandle {
@@ -39,6 +82,14 @@ interface FigureHandle {
   /** Base64 PNG of what the card currently shows (PDF export, save). */
   png: () => Promise<string>;
   save: () => Promise<boolean>;
+  /** Release listeners when the card leaves the cache (a live frame has some). */
+  dispose?: () => void;
+  /**
+   * Called just before a cached card is re-inserted into the tree. A frame
+   * reloads when the element moves (that is how both engines behave), so any
+   * counter that must not survive the move resets here — see `buildHtmlCard`.
+   */
+  beforeMount?: () => void;
 }
 
 /** Newest 48 cards stay alive; a longer conversation rebuilds one on scroll back. */
@@ -373,15 +424,247 @@ function buildCarveCard(spec: FigureSpec, index: number): FigureHandle {
   };
 }
 
+/**
+ * A dynamic figure: one sandboxed frame holding the model's HTML5 fragment.
+ *
+ * The frame is the boundary (see `htmlFigure.ts`), so nothing here sanitises
+ * the markup — it runs in an opaque origin instead. Two things cross back: the
+ * height the wrapper reports, and nothing else. `event.source` is checked on
+ * every message, so one card's reporter cannot resize another reply's drawing.
+ *
+ * There is no PNG: an animation has no single frame, and a cross-origin frame
+ * cannot be rasterised from here anyway. The save action writes the fragment as
+ * a standalone `.html`, tokens baked — which is what a dynamic figure *is*.
+ *
+ * A fragment that cannot run script starts on mount — markup, CSS and SVG
+ * animation cannot block the thread they share with the transcript. A fragment
+ * that can needs one answer first, because on WebKitGTK *and* Chromium a
+ * sandboxed frame shares the web process with the transcript: one
+ * `while (true) {}` freezes the whole window, and no watchdog can end it because
+ * the watchdog runs on the frozen thread (measured in both: a 2 s loop leaves a
+ * 2 s hole in the parent's 50 ms timer). So the tiers are: CSS runs, script
+ * waits for a click — or for the session consent a click records (`AUTOPLAY_KEY`
+ * above). The gate also keeps the one hole CSP cannot close (`loads` below)
+ * behind the same click.
+ */
+function buildHtmlCard(
+  spec: FigureSpec,
+  index: number,
+  options: MountFiguresOptions,
+): FigureHandle {
+  const parts = buildCard(spec, index);
+
+  if (spec.pending) {
+    parts.figure.dataset.figureState = "pending";
+    parts.viewport.textContent = text("figure.drawing");
+    return unrenderable(parts);
+  }
+
+  if (!spec.source.trim() || spec.source.length > MAX_HTML_SOURCE) {
+    // Too large is not "broken": the source is intact and worth showing, and the
+    // status line says why it did not run.
+    showSource(parts, spec.source);
+    parts.status.dataset.state = "error";
+    parts.status.textContent = text("figure.htmlTooLarge");
+    return unrenderable(parts);
+  }
+
+  const tokens = () => readFigureTokens(parts.figure);
+  const caption = spec.title || text("figure.title", { index: index + 1 });
+
+  const button = addButton(parts.actions, text("figure.saveHtml"), "chat-figure-save", () => {
+    void save();
+  });
+
+  const save = (): Promise<boolean> =>
+    saveStatus(parts, button, async () => {
+      const saved = await saveFigureHtml({
+        id: figureSlug(spec, index),
+        html: buildStandaloneDocument(spec.source, tokens(), caption),
+      });
+      return saved.path;
+    });
+
+  let frame: HTMLIFrameElement | null = null;
+  let stopMessages: (() => void) | null = null;
+  // Load count of the live frame. Reset when the frame document starts and when
+  // the card is re-inserted (a move reloads the document without the fragment
+  // navigating), so exactly one load is the document this card wrote.
+  let loadCount = 0;
+
+  // ── The gate ──
+  const poster = document.createElement("div");
+  poster.className = "chat-figure-poster";
+
+  const glyph = document.createElement("span");
+  glyph.className = "chat-figure-poster-glyph";
+  glyph.setAttribute("aria-hidden", "true");
+  glyph.textContent = "▶";
+
+  const label = document.createElement("span");
+  label.className = "chat-figure-poster-label";
+
+  const hint = document.createElement("span");
+  hint.className = "chat-figure-poster-hint";
+
+  const playButton = document.createElement("button");
+  playButton.type = "button";
+  playButton.className = "chat-figure-poster-play";
+  playButton.append(glyph, label);
+
+  const rememberButton = document.createElement("button");
+  rememberButton.type = "button";
+  rememberButton.className = "chat-figure-poster-remember";
+
+  poster.append(playButton, hint, rememberButton);
+
+  const showPoster = (): void => {
+    // Mid-stream the frame would be reloaded by every commit (a commit replaces
+    // the subtree, and a re-inserted frame starts over), so the card holds the
+    // figure until the last commit; only then does the click become the gate.
+    const waiting = Boolean(options.streaming);
+    poster.dataset.mode = waiting ? "waiting" : "ready";
+    playButton.disabled = waiting;
+    rememberButton.disabled = waiting;
+    label.textContent = text(options.streaming ? "figure.playsWhenDone" : "figure.playDynamic");
+    hint.textContent = text("figure.sandboxHint");
+    rememberButton.textContent = text("figure.rememberSession");
+    parts.figure.dataset.figureState = options.streaming ? "deferred" : "gate";
+    parts.viewport.replaceChildren(poster);
+  };
+
+  /** Drop the frame and say why: the figure left the document it was given. */
+  const closeFrame = (notice: string): void => {
+    stopMessages?.();
+    stopMessages = null;
+    frame = null;
+    parts.figure.dataset.figureState = "blocked";
+    const line = document.createElement("p");
+    line.className = "chat-figure-notice";
+    line.textContent = notice;
+    parts.viewport.replaceChildren(line);
+    parts.status.dataset.state = "error";
+    parts.status.textContent = notice;
+  };
+
+  const play = (): void => {
+    if (frame || options.streaming) return;
+    parts.figure.dataset.figureState = "loading";
+
+    const element = document.createElement("iframe");
+    element.className = "chat-figure-frame";
+    // `allow-scripts` and *only* that: without `allow-same-origin` the frame gets
+    // an opaque origin, so it cannot read the transcript, the app's storage or its
+    // cookies, and it cannot navigate the top window.
+    element.setAttribute("sandbox", "allow-scripts");
+    element.setAttribute("referrerpolicy", "no-referrer");
+    element.setAttribute("title", parts.figure.getAttribute("aria-label") ?? "");
+    // A height before the first report, so the card does not jump when the
+    // fragment arrives with a different idea of its own size.
+    element.style.height = `${MIN_FRAME_HEIGHT + 80}px`;
+    frame = element;
+
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== element.contentWindow) return;
+      const data = event.data as { htmlFig?: number; height?: number } | null;
+      if (!data || data.htmlFig !== FRAME_MESSAGE_TAG || typeof data.height !== "number") return;
+      if (!Number.isFinite(data.height)) return;
+      const height = Math.min(
+        MAX_FRAME_HEIGHT,
+        Math.max(MIN_FRAME_HEIGHT, Math.round(data.height)),
+      );
+      element.style.height = `${height}px`;
+    };
+    window.addEventListener("message", onMessage);
+    stopMessages = () => window.removeEventListener("message", onMessage);
+
+    // `srcdoc` is set *before* insertion, and before the load counter starts: an
+    // empty frame inserted first commits `about:blank` and fires that commit's
+    // load, which the navigation guard below would read as the fragment leaving
+    // the document one step early.
+    element.srcdoc = buildFrameDocument(spec.source, tokens());
+    loadCount = 0;
+
+    // `default-src 'none'` refuses every request the fragment makes, but it does
+    // not govern navigation — and a navigation *is* a request, with the URL as
+    // the payload. The sandbox still applies to the document that arrives, so the
+    // figure cannot escape; the point of counting loads is to stop the request
+    // and to not draw an outside page inside a reply. One load is the document
+    // this card wrote, a second one is the fragment leaving it.
+    element.addEventListener("load", () => {
+      loadCount += 1;
+      if (loadCount === 1) {
+        parts.figure.dataset.figureState = "ready";
+        return;
+      }
+      closeFrame(text("figure.navigatedAway"));
+    });
+
+    parts.viewport.replaceChildren(element);
+  };
+
+  poster.addEventListener("click", play);
+
+  rememberButton.addEventListener("click", () => {
+    rememberAutoplayConsent();
+    play();
+  });
+
+  // A theme switch re-sends the tokens instead of rewriting `srcdoc`: the
+  // animation keeps its place, which a rebuild would throw away.
+  const redraw = () => {
+    if (!parts.figure.isConnected) {
+      themeRedraws.delete(redraw);
+      return;
+    }
+    if (frame) postFigureTokens(frame, tokens());
+  };
+  watchTheme(redraw);
+
+  // Tiered start: markup/CSS animation cannot hang the thread it shares with
+  // the transcript, so it runs on the settle commit; script waits for one
+  // answer — a click, or the session consent a click recorded. Mid-stream even
+  // a safe frame waits, because every commit would reload it.
+  const gated = hasInlineScript(spec.source) && !autoplayConsented();
+  if (!options.streaming && !gated) play();
+  else showPoster();
+
+  return {
+    element: parts.figure,
+    activate: noop,
+    png: async () => {
+      throw new Error("a dynamic figure has no single frame");
+    },
+    save,
+    dispose: () => {
+      stopMessages?.();
+      themeRedraws.delete(redraw);
+    },
+    beforeMount: () => {
+      loadCount = 0;
+      // Consent may have arrived after this card was built — the remember click
+      // of another figure. A gate that is no longer needed lifts at the next
+      // rebuild of this reply; a card the guard blocked stays blocked.
+      if (parts.figure.dataset.figureState === "gate" && !options.streaming && autoplayConsented()) {
+        play();
+      }
+    },
+  };
+}
+
 // ─── Slot expansion and mounting ────────────────────────────────────────────
 
 function prune(messageId: string, live: Set<string>): void {
   for (const key of cache.keys()) {
-    if (key.startsWith(`${messageId}|`) && !live.has(key)) cache.delete(key);
+    if (key.startsWith(`${messageId}|`) && !live.has(key)) {
+      cache.get(key)?.dispose?.();
+      cache.delete(key);
+    }
   }
   while (cache.size > MAX_CACHED) {
     const oldest = cache.keys().next().value;
     if (oldest === undefined) break;
+    cache.get(oldest)?.dispose?.();
     cache.delete(oldest);
   }
 }
@@ -411,16 +694,25 @@ export function mountFigures(
     // The source is part of the key: an unfinished figure is a new version on
     // every token and must be rebuilt, while a finished one keeps its canvas,
     // its orbit angle and its "saved" line across rebuilds.
-    const key = `${options.messageId}|${index}|${hashSource(
+    // The streaming flag is part of it too: a dynamic figure mounts differently
+    // before and after the reply settles (`buildHtmlCard`), so the settle commit
+    // must build a card rather than reuse the deferred one.
+    const key = `${options.messageId}|${index}|${options.streaming ? "s" : "c"}|${hashSource(
       `${spec.kind}\u0000${spec.title}\u0000${spec.pending ? "1" : "0"}\u0000${spec.source}`,
     )}`;
     live.add(key);
     let handle = cache.get(key);
     if (!handle) {
-      handle = spec.kind === "carve" ? buildCarveCard(spec, index) : buildSvgCard(spec, index);
+      if (spec.kind === "carve") handle = buildCarveCard(spec, index);
+      else if (spec.kind === "html-fig") handle = buildHtmlCard(spec, index, options);
+      else handle = buildSvgCard(spec, index);
       cache.set(key, handle);
     }
     handles.set(handle.element, handle);
+    // A re-inserted iframe reloads its document (both engines), so a card that
+    // carries a live frame gets its load counter back to zero first: the reload
+    // is not the fragment navigating away, it is the frame starting over.
+    handle.beforeMount?.();
     slotHost(slot).replaceWith(handle.element);
     handle.activate();
   }

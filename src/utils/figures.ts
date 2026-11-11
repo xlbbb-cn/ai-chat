@@ -19,6 +19,16 @@
  * {"objects":[…]}
  * ```
  *
+ * ```html-fig               <html-fig>…</html-fig>
+ * …one self-contained HTML5 fragment (markup + style + script)…
+ * ```
+ *
+ * The third kind is the dynamic one: a fragment that moves, or that the user
+ * can drag. It cannot be sanitised into the transcript like an `<svg>` (a
+ * drawing has no script, this one runs), so it is rendered inside a sandboxed
+ * frame — see `htmlFigure.ts`. Extraction is identical, which is why the kind
+ * lives here and not in a second scanner.
+ *
  * The scan is line-based and fence-aware: a figure only counts at the top
  * level, so a `svg` example inside a ```markdown block — fenced *or* 4-space
  * indented — stays code, and so does one inside a paragraph's inline `code`
@@ -31,11 +41,24 @@
 
 import { slotToken as sharedSlotToken } from "./slotTokens";
 
-export type FigureKind = "svg" | "carve";
+export type FigureKind = "svg" | "carve" | "html-fig";
+
+/**
+ * Fence languages that name a figure. `htmlfig` is accepted because models drop
+ * the hyphen; a plain `html` fence stays an ordinary code block on purpose — it
+ * is what a reply about HTML looks like, and the transcript cannot tell it from
+ * a drawing.
+ */
+const FIGURE_LANGS: Record<string, FigureKind> = {
+  svg: "svg",
+  carve: "carve",
+  "html-fig": "html-fig",
+  htmlfig: "html-fig",
+};
 
 export interface FigureSpec {
   kind: FigureKind;
-  /** Element source for `svg`, the JSON body for `carve`. */
+  /** Element source for `svg`, the JSON body for `carve`, HTML for `html-fig`. */
   source: string;
   /** Caption; empty when the model did not give one. */
   title: string;
@@ -108,7 +131,7 @@ function extractRawTags(source: string, figures: FigureSpec[], streaming: boolea
   let cursor = 0;
 
   for (;;) {
-    const open = /<(svg|carve)\b/gi.exec(source.slice(cursor));
+    const open = /<(svg|carve|html-fig)\b/gi.exec(source.slice(cursor));
     if (!open) break;
     const start = cursor + open.index;
     const kind = open[1].toLowerCase() as FigureKind;
@@ -154,6 +177,12 @@ function extractRawTags(source: string, figures: FigureSpec[], streaming: boolea
     }
     const body = source.slice(openEnd + 1, closeIdx);
     if (kind === "carve" && !body.includes("{")) {
+      cursor = openEnd + 1;
+      continue;
+    }
+    // An empty `<html-fig></html-fig>` is a sentence about the feature, not a
+    // drawing; a fragment has to hold something.
+    if (kind === "html-fig" && !body.trim()) {
       cursor = openEnd + 1;
       continue;
     }
@@ -249,9 +278,8 @@ export function extractFigures(
       }
     }
     const body = lines.slice(i + 1, end === -1 ? lines.length : end);
-    const lang = (open[2] ?? "").toLowerCase();
-    if ((lang === "svg" || lang === "carve") && (end !== -1 || opts.streaming)) {
-      const kind = lang as FigureKind;
+    const kind = FIGURE_LANGS[(open[2] ?? "").toLowerCase()];
+    if (kind && (end !== -1 || opts.streaming)) {
       flushProse();
       const meta = parseFenceMeta(open[3] ?? "", body.join("\n"), kind);
       figures.push({
@@ -259,6 +287,8 @@ export function extractFigures(
         source: body.join("\n"),
         title: meta.title,
         name: meta.name,
+        // No closing fence yet: the card shows the pen for every kind, and an
+        // `html-fig` is no exception (its frame waits for the settle commit).
         pending: end === -1,
       });
       out.push(slotToken(figures.length - 1));

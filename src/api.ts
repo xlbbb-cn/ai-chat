@@ -151,6 +151,20 @@ export async function openFiguresDir(): Promise<void> {
 }
 
 /**
+ * Write one dynamic figure into `<workspace>/figures/<id>.html`.
+ *
+ * A `<html-fig>` is the one figure kind with no single frame to rasterise, so
+ * the file is the figure itself: a standalone document (tokens baked, CSP in
+ * place) that opens — and animates — in any browser.
+ */
+export async function saveFigureHtml(request: {
+  id: string;
+  html: string;
+}): Promise<SavedFigure> {
+  return invoke("save_figure_html", { id: request.id, html: request.html });
+}
+
+/**
  * Markdown of one PDF mention (`@paper.pdf#2`).
  *
  * The page range is converted in-process by the `pdf2md-rs` library and cached

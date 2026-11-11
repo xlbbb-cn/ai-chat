@@ -259,6 +259,13 @@ const zhCN: Messages = {
         saveAll: "保存本回合全部图",
         openFolder: "打开 figures 文件夹",
         webglUnavailable: "此环境未启用 WebGL，3D 预览不可用。",
+        saveHtml: "保存 HTML",
+        htmlTooLarge: "动态图超出大小上限，未运行",
+        playsWhenDone: "回复完成后播放",
+        playDynamic: "播放动态图",
+        sandboxHint: "含脚本 · 沙箱内运行 · 无网络",
+        rememberSession: "本次会话自动播放",
+        navigatedAway: "该动态图试图加载外部页面，已停止",
     },
 
     toolGroup: {
@@ -419,7 +426,7 @@ const zhCN: Messages = {
             dsFormatAuto: "{model} 已自动开启：DeepSeek 系模型始终使用 DS-Format，reasoning_content 会自动回传。",
             enhancedFigures: "增强画图",
             enhancedFiguresHint:
-                "让助手自己画 SVG 图（每张都有保存按钮，PNG 存到 figures/，3D 场景还能拖动旋转），而不是写 Mermaid 图表。关闭后助手改用 ```mermaid 代码块，由对话界面渲染成图表。",
+                "让助手自己画 SVG 图（每张都有保存按钮，PNG 存到 figures/，3D 场景还能拖动旋转），以及动态 HTML5 图（`html-fig`：动画与交互在沙箱里运行，保存为 .html 文件），而不是写 Mermaid 图表。关闭后助手改用 ```mermaid 代码块，由对话界面渲染成图表。",
         },
 
         runtime: {

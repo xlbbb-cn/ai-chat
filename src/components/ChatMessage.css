@@ -965,6 +965,110 @@
   cursor: grabbing;
 }
 
+/* A dynamic figure is a document, not a drawing: the frame takes the viewport
+   width, paints its own `--c-surface` (its body does) and owns its padding, and
+   the card grows to the height it reports — `200px` is the pre-report floor, not
+   a fixed size, so nothing jumps while the fragment boots. */
+.chat-figure-frame {
+  display: block;
+  width: 100%;
+  height: 200px;
+  border: 0;
+  background: var(--c-surface);
+}
+
+.chat-figure[data-figure-kind="html-fig"] .chat-figure-viewport {
+  padding: 0;
+}
+
+/* A dynamic figure waits behind a gate: the fragment is model-authored script,
+   and on WebKitGTK it shares the web process with the transcript, so the click
+   is what creates the frame. The box says what it is, and what it will not do. */
+.chat-figure-poster {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 112px;
+  padding: 16px 12px;
+}
+
+.chat-figure-poster-play {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 16px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--c-text);
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.33s var(--ts-ease), color 0.33s var(--ts-ease);
+}
+
+/* Mid-stream the card is holding the figure, not offering it: a frame would be
+   reloaded by every commit, so the label says it plays when the reply ends. */
+.chat-figure-poster-play:disabled,
+.chat-figure-poster-remember:disabled {
+  cursor: default;
+  color: var(--c-muted);
+}
+
+.chat-figure-poster-play:hover:not(:disabled) {
+  background-color: var(--c-surface-2);
+}
+
+.chat-figure-poster-glyph {
+  font-size: 11px;
+  line-height: 1;
+  color: var(--c-accent);
+}
+
+.chat-figure-poster-label {
+  font-size: 13px;
+  color: var(--c-text);
+}
+
+.chat-figure-poster[data-mode="waiting"] .chat-figure-poster-label {
+  color: var(--c-muted);
+}
+
+.chat-figure-poster-hint {
+  font-size: 11px;
+  color: var(--c-muted);
+}
+
+/* The one-click shortcut that makes script figures automatic for the rest of
+   the session (sessionStorage, so an app restart asks again). */
+.chat-figure-poster-remember {
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--c-muted);
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 0.33s var(--ts-ease);
+}
+
+.chat-figure-poster-remember:hover:not(:disabled) {
+  color: var(--c-text);
+}
+
+/* The card stopped a figure that navigated out of the document it was given:
+   `default-src 'none'` refuses every request, but a navigation is not one. */
+.chat-figure-notice {
+  margin: 0;
+  padding: 18px 10px;
+  font-size: 12px;
+  color: var(--c-danger);
+}
+
 /* Caption + save action on one line, separated by the card's only hairline. */
 .chat-figure-bar {
   display: flex;

@@ -285,6 +285,13 @@ const en = {
         saveAll: "Save all figures",
         openFolder: "Open figures folder",
         webglUnavailable: "3D needs WebGL, which is unavailable in this environment.",
+        saveHtml: "Save HTML",
+        htmlTooLarge: "Dynamic figure is too large to run",
+        playsWhenDone: "Plays when the reply finishes",
+        playDynamic: "Play dynamic figure",
+        sandboxHint: "Contains script · runs sandboxed · no network",
+        rememberSession: "Play automatically this session",
+        navigatedAway: "This figure tried to load an outside page, so it was stopped",
     },
 
     toolGroup: {
@@ -456,7 +463,7 @@ const en = {
             dsFormatAuto: "Always on for {model}: DeepSeek-family models get DS-Format automatically, so reasoning_content is always passed back.",
             enhancedFigures: "Enhanced drawing",
             enhancedFiguresHint:
-                "Let the assistant draw its own SVG figures — every one gets a save button and lands in figures/ as a PNG, and 3D scenes can be orbited — instead of writing Mermaid diagrams. Off: the assistant writes fenced `mermaid` blocks, which the transcript renders as themed diagrams.",
+                "Let the assistant draw its own SVG figures — every one gets a save button and lands in figures/ as a PNG, and 3D scenes can be orbited — plus dynamic HTML5 figures (`html-fig`: animation and interaction inside a sandboxed frame, saved as a .html file), instead of writing Mermaid diagrams. Off: the assistant writes fenced `mermaid` blocks, which the transcript renders as themed diagrams.",
         },
 
         runtime: {
