@@ -50,9 +50,10 @@ const MAX_MARKDOWN_CHARS: usize = 60_000;
 
 /// Cached conversions older than this are dropped when a new one is written.
 /// A 60-page conversion is not small, and the scratch root is shared with
-/// mission batches and composer pastes (`workspace_files` only sweeps its own
-/// `paste-*` files), so the cache needs its own expiry — a week covers "read the
-/// rest of it" without keeping every page ever quoted.
+/// mission batches and composer pastes. The cache survives the paste sweep
+/// because it lives in a directory (`pdf/`) while that sweep only ever deletes
+/// plain files at the top level — so a week here covers "read the rest of it"
+/// without keeping every page ever quoted.
 const CACHE_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 60 * 60);
 
 /// What the frontend appends to the LLM request for one PDF mention.

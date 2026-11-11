@@ -158,9 +158,73 @@ export function partitionByModelSupport(
   return { supported, unsupported };
 }
 
-/** The `@` token for a workspace-relative path. */
+// ─── Naming a mention in a message ──────────────────────────────────────────
+
+/** Workspace-relative scratch folder, addressed by the short `@@<name>` form. */
+const TMP_REL = ".data/tmp";
+
+/** Is this workspace-relative path a file inside the workspace tmp folder? */
+export function isTmpPath(path: string): boolean {
+  return path === TMP_REL || path.startsWith(`${TMP_REL}/`);
+}
+
+/**
+ * The name a mention is *shown* by.
+ *
+ * A file in `.data/tmp` is addressed as `@@<name>`: that folder *is* the
+ * workspace tmp area (composer pastes, sub-agent deliverables, the PDF cache),
+ * so the short form is honest about the lifetime and keeps
+ * `.data/tmp/qa-items.json` out of every message. A real path in the body also
+ * reads to the model as "open this file", which is the tool call the inlined
+ * copy exists to avoid.
+ *
+ * Every other mention keeps its path, because there the path *is* the point:
+ * the model may need the rest of the file, or may write back to it.
+ */
+export function mentionDisplayName(path: string): string {
+  const slash = path.lastIndexOf("/");
+  const base = path.slice(slash + 1);
+  const hash = base.indexOf("#");
+  const suffix = hash >= 0 ? base.slice(hash) : "";
+  if (!isTmpPath(path)) return path;
+  return `@@${hash >= 0 ? base.slice(0, hash) : base}${suffix}`;
+}
+
+/** `@.data/tmp/<name>` plus the optional `#start[-end]` range of `MENTION_RE`. */
+const LONG_TMP_MENTION_RE = /(^|\s)@\.data\/tmp\/([^\s@#]+)(?:#(\d+)(?:-(\d*))?)?/g;
+
+/**
+ * Collapse a hand-typed `@.data/tmp/<name>` to the short `@@<name>` form.
+ *
+ * The composer inserts `@@<name>` itself (and `parseFileMentions` resolves it),
+ * so this only catches the long form: typed by hand, or carried in a message
+ * written before the `@@` syntax existed. The range survives in the app's own
+ * `#12-24` shape — the inlined copy holds only those lines, so dropping it would
+ * tell the model it saw the whole file — and the boundary rule is the parser's
+ * (`@` at the start or after whitespace), so `user@example.com` is left alone.
+ */
+export function canonicalTmpMentions(text: string): string {
+  return text.replace(
+    LONG_TMP_MENTION_RE,
+    (_match, lead: string, name: string, start?: string, end?: string) => {
+      const range =
+        start === undefined ? "" : end === undefined ? `#${start}` : `#${start}-${end}`;
+      return `${lead}@@${name}${range}`;
+    },
+  );
+}
+
+/**
+ * The token for a workspace-relative path: `@@<name>` inside `.data/tmp`,
+ * `@<path>` everywhere else.
+ *
+ * `@@` keeps a paste short (`@@qa-items.json`, not `@.data/tmp/qa-items.json`)
+ * and says what the file is — scratch, not part of the project — while
+ * `parseFileMentions` maps it straight back to `.data/tmp/<name>`.
+ */
 export function mentionTokenForPath(path: string): string {
-  return `@${path}`;
+  if (!isTmpPath(path) || path === TMP_REL) return `@${path}`;
+  return `@@${path.slice(TMP_REL.length + 1)}`;
 }
 
 /**

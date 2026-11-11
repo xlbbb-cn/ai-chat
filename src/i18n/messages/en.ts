@@ -174,7 +174,6 @@ const en = {
         stop: "Stop",
         contextUsage: "Context usage: {percent}%",
         contextUsageWithCache: "Context usage: {percent}% · cache hit {cachePercent}%",
-        attachedFiles: "Attached Files:",
 
         generationStopped: "[Generation stopped]",
         sessionSwitchBlocked:
@@ -254,7 +253,6 @@ const en = {
     chat: {
         thoughtProcess: "Thought Process",
         tokenUsage: "Token usage",
-        attachedFiles: "Attached Files:",
         retryTitle: "Retry this unfinished user message",
         exportTitle: "Export this reply to PDF",
         deleteTitle: "Delete this message",

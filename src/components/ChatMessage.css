@@ -583,13 +583,16 @@
 
 /* `@file#lines` mention inside a user turn: the accent is the reference
    colour, so the token the user typed reads as a reference and not as prose.
-   The chip list below survives only for attachments the body does not name
-   (files attached before mentions existed). */
+   That token *is* the attachment's representation — a pasted file is renamed
+   to `@qa-items.json` before it is sent — so there is no chip list below it. */
 .file-mention-token {
   color: var(--c-accent-text);
   font-weight: 500;
 }
 
+/* An image is the one attachment that is content rather than a reference: it
+   stays visible as a thumbnail, while every other file is named by its
+   `@name` token in the body. */
 .message-attachments {
   display: flex;
   flex-wrap: wrap;
@@ -598,44 +601,9 @@
   align-items: center;
 }
 
-.message-attachments>span:first-child {
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  margin-right: 4px;
-  color: var(--ts-pewter);
-}
-
-.chat-message.assistant .message-attachments>span:first-child {
-  color: var(--ts-pewter);
-}
-
-.message-attachment-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  border-radius: 4px;
-  font-size: 0.78em;
-  max-width: 220px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 3px 8px;
-  background: var(--c-surface);
-  color: var(--ts-graphite);
-  border: 1px solid var(--ts-cloud);
-}
-
-.chat-message.assistant .message-attachment-pill {
-  background: var(--ts-ash);
-  color: var(--ts-pewter);
-  border: 1px solid transparent;
-}
-
 .message-attachment-thumb {
   display: inline-flex;
-  flex-direction: column;
-  align-items: stretch;
+  align-items: center;
   text-decoration: none;
   border-radius: var(--r-md);
   overflow: hidden;
@@ -656,26 +624,8 @@
 .message-attachment-thumb img {
   display: block;
   max-width: 180px;
-  max-height: 20px;
+  max-height: 220px;
   object-fit: cover;
-}
-
-.message-attachment-name {
-  display: block;
-  font-size: 11px;
-  padding: 3px 6px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  text-align: center;
-  background: var(--ts-ash);
-  color: var(--ts-graphite);
-}
-
-.chat-message.assistant .message-attachment-name {
-  background: var(--c-surface-2);
-  color: var(--ts-graphite);
-  border-top: 1px solid var(--ts-cloud);
 }
 
 /* Writing indicator — a pen nib riding at the end of the streamed text,

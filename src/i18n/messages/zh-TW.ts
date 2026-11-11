@@ -158,7 +158,6 @@ const zhTW: Messages = {
         stop: "停止",
         contextUsage: "上下文用量：{percent}%",
         contextUsageWithCache: "上下文用量：{percent}% · 快取命中 {cachePercent}%",
-        attachedFiles: "附件：",
 
         generationStopped: "[生成已停止]",
         sessionSwitchBlocked: "正在生成回覆，請先停止後再切換歷史工作階段。",
@@ -229,7 +228,6 @@ const zhTW: Messages = {
     chat: {
         thoughtProcess: "思考過程",
         tokenUsage: "Token 用量",
-        attachedFiles: "附件：",
         retryTitle: "重試這則未完成的使用者訊息",
         exportTitle: "將這則回覆匯出為 PDF",
         deleteTitle: "刪除這則訊息",

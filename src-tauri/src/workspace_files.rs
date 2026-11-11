@@ -14,14 +14,15 @@
 //!   which are attached whole (a line range is meaningless there).
 //!
 //! The composer also *writes*: a file pasted with `Ctrl+V` or dropped onto the
-//! input box lands in `<workspace>/.data/tmp/` and becomes an `@.data/tmp/<name>`
-//! mention ([`save_pasted_file`], [`import_workspace_paths`]). That is the app's
-//! scratch area ([`crate::workspace::tmp_root`]), so a paste never shows up
-//! among the user's tracked files — and [`resolve_in_workspace`] opens exactly
-//! that one subdirectory of `.data`, so the mention can still be read back while
-//! the database, skills and scripts stay unreachable from the composer. Every
-//! file this module writes there is prefixed [`PASTE_PREFIX`], so the stale sweep
-//! never touches a sub-agent mission batch or a cached PDF conversion.
+//! input box lands in `<workspace>/.data/tmp/` and becomes an `@@<name>` mention
+//! ([`save_pasted_file`], [`import_workspace_paths`]). That is the app's scratch
+//! area ([`crate::workspace::tmp_root`]), so a paste never shows up among the
+//! user's tracked files — and [`resolve_in_workspace`] opens exactly that one
+//! subdirectory of `.data`, so the mention can still be read back while the
+//! database, skills and scripts stay unreachable from the composer. The stored
+//! name is the file's own (no timestamp prefix), which is what keeps `@@<name>`
+//! short; the folder is shared with the sub-agent exchange batches and the PDF
+//! cache, and those are directories, so the stale sweep never touches them.
 //!
 //! Every path is resolved against the workspace root and must stay inside it:
 //! the UI can only *name* a path, so this check is the only thing between a
@@ -312,8 +313,8 @@ pub async fn read_workspace_file_bytes(
 /// It is the app's own scratch area ([`crate::workspace::tmp_root`]) rather than
 /// a top-level `tmp/`, so nothing appears among the user's tracked files.
 /// [`resolve_in_workspace`] opens exactly this subdirectory of `.data` and
-/// nothing else, and the inserted `@.data/tmp/<name>` then reads back through
-/// the very same path a hand-typed mention uses.
+/// nothing else, and a file in it is addressed by the short `@@<name>` mention
+/// (`fileMention.ts` / `composerFiles.ts`) instead of the full path.
 const COMPOSER_TMP_REL: &str = ".data/tmp";
 
 /// Absolute folder that receives files pasted (`Ctrl+V`) or dropped onto the
@@ -321,12 +322,6 @@ const COMPOSER_TMP_REL: &str = ".data/tmp";
 pub(crate) fn composer_tmp_root(workspace: &Path) -> PathBuf {
     crate::workspace::tmp_root(workspace)
 }
-
-/// Prefix of every file this module writes into `.data/tmp`, a folder it shares
-/// with the sub-agent exchange and the PDF cache. The sweep keys on the full
-/// [`is_paste_file_name`] shape rather than this prefix, so neither of those can
-/// ever be deleted by accident.
-const PASTE_PREFIX: &str = "paste-";
 
 /// A pasted file travels through the mention pipeline, so it is capped like any
 /// other binary mention (24 MiB before base64).
@@ -342,9 +337,9 @@ const MAX_PASTE_STEM_LEN: usize = 80;
 /// Longest extension kept from a paste (`tar.gz` is `gz`; this is generous).
 const MAX_PASTE_EXT_LEN: usize = 12;
 
-/// A pasted file nobody sent within a day is garbage: the mention in the
-/// composer is what keeps it alive, and after that the folder would only grow.
-const PASTE_TTL_SECS: i64 = 24 * 60 * 60;
+/// Anything sitting directly in `.data/tmp` for a day was never used: a paste is
+/// kept alive by the mention inside a message, not by the folder.
+const TMP_TTL_SECS: u64 = 24 * 60 * 60;
 
 /// Most files accepted from one drop (dragging a folder names thousands).
 const MAX_IMPORTED_PATHS: usize = 20;
@@ -384,13 +379,14 @@ fn squish_name_part(value: &str) -> String {
     out.trim_matches('-').to_string()
 }
 
-/// Build the stored name for a pasted file: `<PASTE_PREFIX><stamp>-<stem>.<ext>`.
+/// Build the stored name for a pasted file: `<stem>.<ext>`.
 ///
-/// The name must survive the `@` mention grammar, which ends a token at
-/// whitespace, `#`, `@`, `<` or `>` — so it is rebuilt from a whitelist instead
-/// of being escaped. The timestamp prefix keeps two pastes of the same
-/// screenshot apart without a collision check for the common case.
-pub(crate) fn sanitize_paste_name(raw: &str, stamp: &str) -> String {
+/// The name must survive the mention grammar, which ends a token at whitespace,
+/// `#`, `@`, `<` or `>`, so it is rebuilt from a whitelist instead of being
+/// escaped. There is no timestamp: the file is addressed as `@@<name>`, and a
+/// stamp would be noise in every message that references it.
+/// [`next_free_paste_name`] keeps two pastes of the same screenshot apart.
+pub(crate) fn sanitize_tmp_name(raw: &str) -> String {
     let base = raw.rsplit(['/', '\\']).next().unwrap_or("").trim();
     let (raw_stem, ext) = split_paste_name(base);
     let mut stem = squish_name_part(&raw_stem);
@@ -402,9 +398,9 @@ pub(crate) fn sanitize_paste_name(raw: &str, stamp: &str) -> String {
     }
     let stem = stem.trim_matches('-');
     if ext.is_empty() {
-        format!("{PASTE_PREFIX}{stamp}-{stem}")
+        stem.to_string()
     } else {
-        format!("{PASTE_PREFIX}{stamp}-{stem}.{ext}")
+        format!("{stem}.{ext}")
     }
 }
 
@@ -446,61 +442,38 @@ fn write_composer_paste(
     Ok(relative)
 }
 
-/// Drop `.data/tmp/paste-*` files older than [`PASTE_TTL_SECS`].
+/// Drop files that have sat directly in `.data/tmp` for [`TMP_TTL_SECS`].
 ///
 /// Best effort: a locked or vanished file is skipped, never an error — this runs
 /// on the way into an unrelated paste.
 ///
-/// `.data/tmp` is shared with the sub-agent deliverable exchange
+/// Everything directly inside `.data/tmp` is scratch by contract (that is what
+/// `@@<name>` addresses), so a day-old file there was never used. Only *files*
+/// are considered: the sub-agent deliverable exchange
 /// ([`crate::agents::exchange`]) and the PDF conversion cache
-/// ([`crate::pdf_mentions`]), which are permanent. The sweep therefore deletes
-/// on [`is_paste_file_name`] — a `<PASTE_PREFIX><YYYYMMDD>-<HHMMSS>-` shape this
-/// module alone produces — not on the bare prefix, so no batch directory and no
-/// hand-made file can ever match.
+/// ([`crate::pdf_mentions`]) are directories, and a directory is never touched.
 fn sweep_composer_tmp(workspace: &Path) {
     let root = composer_tmp_root(workspace);
     let Ok(entries) = std::fs::read_dir(&root) else {
         return;
     };
     for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if !is_paste_file_name(&name) {
-            continue;
-        }
         let Ok(meta) = entry.metadata() else {
             continue;
         };
         if !meta.is_file() {
             continue;
         }
-        let Ok(modified) = meta.modified() else {
-            continue;
-        };
-        let age = modified
-            .elapsed()
-            .map(|elapsed| elapsed.as_secs() as i64)
+        let age = meta
+            .modified()
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .map(|elapsed| elapsed.as_secs())
             .unwrap_or(0);
-        if age > PASTE_TTL_SECS {
+        if age > TMP_TTL_SECS {
             let _ = std::fs::remove_file(entry.path());
         }
     }
-}
-
-/// Does `name` look like a stored paste (`paste-20261111-155012-shot.png`)?
-///
-/// The shape is what [`sweep_composer_tmp`] deletes on: eight digits, a dash,
-/// six digits, a dash — the stamp [`paste_stamp`] writes. A file that merely
-/// starts with `paste-` (hand-made, or a future writer) is left alone.
-fn is_paste_file_name(name: &str) -> bool {
-    let Some(rest) = name.strip_prefix(PASTE_PREFIX) else {
-        return false;
-    };
-    let bytes = rest.as_bytes();
-    bytes.len() > 16
-        && bytes[..8].iter().all(u8::is_ascii_digit)
-        && bytes[8] == b'-'
-        && bytes[9..15].iter().all(u8::is_ascii_digit)
-        && bytes[15] == b'-'
 }
 
 /// Workspace-relative path of a dropped file that can be mentioned *in place*.
@@ -569,16 +542,12 @@ pub(crate) fn decode_paste(payload: &str) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-/// Timestamp prefix for a stored paste (`20261111-155012`), local time.
-fn paste_stamp() -> String {
-    chrono::Local::now().format("%Y%m%d-%H%M%S").to_string()
-}
-
 /// Store the bytes of one file pasted into the composer (`Ctrl+V`).
 ///
-/// Returns the workspace-relative path (`.data/tmp/paste-….png`), which the composer
-/// inserts as an `@` mention — so the file is attached by the normal pipeline
-/// when the turn is sent, exactly like a workspace file that was already there.
+/// Returns the workspace-relative path (`.data/tmp/<name>`), which the composer
+/// inserts as an `@@<name>` mention — so the file is attached by the normal
+/// pipeline when the turn is sent, exactly like a workspace file that was
+/// already there.
 #[tauri::command]
 pub async fn save_pasted_file(
     state: State<'_, AppState>,
@@ -587,7 +556,7 @@ pub async fn save_pasted_file(
 ) -> Result<String, String> {
     let root = workspace_root(&state)?;
     let bytes = decode_paste(&data_base64)?;
-    let file_name = sanitize_paste_name(&name, &paste_stamp());
+    let file_name = sanitize_tmp_name(&name);
     sweep_composer_tmp(&root);
     write_composer_paste(&root, &file_name, &bytes)
 }
@@ -626,7 +595,6 @@ pub async fn import_workspace_paths(
         });
     }
     sweep_composer_tmp(&root);
-    let stamp = paste_stamp();
     let mut imported = Vec::new();
     let mut problems: Vec<String> = Vec::new();
 
@@ -663,7 +631,7 @@ pub async fn import_workspace_paths(
                 continue;
             }
         };
-        let file_name = sanitize_paste_name(&file_name_of(&source), &stamp);
+        let file_name = sanitize_tmp_name(&file_name_of(&source));
         match write_composer_paste(&root, &file_name, &bytes) {
             Ok(relative) => imported.push(relative),
             Err(e) => problems.push(e),
@@ -679,6 +647,7 @@ pub async fn import_workspace_paths(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{Duration, SystemTime};
 
     fn range(text: &str, start: Option<u64>, end: Option<u64>) -> WorkspaceFileRange {
         slice_lines(text, start, end).expect("range should be valid")
@@ -733,34 +702,31 @@ mod tests {
     fn paste_names_survive_the_mention_grammar() {
         // The token ends at whitespace, `#`, `@`, `<` and `>`, so none of them
         // may reach the stored name.
-        let name = sanitize_paste_name("my screenshot #2 (final).png", "20261111-155012");
-        assert_eq!(name, "paste-20261111-155012-my-screenshot-2-final.png");
+        let name = sanitize_tmp_name("my screenshot #2 (final).png");
+        assert_eq!(name, "my-screenshot-2-final.png");
         assert!(!name.contains([' ', '#', '@', '<', '>']));
 
         // CJK names stay readable, a missing extension stays missing, and a
         // name without letters still gets a usable stem.
-        assert_eq!(
-            sanitize_paste_name("会议记录.md", "s"),
-            "paste-s-会议记录.md"
-        );
+        assert_eq!(sanitize_tmp_name("会议记录.md"), "会议记录.md");
         // Only the last segment is an extension; a dot inside the stem is
         // collapsed like any other separator, so the stored name has one
         // unambiguous extension.
-        assert_eq!(sanitize_paste_name("archive.tar.gz", "s"), "paste-s-archive-tar.gz");
-        assert_eq!(sanitize_paste_name("noext", "s"), "paste-s-noext");
-        assert_eq!(sanitize_paste_name("  ???  ", "s"), "paste-s-file");
+        assert_eq!(sanitize_tmp_name("archive.tar.gz"), "archive-tar.gz");
+        assert_eq!(sanitize_tmp_name("noext"), "noext");
+        assert_eq!(sanitize_tmp_name("  ???  "), "file");
         // Only the basename is used: a pasted name can never carry a directory.
-        assert_eq!(sanitize_paste_name("../../etc/passwd", "s"), "paste-s-passwd");
-        assert_eq!(sanitize_paste_name("C:\\Windows\\x.txt", "s"), "paste-s-x.txt");
+        assert_eq!(sanitize_tmp_name("../../etc/passwd"), "passwd");
+        assert_eq!(sanitize_tmp_name("C:\\Windows\\x.txt"), "x.txt");
     }
 
     #[test]
     fn paste_names_are_length_capped() {
         let long = "a".repeat(300);
-        let name = sanitize_paste_name(&format!("{long}.png"), "s");
+        let name = sanitize_tmp_name(&format!("{long}.png"));
         let (stem, ext) = split_paste_name(&name);
         assert_eq!(ext, "png");
-        assert!(stem.chars().count() <= MAX_PASTE_STEM_LEN + "paste-s-".len());
+        assert!(stem.chars().count() <= MAX_PASTE_STEM_LEN);
     }
 
     #[test]
@@ -784,21 +750,21 @@ mod tests {
         let _ = std::fs::remove_dir_all(&workspace);
         std::fs::create_dir_all(&workspace).unwrap();
 
-        let first = write_composer_paste(&workspace, "paste-s-shot.png", b"one").unwrap();
-        assert_eq!(first, ".data/tmp/paste-s-shot.png");
+        let first = write_composer_paste(&workspace, "shot.png", b"one").unwrap();
+        assert_eq!(first, ".data/tmp/shot.png");
         assert_eq!(
             std::fs::read(workspace.join(&first)).unwrap(),
             b"one".to_vec()
         );
 
-        let second = write_composer_paste(&workspace, "paste-s-shot.png", b"two").unwrap();
-        assert_eq!(second, ".data/tmp/paste-s-shot-2.png");
+        let second = write_composer_paste(&workspace, "shot.png", b"two").unwrap();
+        assert_eq!(second, ".data/tmp/shot-2.png");
 
-        // The written path is readable through the `@` pipeline: `.data/tmp` is
+        // The written path is readable through the `@@` pipeline: `.data/tmp` is
         // the single subdirectory of `.data` the composer may touch, while the
         // state next to it stays unreachable.
         assert!(resolve_in_workspace(&workspace, &first).is_ok());
-        assert!(resolve_in_workspace(&workspace, ".data/tmp/paste-s-shot.png").is_ok());
+        assert!(resolve_in_workspace(&workspace, ".data/tmp/shot.png").is_ok());
         std::fs::write(workspace.join(".data/chat.db"), b"db").unwrap();
         assert!(resolve_in_workspace(&workspace, ".data/chat.db").is_err());
 
@@ -806,18 +772,35 @@ mod tests {
     }
 
     #[test]
-    fn only_the_paste_shape_is_swept() {
-        // Stamped by `paste_stamp`, so the sweep can recognise it.
-        assert!(is_paste_file_name("paste-20261111-155012-shot.png"));
-        assert!(is_paste_file_name("paste-20261111-155012-shot-2.png"));
-        // A mission batch directory, the PDF cache directory, and anything a
-        // user or a future writer put into `.data/tmp` themselves.
-        assert!(!is_paste_file_name("20261111-155012-0f3a91bc"));
-        assert!(!is_paste_file_name("pdf"));
-        assert!(!is_paste_file_name("paste-notes.md"));
-        assert!(!is_paste_file_name("paste-2026111-155012-x.png"));
-        assert!(!is_paste_file_name("paste-20261111-15501-x.png"));
-        assert!(!is_paste_file_name("Paste-20261111-155012-x.png"));
+    fn sweep_drops_stale_files_and_keeps_directories() {
+        let workspace =
+            std::env::temp_dir().join(format!("swept-files-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&workspace);
+        let root = composer_tmp_root(&workspace);
+        std::fs::create_dir_all(root.join("pdf")).unwrap();
+        std::fs::write(root.join("stale.json"), b"old").unwrap();
+        std::fs::write(root.join("fresh.json"), b"new").unwrap();
+        std::fs::write(root.join("pdf/cached.md"), b"cache").unwrap();
+
+        // Age the file the sweep is supposed to drop, and the cached conversion
+        // next to it: `.data/tmp` is shared with the PDF cache, which lives in a
+        // directory and must survive no matter how old it is.
+        let stale_at = SystemTime::now() - Duration::from_secs(TMP_TTL_SECS + 60);
+        for path in ["stale.json", "pdf/cached.md"] {
+            let file = std::fs::File::options()
+                .write(true)
+                .open(root.join(path))
+                .unwrap();
+            file.set_modified(stale_at).unwrap();
+        }
+
+        sweep_composer_tmp(&workspace);
+
+        assert!(!root.join("stale.json").exists());
+        assert!(root.join("fresh.json").exists());
+        assert!(root.join("pdf/cached.md").exists());
+
+        let _ = std::fs::remove_dir_all(&workspace);
     }
 
     #[test]
@@ -831,7 +814,7 @@ mod tests {
         std::fs::write(workspace.join("src/main.rs"), b"fn main() {}").unwrap();
         std::fs::write(workspace.join("my notes.md"), b"# notes").unwrap();
         std::fs::write(workspace.join(".data/skills/demo/skill.md"), b"# skill").unwrap();
-        std::fs::write(workspace.join(".data/tmp/paste-s-shot.png"), b"shot").unwrap();
+        std::fs::write(workspace.join(".data/tmp/shot.png"), b"shot").unwrap();
 
         // Already part of the workspace: no copy, no expiry clock.
         assert_eq!(
@@ -839,8 +822,8 @@ mod tests {
             Some("src/main.rs".to_string())
         );
         assert_eq!(
-            mentionable_workspace_path(&workspace, &workspace.join(".data/tmp/paste-s-shot.png")),
-            Some(".data/tmp/paste-s-shot.png".to_string())
+            mentionable_workspace_path(&workspace, &workspace.join(".data/tmp/shot.png")),
+            Some(".data/tmp/shot.png".to_string())
         );
         // The mention grammar would end the token at the space, so this one is
         // copied instead — the copy rebuilds the name from a whitelist.

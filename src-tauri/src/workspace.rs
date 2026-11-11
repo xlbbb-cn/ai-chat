@@ -75,11 +75,12 @@ pub fn scripts_root(workspace_dir: &Path) -> PathBuf {
 /// common: every mission (or direct `call_subagent` call) gets one batch
 /// directory here (`<stamp>-<8hex>/`, see `agents::exchange`), a PDF mention
 /// caches its Markdown under `pdf/` (`pdf_mentions`), and a file pasted or
-/// dropped into the composer lands as `paste-<stamp>-<name>` (`workspace_files`).
-/// Each of the three owns its own lifetime: a paste expires after 24 h (swept on
-/// the way into the next one), the PDF cache drops entries older than a week
-/// when the next conversion is written, and batch directories are permanent —
-/// the user cleans those manually through "open the exchange folder".
+/// dropped into the composer lands as `<name>` and is addressed as `@@<name>`
+/// (`workspace_files`). Each of the three owns its own lifetime: a composer paste
+/// is a plain file in this folder and expires after 24 h (swept on the way into
+/// the next paste), the PDF cache drops entries older than a week when the next
+/// conversion is written, and batch directories are permanent — the user cleans
+/// those manually through "open the exchange folder".
 pub fn tmp_root(workspace_dir: &Path) -> PathBuf {
     data_root(workspace_dir).join("tmp")
 }

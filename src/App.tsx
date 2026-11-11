@@ -58,7 +58,9 @@ import { extensionOf, supportsMentionName } from "./attachments";
 import { activeMentionQuery, resolveFileMentions, scoreWorkspaceFile } from "./fileMention";
 import type { MentionProgress, MentionResolution } from "./fileMention";
 import {
+  canonicalTmpMentions,
   insertMentionTokens,
+  mentionDisplayName,
   mentionTokenForPath,
   partitionByModelSupport,
   preparePastedFiles,
@@ -260,7 +262,10 @@ function buildMessageContent(
     } else if (att.kind === "text" && att.text_content !== undefined) {
       parts.push({
         type: "text",
-        text: `\n<details><summary>Attached File: ${att.name}</summary>\n\n\`\`\`${fenceLanguage(att)}\n${att.text_content}\n\`\`\`\n</details>`,
+        // The summary says the bytes are already here: a path the model can
+        // open is an invitation to read the file a second time, which is one
+        // wasted tool round per attachment.
+        text: `\n<details><summary>Attached File: ${mentionDisplayName(att.name)} — already provided below</summary>\n\n\`\`\`${fenceLanguage(att)}\n${att.text_content}\n\`\`\`\n</details>`,
       });
     }
   }
@@ -2102,7 +2107,12 @@ export default function App() {
     }
     const messageAttachments = mentionResult.attachments;
 
-    const { content: apiContent } = buildMessageContent(rawText, messageAttachments);
+    // The draft already carries the short `@@<name>` form, so the message that
+    // reaches the model holds no `.data/tmp` path that reads as "open this
+    // file"; a hand-typed long form is collapsed to the same shape here.
+    const messageText = canonicalTmpMentions(rawText);
+
+    const { content: apiContent } = buildMessageContent(messageText, messageAttachments);
     const userAttachments = messageAttachments.length > 0 ? messageAttachments : undefined;
     setPendingRetryMessageId(null);
 

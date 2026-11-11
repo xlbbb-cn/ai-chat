@@ -20,6 +20,7 @@ import razerF5FontUrl from "../assets/Web Fonts/9b77a61b70b873a0f298ad6fbc801666
 import { katexMathPlugin } from "../utils/markdownMath";
 import { extractFigures, type FigureSpec } from "../utils/figures";
 import { mountFigures, saveAllFigures } from "../utils/figureCard";
+import { mentionDisplayName } from "../composerFiles";
 // `t` (module-level) is used by the markdown-it renderer rules, which run
 // outside the React tree; the hook keeps the component re-rendering on change.
 import { t as text, useI18n } from "../i18n";
@@ -27,14 +28,11 @@ import {
   FontAwesomeIcon,
   faCodeBranch,
   faFileArrowDown,
-  faFileLines,
   faImages,
-  faPaperclip,
   faPen,
   faPenToSquare,
   faRotateRight,
   faTrash,
-  faVolumeHigh,
 } from "../icons";
 import "./ChatMessage.css";
 
@@ -413,16 +411,6 @@ interface Props {
   todoActive?: boolean;
 }
 
-function extractAttachmentNames(content: string): string[] {
-  const names: string[] = [];
-  const re = /<details><summary>Attached File: ([^<]+)<\/summary>/g;
-  let m;
-  while ((m = re.exec(content)) !== null) {
-    names.push(m[1].trim());
-  }
-  return names;
-}
-
 /** Extract the textual portion of a multimodal `MessageContent`. */
 function contentToText(content: MessageContent): string {
   if (typeof content === "string") return content;
@@ -448,9 +436,10 @@ function highlightFileMentions(root: HTMLElement) {
   const nodes: Text[] = [];
   while (walker.nextNode()) nodes.push(walker.currentNode as Text);
 
-  // Mirrors `parseMentions` in `fileMention.ts`: a path, then an optional
-  // `#12` / `#12-24` / `#12-` line range.
-  const token = /@[^\s@#<>]+(?:#\d+(?:-\d*)?)?/g;
+  // Mirrors `parseFileMentions` in `fileMention.ts`: `@path` (or `@@name` for a
+  // file in the workspace tmp folder), then an optional `#12` / `#12-24` /
+  // `#12-` range.
+  const token = /@@?[^\s@#<>]+(?:#\d+(?:-\d*)?)?/g;
 
   for (const node of nodes) {
     const text = node.data;
@@ -757,17 +746,14 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
 
   // Display text: collapse multimodal parts to their textual portion.
   const textContent = contentToText(message.content);
-  // `@file` mentions carry their own accent-highlighted token in the body (see
-  // `highlightFileMentions`), so only attachments the text does not reference —
-  // legacy picker uploads — still need the compact chip list. Matching on the
-  // path alone keeps a clamped range (`#5-999` → `#5-7`) from re-adding a chip.
-  const attachmentNames = (
-    isUser && message.attachments
-      ? message.attachments.map((a) => a.name)
-      : isUser
-        ? extractAttachmentNames(textContent)
-        : []
-  ).filter((name) => !textContent.includes(`@${name.split("#")[0]}`));
+  // An attachment is named, never listed: every file is already called by the
+  // accent `@name` token in the body (`highlightFileMentions`), so a chip row
+  // underneath only repeats it — and repeated the machine path before the
+  // mention was renamed. An image is the one exception: it *is* the content,
+  // so it stays visible as a thumbnail.
+  const imageAttachments = isUser
+    ? (message.attachments ?? []).filter((a) => a.kind === "image" && Boolean(a.data_url))
+    : [];
   // Background tool results reach the model through the injection list, but
   // they are not conversation: a turn shows only what was actually said, so
   // they are filtered out of the transcript here.
@@ -1217,35 +1203,20 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
             ))}
           </div>
         )}
-        {attachmentNames.length > 0 && (
+        {imageAttachments.length > 0 && (
           <div className="message-attachments">
-            <span>{t("chat.attachedFiles")}</span>
-            {attachmentNames.map((name, i) => {
-              const att = message.attachments?.find((a) => a.name === name);
-              if (att?.kind === "image" && att.data_url) {
-                return (
-                  <a
-                    key={i}
-                    className="message-attachment-thumb"
-                    href={att.data_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title={att.name}
-                  >
-                    <img src={att.data_url} alt={att.name} />
-                    <span className="message-attachment-name">{att.name}</span>
-                  </a>
-                );
-              }
-              const icon =
-                att?.kind === "file" ? faFileLines : att?.kind === "audio" ? faVolumeHigh : faPaperclip;
-              return (
-                <span key={i} className="message-attachment-pill">
-                  <FontAwesomeIcon icon={icon} />
-                  {name}
-                </span>
-              );
-            })}
+            {imageAttachments.map((att, i) => (
+              <a
+                key={`${att.name}-${i}`}
+                className="message-attachment-thumb"
+                href={att.data_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={mentionDisplayName(att.name)}
+              >
+                <img src={att.data_url} alt={mentionDisplayName(att.name)} />
+              </a>
+            ))}
           </div>
         )}
 

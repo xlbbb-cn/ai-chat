@@ -1,11 +1,22 @@
 /**
- * `@path#range` mentions in the composer.
+ * `@path#range` and `@@tmp-name#range` mentions in the composer.
  *
  * Grammar (one mention, `@` must start a word):
  *
  * ```text
  * @<relative path>[#<start>[-<end>]]
+ * @@<path inside .data/tmp>[#<start>[-<end>]]
  * ```
+ *
+ * The double `@` addresses the workspace tmp folder, which is what makes a
+ * pasted file's token short — `@@qa-items.json` instead of
+ * `@.data/tmp/qa-items.json` — and says the file is scratch rather than project
+ * content. It resolves to exactly the same path, so everything below (ranges,
+ * PDF pages, images) behaves identically:
+ *
+ * - `@@qa-items.json`      → `.data/tmp/qa-items.json`
+ * - `@@qa-items.json#5-9`  → the same file, lines 5…9
+ * - `@@20261111-155012-ab/shared/out.md` → a sub-agent deliverable
  *
  * Text files count *lines*:
  *
@@ -35,8 +46,11 @@ import { classifyName, extensionOf, mimeForName, supportsAttachmentKind } from "
 import { t } from "./i18n";
 import type { Attachment, ModelMetadata, WorkspaceFileEntry } from "./types";
 
-/** `@path` optionally followed by `#start`, `#start-end` or `#start-`. */
-const MENTION_RE = /@([^\s@#]+)(?:#(\d+)(?:-(\d*))?)?/g;
+/** `.data/tmp`, the folder the `@@` form is relative to. */
+const TMP_REL = ".data/tmp";
+
+/** `@path` / `@@tmp-name`, optionally followed by `#start`, `#start-end` or `#start-`. */
+const MENTION_RE = /(@@?)([^\s@#]+)(?:#(\d+)(?:-(\d*))?)?/g;
 
 export interface FileMentionToken {
   /** Index of the `@` in the source text. */
@@ -66,9 +80,10 @@ export function parseFileMentions(text: string): FileMentionToken[] {
     if (previous && !/\s/.test(previous)) continue;
 
     const raw = match[0];
-    const path = match[1];
-    const startText = match[2];
-    const endText = match[3];
+    // `@@name` is the short form of `.data/tmp/name`; both become one path.
+    const path = match[1] === "@@" ? `${TMP_REL}/${match[2]}` : match[2];
+    const startText = match[3];
+    const endText = match[4];
     const hasRange = startText !== undefined;
 
     let startLine: number | undefined;
@@ -106,6 +121,8 @@ export function activeMentionQuery(
   const at = before.lastIndexOf("@");
   if (at < 0) return null;
   const previous = at === 0 ? "" : before[at - 1];
+  // A second `@` means the `@@` tmp form: it is typed (or inserted), never
+  // completed from the workspace listing, so the popup stays closed.
   if (previous && !/\s/.test(previous)) return null;
   const query = before.slice(at + 1);
   if (/[\s@#]/.test(query)) return null;

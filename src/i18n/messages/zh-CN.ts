@@ -158,7 +158,6 @@ const zhCN: Messages = {
         stop: "停止",
         contextUsage: "上下文用量：{percent}%",
         contextUsageWithCache: "上下文用量：{percent}% · 缓存命中 {cachePercent}%",
-        attachedFiles: "附件：",
 
         generationStopped: "[生成已停止]",
         sessionSwitchBlocked: "正在生成回复，请先停止后再切换历史会话。",
@@ -229,7 +228,6 @@ const zhCN: Messages = {
     chat: {
         thoughtProcess: "思考过程",
         tokenUsage: "Token 用量",
-        attachedFiles: "附件：",
         retryTitle: "重试这条未完成的用户消息",
         exportTitle: "将本条回复导出为 PDF",
         deleteTitle: "删除这条消息",

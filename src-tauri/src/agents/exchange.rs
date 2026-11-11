@@ -16,9 +16,11 @@
 //! part of the profile backup.
 //!
 //! The top level of `.data/tmp` is shared with `pdf/` (the PDF mention cache) and
-//! `paste-…` (composer pastes; the only shape the composer's 24 h sweep deletes).
-//! A batch id is `<stamp>-<8hex>`, so it can neither collide with those names nor
-//! be mistaken for an expired paste.
+//! with composer pastes, which land there as plain files under the file's own
+//! name (`@@<name>` in a message). The paste sweep only deletes *files* that sit
+//! directly in the folder and are older than a day, so a batch id — always a
+//! directory, `<stamp>-<8hex>` — can neither collide with those names nor be
+//! swept as an expired paste.
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
