@@ -21,6 +21,7 @@ import {
     getWorkspaceDir,
     importProfileFrom,
     openAppDataDir,
+    openIssuePage,
     openMarkdownFile,
     openWorkspaceDir,
     openWorkspaceTmpDir,
@@ -187,6 +188,9 @@ export function TitleBar({ sleepLock, turnStartedAt, now }: Props) {
             if (typeof path === "string") await openMarkdownFile(path);
         });
 
+    /** GitHub's new-issue page — the bug-report entry, right above About. */
+    const handleReportIssue = () => run(openIssuePage);
+
     const handleAbout = () =>
         run(async () => {
             const version = await getAppVersion();
@@ -324,6 +328,14 @@ export function TitleBar({ sleepLock, turnStartedAt, now }: Props) {
                             {t("app.appMenuMarkdownEdit")}
                         </button>
                         <div className="titlebar-menu-sep" role="separator" />
+                        <button
+                            type="button"
+                            role="menuitem"
+                            className="titlebar-menu-item"
+                            onClick={handleReportIssue}
+                        >
+                            {t("app.appMenuReportIssue")}
+                        </button>
                         <button
                             type="button"
                             role="menuitem"

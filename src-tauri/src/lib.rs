@@ -41,7 +41,11 @@ const OPEN_WORKSPACE_DIR_MENU_ID: &str = "open-workspace-dir";
 const SAVE_PROFILE_MENU_ID: &str = "save-profile";
 const RESTORE_PROFILE_MENU_ID: &str = "restore-profile";
 const MARKDOWN_EDIT_MENU_ID: &str = "markdown-edit";
+const OPEN_ISSUE_MENU_ID: &str = "open-issue";
 const ABOUT_MENU_ID: &str = "about";
+/// Where "Report an issue..." sends the user. Fixed on purpose — see
+/// `open_issue_page`.
+const ISSUE_URL: &str = "https://github.com/xlbbb-cn/ai-chat/issues/new";
 const MARKDOWN_EDIT_OPEN_EVENT: &str = "markdown-edit-open";
 const MARKDOWN_EDIT_ERROR_EVENT: &str = "markdown-edit-error";
 const WORKSPACE_CHANGED_EVENT: &str = "workspace-changed";
@@ -105,6 +109,17 @@ fn open_workspace_dir(app: &AppHandle) -> Result<(), String> {
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     app.opener()
         .open_path(dir.to_string_lossy().into_owned(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+/// Open the GitHub "new issue" page in the system browser.
+///
+/// The destination is a constant rather than a command argument: the menu only
+/// ever needs this one page, and a command that opens arbitrary URLs would let
+/// anything running in the webview drive the browser.
+fn open_issue_page(app: &AppHandle) -> Result<(), String> {
+    app.opener()
+        .open_url(ISSUE_URL, None::<&str>)
         .map_err(|e| e.to_string())
 }
 
@@ -182,6 +197,12 @@ fn app_open_workspace_tmp_dir(app: AppHandle) -> Result<(), String> {
     app.opener()
         .open_path(dir.to_string_lossy().into_owned(), None::<&str>)
         .map_err(|e| e.to_string())
+}
+
+/// Open the GitHub new-issue page (titlebar `⋯` menu → Report an issue…).
+#[tauri::command]
+fn app_open_issue_page(app: AppHandle) -> Result<(), String> {
+    open_issue_page(&app)
 }
 
 /// Open `<app_data>/agents` — the folder holding every `llm` agent definition.
@@ -1607,6 +1628,8 @@ pub fn run() {
                         read_markdown_into_editor(app, &markdown_path);
                     }
                 }
+            } else if event.id() == OPEN_ISSUE_MENU_ID {
+                let _ = open_issue_page(app);
             } else if event.id() == ABOUT_MENU_ID {
                 show_about(app);
             }
@@ -1707,8 +1730,17 @@ pub fn run() {
                 let about_item =
                     MenuItem::with_id(app, ABOUT_MENU_ID, "About AI Chat", true, None::<&str>)
                         .expect("failed to create about menu item");
-                let about_menu = Submenu::with_items(app, "About", true, &[&about_item])
-                    .expect("failed to create about menu");
+                let issue_item = MenuItem::with_id(
+                    app,
+                    OPEN_ISSUE_MENU_ID,
+                    "Report an Issue...",
+                    true,
+                    None::<&str>,
+                )
+                .expect("failed to create issue menu item");
+                let about_menu =
+                    Submenu::with_items(app, "About", true, &[&issue_item, &about_item])
+                        .expect("failed to create about menu");
                 let menu = Menu::with_items(app, &[&file_menu, &edit_menu, &tools_menu, &about_menu])
                     .expect("failed to create app menu");
                 app.set_menu(menu).expect("failed to set app menu");
@@ -1991,6 +2023,7 @@ pub fn run() {
             app_open_data_dir,
             app_open_workspace_dir,
             app_open_workspace_tmp_dir,
+            app_open_issue_page,
             app_open_markdown,
             app_export_profile,
             app_import_profile,

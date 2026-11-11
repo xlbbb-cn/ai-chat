@@ -56,6 +56,7 @@ const zhCN: Messages = {
         appMenuSaveProfile: "导出配置…",
         appMenuRestoreProfile: "恢复配置…",
         appMenuMarkdownEdit: "Markdown 编辑…",
+        appMenuReportIssue: "反馈问题…",
         appMenuAbout: "关于 AI Chat",
 
         emptyStart: "开始一段对话",

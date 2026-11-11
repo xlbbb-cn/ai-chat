@@ -65,6 +65,7 @@ const en = {
         appMenuSaveProfile: "Save profile…",
         appMenuRestoreProfile: "Restore profile…",
         appMenuMarkdownEdit: "Markdown edit…",
+        appMenuReportIssue: "Report an issue…",
         appMenuAbout: "About AI Chat",
 
         emptyStart: "Start a conversation",

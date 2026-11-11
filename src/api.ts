@@ -1032,6 +1032,11 @@ export async function openAgentsDir(): Promise<void> {
   return invoke("app_open_agents_dir");
 }
 
+/** Open the GitHub new-issue page in the system browser. */
+export async function openIssuePage(): Promise<void> {
+  return invoke("app_open_issue_page");
+}
+
 /**
  * Read a user-picked Markdown file and hand it to the built-in editor
  * (`markdown-edit-open` / `markdown-edit-error` events).
