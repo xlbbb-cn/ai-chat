@@ -33,17 +33,18 @@ Chat is the easy part. AI Chat gives the agent a workspace, real utilities (memo
 
 **Core philosophy:** first principles; freedom returned to you (tools, LLM API, prompts); a minimal, professional interface.
 
-| Feature | **AI Chat** | Cherry Studio | Chatbox | LM Studio |
-| --- | :---: | :---: | :---: | :---: |
-| **Skill sandbox** — one skill root per workspace (`.data/skills`), root pinned to its `SKILL.md` | ✅ | ◐ agent workspaces | — | — |
-| **Self-evolution** — the assistant installs/edits/deletes its own skills, keeps verified facts in a dedicated memory scope | ✅ | — | — | — |
-| **Built-in agent utilities** — 4-level memory (`session` / `user` / `repo` / `evolution`), timers, todos | ✅ | ◐ scheduled tasks | — | — |
-| **Agent runtime** — LLM, local CLI or remote cloud, configured in-app | ✅ | ◐ LLM agents | — | — |
-| **Prompt ownership** — no default persona or hidden rewrite; your system message is the base, tool/skill guidance is appended | ✅ | ◐ assistant prompts | ◐ prompt library | ◐ per-model prompt |
-| **Local request audit** — body, tokens, latency, status, errors | ✅ | ◐ history only | ◐ history only | ◐ history + server log |
-| **Background execution** — slow tools, MCP calls and sub-agents keep running while the model works | ✅ | — | — | — |
+| Feature | **AI Chat** | DeepSeek Harness | Cherry Studio | Chatbox | LM Studio |
+| --- | :---: | :---: | :---: | :---: | :---: |
+| **Skill sandbox** — one skill root per workspace (`.data/skills`), root pinned to its `SKILL.md` | ✅ | ✅ OS-sandboxed workspaces | ◐ agent workspaces | — | — |
+| **Self-evolution** — the assistant installs/edits/deletes its own skills, keeps verified facts in a dedicated memory scope | ✅ | ◐ plugin creation via chat | — | — | — |
+| **Built-in agent utilities** — 4-level memory (`session` / `user` / `repo` / `evolution`), timers, todos | ✅ | ◐ scheduled tasks | ◐ scheduled tasks | — | — |
+| **Agent runtime** — LLM, local CLI or remote cloud, configured in-app | ✅ | ✅ LLM + CLI (delegates to Codex / Claude Code) | ◐ LLM agents | — | — |
+| **No account login** — run with just an API key or a local model; no sign-up, no real-name verification | ✅ | ◐ DeepSeek account by default (API key path exists) | ✅ | ✅ | ✅ |
+| **Prompt ownership** — no default persona or hidden rewrite; your system message is the base, tool/skill guidance is appended | ✅ | ◐ swappable prompt sections | ◐ assistant prompts | ◐ prompt library | ◐ per-model prompt |
+| **Local request audit** — body, tokens, latency, status, errors | ✅ | ✅ append-only session log | ◐ history only | ◐ history only | ◐ history + server log |
+| **Background execution** — slow tools, MCP calls and sub-agents keep running while the model works | ✅ | ✅ background tasks | — | — | — |
 
-<sub>✅ built in · ◐ partial or adjacent · — not offered. Based on public documentation as of October 2026.</sub>
+<sub>✅ built in · ◐ partial or adjacent · — not offered. Based on public documentation as of November 2026. DeepSeek Harness is DeepSeek's open-source agent harness (`dsh`, desktop + web).</sub>
 
 ---
 
