@@ -16,6 +16,7 @@ pub mod agents;
 mod backup;
 mod db;
 mod evolution_maintenance;
+mod figures;
 mod instance;
 mod llm_complete;
 mod logger;
@@ -1962,6 +1963,8 @@ pub fn run() {
             workspace_files::read_workspace_file_bytes,
             pdf_mentions::convert_pdf_mention,
             save_markdown_file,
+            figures::save_figure,
+            figures::app_open_figures_dir,
             app_open_data_dir,
             app_open_workspace_dir,
             app_open_workspace_tmp_dir,

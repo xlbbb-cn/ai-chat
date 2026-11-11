@@ -13,7 +13,7 @@ pub(crate) mod memory;
 pub(crate) mod mcp_self;
 pub(crate) mod skill_admin;
 mod patch;
-mod paths;
+pub(crate) mod paths;
 mod process;
 mod risk;
 mod search;

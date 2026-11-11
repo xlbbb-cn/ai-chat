@@ -3452,6 +3452,17 @@ async fn run_chat_turn(
         }
     }
 
+    // ── Figures ─────────────────────────────────────────────────────────────
+    // The transcript renders `svg` / `carve` blocks; the model only uses them
+    // if it is told they exist. Static text, so it stays a stable prefix.
+    let figures_context = crate::figures::prompt_block();
+    if !figures_context.is_empty() {
+        if !system_content.is_empty() {
+            system_content.push_str("\n\n");
+        }
+        system_content.push_str(&figures_context);
+    }
+
     // Sub-agents (`llm`, `cli`, `cloud`) are only reachable when automatic
     // orchestration is enabled (`use_agents`). With orchestration off the main
     // agent answers directly: `call_subagent` is neither advertised in the

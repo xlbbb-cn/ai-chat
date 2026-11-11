@@ -230,6 +230,19 @@ const zhTW: Messages = {
         continue: "繼續",
     },
 
+    figure: {
+        title: "圖 {index}",
+        drawing: "正在繪製…",
+        save: "儲存 PNG",
+        saving: "儲存中…",
+        saved: "已儲存 · {path}",
+        saveFailed: "儲存失敗",
+        resetView: "重設視角",
+        saveAll: "儲存本回合全部圖",
+        openFolder: "開啟 figures 資料夾",
+        webglUnavailable: "此環境未啟用 WebGL，3D 預覽不可用。",
+    },
+
     toolGroup: {
         completed: "已完成 {count} 次工具呼叫",
         completedWithErrors: "{count} 個步驟：{done} 個成功，{errors} 個失敗",

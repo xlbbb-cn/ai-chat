@@ -10,6 +10,8 @@ import "katex/dist/katex.min.css";
 import katexCssUrl from "katex/dist/katex.min.css?url";
 import razerF5FontUrl from "../assets/Web Fonts/9b77a61b70b873a0f298ad6fbc801666.woff2?url";
 import { katexMathPlugin } from "../utils/markdownMath";
+import { extractFigures, type FigureSpec } from "../utils/figures";
+import { mountFigures, saveAllFigures } from "../utils/figureCard";
 // `t` (module-level) is used by the markdown-it renderer rules, which run
 // outside the React tree; the hook keeps the component re-rendering on change.
 import { t as text, useI18n } from "../i18n";
@@ -18,6 +20,7 @@ import {
   faCodeBranch,
   faFileArrowDown,
   faFileLines,
+  faImages,
   faPaperclip,
   faPen,
   faPenToSquare,
@@ -92,6 +95,20 @@ function buildPrintableMessageHtml(contentHtml: string, exportedAt: string): str
       :root {
         color-scheme: light;
         font-family: "RazerF5", "Segoe UI", "Microsoft YaHei", sans-serif;
+        /* A figure's SVG is written in theme tokens; this document is its own
+           document, so it needs the light values those names stand for. */
+        --c-surface: #ffffff;
+        --c-surface-2: #f6f7f8;
+        --c-bg: #ffffff;
+        --c-text: #171a20;
+        --c-body: #2b2f36;
+        --c-muted: #5c5e62;
+        --c-border-s: #e8eaed;
+        --c-border-i: #d9dce1;
+        --c-accent: #3e6ae1;
+        --c-success: #1f8a3b;
+        --c-warning: #b07500;
+        --c-danger: #c0392b;
       }
 
       * {
@@ -161,12 +178,72 @@ function buildPrintableMessageHtml(contentHtml: string, exportedAt: string): str
       .code-block-toolbar {
         display: none !important;
       }
+
+      .chat-figure {
+        margin: 0.75em 0;
+        break-inside: avoid;
+      }
+
+      .chat-figure-viewport {
+        padding: 8px;
+        background: #ffffff;
+        border: 1px solid var(--c-border-s);
+        border-radius: 4px;
+      }
+
+      .chat-figure svg,
+      .chat-figure img {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+
+      .chat-figure-bar {
+        margin-top: 4px;
+        font-size: 11px;
+        color: var(--c-muted);
+      }
+
+      /* Nothing in a printed page is clickable. */
+      .chat-figure-actions,
+      .chat-figure-status {
+        display: none !important;
+      }
     </style>
   </head>
   <body>
     <main>${contentHtml}</main>
   </body>
 </html>`;
+}
+
+/**
+ * The reply as standalone HTML for print / PDF.
+ *
+ * The markdown alone is not enough: figure cards are mounted imperatively, and
+ * a 3D figure is a `<canvas>` — which a document write cannot carry. So the
+ * live subtree is cloned and every canvas is frozen into an `<img>` of its own
+ * pixels; a 2D figure stays vector and picks the token values up from the
+ * print stylesheet.
+ */
+function printableMessageHtml(root: HTMLElement | null, fallback: string): string {
+  if (!root) return fallback;
+  const canvases = Array.from(root.querySelectorAll<HTMLCanvasElement>(".chat-figure-canvas"));
+  if (canvases.length === 0) return root.innerHTML;
+  const clone = root.cloneNode(true) as HTMLElement;
+  const copies = Array.from(clone.querySelectorAll<HTMLCanvasElement>(".chat-figure-canvas"));
+  canvases.forEach((canvas, i) => {
+    const image = document.createElement("img");
+    image.className = "chat-figure-canvas";
+    image.alt = "";
+    try {
+      image.src = canvas.toDataURL("image/png");
+    } catch {
+      return;
+    }
+    copies[i]?.replaceWith(image);
+  });
+  return clone.innerHTML;
 }
 
 function exportAssistantMessagePdf(contentHtml: string, messageId: string) {
@@ -634,10 +711,19 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
     mainContent,
     isAssistant && Boolean(message.streaming),
   );
-  const renderedMainContent = useMemo(
-    () => md.render(streamedMainContent),
-    [streamedMainContent],
-  );
+  // Raw HTML stays off, so a figure is cut out of the reply *before* markdown-it
+  // runs and leaves a slot token behind (`extractFigures`); `mountFigures`
+  // turns each token into a real, sanitised card once the subtree is written.
+  // Only a reply draws: what the user typed stays literal, so a pasted `svg`
+  // snippet in the composer is still code.
+  const replyStreaming = isAssistant && Boolean(message.streaming);
+  const rendered = useMemo<{ html: string; figures: FigureSpec[] }>(() => {
+    if (!isAssistant) return { html: md.render(streamedMainContent), figures: [] };
+    const extracted = extractFigures(streamedMainContent, { streaming: replyStreaming });
+    return { html: md.render(extracted.markdown), figures: extracted.figures };
+  }, [streamedMainContent, replyStreaming, isAssistant]);
+  const renderedMainContent = rendered.html;
+  const figures = rendered.figures;
   const [reasoningOpen, setReasoningOpen] = useState(false);
 
   // Collapsed-state live preview: the last three reasoning lines are rendered
@@ -694,6 +780,10 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
     if (htmlChanged) {
       el.innerHTML = renderedMainContent;
       renderedHtmlRef.current = renderedMainContent;
+      // A figure card is cached by its source hash, so the rebuild a streamed
+      // token causes re-inserts the same canvas — the orbit angle a user just
+      // dragged is not reset on every token.
+      mountFigures(el, figures, { messageId: String(message.id) });
       // The user's body never changes, so this runs once per turn.
       if (isUser) {
         highlightFileMentions(el);
@@ -888,7 +978,7 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
       if (!node.data.trim()) continue;
       // Code, formulas and controls already carry their own markup; a wrapper
       // there would fight highlight.js / KaTeX or animate a button label.
-      if (node.parentElement?.closest("pre, svg, math, annotation, button, a, .katex")) continue;
+      if (node.parentElement?.closest("pre, svg, math, annotation, button, a, .katex, .chat-figure")) continue;
 
       let tail = node;
       let tailStart = start;
@@ -1080,11 +1170,29 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
             <button
               type="button"
               className="message-action-btn export"
-              onClick={() => exportAssistantMessagePdf(renderedMainContent, message.id)}
+              onClick={() =>
+                exportAssistantMessagePdf(
+                  printableMessageHtml(contentRef.current, renderedMainContent),
+                  message.id,
+                )
+              }
               disabled={!mainContent.trim()}
               title={t("chat.exportTitle")}
             >
               <FontAwesomeIcon icon={faFileArrowDown} />
+            </button>
+          )}
+          {figures.some((figure) => !figure.pending) && (
+            <button
+              type="button"
+              className="message-action-btn save-figures"
+              onClick={() => {
+                const root = contentRef.current;
+                if (root) void saveAllFigures(root);
+              }}
+              title={t("figure.saveAll")}
+            >
+              <FontAwesomeIcon icon={faImages} />
             </button>
           )}
           {onDelete && dbId !== undefined && (

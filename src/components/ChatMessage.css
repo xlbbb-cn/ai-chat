@@ -926,3 +926,162 @@
 [data-theme="dark"] .message-reasoning-content .hljs-deletion {
   color: #FFB4B4 !important;
 }
+
+/* ─── Figures — assistant-drawn SVG (2D) and carve scenes (3D) ───────────────
+   One frame for both: `--c-surface-2` fill, 4px radius, `--c-border-s`
+   internals — the same recipe as a code block or a table. No elevation: the
+   drawing is content, not a floating panel. The caption bar carries the only
+   hairline, so a wide chart still reads as one block. */
+
+.chat-figure {
+  margin: 0.75em 0;
+  padding: 0;
+  max-width: 100%;
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-border-s);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.chat-figure-viewport {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  /* The drawing sits on the sheet, the caption on the tinted bar: the colour
+     step is the separator, so the card needs no second hairline. It is also
+     the fill a saved PNG gets, so the file matches what is on screen. */
+  background: var(--c-surface);
+  overflow: hidden;
+}
+
+/* A pending figure has a message inside it, never an empty frame. */
+.chat-figure-viewport:empty {
+  display: none;
+}
+
+.chat-figure-svg,
+.chat-figure-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+}
+
+.chat-figure-canvas {
+  cursor: grab;
+  touch-action: none;
+}
+
+.chat-figure-canvas:active {
+  cursor: grabbing;
+}
+
+/* Caption + save action on one line, separated by the card's only hairline. */
+.chat-figure-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--c-muted);
+}
+
+.chat-figure-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chat-figure-status {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A saved figure's status line is the way to the folder. */
+.chat-figure-status[data-state="ok"] {
+  color: var(--c-success);
+  cursor: pointer;
+}
+
+.chat-figure-status[data-state="error"] {
+  color: var(--c-danger);
+}
+
+.chat-figure-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+/* Same rule as the code-block toolbar: revealed on hover, and on keyboard
+   focus so the card is usable without a pointer. */
+.chat-figure:hover .chat-figure-actions,
+.chat-figure:focus-within .chat-figure-actions {
+  opacity: 1;
+}
+
+.chat-figure-btn {
+  font-size: 12px;
+  color: var(--ts-pewter);
+  background: var(--c-surface);
+  border: 1px solid var(--ts-cloud);
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: color 0.33s var(--ts-ease), border-color 0.33s var(--ts-ease),
+    background-color 0.33s var(--ts-ease);
+}
+
+.chat-figure-btn:hover:not(:disabled) {
+  background-color: var(--ts-ash);
+  border-color: var(--ts-pewter);
+  color: var(--ts-carbon);
+}
+
+.chat-figure-btn:active:not(:disabled) {
+  background-color: var(--ts-cloud);
+}
+
+.chat-figure-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* Still streaming, WebGL missing, or a payload that failed to parse: the card
+   says which in one line instead of leaving a blank frame. */
+.chat-figure[data-figure-state="pending"] .chat-figure-viewport,
+.chat-figure[data-figure-state="loading"] .chat-figure-viewport,
+.chat-figure[data-figure-state="error"] .chat-figure-viewport {
+  padding: 18px 10px;
+  font-size: 12px;
+  color: var(--c-muted);
+}
+
+.chat-figure[data-figure-state="error"] .chat-figure-viewport {
+  color: var(--c-danger);
+}
+
+/* An unrenderable figure keeps its markup visible, in the code surface. */
+.chat-figure-source {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+/* The slot token itself never paints; `mountFigures` swaps it for the card. */
+.chat-figure-slot {
+  display: none;
+}

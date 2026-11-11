@@ -24,6 +24,7 @@ import type {
   Profile,
   SkillsStatus,
   ServeProcessInfo,
+  SavedFigure,
   SleepLockState,
   TimerEntry,
   BackgroundTaskState,
@@ -91,6 +92,25 @@ export async function readWorkspaceFileRange(
 /** Base64 payload of an image/binary workspace file (attached whole). */
 export async function readWorkspaceFileBytes(path: string): Promise<string> {
   return invoke("read_workspace_file_bytes", { path });
+}
+
+/**
+ * Write one rendered figure into `<workspace>/figures/`.
+ *
+ * `pngBase64` is the rasterised image without the `data:` prefix (the backend
+ * rejects anything that is not a PNG), and `id` is the file-name stem: the
+ * model's `#name` when it gave one, else `fig-<n>`.
+ */
+export async function saveFigure(request: {
+  id: string;
+  pngBase64: string;
+}): Promise<SavedFigure> {
+  return invoke("save_figure", { id: request.id, pngBase64: request.pngBase64 });
+}
+
+/** Open `<workspace>/figures` in the OS file manager. */
+export async function openFiguresDir(): Promise<void> {
+  return invoke("app_open_figures_dir");
 }
 
 /**

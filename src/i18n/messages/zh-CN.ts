@@ -230,6 +230,19 @@ const zhCN: Messages = {
         continue: "继续",
     },
 
+    figure: {
+        title: "图 {index}",
+        drawing: "正在绘制…",
+        save: "保存 PNG",
+        saving: "保存中…",
+        saved: "已保存 · {path}",
+        saveFailed: "保存失败",
+        resetView: "重置视角",
+        saveAll: "保存本回合全部图",
+        openFolder: "打开 figures 文件夹",
+        webglUnavailable: "此环境未启用 WebGL，3D 预览不可用。",
+    },
+
     toolGroup: {
         completed: "已完成 {count} 次工具调用",
         completedWithErrors: "{count} 个步骤：{done} 个成功，{errors} 个失败",

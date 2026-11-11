@@ -255,6 +255,19 @@ const en = {
         continue: "Continue",
     },
 
+    figure: {
+        title: "Figure {index}",
+        drawing: "Drawing…",
+        save: "Save PNG",
+        saving: "Saving…",
+        saved: "Saved · {path}",
+        saveFailed: "Save failed",
+        resetView: "Reset view",
+        saveAll: "Save all figures",
+        openFolder: "Open figures folder",
+        webglUnavailable: "3D needs WebGL, which is unavailable in this environment.",
+    },
+
     toolGroup: {
         completed: { one: "{count} tool call completed", other: "{count} tool calls completed" },
         completedWithErrors: {

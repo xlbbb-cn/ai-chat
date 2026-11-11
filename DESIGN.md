@@ -623,6 +623,37 @@ This is the one place with a deliberate asymmetry:
 - Streaming states may animate a gradient sweep across a label, but must respect
   `prefers-reduced-motion`.
 
+### Figures
+
+The assistant can draw. A reply may carry a 2D figure (an inline `<svg>`) or a
+3D one (a `<carve>` scene), and both arrive in the transcript as the same card:
+
+- **One frame for both kinds**: `--c-surface-2` fill, `1px --c-border-s`, 4px
+  radius, no elevation — the recipe a code block and a table already use. A
+  figure is content, not a floating panel.
+- **Two surfaces, one step.** The drawing sits on `--c-surface` (the sheet) and
+  the caption bar on the tinted `--c-surface-2`; the colour step *is* the
+  separator, so the card carries no second hairline. The same sheet colour is
+  what a saved PNG and a 3D canvas are filled with, so the file matches the
+  screen.
+- **The drawing owns the width.** The viewport is full-bleed inside the frame
+  with 10px padding; a 2D drawing scales by its `viewBox`, a 3D canvas keeps a
+  16:10 viewport. Neither scrolls sideways.
+- **The caption bar** holds the title at 12px `--c-muted` (ellipsised) and the
+  save action. Actions are revealed on hover *and* on `:focus-within` — the
+  code-block toolbar rule, so the card is usable without a pointer.
+- **Saving is a state, not a toast**: `--c-success` text with the
+  workspace-relative path when the file lands (and that line is the way to the
+  folder), `--c-danger` when it fails, and the button itself reads `Saving…`.
+- **Colour comes from tokens, never from the payload.** A `<carve>` scene names
+  `accent` / `success` / `warning` / `danger` / `text` / `muted`; the renderer
+  resolves them from the live element, so a palette switch repaints the figure.
+  A 2D figure is written in `var(--c-*)` and `currentColor` and keeps them.
+- **A figure that cannot be drawn shows its source** in the code surface instead
+  of an empty frame; one that is still streaming says `Drawing…` in `--c-muted`.
+- **Motion**: no auto-rotation. Orbiting is pointer-driven only, so a reply is
+  static unless the user touches it.
+
 ### Interaction monitor
 
 The log dialog opened from Settings → Runtime & Debug. Chrome is the shared
@@ -919,6 +950,26 @@ it shares is the canvas.
 
 ---
 
+## PATCH v1.5 — the reply can draw
+
+The transcript renders markdown with `html: false`, and that is not negotiable:
+raw HTML is the injection vector the whole renderer exists to avoid. So a figure
+never travels as HTML. The source is scanned *before* markdown-it runs, each
+figure is cut out and replaced by an invisible slot token, and the card is
+mounted into the committed subtree afterwards. Everything else follows from that
+one decision.
+
+| Tempting | Here, and why |
+|---|---|
+| enable raw HTML so a `<svg>` just works | **refused.** `html: false` is the only thing between a model reply and a script host. The slot-token path reaches the same result while keeping every element the model wrote out of the document until it has been sanitised |
+| make `<carve>` a `<canvas>` the model draws into with script | **refused, same rule.** Executing model-authored JavaScript in the transcript is raw HTML with extra steps. `<carve>` is a declarative scene — JSON primitives, transforms, token colour names — drawn by three.js |
+| one `WebGLRenderer` per figure | **refused.** A renderer per card exhausts the browser's ~16 context limit after a few scenes, and every rebuild leaks one. One shared off-screen renderer blits each scene into the figure's own 2D canvas: unbounded figures, one context, and the canvas is already a PNG source |
+| let the card rebuild with the transcript | **refused.** The subtree is replaced on every streamed token; a rebuilt card would drop its pixels and the orbit angle the user just dragged. Cards are cached by source hash and *moved* back into the new tree |
+| save the PNG at 1× | **refused.** A chart pasted into a document has to be sharp: 2× backing store, capped so a huge figure cannot allocate a 100-megapixel canvas, with the computed styles inlined so the file does not depend on this app's CSS variables |
+| encode the PNG in Rust | **not possible here, and not needed.** There is no `image` / `resvg` dependency and the pixels only exist in the webview; the backend validates the payload (PNG magic, 12 MiB cap, whitelisted slug) and writes `<workspace>/figures/<slug>.png` — not `.data/`, because the file belongs to the user |
+
+---
+
 ## Do's and Don'ts
 
 ### Do
@@ -959,6 +1010,11 @@ it shares is the canvas.
 |---|---|
 | `src/App.css` | **All tokens**, app shell, toolbar, **titlebar / window chrome**, transcript, **floating chat notices**, input row, dialogs, markdown editor, scrollbars, shared primitives |
 | `src/components/ChatMessage.css` | Transcript turns, reasoning, code blocks, tables (`--ts-*` are aliases of `--c-*`) |
+| `src/utils/figures.ts` | Figure extraction (`svg` / `carve` fences, raw tags) — slot tokens handed to the transcript |
+| `src/utils/figureCard.ts` | The `.chat-figure` card: sanitised SVG, three.js canvas, save action, per-source cache |
+| `src/utils/carve3d.ts` | `<carve>` scene parsing and the shared off-screen `WebGLRenderer` |
+| `src/utils/figurePng.ts` | SVG / canvas → base64 PNG (computed styles inlined, 2× backing store) |
+| `src/utils/svgSanitize.ts` | Element allowlist and attribute blocklist for model-authored SVG |
 | `src/components/ToolCallGroup.css` | Tool-call cards and streaming states |
 | `src/components/TodoList.css` | Todo rows |
 | `src/components/FileMentionPopup.css` | Composer mention popup — one surface shared by the `@file` and `/skill` pickers; `SlashMentionPopup.css` only adds the glyph colour and the left-to-right description |

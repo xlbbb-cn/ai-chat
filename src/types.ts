@@ -579,6 +579,20 @@ export interface WorkspaceFileRange {
   truncated: boolean;
 }
 
+/**
+ * One figure the assistant drew, saved as a PNG (`figures::save_figure`).
+ *
+ * The webview rasterises the SVG / 3D canvas and sends the bytes; the backend
+ * only names and writes the file, under `<workspace>/figures/`.
+ */
+export interface SavedFigure {
+  /** Workspace-relative path with `/` separators. */
+  path: string;
+  bytes: number;
+  /** That name already existed, so a `-2`, `-3`… suffix was used. */
+  renamed: boolean;
+}
+
 export interface Skill {
   name: string;
   description: string;

@@ -229,6 +229,13 @@ src/                       # React 19 + TS frontend
                            # AgentMissionPanel, ProfilePanel, MonitorPanel,
                            # MarkdownPreview, TodoList, ToolCallGroup, Portal,
                            # TitleBar
+  utils/figures.ts         # figure extraction from a reply: `svg` / `carve`
+                           # fences + raw element tags → invisible slot tokens
+  utils/figureCard.ts      # `.chat-figure` card (sanitised SVG or three.js
+                           # canvas), save action, per-source card cache
+  utils/carve3d.ts         # `<carve>` scene JSON → one shared WebGLRenderer
+  utils/figurePng.ts       # SVG / canvas → base64 PNG (styles inlined, 2×)
+  utils/svgSanitize.ts     # element allowlist / attribute blocklist for SVG
 
 src-tauri/
   src/lib.rs               # state, menu, command registration, app setup
@@ -242,6 +249,8 @@ src-tauri/
   src/skills.rs            # SKILL.md frontmatter parser, list/save/delete,
                            # workspace skill status (.data/skills.status)
   src/workspace.rs         # hidden `<workspace>/.data` layout (paths + hidden attr)
+  src/figures.rs           # assistant figures: `<workspace>/figures/*.png`,
+                           #   PNG magic + slug validation, figure prompt block
   src/process_guard.rs     # app-wide child registry + process-tree kill / Windows job
   src/tools/               # tool executor, split by feature:
     mod.rs                 #   dispatch/schemas/shared helpers (+ tests)
@@ -285,3 +294,7 @@ scripts/sync-version.cjs   # 3-way version sync (pkg / cargo / tauri.conf)
 - **A shadow window's settings are temporary.** They live in `shadow/config-<id>/config.json` and are deleted on exit; only `workspace_history` is merged back (and its own fork path is filtered out). Do not "fix" that by letting a shadow write the shared config — moving another window's workspace is exactly what the roles prevent.
 - **`timers.json` is workspace-scoped, not app-data.** A timer resumes a session id that only exists in its workspace's database, so the mirror lives in `<workspace>/.data` and moves with `apply_config`; a legacy `<app_data>/timers.json` is migrated once at startup (`timers.json.migrated` when the target already exists).
 - **Draft releases are invisible to the update check.** `GET /releases` never returns drafts, so an in-app “update available” only shows up after the draft created by CI is published.
+- **A figure never reaches the DOM through markdown.** `html: false` is the injection boundary, so `svg` / `carve` blocks are cut out of the reply *before* `md.render` (`utils/figures.ts`) and replaced by an invisible U+2063 slot token; `mountFigures` swaps the token for a sanitised card in the `useLayoutEffect` right after `innerHTML`. Removing the sanitizer or enabling raw HTML undoes the only defence a reply has.
+- **Figure cards are cached by source hash, not rebuilt.** The transcript subtree is replaced on every streamed token; a card that were rebuilt would drop three.js pixels and the orbit angle the user just dragged. The cache *moves* the same element back into the new tree — extend `mountFigures` rather than mounting in React.
+- **Three.js is a lazy chunk with exactly one renderer.** `utils/carve3d.ts` dynamic-imports `three` and owns the single off-screen `WebGLRenderer` that blits into each figure's 2D canvas; a renderer per card hits WebView2's context limit after a few scenes. A conversation without `<carve>` never loads the chunk (it builds as its own ~750 kB asset).
+- **Rust never encodes a figure PNG.** The pixels only exist in the webview, and there is no `image`/`resvg` dependency: the frontend rasterises and sends base64, `figures::save_figure` validates (PNG magic, 12 MiB cap, whitelisted slug) and writes `<workspace>/figures/<slug>.png` — never `<workspace>/.data`.
