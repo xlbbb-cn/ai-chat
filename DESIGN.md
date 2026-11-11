@@ -107,9 +107,11 @@ decision, and `off` is a supported look rather than a broken one.
 
 | Token | Standard | Role |
 |---|---|---|
-| `--glass-blur` | `20px` | Blur of the frosted bars: titlebar, toolbar, sidebar, input area, panel headers |
+| `--glass-blur` | `20px` | Blur of the frosted bars: titlebar, toolbar, input area, popups |
+| `--glass-blur-panel` | `calc(var(--glass-blur) * 1.5)` → `30px` | Blur of the side panel and the panel headers — the same frost one step deeper, because their whole backdrop is 6% of an already blurred transcript. Derived, so `off` still zeroes it |
 | `--glass-blur-scrim` | `8px` | Blur of modal backdrops — a smaller radius keeps a full-window scrim cheap |
 | `--glass-saturate` | `180%` | Saturation boost paired with the blur on **every** glass surface, so a tinted band lifts the colour behind it instead of greying it out. `off` sets `100%` |
+| `--glass-saturate-panel` | `220%` | The side panel's own boost: at 6% read-through an extra radius has little luminance to work on, so the frost reads through colour instead. `off` sets `100%` |
 | `--glass-backdrop` | `var(--c-toolbar)` | The fill the glass sits on |
 | `--glass-transcript` | `var(--c-bg)` | Fill of the reading column. The canvas at every glass level — a translucent sheet over the canvas it already is cannot be seen, it can only flatten Cream's wash — and `color-mix(in srgb, var(--c-bg) 94%, transparent)` under `data-vibrancy`, where the desktop is behind it |
 | `--glass-transcript-image` | `var(--c-bg-image)` | The palette wash under the transcript; `none` while the sheet is translucent |
@@ -122,12 +124,19 @@ The level lives in `AppConfig.glass_effect`, is written to `<html>` as
 `App.css` placed **after** the palette blocks (same specificity as `:root`,
 later wins):
 
-| `data-glass` | `--glass-blur` | `--glass-blur-scrim` | Note |
-|---|---|---|---|
-| `off` | `0px` | `0px` | Fill swaps to `--c-surface`, saturate to `100%`: with no blur a `.62`-alpha bar would show the transcript through it |
-| `subtle` | `12px` | `6px` | |
-| `standard` | `20px` | `8px` | `:root` value, used when the config has no entry |
-| `strong` | `32px` | `14px` | |
+| `data-glass` | `--glass-blur` | `--glass-blur-panel` | `--glass-blur-scrim` | Note |
+|---|---|---|---|---|
+| `off` | `0px` | `0px` | `0px` | Fill swaps to `--c-surface`, saturate to `100%`: with no blur a `.62`-alpha bar would show the transcript through it |
+| `subtle` | `12px` | `18px` | `6px` | |
+| `standard` | `20px` | `30px` | `8px` | `:root` value, used when the config has no entry |
+| `strong` | `32px` | `48px` | `14px` | |
+
+`--glass-blur-panel` is the one rate that is **derived** instead of declared by
+the level blocks — `calc(var(--glass-blur) * 1.5)` — because it is not a third
+kind of glass but the same frost one step deeper, for the one surface whose
+whole backdrop is 6% of an already blurred transcript (see *Control fills*).
+Deriving it keeps `off` honest (0px × 1.5 is still 0) and stops the ladder from
+opening a hole between `standard` and `strong`.
 
 The transcript is the one surface that does **not** follow this ladder. Its
 backdrop is either the canvas it already paints or — under `data-vibrancy` — the
@@ -206,14 +215,33 @@ the reading column, so CSS *can* blur what is behind them even though it can
 never blur the desktop. Hover fills on a glass surface use `--c-active`, which is
 alpha-based in both themes and therefore never turns into a solid block.
 
-The two large surfaces are deliberately near-opaque. A panel or a page carries
-every row it has, so at the window tint the transcript behind it read through as
-text, and its hairlines cut the surface into bands of different colour — the
-Settings header sat over the chat toolbar while the rest sat over the transcript.
-At 94% nothing behind reads, and the blur that stays on keeps the surface
-frosted instead of flat. `--c-panel` is mixed from `--c-bg` and not
-`--c-surface`, so a panel's cards (opaque `--c-surface`) still sit a shade above
-its shell, exactly as the opaque design did.
+The two large surfaces settle their density differently, because they cover
+different things. A **page** (`--c-sheet`) carries 13px labels on every row and
+replaces the transcript, so it stays deliberately near-opaque: at the window
+tint the chat behind it read through as text and its hairlines cut the surface
+into bands of different colour — the Settings header sat over the chat toolbar
+while the rest sat over the transcript. At 94% nothing behind reads, and the
+blur that stays on keeps the surface frosted instead of flat.
+
+The **side panel** (`--c-panel`) is the opposite case: it floats over the
+reading column, so the frost behind it is the effect — but it still carries 13px
+session titles, so it lets 6% of the backdrop through and no more: 94% of the
+canvas, one value for both themes and no dark override (`--c-bg` is already
+theme-aware). Those 6% are what `blur(var(--glass-blur-panel))
+saturate(var(--glass-saturate-panel))` filters — 30px / 220% at `standard`,
+against 20px / 180% for a band — and they are enough for the panel to sit *on*
+the conversation instead of on the bare canvas. The extra radius and the higher
+saturation are what make 6% read as frost rather than as tint: at that alpha
+there is little luminance for a radius to work on, but the ghost's own colour
+still comes through stronger.
+
+The density is also what makes the panel legible, which is the real argument:
+a `--c-muted` title holds 4.6–6.0:1 where a blurred glyph of the transcript
+passes beneath it, against 1.9–3.1:1 at two thirds and 4.3–5.5:1 at 92% — the
+step below this one, and already under the 4.5:1 floor the palettes promise on
+the dark default. Mixed from `--c-bg` and not `--c-surface`, so a panel's cards
+(opaque `--c-surface`) still sit a shade above its shell, exactly as the opaque
+design did.
 
 Never write a blur radius, a `saturate()` or a `--c-toolbar` fill at a call site.
 The whole material is these four declarations and nothing else:
@@ -225,6 +253,11 @@ backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 box-shadow: var(--glass-edge);
 ```
 
+`.sidebar` and `.panel-header` are the single sanctioned variation: they read
+`--glass-blur-panel` / `--glass-saturate-panel` in place of the two band values,
+because they are the only surfaces that float over another surface instead of
+sitting on the canvas.
+
 Glass only reads when something sits **behind** it, so a panel that lives in the
 sidebar (`.skills-panel`, `.tools-panel`, `.mcp-panel`, `.history-panel`,
 `.agents-panel`) paints `--glass-canvas` and not a canvas colour. The sidebar's
@@ -232,6 +265,80 @@ own `--glass-backdrop` + blur then stays visible and the transcript underneath
 is faintly readable — the sidebar is a `position: fixed` overlay, so the
 message column really does continue beneath it. Cards inside the panel keep
 `--c-surface`: only the pane is translucent, never the content.
+
+#### Window-less backdrop (`data-glass-fallback`)
+
+A window backdrop is the one part of the material the app cannot ask for
+itself: `window-vibrancy` has Windows (DWM) and macOS (`NSVisualEffectView`)
+backends only, `apply_window_backdrop` in `src-tauri/src/lib.rs` is
+`#[cfg(target_os = "windows")]`, and on Linux the blur behind a window belongs
+to the WM — KWin and Hyprland each have their own, GNOME/Mutter has none at
+all. So every non-Windows platform fell back to the opaque canvas: the frame
+bands still ran `backdrop-filter`, but the only thing behind them was a flat
+`--c-bg`, and blurring a flat colour is a no-op. The sidebar was the single
+exception — it is a `position: fixed` overlay, so the transcript really does
+continue beneath it and its blur is visible on any platform.
+
+`applyWindowVibrancy()` writes `<html data-glass-fallback>` when
+`set_window_vibrancy` reports no backdrop (Linux, macOS, a Windows build without
+Mica/Acrylic). The attribute is **not** a second material: it matches the same
+tint block as `data-vibrancy`, so `--c-window`, `--c-field`, `--c-btn`,
+`--c-sheet`, `--c-panel`, `--c-popup`, `--glass-transcript` and the level ladder
+are identical. Only the origin of the backdrop changes — the app paints it:
+
+| Token | Light | Dark | Role |
+|---|---|---|---|
+| `--glass-ambient` | `none` | `none` | The wash itself; only `[data-glass-fallback]` fills it |
+| `--c-ambient` | `color-mix(in srgb, var(--c-text) 10%, transparent)` | `color-mix(in srgb, var(--c-text) 6%, transparent)` | The ink the wash is built from |
+
+The wash is two oversized radial blobs whose peaks sit **inside** the frame
+bands — top-right behind the toolbar, bottom-left behind the input area — and
+fade out before they reach the middle of the reading column. `--glass-ambient`
+is painted on `body::before` (`position: fixed`, `inset: 0`, `z-index: -1`), so
+it is pinned to the window, above the canvas colour and below every in-flow
+surface. Strength is where this had to be measured rather than chosen:
+
+| | Rendered band at the blob peak (vs the flat canvas) | `--c-muted` on the band |
+|---|---|---|
+| light, 10% ink | `255 → 243` (12/255 darker) | 5.8 Default · 5.0 Sakura · 4.7 Cream |
+| dark, 6% ink | `26 → 36` (10/255 lighter — a 40% lift on a dark band) | 4.7 Default · 5.9 Sakura · 6.2 Cream |
+
+That ceiling is the honest limit of a *painted* backdrop: the bands carry
+`--c-muted` labels, and the ink can only move the canvas as far as `--c-muted`
+can afford — Cream's light and the default dark are within 0.2 of the 4.5 floor
+at these alphas, so 10% / 6% is the end of the runway. What it deliberately
+does *not* buy: the reading column stays flat (10% of the ink behind the 94%
+fill is ~1/255, which is the whole point of the transcript floor), and the bands
+blur the wash, never text. A backdrop that reads as strongly as Windows' Acrylic
+over a photo wallpaper is not reachable this way — it needs content behind the
+bands (the sidebar already has it: the transcript scrolls beneath it).
+
+Rules that follow:
+
+- **The window stays opaque.** `html` / `body` keep their `--c-bg`; only
+  `[data-vibrancy]` may drop the page background, because only then is there a
+  desktop behind it. `.chat-area` drops its canvas in both cases, so the wash is
+  what the transcript's tint sits on (`.messages` still paints
+  `--glass-transcript`).
+- **Neutral only.** `--c-ambient` is mixed from `--c-text`, so each palette
+  washes its own ink over its own canvas and no palette block declares a colour.
+  Never build the wash from `--c-accent`: the accent is for the primary action,
+  never for decoration.
+- **`off` is excluded** (`:not([data-glass="off"])`) — no blur means no glass,
+  and a backdrop nothing sits on is dead paint.
+- **Contrast is kept.** Measured over the densest blob, across all six palette ×
+  theme pairs: `--c-text` 10.5–17.2:1, `--c-body` 8.2–12:1 and `--c-muted`
+  5.1–7:1 on the transcript; `--c-text` 10.2–15.5:1 and `--c-muted` 4.7–6.2:1 on
+  a `--c-window` band. The `--c-muted` floor (4.5:1) holds everywhere, so the
+  fallback never weakens a palette's guarantee.
+- The scrim blur on `.file-mention-popup`, `.model-select-popup-shell`,
+  `.settings-page` and `.prompt-editor-overlay` is kept: those open over the
+  transcript, which is opaque enough to blur.
+- **The blur stays honest.** The bands blur the wash, never text: the transcript
+  scrolls inside `.messages`, not under the toolbar, so the frame's glass is
+  translucency over a soft backdrop — not the text-frosting the sidebar gets.
+  Making the bars frost the transcript is a layout change (the column would have
+  to scroll beneath them), not a token one.
 
 ### Text hierarchy
 
@@ -277,6 +384,7 @@ only sanctioned exception to "one accent". Never use them decoratively.
 | `--c-bg-image` | `none` | Optional wash over the canvas (`body`, `.chat-area`, `.messages`) |
 | `--c-code-image` | `none` | Optional wash over code blocks |
 | `--c-reason-image` | `none` | Optional wash over reasoning / quote surfaces |
+| `--glass-ambient` | `none` | Stand-in backdrop painted on `body::before` where no window backdrop exists (`data-glass-fallback`) |
 
 `none` everywhere but in the Cream palette, which fills them with the oklab
 gradients of its adjacent group. A rule that uses them must set
@@ -863,7 +971,7 @@ implemented with a token, or listed as a deliberate refusal.
 
 | Spec says | Here |
 |---|---|
-| `blur(24px) saturate(180%)` | `blur(--glass-blur)` — `20px` standard, `12` subtle, `32` strong, `0` off — always paired with `saturate(--glass-saturate)` (`180%`, `100%` when off) |
+| `blur(24px) saturate(180%)` | `blur(--glass-blur)` — `20px` standard, `12` subtle, `32` strong, `0` off — always paired with `saturate(--glass-saturate)` (`180%`, `100%` when off). The side panel and panel headers read the derived pair `--glass-blur-panel` / `--glass-saturate-panel` (`30px` / `220%` at standard) instead — the one sanctioned variation |
 | `border: 1px solid rgba(255,255,255,.4)` | `--glass-edge` inner highlight (window top edge only), on top of the `--c-border` hairline |
 | `box-shadow: 0 8px 32px rgba(0,0,0,.08)` | **refused** — non-negotiable 3, no elevation. The one shading in the system is `--shadow-side`, which separates the floating side panel from the transcript it covers and casts on nothing else |
 | `border-radius: 16px` panels, `24px` pills | **refused** — non-negotiable 4. The 4px geometry is what keeps the app from reading as a web page imitating macOS |
@@ -903,8 +1011,8 @@ blurring past behind it is the effect, not an accident.
 
 | Spec says | Here |
 |---|---|
-| `rgba(255,255,255,.72)` light, `rgba(30,30,30,.65)` dark | `--c-panel` = `color-mix(in srgb, var(--c-bg) 75%, transparent)`, and `65%` under `[data-theme="dark"][data-vibrancy]`. Mixed from the canvas, not the surface, so the panel's cards (opaque `--c-surface`) still sit a shade above the shell |
-| `blur(28px) saturate(190%)` | `blur(var(--glass-blur)) saturate(var(--glass-saturate))` — the level scales it `12 / 20 / 32px`, so the panel never hard-codes a radius |
+| `rgba(255,255,255,.72)` light, `rgba(30,30,30,.65)` dark | `--c-panel` = `color-mix(in srgb, var(--c-bg) 94%, transparent)` — the `.72 / .65` pair first became `75% / 65%`, then `66.667%` for both themes, then 95%, and settled on 94% (6% read-through) once the panel was specified as frosted rather than see-through; 92% is the next step down and it already drops a `--c-muted` title to 4.3:1 on the dark default (two thirds: 1.9–3.1:1), see *Control fills*. The frost went the other way — the panel moved to `--glass-blur-panel` / `--glass-saturate-panel` (30px / 220% at `standard`) instead of taking more backdrop. Mixed from the canvas, not the surface, so the panel's cards (opaque `--c-surface`) still sit a shade above the shell |
+| `blur(28px) saturate(190%)` | `blur(var(--glass-blur)) saturate(var(--glass-saturate))` — the level scales it `12 / 20 / 32px`, so nothing hard-codes a radius. The panel's frost is the derived `--glass-blur-panel` (`18 / 30 / 48px`) with `--glass-saturate-panel` |
 | `border-right: 1px solid rgba(255,255,255,.35)` | the `.sidebar::after` hairline stays the structural edge; there is no lit edge on the panel — its top is tucked under the titlebar — only the `--shadow-side` shade |
 | `box-shadow: 10px 0 30px rgba(0,0,0,.04)` | `--shadow-side` = `10px 0 30px var(--c-panel-shade)` (`rgba(0,0,0,.05)` light, `.32` dark), applied **only** to `.sidebar` |
 | `border-radius: 10px` rows, `rgba(var(--primary-color-rgb), .08)` fills | rows keep `--r-sm` and use `--c-accent-soft` / `--c-hover`; there is no `--primary-color-rgb`, and no second way to spell the accent |

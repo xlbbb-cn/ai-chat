@@ -164,17 +164,29 @@ function currentGlassEffect(): GlassEffect {
  * what it managed to apply.
  *
  * `data-vibrancy` is written only when the native call succeeded, so a failure
- * (macOS, Linux, an unsupported Windows build) leaves the app on its opaque
- * canvas instead of a transparent window over a raw desktop. Fire and forget:
- * `data-glass` is already set, and the blur level must not wait for the IPC.
+ * (macOS, Linux, an unsupported Windows build) never leaves a transparent
+ * window over a raw desktop. That case gets `data-glass-fallback` instead: the
+ * same glass, with the backdrop the app paints itself — a webview can blur only
+ * its own pixels, so the compositor is not the only thing that can supply
+ * something behind the chrome. Fire and forget: `data-glass` is already set,
+ * and the blur level must not wait for the IPC.
  */
 function applyWindowVibrancy(level: GlassEffect, dark: boolean) {
+  const root = document.documentElement;
+  const settle = (kind: string | null) => {
+    if (kind) {
+      root.setAttribute("data-vibrancy", kind);
+      root.removeAttribute("data-glass-fallback");
+    } else {
+      root.removeAttribute("data-vibrancy");
+      // `[data-glass="off"]` gates the fallback out on the CSS side: with no
+      // blur there is no glass to sit on a backdrop.
+      root.setAttribute("data-glass-fallback", "");
+    }
+  };
   setWindowVibrancy(level, dark)
-    .then((kind) => {
-      if (kind) document.documentElement.setAttribute("data-vibrancy", kind);
-      else document.documentElement.removeAttribute("data-vibrancy");
-    })
-    .catch(() => document.documentElement.removeAttribute("data-vibrancy"));
+    .then((kind) => settle(kind))
+    .catch(() => settle(null));
 }
 
 /**

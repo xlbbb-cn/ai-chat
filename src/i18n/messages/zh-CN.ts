@@ -322,7 +322,7 @@ const zhCN: Messages = {
             glassSubtle: "轻",
             glassStandard: "标准",
             glassStrong: "强",
-  glassHint: "标题栏、工具栏与面板头部的模糊强度。选「关闭」时这些条改为不透明，可减轻低配显卡和远程桌面的负担。在 Windows 上这一档位也让窗框透出模糊的桌面（Acrylic 背板），对话正文始终是实底。",
+  glassHint: "标题栏、工具栏与面板头部的模糊强度。选「关闭」时这些条改为不透明，可减轻低配显卡和远程桌面的负担。这一档位也让窗框变透明：系统提供背板时透出模糊的桌面（Windows 的 Acrylic），其他平台则透出应用自绘的柔和底纹。对话正文始终是实底。",
             language: "语言",
             languageHint: "立即生效，并保存到配置中。",
         },

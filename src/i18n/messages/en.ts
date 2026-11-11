@@ -354,7 +354,7 @@ const en = {
             glassSubtle: "Subtle",
             glassStandard: "Standard",
             glassStrong: "Strong",
-  glassHint: "Blur strength for the titlebar, toolbar and panel headers. Off makes those bars opaque instead of blurred — cheaper on weak GPUs and remote sessions. On Windows the level also makes the window frame translucent, so the blurred desktop shows through it (Acrylic); the transcript stays solid.",
+  glassHint: "Blur strength for the titlebar, toolbar and panel headers. Off makes those bars opaque instead of blurred — cheaper on weak GPUs and remote sessions. The level also makes the window frame translucent: over the blurred desktop where the system provides a backdrop (Acrylic on Windows), and elsewhere over a soft backdrop the app draws itself. The transcript always stays solid.",
             language: "Language",
             languageHint: "Applies immediately and is stored in your configuration.",
         },

@@ -322,7 +322,7 @@ const zhTW: Messages = {
             glassSubtle: "輕",
             glassStandard: "標準",
             glassStrong: "強",
-  glassHint: "標題列、工具列與面板標頭的模糊強度。選「關閉」時這些列改為不透明，可減輕低階顯示卡與遠端桌面的負擔。在 Windows 上這個檔位也讓視窗外框透出模糊的桌面（Acrylic 背板），對話內容始終維持實底。",
+  glassHint: "標題列、工具列與面板標頭的模糊強度。選「關閉」時這些列改為不透明，可減輕低階顯示卡與遠端桌面的負擔。這個檔位也讓視窗外框變透明：系統提供背板時透出模糊的桌面（Windows 的 Acrylic），其他平台則透出應用程式自繪的柔和底紋。對話內容始終維持實底。",
             language: "語言",
             languageHint: "立即生效，並儲存至設定檔中。",
         },
