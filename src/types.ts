@@ -317,6 +317,13 @@ export type ThemeMode = "auto" | "light" | "dark";
 export type Palette = "default" | "sakura" | "cream";
 
 /**
+ * Frosted-glass strength for every translucent surface, applied as
+ * `data-glass` on `<html>`. `standard` is the design's own blur (20px);
+ * `off` also swaps the 0.75-alpha bar fill for the opaque surface colour.
+ */
+export type GlassEffect = "off" | "subtle" | "standard" | "strong";
+
+/**
  * One extra HTTP header attached to every upstream model request
  * (Settings → API → Custom request headers).
  */
@@ -446,6 +453,12 @@ export interface AppConfig {
    * group washed with oklab gradients).
    */
   palette?: Palette;
+  /**
+   * Frosted-glass strength: `off` (opaque bars, no blur), `subtle` (12px),
+   * `standard` (20px, the default) or `strong` (32px). Missing means
+   * `standard`.
+   */
+  glass_effect?: GlassEffect;
   /**
    * UI language. Kept in the config so it survives restarts and travels with
    * exported profiles; the frontend also caches it in `localStorage` so the

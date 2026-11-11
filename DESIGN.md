@@ -21,7 +21,7 @@ motion curve. Everything below is written against this codebase — the tokens i
    a view. Never use it decoratively and never add a second chromatic accent.
    A palette may re-hue it, but it stays the only accent of that view.
 3. **No elevation.** `--shadow-*` resolve to `none`. Layering is z-index, opacity
-   and the frosted `--c-toolbar` surface — nothing else. The **one** exception is
+   and the frosted `--glass-backdrop` surface — nothing else. The **one** exception is
    the functional scroll-edge shade (`--shadow-scroll-top` /
    `--shadow-scroll-bottom`): it never lifts a surface, it only says “the
    transcript continues past this bar”, and it is toggled by scroll position.
@@ -96,7 +96,87 @@ All tokens live in `src/App.css`. Nothing else may define colour/radius/motion.
 | `--c-surface-2` | `#F4F4F4` | `#23262D` | Alternate surface: user turn, code, reasoning, tool calls |
 | `--c-hover` | `rgba(23,26,32,.04)` | `rgba(255,255,255,.06)` | Hover fill |
 | `--c-active` | `rgba(23,26,32,.07)` | `rgba(255,255,255,.10)` | Pressed fill |
-| `--c-toolbar` | `rgba(255,255,255,.75)` | `rgba(23,26,32,.75)` | Frosted bars: toolbar, input area, sidebar, panel headers |
+| `--c-toolbar` | `rgba(255,255,255,.62)` | `rgba(23,26,32,.62)` | Frosted bars: toolbar, input area, sidebar, panel headers |
+
+#### Frosted glass (`--glass-*`)
+
+The blur is a third, independent dimension, next to `data-theme` and
+`data-palette` (see “Theming” below). Every translucent surface reads the same
+tokens, so the strength is one global setting instead of a per-component
+decision, and `off` is a supported look rather than a broken one.
+
+| Token | Standard | Role |
+|---|---|---|
+| `--glass-blur` | `20px` | Blur of the frosted bars: titlebar, toolbar, sidebar, input area, panel headers |
+| `--glass-blur-scrim` | `8px` | Blur of modal backdrops — a smaller radius keeps a full-window scrim cheap |
+| `--glass-saturate` | `180%` | Saturation boost of the headers that tint their backdrop |
+| `--glass-backdrop` | `var(--c-toolbar)` | The fill the glass sits on |
+| `--glass-canvas` | `transparent` | Canvas of a panel mounted in the glass sidebar |
+| `--c-window` | `color-mix(in srgb, var(--c-surface) 40%, transparent)` | Window-frame tint, only defined under `html[data-vibrancy]` (see *Window vibrancy*) |
+
+The level lives in `AppConfig.glass_effect`, is written to `<html>` as
+`data-glass` (`applyGlassEffect()` in `src/App.tsx`) and selects a block in
+`App.css` placed **after** the palette blocks (same specificity as `:root`,
+later wins):
+
+| `data-glass` | `--glass-blur` | `--glass-blur-scrim` | Note |
+|---|---|---|---|
+| `off` | `0px` | `0px` | Fill swaps to `--c-surface`, saturate to `100%`: with no blur a `.62`-alpha bar would show the transcript through it |
+| `subtle` | `12px` | `6px` | |
+| `standard` | `20px` | `8px` | `:root` value, used when the config has no entry |
+| `strong` | `32px` | `14px` | |
+
+#### Window vibrancy (`data-vibrancy`)
+
+A webview can only blur its own pixels, so the desktop seen **through** the
+window is blurred by the compositor's **Acrylic** backdrop (`window-vibrancy`,
+applied by `apply_window_backdrop` in `src-tauri/src/lib.rs`): the Windows 11
+system backdrop `DWMSBT_TRANSIENTWINDOW` on 11, the v1809 accent blur on
+Windows 10. Acrylic, not Mica, on purpose — Mica only samples the wallpaper, so
+against a plain background the frame reads as the flat pane it was before,
+while Acrylic blurs what is actually behind the window. `apply_mica` still runs
+first for its side effect: it is the only call that sets
+`DWMWA_USE_IMMERSIVE_DARK_MODE`, so the backdrop follows the *app* theme and
+not the system one; the Acrylic call then replaces the Mica backdrop.
+
+The same `glass_effect` level drives it — `set_window_vibrancy` runs once at
+startup and again from Settings → Appearance, and writes
+`<html data-vibrancy="acrylic|mica">` **only** when the native call succeeded.
+Without the attribute every vibrancy rule is inert and the app keeps its opaque
+canvas, because a transparent window with no backdrop would show a raw,
+unblurred desktop. `off` clears the backdrop.
+
+Only the frame is translucent: `html[data-vibrancy]` points `--glass-backdrop`
+at `--c-window`, so the titlebar, sidebar, toolbar, input area and panel
+headers let the desktop through, while `.chat-area` drops its canvas and
+`.messages` keeps its opaque `--c-bg`. The transcript therefore stays a solid
+sheet — reading contrast and scroll cost are unchanged.
+
+| `data-glass` | `--c-window` | Note |
+|---|---|---|
+| `subtle` | `color-mix(in srgb, var(--c-surface) 24%, transparent)` | Thin tint, the desktop reads clearly |
+| `standard` | `color-mix(in srgb, var(--c-surface) 40%, transparent)` | The value on `html[data-vibrancy]` itself |
+| `strong` | `color-mix(in srgb, var(--c-surface) 58%, transparent)` | Densest tint; the desktop is a hint |
+
+The alphas stay **well under** the opaque `--c-toolbar` (`.62`): the backdrop
+already blurs, so a tint as dense as the old bar fill composites back to the
+same flat pane and the glass looks switched off. The native backdrop only adds
+the blur (the Windows 11 system backdrop is tinted by the OS, the Windows 10
+path gets a low-alpha tint), so the density per level lives entirely in
+`--c-window` and both backdrops land on the same contrast.
+
+Never write a blur radius, a `saturate()` or a `--c-toolbar` fill at a call site:
+`background: var(--glass-backdrop)` plus
+`backdrop-filter: blur(var(--glass-blur))` (add
+`saturate(var(--glass-saturate))` only where the header tints its backdrop).
+
+Glass only reads when something sits **behind** it, so a panel that lives in the
+sidebar (`.skills-panel`, `.tools-panel`, `.mcp-panel`, `.history-panel`,
+`.agents-panel`) paints `--glass-canvas` and not a canvas colour. The sidebar's
+own `--glass-backdrop` + blur then stays visible and the transcript underneath
+is faintly readable — the sidebar is a `position: fixed` overlay, so the
+message column really does continue beneath it. Cards inside the panel keep
+`--c-surface`: only the pane is translucent, never the content.
 
 ### Text hierarchy
 
@@ -335,11 +415,13 @@ accent colour. A badge that is not a state must not compete with the one accent.
 
 ### Overlays and popups
 
-- Modal backdrop: `rgba(128,128,128,.65)` + `backdrop-filter: blur(8px)`.
+- Modal backdrop: `rgba(128,128,128,.65)` + `backdrop-filter: blur(var(--glass-blur-scrim))`.
 - Popup / dialog surface: `--c-surface` + 1px `--c-border-i` + 4px radius, **no shadow**.
   A popup that floats *inside* the composer uses `--c-bg-secondary` instead, so it
   separates from the frosted input bar without elevation.
-- Frosted bars: `background: var(--c-toolbar)` + `backdrop-filter: blur(20px)`.
+- Frosted bars: `background: var(--glass-backdrop)` + `backdrop-filter: blur(var(--glass-blur))`
+  (`saturate(var(--glass-saturate))` added where the header tints its backdrop).
+  Both tokens follow Settings → Appearance → Frosted glass.
 
 #### Composer mention popups (`@file`, `/skill`)
 
@@ -471,7 +553,7 @@ This is the one place with a deliberate asymmetry:
 ### Interaction monitor
 
 The log dialog opened from Settings → Runtime & Debug. Chrome is the shared
-dialog recipe — `--c-toolbar` header with one hairline, `--c-surface` content,
+dialog recipe — `--glass-backdrop` header with one hairline, `--c-surface` content,
 4px radius, no elevation — and it carries **no literal colour**: the dark box it
 used to be was the last hardcoded surface in the system.
 
@@ -525,7 +607,7 @@ Nothing in between.
 | Chat transcript (`.messages`) | `padding: 18px 16px 20px`, `gap: 16px` |
 | Chat input area | `padding: 10px 12px 12px`, `gap: 8px`; control row `gap: 6px` |
 | Sidebar | `width: 400px`; 1px right hairline drawn by `.sidebar::after`, starting `--panel-header-h` down so it never crosses the header band |
-| Panel header | `.panel-header` (shared, `App.css`): `min-height: var(--panel-header-h)` = 49px so its hairline lands on the chat toolbar's, `padding: 6px 12px`, frosted `--c-toolbar`, 1px hairline, title + one `faAnglesLeft` collapse chevron and nothing else |
+| Panel header | `.panel-header` (shared, `App.css`): `min-height: var(--panel-header-h)` = 49px so its hairline lands on the chat toolbar's, `padding: 6px 12px`, frosted `--glass-backdrop`, 1px hairline, title + one `faAnglesLeft` collapse chevron and nothing else |
 | Panel footer | `padding: 10px 12px`, 1px hairline |
 | Panel list | `padding: 10px 12px`, `gap: 6px` |
 | Panel row | `padding: 10px 12px` |
@@ -595,7 +677,7 @@ every other surface — no shadow, one hairline, one accent.
 
 | Part | Rule |
 |---|---|
-| Bar | `--titlebar-h` (32px), `--c-toolbar` + `blur(20px)`, 1px `--c-border` bottom, `user-select: none` |
+| Bar | `--titlebar-h` (32px), `--glass-backdrop` + `blur(var(--glass-blur))`, 1px `--c-border` bottom, `user-select: none` |
 | Drag region | The bar **and** its filler carry `data-tauri-drag-region` (the attribute does not inherit); buttons never do |
 | Window buttons | 34×28, 4px radius, `--c-muted` glyph at 12px; hover `--c-hover` + `--c-text`; active `--c-active` |
 | Close button | Destructive variant: hover is `--c-danger-soft` fill + `--c-danger` glyph |
@@ -609,7 +691,7 @@ Fullscreen pages start at `top: var(--titlebar-h)`; the sidebar starts below it
 too. True modal dialogs (9999 layer) still cover the titlebar on purpose.
 
 The sidebar panel header (`.panel-header`) repeats the titlebar's frosted
-`--c-toolbar` and the chat toolbar's height, so the whole top of the window —
+`--glass-backdrop` and the chat toolbar's height, so the whole top of the window —
 titlebar, panel header, chat toolbar — reads as one glass band divided only by
 the hairline under the panel header. That shared height is what lands the
 hairline on the toolbar's own row, so the top of the window shows one

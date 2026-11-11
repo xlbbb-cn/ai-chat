@@ -28,6 +28,7 @@ import type {
   TimerEntry,
   BackgroundTaskState,
   EvolutionMaintenanceState,
+  GlassEffect,
   TodoListSummary,
   UpdateInfo,
   UpdateDownloadProgress,
@@ -169,6 +170,26 @@ export async function setModelContextLength(
 ): Promise<void> {
   return invoke("set_model_context_length", { model, contextLength });
 }
+
+/**
+ * Apply the window-level backdrop behind a frosted-glass level.
+ *
+ * The desktop seen through the window is blurred by the compositor, not by CSS:
+ * Mica on Windows 11, Acrylic on Windows 10. Returns the kind now in effect, or
+ * `null` when the platform has no backdrop — the caller writes it to
+ * `<html data-vibrancy>`, which is the only switch that turns the translucent
+ * window tokens on (`src/App.css`). A `null` answer therefore keeps the app on
+ * its opaque canvas rather than over a raw, unblurred desktop.
+ */
+export async function setWindowVibrancy(
+  level: GlassEffect,
+  dark: boolean,
+): Promise<WindowVibrancy | null> {
+  return invoke("set_window_vibrancy", { level, dark });
+}
+
+/** Native backdrop actually applied to the window. */
+export type WindowVibrancy = "mica" | "acrylic";
 
 /**
  * One entry of the remote `/models` listing.

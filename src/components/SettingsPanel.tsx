@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { fetchModels, fetchModelMetadata, getAppVersion, getConfig, getInstanceInfo, getWorkspaceDir, saveConfig, listProfiles, saveProfile, deleteProfile, applyProfile, listMcpServers, listSubAgents, getAgentOrchestration } from "../api";
-import type { AppConfig, InstanceInfo, ModelMetadata, ModelSettings, Palette, Profile, RequestHeader } from "../types";
+import type { AppConfig, GlassEffect, InstanceInfo, ModelMetadata, ModelSettings, Palette, Profile, RequestHeader } from "../types";
 import { LOCALE_LABELS, LOCALES, useI18n, type Locale, type MessageKey } from "../i18n";
 import { matchModelCatalog, isDeepSeekModel } from "../utils/modelMetadata";
 import { FontAwesomeIcon, faCaretDown, faCheck, faXmark } from "../icons";
@@ -18,6 +18,7 @@ interface Props {
   onConfigSaved?: (config: AppConfig) => void;
   onThemePreview?: (theme: "auto" | "light" | "dark" | undefined) => void;
   onPalettePreview?: (palette: Palette) => void;
+  onGlassPreview?: (glass: GlassEffect) => void;
   sessionId?: string;
 }
 
@@ -29,6 +30,18 @@ const PALETTES: { id: Palette; labelKey: MessageKey }[] = [
   { id: "default", labelKey: "settings.appearance.paletteDefault" },
   { id: "sakura", labelKey: "settings.appearance.paletteSakura" },
   { id: "cream", labelKey: "settings.appearance.paletteCream" },
+];
+
+/**
+ * Frosted-glass strengths. `standard` is the design's own blur (20px), so it
+ * is what the row shows when the config carries no value; the block that the
+ * attribute selects lives in `src/App.css` (`[data-glass="..."]`).
+ */
+const GLASS_LEVELS: { id: GlassEffect; labelKey: MessageKey }[] = [
+  { id: "off", labelKey: "settings.appearance.glassOff" },
+  { id: "subtle", labelKey: "settings.appearance.glassSubtle" },
+  { id: "standard", labelKey: "settings.appearance.glassStandard" },
+  { id: "strong", labelKey: "settings.appearance.glassStrong" },
 ];
 
 const defaultConfig: AppConfig = {
@@ -145,7 +158,7 @@ function formatTokenCount(tokens: number): string {
   return String(tokens);
 }
 
-export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalettePreview, sessionId }: Props) {
+export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalettePreview, onGlassPreview, sessionId }: Props) {
   const { t, locale, setLocale } = useI18n();
   const [config, setConfig] = useState<AppConfig>(defaultConfig);
   const [saving, setSaving] = useState(false);
@@ -603,6 +616,27 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
                   })}
                 </div>
                 <small className="settings-field-hint">{t("settings.appearance.paletteHint")}</small>
+              </div>
+
+              <div className="settings-field-row settings-field-row-stacked">
+                <span className="settings-field-label">{t("settings.appearance.glass")}</span>
+                <div className="theme-segmented">
+                  {GLASS_LEVELS.map((level) => (
+                    <button
+                      key={level.id}
+                      type="button"
+                      className={`theme-seg-btn${(config.glass_effect ?? "standard") === level.id ? " active" : ""}`}
+                      onClick={() => {
+                        setConfig((prev) => ({ ...prev, glass_effect: level.id }));
+                        // Apply immediately so the blur change is visible in real time.
+                        onGlassPreview?.(level.id);
+                      }}
+                    >
+                      {t(level.labelKey)}
+                    </button>
+                  ))}
+                </div>
+                <small className="settings-field-hint">{t("settings.appearance.glassHint")}</small>
               </div>
 
               <div className="settings-field-row settings-field-row-stacked">

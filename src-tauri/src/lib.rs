@@ -529,6 +529,12 @@ pub struct AppConfig {
     /// interprets the value — the frontend turns it into `data-palette`.
     #[serde(default)]
     pub palette: Option<String>,
+    /// Frosted-glass level (`off`, `subtle`, `standard`, `strong`). Persisted
+    /// like `palette`; the backend never interprets the value — the frontend
+    /// turns it into `data-glass`, which selects the `--glass-*` token block
+    /// in App.css. Missing means `standard` (the design's own blur).
+    #[serde(default)]
+    pub glass_effect: Option<String>,
     /// UI language (`en`, `zh-CN`, `zh-TW`). Persisted so the frontend restores
     /// it on startup; the backend never interprets the value.
     #[serde(default)]
@@ -583,6 +589,7 @@ impl Default for AppConfig {
             auto_accept_confirm_kinds: vec![],
             theme: None,
             palette: None,
+            glass_effect: None,
             language: None,
             check_updates_on_startup: true,
             include_prerelease_updates: false,
@@ -1414,6 +1421,91 @@ fn focus_main_window(app: &AppHandle) {
     }
 }
 
+// ─── Window backdrop (frosted glass) ─────────────────────────────────────────
+
+/// Paint the window-level backdrop for one frosted-glass level and report what
+/// ended up in effect.
+///
+/// A webview can blur only its own pixels, so the desktop seen *through* the
+/// window can only be blurred by the compositor: Mica on Windows 11, Acrylic
+/// on Windows 10 (where the Mica call fails). The returned kind is what the
+/// frontend writes to `<html data-vibrancy>`; `None` means no backdrop is in
+/// effect and the app keeps its opaque canvas — which is also the only safe
+/// answer on platforms without a supported backdrop, because a transparent
+/// window with nothing behind it would show the raw, unblurred desktop.
+///
+/// The backdrop itself stays nearly colourless: the density of each level
+/// lives in `--c-window` (`src/App.css`), so Mica and Acrylic land on the same
+/// contrast and the level can be changed without touching the native side.
+#[cfg(target_os = "windows")]
+fn apply_window_backdrop(
+    window: &tauri::WebviewWindow,
+    level: &str,
+    dark: bool,
+) -> Option<&'static str> {
+    use window_vibrancy::{apply_acrylic, apply_mica, clear_acrylic, clear_mica};
+
+    if level == "off" {
+        // Clear both, so switching the switch off never leaves the previous
+        // backdrop behind on a host that only supports one of them.
+        let _ = clear_mica(window);
+        let _ = clear_acrylic(window);
+        return None;
+    }
+
+    // Acrylic before Mica, deliberately. Mica only samples the wallpaper, so
+    // against a plain background the frame reads as a flat pane — the glass
+    // this app sells is "what is behind the window is blurred", and that is
+    // DWMSBT_TRANSIENTWINDOW (Acrylic), the same backdrop the Windows 11
+    // flyouts use. `apply_mica` still runs first for its side effect: it is
+    // the only call that sets DWMWA_USE_IMMERSIVE_DARK_MODE, which makes the
+    // Acrylic tint follow the *app* theme instead of the system one, and the
+    // Acrylic call then replaces the Mica backdrop it left behind.
+    let mica = apply_mica(window, Some(dark)).is_ok();
+    // The colour only reaches the legacy Windows 10 v1809+ path; the Windows
+    // 11 system backdrop is tinted by the OS, so this stays a light wash.
+    let tint: (u8, u8, u8, u8) = if dark {
+        (18, 18, 18, 120)
+    } else {
+        (250, 250, 250, 120)
+    };
+    if apply_acrylic(window, Some(tint)).is_ok() {
+        return Some("acrylic");
+    }
+    if mica {
+        return Some("mica");
+    }
+    None
+}
+
+#[cfg(not(target_os = "windows"))]
+fn apply_window_backdrop(
+    _window: &tauri::WebviewWindow,
+    _level: &str,
+    _dark: bool,
+) -> Option<&'static str> {
+    // No window backdrop on macOS / Linux: the config promises a glass level,
+    // not a platform feature, and a transparent window without a backdrop
+    // would show the desktop unblurred behind the chrome.
+    None
+}
+
+/// Re-apply the window backdrop for a frosted-glass level (`off`, `subtle`,
+/// `standard`, `strong`) and the theme it should match.
+///
+/// Returns the kind now in effect (`mica` / `acrylic`) or `None`; the frontend
+/// writes that to `<html data-vibrancy>`, which is the only switch that turns
+/// the translucent window tokens on. Called on startup (see `setup`) and from
+/// Settings → Appearance, including the live preview.
+#[tauri::command]
+fn set_window_vibrancy(
+    window: tauri::WebviewWindow,
+    level: String,
+    dark: bool,
+) -> Option<String> {
+    apply_window_backdrop(&window, &level, dark).map(str::to_string)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let context = tauri::generate_context!();
@@ -1757,6 +1849,30 @@ pub fn run() {
                 let _ = win.set_title(&title);
             }
 
+            // Window backdrop: on Windows the glass level is a window-level
+            // effect, so it is applied once here and re-applied whenever
+            // Settings changes it. `data-vibrancy` is written only when a
+            // backdrop really is in effect — the opaque canvas then stays the
+            // fallback instead of a transparent window over a raw desktop.
+            if let Some(win) = app.get_webview_window("main") {
+                let (level, dark) = {
+                    let state = app.state::<AppState>();
+                    let config = state.config.lock().unwrap();
+                    (
+                        config
+                            .glass_effect
+                            .clone()
+                            .unwrap_or_else(|| "standard".to_string()),
+                        config.theme.as_deref() == Some("dark"),
+                    )
+                };
+                if let Some(kind) = apply_window_backdrop(&win, &level, dark) {
+                    let _ = win.eval(&format!(
+                        "document.documentElement.dataset.vibrancy = '{kind}'"
+                    ));
+                }
+            }
+
             // Warmup: auto-start all enabled stdio MCP servers
             {
                 // Servers the assistant built live in the workspace roster
@@ -1840,6 +1956,7 @@ pub fn run() {
             model_metadata::fetch_model_metadata,
             get_workspace_dir,
             get_instance_info,
+            set_window_vibrancy,
             workspace_files::list_workspace_files,
             workspace_files::read_workspace_file_range,
             workspace_files::read_workspace_file_bytes,

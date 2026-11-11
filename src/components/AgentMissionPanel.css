@@ -14,8 +14,8 @@
        the modal's top border and header are hidden behind the window chrome. */
     inset: var(--titlebar-h) 0 0 0;
     background: rgba(0, 0, 0, 0.45);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
-    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(var(--glass-blur-scrim));
+    backdrop-filter: blur(var(--glass-blur-scrim));
     display: flex;
     align-items: center;
     justify-content: center;
@@ -52,9 +52,9 @@
     gap: 12px;
     padding: 11px 14px 10px;
     border-bottom: 0.5px solid var(--c-border);
-    background: var(--c-toolbar);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
-    backdrop-filter: blur(20px) saturate(180%);
+    background: var(--glass-backdrop);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 }
 
 .mission-monitor-header h2 {

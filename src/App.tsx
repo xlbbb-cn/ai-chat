@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState } from "./api";
+import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState, setWindowVibrancy } from "./api";
 
 import { ChatMessage } from "./components/ChatMessage";
 import { ToolCallGroup } from "./components/ToolCallGroup";
@@ -42,6 +42,7 @@ import type {
   MessageContent,
   ModelMetadata,
   Palette,
+  GlassEffect,
   SkillsStatus,
   SleepLockState,
   ThemeMode,
@@ -131,6 +132,50 @@ function applyTheme(theme: ThemeMode | undefined, palette: Palette | undefined) 
   const resolved = theme === "dark" || (theme !== "light" && prefersDark) ? "dark" : "light";
   document.documentElement.setAttribute("data-theme", resolved);
   document.documentElement.setAttribute("data-palette", palette ?? "default");
+  // Mica's light / dark variant is a native flag, not a CSS token, so a theme
+  // change re-applies the backdrop the vibrancy switch already asked for.
+  if (document.documentElement.hasAttribute("data-vibrancy")) {
+    applyWindowVibrancy(currentGlassEffect(), resolved === "dark");
+  }
+}
+
+/** The glass level currently painted on `<html>`. */
+function currentGlassEffect(): GlassEffect {
+  const level = document.documentElement.getAttribute("data-glass");
+  return level === "off" || level === "subtle" || level === "strong" ? level : "standard";
+}
+
+/**
+ * Ask the backend for the window-level backdrop behind a glass level and record
+ * what it managed to apply.
+ *
+ * `data-vibrancy` is written only when the native call succeeded, so a failure
+ * (macOS, Linux, an unsupported Windows build) leaves the app on its opaque
+ * canvas instead of a transparent window over a raw desktop. Fire and forget:
+ * `data-glass` is already set, and the blur level must not wait for the IPC.
+ */
+function applyWindowVibrancy(level: GlassEffect, dark: boolean) {
+  setWindowVibrancy(level, dark)
+    .then((kind) => {
+      if (kind) document.documentElement.setAttribute("data-vibrancy", kind);
+      else document.documentElement.removeAttribute("data-vibrancy");
+    })
+    .catch(() => document.documentElement.removeAttribute("data-vibrancy"));
+}
+
+/**
+ * Paint the frosted-glass level on `<html>`.
+ *
+ * `data-glass` selects the `--glass-*` token block in `src/App.css`. The level
+ * is independent of the light / dark and palette dimensions (and of the OS
+ * scheme), so it is applied on its own rather than through `applyTheme`.
+ */
+function applyGlassEffect(glass: GlassEffect | undefined) {
+  const level = glass ?? "standard";
+  document.documentElement.setAttribute("data-glass", level);
+  // The desktop seen *through* the window is blurred by the compositor, not by
+  // `backdrop-filter`, so the level also drives a native Mica / Acrylic call.
+  applyWindowVibrancy(level, document.documentElement.getAttribute("data-theme") === "dark");
 }
 
 // ─── Delay timers ────────────────────────────────────────────────────────────
@@ -1147,6 +1192,7 @@ export default function App() {
         themeRef.current = cfg.theme ?? "auto";
         paletteRef.current = cfg.palette ?? "default";
         applyTheme(cfg.theme, cfg.palette);
+        applyGlassEffect(cfg.glass_effect);
       })
       .catch(console.error);
     // The skill selection is workspace-scoped, so it is loaded from the
@@ -3387,6 +3433,9 @@ export default function App() {
                 paletteRef.current = palette;
                 applyTheme(themeRef.current, palette);
               }}
+              onGlassPreview={(glass) => {
+                applyGlassEffect(glass);
+              }}
               onConfigSaved={(cfg) => {
                 const catalog = Array.from(new Set([...(cfg.model_catalog ?? []), cfg.model].filter(Boolean)));
                 setAvailableModels(catalog.length > 0 ? catalog : ["gpt-4o-mini"]);
@@ -3401,6 +3450,7 @@ export default function App() {
                 themeRef.current = cfg.theme ?? "auto";
                 paletteRef.current = cfg.palette ?? "default";
                 applyTheme(cfg.theme, cfg.palette);
+                applyGlassEffect(cfg.glass_effect);
                 if (isLocale(cfg.language)) setLocale(cfg.language);
               }}
             />

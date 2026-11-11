@@ -17,8 +17,8 @@
     z-index: 1000;
     /* Modal backdrop (DESIGN.md → Overlays and popups). */
     background: rgba(128, 128, 128, 0.65);
-    -webkit-backdrop-filter: blur(8px);
-    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(var(--glass-blur-scrim));
+    backdrop-filter: blur(var(--glass-blur-scrim));
     animation: fade-in 200ms ease;
 }
 
@@ -48,9 +48,9 @@
     gap: 12px;
     flex-shrink: 0;
     padding: 9px 12px;
-    background: var(--c-toolbar);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
-    backdrop-filter: blur(20px) saturate(180%);
+    background: var(--glass-backdrop);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
     border-bottom: 1px solid var(--c-border);
 }
 

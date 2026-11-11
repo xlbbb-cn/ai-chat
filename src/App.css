@@ -61,7 +61,7 @@
   --c-code: #F4F4F4;
   --c-reason: #F4F4F4;
   --c-reason-b: #D0D1D2;
-  --c-toolbar: rgba(255, 255, 255, 0.75);
+  --c-toolbar: rgba(255, 255, 255, 0.62);
   /* frosted-glass nav */
 
   /* Accent — Electric Blue, primary calls to action only */
@@ -128,6 +128,23 @@
      land on the same row — the window chrome reads as one band across it. */
   --panel-header-h: 49px;
 
+  /* Frosted glass — one blur recipe for every translucent surface, scaled
+     globally by the level blocks below (`[data-glass="..."]`, written on
+     <html> by `applyGlassEffect` in App.tsx). `--glass-backdrop` is the fill
+     the glass sits on, so the "off" level can swap the 0.75-alpha
+     `--c-toolbar` for the opaque `--c-surface` without touching a call site.
+     Scrims (modal backdrops) get their own radius: they dim the whole window,
+     not a 49px band, and a smaller blur keeps them cheap. */
+  --glass-blur: 20px;
+  --glass-blur-scrim: 8px;
+  --glass-saturate: 180%;
+  --glass-backdrop: var(--c-toolbar);
+  /* Canvas of a panel mounted inside the glass sidebar. Panels must not paint
+     an opaque sheet here or the sidebar's tint and blur are covered and the
+     transcript underneath is never faintly visible; their cards keep
+     `--c-surface`, so content stays legible. */
+  --glass-canvas: transparent;
+
   /* Palette swatch samples — the Settings palette picker shows each
      palette's own colours. They live here so that no component stylesheet
      ever has to carry a literal hex. */
@@ -186,7 +203,7 @@
   --c-code: rgba(255, 255, 255, 0.06);
   --c-reason: rgba(255, 255, 255, 0.04);
   --c-reason-b: rgba(255, 255, 255, 0.14);
-  --c-toolbar: rgba(23, 26, 32, 0.75);
+  --c-toolbar: rgba(23, 26, 32, 0.62);
 
   --c-accent: #5B7EF0;
   --c-accent-hover: #6F8DF3;
@@ -252,7 +269,7 @@
   /* 薰衣草紫 — reasoning blocks */
   --c-reason: #EDE4FF;
   --c-reason-b: rgba(74, 35, 51, 0.22);
-  --c-toolbar: rgba(255, 247, 250, 0.80);
+  --c-toolbar: rgba(255, 247, 250, 0.68);
 
   /* 樱花粉 — the primary action */
   --c-accent: #FF8FB1;
@@ -298,7 +315,7 @@
   /* 薰衣草紫, washed over the dark canvas */
   --c-reason: rgba(237, 228, 255, 0.12);
   --c-reason-b: rgba(255, 255, 255, 0.14);
-  --c-toolbar: rgba(55, 33, 44, 0.80);
+  --c-toolbar: rgba(55, 33, 44, 0.68);
 
   /* 樱花粉, lifted so the pastel still reads on a dark ground */
   --c-accent: #FFA6C2;
@@ -350,7 +367,7 @@
   --c-border-i: rgba(96, 80, 48, 0.26);
   --c-reason-b: rgba(96, 80, 48, 0.22);
   /* 乳白 → 奶油白, frosted */
-  --c-toolbar: linear-gradient(90deg in oklab, rgba(249, 244, 220, 0.82) 0%, rgba(255, 248, 231, 0.82) 100%);
+  --c-toolbar: linear-gradient(90deg in oklab, rgba(249, 244, 220, 0.70) 0%, rgba(255, 248, 231, 0.70) 100%);
 
   /* Electric Blue stays the accent — this palette is about the neutrals. */
   --c-accent: #3E6AE1;
@@ -395,7 +412,7 @@
   --c-border-s: rgba(249, 241, 219, 0.06);
   --c-border-i: rgba(249, 241, 219, 0.18);
   --c-reason-b: rgba(249, 241, 219, 0.14);
-  --c-toolbar: rgba(38, 33, 25, 0.80);
+  --c-toolbar: rgba(38, 33, 25, 0.68);
 
   --c-accent: #5B7EF0;
   --c-accent-hover: #6F8DF3;
@@ -413,6 +430,81 @@
   --c-bg-image: none;
   --c-code-image: none;
   --c-reason-image: none;
+}
+
+/* ══════════════════════════════════════════
+   Frosted glass levels — Settings → Appearance.
+
+   `standard` is the value in :root, so only the other three levels need a
+   block. The blocks sit after the palette blocks on purpose: same specificity
+   as `:root`, later in the file wins. `off` also swaps the fill for the opaque
+   surface — a 0px blur over a 0.62-alpha `--c-toolbar` would just show the
+   transcript scrolling through the toolbar.
+   ══════════════════════════════════════════ */
+[data-glass="off"] {
+  --glass-blur: 0px;
+  --glass-blur-scrim: 0px;
+  --glass-saturate: 100%;
+  --glass-backdrop: var(--c-surface);
+}
+
+[data-glass="subtle"] {
+  --glass-blur: 12px;
+  --glass-blur-scrim: 6px;
+}
+
+[data-glass="strong"] {
+  --glass-blur: 32px;
+  --glass-blur-scrim: 14px;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Window vibrancy — the desktop behind the window
+
+   A webview can only blur its own pixels, so glass that shows the *desktop*
+   has to come from the compositor: DWM paints an Acrylic backdrop behind a
+   transparent window (the system one on Windows 11, the v1809 accent on
+   Windows 10), and the rules below tint it. `<html data-vibrancy>` is written
+   by the Rust side (`set_window_vibrancy`
+   and the `setup` hook in src-tauri/src/lib.rs) only after that native call
+   succeeded; without the attribute every rule here is inert and the app keeps
+   today's opaque canvas, because a transparent window with no backdrop would
+   show a raw, unblurred desktop.
+
+   Only the window *frame* is translucent: the titlebar, sidebar, toolbar,
+   input area and panel headers read `--c-window` through `--glass-backdrop`
+   and let the blurred desktop through, while the transcript keeps its opaque
+   `--c-bg` canvas — so text stays on a solid surface and scrolling never
+   re-composites the whole window.
+   ══════════════════════════════════════════════════════════════════════════ */
+html[data-vibrancy] {
+  /* The window's base tint, derived from the palette's own surface so every
+     theme and palette keeps its hue. `standard` is the value in this block.
+     Keep the alpha well under the opaque `--c-toolbar` (0.62): the backdrop
+     already blurs, so anything denser than the frame used to be reads as the
+     same flat pane it was, and the glass looks switched off. */
+  --c-window: color-mix(in srgb, var(--c-surface) 40%, transparent);
+  --glass-backdrop: var(--c-window);
+}
+
+html[data-vibrancy][data-glass="subtle"] {
+  --c-window: color-mix(in srgb, var(--c-surface) 24%, transparent);
+}
+
+html[data-vibrancy][data-glass="strong"] {
+  --c-window: color-mix(in srgb, var(--c-surface) 58%, transparent);
+}
+
+/* The page itself has to be see-through for the backdrop to be visible. */
+html[data-vibrancy],
+html[data-vibrancy] body {
+  background-color: transparent;
+  background-image: none;
+}
+
+/* The reading column stays a solid sheet: only the frame around it is glass. */
+html[data-vibrancy] .chat-area {
+  background: transparent;
 }
 
 body {
@@ -461,9 +553,9 @@ body {
   gap: 6px;
   height: var(--titlebar-h);
   padding: 0 6px 0 12px;
-  background: var(--c-toolbar);
-  -webkit-backdrop-filter: blur(20px);
-  backdrop-filter: blur(20px);
+  background: var(--glass-backdrop);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
   border-bottom: none;
   user-select: none;
   -webkit-user-select: none;
@@ -633,11 +725,11 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--c-toolbar);
+  background: var(--glass-backdrop);
   background-size: 100vw 100%;
   background-repeat: no-repeat;
-  -webkit-backdrop-filter: blur(20px);
-  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
   z-index: 900;
 }
 
@@ -732,9 +824,9 @@ body {
   justify-content: space-between;
   padding: 8px 12px;
   border-bottom: 1px solid var(--c-border);
-  background: var(--c-toolbar);
-  -webkit-backdrop-filter: blur(20px);
-  backdrop-filter: blur(20px);
+  background: var(--glass-backdrop);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
   flex-shrink: 0;
   z-index: 10;
 }
@@ -846,9 +938,9 @@ body {
   flex-shrink: 0;
   padding: 7px 12px 9px;
   border-bottom: 1px solid var(--c-border);
-  background: var(--c-toolbar);
-  -webkit-backdrop-filter: blur(20px);
-  backdrop-filter: blur(20px);
+  background: var(--glass-backdrop);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
 }
 
 .profile-export-progress-label {
@@ -1614,9 +1706,9 @@ button.rabbit-hop-bunny:focus-visible {
   gap: 8px;
   padding: 10px 12px 12px;
   border-top: 1px solid var(--c-border);
-  background: var(--c-toolbar);
-  -webkit-backdrop-filter: blur(20px);
-  backdrop-filter: blur(20px);
+  background: var(--glass-backdrop);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
   flex-shrink: 0;
 }
 
@@ -2365,9 +2457,9 @@ button.rabbit-hop-bunny:focus-visible {
   gap: 10px;
   padding: 9px 12px;
   border-bottom: 1px solid var(--c-border);
-  background: var(--c-toolbar);
-  -webkit-backdrop-filter: blur(20px);
-  backdrop-filter: blur(20px);
+  background: var(--glass-backdrop);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
 }
 
 .markdown-editor-header h3 {
@@ -2472,16 +2564,6 @@ button.rabbit-hop-bunny:focus-visible {
   background: #F4F4F4;
 }
 
-/* Sidebar/toolbar vibrancy needs a slightly stronger backdrop in dark mode */
-[data-theme="dark"] .sidebar,
-[data-theme="dark"] .toolbar,
-[data-theme="dark"] .titlebar,
-[data-theme="dark"] .input-area,
-[data-theme="dark"] .markdown-editor-header,
-[data-theme="dark"] .profile-export-progress {
-  background: var(--c-toolbar);
-}
-
 /* ══════════════════════════════════════════════════════════════════
    Shared primitives
 
@@ -2512,11 +2594,11 @@ button.rabbit-hop-bunny:focus-visible {
   min-height: var(--panel-header-h);
   padding: 6px 12px;
   border-bottom: 1px solid var(--c-border);
-  background: var(--c-toolbar);
+  background: var(--glass-backdrop);
   background-size: 100vw 100%;
   background-repeat: no-repeat;
-  -webkit-backdrop-filter: blur(20px);
-  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
   flex-shrink: 0;
   position: sticky;
   top: 0;

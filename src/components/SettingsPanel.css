@@ -848,10 +848,10 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  background: var(--c-toolbar);
+  background: var(--glass-backdrop);
   border-bottom: 1px solid var(--c-border);
-  -webkit-backdrop-filter: blur(20px);
-  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
 }
 
 .prompt-editor-header h3 {

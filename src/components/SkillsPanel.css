@@ -2,7 +2,7 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: var(--c-bg);
+  background: var(--glass-canvas);
   color: var(--c-body);
 }
 
@@ -241,9 +241,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  background: var(--c-toolbar);
-  -webkit-backdrop-filter: blur(20px);
-  backdrop-filter: blur(20px);
+  background: var(--glass-backdrop);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
 }
 
 .prompt-editor-header h3 {

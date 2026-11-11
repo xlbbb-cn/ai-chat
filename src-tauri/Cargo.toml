@@ -48,6 +48,10 @@ lopdf = "0.47"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Globalization", "Win32_Storage_FileSystem", "Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Power"] }
+# Window-level Mica / Acrylic behind the frosted-glass levels: DWM blurs what
+# is behind the window, and App.css tints it. `apply_mica` only exists on
+# Windows 11, so `apply_window_backdrop` in lib.rs falls back to Acrylic.
+window-vibrancy = "0.8"
 
 [target.'cfg(unix)'.dependencies]
 # Whole-process-group kill for cancelled/timed-out CLI agents (`process_group`).
