@@ -1344,9 +1344,9 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
               className="message-action-btn export"
               onClick={() => {
                 // Building the document may re-render diagrams, so it is async.
-                void printableMessageHtml(contentRef.current, renderedMainContent).then((html) =>
-                  exportAssistantMessagePdf(html, message.id),
-                );
+                void printableMessageHtml(contentRef.current, renderedMainContent)
+                  .then((html) => exportAssistantMessagePdf(html, message.id))
+                  .catch((error) => console.error("Message export failed", error));
               }}
               disabled={!mainContent.trim()}
               title={t("chat.exportTitle")}

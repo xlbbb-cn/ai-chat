@@ -267,6 +267,10 @@ async function configure(api: MermaidApi, theme: DiagramTheme): Promise<void> {
     // Mermaid sanitises rather than trusting the source.
     securityLevel: "strict",
     htmlLabels: false,
+    // A draw that throws must not leave Mermaid's error diagram in a temp
+    // `<div>` appended to `<body>` (its cleanup only runs in this mode), and
+    // the card's own `showSource()` is a better fallback than that error box.
+    suppressErrorRendering: true,
     theme: "base",
     themeVariables: themeVariables(theme),
     fontFamily: theme.font,
