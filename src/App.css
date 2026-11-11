@@ -50,6 +50,12 @@
   --c-placeholder: #8E8E8E;
   /* Silver Fog — placeholders, disabled */
   --c-text-secondary: #5C5E62;
+  /* The chevron a `<select>` draws instead of the native arrow. A data URI
+     cannot read `currentColor`, so the glyph ships as a token — one neutral
+     grey per theme, never a literal in a component sheet. #8A8A8A is the
+     lightest grey that still clears the 3:1 a glyph needs on Cream's canvas
+     (3.15:1 there, 3.45:1 on white); the dark block lifts it to 4.5:1. */
+  --icon-chevron: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3e%3cpath d='M1 1l4 4 4-4' stroke='%238A8A8A' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3e%3c/svg%3e");
 
   /* Hairlines — separation without borders */
   --c-border: #EEEEEE;
@@ -224,6 +230,9 @@
   --c-muted: #8E8E93;
   --c-placeholder: #6B6E73;
   --c-text-secondary: #8E8E93;
+  /* Same glyph, lifted off the Carbon Dark surface: #8B9099 is 4.9:1 on
+     `--c-surface` and still 4.2:1 on Sakura Dark's plum. */
+  --icon-chevron: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3e%3cpath d='M1 1l4 4 4-4' stroke='%238B9099' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3e%3c/svg%3e");
 
   --c-border: rgba(255, 255, 255, 0.08);
   --c-border-s: rgba(255, 255, 255, 0.05);
@@ -582,6 +591,17 @@ html[data-vibrancy] .settings-page,
 html[data-vibrancy] .prompt-editor-overlay {
   -webkit-backdrop-filter: blur(var(--glass-blur-scrim));
   backdrop-filter: blur(var(--glass-blur-scrim));
+}
+
+/* The list a `<select>` opens is drawn by the platform, and it paints each row
+   over its own surface rather than over the page. A row that inherits the field
+   fill therefore stops being opaque there — `--c-field` is 40% of the surface
+   under `data-vibrancy` — so in the dark palettes near-white text can land on a
+   popup surface the page never chose. Rows carry their own opaque pair instead,
+   which reads the same in every theme, palette and glass level. */
+select option {
+  background-color: var(--c-surface);
+  color: var(--c-text);
 }
 
 body {
@@ -2162,7 +2182,7 @@ button.rabbit-hop-bunny:focus-visible {
   transition: border-color var(--t-dur) var(--t-ease);
   appearance: none;
   -webkit-appearance: none;
-  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3e%3cpath d='M1 1l4 4 4-4' stroke='%238E8E8E' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3e%3c/svg%3e");
+  background-image: var(--icon-chevron);
   background-repeat: no-repeat;
   background-position: right 10px center;
 }

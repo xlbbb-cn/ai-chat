@@ -413,8 +413,13 @@ transition: border-color var(--t-dur) var(--t-ease);
 ```
 
 Focus is a **border-colour change to `--c-accent`** — no glow, no ring, no shadow.
-Placeholder uses `--c-placeholder`. Selects use the inline SVG chevron in
-`--c-placeholder` grey, never the native arrow.
+Placeholder uses `--c-placeholder`. Selects hide the native arrow and paint the
+inline SVG chevron from `--icon-chevron` — a glyph token (one neutral grey per
+theme), because a data URI cannot read `currentColor`. The list a select opens is
+drawn by the platform over its own surface, so `option` rows carry the opaque
+`--c-surface` / `--c-text` pair (one rule in `App.css`): a row that inherited the
+translucent `--c-field` washes out there, and in the dark palettes it leaves
+near-white text on a surface the page never chose.
 
 ### Toggle switch
 
