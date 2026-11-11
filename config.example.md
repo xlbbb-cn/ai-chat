@@ -26,7 +26,8 @@ Typical locations:
   "check_updates_on_startup": true,
   "include_prerelease_updates": false,
   "glass_effect": "standard",
-  "log_retention_days": 90
+  "log_retention_days": 90,
+  "enhanced_figures": true
 }
 ```
 
@@ -46,6 +47,7 @@ Typical locations:
 - include_prerelease_updates: Also consider releases flagged as pre-release; draft releases are never visible to the public API.
 - glass_effect: Frosted-glass strength for the titlebar, toolbar, sidebar, panel headers and modal scrims — `off` (opaque bars, no blur), `subtle` (12px), `standard` (20px, also the default when the field is absent) or `strong` (32px). The backend never interprets it; the frontend writes it to `<html>` as `data-glass`, which selects the `--glass-*` token block in `src/App.css`. On Windows the same level also drives the window's Acrylic backdrop (the DWM system backdrop on 11, the v1809 accent blur on 10): the frame is tinted by `--c-window` so the blurred desktop shows through it, while the transcript stays opaque. `off` clears the backdrop and returns the window to its opaque canvas; a platform without a backdrop does the same on its own.
 - log_retention_days: Retention window (days, default 90) for the request/interaction log tables (`api_requests`, `interaction_log`). Older rows are deleted at startup and when the Interaction Monitor compacts the database; 0 keeps logs forever. Chat history is never pruned. Each request stores its full prompt body, so this is the main driver of `chat.db` growth.
+- enhanced_figures: Draw with `svg` / `carve` figures — saved as PNG in `<workspace>/figures/`, 3D scenes orbitable — instead of Mermaid diagrams (default `true`; absent means `true`). Turned off, the system prompt asks for a fenced `mermaid` block, which the transcript renders itself. It only picks the prompt block: replies containing any of the three kinds keep rendering either way.
 
 ## Security
 

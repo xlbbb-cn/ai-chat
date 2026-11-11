@@ -409,6 +409,12 @@ export interface AppConfig {
    */
   sub_agent_main_help?: boolean;
   /**
+   * Draw with `svg` / `carve` figures (saved as PNG, plus 3D scenes) instead of
+   * Mermaid diagrams. Defaults to on; when off the system prompt asks for a
+   * fenced `mermaid` block, which the transcript renders itself.
+   */
+  enhanced_figures?: boolean;
+  /**
    * Upper bound on model requests in one chat turn. `0` = unlimited; the
    * backend clamps it to 1000. When the budget is spent the turn sends one last
    * request without a tool list, so the assistant answers with what it has.

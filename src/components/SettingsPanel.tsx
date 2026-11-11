@@ -1230,6 +1230,23 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
                     </small>
                   </div>
                 </label>
+
+                <label className="settings-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={config.enhanced_figures ?? true}
+                    onChange={(e) =>
+                      setConfig((prev) => ({
+                        ...prev,
+                        enhanced_figures: e.target.checked,
+                      }))
+                    }
+                  />
+                  <div className="settings-checkbox-copy">
+                    <span>{t("settings.advanced.enhancedFigures")}</span>
+                    <small>{t("settings.advanced.enhancedFiguresHint")}</small>
+                  </div>
+                </label>
               </div>
             )}
           </section>

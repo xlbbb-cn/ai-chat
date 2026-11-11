@@ -20,6 +20,12 @@ import razerF5FontUrl from "../assets/Web Fonts/9b77a61b70b873a0f298ad6fbc801666
 import { katexMathPlugin } from "../utils/markdownMath";
 import { extractFigures, type FigureSpec } from "../utils/figures";
 import { mountFigures, saveAllFigures } from "../utils/figureCard";
+import {
+  extractDiagrams,
+  inlineDiagramsForPrint,
+  mountDiagrams,
+  type DiagramSpec,
+} from "../utils/mermaidDiagrams";
 import { mentionDisplayName } from "../composerFiles";
 // `t` (module-level) is used by the markdown-it renderer rules, which run
 // outside the React tree; the hook keeps the component re-rendering on change.
@@ -306,24 +312,37 @@ function buildPrintableMessageHtml(contentHtml: string, exportedAt: string): str
  * live subtree is cloned and every canvas is frozen into an `<img>` of its own
  * pixels; a 2D figure stays vector and picks the token values up from the
  * print stylesheet.
+ *
+ * A Mermaid diagram is already an `<svg>` in the live subtree, so the clone
+ * carries it. It is re-rendered in the printed page's own palette, though: the
+ * diagram on screen has the app's colours baked in, and a dark-mode reply would
+ * otherwise print light text on a dark block on a white sheet.
  */
-function printableMessageHtml(root: HTMLElement | null, fallback: string): string {
+async function printableMessageHtml(root: HTMLElement | null, fallback: string): Promise<string> {
   if (!root) return fallback;
-  const canvases = Array.from(root.querySelectorAll<HTMLCanvasElement>(".chat-figure-canvas"));
-  if (canvases.length === 0) return root.innerHTML;
   const clone = root.cloneNode(true) as HTMLElement;
-  const copies = Array.from(clone.querySelectorAll<HTMLCanvasElement>(".chat-figure-canvas"));
-  canvases.forEach((canvas, i) => {
-    const image = document.createElement("img");
-    image.className = "chat-figure-canvas";
-    image.alt = "";
-    try {
-      image.src = canvas.toDataURL("image/png");
-    } catch {
-      return;
-    }
-    copies[i]?.replaceWith(image);
-  });
+  const canvases = Array.from(root.querySelectorAll<HTMLCanvasElement>(".chat-figure-canvas"));
+  if (canvases.length > 0) {
+    const copies = Array.from(clone.querySelectorAll<HTMLCanvasElement>(".chat-figure-canvas"));
+    canvases.forEach((canvas, i) => {
+      const image = document.createElement("img");
+      image.className = "chat-figure-canvas";
+      image.alt = "";
+      try {
+        image.src = canvas.toDataURL("image/png");
+      } catch {
+        return;
+      }
+      copies[i]?.replaceWith(image);
+    });
+  }
+  try {
+    await inlineDiagramsForPrint(root, clone);
+  } catch (error) {
+    // The clone already holds whatever was on screen; a failed re-render must
+    // not cost the user the export.
+    console.error("Diagram export failed", error);
+  }
   return clone.innerHTML;
 }
 
@@ -788,17 +807,25 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
   // Only a reply draws: what the user typed stays literal, so a pasted `svg`
   // snippet in the composer is still code.
   const replyStreaming = isAssistant && Boolean(message.streaming);
-  const rendered = useMemo<{ html: string; figures: FigureSpec[] }>(() => {
+  const rendered = useMemo<{ html: string; figures: FigureSpec[]; diagrams: DiagramSpec[] }>(() => {
     // The user's own text is rendered by the literal profile: no image rule, so
     // a typed `![a](b)` stays those characters instead of becoming an element.
     if (!isAssistant) {
-      return { html: renderMarkdown(mdLiteral, streamedMainContent), figures: [] };
+      return { html: renderMarkdown(mdLiteral, streamedMainContent), figures: [], diagrams: [] };
     }
     const extracted = extractFigures(streamedMainContent, { streaming: replyStreaming });
-    return { html: renderMarkdown(md, extracted.markdown), figures: extracted.figures };
+    // Mermaid runs second: an ordinary fence survives `extractFigures` verbatim,
+    // so both kinds of drawing can share one reply.
+    const diagrams = extractDiagrams(extracted.markdown, { streaming: replyStreaming });
+    return {
+      html: renderMarkdown(md, diagrams.markdown),
+      figures: extracted.figures,
+      diagrams: diagrams.diagrams,
+    };
   }, [streamedMainContent, replyStreaming, isAssistant]);
   const renderedMainContent = rendered.html;
   const figures = rendered.figures;
+  const diagrams = rendered.diagrams;
   const [reasoningOpen, setReasoningOpen] = useState(false);
 
   // Collapsed-state live preview: the last three reasoning lines are rendered
@@ -864,6 +891,13 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
         mountFigures(el, figures, { messageId: String(message.id) });
       } catch (error) {
         console.error("Figure card failed to mount", error);
+      }
+      // Mermaid renders asynchronously, so the card is placed here and paints
+      // itself when its chunk has loaded and the SVG is ready.
+      try {
+        mountDiagrams(el, diagrams, { messageId: String(message.id) });
+      } catch (error) {
+        console.error("Diagram card failed to mount", error);
       }
       // The user's body never changes, so this runs once per turn.
       if (isUser) {
@@ -1240,12 +1274,12 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
             <button
               type="button"
               className="message-action-btn export"
-              onClick={() =>
-                exportAssistantMessagePdf(
-                  printableMessageHtml(contentRef.current, renderedMainContent),
-                  message.id,
-                )
-              }
+              onClick={() => {
+                // Building the document may re-render diagrams, so it is async.
+                void printableMessageHtml(contentRef.current, renderedMainContent).then((html) =>
+                  exportAssistantMessagePdf(html, message.id),
+                );
+              }}
               disabled={!mainContent.trim()}
               title={t("chat.exportTitle")}
             >

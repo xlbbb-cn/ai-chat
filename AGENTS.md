@@ -236,6 +236,10 @@ src/                       # React 19 + TS frontend
   utils/carve3d.ts         # `<carve>` scene JSON → one shared WebGLRenderer
   utils/figurePng.ts       # SVG / canvas → base64 PNG (styles inlined, 2×)
   utils/svgSanitize.ts     # element allowlist / attribute blocklist for SVG
+  utils/mermaidDiagrams.ts # `mermaid` fences → `.chat-mermaid` card (async
+                           # render, token colours, print re-render)
+  utils/slotTokens.ts      # U+2063 slot token ↔ element swap, shared by both
+                           # card renderers
 
 src-tauri/
   src/lib.rs               # state, menu, command registration, app setup
@@ -250,7 +254,8 @@ src-tauri/
                            # workspace skill status (.data/skills.status)
   src/workspace.rs         # hidden `<workspace>/.data` layout (paths + hidden attr)
   src/figures.rs           # assistant figures: `<workspace>/figures/*.png`,
-                           #   PNG magic + slug validation, figure prompt block
+                           #   PNG magic + slug validation, figure / mermaid
+                           #   prompt blocks (`prompt_block_for(enhanced)`)
   src/process_guard.rs     # app-wide child registry + process-tree kill / Windows job
   src/tools/               # tool executor, split by feature:
     mod.rs                 #   dispatch/schemas/shared helpers (+ tests)
@@ -309,3 +314,5 @@ scripts/sync-version.cjs   # 3-way version sync (pkg / cargo / tauri.conf)
 - **Figure cards are cached by source hash, not rebuilt.** The transcript subtree is replaced on every streamed token; a card that were rebuilt would drop three.js pixels and the orbit angle the user just dragged. The cache *moves* the same element back into the new tree — extend `mountFigures` rather than mounting in React.
 - **Three.js is a lazy chunk with exactly one renderer.** `utils/carve3d.ts` dynamic-imports `three` and owns the single off-screen `WebGLRenderer` that blits into each figure's 2D canvas; a renderer per card hits WebView2's context limit after a few scenes. A conversation without `<carve>` never loads the chunk (it builds as its own ~750 kB asset).
 - **Rust never encodes a figure PNG.** The pixels only exist in the webview, and there is no `image`/`resvg` dependency: the frontend rasterises and sends base64, `figures::save_figure` validates (PNG magic, 12 MiB cap, whitelisted slug) and writes `<workspace>/figures/<slug>.png` — never `<workspace>/.data`.
+- **The drawing toggle changes the prompt, not the renderer.** `enhanced_figures` (Settings → Advanced, on by default) picks between `figures::prompt_block()` (`svg` / `carve`) and `figures::mermaid_prompt_block()`; the transcript renders all three kinds either way, so flipping it never orphans an earlier reply.
+- **A Mermaid diagram is a figure card with a second renderer.** `utils/mermaidDiagrams.ts` cuts `mermaid` fences out with the same U+2063 slot token and renders them asynchronously with `securityLevel: "strict"` + `htmlLabels: false`, pruning the SVG again (`script` / `foreignObject` / `on*` / external `url()`); Mermaid's id-scoped `<style>` survives, which is why the SVG is not run through `svgSanitize.ts`. Colours are baked into the SVG, so a theme or palette change re-renders instead of repainting, and a graph wider than ~2.5× the card keeps its natural width and scrolls.

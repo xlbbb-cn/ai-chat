@@ -1,5 +1,9 @@
 //! Figures (`<svg>` / `<carve>`) that the assistant draws, saved as PNG.
 //!
+//! The plain drawing mode in [`mermaid_prompt_block`] swaps the hand-written
+//! markup for a fenced `mermaid` block, which the transcript renders on its own
+//! (no backend involvement) — the toggle only changes the prompt.
+//!
 //! The webview is the only place these figures exist as pixels: a 2D figure is
 //! an SVG rasterised through a canvas, a 3D one is a three.js canvas, and both
 //! reach this module as a base64 PNG. Rust therefore never parses or encodes an
@@ -218,6 +222,38 @@ pub fn prompt_block() -> String {
         .to_string()
 }
 
+/// System-prompt block for the plain drawing mode: Mermaid instead of a
+/// hand-written `<svg>` / `carve` scene.
+///
+/// The transcript renders a fenced `mermaid` block itself, so this is the cheap
+/// path — a few lines of Mermaid source the webview themes, instead of SVG the
+/// model has to get right by hand. Static like [`prompt_block`], for the same
+/// prompt-caching reason.
+pub fn mermaid_prompt_block() -> String {
+    "Diagrams — you can draw, and the transcript renders what you draw:\n\
+     - Use a fenced `mermaid` block holding Mermaid source: `flowchart`, `sequenceDiagram`, \
+     `classDiagram`, `stateDiagram-v2`, `erDiagram`, `gantt`, `pie`, `mindmap`, `timeline`. \
+     Example: a fence opened with `mermaid` followed by `flowchart LR` and `  A[request] --> B[gateway]`.\n\
+     - Put a title after the language on the fence line (`mermaid 请求链路`); it becomes the \
+     diagram caption.\n\
+     - Keep labels short, and quote any label holding parentheses, brackets or slashes: \
+     `A[\"GET /v1/chat (stream)\"]`.\n\
+     - Do not hand-write `<svg>` or `carve` blocks: Mermaid is the diagram format here."
+        .to_string()
+}
+
+/// The drawing block for the configured mode.
+///
+/// `enhanced` (on by default) hands the model the `svg` / `carve` markup the
+/// transcript can rasterise and save; `false` keeps it on Mermaid.
+pub fn prompt_block_for(enhanced: bool) -> String {
+    if enhanced {
+        prompt_block()
+    } else {
+        mermaid_prompt_block()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,5 +339,21 @@ mod tests {
         assert!(block.contains("svg"));
         assert!(block.contains("carve"));
         assert!(block.contains("figures/"));
+    }
+
+    #[test]
+    fn mermaid_prompt_block_asks_for_mermaid() {
+        let block = mermaid_prompt_block();
+        assert!(block.contains("mermaid"));
+        assert!(block.contains("flowchart"));
+        // The caption convention has to survive: it is what titles the card.
+        assert!(block.contains("caption"));
+    }
+
+    #[test]
+    fn prompt_block_for_switches_on_the_toggle() {
+        assert_eq!(prompt_block_for(true), prompt_block());
+        assert_eq!(prompt_block_for(false), mermaid_prompt_block());
+        assert_ne!(prompt_block(), mermaid_prompt_block());
     }
 }

@@ -1070,6 +1070,42 @@
 }
 
 /* The slot token itself never paints; `mountFigures` swaps it for the card. */
-.chat-figure-slot {
+.chat-figure-slot,
+.chat-mermaid-slot {
   display: none;
+}
+
+/* ─── Mermaid diagrams ──────────────────────────────────────────────────────
+   The card carries `.chat-figure` too, so the frame, caption bar and state
+   lines are the figure card's. Mermaid bakes its colours into the SVG, so the
+   diagram is themed where it is rendered (`mermaidDiagrams.ts`) and only
+   sizing is left here. */
+
+.chat-mermaid .chat-figure-viewport {
+  padding: 12px;
+}
+
+.chat-mermaid-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  /* Same cap as a drawn figure: a big graph letterboxes instead of pushing the
+     reply a thousand pixels down. Mermaid's own `max-width` keeps a small
+     diagram at its natural size. */
+  max-height: 420px;
+}
+
+/* A graph more than ~2.5× the card width would scale to an illegible strip, so
+   `fitDiagram` keeps it at natural width and the card scrolls sideways. */
+.chat-mermaid[data-diagram-fit="scroll"] .chat-figure-viewport {
+  overflow-x: auto;
+  justify-content: flex-start;
+}
+
+/* The viewport is a flex box, so the diagram would shrink back to the card
+   width instead of overflowing and scrolling. */
+.chat-mermaid[data-diagram-fit="scroll"] .chat-mermaid-svg {
+  flex: none;
+  max-width: none;
 }

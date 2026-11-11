@@ -23,7 +23,8 @@ import {
   type CarveView,
 } from "./carve3d";
 import { canvasToPngBase64, svgToPngBase64 } from "./figurePng";
-import { figureSlug, SLOT_PATTERN, type FigureSpec } from "./figures";
+import { figureSlug, type FigureSpec } from "./figures";
+import { expandSlots, hashSource, slotHost } from "./slotTokens";
 import { sanitizeSvg } from "./svgSanitize";
 
 export interface MountFiguresOptions {
@@ -48,20 +49,17 @@ const cache = new Map<string, FigureHandle>();
 /** Element → handle, so "save all" can await the real save it triggers. */
 const handles = new WeakMap<HTMLElement, FigureHandle>();
 
-/** FNV-1a — cheap, and only used to tell one figure version from another. */
-function hash(value: string): string {
-  let result = 0x811c9dc5;
-  for (let i = 0; i < value.length; i += 1) {
-    result ^= value.charCodeAt(i);
-    result = Math.imul(result, 0x01000193);
-  }
-  return (result >>> 0).toString(36);
+/** Slot marker for a figure card; `figures.ts` emits it, this module mounts it. */
+const SLOT_OPTIONS = { marker: "\u2063F", className: "chat-figure-slot", datasetKey: "figureSlot" };
+
+/** One interface token, read live — a drawing that bakes colours follows the theme. */
+export function readToken(element: Element, name: string, fallback: string): string {
+  const computed = window.getComputedStyle(element);
+  return computed.getPropertyValue(name).trim() || fallback;
 }
 
 function readPalette(element: Element): CarvePalette {
-  const computed = window.getComputedStyle(element);
-  const read = (name: string, fallback: string) =>
-    computed.getPropertyValue(name).trim() || fallback;
+  const read = (name: string, fallback: string) => readToken(element, name, fallback);
   return {
     // The viewport's own fill: a saved PNG and a 3D canvas both continue the
     // sheet the drawing sits on instead of introducing a third surface.
@@ -83,7 +81,7 @@ function readPalette(element: Element): CarvePalette {
 const themeRedraws = new Set<() => void>();
 let themeObserver: MutationObserver | null = null;
 
-function watchTheme(redraw: () => void): void {
+export function watchTheme(redraw: () => void): void {
   themeRedraws.add(redraw);
   if (themeObserver) return;
   themeObserver = new MutationObserver(() => {
@@ -377,51 +375,6 @@ function buildCarveCard(spec: FigureSpec, index: number): FigureHandle {
 
 // ─── Slot expansion and mounting ────────────────────────────────────────────
 
-/** Replace every slot token in `root` with an empty `<span>`. */
-function expandSlots(root: HTMLElement): HTMLSpanElement[] {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  const texts: Text[] = [];
-  while (walker.nextNode()) {
-    const node = walker.currentNode as Text;
-    // Code and formulas keep their text verbatim: the extractor never puts a
-    // slot token there, so one that shows up is the model echoing the marker
-    // itself, not a figure to mount.
-    if (node.parentElement?.closest("pre, code, .katex")) continue;
-    if (node.data.includes("\u2063F")) texts.push(node);
-  }
-  const slots: HTMLSpanElement[] = [];
-  for (const node of texts) {
-    const fragment = document.createDocumentFragment();
-    for (const part of node.data.split(/(\u2063F\d+\u2063)/g)) {
-      SLOT_PATTERN.lastIndex = 0;
-      const match = SLOT_PATTERN.exec(part);
-      if (match && part === match[0]) {
-        const slot = document.createElement("span");
-        slot.className = "chat-figure-slot";
-        slot.dataset.figureSlot = match[1];
-        fragment.appendChild(slot);
-        slots.push(slot);
-      } else if (part) {
-        fragment.appendChild(document.createTextNode(part));
-      }
-    }
-    node.parentNode?.replaceChild(fragment, node);
-  }
-  return slots;
-}
-
-/** A figure alone in its paragraph is a block; next to prose it stays inline. */
-function slotHost(slot: HTMLSpanElement): HTMLElement {
-  const parent = slot.parentElement;
-  if (parent && parent.tagName === "P") {
-    const alone = Array.from(parent.childNodes).every(
-      (node) => node === slot || (node.nodeType === Node.TEXT_NODE && !(node as Text).data.trim()),
-    );
-    if (alone) return parent;
-  }
-  return slot;
-}
-
 function prune(messageId: string, live: Set<string>): void {
   for (const key of cache.keys()) {
     if (key.startsWith(`${messageId}|`) && !live.has(key)) cache.delete(key);
@@ -444,7 +397,7 @@ export function mountFigures(
   options: MountFiguresOptions,
 ): void {
   if (figures.length === 0) return;
-  const slots = expandSlots(root);
+  const slots = expandSlots(root, SLOT_OPTIONS);
   if (slots.length === 0) return;
 
   const live = new Set<string>();
@@ -458,7 +411,7 @@ export function mountFigures(
     // The source is part of the key: an unfinished figure is a new version on
     // every token and must be rebuilt, while a finished one keeps its canvas,
     // its orbit angle and its "saved" line across rebuilds.
-    const key = `${options.messageId}|${index}|${hash(
+    const key = `${options.messageId}|${index}|${hashSource(
       `${spec.kind}\u0000${spec.title}\u0000${spec.pending ? "1" : "0"}\u0000${spec.source}`,
     )}`;
     live.add(key);

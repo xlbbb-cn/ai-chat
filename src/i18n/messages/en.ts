@@ -266,6 +266,7 @@ const en = {
 
     figure: {
         title: "Figure {index}",
+        diagramTitle: "Diagram {index}",
         drawing: "Drawing…",
         save: "Save PNG",
         saving: "Saving…",
@@ -444,6 +445,9 @@ const en = {
             dsFormat: "DS-Format (DeepSeek)",
             dsFormatHint: "Pass reasoning_content back on assistant messages as DeepSeek-family thinking models require. DeepSeek-family models enable this automatically; turn it on only for other endpoints that need the same pass-through.",
             dsFormatAuto: "Always on for {model}: DeepSeek-family models get DS-Format automatically, so reasoning_content is always passed back.",
+            enhancedFigures: "Enhanced drawing",
+            enhancedFiguresHint:
+                "Let the assistant draw its own SVG figures — every one gets a save button and lands in figures/ as a PNG, and 3D scenes can be orbited — instead of writing Mermaid diagrams. Off: the assistant writes fenced `mermaid` blocks, which the transcript renders as themed diagrams.",
         },
 
         runtime: {

@@ -3470,9 +3470,12 @@ async fn run_chat_turn(
     }
 
     // ── Figures ─────────────────────────────────────────────────────────────
-    // The transcript renders `svg` / `carve` blocks; the model only uses them
-    // if it is told they exist. Static text, so it stays a stable prefix.
-    let figures_context = crate::figures::prompt_block();
+    // The transcript renders `svg` / `carve` blocks and `mermaid` blocks; the
+    // model only uses them if it is told they exist. `enhanced_figures`
+    // (Settings → Advanced, on by default) picks the hand-drawn SVG path; with
+    // it off the model writes Mermaid instead. Static text either way, so it
+    // stays a stable prefix.
+    let figures_context = crate::figures::prompt_block_for(config.enhanced_figures);
     if !figures_context.is_empty() {
         if !system_content.is_empty() {
             system_content.push_str("\n\n");

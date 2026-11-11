@@ -519,6 +519,12 @@ pub struct AppConfig {
     /// executable.
     #[serde(default = "update::default_true")]
     pub sub_agent_main_help: bool,
+    /// Draw with `svg` / `carve` figures instead of Mermaid diagrams
+    /// (Settings → Advanced, on by default). Off means the system prompt asks
+    /// for a fenced `mermaid` block, which the transcript renders itself; the
+    /// rasterise-and-save path (and 3D scenes) stay unused.
+    #[serde(default = "update::default_true")]
+    pub enhanced_figures: bool,
     /// Upper bound on model requests in one chat turn (`0` = unlimited; values
     /// above `turn_guard::MAX_MAIN_AGENT_ROUNDS` are clamped). A ReAct turn is
     /// driven by the model, so without a cap a tool loop could run forever;
@@ -605,6 +611,7 @@ impl Default for AppConfig {
             self_evolution_mode: false,
             background_tools: true,
             sub_agent_main_help: true,
+            enhanced_figures: true,
             main_agent_max_rounds: turn_guard::DEFAULT_MAIN_AGENT_MAX_ROUNDS,
             main_agent_max_tool_calls: turn_guard::DEFAULT_MAIN_AGENT_MAX_TOOL_CALLS,
             tool_failure_limit: turn_guard::DEFAULT_TOOL_FAILURE_LIMIT,

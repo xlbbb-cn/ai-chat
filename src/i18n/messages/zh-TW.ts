@@ -241,6 +241,7 @@ const zhTW: Messages = {
 
     figure: {
         title: "圖 {index}",
+        diagramTitle: "圖表 {index}",
         drawing: "正在繪製…",
         save: "儲存 PNG",
         saving: "儲存中…",
@@ -408,6 +409,9 @@ const zhTW: Messages = {
             dsFormat: "DS-Format（DeepSeek 格式）",
             dsFormatHint: "按 DeepSeek 系思考模式模型的要求，在回傳 assistant 訊息時攜帶 reasoning_content。DeepSeek 系模型會自動開啟；僅當其他供應商同樣需要時才手動開啟。",
             dsFormatAuto: "{model} 已自動開啟：DeepSeek 系模型一律使用 DS-Format，reasoning_content 會自動回傳。",
+            enhancedFigures: "增強畫圖",
+            enhancedFiguresHint:
+                "讓助理自己畫 SVG 圖（每張都有儲存按鈕，PNG 存到 figures/，3D 場景還能拖曳旋轉），而不是寫 Mermaid 圖表。關閉後助理改用 ```mermaid 程式碼區塊，由對話介面渲染成圖表。",
         },
 
         runtime: {

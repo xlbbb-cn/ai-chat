@@ -29,6 +29,8 @@
  * because that is what markdown-it renders and `Drawing…` would be a lie.
  */
 
+import { slotToken as sharedSlotToken } from "./slotTokens";
+
 export type FigureKind = "svg" | "carve";
 
 export interface FigureSpec {
@@ -49,16 +51,10 @@ export interface ExtractedFigures {
   figures: FigureSpec[];
 }
 
-// U+2063 (INVISIBLE SEPARATOR) around the index: markdown-it passes it through
-// untouched, it survives the `breaks: true` line splitting, and it is
-// effectively impossible to collide with real prose.
-const SLOT_OPEN = "\u2063F";
-const SLOT_CLOSE = "\u2063";
+/** Marker the figure slots get; `slotTokens.ts` owns the token's spelling. */
+const SLOT_MARKER = "\u2063F";
 
-export const slotToken = (index: number): string => `${SLOT_OPEN}${index}${SLOT_CLOSE}`;
-
-/** Matches one slot token, capturing the figure index. */
-export const SLOT_PATTERN = /\u2063F(\d+)\u2063/g;
+const slotToken = (index: number): string => sharedSlotToken(SLOT_MARKER, index);
 
 const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})[ \t]*([^\s`]*)[ \t]*(.*)$/;
 const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
