@@ -347,6 +347,45 @@ mod tests {
         assert!(!has_authorization_header(&[]));
     }
 
+    fn role(id: &str, name: &str, description: &str, prompt: &str) -> db::EmbeddedRole {
+        db::EmbeddedRole {
+            id: id.to_string(),
+            name: name.to_string(),
+            description: description.to_string(),
+            prompt: prompt.to_string(),
+        }
+    }
+
+    #[test]
+    fn embedded_roles_render_nothing_without_content() {
+        assert_eq!(render_embedded_roles(&[]), "");
+        // A blank prompt contributes nothing — not even the framing block.
+        assert_eq!(
+            render_embedded_roles(&[role("a", "A", "desc", "   ")]),
+            ""
+        );
+    }
+
+    #[test]
+    fn embedded_roles_render_in_selection_order_with_one_framing_block() {
+        let block = render_embedded_roles(&[
+            role("a", "Embedded A", "Does A things.", "Prompt A."),
+            role("b", "", "", "Prompt B."),
+        ]);
+
+        assert_eq!(block.matches("EMBEDDED ROLES").count(), 1);
+        assert_eq!(block.matches("## Embedded role:").count(), 2);
+
+        let first = block.find("## Embedded role: Embedded A").unwrap();
+        let second = block.find("## Embedded role: b").unwrap();
+        assert!(first < second, "selection order is preserved");
+
+        assert!(block.contains("Does A things.\nPrompt A."));
+        assert!(block.contains("Prompt B."));
+        // The safety/tool precedence rule travels with the roles.
+        assert!(block.contains("Safety, tool and approval rules win"));
+    }
+
     #[test]
     fn collect_loaded_skills_unions_messages_in_first_seen_order() {
         let messages = vec![
@@ -3217,6 +3256,47 @@ async fn build_turn_tools(
     (tools_list, mcp_tool_map, state.mcp_revision())
 }
 
+/// Render the session's embedded sub-agent roles (`+agent` in the composer) as
+/// a system-prompt block.
+///
+/// The block is appended to the main system prompt: a role defines *how* the
+/// assistant answers, while tools, the model and approval rules stay the main
+/// agent's. Empty/blank prompts are skipped, and an empty list renders nothing
+/// so the caller leaves the prompt byte-identical to a normal session.
+fn render_embedded_roles(roles: &[db::EmbeddedRole]) -> String {
+    let mut block = String::new();
+    for role in roles {
+        let prompt = role.prompt.trim();
+        if prompt.is_empty() {
+            continue;
+        }
+        if block.is_empty() {
+            block.push_str(
+                "EMBEDDED ROLES: the user attached the following specialist role(s) to this \
+                 conversation with `+agent`. Adopt each role as your own operating persona and \
+                 follow it alongside the instructions above. Safety, tool and approval rules win \
+                 over a role; tool access, the model and permissions are unchanged by it. Do not \
+                 delegate to an embedded role with `call_subagent` — you act as it directly.",
+            );
+        }
+        let name = role.name.trim();
+        let name = if name.is_empty() {
+            role.id.as_str()
+        } else {
+            name
+        };
+        block.push_str(&format!("\n\n## Embedded role: {name}"));
+        let description = role.description.trim();
+        if !description.is_empty() {
+            block.push('\n');
+            block.push_str(description);
+        }
+        block.push('\n');
+        block.push_str(prompt);
+    }
+    block
+}
+
 /// The whole chat turn: orchestration, the main-agent tool loop, and the
 /// final answer. Extracted from `chat_completion` so the command wrapper can
 /// run turn-end cleanup on every exit path (final answer, upstream error,
@@ -3667,6 +3747,24 @@ async fn run_chat_turn(
             system_content.push_str("\n\n");
         }
         system_content.push_str(todo_guidance);
+    }
+
+    // ── Embedded sub-agent roles (`+agent` in the composer) ─────────────────
+    // A snapshot written when the session's first message was sent. It is
+    // appended at the END of the stable system prefix, so it stays
+    // byte-identical on every turn (prompt-cache friendly) and never reorders
+    // the blocks above. A missing table/row simply means "no roles".
+    let embedded_roles = state
+        .db
+        .lock()
+        .map(|db| db::get_embedded_roles(&db, &session_id))
+        .unwrap_or_default();
+    let embedded_block = render_embedded_roles(&embedded_roles);
+    if !embedded_block.is_empty() {
+        if !system_content.is_empty() {
+            system_content.push_str("\n\n");
+        }
+        system_content.push_str(&embedded_block);
     }
 
     // ── Message layout (prompt-cache conscious) ─────────────────────────────
@@ -5070,6 +5168,7 @@ pub async fn chat_completion(
     session_id: String,
     model_override: Option<String>,
     use_agents: Option<bool>,
+    embedded_agent_ids: Option<Vec<String>>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     // The user's own turn always wins over the background evolution
@@ -5084,6 +5183,59 @@ pub async fn chat_completion(
     // exit path — final answer, upstream error, Stop — and only after the
     // turn-end cleanup below finished.
     let sleep_guard = app.state::<crate::timer::SleepLock>().acquire();
+
+    // `+agent` roles are frozen on the session's FIRST request. The composer
+    // only offers the popup while the transcript is empty, and this guard
+    // repeats the rule in the backend, so a retry or a hand-crafted call cannot
+    // attach a role halfway through a conversation. The snapshot is what every
+    // later turn reads, so editing or deleting the agent definition afterwards
+    // leaves this session untouched.
+    if let Some(ids) = embedded_agent_ids.as_deref().filter(|ids| !ids.is_empty()) {
+        let first_turn = !messages.iter().any(|m| m.role == "assistant");
+        if first_turn {
+            let roles = agents::snapshot_embedded_roles(&state.agents_config_path, ids);
+            if roles.is_empty() {
+                log_event(
+                    &state,
+                    "WARN",
+                    format!("no embeddable sub-agent role resolved: ids={ids:?}"),
+                );
+            } else {
+                let names = roles
+                    .iter()
+                    .map(|role| role.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                match state
+                    .db
+                    .lock()
+                    .map_err(|_| "database lock poisoned".to_string())
+                    .and_then(|db| db::set_embedded_roles(&db, &session_id, &roles))
+                {
+                    Ok(()) => log_event(
+                        &state,
+                        "INFO",
+                        format!(
+                            "embedded sub-agent roles: session_id={session_id}, roles=[{names}]"
+                        ),
+                    ),
+                    // A storage failure must not fail the user's turn: the
+                    // message is answered without the role rather than erroring.
+                    Err(err) => log_event(
+                        &state,
+                        "WARN",
+                        format!("could not store embedded roles: session_id={session_id}, error={err}"),
+                    ),
+                }
+            }
+        } else {
+            log_event(
+                &state,
+                "WARN",
+                format!("ignored embedded roles on a non-first turn: session_id={session_id}"),
+            );
+        }
+    }
 
     let result = run_chat_turn(
         app.clone(),

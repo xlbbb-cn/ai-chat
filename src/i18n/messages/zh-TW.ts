@@ -131,6 +131,14 @@ const zhTW: Messages = {
             noMatches: "沒有符合“{query}”的技能。",
             listFailed: "無法列出工作區技能：{error}",
         },
+        agentMention: {
+            title: "嵌入子 agent 角色",
+            hint: "↑↓ 選擇 · Enter/Tab 插入 · Esc 關閉 · 僅新會話可用",
+            loading: "正在讀取子 agent…",
+            noMatches: "沒有符合“{query}”的子 agent。",
+            noSelectable: "沒有已啟用且帶系統提示詞的 llm 子 agent，請先在子 agent 面板啟用。",
+            listFailed: "無法列出子 agent：{error}",
+        },
         attachmentUnsupported: "已跳過 {names}：「{model}」無法讀取該檔案類型。",
         composer: {
             dropHint: "放開即可加入對話（檔案存入 .data/tmp 並插入 @ 引用）",

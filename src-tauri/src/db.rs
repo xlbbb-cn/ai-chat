@@ -1,5 +1,5 @@
 use rusqlite::Connection;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// Open the workspace database and bring its schema up to date.
@@ -65,6 +65,13 @@ pub fn open_db(path: &Path) -> rusqlite::Result<Connection> {
         )",
         [],
     )?;
+    // Composer `+agent` roles embedded for the whole session: a JSON array of
+    // `EmbeddedRole` snapshots taken when the session's first message is sent.
+    // Lazy ALTER so existing databases upgrade in place.
+    let _ = db.execute(
+        "ALTER TABLE session_meta ADD COLUMN embedded_roles TEXT NOT NULL DEFAULT ''",
+        [],
+    );
     db.execute(
         "CREATE TABLE IF NOT EXISTS session_summaries (\
             session_id TEXT PRIMARY KEY, \
@@ -516,6 +523,10 @@ pub fn fork_session(
         .map_err(|e| e.to_string())?;
     }
 
+    // A fork is a copy of the conversation, so it inherits the roles embedded
+    // at its first send and keeps answering in the same voice.
+    copy_embedded_roles(&db, &source_session_id, &new_session_id)?;
+
     Ok(count)
 }
 
@@ -527,6 +538,73 @@ pub struct SessionMeta {
     pub title: Option<String>,
     pub favorite: bool,
     pub archived: bool,
+}
+
+/// One sub-agent role embedded into a chat session with `+agent`.
+///
+/// This is a **snapshot** taken when the session's first message is sent, not a
+/// live reference: editing or enabling/disabling the agent definition later
+/// must never change a conversation that already started, and a deleted agent
+/// must not break an existing session. `prompt` is the agent's `system_prompt`
+/// at snapshot time.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct EmbeddedRole {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub prompt: String,
+}
+
+/// Read the embedded-role snapshot of a session.
+///
+/// A missing meta row, an empty column (the lazy `ALTER TABLE` default) and
+/// malformed JSON all read as "no roles": a broken snapshot must never fail a
+/// chat turn.
+pub fn get_embedded_roles(db: &Connection, session_id: &str) -> Vec<EmbeddedRole> {
+    let raw: Option<String> = db
+        .query_row(
+            "SELECT embedded_roles FROM session_meta WHERE session_id = ?1",
+            rusqlite::params![session_id],
+            |row| row.get(0),
+        )
+        .ok();
+    raw.filter(|s| !s.trim().is_empty())
+        .and_then(|s| serde_json::from_str::<Vec<EmbeddedRole>>(&s).ok())
+        .unwrap_or_default()
+}
+
+/// Replace the embedded-role snapshot of a session, creating its meta row when
+/// needed. Title/favorite/archived are left untouched.
+pub fn set_embedded_roles(
+    db: &Connection,
+    session_id: &str,
+    roles: &[EmbeddedRole],
+) -> Result<(), String> {
+    let json = serde_json::to_string(roles).map_err(|e| e.to_string())?;
+    db.execute(
+        "INSERT OR IGNORE INTO session_meta (session_id) VALUES (?1)",
+        rusqlite::params![session_id],
+    )
+    .map_err(|e| e.to_string())?;
+    db.execute(
+        "UPDATE session_meta SET embedded_roles = ?2 WHERE session_id = ?1",
+        rusqlite::params![session_id, json],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Copy the role snapshot when a session is forked, so a branch keeps the roles
+/// that shaped its transcript.
+pub fn copy_embedded_roles(db: &Connection, from: &str, to: &str) -> Result<(), String> {
+    let roles = get_embedded_roles(db, from);
+    if roles.is_empty() {
+        return Ok(());
+    }
+    set_embedded_roles(db, to, &roles)
 }
 
 /// List all session meta rows. Sessions without a meta row are simply absent
@@ -1454,6 +1532,17 @@ mod tests {
             [],
         )
         .unwrap();
+        conn.execute(
+            "CREATE TABLE session_meta (\
+                session_id TEXT PRIMARY KEY, \
+                title TEXT, \
+                favorite INTEGER NOT NULL DEFAULT 0, \
+                archived INTEGER NOT NULL DEFAULT 0, \
+                embedded_roles TEXT NOT NULL DEFAULT ''\
+            )",
+            [],
+        )
+        .unwrap();
         conn
     }
 
@@ -1819,5 +1908,60 @@ mod tests {
         assert_eq!(stats.tools[0].duration_ms, 60);
         assert_eq!(stats.tools[1].name, "mcp_search");
         assert_eq!(stats.tools[1].failures, 1);
+    }
+
+    fn role(id: &str, prompt: &str) -> EmbeddedRole {
+        EmbeddedRole {
+            id: id.to_string(),
+            name: format!("role-{id}"),
+            description: String::new(),
+            prompt: prompt.to_string(),
+        }
+    }
+
+    #[test]
+    fn embedded_roles_round_trip_and_ignore_blank_state() {
+        let conn = test_conn();
+
+        // No meta row at all reads as "no roles", never an error.
+        assert!(get_embedded_roles(&conn, "s").is_empty());
+
+        let roles = vec![role("a", "You are A."), role("b", "You are B.")];
+        set_embedded_roles(&conn, "s", &roles).unwrap();
+        assert_eq!(get_embedded_roles(&conn, "s"), roles);
+
+        // Title/favorite updates must not clobber the snapshot.
+        conn.execute(
+            "UPDATE session_meta SET title = 'kept', favorite = 1 WHERE session_id = 's'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(get_embedded_roles(&conn, "s"), roles);
+
+        // An empty snapshot clears the roles but keeps the row.
+        set_embedded_roles(&conn, "s", &[]).unwrap();
+        assert!(get_embedded_roles(&conn, "s").is_empty());
+
+        // Malformed JSON degrades to "no roles" instead of failing a turn.
+        conn.execute(
+            "UPDATE session_meta SET embedded_roles = 'not json' WHERE session_id = 's'",
+            [],
+        )
+        .unwrap();
+        assert!(get_embedded_roles(&conn, "s").is_empty());
+    }
+
+    #[test]
+    fn embedded_roles_copy_to_a_forked_session() {
+        let conn = test_conn();
+        let roles = vec![role("a", "You are A.")];
+        set_embedded_roles(&conn, "source", &roles).unwrap();
+
+        copy_embedded_roles(&conn, "source", "fork").unwrap();
+        assert_eq!(get_embedded_roles(&conn, "fork"), roles);
+
+        // Copying a session without roles leaves the target untouched.
+        copy_embedded_roles(&conn, "plain", "other").unwrap();
+        assert!(get_embedded_roles(&conn, "other").is_empty());
     }
 }

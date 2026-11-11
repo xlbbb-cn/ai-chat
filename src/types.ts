@@ -718,6 +718,20 @@ export interface SubAgent {
   enabled: boolean;
 }
 
+/**
+ * One row of the composer's `+agent` popup: an enabled `llm` sub-agent whose
+ * system prompt can be embedded into a new session. The prompt itself is not
+ * part of this payload — the backend snapshots it when the session starts.
+ */
+export interface AgentMention {
+  id: string;
+  name: string;
+  description: string;
+  emoji?: string;
+  /** The token inserted after `+` in the composer. */
+  token: string;
+}
+
 export interface AgentOrchestration {
   use_agents: boolean;
   auto_configure: boolean;

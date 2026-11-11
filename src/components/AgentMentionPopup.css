@@ -1,0 +1,26 @@
+/* Inline `+agent` picker for the composer (see components/AgentMentionPopup.tsx).
+
+   The surface — frame, header, rows, active state — is the `@file` popup from
+   FileMentionPopup.css, reused verbatim so every mention looks and behaves
+   identically. Only the three deltas below are declared here. */
+
+/* An agent is a reference rather than an attachment, so its glyph wears the
+   accent (like a link and like `/skill`) instead of a per-kind colour. */
+.agent-mention-icon {
+  color: var(--c-accent-text);
+}
+
+/* The agent definition may carry an emoji badge; it must sit on the same
+   16px optical box as a Font Awesome glyph. */
+.agent-mention-emoji {
+  font-size: 14px;
+  line-height: 1;
+  text-align: center;
+}
+
+/* `@file` rows print a path right-to-left so deep paths keep their tail; an
+   agent description must read straight through. */
+.agent-mention-item .file-mention-path {
+  direction: ltr;
+  text-align: right;
+}

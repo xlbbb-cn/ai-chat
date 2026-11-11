@@ -131,6 +131,14 @@ const zhCN: Messages = {
             noMatches: "没有匹配“{query}”的技能。",
             listFailed: "无法列出工作区技能：{error}",
         },
+        agentMention: {
+            title: "嵌入子 agent 角色",
+            hint: "↑↓ 选择 · Enter/Tab 插入 · Esc 关闭 · 仅新会话可用",
+            loading: "正在读取子 agent…",
+            noMatches: "没有匹配“{query}”的子 agent。",
+            noSelectable: "没有已启用且带系统提示词的 llm 子 agent，请先在子 agent 面板启用。",
+            listFailed: "无法列出子 agent：{error}",
+        },
         attachmentUnsupported: "已跳过 {names}：“{model}” 无法读取该文件类型。",
         composer: {
             dropHint: "松开即可加入对话（文件存入 .data/tmp 并插入 @ 引用）",

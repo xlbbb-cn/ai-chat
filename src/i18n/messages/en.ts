@@ -144,6 +144,15 @@ const en = {
             noMatches: "No skill matches “{query}”.",
             listFailed: "Could not list workspace skills: {error}",
         },
+        agentMention: {
+            title: "Embed sub-agent role",
+            hint: "↑↓ choose · Enter/Tab insert · Esc close · new sessions only",
+            loading: "Loading sub-agents…",
+            noMatches: "No sub-agent matches “{query}”.",
+            noSelectable:
+                "No enabled llm sub-agent with a system prompt — enable one in the Sub Agents panel.",
+            listFailed: "Could not list sub-agents: {error}",
+        },
         attachmentUnsupported:
             "Skipped {names}: “{model}” cannot read that file type.",
         composer: {

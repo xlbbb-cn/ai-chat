@@ -14,6 +14,7 @@ import type {
   McpServer,
   McpLogEntry,
   SubAgent,
+  AgentMention,
   AgentOrchestration,
   AgentTaskEvent,
   AgentMissionSnapshot,
@@ -496,6 +497,12 @@ export async function chatCompletion(
   modelOverride: string | undefined,
   callbacks: StreamCallbacks,
   useAgents?: boolean,
+  /**
+   * Composer `+agent` selections for a session's FIRST turn. The backend
+   * snapshots their system prompts into `session_meta.embedded_roles`; later
+   * turns pass nothing and read the snapshot instead.
+   */
+  embeddedAgentIds?: string[],
 ): Promise<UnlistenFn> {
   const unlisteners: UnlistenFn[] = [];
 
@@ -562,6 +569,7 @@ export async function chatCompletion(
     sessionId,
     modelOverride,
     useAgents: useAgents ?? false,
+    embeddedAgentIds: embeddedAgentIds ?? [],
   }).catch((err: string) => {
     finish(err);
   });
@@ -845,6 +853,14 @@ export async function compactDatabase(): Promise<CompactDbResult> {
 
 export async function listSubAgents(): Promise<SubAgent[]> {
   return invoke("list_sub_agents");
+}
+
+/**
+ * Lightweight `+agent` popup roster: enabled `llm` agents with a system prompt,
+ * already carrying the token that gets inserted after `+`.
+ */
+export async function listAgentMentions(): Promise<AgentMention[]> {
+  return invoke("list_agent_mentions");
 }
 
 /**

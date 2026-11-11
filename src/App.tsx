@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } fr
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState, setWindowVibrancy, savePastedFile, importWorkspacePaths } from "./api";
+import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, listAgentMentions, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState, setWindowVibrancy, savePastedFile, importWorkspacePaths } from "./api";
 
 import { ChatMessage, ChatMessageBoundary } from "./components/ChatMessage";
 import { ToolCallGroup } from "./components/ToolCallGroup";
@@ -25,6 +25,7 @@ import type {
 import { UpdatePanel } from "./components/UpdatePanel";
 import { FileMentionPopup } from "./components/FileMentionPopup";
 import { SlashMentionPopup } from "./components/SlashMentionPopup";
+import { AgentMentionPopup } from "./components/AgentMentionPopup";
 import type {
   AppConfig,
   Message,
@@ -67,6 +68,8 @@ import {
 } from "./composerFiles";
 import { activeSlashQuery, scoreSkillOption, toSkillOptions } from "./slashMention";
 import type { SkillMentionOption } from "./slashMention";
+import { activeAgentQuery, hasAgentToken, scoreAgentMention } from "./agentMention";
+import type { AgentMentionOption } from "./agentMention";
 import { isGenerationStopped, isLocale, stripGenerationStopped, useI18n } from "./i18n";
 import { formatCountdown } from "./utils/time";
 import {
@@ -355,6 +358,8 @@ const WORKSPACE_FILES_TTL_MS = 15_000;
 const MENTION_MAX_ITEMS = 8;
 /** How long the `/skill` popup trusts its cached skill list. */
 const SKILL_MENTIONS_TTL_MS = 15_000;
+/** How long the `+agent` popup trusts its cached sub-agent roster. */
+const AGENT_MENTIONS_TTL_MS = 15_000;
 
 interface MarkdownEditPayload {
   path: string;
@@ -412,6 +417,34 @@ export default function App() {
   /** Timestamped cache of `slashSkills`, so the list is read at most every 15s. */
   const slashSkillsRef = useRef<{ at: number; options: SkillMentionOption[] } | null>(null);
   const slashSkillsPendingRef = useRef(false);
+  /**
+   * Composer `+agent` popup: embeds a sub-agent's system prompt into a **new**
+   * conversation. `embeddedAgents` holds the agents whose `+token` was
+   * accepted; their ids travel with the first message only, because the
+   * backend freezes a snapshot from then on.
+   */
+  const [agentMentionState, setAgentMentionState] = useState<{
+    open: boolean;
+    query: string;
+    start: number;
+  }>({ open: false, query: "", start: 0 });
+  const [agentMentionIndex, setAgentMentionIndex] = useState(0);
+  /** Enabled `llm` agents for the popup; `null` until the first load. */
+  const [agentMentionOptions, setAgentMentionOptions] = useState<AgentMentionOption[] | null>(null);
+  const [agentMentionLoading, setAgentMentionLoading] = useState(false);
+  /** Timestamped cache, so the roster is read at most every 15s. */
+  const agentMentionRef = useRef<{ at: number; options: AgentMentionOption[] } | null>(null);
+  const agentMentionPendingRef = useRef(false);
+  const [embeddedAgents, setEmbeddedAgents] = useState<AgentMentionOption[]>([]);
+  /**
+   * Drop the pending `+agent` selections. Called whenever the session changes
+   * (new chat, history load, fork): a role belongs to the conversation it was
+   * chosen for, never to the next one.
+   */
+  const resetEmbeddedAgents = useCallback(() => {
+    setEmbeddedAgents([]);
+    setAgentMentionState({ open: false, query: "", start: 0 });
+  }, []);
   const [streaming, setStreaming] = useState(false);
   /**
    * The empty-state smiley's silent maintenance pass. `running` is driven by
@@ -1252,7 +1285,20 @@ export default function App() {
   useEffect(() => {
     listSubAgents()
       .then((agents) => setActiveAgentCount(agents.filter((a) => a.enabled).length))
-      .catch(console.error);
+      .catch(console.error)
+      // Preload the `+agent` roster after the panel roster: both read the same
+      // definition store (and a legacy migration may rewrite it), so the two
+      // calls are serialised instead of racing. The roster feeds both the popup
+      // and the transcript token highlighting, which must work before the
+      // popup is ever opened.
+      .finally(() => {
+        listAgentMentions()
+          .then((options) => {
+            agentMentionRef.current = { at: Date.now(), options };
+            setAgentMentionOptions(options);
+          })
+          .catch(console.error);
+      });
     getAgentOrchestration()
       .then((orch) => setUseAgentsEnabled(orch.use_agents))
       .catch(console.error);
@@ -1262,9 +1308,17 @@ export default function App() {
     const unlisten = listen("profile-restored", async () => {
       try {
         // A restored profile can reference skills that are absent from the
-        // current workspace, so re-validate before activating them.
-        const [, servers] = await Promise.all([applyConfigToUi(), listMcpServers()]);
+        // current workspace, so re-validate before activating them. The
+        // `+agent` roster is refreshed too: a profile swap can enable or
+        // disable sub-agents.
+        const [, servers, mentions] = await Promise.all([
+          applyConfigToUi(),
+          listMcpServers(),
+          listAgentMentions(),
+        ]);
         setActiveMcpCount(servers.filter((s) => s.enabled).length);
+        agentMentionRef.current = { at: Date.now(), options: mentions };
+        setAgentMentionOptions(mentions);
       } catch (err) {
         console.error(err);
       }
@@ -2112,6 +2166,20 @@ export default function App() {
     // file"; a hand-typed long form is collapsed to the same shape here.
     const messageText = canonicalTmpMentions(rawText);
 
+    // `+agent` selections only travel with a conversation that has no reply
+    // yet; after that the frozen snapshot in the database speaks for itself —
+    // the same rule the backend repeats. Matching the backend's "no assistant
+    // row" test (rather than `messages.length === 0`) also covers retrying a
+    // first message that failed before the snapshot was written. A timer
+    // resume is not a user send, and a token the user deleted from the draft is
+    // no longer a selection.
+    const embeddedAgentIds =
+      !autoResume && !messages.some((m) => m.role === "assistant")
+        ? embeddedAgents
+            .filter((agent) => hasAgentToken(messageText, agent.token))
+            .map((agent) => agent.id)
+        : undefined;
+
     const { content: apiContent } = buildMessageContent(messageText, messageAttachments);
     const userAttachments = messageAttachments.length > 0 ? messageAttachments : undefined;
     setPendingRetryMessageId(null);
@@ -2142,6 +2210,12 @@ export default function App() {
     // An auto-resume must not discard a draft the user is still composing.
     if (!autoResume) {
       setInput("");
+      // Sending clears the draft, so a composer popup it opened must close
+      // too: Enter can send while a popup is visible (an empty result list
+      // leaves the key unclaimed), and a stale popup would hang over the turn.
+      setMentionState({ open: false, query: "", start: 0 });
+      setSlashState({ open: false, query: "", start: 0 });
+      setAgentMentionState({ open: false, query: "", start: 0 });
     }
     setStreaming(true);
     setError(null);
@@ -2362,10 +2436,10 @@ export default function App() {
         setStreaming(false);
         cleanupRef.current = null;
       },
-    }, useAgentsEnabled);
+    }, useAgentsEnabled, embeddedAgentIds);
 
     cleanupRef.current = cleanup;
-  }, [input, messages, streaming, profileExporting, activeSkillIds, sessionId, selectedModel, selectedMetadata, useAgentsEnabled, t, flushUndeliveredInjections]);
+  }, [input, messages, streaming, profileExporting, activeSkillIds, sessionId, selectedModel, selectedMetadata, useAgentsEnabled, embeddedAgents, t, flushUndeliveredInjections]);
 
   /**
    * Start the silent evolution-maintenance pass from the empty-state face.
@@ -2726,12 +2800,15 @@ export default function App() {
       followBottomRef.current = true;
       setMessages(forkedMessages);
       setSessionId(newSessionId);
+      // The fork inherits the role snapshot from the database, but the
+      // composer's pending selection belongs to the old conversation.
+      resetEmbeddedAgents();
       setPendingRetryMessageId(null);
       setError(null);
     } catch (err) {
       setError(t("app.forkFailed", { error: String(err) }));
     }
-  }, [messages, sessionId, t]);
+  }, [messages, sessionId, resetEmbeddedAgents, t]);
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (profileExporting) {
@@ -2739,16 +2816,27 @@ export default function App() {
       return;
     }
 
-    // An open mention popup (`@file` or `/skill`) owns the arrow keys,
-    // Enter/Tab and Escape while it is visible. Their token grammars are
+    // An IME composition (pinyin, kana, …) owns Enter/Tab and the arrows until
+    // it commits. Acting on those keys would accept a mention row or send the
+    // message mid-composition — and embedded role tokens are usually CJK, so
+    // the popup is often open while an IME is active.
+    if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
+
+    // An open mention popup (`@file`, `/skill` or `+agent`) owns the arrow
+    // keys, Enter/Tab and Escape while it is visible. Their token grammars are
     // mutually exclusive, so at most one is open and it decides which list,
     // index and accept handler the keys act on.
-    if (mentionState.open || slashState.open) {
-      const rowCount = mentionState.open ? mentionItems.length : slashItems.length;
+    if (mentionState.open || slashState.open || agentMentionState.open) {
+      const rowCount = mentionState.open
+        ? mentionItems.length
+        : slashState.open
+          ? slashItems.length
+          : agentMentionItems.length;
       if (e.key === "Escape") {
         e.preventDefault();
         closeMention();
         closeSlash();
+        closeAgentMention();
         return;
       }
       if (rowCount > 0) {
@@ -2757,8 +2845,10 @@ export default function App() {
           const delta = e.key === "ArrowDown" ? 1 : -1;
           if (mentionState.open) {
             setMentionIndex((prev) => (prev + delta + rowCount) % rowCount);
-          } else {
+          } else if (slashState.open) {
             setSlashIndex((prev) => (prev + delta + rowCount) % rowCount);
+          } else {
+            setAgentMentionIndex((prev) => (prev + delta + rowCount) % rowCount);
           }
           return;
         }
@@ -2767,9 +2857,12 @@ export default function App() {
           if (mentionState.open) {
             const item = mentionItems[mentionActiveIndex];
             if (item) acceptMention(item);
-          } else {
+          } else if (slashState.open) {
             const item = slashItems[slashActiveIndex];
             if (item) acceptSlash(item);
+          } else {
+            const item = agentMentionItems[agentMentionActiveIndex];
+            if (item) acceptAgentMention(item);
           }
           return;
         }
@@ -2856,6 +2949,7 @@ export default function App() {
     setUsageReady(false);
     setPendingRetryMessageId(null);
     setDreamResult(null);
+    resetEmbeddedAgents();
     setSessionId(crypto.randomUUID());
   }
 
@@ -3367,6 +3461,138 @@ export default function App() {
     return Array.from(names).sort();
   }, [slashSkills, skillStatus]);
 
+  // ─── Composer `+agent` mentions ───────────────────────────────────────────
+
+  /**
+   * Agents the `+agent` popup offers, ranked by relevance.
+   *
+   * The backend already filters to enabled `llm` agents with a real system
+   * prompt; nothing else can contribute one. The popup itself is only
+   * reachable while the transcript is empty (see `syncAgentMentionFromInput`).
+   */
+  const agentMentionItems = useMemo(() => {
+    if (!agentMentionState.open || !agentMentionOptions) return [];
+    const scored: { item: AgentMentionOption; score: number }[] = [];
+    for (const option of agentMentionOptions) {
+      const score = scoreAgentMention(option, agentMentionState.query);
+      if (score === null) continue;
+      scored.push({ item: option, score });
+    }
+    scored.sort(
+      (a, b) => a.score - b.score || a.item.name.localeCompare(b.item.name),
+    );
+    return scored.slice(0, MENTION_MAX_ITEMS).map((entry) => entry.item);
+  }, [agentMentionState.open, agentMentionState.query, agentMentionOptions]);
+
+  /** Index stays valid while the filtered list shrinks under the cursor. */
+  const agentMentionActiveIndex = Math.min(
+    agentMentionIndex,
+    Math.max(0, agentMentionItems.length - 1),
+  );
+
+  const closeAgentMention = useCallback(() => {
+    setAgentMentionState((prev) =>
+      prev.open ? { open: false, query: "", start: 0 } : prev,
+    );
+  }, []);
+
+  /**
+   * Load the sub-agent roster for the popup (15 s cache). The roster is
+   * app-global, so a workspace switch does not invalidate it; the TTL covers a
+   * panel edit made in another window.
+   */
+  const ensureAgentMentions = useCallback(async () => {
+    if (agentMentionPendingRef.current) return;
+    const cached = agentMentionRef.current;
+    if (cached && Date.now() - cached.at < AGENT_MENTIONS_TTL_MS) return;
+
+    agentMentionPendingRef.current = true;
+    setAgentMentionLoading(true);
+    try {
+      const options = await listAgentMentions();
+      agentMentionRef.current = { at: Date.now(), options };
+      setAgentMentionOptions(options);
+    } catch (err) {
+      setError(t("app.agentMention.listFailed", { error: String(err) }));
+    } finally {
+      agentMentionPendingRef.current = false;
+      setAgentMentionLoading(false);
+    }
+  }, [t]);
+
+  /**
+   * Open/close the `+agent` popup for the token under the caret.
+   *
+   * Only a real user edit reaches this — accepting inserts text
+   * programmatically, which must not immediately reopen the popup.
+   */
+  const syncAgentMentionFromInput = useCallback(
+    (value: string, caret: number) => {
+      // Embedded roles shape a NEW conversation. Once a turn exists the role
+      // snapshot is frozen in the backend, so the popup would lie about being
+      // able to change it. Injection mode and profile export disable it too.
+      if (streaming || profileExporting || messages.length > 0) {
+        closeAgentMention();
+        return;
+      }
+      const active = activeAgentQuery(value, caret);
+      if (!active) {
+        closeAgentMention();
+        return;
+      }
+      setAgentMentionState((prev) =>
+        prev.open && prev.start === active.start && prev.query === active.query
+          ? prev
+          : { open: true, query: active.query, start: active.start },
+      );
+      setAgentMentionIndex(0);
+      void ensureAgentMentions();
+    },
+    [closeAgentMention, ensureAgentMentions, messages.length, profileExporting, streaming],
+  );
+
+  /**
+   * Insert `+<token>` for `item`, replacing the `+` + query that opened the
+   * popup, and leave the caret right behind it. A trailing space keeps the
+   * line in the `+token +token` grammar, so the next `+` opens the popup again.
+   */
+  const acceptAgentMention = useCallback(
+    (item: AgentMentionOption) => {
+      const el = textareaRef.current;
+      const token = `+${item.token}`;
+      // The whole `+query` run is replaced, not just the part before the
+      // caret: the caret can sit inside the token (a click or an arrow key),
+      // and replacing only its prefix would glue the remaining letters onto
+      // the accepted token.
+      const start = agentMentionState.start;
+      let end = start + 1;
+      while (end < input.length && !/[\s+@/<>#]/.test(input[end])) end += 1;
+      const before = input.slice(0, start);
+      const after = input.slice(end);
+      const suffix = /^\s/.test(after) ? "" : " ";
+      setInput(`${before}${token}${suffix}${after}`);
+      setEmbeddedAgents((prev) =>
+        prev.some((agent) => agent.id === item.id) ? prev : [...prev, item],
+      );
+      closeAgentMention();
+      requestAnimationFrame(() => {
+        const position = before.length + token.length + suffix.length;
+        el?.focus();
+        el?.setSelectionRange(position, position);
+      });
+    },
+    [agentMentionState.start, closeAgentMention, input],
+  );
+
+  /**
+   * Agent tokens known in this roster. A sent `+token` is only highlighted when
+   * it names a real agent, so arithmetic such as `2 + 2` stays plain text.
+   */
+  const knownAgentTokens = useMemo(
+    () => (agentMentionOptions ?? []).map((option) => option.token).sort(),
+    [agentMentionOptions],
+  );
+
   // ─── Files pasted / dropped onto the composer ─────────────────────────────
 
   /**
@@ -3747,6 +3973,7 @@ export default function App() {
                   followBottomRef.current = true;
                   setMessages(msgs);
                   setSessionId(sid);
+                  resetEmbeddedAgents();
 
                   const lastMsg = msgs.length > 0 ? msgs[msgs.length - 1] : null;
                   if (lastMsg?.role === "user") {
@@ -4068,6 +4295,7 @@ export default function App() {
                   sessionId={sessionId}
                   todoActive={m.role === "assistant" && m.id === todoMessageId}
                   skillNames={knownSkillNames}
+                  agentTokens={knownAgentTokens}
                 />
               </ChatMessageBoundary>
             )
@@ -4191,6 +4419,15 @@ export default function App() {
             </div>
           )}
           <div className="input-row">
+            <AgentMentionPopup
+              open={agentMentionState.open}
+              items={agentMentionItems}
+              activeIndex={agentMentionActiveIndex}
+              loading={agentMentionLoading}
+              query={agentMentionState.query}
+              onHover={setAgentMentionIndex}
+              onSelect={acceptAgentMention}
+            />
             <SlashMentionPopup
               open={slashState.open}
               items={slashItems}
@@ -4217,8 +4454,10 @@ export default function App() {
               onChange={(e) => {
                 const value = e.target.value;
                 setInput(value);
-                syncMentionFromInput(value, e.target.selectionStart ?? value.length);
-                syncSlashFromInput(value, e.target.selectionStart ?? value.length);
+                const caret = e.target.selectionStart ?? value.length;
+                syncMentionFromInput(value, caret);
+                syncSlashFromInput(value, caret);
+                syncAgentMentionFromInput(value, caret);
               }}
               onKeyDown={handleKeyDown}
               onPaste={handleComposerPaste}
@@ -4228,6 +4467,7 @@ export default function App() {
               onBlur={() => {
                 closeMention();
                 closeSlash();
+                closeAgentMention();
               }}
               placeholder={streaming ? t("app.injections.placeholder") : t("app.inputPlaceholder")}
               // Stays usable while a reply streams: Enter then adds the text to

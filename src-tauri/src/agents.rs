@@ -13,6 +13,7 @@ const LLM_DEFAULT_MAX_TOKENS: u32 = 131_072;
 const LLM_DEFAULT_MAX_COMLETE_TOKENS: u32 = 8_192;
 
 use crate::{
+    db::EmbeddedRole,
     llm_complete::{
         apply_completion_token_limit, apply_request_headers, content_to_text,
         extract_upstream_error_message, has_authorization_header, resolve_reasoning_effort,
@@ -1395,6 +1396,139 @@ pub(crate) fn save_agents_config_file(path: &Path, config: &AgentsConfig) -> Res
 #[tauri::command]
 pub fn list_sub_agents(state: State<'_, AppState>) -> Vec<SubAgent> {
     load_sub_agent_list(&state.agents_config_path)
+}
+
+// ─── Composer `+agent` mentions ───────────────────────────────────────────────
+
+/// One row of the composer's `+agent` popup.
+///
+/// It deliberately carries no `system_prompt`: the popup only needs a label,
+/// while the full roster would send hundreds of kilobytes to the frontend. The
+/// prompt is snapshotted in the backend when the session's first message is
+/// sent (`snapshot_embedded_roles`).
+#[derive(Debug, Clone, Serialize)]
+pub struct AgentMention {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub emoji: Option<String>,
+    /// The token inserted after `+` in the composer.
+    pub token: String,
+}
+
+/// Whether `value` can be typed as one mention token.
+///
+/// The composer grammar (`src/agentMention.ts`) ends a token at whitespace and
+/// at `+ @ / # < >`, so a name containing any of them would split itself.
+fn is_mention_token_safe(value: &str) -> bool {
+    !value.is_empty()
+        && !value
+            .chars()
+            .any(|c| c.is_whitespace() || matches!(c, '+' | '@' | '/' | '#' | '<' | '>'))
+}
+
+/// The token offered for `agent`, before roster-wide deduplication.
+///
+/// The display name wins when it is token-safe (Chinese names usually are), so
+/// `+嵌入式固件工程师` matches what the panel shows. Otherwise the markdown file
+/// stem is used, which is the stable English handle for imported agents, and a
+/// short id fragment is the last resort.
+fn agent_mention_base_token(agent: &SubAgent) -> String {
+    let name = agent.name.trim();
+    if is_mention_token_safe(name) {
+        return name.to_string();
+    }
+    if let Some(file) = agent.file.as_deref() {
+        let stem = Path::new(file)
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if is_mention_token_safe(&stem) {
+            return stem;
+        }
+    }
+    let fallback: String = agent
+        .id
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+        .take(8)
+        .collect();
+    if fallback.is_empty() {
+        "agent".to_string()
+    } else {
+        fallback
+    }
+}
+
+/// The `+agent` popup roster: enabled `llm` agents that have a real system
+/// prompt (a `cli` / `cloud` agent has none to embed). Tokens are unique within
+/// the roster, with `-2`, `-3` suffixes on a collision.
+#[tauri::command]
+pub fn list_agent_mentions(state: State<'_, AppState>) -> Vec<AgentMention> {
+    let roster = load_configured_agents(&state.agents_config_path);
+    let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut mentions = Vec::new();
+
+    for agent in roster.agents {
+        if agent.agent_type != AGENT_TYPE_LLM
+            || !agent.enabled
+            || agent.system_prompt.trim().is_empty()
+        {
+            continue;
+        }
+        let base = agent_mention_base_token(&agent);
+        let mut token = base.clone();
+        let mut counter = 2u32;
+        while used.contains(&token.to_lowercase()) {
+            token = format!("{base}-{counter}");
+            counter += 1;
+        }
+        used.insert(token.to_lowercase());
+        mentions.push(AgentMention {
+            id: agent.id,
+            name: agent.name,
+            description: agent.description,
+            emoji: agent.emoji,
+            token,
+        });
+    }
+
+    mentions
+}
+
+/// Freeze the roles the composer embedded into a session.
+///
+/// Only `llm` agents with a non-empty prompt contribute one. `enabled` is
+/// deliberately **not** checked: the popup lists enabled agents, but disabling
+/// one between selection and the first send must not silently drop the role the
+/// user picked. Unknown ids are skipped and duplicates keep their first
+/// position, so the prompt order matches the composer order.
+pub fn snapshot_embedded_roles(path: &Path, ids: &[String]) -> Vec<EmbeddedRole> {
+    if ids.is_empty() {
+        return Vec::new();
+    }
+    let roster = load_configured_agents(path);
+    let mut roles: Vec<EmbeddedRole> = Vec::new();
+    for id in ids {
+        if roles.iter().any(|role| &role.id == id) {
+            continue;
+        }
+        let Some(agent) = roster.agents.iter().find(|agent| &agent.id == id) else {
+            continue;
+        };
+        let prompt = agent.system_prompt.trim();
+        if agent.agent_type != AGENT_TYPE_LLM || prompt.is_empty() {
+            continue;
+        }
+        roles.push(EmbeddedRole {
+            id: agent.id.clone(),
+            name: agent.name.clone(),
+            description: agent.description.clone(),
+            prompt: prompt.to_string(),
+        });
+    }
+    roles
 }
 
 /// The panel's Refresh action: migrate configured inline prompts, scan

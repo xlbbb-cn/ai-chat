@@ -2071,6 +2071,7 @@ pub fn run() {
             mcp::mcp_start_stdio,
             mcp::mcp_stop_stdio,
             agents::list_sub_agents,
+            agents::list_agent_mentions,
             agents::refresh_agent_index,
             agents::save_sub_agent,
             agents::delete_sub_agent,

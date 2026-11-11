@@ -485,28 +485,33 @@ accent colour. A badge that is not a state must not compete with the one accent.
   (`saturate(var(--glass-saturate))` added where the header tints its backdrop).
   Both tokens follow Settings → Appearance → Frosted glass.
 
-#### Composer mention popups (`@file`, `/skill`)
+#### Composer mention popups (`@file`, `/skill`, `+agent`)
 
-One surface, two triggers, one behaviour. `components/FileMentionPopup.css` owns
-the frame — header, rows, active fill, empty state — and both
-`components/FileMentionPopup.tsx` and `components/SlashMentionPopup.tsx` render
-those `.file-mention-*` classes. `SlashMentionPopup.css` may only add the skill
-glyph colour (`--c-accent-text`) and the left-to-right description row; it must
-never restate the frame.
+One surface, three triggers, one behaviour. `components/FileMentionPopup.css` owns
+the frame — header, rows, active fill, empty state — and
+`components/FileMentionPopup.tsx`, `components/SlashMentionPopup.tsx` and
+`components/AgentMentionPopup.tsx` render those `.file-mention-*` classes.
+`SlashMentionPopup.css` may only add the skill glyph colour
+(`--c-accent-text`) and the left-to-right description row, and
+`AgentMentionPopup.css` the same two deltas plus the emoji badge box; neither
+may restate the frame.
 
 - Sits `bottom: calc(100% + 6px)` inside `.input-row`, full input width,
   `max-height: 240px` with its own scroll.
 - **Never takes focus.** A row accepts on `mousedown` + `preventDefault`, so the
   caret stays in the textarea and the popup is drivable by keyboard alone.
-- Keyboard contract, identical for both: `↑` / `↓` move, `Enter` / `Tab` accept,
-  `Esc` dismisses. Only the active row wears the `--c-accent-soft` fill.
+- Keyboard contract, identical for all three: `↑` / `↓` move, `Enter` / `Tab`
+  accept, `Esc` dismisses. Only the active row wears the `--c-accent-soft` fill.
 - Row: 4px radius, transparent at rest, `--c-hover` on hover; name `--c-text`
   500, meta (path or description) `--c-muted` 11px, truncated, `margin-left: auto`.
 - **At most one popup is open** — the token grammars are mutually exclusive
   (`@` needs a word boundary and no whitespace/`/`; `/` needs a word boundary and
-  no whitespace/`@`/`#`), so no stacking rule is needed.
+  no whitespace/`@`/`#`; `+` needs to open the line and the line may only hold
+  `+token` words), so no stacking rule is needed.
 - The `@` picker materialises attachments on send; the `/` picker leaves a plain
-  `/skill-name` token in the body for the model to resolve with `use_skill`.
+  `/skill-name` token in the body for the model to resolve with `use_skill`; the
+  `+` picker leaves a `+agent-token` the backend resolves into a session-scoped
+  system-prompt snapshot (only in a conversation with no history yet).
 
 #### Chat notices (warning / error)
 
@@ -1046,7 +1051,7 @@ one decision.
 | `src/utils/svgSanitize.ts` | Element allowlist and attribute blocklist for model-authored SVG |
 | `src/components/ToolCallGroup.css` | Tool-call cards and streaming states |
 | `src/components/TodoList.css` | Todo rows |
-| `src/components/FileMentionPopup.css` | Composer mention popup — one surface shared by the `@file` and `/skill` pickers; `SlashMentionPopup.css` only adds the glyph colour and the left-to-right description |
+| `src/components/FileMentionPopup.css` | Composer mention popup — one surface shared by the `@file`, `/skill` and `+agent` pickers; `SlashMentionPopup.css` / `AgentMentionPopup.css` only add the glyph colour and the left-to-right description |
 | `src/components/{Skills,Mcp,Tools,Agents,History}Panel.css` | Panel-specific layout only — chrome comes from the shared primitives |
 | `src/components/SettingsPanel.css` | Settings page (`--t-*` are aliases of `--c-*`) |
 | `src/components/ModelSelect.css` | Model picker trigger + portal popup |

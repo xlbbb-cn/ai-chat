@@ -427,6 +427,12 @@ interface Props {
    * `1/2` fraction stays plain text.
    */
   skillNames?: string[];
+  /**
+   * Agent tokens (`+agent`, without the `+`) known in the roster. A `+token`
+   * in a user message is highlighted only when it names one of them, so
+   * arithmetic such as `2 + 2` and `C++` stays plain text.
+   */
+  agentTokens?: string[];
   /** Session this message belongs to — the todo panel fetches its active list. */
   sessionId?: string;
   /**
@@ -529,6 +535,55 @@ function highlightSkillMentions(root: HTMLElement, known: Set<string>) {
       // Punctuation belongs to the sentence, not to the skill name.
       const raw = match[0].replace(/[.,;:!?)\]}"']+$/, "");
       if (!known.has(raw.slice(1))) continue;
+      found = true;
+      if (match.index > cursor) {
+        fragment.appendChild(document.createTextNode(text.slice(cursor, match.index)));
+      }
+      const span = document.createElement("span");
+      span.className = "file-mention-token";
+      span.textContent = raw;
+      fragment.appendChild(span);
+      cursor = match.index + raw.length;
+    }
+    if (!found) continue;
+    if (cursor < text.length) {
+      fragment.appendChild(document.createTextNode(text.slice(cursor)));
+    }
+    node.replaceWith(fragment);
+  }
+}
+
+/**
+ * Wrap `+agent` mentions in the body with the same accent span `@file` and
+ * `/skill` mentions wear. Only a token naming a known agent is highlighted:
+ * `+` is an ordinary character in arithmetic (`2 + 2`) and in `C++`, so an
+ * unknown token must stay exactly as typed.
+ */
+function highlightAgentMentions(root: HTMLElement, known: Set<string>) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode as Text);
+
+  const token = /\+([^\s+@/<>#]+)/g;
+
+  for (const node of nodes) {
+    const text = node.data;
+    if (!text.includes("+")) continue;
+    // Already wrapped tokens are skipped, which keeps a re-run idempotent.
+    if (node.parentElement?.closest("pre, code, a, .katex, button, .file-mention-token")) continue;
+
+    const fragment = document.createDocumentFragment();
+    let cursor = 0;
+    let found = false;
+    token.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = token.exec(text)) !== null) {
+      // Only a token that opens the line or follows whitespace is a mention.
+      if (match.index > 0 && !/\s/.test(text[match.index - 1])) continue;
+      // Punctuation belongs to the sentence, not to the agent token.
+      const raw = match[0].replace(/[.,;:!?，。；：！？)\]}"']+$/, "");
+      const name = raw.slice(1);
+      if (!known.has(name)) continue;
       found = true;
       if (match.index > cursor) {
         fragment.appendChild(document.createTextNode(text.slice(cursor, match.index)));
@@ -763,7 +818,7 @@ function writingTailHost(content: HTMLElement): HTMLElement {
   return host;
 }
 
-export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onFork, dbId, onConfirm, onCancelBackground, backgroundTasks, backgroundWaiting, skillNames, sessionId, todoActive }: Props) {
+export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onFork, dbId, onConfirm, onCancelBackground, backgroundTasks, backgroundWaiting, skillNames, agentTokens, sessionId, todoActive }: Props) {
   const { t } = useI18n();
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
@@ -858,6 +913,7 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
   const streamedTextRef = useRef("");
   const renderedHtmlRef = useRef("");
   const appliedSkillNamesRef = useRef("");
+  const appliedAgentTokensRef = useRef("");
   const writingPenRef = useRef<HTMLSpanElement | null>(null);
   const writingStartRef = useRef(0);
   // Per-character reveal schedule. `starts[i]` is the absolute time at which
@@ -906,8 +962,9 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
         } catch (error) {
           console.error("Mention highlighting failed", error);
         }
-        // A freshly painted body carries no `/skill` spans yet.
+        // A freshly painted body carries no `/skill` or `+agent` spans yet.
         appliedSkillNamesRef.current = "";
+        appliedAgentTokensRef.current = "";
       }
     }
 
@@ -919,6 +976,17 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
       if (key !== appliedSkillNamesRef.current) {
         highlightSkillMentions(el, new Set(skillNames));
         appliedSkillNamesRef.current = key;
+      }
+    }
+
+    // The `+agent` roster is preloaded at startup, so a restored transcript can
+    // be highlighted as soon as it is painted; the key guard keeps this cheap
+    // on every later commit.
+    if (isUser && agentTokens && agentTokens.length > 0) {
+      const key = agentTokens.join("\n");
+      if (key !== appliedAgentTokensRef.current) {
+        highlightAgentMentions(el, new Set(agentTokens));
+        appliedAgentTokensRef.current = key;
       }
     }
 
