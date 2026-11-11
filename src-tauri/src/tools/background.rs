@@ -16,7 +16,9 @@
 // Lifetime: tasks are turn-scoped, exactly like `run_shell` serve processes.
 // `end_turn_cleanup` shuts a session down, which sets every cancel flag and
 // drops the entries; the runners then kill their children and find no entry to
-// report into.
+// report into. Teardown and cancellation therefore *return* the terminal
+// snapshots: that discarded report is the only other way the UI could learn
+// that a task it still shows as running is gone.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -341,48 +343,57 @@ impl BackgroundRegistry {
         Some(snapshot)
     }
 
-    /// Cancel every running task of a session. Returns how many were running.
-    pub fn cancel_session(&self, session_id: &str) -> usize {
-        let ids: Vec<String> = self
-            .tasks
-            .lock()
-            .map(|tasks| {
-                tasks
-                    .values()
-                    .filter(|task| {
-                        task.session_id == session_id && task.status == BgStatus::Running
-                    })
-                    .map(|task| task.id.clone())
-                    .collect()
-            })
-            .unwrap_or_default();
-        let mut cancelled = 0;
-        for id in ids {
-            if self.cancel(&id).is_some() {
-                cancelled += 1;
+    /// Cancel every running task of a session and return their terminal
+    /// snapshots so the caller can broadcast the change. Tasks that were not
+    /// running are left untouched and not reported — nothing changed for them.
+    pub fn cancel_session(&self, session_id: &str) -> Vec<BackgroundTaskSnapshot> {
+        let mut cancelled: Vec<BackgroundTaskSnapshot> = Vec::new();
+        if let Ok(mut tasks) = self.tasks.lock() {
+            let now = Instant::now();
+            for task in tasks.values_mut() {
+                if task.session_id != session_id || task.status != BgStatus::Running {
+                    continue;
+                }
+                task.cancel.store(true, Ordering::SeqCst);
+                task.status = BgStatus::Cancelled;
+                task.finished_at = Some(now);
+                cancelled.push(task.snapshot());
             }
         }
+        if !cancelled.is_empty() {
+            self.notify.notify_waiters();
+        }
+        cancelled.sort_by(|a, b| a.started_at_ms.cmp(&b.started_at_ms).then(a.id.cmp(&b.id)));
         cancelled
     }
 
     /// Turn-end teardown: set every running cancel flag, then drop all of the
     /// session's entries. The runners still complete (and kill their children)
     /// but find nothing to report into, which is exactly what "the turn is
-    /// over" means.
-    pub fn shutdown_session(&self, session_id: &str) -> usize {
+    /// over" means. Returns the snapshots of the dropped entries, with a task
+    /// still running reported as `Cancelled`, so the caller can broadcast a
+    /// terminal state for every row the UI is still showing.
+    pub fn shutdown_session(&self, session_id: &str) -> Vec<BackgroundTaskSnapshot> {
         let Ok(mut tasks) = self.tasks.lock() else {
-            return 0;
+            return Vec::new();
         };
-        for task in tasks.values() {
-            if task.session_id == session_id && task.status == BgStatus::Running {
-                task.cancel.store(true, Ordering::SeqCst);
+        let now = Instant::now();
+        let mut removed: Vec<BackgroundTaskSnapshot> = Vec::new();
+        for task in tasks.values_mut() {
+            if task.session_id != session_id {
+                continue;
             }
+            if task.status == BgStatus::Running {
+                task.cancel.store(true, Ordering::SeqCst);
+                task.status = BgStatus::Cancelled;
+                task.finished_at = Some(now);
+            }
+            removed.push(task.snapshot());
         }
-        let before = tasks.len();
         tasks.retain(|_, task| task.session_id != session_id);
-        let removed = before - tasks.len();
         drop(tasks);
         self.notify.notify_waiters();
+        removed.sort_by(|a, b| a.started_at_ms.cmp(&b.started_at_ms).then(a.id.cmp(&b.id)));
         removed
     }
 
@@ -551,10 +562,58 @@ mod tests {
         let (done, _) = registry.insert("s1", "run_cmd", "short");
         registry.finish(&done, BgStatus::Done, Some("ok".to_string()));
 
-        assert_eq!(registry.shutdown_session("s1"), 2);
+        let dropped = registry.shutdown_session("s1");
+        assert_eq!(dropped.len(), 2);
         assert!(cancel.load(Ordering::SeqCst));
+        let stubborn = dropped.iter().find(|task| task.id == running).unwrap();
+        assert_eq!(
+            stubborn.status,
+            BgStatus::Cancelled,
+            "a task still running at teardown is reported as cancelled"
+        );
         assert!(registry.list("s1").is_empty());
         assert!(registry.get(&running).is_none());
+    }
+
+    #[test]
+    fn shutdown_session_reports_a_terminal_snapshot_for_every_dropped_task() {
+        let registry = BackgroundRegistry::new();
+        let (running, _) = registry.insert("s1", "run_shell", "long");
+        let (done, _) = registry.insert("s1", "run_cmd", "short");
+        let (failed, _) = registry.insert("s1", "run_cmd", "bad");
+        registry.finish(&done, BgStatus::Done, Some("ok".to_string()));
+        registry.finish(&failed, BgStatus::Failed, Some("Error: boom".to_string()));
+        let (other, _) = registry.insert("s2", "run_shell", "elsewhere");
+
+        let dropped = registry.shutdown_session("s1");
+        assert_eq!(dropped.len(), 3, "only this session's tasks are reported");
+        let status_of = |id: &str| dropped.iter().find(|task| task.id == id).unwrap().status;
+        assert_eq!(status_of(&running), BgStatus::Cancelled);
+        assert_eq!(status_of(&done), BgStatus::Done);
+        assert_eq!(status_of(&failed), BgStatus::Failed);
+        assert!(dropped.iter().all(|task| task.session_id == "s1"));
+        // The other session is untouched.
+        assert_eq!(registry.pending("s2"), 1);
+        assert!(registry.get(&other).is_some());
+    }
+
+    #[test]
+    fn cancel_session_reports_only_the_tasks_it_cancelled() {
+        let registry = BackgroundRegistry::new();
+        let (running, cancel) = registry.insert("s1", "run_shell", "long");
+        let (done, _) = registry.insert("s1", "run_cmd", "short");
+        registry.finish(&done, BgStatus::Done, Some("ok".to_string()));
+
+        let cancelled = registry.cancel_session("s1");
+        assert_eq!(cancelled.len(), 1);
+        assert_eq!(cancelled[0].id, running);
+        assert_eq!(cancelled[0].status, BgStatus::Cancelled);
+        assert!(cancel.load(Ordering::SeqCst));
+        assert!(
+            registry.cancel_session("s1").is_empty(),
+            "nothing is left to cancel, so nothing is reported"
+        );
+        assert_eq!(registry.pending("s1"), 0);
     }
 
     #[tokio::test]

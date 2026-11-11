@@ -1247,6 +1247,7 @@ fn start_background_mcp_call(
 
 /// `background_task` control tool: list / wait / get / cancel.
 async fn handle_background_task_tool(
+    app: &AppHandle,
     state: &State<'_, AppState>,
     session_id: &str,
     args: &Value,
@@ -1351,21 +1352,37 @@ async fn handle_background_task_tool(
             let id = args["task_id"].as_str().unwrap_or("").trim();
             if id.is_empty() || id == "all" {
                 let cancelled = state.background_tasks.cancel_session(session_id);
-                return if cancelled == 0 {
+                let count = cancelled.len();
+                // The model cancelled them, but the user is looking at the same
+                // rows: broadcast each terminal snapshot, or the panel keeps
+                // showing work that is already dying.
+                for snapshot in cancelled {
+                    let _ = app.emit(
+                        tools::background::BACKGROUND_TASK_STATE_EVENT,
+                        snapshot,
+                    );
+                }
+                return if count == 0 {
                     "No running background tasks.".to_string()
                 } else {
                     format!(
-                        "Cancelled {cancelled} background task(s). Their process trees are being terminated."
+                        "Cancelled {count} background task(s). Their process trees are being terminated."
                     )
                 };
             }
             match state.background_tasks.cancel(id) {
-                Some(snapshot) => format!(
-                    "Task {} ({}) is {} — its process tree is being terminated.",
-                    snapshot.id,
-                    snapshot.tool,
-                    snapshot.status.as_str()
-                ),
+                Some(snapshot) => {
+                    let _ = app.emit(
+                        tools::background::BACKGROUND_TASK_STATE_EVENT,
+                        snapshot.clone(),
+                    );
+                    format!(
+                        "Task {} ({}) is {} — its process tree is being terminated.",
+                        snapshot.id,
+                        snapshot.tool,
+                        snapshot.status.as_str()
+                    )
+                }
                 None => format!("Error: unknown background task '{id}'."),
             }
         }
@@ -4513,9 +4530,18 @@ still missing."
                     "WARN",
                     format!(
                         "background hold budget exhausted: session_id={}, cancelled={}",
-                        session_id, cancelled
+                        session_id,
+                        cancelled.len()
                     ),
                 );
+                // Tell the UI now: these tasks never get a runner report the
+                // user could see (the turn is ending right after).
+                for snapshot in cancelled {
+                    let _ = app.emit(
+                        tools::background::BACKGROUND_TASK_STATE_EVENT,
+                        snapshot,
+                    );
+                }
             }
 
             final_answer = Some(sr.content.clone());
@@ -4592,7 +4618,7 @@ still missing."
             let mut result = if let Some(notice) = blocked {
                 notice
             } else if name == BACKGROUND_TOOL_NAME {
-                handle_background_task_tool(&state, &session_id, &background_args).await
+                handle_background_task_tool(&app, &state, &session_id, &background_args).await
             } else if config.background_tools
                 && background_requested(&background_args)
                 && name != "call_subagent"
@@ -5086,11 +5112,32 @@ async fn end_turn_cleanup(app: &AppHandle, session_id: &str) {
         .state::<AppState>()
         .background_tasks
         .shutdown_session(session_id);
-    if removed > 0 {
+    let removed_count = removed.len();
+    // Broadcast a terminal snapshot for every dropped task *before*
+    // `chat_completion` returns. The runner that dies now finds no entry to
+    // report into, so this is the only thing that can flip the UI: without it
+    // the panel keeps rendering the last `running` state forever and the
+    // transcript row keeps offering a cancel button for a task that is gone.
+    for snapshot in removed {
+        let _ = app.emit(
+            tools::background::BACKGROUND_TASK_STATE_EVENT,
+            snapshot,
+        );
+    }
+    // The waiting chip is driven by `background-waiting`; zero it on every turn
+    // end so a hold that was cut short (Stop, error, budget) cannot leave it
+    // counting down a turn that no longer exists.
+    let _ = app.emit(
+        tools::background::BACKGROUND_WAITING_EVENT,
+        json!({ "session_id": session_id, "pending": 0 }),
+    );
+    if removed_count > 0 {
         log_event(
             &app.state::<AppState>(),
             "INFO",
-            format!("turn ended (session {session_id}): shut down {removed} background task(s)"),
+            format!(
+                "turn ended (session {session_id}): shut down {removed_count} background task(s)"
+            ),
         );
     }
 

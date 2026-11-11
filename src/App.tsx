@@ -1889,6 +1889,22 @@ export default function App() {
       .catch((err) => console.error("Failed to load background tasks", err));
   }, [sessionId]);
 
+  // Safety net for the turn boundary. Tasks are turn-scoped, so once the turn
+  // is over nothing can still be `running`: the backend tore every runner down
+  // and dropped its entry (`end_turn_cleanup`), and its own report is discarded
+  // by that teardown. Rows left here are therefore stale by definition — drop
+  // them and zero the waiting chip, so a missed or late event can never leave
+  // the panel spinning on work that is already gone.
+  useEffect(() => {
+    if (streaming) return;
+    setBackgroundTasks((prev) =>
+      prev.some((task) => task.status === "running")
+        ? prev.filter((task) => task.status !== "running")
+        : prev
+    );
+    setBackgroundWaiting(0);
+  }, [streaming]);
+
   // Delay timers: initial list, live updates, and the resume hook.
   useEffect(() => {
     listTimers()

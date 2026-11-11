@@ -1071,7 +1071,7 @@ fn extract_context_length(model: &serde_json::Value) -> Option<u64> {
 }
 
 #[tauri::command]
-fn stop_chat_completion(state: State<'_, AppState>) {
+fn stop_chat_completion(app: AppHandle, state: State<'_, AppState>) {
     // Cancel the *current* turn's flag. If no turn is running this simply
     // marks the slot's default flag — a new turn installs a fresh flag anyway,
     // so the stop never leaks into the next turn.
@@ -1081,19 +1081,37 @@ fn stop_chat_completion(state: State<'_, AppState>) {
     // Background tasks must die immediately, not at the next loop iteration:
     // a foreground tool may still be blocking the turn. The active turn carries
     // the session id, so only this session's tasks are touched.
-    if let Ok(active) = state.active_turn.lock() {
-        if let Some((_, session_id)) = active.as_ref() {
-            let cancelled = state.background_tasks.cancel_session(session_id);
-            if cancelled > 0 {
-                let _ = state.logger.lock().map(|logger| {
-                    logger.log(
-                        "INFO",
-                        &format!(
-                            "Stop pressed: cancelled {cancelled} background task(s) of session {session_id}"
-                        ),
-                    );
-                });
-            }
+    let session_id = state
+        .active_turn
+        .lock()
+        .ok()
+        .and_then(|active| active.as_ref().map(|(_, session_id)| session_id.clone()));
+    if let Some(session_id) = session_id {
+        let cancelled = state.background_tasks.cancel_session(&session_id);
+        // Broadcast before the turn unwinds. Stop is the one path where the
+        // turn-end teardown may drop the entry before the runner can report it,
+        // so the UI would otherwise keep the row (and its cancel button) alive
+        // for a task that is already dying.
+        for snapshot in &cancelled {
+            let _ = app.emit(
+                tools::background::BACKGROUND_TASK_STATE_EVENT,
+                snapshot.clone(),
+            );
+        }
+        let _ = app.emit(
+            tools::background::BACKGROUND_WAITING_EVENT,
+            serde_json::json!({ "session_id": session_id, "pending": 0 }),
+        );
+        if !cancelled.is_empty() {
+            let count = cancelled.len();
+            let _ = state.logger.lock().map(|logger| {
+                logger.log(
+                    "INFO",
+                    &format!(
+                        "Stop pressed: cancelled {count} background task(s) of session {session_id}"
+                    ),
+                );
+            });
         }
     }
 }
