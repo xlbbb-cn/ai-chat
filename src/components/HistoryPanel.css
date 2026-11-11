@@ -27,7 +27,7 @@
   padding: 7px 11px;
   font-size: 13px;
   color: var(--c-text);
-  background: var(--c-surface);
+  background: var(--c-field);
   outline: none;
   transition: border-color 0.2s, box-shadow 0.2s;
 }
@@ -57,7 +57,6 @@
   left: 0;
   z-index: 0;
   box-sizing: border-box;
-  border: 1px solid var(--c-accent-text);
   border-radius: var(--r-sm);
   background: var(--c-accent-soft);
   pointer-events: none;
@@ -117,7 +116,10 @@
   left: 0;
   z-index: 0;
   box-sizing: border-box;
-  border: 1px solid var(--c-accent-text);
+  /* No outline around the selected row: a soft fill plus a 2px accent
+     indicator on its leading edge reads as a highlight, where a box drawn
+     around the text read as a form field. */
+  border-left: 2px solid var(--c-accent);
   border-radius: var(--r-sm);
   background: var(--c-accent-soft);
   pointer-events: none;
@@ -199,7 +201,6 @@
 
 .history-item:hover {
   background: var(--c-hover);
-  border-color: var(--c-border-i);
 }
 
 .history-item.disabled {
@@ -317,7 +318,7 @@
   padding: 3px 7px;
   font-size: 13px;
   color: var(--c-text);
-  background: var(--c-surface);
+  background: var(--c-field);
   outline: none;
   box-shadow: 0 0 0 3px var(--c-accent-soft);
 }
@@ -337,6 +338,9 @@
   flex: 1;
   min-width: 0;
   font-size: 13px;
+  /* A session title is the row's headline: Medium, while the metadata and
+     timestamp below stay Regular at 12px in the secondary greys. */
+  font-weight: 500;
   color: var(--c-text);
   overflow: hidden;
   text-overflow: ellipsis;

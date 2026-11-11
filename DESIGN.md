@@ -21,14 +21,14 @@ motion curve. Everything below is written against this codebase — the tokens i
    a view. Never use it decoratively and never add a second chromatic accent.
    A palette may re-hue it, but it stays the only accent of that view.
 3. **No elevation.** `--shadow-*` resolve to `none`. Layering is z-index, opacity
-   and the frosted `--glass-backdrop` surface — nothing else. The **one** exception is
+   and the frosted `--glass-backdrop` surface — nothing else. There are exactly **two** exceptions and neither lifts a surface:
    the functional scroll-edge shade (`--shadow-scroll-top` /
    `--shadow-scroll-bottom`): it never lifts a surface, it only says “the
-   transcript continues past this bar”, and it is toggled by scroll position.
+   transcript continues past this bar”, and it is toggled by scroll position. The other is the specular inner edge (`--glass-edge`): a 1px highlight along the **window's** top edge that casts nothing outward; a band tucked under another band gets none, because there it reads as a stray rule. A drop shadow, a glow or a second ring is still a bug.
 4. **4px radius on interactive elements.** No pills, no large radii, no circles
    (except the deliberate dot/spinner indicators).
 5. **One motion curve.** `--t-dur` + `--t-ease` for every state change. Colour and
-   border transitions only — no `scale`, no `translate` on hover.
+   border transitions only — no `scale`, no `translate` on hover. The **one** spring in the system is the side panel's entrance (`SIDEBAR_SPRING` in `src/App.tsx`): a 20px glide at stiffness 320 / damping 32, because a fixed curve cannot give a 400px frosted panel its settle. It is disabled under `prefers-reduced-motion`.
 6. **Hairlines separate, not boxes.** 1px `--c-border` for structure, 1px
    `--c-border-i` for interactive outlines.
 7. **Reuse the shared primitives.** `.close-btn`, `.btn-primary`, `.btn-secondary`,
@@ -109,9 +109,10 @@ decision, and `off` is a supported look rather than a broken one.
 |---|---|---|
 | `--glass-blur` | `20px` | Blur of the frosted bars: titlebar, toolbar, sidebar, input area, panel headers |
 | `--glass-blur-scrim` | `8px` | Blur of modal backdrops — a smaller radius keeps a full-window scrim cheap |
-| `--glass-saturate` | `180%` | Saturation boost of the headers that tint their backdrop |
+| `--glass-saturate` | `180%` | Saturation boost paired with the blur on **every** glass surface, so a tinted band lifts the colour behind it instead of greying it out. `off` sets `100%` |
 | `--glass-backdrop` | `var(--c-toolbar)` | The fill the glass sits on |
 | `--glass-canvas` | `transparent` | Canvas of a panel mounted in the glass sidebar |
+| `--glass-edge` | `inset 0 1px 0 rgba(255,255,255,.55)` | The specular 1px inner highlight, window top edge only (dark: `.07`) |
 | `--c-window` | `color-mix(in srgb, var(--c-surface) 40%, transparent)` | Window-frame tint, only defined under `html[data-vibrancy]` (see *Window vibrancy*) |
 
 The level lives in `AppConfig.glass_effect`, is written to `<html>` as
@@ -165,10 +166,48 @@ the blur (the Windows 11 system backdrop is tinted by the OS, the Windows 10
 path gets a low-alpha tint), so the density per level lives entirely in
 `--c-window` and both backdrops land on the same contrast.
 
-Never write a blur radius, a `saturate()` or a `--c-toolbar` fill at a call site:
-`background: var(--glass-backdrop)` plus
-`backdrop-filter: blur(var(--glass-blur))` (add
-`saturate(var(--glass-saturate))` only where the header tints its backdrop).
+#### Control fills (`--c-field` / `--c-btn` / `--c-sheet` / `--c-panel` / `--c-popup`)
+
+A control painted `--c-surface` on a translucent band is a solid block on
+glass. These five tokens are the fix, and they are opaque by default, so every
+platform without a backdrop keeps the opaque look:
+
+| Token | Opaque | Under `data-vibrancy` | Used by |
+|---|---|---|---|
+| `--c-field` | `var(--c-surface)` | `var(--c-window)` | inputs, textareas, selects, segmented and palette options, timer / injection chips |
+| `--c-btn` | `var(--c-surface-2)` | `color-mix(in srgb, var(--c-surface) 55%, transparent)` | tonal buttons, list rows, nav items, inner confirmation cards |
+| `--c-sheet` | `var(--c-surface)` | `color-mix(in srgb, var(--c-surface) 94%, transparent)` | page canvas that replaces the transcript (Settings, prompt editor) |
+| `--c-panel` | `var(--glass-backdrop)` | `color-mix(in srgb, var(--c-bg) 94%, transparent)` | the side panel shell, its headers and the bands mounted inside it |
+| `--c-popup` | `var(--c-surface)` | `color-mix(in srgb, var(--c-surface) 84%, transparent)` | floating cards over readable text (model picker, `@` popup, confirmation panel) |
+
+`--c-field` resolving to the band tint is deliberate: a field then reads as part
+of the glass and only its hairline defines it — the same relationship the opaque
+design already had, where a field was filled with the page colour. `--c-btn`
+stays one step denser than the band, so a tonal fill still reads as a patch
+rather than as a hairline. Popups keep most of their body and pick up
+`backdrop-filter: blur(var(--glass-blur-scrim))` under vibrancy: they open over
+the opaque transcript, so CSS *can* blur what is behind them even though it can
+never blur the desktop. Hover fills on a glass surface use `--c-active`, which is
+alpha-based in both themes and therefore never turns into a solid block.
+
+The two large surfaces are deliberately near-opaque. A panel or a page carries
+every row it has, so at the window tint the transcript behind it read through as
+text, and its hairlines cut the surface into bands of different colour — the
+Settings header sat over the chat toolbar while the rest sat over the transcript.
+At 94% nothing behind reads, and the blur that stays on keeps the surface
+frosted instead of flat. `--c-panel` is mixed from `--c-bg` and not
+`--c-surface`, so a panel's cards (opaque `--c-surface`) still sit a shade above
+its shell, exactly as the opaque design did.
+
+Never write a blur radius, a `saturate()` or a `--c-toolbar` fill at a call site.
+The whole material is these four declarations and nothing else:
+
+```css
+background: var(--glass-backdrop);   /* or --c-window under data-vibrancy */
+-webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+box-shadow: var(--glass-edge);
+```
 
 Glass only reads when something sits **behind** it, so a panel that lives in the
 sidebar (`.skills-panel`, `.tools-panel`, `.mcp-panel`, `.history-panel`,
@@ -275,13 +314,15 @@ square off with everything else. New code should write `4px` or `var(--r-sm)`.
 ### Motion
 
 ```css
---t-dur: 0.33s;
---t-ease: cubic-bezier(0.5, 0, 0, 0.75);
+--t-dur: 0.18s;
+--t-ease: cubic-bezier(0.25, 1, 0.5, 1);
 ```
 
-Use as `transition: background-color var(--t-dur) var(--t-ease)`. The only
-sanctioned deviation is `box-shadow 0.25s var(--t-ease)` on the inset focus/active
-ring of primary buttons.
+Use as `transition: background-color var(--t-dur) var(--t-ease)`. 180ms is the top
+of the 120–200ms band the interaction spec asks for; anything longer reads as lag
+in a keyboard-driven tool. The curve is a fast-out / slow-in ease (Out Quad). The
+only sanctioned deviation is `box-shadow 0.25s var(--t-ease)` on the inset
+focus/active ring of primary buttons.
 
 ### Legacy aliases that must stay
 
@@ -703,6 +744,108 @@ The 1px divider between the sidebar and the chat area is drawn by
 the header's own band it is deliberately absent, because a vertical line there
 would cut the glass band in two right next to the chevron and make the header read as
 a board glued to the left edge.
+
+---
+
+## PATCH v1.0 — Liquid Glass material & interaction spec
+
+An external spec ("AI 客户端界面设计与交互规范 v1.0") was folded into this
+contract. It describes a macOS Liquid Glass client; this app is a Tauri desktop
+tool built around a 4px hairline layout, so the patch is applied **through the
+token system**: its *material* moved, its *geometry* did not. Everything below is
+implemented with a token, or listed as a deliberate refusal.
+
+### The three principles, in this codebase
+
+| Principle | Implementation |
+|---|---|
+| 通透与层级 — translucency carries the hierarchy | `--glass-backdrop` + `blur(--glass-blur)` + `saturate(--glass-saturate)` + `--glass-edge`, scaled globally by `data-glass`, with the DWM backdrop under `data-vibrancy`. A coloured block where a tinted surface would do is a regression. |
+| 克制与聚焦 — the conversation is the interface | One accent (`--c-accent`); the transcript stays opaque `--c-bg`; the chrome stays neutral. |
+| 细腻的光影 — specular detail | `--glass-edge` (1px inner top highlight), `--c-border` hairlines, and the two sanctioned shades: the scroll edge and `--shadow-side`. Nothing else. |
+
+### Material (spec §2)
+
+| Spec says | Here |
+|---|---|
+| `blur(24px) saturate(180%)` | `blur(--glass-blur)` — `20px` standard, `12` subtle, `32` strong, `0` off — always paired with `saturate(--glass-saturate)` (`180%`, `100%` when off) |
+| `border: 1px solid rgba(255,255,255,.4)` | `--glass-edge` inner highlight (window top edge only), on top of the `--c-border` hairline |
+| `box-shadow: 0 8px 32px rgba(0,0,0,.08)` | **refused** — non-negotiable 3, no elevation. The one shading in the system is `--shadow-side`, which separates the floating side panel from the transcript it covers and casts on nothing else |
+| `border-radius: 16px` panels, `24px` pills | **refused** — non-negotiable 4. The 4px geometry is what keeps the app from reading as a web page imitating macOS |
+| focus glow `0.08 → 0.18` on the input pill | **refused for the composer**: it holds focus while typing, so a permanent glow would be the loudest object on screen. The glow stays on the primary CTA ring (`--c-accent-soft`, `0.10 → 0.18` on hover) |
+
+### Interaction (spec §3–§5)
+
+Already satisfied — no change was needed:
+
+- **Header**: the window drag region (`--titlebar-h`), 1.5px `currentColor`
+  strokes, `--c-hover` fill on `--t-dur`.
+- **Composer**: `@` reference, attachments, model picker, thinking level and the
+  accent send button, all on the frosted `--glass-backdrop`.
+- **Reasoning** is a collapsible low-contrast block (`--c-reason`, `--c-muted`
+  copy); **code** blocks carry their own surface, language label and copy button.
+- **Motion**: `--t-dur` `180ms`, `--t-ease` `cubic-bezier(.25, 1, .5, 1)`, colour
+  and border only.
+
+Refused or deferred:
+
+- **Spring physics** for anything other than the side panel — one curve is a non-negotiable. Height
+  transitions use `--t-ease`, and `prefers-reduced-motion` still collapses them.
+- **`scale(1.02)` on the send button** — non-negotiable 5 keeps hover to colour;
+  a scaling button in a 34px row shifts the optical weight of its neighbours.
+- **Liquid radii / floating pill geometry** — that is a *mode*: it would have to
+  swap `--r-*` wholesale. Pills next to 4px fields is worse than neither.
+- **A second chromatic accent** (Aurora Blue / Fluid Violet as a new hue) — the
+  palette system already re-hues the single accent; a parallel one breaks rule 2.
+
+---
+
+## PATCH v1.1 — side panel (history, skills, tools, agents, MCP)
+
+The side panel is the one surface that floats **over** the transcript, so it is
+also the one place where the glass has to show something: the conversation
+blurring past behind it is the effect, not an accident.
+
+| Spec says | Here |
+|---|---|
+| `rgba(255,255,255,.72)` light, `rgba(30,30,30,.65)` dark | `--c-panel` = `color-mix(in srgb, var(--c-bg) 75%, transparent)`, and `65%` under `[data-theme="dark"][data-vibrancy]`. Mixed from the canvas, not the surface, so the panel's cards (opaque `--c-surface`) still sit a shade above the shell |
+| `blur(28px) saturate(190%)` | `blur(var(--glass-blur)) saturate(var(--glass-saturate))` — the level scales it `12 / 20 / 32px`, so the panel never hard-codes a radius |
+| `border-right: 1px solid rgba(255,255,255,.35)` | the `.sidebar::after` hairline stays the structural edge; there is no lit edge on the panel — its top is tucked under the titlebar — only the `--shadow-side` shade |
+| `box-shadow: 10px 0 30px rgba(0,0,0,.04)` | `--shadow-side` = `10px 0 30px var(--c-panel-shade)` (`rgba(0,0,0,.05)` light, `.32` dark), applied **only** to `.sidebar` |
+| `border-radius: 10px` rows, `rgba(var(--primary-color-rgb), .08)` fills | rows keep `--r-sm` and use `--c-accent-soft` / `--c-hover`; there is no `--primary-color-rgb`, and no second way to spell the accent |
+| active row = soft fill + theme indicator | `.history-selection` is `--c-accent-soft` with a `2px --c-accent` leading bar and **no** outline. The filter tabs' travelling indicator lost its accent outline for the same reason: a box around the label read as a form field |
+| hover `rgba(0,0,0,.03)` | `--c-hover`, and the row's hairline is dropped on hover — the fill alone marks the row, so the list stops looking like a table |
+| title Medium, meta smaller / lower contrast | `.history-preview` `500` at `13px`; `.history-meta` and `.history-created` stay `400` at `12px` in `--c-muted` / `--c-placeholder` |
+| gradient on the selected row | **refused** — gradients are palette-only (Cream washes); a translucent fill does the same job without a second colour system |
+
+---
+
+## PATCH v1.2 — panel motion: spring physics
+
+`framer-motion` (`motion.aside` + `AnimatePresence`) drives the side panel's
+entrance and exit. It is the **only** animation in the app that is not
+`--t-dur` + `--t-ease`.
+
+```ts
+// src/App.tsx
+const SIDEBAR_SPRING = { type: "spring", stiffness: 320, damping: 32 };
+const SIDEBAR_SHOWN = { opacity: 1, x: 0, pointerEvents: "auto" };
+const SIDEBAR_HIDDEN = { opacity: 0, x: -20, pointerEvents: "none" };
+```
+
+| Spec says | Here, and why |
+|---|---|
+| `animate={{ width: isOpen ? 280 : 0 }}` | **refused for width** — the panel keeps its fixed `400px`. Animating the width of a frosted surface re-samples the backdrop and reflows every row on each frame, which is the stutter the spec's own §3 warns about |
+| `x: isOpen ? 0 : -20` | adopted verbatim as `SIDEBAR_HIDDEN.x`: a 20px glide plus the fade is what makes the spring felt without moving the whole surface |
+| `stiffness: 320, damping: 32` | adopted verbatim. No second spring exists anywhere, so the app still has one motion language |
+| `overflow: hidden` + `white-space: nowrap` | already true, and moot: nothing resizes, so no text can reflow mid-animation (`.sidebar { overflow: hidden }`, rows ellipsise) |
+| `translateZ(0)` / `backface-visibility: hidden` | `.sidebar` carries `will-change: transform` + `backface-visibility: hidden`; the inline `transform` framer writes would overwrite a literal `translateZ(0)` |
+| a leaving panel must not eat clicks | `SIDEBAR_HIDDEN.pointerEvents: "none"` |
+| `prefers-reduced-motion` | `useReducedMotion()` collapses the spring to a 0ms swap; mount and unmount still run |
+
+`--t-dur-sidebar` and the `.sidebar-opening` / `.sidebar-closing` crossfade were
+removed with it. `AnimatePresence` owns the exit, and `sidebar` state drops to
+`null` the moment it closes — Escape, the window title and chat-click handling
+never see a half-open panel.
 
 ---
 

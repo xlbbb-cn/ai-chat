@@ -48,7 +48,7 @@
     gap: 12px;
     flex-shrink: 0;
     padding: 9px 12px;
-    background: var(--glass-backdrop);
+    background: var(--c-panel);
     -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
     backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
     border-bottom: 1px solid var(--c-border);

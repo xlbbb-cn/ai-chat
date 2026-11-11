@@ -11,7 +11,9 @@
   position: fixed;
   inset: var(--titlebar-h) 0 0 0;
   z-index: 900;
-  background: var(--c-bg);
+  /* The page inside paints the sheet (`--c-sheet`), so the overlay is only a
+     container — painting it too would hide the glass behind two fills. */
+  background: transparent;
   animation: settings-fade-in 0.2s ease;
 }
 
@@ -51,9 +53,24 @@
   flex-direction: column;
   width: 100%;
   height: 100%;
-  background: var(--t-bg);
+  background: var(--c-sheet);
   color: var(--t-text);
   overflow: hidden;
+}
+
+/* A page on a translucent sheet shows what is behind it, and behind this one is
+   a stack of different fills: the chat toolbar ends ~50px below the titlebar —
+   *inside* this page's header band — so its hairline used to cut the title
+   background in two, with the opaque transcript below it. The page replaces the
+   chat outright, so the chat fades out while it is open and the only thing left
+   behind is the window backdrop, which is uniform.
+   `:has()` is a progressive enhancement: a browser without it keeps the old
+   two-tone header, never a broken layout. */
+body:has(> .settings-overlay) .chat-area,
+body:has(> .settings-overlay) .sidebar {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
 }
 
 /* ---- Page header ---- */
@@ -124,12 +141,12 @@
 
 .settings-nav-item:hover {
   color: var(--t-text);
-  background: var(--t-bg-soft);
+  background: var(--c-btn);
 }
 
 .settings-nav-item.active {
   color: var(--t-text);
-  background: var(--t-bg-soft);
+  background: var(--c-btn);
 }
 
 .settings-content {
@@ -301,7 +318,7 @@
   box-sizing: border-box;
   height: 34px;
   padding: 0 11px;
-  background: var(--t-bg);
+  background: var(--c-field);
   border: 1px solid var(--t-border-i);
   border-radius: 4px;
   color: var(--t-text);
@@ -538,7 +555,7 @@
   padding: 4px 14px;
   border: 3px solid transparent;
   border-radius: 4px;
-  background: var(--t-bg-soft);
+  background: var(--c-btn);
   color: var(--t-body);
   font-family: inherit;
   font-size: 13px;
@@ -552,7 +569,7 @@
 }
 
 .settings-btn:hover:not(:disabled) {
-  background: var(--t-border);
+  background: var(--c-active);
   color: var(--t-text);
 }
 
@@ -591,7 +608,7 @@
 }
 
 .settings-btn-danger:hover:not(:disabled) {
-  background: var(--t-bg-soft);
+  background: var(--c-active);
   color: var(--t-danger);
 }
 
@@ -634,7 +651,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 8px 12px;
-  background: var(--t-bg-soft);
+  background: var(--c-btn);
   border-radius: 4px;
 }
 
@@ -690,7 +707,7 @@
   font-size: 13px;
   font-weight: 500;
   font-family: inherit;
-  background: var(--t-bg);
+  background: var(--c-field);
   color: var(--t-body);
   border: none;
   cursor: pointer;
@@ -708,7 +725,7 @@
 }
 
 .theme-seg-btn:hover:not(.active) {
-  background: var(--t-bg-soft);
+  background: var(--c-active);
 }
 
 /* ===================================================================
@@ -727,7 +744,7 @@
   gap: 8px;
   min-height: 34px;
   padding: 4px 10px 4px 6px;
-  background: var(--t-bg);
+  background: var(--c-field);
   color: var(--t-body);
   border: 1px solid var(--t-border-i);
   border-radius: 4px;
@@ -742,7 +759,7 @@
 }
 
 .palette-option:hover:not(.active) {
-  background: var(--t-bg-soft);
+  background: var(--c-active);
 }
 
 .palette-option.active {
@@ -832,7 +849,7 @@
   position: fixed;
   inset: 0;
   z-index: 9999;
-  background: var(--c-bg);
+  background: var(--c-sheet);
   animation: settings-fade-in 0.2s ease;
 }
 
@@ -850,8 +867,8 @@
   gap: 12px;
   background: var(--glass-backdrop);
   border-bottom: 1px solid var(--c-border);
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 }
 
 .prompt-editor-header h3 {
@@ -905,7 +922,7 @@
   line-height: 1.6;
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   color: var(--c-text);
-  background: var(--c-surface);
+  background: var(--c-field);
   outline: none;
   transition: border-color var(--t-dur) var(--t-ease);
 }
@@ -924,7 +941,7 @@
   font-size: 13px;
   line-height: 1.6;
   color: var(--c-body);
-  background: var(--c-surface);
+  background: var(--c-field);
 }
 
 .prompt-preview-empty {

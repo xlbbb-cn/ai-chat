@@ -18,7 +18,7 @@
     padding: 0 10px;
     border: 0.5px solid var(--c-border-i);
     border-radius: var(--r-md);
-    background: var(--c-surface);
+    background: var(--c-field);
     color: var(--c-text);
     font-size: 13px;
     font-family: inherit;
@@ -71,7 +71,7 @@
     overflow: hidden;
     border: 0.5px solid var(--c-border-i);
     border-radius: var(--r-md);
-    background: var(--c-surface);
+    background: var(--c-popup);
     box-shadow: var(--shadow-lg);
     animation: model-select-pop 0.12s ease;
 }

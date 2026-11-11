@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { listen } from "@tauri-apps/api/event";
 import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState, setWindowVibrancy } from "./api";
 
@@ -347,8 +348,22 @@ interface MarkdownEditPayload {
   content: string;
 }
 
+/**
+ * Sidebar entrance/exit spring — the one animation in the app that is not
+ * `--t-dur` + `--t-ease`, because a 400px frosted panel has to settle with mass
+ * instead of a fixed curve (Design System v1.0 §三). The travel is 20px, not the
+ * panel's width: resizing a frosted panel re-samples its backdrop and reflows
+ * every row on each frame, so the width stays fixed and the surface glides.
+ * `prefers-reduced-motion` drops the whole thing to an instant swap.
+ */
+const SIDEBAR_SPRING = { type: "spring" as const, stiffness: 320, damping: 32 };
+const SIDEBAR_SHOWN = { opacity: 1, x: 0, pointerEvents: "auto" as const };
+const SIDEBAR_HIDDEN = { opacity: 0, x: -20, pointerEvents: "none" as const };
+
 export default function App() {
   const { t, locale, setLocale } = useI18n();
+  /** Spring physics must be off when the OS asks for reduced motion. */
+  const reducedMotion = useReducedMotion();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   /**
@@ -417,7 +432,6 @@ export default function App() {
   const lastDreamClickRef = useRef(0);
   const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
   const [sidebar, setSidebar] = useState<Sidebar>(null);
-  const [sidebarMotion, setSidebarMotion] = useState<"opening" | "closing" | null>(null);
   /** Geometry of the toolbar's sliding selection fill (measured from the active button). */
   const [toolbarIndicator, setToolbarIndicator] = useState<{ left: number; width: number } | null>(null);
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
@@ -2763,37 +2777,24 @@ export default function App() {
   );
 
   function toggleSidebar(panel: Sidebar) {
-    // Clicking the open panel's button closes it; clicking it while the close
-    // fade is still running reopens instead of waiting for it to finish.
-    if (sidebar === panel && sidebarMotion !== "closing") {
+    // Clicking the open panel's button closes it.
+    if (sidebar === panel) {
       closeSidebar();
       return;
     }
 
-    // Reopening from closed (or mid-close) fades in. Switching to another
-    // panel while the sidebar is already visible swaps the shell in place:
-    // replaying the fade on every tab click would flash the whole surface.
+    // Switching to another panel while the sidebar is already visible swaps the
+    // shell in place: replaying the entrance on every tab click would flash a
+    // 400px frosted surface.
     setSidebar(panel);
-    setSidebarMotion(
-      sidebar === null || sidebarMotion === "closing" ? "opening" : sidebarMotion,
-    );
   }
 
   function closeSidebar() {
-    if (!sidebar || sidebarMotion === "closing") return;
-    setSidebarMotion("closing");
-  }
-
-  /**
-   * The fade owns the mount lifetime: `sidebar` stays in state until the
-   * closing animation reports completion, so no timer has to guess the CSS
-   * duration (the old 180 ms timer cut a 220 ms slide short and made it snap).
-   * Child animations bubble through the aside, hence the target guard.
-   */
-  function handleSidebarAnimationEnd(event: React.AnimationEvent<HTMLElement>) {
-    if (event.target !== event.currentTarget) return;
-    if (sidebarMotion === "closing") setSidebar(null);
-    setSidebarMotion(null);
+    // `AnimatePresence` owns the exit spring and unmounts the aside when it
+    // settles; the state drops to null at once, so the rest of the app (title,
+    // Escape, chat clicks) sees a closed sidebar immediately.
+    if (!sidebar) return;
+    setSidebar(null);
   }
 
   function handleChatAreaClick(event: React.MouseEvent<HTMLDivElement>) {
@@ -3458,10 +3459,15 @@ export default function App() {
         </Portal>
       )}
       {/* Sidebar */}
+      <AnimatePresence>
       {sidebar && (
-        <aside
-          className={`sidebar ${sidebarMotion === "opening" ? "sidebar-opening" : ""} ${sidebarMotion === "closing" ? "sidebar-closing" : ""}`}
-          onAnimationEnd={handleSidebarAnimationEnd}
+        <motion.aside
+          key="sidebar"
+          className="sidebar"
+          initial={reducedMotion ? false : SIDEBAR_HIDDEN}
+          animate={SIDEBAR_SHOWN}
+          exit={SIDEBAR_HIDDEN}
+          transition={reducedMotion ? { duration: 0 } : SIDEBAR_SPRING}
         >
           <div className={`sidebar-shell ${sidebar === "settings" ? "panel-settings" : ""} ${sidebar === "skills" ? "panel-skills" : ""} ${sidebar === "history" ? "panel-history" : ""} ${sidebar === "tools" ? "panel-tools" : ""} ${sidebar === "mcp" ? "panel-mcp" : ""} ${sidebar === "agents" ? "panel-agents" : ""}`} key={sidebar}>
             {sidebar === "skills" && (
@@ -3543,8 +3549,9 @@ export default function App() {
               />
             )}
           </div>
-        </aside>
+        </motion.aside>
       )}
+      </AnimatePresence>
 
       {/* Main chat area */}
       <div className="chat-area" onClick={handleChatAreaClick}>

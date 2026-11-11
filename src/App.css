@@ -102,6 +102,12 @@
   --shadow-scroll-top: 0 12px 18px -12px var(--c-scroll-shade);
   --shadow-scroll-bottom: 0 -12px 18px -12px var(--c-scroll-shade);
 
+  /* Side-panel edge — the layout has exactly one surface that floats over
+     another, and it gets a shade rather than depth: enough to read as a layer
+     above the transcript, never enough to look lifted off the window. */
+  --c-panel-shade: rgba(0, 0, 0, 0.05);
+  --shadow-side: 10px 0 30px var(--c-panel-shade);
+
   /* Radii — 4px on interactive elements and nothing else. `--r-pill` is
      kept as an alias so the few pill-shaped chips square off with the rest. */
   --r-sm: 4px;
@@ -110,15 +116,16 @@
   --r-xl: 4px;
   --r-pill: 4px;
 
-  /* Motion — one timing curve for every interactive state change. */
-  --t-ease: cubic-bezier(0.5, 0, 0, 0.75);
-  --t-dur: 0.33s;
+  /* Motion — one timing curve for every interactive state change. 180ms sits
+     inside the 120–200ms band of the interaction spec, and the curve is a
+     fast-out / slow-in ease (Out Quad): a hover, a caret and a panel settle
+     without a visible tail. */
+  --t-ease: cubic-bezier(0.25, 1, 0.5, 1);
+  --t-dur: 0.18s;
   /* Streaming typewriter: per-character fade length. `STREAM_CHAR_FADE_MS`
      in ChatMessage.tsx mirrors this value, because the reveal schedule uses it
      to decide which characters still need to be re-wrapped after a rebuild. */
   --t-dur-stream: 0.2s;
-  /* Sidebar enter/exit crossfade (the animation classes below read it). */
-  --t-dur-sidebar: 0.18s;
 
   /* Layout — height of the custom window chrome. Fullscreen portals and the
      sidebar start below it so the drag region stays reachable. */
@@ -144,6 +151,28 @@
      transcript underneath is never faintly visible; their cards keep
      `--c-surface`, so content stays legible. */
   --glass-canvas: transparent;
+  /* Specular edge — a 1px inner highlight along the window's top edge:
+     light on glass, not depth. It casts nothing outward and lifts nothing,
+     which is why it may sit beside the no-op `--shadow-*` tokens. */
+  --glass-edge: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+
+  /* Control fills — what a field, a tonal button, a page sheet or a floating
+     card paints. Opaque here, so every platform keeps the opaque look; the
+     vibrancy block below re-points them at translucent tints so a control on
+     the glass frame stops reading as a solid block. A call site that sits on a
+     glass band uses these instead of `--c-surface`:
+       --c-field  inputs, textareas, selects, segmented / palette options
+       --c-btn    tonal buttons, list rows, nav items
+       --c-sheet  a page canvas that replaces the transcript (Settings)
+       --c-panel  the side panel shell and its headers
+       --c-popup  floating cards over readable text (model and @ pickers) */
+  --c-field: var(--c-surface);
+  --c-btn: var(--c-surface-2);
+  --c-sheet: var(--c-surface);
+  /* Follows the glass level, so the panel keeps today's fill wherever there is
+     no window backdrop. */
+  --c-panel: var(--glass-backdrop);
+  --c-popup: var(--c-surface);
 
   /* Palette swatch samples — the Settings palette picker shows each
      palette's own colours. They live here so that no component stylesheet
@@ -224,6 +253,11 @@
 
   /* A black shade on a Carbon Dark canvas needs a firmer hand to read at all. */
   --c-scroll-shade: rgba(0, 0, 0, 0.55);
+  --c-panel-shade: rgba(0, 0, 0, 0.32);
+
+  /* A lit top edge barely shows on a dark fill; it only has to break the
+     silhouette, not shine. */
+  --glass-edge: inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -485,6 +519,31 @@ html[data-vibrancy] {
      same flat pane it was, and the glass looks switched off. */
   --c-window: color-mix(in srgb, var(--c-surface) 40%, transparent);
   --glass-backdrop: var(--c-window);
+  /* Controls follow the tint, so a field reads as part of the band it sits on
+     and only its hairline defines it — the same relationship the opaque design
+     already had (field fill == page fill). */
+  --c-field: var(--c-window);
+  /* A tonal fill stays one step off the band: denser, so it reads as a patch
+     rather than as a hairline. */
+  --c-btn: color-mix(in srgb, var(--c-surface) 55%, transparent);
+  /* The Settings page replaces the transcript and holds 13px labels on every
+     row, so it is the densest glass in the app: opaque enough that the chat
+     behind it never reads through, blurred enough to stay frosted. */
+  --c-sheet: color-mix(in srgb, var(--c-surface) 94%, transparent);
+  /* The side panel carries every row and card the panel has, so it is just as
+     dense — but on the canvas colour, which keeps its cards (opaque
+     `--c-surface`) a shade above the shell, the way the opaque design did. */
+  --c-panel: color-mix(in srgb, var(--c-bg) 75%, transparent);
+  /* Floating cards sit over the opaque transcript, not over the desktop: they
+     keep most of their body and blur what is behind them. */
+  --c-popup: color-mix(in srgb, var(--c-surface) 84%, transparent);
+}
+
+/* A dark fill hides what is behind it sooner than a light one, so the same
+   alpha reads as a solid block: the dark panel drops to 65%, which is the pair
+   the side-panel spec asks for (0.75 light / 0.65 dark). */
+html[data-theme="dark"][data-vibrancy] {
+  --c-panel: color-mix(in srgb, var(--c-bg) 65%, transparent);
 }
 
 html[data-vibrancy][data-glass="subtle"] {
@@ -505,6 +564,24 @@ html[data-vibrancy] body {
 /* The reading column stays a solid sheet: only the frame around it is glass. */
 html[data-vibrancy] .chat-area {
   background: transparent;
+}
+
+/* The pickers open over the transcript — an opaque sheet — so CSS *can* blur
+   what is behind them even though it cannot blur the desktop. They are the one
+   place where `backdrop-filter` still earns its cost under vibrancy. */
+html[data-vibrancy] .file-mention-popup,
+html[data-vibrancy] .model-select-popup-shell {
+  -webkit-backdrop-filter: blur(var(--glass-blur-scrim));
+  backdrop-filter: blur(var(--glass-blur-scrim));
+}
+
+/* The Settings page and the prompt editor replace the transcript, and the chat
+   behind them is an opaque sheet — blur it so the translucent sheet reads as
+   glass instead of as a ghost of the conversation. */
+html[data-vibrancy] .settings-page,
+html[data-vibrancy] .prompt-editor-overlay {
+  -webkit-backdrop-filter: blur(var(--glass-blur-scrim));
+  backdrop-filter: blur(var(--glass-blur-scrim));
 }
 
 body {
@@ -554,8 +631,8 @@ body {
   height: var(--titlebar-h);
   padding: 0 6px 0 12px;
   background: var(--glass-backdrop);
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   border-bottom: none;
   user-select: none;
   -webkit-user-select: none;
@@ -725,11 +802,16 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--glass-backdrop);
+  background: var(--c-panel);
   background-size: 100vw 100%;
   background-repeat: no-repeat;
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  /* GPU hints: the entrance spring animates `transform`, and a frosted panel
+     that moves has to stay on its own compositor layer instead of repainting
+     the chat underneath on every frame. */
+  will-change: transform;
+  backface-visibility: hidden;
   z-index: 900;
 }
 
@@ -757,50 +839,11 @@ body {
   min-width: 0;
 }
 
-/* Enter/exit is a pure crossfade. The 400px frosted surface used to slide in
-   with an extra 1px blur on top of its 20px backdrop blur, which forced a
-   backdrop re-render on every frame and visibly stuttered; an opacity fade
-   keeps the compositor work bounded. */
-.sidebar-opening {
-  animation: sidebar-fade-in var(--t-dur-sidebar) var(--t-ease) both;
-  will-change: opacity;
-}
-
-.sidebar-closing {
-  animation: sidebar-fade-out var(--t-dur-sidebar) var(--t-ease) both;
-  will-change: opacity;
-  /* Do not let a fading-out overlay swallow a click meant for the chat. */
-  pointer-events: none;
-}
-
-@keyframes sidebar-fade-in {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes sidebar-fade-out {
-  from {
-    opacity: 1;
-  }
-
-  to {
-    opacity: 0;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  /* Keep the animation at an effectively zero length instead of `none`, so
-     the `animationend` handler that unmounts the sidebar still runs. */
-  .sidebar-opening,
-  .sidebar-closing {
-    animation-duration: 1ms;
-  }
-}
+/* Enter/exit is a spring, not a CSS animation — `SIDEBAR_SPRING` in App.tsx.
+   A fixed curve cannot give a 400px frosted panel the settle it needs, and the
+   travel is a 20px glide instead of a width animation: resizing the panel would
+   re-sample its backdrop and reflow every row on each frame. The spring is
+   disabled wholesale under `prefers-reduced-motion`. */
 
 /* Chat area */
 .chat-area {
@@ -825,8 +868,8 @@ body {
   padding: 8px 12px;
   border-bottom: 1px solid var(--c-border);
   background: var(--glass-backdrop);
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   flex-shrink: 0;
   z-index: 10;
 }
@@ -938,9 +981,9 @@ body {
   flex-shrink: 0;
   padding: 7px 12px 9px;
   border-bottom: 1px solid var(--c-border);
-  background: var(--glass-backdrop);
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  backdrop-filter: blur(var(--glass-blur));
+  background: var(--c-panel);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 }
 
 .profile-export-progress-label {
@@ -1048,7 +1091,7 @@ body {
   padding: 3px 3px 3px 8px;
   border: 1px solid var(--c-border-i);
   border-radius: 4px;
-  background: var(--c-surface);
+  background: var(--c-field);
   font-size: 12px;
   color: var(--c-text);
   max-width: 100%;
@@ -1105,7 +1148,7 @@ body {
   gap: 10px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--c-border);
-  background: var(--c-surface-2);
+  background: var(--c-btn);
 }
 
 .timer-notice-text {
@@ -1707,8 +1750,8 @@ button.rabbit-hop-bunny:focus-visible {
   padding: 10px 12px 12px;
   border-top: 1px solid var(--c-border);
   background: var(--glass-backdrop);
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   flex-shrink: 0;
 }
 
@@ -1821,7 +1864,7 @@ button.rabbit-hop-bunny:focus-visible {
   padding: 3px 8px;
   border: 1px solid var(--c-border-i);
   border-radius: 4px;
-  background: var(--c-surface);
+  background: var(--c-field);
   font-size: 12px;
   color: var(--c-text);
 }
@@ -2047,7 +2090,7 @@ button.rabbit-hop-bunny:focus-visible {
 .chat-input {
   flex: 1;
   padding: 6px 11px;
-  background: var(--c-surface);
+  background: var(--c-field);
   border: 1px solid var(--c-border-i);
   border-radius: 4px;
   color: var(--c-text);
@@ -2111,7 +2154,7 @@ button.rabbit-hop-bunny:focus-visible {
   padding: 0 22px 0 23px;
   border: 1px solid var(--c-border-i);
   border-radius: 4px;
-  background: var(--c-surface);
+  background: var(--c-field);
   color: var(--c-text);
   font-size: 13px;
   outline: none;
@@ -2181,7 +2224,7 @@ button.rabbit-hop-bunny:focus-visible {
   flex-shrink: 0;
   border: 1px solid var(--c-border-i);
   border-radius: 4px;
-  background: var(--c-surface);
+  background: var(--c-popup);
   max-height: 42vh;
   overflow: hidden;
 }
@@ -2260,7 +2303,7 @@ button.rabbit-hop-bunny:focus-visible {
   padding: 8px 10px;
   border: 1px solid var(--c-border-i);
   border-radius: 4px;
-  background: var(--c-surface-2);
+  background: var(--c-btn);
 }
 
 .confirm-panel-credentials label {
@@ -2277,7 +2320,7 @@ button.rabbit-hop-bunny:focus-visible {
   padding: 0 10px;
   border: 1px solid var(--c-border-i);
   border-radius: 4px;
-  background: var(--c-surface);
+  background: var(--c-field);
   color: var(--c-text);
   font-size: 14px;
   font-family: inherit;
@@ -2304,7 +2347,7 @@ button.rabbit-hop-bunny:focus-visible {
   padding: 8px 10px;
   border: 1px solid var(--c-border-s);
   border-radius: 4px;
-  background: var(--c-surface-2);
+  background: var(--c-btn);
 }
 
 .confirm-risk-header {
@@ -2324,7 +2367,7 @@ button.rabbit-hop-bunny:focus-visible {
   font-size: 12px;
   font-weight: 500;
   line-height: 1.5;
-  background: var(--c-surface);
+  background: var(--c-field);
   border: 1px solid var(--c-border-i);
   color: var(--c-text);
 }
@@ -2458,8 +2501,8 @@ button.rabbit-hop-bunny:focus-visible {
   padding: 9px 12px;
   border-bottom: 1px solid var(--c-border);
   background: var(--glass-backdrop);
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 }
 
 .markdown-editor-header h3 {
@@ -2594,15 +2637,34 @@ button.rabbit-hop-bunny:focus-visible {
   min-height: var(--panel-header-h);
   padding: 6px 12px;
   border-bottom: 1px solid var(--c-border);
-  background: var(--glass-backdrop);
+  background: var(--c-panel);
   background-size: 100vw 100%;
   background-repeat: no-repeat;
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   flex-shrink: 0;
   position: sticky;
   top: 0;
   z-index: 2;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Specular edge. Only the window's own top edge carries the 1px highlight along the top
+   edge — the cue that turns a tinted strip into a lit sheet of glass without
+   adding depth. It is an *inner* line, so it never casts a shadow outward, and
+   the scroll-edge shades still win while they are on (0-2-0 selectors). `off`
+   keeps it: an opaque band has an edge too. A band tucked under another band gets no highlight, because there it lands as a stray white rule across the seam.
+   ══════════════════════════════════════════════════════════════════════════ */
+.titlebar {
+  box-shadow: var(--glass-edge);
+}
+
+/* The side panel is the one surface that floats over another, so it is the one
+   that gets depth: a soft shade off its right edge. No specular line — its top
+   is tucked under the titlebar, where a highlight draws the same stray rule
+   the toolbar had. */
+.sidebar {
+  box-shadow: var(--shadow-side);
 }
 
 .panel-header h2 {
