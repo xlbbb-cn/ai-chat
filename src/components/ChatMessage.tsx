@@ -273,6 +273,12 @@ function buildPrintableMessageHtml(contentHtml: string, exportedAt: string): str
         height: auto;
       }
 
+      /* Same cap as the transcript: a huge viewBox letterboxes instead of
+         printing hundreds of near-empty pages. */
+      .chat-figure svg {
+        max-height: 420px;
+      }
+
       .chat-figure-bar {
         margin-top: 4px;
         font-size: 11px;

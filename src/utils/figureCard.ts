@@ -383,6 +383,10 @@ function expandSlots(root: HTMLElement): HTMLSpanElement[] {
   const texts: Text[] = [];
   while (walker.nextNode()) {
     const node = walker.currentNode as Text;
+    // Code and formulas keep their text verbatim: the extractor never puts a
+    // slot token there, so one that shows up is the model echoing the marker
+    // itself, not a figure to mount.
+    if (node.parentElement?.closest("pre, code, .katex")) continue;
     if (node.data.includes("\u2063F")) texts.push(node);
   }
   const slots: HTMLSpanElement[] = [];

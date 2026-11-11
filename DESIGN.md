@@ -639,6 +639,10 @@ The assistant can draw. A reply may carry a 2D figure (an inline `<svg>`) or a
 - **The drawing owns the width.** The viewport is full-bleed inside the frame
   with 10px padding; a 2D drawing scales by its `viewBox`, a 3D canvas keeps a
   16:10 viewport. Neither scrolls sideways.
+- **A drawing is capped, never stretched.** A 2D figure taller than `420px`
+  letterboxes inside the viewport (`preserveAspectRatio` centres it), so a
+  hand-written `viewBox` with an extreme aspect ratio cannot grow the card to
+  millions of pixels; the 3D canvas keeps its fixed 16:10 and needs no cap.
 - **The caption bar** holds the title at 12px `--c-muted` (ellipsised) and the
   save action. Actions are revealed on hover *and* on `:focus-within` — the
   code-block toolbar rule, so the card is usable without a pointer.
@@ -965,6 +969,7 @@ one decision.
 | make `<carve>` a `<canvas>` the model draws into with script | **refused, same rule.** Executing model-authored JavaScript in the transcript is raw HTML with extra steps. `<carve>` is a declarative scene — JSON primitives, transforms, token colour names — drawn by three.js |
 | one `WebGLRenderer` per figure | **refused.** A renderer per card exhausts the browser's ~16 context limit after a few scenes, and every rebuild leaks one. One shared off-screen renderer blits each scene into the figure's own 2D canvas: unbounded figures, one context, and the canvas is already a PNG source |
 | let the card rebuild with the transcript | **refused.** The subtree is replaced on every streamed token; a rebuilt card would drop its pixels and the orbit angle the user just dragged. Cards are cached by source hash and *moved* back into the new tree |
+| keep `<style>` inside the sanitised SVG — drawings lean on it | **refused.** Inside an inline SVG those rules style the whole document, so a reply could restyle app UI (hide the confirm dialog's buttons, fake one) with selectors no text screen can tell apart from drawing styles. The element is dropped; drawings carry their look in presentation attributes, which is what the prompt asks for anyway. The *root's* `style` attribute is dropped too — the root is the one element that generates a CSS box, so `position: fixed` there would lift the drawing out over the window — and the viewport gets `contain: layout paint` as the belt to that braces |
 | save the PNG at 1× | **refused.** A chart pasted into a document has to be sharp: 2× backing store, capped so a huge figure cannot allocate a 100-megapixel canvas, with the computed styles inlined so the file does not depend on this app's CSS variables |
 | encode the PNG in Rust | **not possible here, and not needed.** There is no `image` / `resvg` dependency and the pixels only exist in the webview; the backend validates the payload (PNG magic, 12 MiB cap, whitelisted slug) and writes `<workspace>/figures/<slug>.png` — not `.data/`, because the file belongs to the user |
 

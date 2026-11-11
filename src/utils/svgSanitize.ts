@@ -10,8 +10,12 @@
  * The rule is an element allowlist (drawing shapes, text, gradients, filters,
  * markers) plus an attribute blocklist: an unknown presentation attribute is
  * inert, while an unknown *element* can be a script container. `<style>` is
- * kept because drawings lean on it, but its text is screened for `@import`,
- * `expression()` and `url()` to anything but a fragment.
+ * dropped outright: inside an inline SVG its rules apply to the whole
+ * document, and a reply could restyle app UI (hide the confirm dialog's
+ * buttons, fake a dialog of its own) with selectors no text screen can tell
+ * apart from drawing styles. Drawings carry their look in presentation
+ * attributes (`fill="var(--c-accent)"`), which is what the system prompt asks
+ * for anyway; the same reasoning strips the *root's* `style` attribute below.
  */
 
 /** Elements a figure may contain. Everything else is removed with its subtree. */
@@ -53,7 +57,6 @@ const ALLOWED_ELEMENTS = new Set([
   "fetile",
   "femorphology",
   "feboxblur",
-  "style",
 ]);
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -135,8 +138,15 @@ export function sanitizeSvg(source: string): string | null {
         element.removeAttribute(attr.name);
       }
     }
-    if (name === "style" && !cssIsSafe(element.textContent ?? "")) element.remove();
   }
+
+  // The root is the one SVG element that generates a CSS box, so its `style`
+  // is layout-hostile by definition: `position: fixed` there lifts the drawing
+  // out of the card (no transcript ancestor creates a containing block), and
+  // the card's own stylesheet owns root presentation anyway. A child's `style`
+  // is inert for positioning (SVG children are not CSS boxes) and is how the
+  // drawing carries its fill/stroke.
+  root.removeAttribute("style");
 
   // A root that lost its only child to the allowlist is an empty frame.
   if (root.childElementCount === 0) return null;

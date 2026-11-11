@@ -20,9 +20,13 @@
  * ```
  *
  * The scan is line-based and fence-aware: a figure only counts at the top
- * level, so a `svg` example inside a ```markdown block stays code. It is also
+ * level, so a `svg` example inside a ```markdown block — fenced *or* 4-space
+ * indented — stays code, and so does one inside a paragraph's inline `code`
+ * span (counted across lines, since a span may cross them). It is also
  * tolerant of a half-written block while a reply streams — an unterminated
- * figure becomes `pending` instead of flashing back to raw text.
+ * figure becomes `pending` instead of flashing back to raw text. A reply that
+ * *ends* mid-fence falls back to a plain code block once the stream is over,
+ * because that is what markdown-it renders and `Drawing…` would be a lie.
  */
 
 export type FigureKind = "svg" | "carve";
@@ -58,6 +62,13 @@ export const SLOT_PATTERN = /\u2063F(\d+)\u2063/g;
 
 const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})[ \t]*([^\s`]*)[ \t]*(.*)$/;
 const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
+
+/** A CommonMark indented code block: 4 spaces or a tab. */
+const INDENTED_CODE = /^(?: {4}|\t)/;
+
+/** An indented code block cannot interrupt a paragraph (CommonMark §4.4). */
+const canStartIndentedCode = (prose: string[]): boolean =>
+  prose.length === 0 || prose[prose.length - 1].trim() === "";
 
 function isFenceClose(line: string, fence: string): boolean {
   const match = FENCE_CLOSE.exec(line);
@@ -105,9 +116,11 @@ function extractRawTags(source: string, figures: FigureSpec[], streaming: boolea
     if (!open) break;
     const start = cursor + open.index;
     const kind = open[1].toLowerCase() as FigureKind;
-    const lineStart = source.lastIndexOf("\n", start) + 1;
-    // Odd number of backticks before the tag on this line → inside `code`.
-    const ticks = (source.slice(lineStart, start).match(/`/g) ?? []).length;
+    // Odd number of backticks between the paragraph's start and the tag → the
+    // tag sits inside an inline `code` span. The window is the whole paragraph
+    // (a blank line ends it), not the line: a code span may cross lines, so
+    // counting only the current line would miss one that opened above.
+    const ticks = (source.slice(paragraphStartOf(source, start), start).match(/`/g) ?? []).length;
     if (ticks % 2 === 1) {
       cursor = start + open[0].length;
       continue;
@@ -169,6 +182,18 @@ function attribute(tag: string, name: string): string | null {
   return value || null;
 }
 
+/** Index where the paragraph containing `at` begins; a blank line ends it. */
+function paragraphStartOf(source: string, at: number): number {
+  let lineStart = at === 0 ? 0 : source.lastIndexOf("\n", at - 1) + 1;
+  while (lineStart > 0) {
+    const prevEnd = lineStart - 1; // the "\n" that ends the previous line
+    const prevStart = prevEnd === 0 ? 0 : source.lastIndexOf("\n", prevEnd - 1) + 1;
+    if (source.slice(prevStart, prevEnd).trim() === "") return lineStart;
+    lineStart = prevStart;
+  }
+  return lineStart;
+}
+
 /** Split the markdown source into rendered text plus the figures it holds. */
 export function extractFigures(
   markdown: string,
@@ -190,6 +215,31 @@ export function extractFigures(
     const line = lines[i];
     const open = FENCE_OPEN.exec(line);
     if (!open) {
+      // An indented code block (4+ spaces, or a tab) is code in CommonMark as
+      // well: it must bypass the raw-tag scan like a fenced block does, or an
+      // indented `<svg>` example becomes a figure. It only starts after a
+      // blank line — an indented line inside a paragraph is a lazy
+      // continuation (or list-item text), which stays prose. Verbatim
+      // passthrough is always faithful: markdown-it re-parses the chunk, so
+      // only the figure-vs-escaped-text decision changes.
+      if (INDENTED_CODE.test(line) && canStartIndentedCode(prose)) {
+        flushProse();
+        const block: string[] = [];
+        let j = i;
+        for (; j < lines.length; j += 1) {
+          const candidate = lines[j];
+          if (candidate.trim() === "" || INDENTED_CODE.test(candidate)) block.push(candidate);
+          else break;
+        }
+        // Trailing blank lines belong to the prose again.
+        while (block.length > 0 && block[block.length - 1].trim() === "") {
+          block.pop();
+          j -= 1;
+        }
+        out.push(block.join("\n"));
+        i = j;
+        continue;
+      }
       prose.push(line);
       i += 1;
       continue;
@@ -204,7 +254,7 @@ export function extractFigures(
     }
     const body = lines.slice(i + 1, end === -1 ? lines.length : end);
     const lang = (open[2] ?? "").toLowerCase();
-    if (lang === "svg" || lang === "carve") {
+    if ((lang === "svg" || lang === "carve") && (end !== -1 || opts.streaming)) {
       const kind = lang as FigureKind;
       flushProse();
       const meta = parseFenceMeta(open[3] ?? "", body.join("\n"), kind);
@@ -219,7 +269,10 @@ export function extractFigures(
     } else {
       // An ordinary code block is copied verbatim — and it must bypass the
       // raw-tag scan: an `svg` example inside a ```markdown block is code, so
-      // it is emitted as its own chunk instead of joining the prose.
+      // it is emitted as its own chunk instead of joining the prose. A figure
+      // fence the reply ended without closing lands here too once the stream
+      // is over: markdown-it renders an unclosed fence as a code block, and a
+      // card that said `Drawing…` forever would be a lie.
       flushProse();
       out.push(lines.slice(i, end === -1 ? lines.length : end + 1).join("\n"));
     }
