@@ -122,10 +122,6 @@ export function translate(locale: Locale, key: MessageKey, vars?: TranslateVars)
 
 let activeLocale: Locale = readCachedLocale();
 
-export function getActiveLocale(): Locale {
-    return activeLocale;
-}
-
 /**
  * Translate without a hook. Use only where a hook cannot: the value is read
  * from the module-level locale, so callers do not automatically re-render.

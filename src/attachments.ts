@@ -31,7 +31,6 @@ export const TEXT_EXTENSIONS = [
 export const IMAGE_EXTENSIONS = [
   "jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "heic", "heif", "ico", "tif", "tiff",
 ];
-export const FILE_EXTENSIONS = ["pdf"];
 export const AUDIO_EXTENSIONS = ["mp3", "wav"];
 
 const FILE_TYPE_EXT_OVERRIDES: Record<string, string> = {

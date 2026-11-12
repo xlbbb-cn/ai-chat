@@ -843,7 +843,7 @@ def build_html(d1, d2, d3):
   </section>
 
   <footer>
-    <span>依据 v3.2.0 源码实测：98 命令 · 43 事件 · 8 表 · 78 个 Rust 文件</span>
+    <span>依据 v3.2.0 源码实测：92 命令 · 48 事件 · 8 表 · 78 个 Rust 文件</span>
     <span>颜色取自 src/App.css 设计令牌</span>
   </footer>
 

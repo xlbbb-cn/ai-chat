@@ -860,20 +860,6 @@ export interface AgentTaskReasoningEvent {
   token: string;
 }
 
-/** Legacy standalone CLI agent (pre typed sub-agents), kept for imports. */
-export interface LegacyCliAgent {
-  id: string;
-  name: string;
-  description: string;
-  command: string;
-  args: string[];
-  prompt_via: string;
-  model_args: string[];
-  env: KeyValue[];
-  default_timeout_seconds: number;
-  enabled: boolean;
-}
-
 export interface AgentTaskEvent {
   task_id: string;
   agent_id: string;
@@ -919,22 +905,6 @@ export interface AgentMbusMessageEvent {
   body: string;
   recipients: Array<{ id: string; name: string }>;
   created_at_ms: number;
-}
-
-/** `agent-mbus-delivered`: messages just injected at a sub-agent request boundary. */
-export interface AgentMbusDeliveredEvent {
-  bus_id: string;
-  session_id: string;
-  mission_id: string;
-  task_id: string;
-  count: number;
-  messages: Array<{
-    from_id: string;
-    from_name: string;
-    topic: string;
-    body: string;
-    created_at_ms: number;
-  }>;
 }
 
 /** `agent-planner-state`: live supervision status for the planner row. */

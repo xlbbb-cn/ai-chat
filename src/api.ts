@@ -848,56 +848,6 @@ export async function onMcpServersChanged(
   return listen<McpServersChanged>("mcp-servers-changed", (e) => cb(e.payload));
 }
 
-// ─── API Request Monitor ──────────────────────────────────────────────────────
-
-export interface ApiRequestRecord {
-  id: number;
-  session_id: string;
-  timestamp: string;
-  model: string;
-  finish_reason: string;
-  prompt_tokens: number;
-  completion_tokens: number;
-  /** Cached prompt-prefix tokens; `null` when the provider does not report caching. */
-  cached_tokens: number | null;
-  duration_ms: number;
-  error: string;
-  response_preview: string;
-}
-
-export interface ApiRequestDetail {
-  id: number;
-  session_id: string;
-  timestamp: string;
-  model: string;
-  request_body: string;
-  response_content: string;
-  tool_calls: string;
-  finish_reason: string;
-  prompt_tokens: number;
-  completion_tokens: number;
-  /** Cached prompt-prefix tokens; `null` when the provider does not report caching. */
-  cached_tokens: number | null;
-  duration_ms: number;
-  error: string;
-}
-
-export async function listApiRequests(): Promise<ApiRequestRecord[]> {
-  return invoke("list_api_requests");
-}
-
-export async function getApiRequest(id: number): Promise<ApiRequestDetail> {
-  return invoke("get_api_request", { id });
-}
-
-export async function deleteApiRequest(id: number): Promise<void> {
-  return invoke("delete_api_request", { id });
-}
-
-export async function clearApiRequests(): Promise<void> {
-  return invoke("clear_api_requests");
-}
-
 /** Result of a database compaction run. */
 export interface CompactDbResult {
   /** Expired log rows dropped by the retention policy during this run. */
@@ -1038,10 +988,6 @@ export async function listInteractions(sessionId: string): Promise<InteractionLo
 
 export async function getInteraction(id: number): Promise<InteractionLogDetail> {
   return invoke("get_interaction", { id });
-}
-
-export async function clearInteractions(sessionId: string): Promise<void> {
-  return invoke("clear_interactions", { sessionId });
 }
 
 /**

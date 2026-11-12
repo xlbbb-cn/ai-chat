@@ -748,39 +748,6 @@
   }
 }
 
-.message-export-actions {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.message-export-btn {
-  border: 1px solid var(--ts-cloud);
-  background: var(--c-surface);
-  color: var(--ts-pewter);
-  border-radius: 4px;
-  padding: 5px 12px;
-  font-size: 12px;
-  line-height: 1;
-  cursor: pointer;
-  transition: color 0.33s var(--ts-ease), border-color 0.33s var(--ts-ease),
-    background-color 0.33s var(--ts-ease);
-}
-
-.message-export-btn:hover:not(:disabled) {
-  background: var(--ts-ash);
-  border-color: var(--ts-pewter);
-  color: var(--ts-carbon);
-}
-
-.message-export-btn:active:not(:disabled) {
-  background: var(--ts-cloud);
-}
-
-.message-export-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
 /* ─── Message action buttons (delete / fork / export, user retry) ─────────── */
 .message-action-buttons {
   display: flex;

@@ -173,32 +173,6 @@
   min-width: 0;
 }
 
-.history-delete-btn {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  font-size: 14px;
-  opacity: 0;
-  transition: opacity 0.2s, transform 0.2s, color 0.2s;
-  padding: 4px;
-  color: var(--c-muted);
-  border-radius: var(--r-sm);
-}
-
-.history-delete-btn:hover {
-  transform: scale(1.05);
-  color: var(--c-danger);
-  background: var(--c-hover);
-}
-
-.history-item:hover .history-delete-btn {
-  opacity: 0.7;
-}
-
-.history-delete-btn:hover {
-  opacity: 1 !important;
-}
-
 .history-item:hover {
   background: var(--c-hover);
 }
@@ -239,11 +213,6 @@
   to {
     transform: rotate(360deg);
   }
-}
-
-.history-item.disabled .history-delete-btn {
-  opacity: 0;
-  pointer-events: none;
 }
 
 .history-item.archived .history-preview {
