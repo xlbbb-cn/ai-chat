@@ -31,6 +31,7 @@ mod skills;
 mod tools;
 mod turn_guard;
 mod update;
+mod util;
 mod workspace;
 mod workspace_files;
 
@@ -146,8 +147,8 @@ fn read_markdown_into_editor(app: &AppHandle, markdown_path: &Path) {
 }
 
 /// Restore a backup archive and log failures without interrupting the caller.
-fn import_profile_archive(app: &AppHandle, profile_path: &Path) {
-    if let Err(err) = backup::import_profile(app, profile_path) {
+fn import_backup_archive(app: &AppHandle, backup_path: &Path) {
+    if let Err(err) = backup::import_backup(app, backup_path) {
         app.state::<AppState>()
             .logger
             .lock()
@@ -225,23 +226,23 @@ fn app_open_markdown(app: AppHandle, path: String) {
 }
 
 #[tauri::command]
-fn app_export_profile(app: AppHandle, path: String) -> Result<(), String> {
+fn app_export_backup(app: AppHandle, path: String) -> Result<(), String> {
     if path.trim().is_empty() {
         return Err("Backup path is empty".into());
     }
-    backup::spawn_profile_export(app, PathBuf::from(path));
+    backup::spawn_backup_export(app, PathBuf::from(path));
     Ok(())
 }
 
 #[tauri::command]
-async fn app_import_profile(app: AppHandle, path: String) -> Result<(), String> {
+async fn app_import_backup(app: AppHandle, path: String) -> Result<(), String> {
     if path.trim().is_empty() {
         return Err("Backup path is empty".into());
     }
-    let profile_path = PathBuf::from(path);
+    let backup_path = PathBuf::from(path);
     // Import rewrites the workspace and the SQLite snapshot, so keep it off
     // the IPC thread.
-    tauri::async_runtime::spawn_blocking(move || backup::import_profile(&app, &profile_path))
+    tauri::async_runtime::spawn_blocking(move || backup::import_backup(&app, &backup_path))
         .await
         .map_err(|err| format!("Backup import task failed: {err}"))?
 }
@@ -1612,8 +1613,8 @@ pub fn run() {
                     .set_file_name("rabbit-chat-studio.backup.zip")
                     .blocking_save_file()
                 {
-                    if let Some(profile_path) = path.into_path().ok() {
-                        backup::spawn_profile_export(app.clone(), profile_path);
+                    if let Some(backup_path) = path.into_path().ok() {
+                        backup::spawn_backup_export(app.clone(), backup_path);
                     }
                 }
             } else if event.id() == RESTORE_BACKUP_MENU_ID {
@@ -1623,8 +1624,8 @@ pub fn run() {
                     .add_filter("Backup", &["zip"])
                     .blocking_pick_file()
                 {
-                    if let Some(profile_path) = path.into_path().ok() {
-                        import_profile_archive(app, &profile_path);
+                    if let Some(backup_path) = path.into_path().ok() {
+                        import_backup_archive(app, &backup_path);
                     }
                 }
             } else if event.id() == MARKDOWN_EDIT_MENU_ID {
@@ -2037,8 +2038,8 @@ pub fn run() {
             app_open_workspace_tmp_dir,
             app_open_issue_page,
             app_open_markdown,
-            app_export_profile,
-            app_import_profile,
+            app_export_backup,
+            app_import_backup,
             app_export_pdf,
             skills::list_skills,
             skills::save_skill,

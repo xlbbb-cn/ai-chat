@@ -111,8 +111,8 @@
   color: var(--ts-pewter, var(--c-muted));
   white-space: nowrap;
   overflow: hidden;
-  -webkit-mask-image: linear-gradient(90deg, #000 75%, transparent 100%);
-  mask-image: linear-gradient(90deg, #000 75%, transparent 100%);
+  -webkit-mask-image: linear-gradient(90deg, var(--c-text) 75%, transparent 100%);
+  mask-image: linear-gradient(90deg, var(--c-text) 75%, transparent 100%);
 }
 
 .todo-preview-icon {

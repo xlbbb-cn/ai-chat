@@ -22,8 +22,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
+
+use crate::util::now_ms;
 
 /// Emitted with the full list of pending timers whenever it changes.
 pub const TIMER_STATE_EVENT: &str = "timer-state";
@@ -72,14 +74,6 @@ pub struct TimerRegistry {
     /// Parked guard for the sleep lock; exists exactly while the timer set is
     /// non-empty.
     sleep_guard: Mutex<Option<SleepGuard>>,
-}
-
-/// Current wall-clock time in milliseconds since the UNIX epoch.
-pub fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
 }
 
 /// Human-readable duration, e.g. `30m 0s`, `1h 5m`, `2d 3h`.

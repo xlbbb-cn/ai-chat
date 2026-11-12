@@ -34,11 +34,11 @@ use zip::{write::FileOptions, ZipArchive, ZipWriter};
 
 use crate::{agents, apply_config, mcp, AppConfig, AppState};
 
-const PROFILE_EXPORT_START_EVENT: &str = "profile-export-start";
-const PROFILE_EXPORT_STATUS_EVENT: &str = "profile-export-status";
-const PROFILE_EXPORT_DONE_EVENT: &str = "profile-export-done";
-const PROFILE_EXPORT_ERROR_EVENT: &str = "profile-export-error";
-pub(crate) const PROFILE_RESTORED_EVENT: &str = "profile-restored";
+const BACKUP_EXPORT_START_EVENT: &str = "backup-export-start";
+const BACKUP_EXPORT_STATUS_EVENT: &str = "backup-export-status";
+const BACKUP_EXPORT_DONE_EVENT: &str = "backup-export-done";
+const BACKUP_EXPORT_ERROR_EVENT: &str = "backup-export-error";
+pub(crate) const BACKUP_RESTORED_EVENT: &str = "backup-restored";
 
 /// Workspace-scoped state directories that are part of a backup, as
 /// `(zip name, path under <workspace>/.data)`.
@@ -151,8 +151,8 @@ fn safe_join(root: &Path, relative: &str) -> Option<PathBuf> {
 
 // ─── Export ──────────────────────────────────────────────────────────────────
 
-fn emit_profile_export_status(app: &AppHandle, status: &str) {
-    let _ = app.emit(PROFILE_EXPORT_STATUS_EVENT, status.to_string());
+fn emit_backup_export_status(app: &AppHandle, status: &str) {
+    let _ = app.emit(BACKUP_EXPORT_STATUS_EVENT, status.to_string());
 }
 
 fn escape_sql_string(value: &str) -> String {
@@ -174,26 +174,26 @@ fn backup_chat_db(state: &AppState) -> Result<PathBuf, String> {
     Ok(backup_path)
 }
 
-fn export_profile(app: &AppHandle, profile_path: &Path) -> Result<(), String> {
+fn export_backup(app: &AppHandle, backup_path: &Path) -> Result<(), String> {
     let state = app.state::<AppState>();
-    if let Some(parent) = profile_path.parent() {
+    if let Some(parent) = backup_path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
 
-    let file = fs::File::create(profile_path).map_err(|e| e.to_string())?;
+    let file = fs::File::create(backup_path).map_err(|e| e.to_string())?;
     let mut zip = ZipWriter::new(file);
 
-    emit_profile_export_status(app, "Writing config.json");
+    emit_backup_export_status(app, "Writing config.json");
     let config_json = serde_json::to_string_pretty(&state.config.lock().unwrap().clone())
         .map_err(|e| e.to_string())?;
     write_text_entry(&mut zip, "config.json", &config_json)?;
 
-    emit_profile_export_status(app, "Writing mcp_servers.json");
+    emit_backup_export_status(app, "Writing mcp_servers.json");
     let mcp_json = serde_json::json!({ "servers": mcp::load_servers(&state.mcp_servers_path) });
     let mcp_json = serde_json::to_string_pretty(&mcp_json).map_err(|e| e.to_string())?;
     write_text_entry(&mut zip, "mcp_servers.json", &mcp_json)?;
 
-    emit_profile_export_status(app, "Writing sub_agents.json");
+    emit_backup_export_status(app, "Writing sub_agents.json");
     let sub_agents_json = if state.agents_config_path.exists() {
         fs::read_to_string(&state.agents_config_path).map_err(|e| e.to_string())?
     } else {
@@ -206,7 +206,7 @@ fn export_profile(app: &AppHandle, profile_path: &Path) -> Result<(), String> {
     // copying them would only create duplicate definitions on restore.
     let agents_dir = agents::files::agents_root(&state.agents_config_path);
     if agents_dir.is_dir() {
-        emit_profile_export_status(app, "Packing agents directory");
+        emit_backup_export_status(app, "Packing agents directory");
         zip.add_directory("agents/", zip_options())
             .map_err(|e| e.to_string())?;
         add_agent_files_to_zip(&mut zip, &agents_dir, &agents_dir)?;
@@ -219,7 +219,7 @@ fn export_profile(app: &AppHandle, profile_path: &Path) -> Result<(), String> {
         if !dir_path.is_dir() {
             continue;
         }
-        emit_profile_export_status(app, &format!("Packing workspace/{dir_name} directory"));
+        emit_backup_export_status(app, &format!("Packing workspace/{dir_name} directory"));
         let zip_prefix = format!("workspace/{dir_name}");
         zip.add_directory(format!("{zip_prefix}/"), zip_options())
             .map_err(|e| e.to_string())?;
@@ -228,7 +228,7 @@ fn export_profile(app: &AppHandle, profile_path: &Path) -> Result<(), String> {
 
     let status_path = crate::workspace::skills_status_path(&workspace_dir);
     if status_path.is_file() {
-        emit_profile_export_status(app, "Packing workspace/skills.status");
+        emit_backup_export_status(app, "Packing workspace/skills.status");
         let result = (|| -> Result<(), String> {
             zip.start_file("workspace/skills.status", zip_options())
                 .map_err(|e| e.to_string())?;
@@ -243,7 +243,7 @@ fn export_profile(app: &AppHandle, profile_path: &Path) -> Result<(), String> {
     // (the panel-owned servers stay in `mcp_servers.json` above).
     let mcp_conf_path = crate::workspace::mcp_conf_path(&workspace_dir);
     if mcp_conf_path.is_file() {
-        emit_profile_export_status(app, "Packing workspace/mcp.conf");
+        emit_backup_export_status(app, "Packing workspace/mcp.conf");
         let result = (|| -> Result<(), String> {
             zip.start_file("workspace/mcp.conf", zip_options())
                 .map_err(|e| e.to_string())?;
@@ -254,7 +254,7 @@ fn export_profile(app: &AppHandle, profile_path: &Path) -> Result<(), String> {
         result?;
     }
 
-    emit_profile_export_status(app, "Exporting chat.db (sending disabled during export)");
+    emit_backup_export_status(app, "Exporting chat.db (sending disabled during export)");
     let chat_db_backup = backup_chat_db(&state)?;
     let db_result = (|| -> Result<(), String> {
         zip.start_file("chat.db", zip_options())
@@ -269,24 +269,24 @@ fn export_profile(app: &AppHandle, profile_path: &Path) -> Result<(), String> {
     zip.finish().map_err(|e| e.to_string())?;
     state.logger.lock().unwrap().log(
         "INFO",
-        &format!("Backup saved to {}", profile_path.display()),
+        &format!("Backup saved to {}", backup_path.display()),
     );
     Ok(())
 }
 
 /// Run the export on a background thread and report progress through the
-/// `profile-export-*` events.
-pub(crate) fn spawn_profile_export(app: AppHandle, profile_path: PathBuf) {
+/// `backup-export-*` events.
+pub(crate) fn spawn_backup_export(app: AppHandle, backup_path: PathBuf) {
     std::thread::spawn(move || {
-        let _ = app.emit(PROFILE_EXPORT_START_EVENT, ());
-        emit_profile_export_status(&app, "Preparing backup export...");
+        let _ = app.emit(BACKUP_EXPORT_START_EVENT, ());
+        emit_backup_export_status(&app, "Preparing backup export...");
 
-        match export_profile(&app, &profile_path) {
+        match export_backup(&app, &backup_path) {
             Ok(()) => {
-                let _ = app.emit(PROFILE_EXPORT_DONE_EVENT, ());
+                let _ = app.emit(BACKUP_EXPORT_DONE_EVENT, ());
             }
             Err(err) => {
-                let _ = app.emit(PROFILE_EXPORT_ERROR_EVENT, err);
+                let _ = app.emit(BACKUP_EXPORT_ERROR_EVENT, err);
             }
         }
     });
@@ -453,9 +453,9 @@ fn restore_agent_files(
     Ok(())
 }
 
-pub(crate) fn import_profile(app: &AppHandle, profile_path: &Path) -> Result<(), String> {
+pub(crate) fn import_backup(app: &AppHandle, backup_path: &Path) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let file = fs::File::open(profile_path).map_err(|e| e.to_string())?;
+    let file = fs::File::open(backup_path).map_err(|e| e.to_string())?;
     let mut archive = ZipArchive::new(file).map_err(|e| e.to_string())?;
 
     let config: AppConfig = {
@@ -530,10 +530,10 @@ pub(crate) fn import_profile(app: &AppHandle, profile_path: &Path) -> Result<(),
     // definitions that are new to this machine.
     let _ = agents::load_configured_agents(&state.agents_config_path);
 
-    let _ = app.emit(PROFILE_RESTORED_EVENT, ());
+    let _ = app.emit(BACKUP_RESTORED_EVENT, ());
     state.logger.lock().unwrap().log(
         "INFO",
-        &format!("Backup restored from {}", profile_path.display()),
+        &format!("Backup restored from {}", backup_path.display()),
     );
     Ok(())
 }

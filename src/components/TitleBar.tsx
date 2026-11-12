@@ -16,12 +16,12 @@ import {
     faXmark,
 } from "../icons";
 import {
-    exportProfileTo,
+    exportBackupTo,
     getAppVersion,
     getInstanceInfo,
     getWorkspaceDir,
     getWorkspaceHistory,
-    importProfileFrom,
+    importBackupFrom,
     openAppDataDir,
     openIssuePage,
     openMarkdownFile,
@@ -289,7 +289,7 @@ export function TitleBar({
                 defaultPath: "rabbit-chat-studio.backup.zip",
                 filters: [{ name: "Backup", extensions: ["zip"] }],
             });
-            if (path) await exportProfileTo(path);
+            if (path) await exportBackupTo(path);
         });
 
     const handleRestoreBackup = () =>
@@ -299,7 +299,7 @@ export function TitleBar({
                 directory: false,
                 filters: [{ name: "Backup", extensions: ["zip"] }],
             });
-            if (typeof path === "string") await importProfileFrom(path);
+            if (typeof path === "string") await importBackupFrom(path);
         });
 
     const handleMarkdownEdit = () =>

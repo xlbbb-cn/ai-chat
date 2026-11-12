@@ -2,18 +2,13 @@ import { useState, useEffect } from "react";
 import { listInteractions, getInteraction, clearLogs, compactDatabase, getSessionStats } from "../api";
 import type { InteractionLogRecord, InteractionLogDetail, SessionStats } from "../api";
 import { useI18n } from "../i18n";
+import { formatBytes } from "../utils/format";
 import { FontAwesomeIcon, faSpinner, faXmark } from "../icons";
 import "./MonitorPanel.css";
 
 interface Props {
     sessionId: string;
     onClose: () => void;
-}
-
-function formatBytes(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /** Compact token count: `1.2K`, `34.5K`, `1.2M`. */

@@ -23,6 +23,7 @@ use crate::llm_complete::{
     apply_completion_token_limit, content_to_text, sanitize_tool_pairs, stream_llm_request,
     upstream_request_headers, ChatMessage, StreamOptions,
 };
+use crate::util::now_ms;
 use crate::AppConfig;
 
 /// Hard cap on planner LLM activations for one mission. The supervisor is a
@@ -908,11 +909,4 @@ fn render_inbox(messages: &[BusMessage]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_millis() as i64)
-        .unwrap_or(0)
 }

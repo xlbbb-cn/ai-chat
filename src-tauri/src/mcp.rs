@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::State;
 use tokio::io::AsyncBufReadExt;
 
@@ -55,7 +54,7 @@ pub struct McpServer {
     #[serde(default)]
     pub enabled: bool,
     /// Where the entry came from: `""` / `user` (the panel, an imported
-    /// profile, a hand-edited file) or `self-evolution` (written by the
+    /// backup, a hand-edited file) or `self-evolution` (written by the
     /// `mcp_self` tool in self-evolution mode). Only the latter is deletable
     /// from the assistant's side; the panel owns everything else.
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -64,7 +63,7 @@ pub struct McpServer {
     /// (`.data/mcp/<slug>/server.py`). Informational for the panel and the
     /// model — the executable contract stays `command` + `args`, and because
     /// every stdio child starts in the workspace root the relative path
-    /// resolves on any machine the profile is restored on.
+    /// resolves on any machine the backup is restored on.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub definition_path: String,
 }
@@ -100,13 +99,6 @@ pub enum McpLogLevel {
 /// Max entries kept per server in the in-memory ring buffer.
 pub const MAX_MCP_LOG_ENTRIES: usize = 200;
 
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
-
 /// Append an entry to the per-server ring buffer. No-op if `state` is
 /// somehow not initialised (defensive — should never happen in practice).
 pub fn append_mcp_log(state: &AppState, id: &str, level: McpLogLevel, message: String) {
@@ -118,7 +110,7 @@ pub fn append_mcp_log(state: &AppState, id: &str, level: McpLogLevel, message: S
         buf.pop_front();
     }
     buf.push_back(McpLogEntry {
-        ts: now_ms(),
+        ts: crate::util::now_ms_u64(),
         level,
         message,
     });
@@ -430,7 +422,7 @@ fn save_servers(path: &PathBuf, servers: &[McpServer]) -> Result<(), String> {
 /// bump the registry revision.
 ///
 /// Single writer for the app-data roster (`mcp_servers.json`) — the panel
-/// commands and the profile restore — so the revision is bumped exactly once
+/// commands and the backup restore — so the revision is bumped exactly once
 /// per change and an in-flight turn knows to rebuild its MCP tool segment
 /// before the next request. The assistant's own servers go through
 /// [`upsert_workspace_server`] instead.
@@ -463,10 +455,10 @@ pub fn remove_server(state: &AppState, id: &str) -> Result<bool, String> {
 // ─── Two rosters: app data (panel) + workspace (self-evolution) ──────────────
 //
 // `mcp_servers.json` in the app-data directory belongs to the user: the MCP
-// panel, an imported profile and a hand edit all write it. Servers the
+// panel, an imported backup and a hand edit all write it. Servers the
 // assistant builds for itself in self-evolution mode belong to the *workspace*
 // and live in `<workspace>/.data/mcp.conf`, next to their scripts — so they
-// follow the workspace, they travel inside the profile's workspace snapshot,
+// follow the workspace, they travel inside the backup's workspace snapshot,
 // and switching the workspace switches the assistant's server set with it.
 //
 // The rest of the app only ever reads the merged view
@@ -509,7 +501,7 @@ pub fn load_workspace_servers(workspace_dir: &Path) -> Vec<McpServer> {
 
 /// Whether `text` is a roster this module can read (YAML or JSON).
 ///
-/// The profile restore checks the archive entry with it, so a hand-broken
+/// The backup restore checks the archive entry with it, so a hand-broken
 /// `mcp.conf` cannot replace a working one — the file simply keeps whatever it
 /// had, and the assistant's servers stay usable.
 pub fn validate_workspace_roster(text: &str) -> bool {
@@ -1156,7 +1148,7 @@ fn spawn_stderr_drain<R: tokio::io::AsyncRead + Unpin + Send + 'static>(
                         buf.pop_front();
                     }
                     buf.push_back(McpLogEntry {
-                        ts: now_ms(),
+                        ts: crate::util::now_ms_u64(),
                         level: McpLogLevel::Warn,
                         message: format!("{prefix}[{name} stderr] {trimmed}"),
                     });
@@ -2509,12 +2501,9 @@ mod tests {
 
     /// Throwaway workspace directory for the roster round-trip.
     fn temp_workspace() -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let dir =
-            std::env::temp_dir().join(format!("rabbit-chat-studio-roster-{}-{nanos}", std::process::id()));
+        let stamp = crate::util::now_ms_u64();
+        let dir = std::env::temp_dir()
+            .join(format!("rabbit-chat-studio-roster-{}-{stamp}", std::process::id()));
         fs::create_dir_all(&dir).expect("temp workspace");
         dir
     }

@@ -17,20 +17,13 @@
 import katexCssUrl from "katex/dist/katex.min.css?url";
 import katexCssText from "katex/dist/katex.min.css?raw";
 import razerF5FontUrl from "../assets/Web Fonts/9b77a61b70b873a0f298ad6fbc801666.woff2?url";
+import { escapeHtml } from "./format";
 
 /** Font stack of a standalone document: system faces, nothing downloaded. */
 const SYSTEM_FONT_STACK =
   '"Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Helvetica Neue", Arial, sans-serif';
 
 const CODE_FONT_STACK = '"Cascadia Code", "Consolas", "Microsoft YaHei", monospace';
-
-export const escapeHtml = (value: string): string =>
-  value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 
 /**
  * Every font `katex.min.css` points at.

@@ -25,7 +25,7 @@
 //! writes it like any other folder (the SQLite database excepted — see
 //! `tools::paths`). On Windows the directory carries the file-system hidden
 //! attribute so it stays out of Explorer. Application-level files
-//! (config.json, app.log, MCP/sub-agent definitions, profiles) remain in the OS
+//! (config.json, app.log, MCP/sub-agent definitions, backups) remain in the OS
 //! app data directory; timers live here because a timer resumes a chat session
 //! of *this* workspace.
 
@@ -90,7 +90,7 @@ pub fn tmp_root(workspace_dir: &Path) -> PathBuf {
 /// One directory per server (`<slug>/server.py`), written by the `mcp_self`
 /// tool in self-evolution mode. The registry entry in the app-data
 /// `mcp_servers.json` points at the script with a workspace-relative path, so
-/// the assets travel with the workspace (and with a profile backup) while the
+/// the assets travel with the workspace (and with a backup archive) while the
 /// stdio child keeps starting in the workspace root.
 pub fn mcp_root(workspace_dir: &Path) -> PathBuf {
     data_root(workspace_dir).join("mcp")
@@ -101,8 +101,8 @@ pub fn mcp_root(workspace_dir: &Path) -> PathBuf {
 /// The assistant's self-evolution mode keeps the servers it built here, next
 /// to their scripts, and never writes the app-data `mcp_servers.json`. The two
 /// files are merged into the effective roster (`mcp::load_effective_servers`),
-/// so a self-built server still moves with the workspace (and with a profile
-/// backup) while the panel-owned entries stay application-wide.
+/// so a self-built server still moves with the workspace (and with a backup
+/// archive) while the panel-owned entries stay application-wide.
 pub fn mcp_conf_path(workspace_dir: &Path) -> PathBuf {
     data_root(workspace_dir).join("mcp.conf")
 }

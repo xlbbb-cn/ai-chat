@@ -281,7 +281,7 @@
 }
 
 .history-action-btn.fav {
-  color: #eab308;
+  color: var(--c-favorite);
   opacity: 0.9;
 }
 

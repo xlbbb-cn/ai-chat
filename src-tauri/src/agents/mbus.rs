@@ -9,7 +9,6 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::OptionalExtension;
 use serde::Serialize;
@@ -21,6 +20,7 @@ use super::{
     get_active_mission_tasks, log_agent_event, normalize_agent_type, preview_text, SubAgent, Task,
     TaskResult, AGENT_TYPE_LLM,
 };
+use crate::util::now_ms;
 use crate::AppState;
 
 /// Peer id of the planner. Plan task ids are sanitized so they can never
@@ -1153,13 +1153,6 @@ impl MissionBus {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_millis() as i64)
-        .unwrap_or(0)
-}
 
 fn next_seq(inner: &mut BusInner) -> u64 {
     inner.seq = inner.seq.saturating_add(1);

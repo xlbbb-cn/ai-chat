@@ -265,7 +265,7 @@
     width: 14px;
     left: 3px;
     bottom: 3px;
-    background-color: #FFFFFF;
+    background-color: var(--c-knob);
     transition: transform var(--t-dur) var(--t-ease);
     border-radius: 2px;
 }

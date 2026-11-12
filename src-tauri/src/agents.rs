@@ -291,7 +291,7 @@ fn default_poll_interval_seconds() -> u32 {
 }
 
 /// Definition of a standalone CLI agent written by builds that predate agent
-/// types. Only used to migrate `sub_agents.json` / profiles forward.
+/// types. Only used to migrate `sub_agents.json` / old backup archives forward.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LegacyCliAgent {
     pub id: String,

@@ -33,6 +33,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::workspace;
 use crate::workspace_files::resolve_in_workspace;
+use crate::util::truncate_chars;
 use crate::AppState;
 
 /// Largest PDF a mention may convert (48 MiB). Bigger files are a deliberate
@@ -186,14 +187,6 @@ fn slash_path(root: &Path, path: &Path) -> String {
         .map(|component| component.as_os_str().to_string_lossy())
         .collect::<Vec<_>>()
         .join("/")
-}
-
-/// Cut `text` to at most `limit` characters, on a char boundary.
-fn truncate_chars(text: &str, limit: usize) -> String {
-    match text.char_indices().nth(limit) {
-        Some((index, _)) => text[..index].to_string(),
-        None => text.to_string(),
-    }
 }
 
 /// The part of `full` the prompt gets, plus whether anything was dropped.

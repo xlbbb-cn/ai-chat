@@ -271,30 +271,14 @@ fn is_backup_name(name: &str) -> bool {
     name.contains(".bak.")
 }
 
-/// Filename slug derived from an agent name. Keeps Unicode letters/digits so a
-/// Chinese name produces a readable file name; falls back to a random suffix.
+/// Filename slug derived from an agent name (80 characters max); falls back to
+/// a random suffix so two unnamed agents never share a file.
 fn slugify(name: &str) -> String {
-    let mut out = String::new();
-    let mut last_dash = false;
-    for ch in name.trim().chars() {
-        if ch.is_alphanumeric() {
-            for lower in ch.to_lowercase() {
-                out.push(lower);
-            }
-            last_dash = false;
-        } else if !out.is_empty() && !last_dash {
-            out.push('-');
-            last_dash = true;
-        }
-        if out.chars().count() >= 80 {
-            break;
-        }
-    }
-    let trimmed = out.trim_matches('-').to_string();
-    if trimmed.is_empty() {
+    let slug = crate::util::slugify(name, 80);
+    if slug.is_empty() {
         format!("agent-{}", &Uuid::new_v4().to_string()[..8])
     } else {
-        trimmed
+        slug
     }
 }
 
@@ -757,7 +741,7 @@ pub fn resolve_configured(config: &mut super::AgentsConfig, root: &Path) -> Sync
             }
         }
 
-        // No readable file. Migrate an inline prompt (legacy JSON, old profile)
+        // No readable file. Migrate an inline prompt (legacy JSON, old export)
         // into a file, otherwise drop the stale (or invalid) file reference.
         if !agent.system_prompt.trim().is_empty() || !agent.name.trim().is_empty() {
             let relative = declared

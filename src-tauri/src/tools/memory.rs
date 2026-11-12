@@ -6,6 +6,7 @@
 // a ranked read path the model queries on demand, and a "consolidate into a
 // skill" archive path.
 
+use crate::util::{slugify, truncate_with_ellipsis};
 use crate::db;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -146,9 +147,9 @@ impl EvolutionEntry {
     fn display_title(&self) -> String {
         let title = self.meta.title.trim();
         if !title.is_empty() {
-            truncate_chars(title, EVOLUTION_TITLE_MAX)
+            truncate_with_ellipsis(title, EVOLUTION_TITLE_MAX)
         } else {
-            truncate_chars(&self.summary, EVOLUTION_TITLE_MAX)
+            truncate_with_ellipsis(&self.summary, EVOLUTION_TITLE_MAX)
         }
     }
 
@@ -170,19 +171,6 @@ pub struct ScoredEntry {
 
 // ─── Small text helpers ──────────────────────────────────────────────────────
 
-fn truncate_chars(text: &str, max: usize) -> String {
-    if max == 0 {
-        return String::new();
-    }
-    let total = text.chars().count();
-    if total <= max {
-        return text.to_string();
-    }
-    let mut out: String = text.chars().take(max.saturating_sub(1)).collect();
-    out.push('…');
-    out
-}
-
 /// Collapse markdown lines into one dense line, preserving order and content.
 fn one_line(text: &str, max: usize) -> String {
     let mut out = String::new();
@@ -202,7 +190,7 @@ fn one_line(text: &str, max: usize) -> String {
             break;
         }
     }
-    truncate_chars(&out, max)
+    truncate_with_ellipsis(&out, max)
 }
 
 /// First sentence (EN or CJK punctuation), used as a fallback title.
@@ -215,11 +203,11 @@ fn first_sentence(text: &str) -> String {
         if matches!(ch, '。' | '！' | '？' | '.' | '!' | '?') {
             let candidate = &flat[..index + ch.len_utf8()];
             if candidate.chars().count() >= 12 {
-                return truncate_chars(candidate.trim(), EVOLUTION_TITLE_MAX);
+                return truncate_with_ellipsis(candidate.trim(), EVOLUTION_TITLE_MAX);
             }
         }
     }
-    truncate_chars(flat.trim(), EVOLUTION_TITLE_MAX)
+    truncate_with_ellipsis(flat.trim(), EVOLUTION_TITLE_MAX)
 }
 
 /// Lower-cased alphanumeric + CJK text, used for identity comparisons.
@@ -298,23 +286,6 @@ fn jaccard(left: &HashSet<String>, right: &HashSet<String>) -> f64 {
     } else {
         intersection / union
     }
-}
-
-fn slugify(text: &str) -> String {
-    let mut out = String::new();
-    let mut last_dash = false;
-    for ch in text.chars().flat_map(|c| c.to_lowercase()) {
-        // Keep CJK/alphanumerics: a Chinese title must still produce a stable
-        // key, otherwise every automatic conclusion becomes a new file.
-        if ch.is_alphanumeric() {
-            out.push(ch);
-            last_dash = false;
-        } else if !last_dash && !out.is_empty() {
-            out.push('-');
-            last_dash = true;
-        }
-    }
-    out.trim_matches('-').to_string()
 }
 
 // ─── Parsing / serialization ─────────────────────────────────────────────────
@@ -1253,8 +1224,8 @@ pub fn plan_clusters(ranked: &[ScoredEntry], budget_chars: usize) -> Vec<Evoluti
             .max_by(|left, right| left.1.cmp(&right.1).then_with(|| right.0.cmp(&left.0)))
             .map(|(tag, _)| tag)
             .unwrap_or_default();
-        let suggested_skill = if slugify(&dominant_tag).len() >= 3 {
-            format!("{}-archive", slugify(&dominant_tag))
+        let suggested_skill = if slugify(&dominant_tag, 0).len() >= 3 {
+            format!("{}-archive", slugify(&dominant_tag, 0))
         } else {
             "memory-archive".to_string()
         };
@@ -1693,7 +1664,7 @@ pub fn distill_conclusion(answer: &str) -> (String, String) {
         }
     }
 
-    let body = truncate_chars(body.trim(), 320);
+    let body = truncate_with_ellipsis(body.trim(), 320);
     let title = first_sentence(&body);
     (title, body)
 }
@@ -1708,9 +1679,9 @@ pub fn record_auto_conclusion(workspace_dir: &Path, _session_id: &str, answer: &
     if body.chars().count() < 40 {
         return None;
     }
-    let slug = slugify(&title);
+    let slug = slugify(&title, 0);
     let key = if slug.chars().count() >= 4 {
-        format!("auto-{}", truncate_chars(&slug, 60))
+        format!("auto-{}", truncate_with_ellipsis(&slug, 60))
     } else {
         format!("auto-{}", chrono::Utc::now().format("%Y%m%d-%H%M%S"))
     };
@@ -2959,8 +2930,8 @@ mod tests {
     #[test]
     fn truncation_is_character_safe() {
         let text = "上海机房跳板机";
-        assert_eq!(truncate_chars(text, 3), "上海…");
-        assert_eq!(truncate_chars(text, 100), text);
+        assert_eq!(truncate_with_ellipsis(text, 3), "上海…");
+        assert_eq!(truncate_with_ellipsis(text, 100), text);
     }
 
     /// Identical bodies collapse into one ranked row with summed evidence.

@@ -157,8 +157,8 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  -webkit-mask-image: linear-gradient(90deg, #000 75%, transparent 100%);
-  mask-image: linear-gradient(90deg, #000 75%, transparent 100%);
+  -webkit-mask-image: linear-gradient(90deg, var(--c-text) 75%, transparent 100%);
+  mask-image: linear-gradient(90deg, var(--c-text) 75%, transparent 100%);
 }
 
 /* Slot 1 — the outgoing line. Clipped at rest; only visible while the
@@ -830,14 +830,14 @@
 [data-theme="dark"] .message-content pre code.hljs,
 [data-theme="dark"] .message-reasoning-content pre code.hljs {
   background: var(--c-code) !important;
-  color: #E8EAED !important;
+  color: var(--c-syn-text) !important;
 }
 
 [data-theme="dark"] .message-content .hljs-comment,
 [data-theme="dark"] .message-content .hljs-quote,
 [data-theme="dark"] .message-reasoning-content .hljs-comment,
 [data-theme="dark"] .message-reasoning-content .hljs-quote {
-  color: #8A8A90 !important;
+  color: var(--c-syn-comment) !important;
 }
 
 [data-theme="dark"] .message-content .hljs-keyword,
@@ -846,7 +846,7 @@
 [data-theme="dark"] .message-reasoning-content .hljs-keyword,
 [data-theme="dark"] .message-reasoning-content .hljs-selector-tag,
 [data-theme="dark"] .message-reasoning-content .hljs-subst {
-  color: #9DB7FF !important;
+  color: var(--c-syn-keyword) !important;
 }
 
 [data-theme="dark"] .message-content .hljs-string,
@@ -855,7 +855,7 @@
 [data-theme="dark"] .message-reasoning-content .hljs-string,
 [data-theme="dark"] .message-reasoning-content .hljs-doctag,
 [data-theme="dark"] .message-reasoning-content .hljs-regexp {
-  color: #C8E6A0 !important;
+  color: var(--c-syn-string) !important;
 }
 
 [data-theme="dark"] .message-content .hljs-title,
@@ -870,7 +870,7 @@
 [data-theme="dark"] .message-reasoning-content .hljs-attr,
 [data-theme="dark"] .message-reasoning-content .hljs-attribute,
 [data-theme="dark"] .message-reasoning-content .hljs-type {
-  color: #8EC5FF !important;
+  color: var(--c-syn-title) !important;
 }
 
 [data-theme="dark"] .message-content .hljs-number,
@@ -881,7 +881,7 @@
 [data-theme="dark"] .message-reasoning-content .hljs-literal,
 [data-theme="dark"] .message-reasoning-content .hljs-symbol,
 [data-theme="dark"] .message-reasoning-content .hljs-bullet {
-  color: #F2C38F !important;
+  color: var(--c-syn-number) !important;
 }
 
 [data-theme="dark"] .message-content .hljs-built_in,
@@ -890,7 +890,7 @@
 [data-theme="dark"] .message-reasoning-content .hljs-built_in,
 [data-theme="dark"] .message-reasoning-content .hljs-code,
 [data-theme="dark"] .message-reasoning-content .hljs-addition {
-  color: #9ADBB7 !important;
+  color: var(--c-syn-builtin) !important;
 }
 
 [data-theme="dark"] .message-content .hljs-variable,
@@ -899,7 +899,7 @@
 [data-theme="dark"] .message-reasoning-content .hljs-variable,
 [data-theme="dark"] .message-reasoning-content .hljs-template-variable,
 [data-theme="dark"] .message-reasoning-content .hljs-deletion {
-  color: #FFB4B4 !important;
+  color: var(--c-syn-deletion) !important;
 }
 
 /* ─── Figures — assistant-drawn SVG (2D) and carve scenes (3D) ───────────────

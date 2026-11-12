@@ -13,7 +13,7 @@
 //! The directory is intentionally *outside* the task's working directory so a
 //! producer and its consumers can exchange large artifacts without pasting
 //! them into prompts. It is permanent (the user cleans it manually) and is not
-//! part of the profile backup.
+//! part of the backup archive.
 //!
 //! The top level of `.data/tmp` is shared with `pdf/` (the PDF mention cache) and
 //! with composer pastes, which land there as plain files under the file's own

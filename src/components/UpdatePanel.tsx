@@ -8,7 +8,8 @@ import {
     revealUpdateFile,
 } from "../api";
 import type { UpdateAsset, UpdateInfo } from "../types";
-import { useI18n, type Locale } from "../i18n";
+import { useI18n } from "../i18n";
+import { formatBytes, formatDate } from "../utils/format";
 import { MarkdownPreview } from "./MarkdownPreview";
 import "./UpdatePanel.css";
 
@@ -18,24 +19,6 @@ interface Props {
     onClose: () => void;
     /** Lets the caller (chat banner) react to a fresh check result. */
     onInfo?: (info: UpdateInfo) => void;
-}
-
-function formatBytes(bytes: number): string {
-    if (!bytes) return "";
-    const units = ["B", "KB", "MB", "GB"];
-    let value = bytes;
-    let unit = 0;
-    while (value >= 1024 && unit < units.length - 1) {
-        value /= 1024;
-        unit += 1;
-    }
-    return `${value >= 10 || unit === 0 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
-}
-
-function formatDate(iso: string | undefined, locale: Locale): string {
-    if (!iso) return "";
-    const date = new Date(iso);
-    return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString(locale);
 }
 
 /** Split a path so a long folder name cannot push the file name out of view. */

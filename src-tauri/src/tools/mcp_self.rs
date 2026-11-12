@@ -11,7 +11,7 @@
 //! ```
 //!
 //! The roster lives *in the workspace*, next to the scripts: it follows the
-//! workspace switch, it travels inside the profile's workspace snapshot, and
+//! workspace switch, it travels inside the backup's workspace snapshot, and
 //! the assistant never touches the user's app-data `mcp_servers.json`. Both
 //! files are merged into the effective roster (`mcp::load_effective_servers`),
 //! so the panel lists self-built servers like any other entry.
@@ -34,7 +34,7 @@
 //! The registry entry keeps the script as a **workspace-relative** argument
 //! (`command = python3`, `args = [".data/mcp/<slug>/server.py"]`). Every stdio
 //! child already starts in the workspace root (`mcp::build_stdio_cmd`), so the
-//! relative argument resolves locally and still resolves after a profile
+//! relative argument resolves locally and still resolves after a backup
 //! restore on another machine.
 
 use serde_json::{json, Value};
@@ -684,28 +684,13 @@ fn pick(candidates: &[&str]) -> String {
         .unwrap_or_default()
 }
 
-/// `name` → folder slug (`Weather Tools!` → `weather-tools`).
+/// `name` → folder slug (`Weather Tools!` → `weather-tools`), never empty.
 fn slugify(name: &str) -> String {
-    let mut out = String::new();
-    let mut last_separator = false;
-    for ch in name.chars() {
-        if ch.is_alphanumeric() {
-            for lower in ch.to_lowercase() {
-                out.push(lower);
-            }
-            last_separator = false;
-        } else if !out.is_empty() && !last_separator {
-            out.push('-');
-            last_separator = true;
-        }
-    }
-    let trimmed = out.trim_matches('-');
-    let capped: String = trimmed.chars().take(40).collect();
-    let capped = capped.trim_matches('-').to_string();
-    if capped.is_empty() {
+    let slug = crate::util::slugify(name, 40);
+    if slug.is_empty() {
         "server".to_string()
     } else {
-        capped
+        slug
     }
 }
 

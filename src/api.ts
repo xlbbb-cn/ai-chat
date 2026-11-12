@@ -1149,11 +1149,11 @@ export async function openMarkdownFile(path: string): Promise<void> {
 }
 
 /** Export the backup archive to a path the caller picked. */
-export async function exportProfileTo(path: string): Promise<void> {
-  return invoke("app_export_profile", { path });
+export async function exportBackupTo(path: string): Promise<void> {
+  return invoke("app_export_backup", { path });
 }
 
 /** Restore a backup archive from a path the caller picked. */
-export async function importProfileFrom(path: string): Promise<void> {
-  return invoke("app_import_profile", { path });
+export async function importBackupFrom(path: string): Promise<void> {
+  return invoke("app_import_backup", { path });
 }

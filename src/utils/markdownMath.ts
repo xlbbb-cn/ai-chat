@@ -2,6 +2,7 @@ import type MarkdownIt from "markdown-it";
 import type StateBlock from "markdown-it/lib/rules_block/state_block.mjs";
 import type StateInline from "markdown-it/lib/rules_inline/state_inline.mjs";
 import katex from "katex";
+import { escapeHtml } from "./format";
 
 type BlockState = StateBlock;
 type InlineState = StateInline;
@@ -22,15 +23,6 @@ function isWhitespaceChar(code: number): boolean {
 
 function isDigitChar(code: number): boolean {
     return code >= 0x30 && code <= 0x39;
-}
-
-function escapeHtml(value: string): string {
-    return value
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
 }
 
 function renderMath(latex: string, displayMode: boolean): string {

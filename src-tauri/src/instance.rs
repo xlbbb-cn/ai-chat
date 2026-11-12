@@ -30,8 +30,9 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 
+use crate::util::now_ms;
 use crate::AppConfig;
 
 /// Directory below the app data root holding the primary lock and every shadow
@@ -548,13 +549,6 @@ fn pid_is_alive(pid: u32) -> bool {
         let _ = pid;
         true
     }
-}
-
-fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
 }
 
 #[cfg(test)]

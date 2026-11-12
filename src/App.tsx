@@ -612,9 +612,9 @@ export default function App() {
     penalty_items?: Array<{ name: string; points: number }>;
     requires_confirmation?: boolean;
   } | null>(null);
-  const [profileExporting, setProfileExporting] = useState(false);
-  const [profileExportPhase, setProfileExportPhase] = useState<"idle" | "preparing" | "status">("idle");
-  const [profileExportStatus, setProfileExportStatus] = useState("");
+  const [backupExporting, setBackupExporting] = useState(false);
+  const [backupExportPhase, setBackupExportPhase] = useState<"idle" | "preparing" | "status">("idle");
+  const [backupExportStatus, setBackupExportStatus] = useState("");
   const [pendingRetryMessageId, setPendingRetryMessageId] = useState<string | null>(null);
   const [markdownEditorOpen, setMarkdownEditorOpen] = useState(false);
   const [markdownPath, setMarkdownPath] = useState("");
@@ -1331,7 +1331,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const unlisten = listen("profile-restored", async () => {
+    const unlisten = listen("backup-restored", async () => {
       try {
         // A restored backup can reference skills that are absent from the
         // current workspace, so re-validate before activating them. The
@@ -1357,23 +1357,23 @@ export default function App() {
   useEffect(() => {
     const unlisteners: Promise<() => void>[] = [];
     unlisteners.push(
-      listen("profile-export-start", () => {
-        setProfileExporting(true);
-        setProfileExportPhase("preparing");
+      listen("backup-export-start", () => {
+        setBackupExporting(true);
+        setBackupExportPhase("preparing");
       }),
-      listen<string>("profile-export-status", (e) => {
-        setProfileExportPhase("status");
-        setProfileExportStatus(e.payload);
+      listen<string>("backup-export-status", (e) => {
+        setBackupExportPhase("status");
+        setBackupExportStatus(e.payload);
       }),
-      listen("profile-export-done", () => {
-        setProfileExporting(false);
-        setProfileExportPhase("idle");
-        setProfileExportStatus("");
+      listen("backup-export-done", () => {
+        setBackupExporting(false);
+        setBackupExportPhase("idle");
+        setBackupExportStatus("");
       }),
-      listen<string>("profile-export-error", (e) => {
-        setProfileExporting(false);
-        setProfileExportPhase("idle");
-        setProfileExportStatus("");
+      listen<string>("backup-export-error", (e) => {
+        setBackupExporting(false);
+        setBackupExportPhase("idle");
+        setBackupExportStatus("");
         setError(t("app.backupExportFailed", { error: e.payload }));
       })
     );
@@ -2109,7 +2109,7 @@ export default function App() {
    */
   const appendInjection = useCallback(async () => {
     const text = input.trim();
-    if (!text || !streaming || profileExporting) return;
+    if (!text || !streaming || backupExporting) return;
 
     const item: ChatInjection = {
       id: crypto.randomUUID(),
@@ -2133,7 +2133,7 @@ export default function App() {
     );
     setPendingInjections(pendingInjectionsRef.current);
     setPendingAutoPrompts((prev) => [...prev, text]);
-  }, [input, streaming, sessionId, profileExporting]);
+  }, [input, streaming, sessionId, backupExporting]);
 
   /**
    * Turn-end flush: an injection still queued when the turn ended never
@@ -2149,7 +2149,7 @@ export default function App() {
   }, []);
 
   const sendMessage = useCallback(async (overrideText?: string) => {
-    if (profileExporting) return;
+    if (backupExporting) return;
 
     // `overrideText` is the timer resume path: it bypasses the input box
     // entirely, so it must not carry a `@file` mention either.
@@ -2507,7 +2507,7 @@ export default function App() {
     }, useAgentsEnabled, embeddedAgentIds);
 
     cleanupRef.current = cleanup;
-  }, [input, messages, streaming, profileExporting, activeSkillIds, sessionId, selectedModel, selectedMetadata, useAgentsEnabled, embeddedAgents, t, flushUndeliveredInjections]);
+  }, [input, messages, streaming, backupExporting, activeSkillIds, sessionId, selectedModel, selectedMetadata, useAgentsEnabled, embeddedAgents, t, flushUndeliveredInjections]);
 
   /**
    * Start the silent evolution-maintenance pass from the empty-state face.
@@ -2515,7 +2515,7 @@ export default function App() {
    * `evolution-maintenance-state` event clears `dreamState`.
    */
   const startDream = useCallback(async () => {
-    if (!selfEvolutionMode || dreamState === "running" || streaming || profileExporting) {
+    if (!selfEvolutionMode || dreamState === "running" || streaming || backupExporting) {
       return;
     }
     setDreamGlyphs(makeDreamGlyphs());
@@ -2541,7 +2541,7 @@ export default function App() {
     selfEvolutionMode,
     dreamState,
     streaming,
-    profileExporting,
+    backupExporting,
     selectedModel,
     setError,
     t,
@@ -2608,11 +2608,11 @@ export default function App() {
   // full history. Sending one at a time keeps the turn order intact when
   // several prompts queue together.
   useEffect(() => {
-    if (streaming || profileExporting || pendingAutoPrompts.length === 0) return;
+    if (streaming || backupExporting || pendingAutoPrompts.length === 0) return;
     const [next, ...rest] = pendingAutoPrompts;
     setPendingAutoPrompts(rest);
     void sendMessage(next);
-  }, [pendingAutoPrompts, streaming, profileExporting, sendMessage]);
+  }, [pendingAutoPrompts, streaming, backupExporting, sendMessage]);
 
   const retryPendingUserMessage = useCallback(async () => {
     if (streaming || !pendingRetryMessageId || retryingRef.current) return;
@@ -2950,7 +2950,7 @@ export default function App() {
   }, [messages, sessionId, resetEmbeddedAgents, t]);
 
   function handleKeyDown(e: React.KeyboardEvent) {
-    if (profileExporting) {
+    if (backupExporting) {
       e.preventDefault();
       return;
     }
@@ -3699,7 +3699,7 @@ export default function App() {
       // Embedded roles shape a NEW conversation. Once a turn exists the role
       // snapshot is frozen in the backend, so the popup would lie about being
       // able to change it. Injection mode and backup export disable it too.
-      if (streaming || profileExporting || messages.length > 0) {
+      if (streaming || backupExporting || messages.length > 0) {
         closeAgentMention();
         return;
       }
@@ -3716,7 +3716,7 @@ export default function App() {
       setAgentMentionIndex(0);
       void ensureAgentMentions();
     },
-    [closeAgentMention, ensureAgentMentions, messages.length, profileExporting, streaming],
+    [closeAgentMention, ensureAgentMentions, messages.length, backupExporting, streaming],
   );
 
   /**
@@ -3827,7 +3827,7 @@ export default function App() {
    */
   const importDroppedPaths = useCallback(
     async (paths: string[]) => {
-      if (profileExporting) return;
+      if (backupExporting) return;
       if (streaming) {
         setError(t("app.composer.busy"), "warning");
         return;
@@ -3845,7 +3845,7 @@ export default function App() {
         setError(t("app.composer.dropFailed", { error: String(err) }), "warning");
       }
     },
-    [profileExporting, streaming, insertMentionPaths, invalidateWorkspaceFileCache, setError, t],
+    [backupExporting, streaming, insertMentionPaths, invalidateWorkspaceFileCache, setError, t],
   );
 
   /**
@@ -3867,7 +3867,7 @@ export default function App() {
       if (files.length === 0) return;
       event.preventDefault();
 
-      if (profileExporting) return;
+      if (backupExporting) return;
       if (streaming) {
         // While a turn runs the composer is an injection channel, and injected
         // text carries no attachments: the file would be saved but never sent.
@@ -3900,7 +3900,7 @@ export default function App() {
       })();
     },
     [
-      profileExporting,
+      backupExporting,
       streaming,
       insertMentionPaths,
       invalidateWorkspaceFileCache,
@@ -4272,18 +4272,18 @@ export default function App() {
           </div>
         </header>
 
-        {profileExporting && (
-          <div className="profile-export-progress" role="progressbar" aria-busy="true" aria-live="polite">
-            <div className="profile-export-progress-label">
-              {profileExportPhase === "preparing"
+        {backupExporting && (
+          <div className="backup-export-progress" role="progressbar" aria-busy="true" aria-live="polite">
+            <div className="backup-export-progress-label">
+              {backupExportPhase === "preparing"
                 ? t("app.backupExportPreparing")
-                : profileExportPhase === "status"
-                  ? profileExportStatus
+                : backupExportPhase === "status"
+                  ? backupExportStatus
                   : t("app.backupExportLabel")}
             </div>
-            <div className="profile-export-progress-hint">{t("app.backupExportHint")}</div>
-            <div className="profile-export-progress-track">
-              <div className="profile-export-progress-fill" />
+            <div className="backup-export-progress-hint">{t("app.backupExportHint")}</div>
+            <div className="backup-export-progress-track">
+              <div className="backup-export-progress-fill" />
             </div>
           </div>
         )}
@@ -4656,13 +4656,13 @@ export default function App() {
               placeholder={streaming ? t("app.injections.placeholder") : t("app.inputPlaceholder")}
               // Stays usable while a reply streams: Enter then adds the text to
               // the running turn instead of starting a new one.
-              disabled={profileExporting}
+              disabled={backupExporting}
             />
             <ModelSelect
               models={availableModels}
               value={selectedModel}
               metadata={modelMetadata}
-              disabled={streaming || profileExporting}
+              disabled={streaming || backupExporting}
               onChange={setSelectedModel}
             />
             {reasoningSupported && (
@@ -4674,7 +4674,7 @@ export default function App() {
                 compact
                 value={reasoningEffort}
                 onChange={(next) => void handleReasoningEffortChange(next)}
-                disabled={streaming || profileExporting}
+                disabled={streaming || backupExporting}
                 options={[
                   { value: "", label: t("app.reasoningDefault") },
                   { value: "low", label: t("app.reasoningLow") },
@@ -4686,7 +4686,7 @@ export default function App() {
             <button
               className="send-btn"
               onClick={() => (streaming ? void stopStreaming() : void sendMessage())}
-              disabled={profileExporting || (!streaming && !input.trim())}
+              disabled={backupExporting || (!streaming && !input.trim())}
             >
               {streaming ? t("app.stop") : t("app.send")}
             </button>

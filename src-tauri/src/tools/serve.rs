@@ -25,6 +25,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 
 use super::process::{build_command, decode_hint_for_shell, decode_process_bytes};
 use crate::process_guard;
+use crate::util::truncate_with_trailing_ellipsis;
 
 /// Output kept per serve process (head is dropped first once the budget is spent).
 const MAX_OUTPUT_CHARS: usize = 16_000;
@@ -237,7 +238,7 @@ impl ServeRegistry {
                 process.shell_type,
                 process.started_at.elapsed().as_secs(),
                 process.cwd.display(),
-                truncate_chars(&process.code, CODE_PREVIEW_CHARS),
+                truncate_with_trailing_ellipsis(&process.code, CODE_PREVIEW_CHARS),
             ));
             if let Some(code) = status.exit_code {
                 output.push_str(&format!("\n  exit code: {code}"));
@@ -280,7 +281,7 @@ impl ServeRegistry {
                     id: process.id.clone(),
                     pid: process.pid,
                     shell_type: process.shell_type.clone(),
-                    code: truncate_chars(&process.code, CODE_PREVIEW_CHARS),
+                    code: truncate_with_trailing_ellipsis(&process.code, CODE_PREVIEW_CHARS),
                     cwd: process.cwd.display().to_string(),
                     state: if status.state.is_empty() {
                         "unknown".to_string()
@@ -525,7 +526,7 @@ fn log_start(app: &AppHandle, id: &str, pid: u32, shell_type: &str, code: &str, 
             &format!(
                 "Started serve process {id} (pid {pid}, shell {shell_type}, cwd {}): {}",
                 cwd.display(),
-                truncate_chars(code, CODE_PREVIEW_CHARS)
+                truncate_with_trailing_ellipsis(code, CODE_PREVIEW_CHARS)
             ),
         );
     }
@@ -570,15 +571,6 @@ fn append_limited(buffer: &mut String, text: &str) {
             .skip(total - MAX_OUTPUT_CHARS)
             .collect::<String>();
     }
-}
-
-fn truncate_chars(value: &str, max: usize) -> String {
-    if value.chars().count() <= max {
-        return value.to_string();
-    }
-    let mut truncated: String = value.chars().take(max).collect();
-    truncated.push_str(" …");
-    truncated
 }
 
 fn recent_output(output: &str, max_lines: usize) -> String {

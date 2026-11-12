@@ -16,7 +16,7 @@ import "highlight.js/styles/github.css";
 import "katex/dist/katex.min.css";
 import { katexMathPlugin } from "../utils/markdownMath";
 import hljs from "../utils/highlight";
-import { escapeHtml } from "../utils/printDocument";
+import { escapeHtml } from "../utils/format";
 import { exportHtmlAsPdf, type PdfExportResult } from "../utils/pdfExport";
 import { extractFigures, type FigureSpec } from "../utils/figures";
 import { mountFigures, saveAllFigures } from "../utils/figureCard";

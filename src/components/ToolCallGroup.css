@@ -120,8 +120,8 @@
     overflow: hidden;
     /* 3D scene for the flip card inside. */
     perspective: 320px;
-    -webkit-mask-image: linear-gradient(90deg, #000 75%, transparent 100%);
-    mask-image: linear-gradient(90deg, #000 75%, transparent 100%);
+    -webkit-mask-image: linear-gradient(90deg, var(--c-text) 75%, transparent 100%);
+    mask-image: linear-gradient(90deg, var(--c-text) 75%, transparent 100%);
 }
 
 .tool-call-preview-icon {
