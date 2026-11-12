@@ -19,15 +19,21 @@
  * {"objects":[…]}
  * ```
  *
+ * ```flow                   {"nodes":[…],"edges":[…]}
+ * {"direction":"LR","nodes":[…],"edges":[…]}
+ * ```
+ *
  * ```html-fig               <html-fig>…</html-fig>
  * …one self-contained HTML5 fragment (markup + style + script)…
  * ```
  *
- * The third kind is the dynamic one: a fragment that moves, or that the user
+ * The fourth kind is the dynamic one: a fragment that moves, or that the user
  * can drag. It cannot be sanitised into the transcript like an `<svg>` (a
  * drawing has no script, this one runs), so it is rendered inside a sandboxed
- * frame — see `htmlFigure.ts`. Extraction is identical, which is why the kind
- * lives here and not in a second scanner.
+ * frame — see `htmlFigure.ts`. `flow` is the declarative flowchart: JSON in,
+ * a laid-out, themed SVG out (see `flowDiagram.ts`) — no coordinates for the
+ * model to get wrong. Extraction is identical for all of them, which is why
+ * the kind lives here and not in a second scanner.
  *
  * The scan is line-based and fence-aware: a figure only counts at the top
  * level, so a `svg` example inside a ```markdown block — fenced *or* 4-space
@@ -41,7 +47,7 @@
 
 import { slotToken as sharedSlotToken } from "./slotTokens";
 
-export type FigureKind = "svg" | "carve" | "html-fig";
+export type FigureKind = "svg" | "carve" | "flow" | "html-fig";
 
 /**
  * Fence languages that name a figure. `htmlfig` is accepted because models drop
@@ -52,6 +58,7 @@ export type FigureKind = "svg" | "carve" | "html-fig";
 const FIGURE_LANGS: Record<string, FigureKind> = {
   svg: "svg",
   carve: "carve",
+  flow: "flow",
   "html-fig": "html-fig",
   htmlfig: "html-fig",
 };
@@ -102,10 +109,20 @@ function parseFenceMeta(rest: string, body: string, kind: FigureKind): { title: 
   if (named) {
     name = named[1];
     title = title.slice(named[0].length).trim();
+  } else {
+    // Models also put the token last (`flow 发布链路 #release`). Only a
+    // whitespace-separated ASCII slug at the very end counts, so `C# 编译`
+    // and `#话题` stay titles.
+    const tail = /\s#([A-Za-z0-9._-]{1,64})$/.exec(title);
+    if (tail) {
+      name = tail[1];
+      title = title.slice(0, tail.index).trim();
+    }
   }
-  // A carve scene may carry its own caption; the JSON is the thing the model
-  // actually writes, so honour it when the fence line says nothing.
-  if (kind === "carve" && (!title || !name)) {
+  // A carve scene or a flow spec may carry its own caption; the JSON is the
+  // thing the model actually writes, so honour it when the fence line says
+  // nothing.
+  if ((kind === "carve" || kind === "flow") && (!title || !name)) {
     try {
       const scene = JSON.parse(body) as { title?: unknown; name?: unknown };
       if (!title && typeof scene.title === "string") title = scene.title.trim();
@@ -120,18 +137,20 @@ function parseFenceMeta(rest: string, body: string, kind: FigureKind): { title: 
 }
 
 /**
- * Cut raw `<svg>` / `<carve>` elements out of one run of prose.
+ * Cut raw `<svg>` / `<carve>` / `<flow>` / `<html-fig>` elements out of one run
+ * of prose.
  *
  * A tag only counts when it is a *real* element: it must close, carry a
- * `viewBox`/size (svg) or a `{` (carve), and it must not sit inside an inline
- * code span — otherwise a sentence explaining the feature would eat itself.
+ * `viewBox`/size (svg) or a `{` (carve, flow), and it must not sit inside an
+ * inline code span — otherwise a sentence explaining the feature would eat
+ * itself.
  */
 function extractRawTags(source: string, figures: FigureSpec[], streaming: boolean): string {
   let out = "";
   let cursor = 0;
 
   for (;;) {
-    const open = /<(svg|carve|html-fig)\b/gi.exec(source.slice(cursor));
+    const open = /<(svg|carve|flow|html-fig)\b/gi.exec(source.slice(cursor));
     if (!open) break;
     const start = cursor + open.index;
     const kind = open[1].toLowerCase() as FigureKind;
@@ -176,7 +195,7 @@ function extractRawTags(source: string, figures: FigureSpec[], streaming: boolea
       continue;
     }
     const body = source.slice(openEnd + 1, closeIdx);
-    if (kind === "carve" && !body.includes("{")) {
+    if ((kind === "carve" || kind === "flow") && !body.includes("{")) {
       cursor = openEnd + 1;
       continue;
     }

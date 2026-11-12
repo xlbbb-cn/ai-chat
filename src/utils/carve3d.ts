@@ -8,6 +8,14 @@
  * actually needs, and every colour is a token name so the drawing follows the
  * active theme.
  *
+ * A *scene diagram* is more than a pile of solids, so the vocabulary carries
+ * the connective tissue too: an `edge` object draws a line — optionally
+ * dashed — from `from` to `to` with a cone arrowhead at the far end, and any
+ * object can carry a `label`, drawn as a camera-facing sprite with a
+ * surface-coloured halo. A soft contact shadow grounds the content by
+ * default (`"shadow": false` opts out), which is what separates a rendered
+ * scene from a floating clip-art pile.
+ *
  * Rendering uses **one** shared `WebGLRenderer`. A `WebGLRenderer` per figure
  * would run into the browser's WebGL-context limit (about 16) as soon as a
  * conversation holds a few scenes, and each rebuild of the transcript would
@@ -30,6 +38,13 @@ export interface CarveObject {
   opacity?: number;
   wireframe?: boolean;
   points?: number[][];
+  /** `edge` only: the two endpoints the line connects. */
+  from?: number[];
+  to?: number[];
+  /** `edge` only: a dashed line instead of a solid one. */
+  dashed?: boolean;
+  /** Camera-facing text sprite above the object. */
+  label?: string;
 }
 
 export interface CarveScene {
@@ -39,6 +54,8 @@ export interface CarveScene {
   objects?: CarveObject[];
   grid?: boolean;
   axes?: boolean;
+  /** The soft contact shadow under the content; on unless explicitly false. */
+  shadow?: boolean;
 }
 
 export interface CarveView {
@@ -130,6 +147,8 @@ export interface CarvePalette {
   danger: string;
   text: string;
   muted: string;
+  /** Interface typeface, for label sprites. */
+  font: string;
 }
 
 const NAMED_COLORS = ["accent", "success", "warning", "danger", "text", "muted"] as const;
@@ -165,10 +184,19 @@ export async function renderCarve(
 
   const group = new three.Group();
   const disposables: Array<{ dispose: () => void }> = [];
+  // Labels are deferred until the scene radius is known (the sprite scale is
+  // relative to it), and edges are built after the extent is measured, so an
+  // arrowhead is sized by the scene rather than by its own edge.
+  const labels: Array<{ at: [number, number, number]; top: number; text: string }> = [];
+  const edgeObjects: CarveObject[] = [];
 
   const materialFor = (object: CarveObject) => {
-    const material = new three.MeshLambertMaterial({
+    // Standard, not Lambert: a roughness around 0.55 gives the shading a
+    // material feel — a matte plastic rather than flat paint.
+    const material = new three.MeshStandardMaterial({
       color: new three.Color(colorOf(palette, object.color)),
+      roughness: 0.55,
+      metalness: 0.05,
       transparent: (object.opacity ?? 1) < 1,
       opacity: Math.min(1, Math.max(0.05, object.opacity ?? 1)),
       wireframe: object.wireframe === true,
@@ -190,20 +218,35 @@ export async function renderCarve(
     group.add(mesh);
   };
 
+  const placeLabeled = (mesh: import("three").Object3D, object: CarveObject) => {
+    place(mesh, object);
+    const label = (object.label ?? "").trim();
+    if (!label) return;
+    // `top` is how far the object rises above its anchor: the sprite's baseline
+    // offset, so a tall box gets its label above its lid, not through it.
+    const meshBox = new three.Box3().setFromObject(mesh);
+    const anchor = tuple(object.at, [0, 0, 0]);
+    labels.push({ at: anchor, top: meshBox.max.y - anchor[1], text: label });
+  };
+
   for (const object of scene.objects ?? []) {
+    if (object.type === "edge") {
+      edgeObjects.push(object);
+      continue;
+    }
     switch (object.type) {
       case "box": {
         const size = tuple(object.size, [1, 1, 1]).map((value) => Math.max(0.001, Math.abs(value)));
         const geometry = new three.BoxGeometry(size[0], size[1], size[2]);
         disposables.push(geometry);
-        place(new three.Mesh(geometry, materialFor(object)), object);
+        placeLabeled(new three.Mesh(geometry, materialFor(object)), object);
         break;
       }
       case "sphere": {
         const radius = Math.max(0.001, Math.abs(finite(object.r, 0.5)));
         const geometry = new three.SphereGeometry(radius, 28, 18);
         disposables.push(geometry);
-        place(new three.Mesh(geometry, materialFor(object)), object);
+        placeLabeled(new three.Mesh(geometry, materialFor(object)), object);
         break;
       }
       case "cylinder": {
@@ -211,7 +254,7 @@ export async function renderCarve(
         const height = Math.max(0.001, Math.abs(finite(object.h, 1)));
         const geometry = new three.CylinderGeometry(radius, radius, height, 32);
         disposables.push(geometry);
-        place(new three.Mesh(geometry, materialFor(object)), object);
+        placeLabeled(new three.Mesh(geometry, materialFor(object)), object);
         break;
       }
       case "cone": {
@@ -219,7 +262,7 @@ export async function renderCarve(
         const height = Math.max(0.001, Math.abs(finite(object.h, 1)));
         const geometry = new three.ConeGeometry(radius, height, 32);
         disposables.push(geometry);
-        place(new three.Mesh(geometry, materialFor(object)), object);
+        placeLabeled(new three.Mesh(geometry, materialFor(object)), object);
         break;
       }
       case "torus": {
@@ -227,7 +270,7 @@ export async function renderCarve(
         const tube = Math.max(0.001, Math.abs(finite(object.tube, 0.15)));
         const geometry = new three.TorusGeometry(radius, tube, 16, 64);
         disposables.push(geometry);
-        place(new three.Mesh(geometry, materialFor(object)), object);
+        placeLabeled(new three.Mesh(geometry, materialFor(object)), object);
         break;
       }
       case "plane": {
@@ -241,7 +284,7 @@ export async function renderCarve(
         // A ground plane is what a `plane` is for; the default XY orientation
         // would stand it up like a wall.
         const rot = tuple(object.rot, [-90, 0, 0]);
-        place(mesh, { ...object, rot });
+        placeLabeled(mesh, { ...object, rot });
         break;
       }
       case "line": {
@@ -257,7 +300,7 @@ export async function renderCarve(
           opacity: Math.min(1, Math.max(0.05, object.opacity ?? 1)),
         });
         disposables.push(geometry, material);
-        place(new three.Line(geometry, material), object);
+        placeLabeled(new three.Line(geometry, material), object);
         break;
       }
       default:
@@ -270,13 +313,60 @@ export async function renderCarve(
     return false;
   }
 
-  const box = new three.Box3().setFromObject(group);
+  // The extent covers the solids *and* every edge endpoint, so an arrow that
+  // points at empty space still frames the scene correctly.
+  const box = new three.Box3();
+  for (const child of group.children) box.expandByObject(child);
+  for (const edge of edgeObjects) {
+    if (Array.isArray(edge.from) && Array.isArray(edge.to)) {
+      box.expandByPoint(new three.Vector3(...tuple(edge.from, [0, 0, 0])));
+      box.expandByPoint(new three.Vector3(...tuple(edge.to, [0, 1, 0])));
+    }
+  }
   if (!box.isEmpty()) {
     const center = box.getCenter(new three.Vector3());
     const radius = Math.max(0.25, box.getSize(new three.Vector3()).length() / 2);
     // Re-centre on the origin so orbiting turns around the content, not a
     // point the model happened to place things at.
     group.position.sub(center);
+
+    if (scene.shadow !== false) {
+      // The contact shadow: a soft radial darkening on a ground plane just
+      // under the content's lowest point. One canvas texture for the whole
+      // scene — cheap, and what makes a rendered scene read as sitting in
+      // space instead of floating in a void.
+      const footprint = new three.Vector3();
+      box.getSize(footprint);
+      const gradientCanvas = document.createElement("canvas");
+      gradientCanvas.width = 256;
+      gradientCanvas.height = 256;
+      const gctx = gradientCanvas.getContext("2d");
+      if (gctx) {
+        const grad = gctx.createRadialGradient(128, 128, 24, 128, 128, 128);
+        grad.addColorStop(0, "rgba(0, 0, 0, 0.34)");
+        grad.addColorStop(0.7, "rgba(0, 0, 0, 0.10)");
+        grad.addColorStop(1, "rgba(0, 0, 0, 0)");
+        gctx.fillStyle = grad;
+        gctx.fillRect(0, 0, 256, 256);
+        const shadowTexture = new three.CanvasTexture(gradientCanvas);
+        const shadowMaterial = new three.MeshBasicMaterial({
+          map: shadowTexture,
+          transparent: true,
+          depthWrite: false,
+        });
+        const shadowGeometry = new three.PlaneGeometry(
+          Math.max(footprint.x, radius) * 1.35,
+          Math.max(footprint.z, radius) * 1.35,
+        );
+        const shadow = new three.Mesh(shadowGeometry, shadowMaterial);
+        shadow.rotation.x = -Math.PI / 2;
+        shadow.position.y = box.min.y - center.y - radius * 0.004;
+        // First of the transparents: the grid and the dashed edges blend over it.
+        shadow.renderOrder = -1;
+        disposables.push(shadowTexture, shadowMaterial, shadowGeometry);
+        group.add(shadow);
+      }
+    }
 
     if (scene.grid) {
       const divisions = 10;
@@ -312,6 +402,91 @@ export async function renderCarve(
       axis([1, 0, 0], palette.danger);
       axis([0, 1, 0], palette.success);
       axis([0, 0, 1], palette.accent);
+    }
+
+    // Edges, now that `radius` exists: the arrowhead is a fixed fraction of
+    // the scene, so every arrow reads the same weight at a glance.
+    for (const edge of edgeObjects) {
+      if (!Array.isArray(edge.from) || !Array.isArray(edge.to)) continue;
+      const from = new three.Vector3(...tuple(edge.from, [0, 0, 0]));
+      const to = new three.Vector3(...tuple(edge.to, [0, 1, 0]));
+      const direction = to.clone().sub(from);
+      const length = direction.length();
+      if (length < 0.01) continue;
+      direction.normalize();
+      const color = new three.Color(colorOf(palette, edge.color));
+      const opacity = Math.min(1, Math.max(0.05, edge.opacity ?? 0.9));
+      const lineMaterial = edge.dashed === true
+        ? new three.LineDashedMaterial({
+            color,
+            transparent: true,
+            opacity,
+            dashSize: radius * 0.05,
+            gapSize: radius * 0.035,
+          })
+        : new three.LineBasicMaterial({ color, transparent: true, opacity });
+      const lineGeometry = new three.BufferGeometry().setFromPoints([from, to]);
+      const line = new three.Line(lineGeometry, lineMaterial);
+      if (edge.dashed === true) line.computeLineDistances();
+      disposables.push(lineGeometry, lineMaterial);
+      group.add(line);
+      // The head: a cone whose tip lands exactly on `to`, oriented along the
+      // edge. `ConeGeometry` points +Y, so one quaternion does the alignment.
+      const headLength = Math.min(radius * 0.09, length * 0.4);
+      if (headLength > radius * 0.012) {
+        const headGeometry = new three.ConeGeometry(headLength / 3, headLength, 12);
+        const headMaterial = new three.MeshStandardMaterial({
+          color,
+          roughness: 0.55,
+          metalness: 0.05,
+          transparent: opacity < 1,
+          opacity,
+        });
+        const head = new three.Mesh(headGeometry, headMaterial);
+        head.position.copy(to).addScaledVector(direction, -headLength / 2);
+        head.quaternion.setFromUnitVectors(new three.Vector3(0, 1, 0), direction);
+        disposables.push(headGeometry, headMaterial);
+        group.add(head);
+      }
+    }
+
+    // Labels: canvas-texture sprites, always facing the camera, scaled by the
+    // scene radius so text stays legible in a giant or tiny scene alike.
+    if (labels.length > 0) {
+      const labelCanvas = document.createElement("canvas");
+      const lctx = labelCanvas.getContext("2d");
+      if (lctx) {
+        const font = `500 64px ${palette.font || "system-ui, sans-serif"}`;
+        lctx.font = font;
+        for (const entry of labels) {
+          const text = entry.text.slice(0, 80);
+          if (!text) continue;
+          const textWidth = Math.ceil(lctx.measureText(text).width);
+          const canvasWidth = textWidth + 56;
+          const canvasHeight = 104;
+          labelCanvas.width = canvasWidth;
+          labelCanvas.height = canvasHeight;
+          lctx.font = font; // a resize resets the context state
+          lctx.textBaseline = "middle";
+          lctx.textAlign = "center";
+          // Halo in the card's own surface colour first, then the glyph: the
+          // label stays readable over any object behind it.
+          lctx.lineWidth = 12;
+          lctx.strokeStyle = palette.background;
+          lctx.lineJoin = "round";
+          lctx.strokeText(text, canvasWidth / 2, canvasHeight / 2);
+          lctx.fillStyle = palette.text;
+          lctx.fillText(text, canvasWidth / 2, canvasHeight / 2);
+          const texture = new three.CanvasTexture(labelCanvas);
+          const material = new three.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
+          const spriteHeight = radius * 0.17;
+          const sprite = new three.Sprite(material);
+          sprite.scale.set(spriteHeight * (canvasWidth / canvasHeight), spriteHeight, 1);
+          sprite.position.set(entry.at[0], entry.at[1] + entry.top + spriteHeight * 0.95, entry.at[2]);
+          disposables.push(texture, material);
+          group.add(sprite);
+        }
+      }
     }
 
     const fov = Math.min(90, Math.max(15, finite(scene.camera?.fov, 35)));

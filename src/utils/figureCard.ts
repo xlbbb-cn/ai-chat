@@ -35,6 +35,7 @@ import {
   postFigureTokens,
   readFigureTokens,
 } from "./htmlFigure";
+import { parseFlow, renderFlowSvg, resolveFlowPalette } from "./flowDiagram";
 import { expandSlots, hashSource, slotHost } from "./slotTokens";
 import { sanitizeSvg } from "./svgSanitize";
 
@@ -121,6 +122,8 @@ function readPalette(element: Element): CarvePalette {
     danger: read("--c-danger", "#c0392b"),
     text: read("--c-text", "#171a20"),
     muted: read("--c-muted", "#5c5e62"),
+    // Label sprites are drawn in the interface's typeface.
+    font: window.getComputedStyle(element).fontFamily || "system-ui, sans-serif",
   };
 }
 
@@ -425,6 +428,125 @@ function buildCarveCard(spec: FigureSpec, index: number): FigureHandle {
 }
 
 /**
+ * A flow figure: the declarative flowchart (spec and renderer in
+ * `flowDiagram.ts`).
+ *
+ * The card work is the svg card's — a themed, rasterisable inline SVG with a
+ * save button — plus two differences: the render is asynchronous (dagre is a
+ * lazy chunk, imported on the first flow figure), and a graph wider than the
+ * card scrolls sideways instead of shrinking to an illegible strip (the
+ * mermaid behaviour). Colours are baked into the SVG, so a theme switch
+ * re-renders rather than re-styles.
+ */
+function buildFlowCard(spec: FigureSpec, index: number): FigureHandle {
+  const parts = buildCard(spec, index);
+
+  if (spec.pending) {
+    parts.figure.dataset.figureState = "pending";
+    parts.viewport.textContent = text("figure.drawing");
+    return unrenderable(parts);
+  }
+
+  const parsed = parseFlow(spec.source);
+  if (!parsed) {
+    showSource(parts, spec.source);
+    return unrenderable(parts);
+  }
+
+  const caption = spec.title || text("figure.title", { index: index + 1 });
+
+  const button = addButton(parts.actions, text("figure.save"), "chat-figure-save", () => {
+    void save();
+  });
+
+  const png = async (): Promise<string> => {
+    const svg = parts.viewport.querySelector<SVGSVGElement>("svg");
+    if (!svg) throw new Error("figure is not drawn yet");
+    return svgToPngBase64(svg, { background: readPalette(parts.figure).background });
+  };
+
+  const save = (): Promise<boolean> =>
+    saveStatus(parts, button, async () => {
+      const saved = await saveFigure({
+        id: figureSlug(spec, index),
+        pngBase64: await png(),
+      });
+      return saved.path;
+    });
+
+  let busy = false;
+  let queued = false;
+
+  const paint = (): void => {
+    if (busy) {
+      queued = true;
+      return;
+    }
+    busy = true;
+    void renderFlowSvg(parsed, resolveFlowPalette(parts.figure), caption)
+      .then((svg) => {
+        // A spec that parsed but did not lay out shows its source, like a
+        // scene that parsed but drew nothing.
+        if (!svg) {
+          showSource(parts, spec.source);
+          return;
+        }
+        svg.classList.add("chat-figure-svg");
+        parts.viewport.replaceChildren(svg);
+        fitFlowDiagram(svg, parts.viewport, parts.figure);
+        parts.figure.dataset.figureState = "ready";
+      })
+      .catch(() => showSource(parts, spec.source))
+      .finally(() => {
+        busy = false;
+        if (queued) {
+          queued = false;
+          paint();
+        }
+      });
+  };
+
+  const redraw = () => {
+    // A card that left the document stops listening for theme changes.
+    if (!parts.figure.isConnected) {
+      themeRedraws.delete(redraw);
+      return;
+    }
+    paint();
+  };
+
+  watchTheme(redraw);
+  paint();
+
+  return { element: parts.figure, activate: noop, png, save };
+}
+
+/**
+ * Keep a flow graph at natural width past ~2.5× the card (it would otherwise
+ * scale to an illegible strip) and let the card scroll sideways — the rule the
+ * mermaid card applies. Its copy lives in `mermaidDiagrams.ts` because
+ * importing it here would be a cycle: it imports this module's theme watcher.
+ */
+function fitFlowDiagram(svg: SVGSVGElement, viewport: HTMLElement, figure: HTMLElement): void {
+  const viewBox = (svg.getAttribute("viewBox") ?? "").split(/[\s,]+/).map(Number);
+  const natural = viewBox.length === 4 && Number.isFinite(viewBox[2]) ? viewBox[2] : 0;
+  // `clientWidth` includes the viewport's 12px padding on both sides.
+  const room = viewport.clientWidth - 24;
+  if (natural <= 0 || room <= 0 || natural <= room * 2.5) {
+    delete figure.dataset.diagramFit;
+    svg.style.removeProperty("width");
+    // Never upscale: a three-node chart blown up 3× to the card width looks
+    // like clip art. `max-width` at natural size keeps small charts tidy and
+    // still lets a wide one shrink to fit (the mermaid rule).
+    if (natural > 0) svg.style.maxWidth = `${Math.round(natural)}px`;
+    return;
+  }
+  figure.dataset.diagramFit = "scroll";
+  svg.style.width = `${Math.round(natural)}px`;
+  svg.style.maxWidth = "none";
+}
+
+/**
  * A dynamic figure: one sandboxed frame holding the model's HTML5 fragment.
  *
  * The frame is the boundary (see `htmlFigure.ts`), so nothing here sanitises
@@ -705,6 +827,7 @@ export function mountFigures(
     if (!handle) {
       if (spec.kind === "carve") handle = buildCarveCard(spec, index);
       else if (spec.kind === "html-fig") handle = buildHtmlCard(spec, index, options);
+      else if (spec.kind === "flow") handle = buildFlowCard(spec, index);
       else handle = buildSvgCard(spec, index);
       cache.set(key, handle);
     }

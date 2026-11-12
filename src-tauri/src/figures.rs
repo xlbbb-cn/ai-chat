@@ -1,4 +1,5 @@
-//! Figures (`<svg>` / `<carve>`) that the assistant draws, saved as PNG.
+//! Figures (`<svg>` / `<carve>` / `flow`) that the assistant draws, saved as
+//! PNG (or `.html` for a dynamic figure).
 //!
 //! The plain drawing mode in [`mermaid_prompt_block`] swaps the hand-written
 //! markup for a fenced `mermaid` block, which the transcript renders on its own
@@ -269,9 +270,22 @@ pub fn app_open_figures_dir(app: AppHandle) -> Result<(), String> {
 /// Static (no workspace interpolation) so it stays a stable prefix for prompt
 /// caching, and short: the conventions that matter are the ones a model gets
 /// wrong on its own — literal colours instead of tokens, raw HTML that the
-/// sanitizer strips, and a `carve` scene that is prose instead of JSON.
+/// sanitizer strips, coordinates it cannot compute, and a `carve` scene that
+/// is prose instead of JSON.
 pub fn prompt_block() -> String {
     "Figures — you can draw, and the user can save what you draw:\n\
+     - Flowcharts: a fenced `flow` block holding one JSON object — declare nodes and \
+     edges, never coordinates; the renderer measures the text and lays the graph out. \
+     Example: `{\"direction\":\"LR\",\"anim\":\"flow\",\"nodes\":[{\"id\":\"a\",\"label\":\
+     \"提交代码\",\"shape\":\"start\"},{\"id\":\"b\",\"label\":\"CI 通过?\",\"shape\":\
+     \"decision\"},{\"id\":\"c\",\"label\":\"发布\",\"tone\":\"accent\"}],\"edges\":[\
+     {\"from\":\"a\",\"to\":\"b\",\"label\":\"push\"},{\"from\":\"b\",\"to\":\"c\",\"label\":\
+     \"绿色\"}]}`. Shapes: `process` (default), `start`/`end` (stadium), `decision` \
+     (diamond), `io`, `database`. Tones: `default`, `accent`, `success`, `warning`, \
+     `danger`. Edges take an optional `label`. `anim`: `flow` (packets travel the \
+     edges), `step` (nodes light up in order), or omit for static; optional `speed` \
+     0.5–3. No self-loops; keep labels short. Use `flow` for every flowchart — it is \
+     saved as a PNG like any drawn figure, and animated ones play on their own.\n\
      - 2D: a fenced `svg` block (or an inline `<svg>` element) holding one complete \
      `<svg viewBox=\"0 0 W H\" …>…</svg>`. Keep every colour on the interface's tokens \
      (`fill=\"var(--c-accent)\"`, `stroke=\"currentColor\"`, `var(--c-text)`, \
@@ -282,13 +296,19 @@ pub fn prompt_block() -> String {
      - 3D: a fenced `carve` block holding one JSON object: \
      `{\"camera\":{\"yaw\":35,\"pitch\":22},\"objects\":[{\"type\":\"box\",\"size\":[2,1,1],\"at\":[0,0,0]}]}`. \
      Types: `box` (`size`), `sphere` (`r`), `cylinder`/`cone` (`r`, `h`), `torus` (`r`, `tube`), \
-     `plane` (`size`), `line` (`points`). Optional per object: `rot: [x,y,z]`, \
-     `color: accent|success|warning|danger|text|muted`, `opacity`, `wireframe`. \
-     It renders with three.js in a canvas the user can orbit by dragging.\n\
-     - Dynamic (motion or interaction): a fenced `html-fig` block (or an inline \
-     `<html-fig>…</html-fig>`) holding one self-contained HTML5 fragment — markup, \
-     `<style>` and `<script>`, with no external files: the frame's CSP blocks the \
-     network and every external `src`/`href`. It runs in a sandboxed frame whose \
+     `plane` (`size`), `line` (`points`), `edge` (`from`/`to` — a line with an arrowhead \
+     at `to`, optional `\"dashed\": true`). Optional per object: `rot: [x,y,z]`, \
+     `color: accent|success|warning|danger|text|muted`, `opacity`, `wireframe`, `label` \
+     (text above the object — name the parts of a scene diagram with it). A soft \
+     contact shadow is drawn by default (`\"shadow\": false` opts out); `grid: true` / \
+     `axes: true` add reference geometry. It renders with three.js in a canvas the \
+     user can orbit by dragging.\n\
+     - Dynamic (motion or interaction beyond what `flow` animates): a fenced `html-fig` \
+     block (or an inline `<html-fig>…</html-fig>`) holding one self-contained HTML5 \
+     fragment — markup, `<style>` and `<script>`, with no external files: the frame's \
+     CSP blocks the network and every external `src`/`href`. A flowchart that must be \
+     *touched* (click a node to expand it, drag boxes) is an `html-fig`; a moving \
+     flowchart is `flow` with `anim`. It runs in a sandboxed frame whose \
      `:root` already carries the app's tokens (`--c-bg`, `--c-surface`, \
      `--c-surface-2`, `--c-text`, `--c-body`, `--c-muted`, `--c-border`, \
      `--c-border-i`, `--c-accent`, `--c-accent-soft`, `--c-on-accent`, \
@@ -298,8 +318,8 @@ pub fn prompt_block() -> String {
      and grows with it. Use it \
      only when the figure must move or be touched; a static chart stays an `svg`, \
      and an `html-fig` is saved as `.html` rather than PNG.\n\
-     - All three accept a title after the language on the fence line (`svg 抛体轨迹`) and a \
-     `#name` token used for the PNG file name (`carve #orbit 椭圆轨道`).\n\
+     - All four accept a title after the language on the fence line (`svg 抛体轨迹`) and a \
+     `#name` token used for the file name (`carve #orbit 椭圆轨道`).\n\
      - Every figure gets a save button; images land in `<workspace>/figures/` as PNG, \
      dynamic figures as `.html`."
         .to_string()
@@ -419,10 +439,23 @@ mod tests {
     #[test]
     fn prompt_block_names_every_markup() {
         let block = prompt_block();
+        assert!(block.contains("flow"));
         assert!(block.contains("svg"));
         assert!(block.contains("carve"));
         assert!(block.contains("html-fig"));
         assert!(block.contains("figures/"));
+    }
+
+    /// The example in the prompt must itself be valid JSON: a fence line a
+    /// model copies verbatim cannot be the thing that breaks rendering.
+    #[test]
+    fn prompt_flow_example_is_a_valid_spec() {
+        let block = prompt_block();
+        let from = block.find("{\"direction\":\"LR\"").expect("flow example present");
+        let end = block.find("`. Shapes:").expect("example terminated");
+        let json = &block[from..end];
+        let parsed: Result<serde_json::Value, _> = serde_json::from_str(json);
+        assert!(parsed.is_ok(), "prompt example must be valid JSON: {json}");
     }
 
     #[test]

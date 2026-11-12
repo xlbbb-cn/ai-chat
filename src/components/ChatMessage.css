@@ -1213,3 +1213,28 @@
   flex: none;
   max-width: none;
 }
+
+/* ─── Flow figures — declarative flowcharts (`flowDiagram.ts`) ───────────────
+   Same card, same sizing rules as mermaid: 12px breathing room, and a graph
+   more than ~2.5× the card wide keeps its natural width and scrolls. The SVG
+   is self-styled by the renderer with baked tokens; only sizing lives here. */
+
+.chat-figure[data-figure-kind="flow"] .chat-figure-viewport {
+  padding: 12px;
+}
+
+/* A tall `TB` chart must not letterbox into a 420px strip (13px text would
+   scale to 5px): height follows the width scale, like a long code block. */
+.chat-figure[data-figure-kind="flow"] .chat-figure-svg {
+  max-height: none;
+}
+
+.chat-figure[data-figure-kind="flow"][data-diagram-fit="scroll"] .chat-figure-viewport {
+  overflow-x: auto;
+  justify-content: flex-start;
+}
+
+.chat-figure[data-figure-kind="flow"][data-diagram-fit="scroll"] .chat-figure-svg {
+  flex: none;
+  max-width: none;
+}
