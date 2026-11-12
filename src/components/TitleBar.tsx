@@ -120,7 +120,7 @@ export function TitleBar({
         };
     }, []);
 
-    // The Rust side writes `AI Chat — <workspace>` into the native title (the
+    // The Rust side writes `Rabbit Chat Studio — <workspace>` into the native title (the
     // taskbar text). With no native titlebar, surface the workspace here.
     useEffect(() => {
         let disposed = false;
@@ -235,7 +235,7 @@ export function TitleBar({
             try {
                 await action();
             } catch (err) {
-                await messageDialog(String(err), { title: "AI Chat", kind: "error" })
+                await messageDialog(String(err), { title: "Rabbit Chat Studio", kind: "error" })
                     .catch(() => { });
             }
         },
@@ -254,7 +254,7 @@ export function TitleBar({
         try {
             setWorkspace(await setWorkspaceDir(dir));
         } catch (err) {
-            await messageDialog(String(err), { title: "AI Chat", kind: "error" })
+            await messageDialog(String(err), { title: "Rabbit Chat Studio", kind: "error" })
                 .catch(() => { });
         }
     };
@@ -271,7 +271,7 @@ export function TitleBar({
             });
             if (typeof selected === "string" && selected) await switchWorkspace(selected);
         } catch (err) {
-            await messageDialog(String(err), { title: "AI Chat", kind: "error" })
+            await messageDialog(String(err), { title: "Rabbit Chat Studio", kind: "error" })
                 .catch(() => { });
         }
     };
@@ -286,7 +286,7 @@ export function TitleBar({
     const handleSaveBackup = () =>
         run(async () => {
             const path = await saveDialog({
-                defaultPath: "ai-chat.backup.zip",
+                defaultPath: "rabbit-chat-studio.backup.zip",
                 filters: [{ name: "Backup", extensions: ["zip"] }],
             });
             if (path) await exportProfileTo(path);
@@ -319,8 +319,8 @@ export function TitleBar({
         run(async () => {
             const version = await getAppVersion();
             await messageDialog(
-                `About AI Chat\n\nAI Chat\nOpenAI-compatible desktop assistant\nVersion ${version}`,
-                { title: "AI Chat", kind: "info" },
+                `About Rabbit Chat Studio\n\nRabbit Chat Studio\nOpenAI-compatible desktop assistant\nVersion ${version}`,
+                { title: "Rabbit Chat Studio", kind: "info" },
             );
         });
 
@@ -364,7 +364,7 @@ export function TitleBar({
             {IS_MAC && controls}
             <div className="titlebar-drag" data-tauri-drag-region>
                 <span className="titlebar-title" data-tauri-drag-region>
-                    AI Chat
+                    Rabbit Chat Studio
                 </span>
                 {workspace && (
                     <div className="titlebar-workspace-wrap" ref={workspaceMenuRef}>

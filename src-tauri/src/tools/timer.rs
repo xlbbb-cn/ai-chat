@@ -304,7 +304,7 @@ mod platform {
                     return Ok(()); // already asserted
                 }
                 let assertion_type = cf_string(ASSERTION_TYPE)?;
-                let name = match cf_string("ai-chat long task") {
+                let name = match cf_string("rabbit-chat-studio long task") {
                     Ok(name) => name,
                     Err(err) => {
                         release_cf(assertion_type);
@@ -406,7 +406,7 @@ mod platform {
             fn inhibit(&self, what: &str, who: &str, why: &str, mode: &str) -> FdoResult<OwnedFd>;
         }
 
-        const APP_NAME: &str = "ai-chat";
+        const APP_NAME: &str = "rabbit-chat-studio";
         const REASON: &str = "long task in progress";
         /// `idle` is the inhibit logind grants without a polkit prompt, and the
         /// one power managers consult before suspending on their own.
@@ -1061,7 +1061,7 @@ mod tests {
 
     /// A unique `timers.json` path inside the OS temp directory.
     fn temp_path(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("ai-chat-timer-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("rabbit-chat-studio-timer-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("timers.json")
     }
@@ -1207,7 +1207,7 @@ mod tests {
         registry.insert(entry("old", now_ms() + 60_000));
 
         let new_dir = std::env::temp_dir().join(format!(
-            "ai-chat-timer-rebase-new-{}",
+            "rabbit-chat-studio-timer-rebase-new-{}",
             std::process::id()
         ));
         std::fs::create_dir_all(&new_dir).unwrap();
@@ -1237,7 +1237,7 @@ mod tests {
     #[test]
     fn legacy_mirror_is_migrated_once() {
         let dir = std::env::temp_dir().join(format!(
-            "ai-chat-timer-migrate-{}",
+            "rabbit-chat-studio-timer-migrate-{}",
             std::process::id()
         ));
         std::fs::create_dir_all(&dir).unwrap();

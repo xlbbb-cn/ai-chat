@@ -30,7 +30,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::llm_complete::{
-    apply_completion_token_limit, build_http_client, resolve_reasoning_effort,
+    apply_completion_token_limit, build_stream_client, resolve_reasoning_effort,
     sanitize_tool_pairs, stream_llm_request, upstream_request_headers, StreamOptions,
 };
 use crate::tools;
@@ -399,7 +399,7 @@ async fn run_inner(
         "{}/chat/completions",
         config.api_base_url.trim_end_matches('/')
     );
-    let client = build_http_client()?;
+    let client = build_stream_client()?;
     let headers = upstream_request_headers(&config, MISSION_ID);
     let started = Instant::now();
     let mut total_tokens: u32 = 0;
@@ -849,7 +849,7 @@ fn build_system_prompt(workspace_dir: &Path) -> String {
     let status_path = workspace::skills_status_path(workspace_dir);
     let memory_root = workspace::memory_root(workspace_dir);
     format!(
-        "You are the workspace evolution maintainer of AI Chat. This is a background maintenance \
+        "You are the workspace evolution maintainer of Rabbit Chat Studio. This is a background maintenance \
          pass, not a conversation: the user is not present, nobody will answer a question, and \
          your work is applied directly to the workspace. Work autonomously and finish with a \
          short report.\n\n\
@@ -1064,7 +1064,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let dir = std::env::temp_dir().join(format!(
-            "ai-chat-evo-{tag}-{}-{nanos}",
+            "rabbit-chat-studio-evo-{tag}-{}-{nanos}",
             std::process::id()
         ));
         fs::create_dir_all(&dir).unwrap();

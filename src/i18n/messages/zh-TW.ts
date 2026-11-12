@@ -53,7 +53,7 @@ const zhTW: Messages = {
         appMenuRestoreBackup: "還原備份…",
         appMenuMarkdownEdit: "Markdown 編輯…",
         appMenuReportIssue: "回報問題…",
-        appMenuAbout: "關於 AI Chat",
+        appMenuAbout: "關於 Rabbit Chat Studio",
 
         workspaceSwitch: "切換工作區",
         workspaceSwitchAria: "目前工作區 {workspace} — 切換工作區",
@@ -187,6 +187,10 @@ const zhTW: Messages = {
         previewColumn: "預覽",
         markdownPlaceholder: "在此撰寫 Markdown…",
         markdownPreviewEmpty: "Markdown 預覽將顯示在這裡。",
+        markdownPdf: "匯出 PDF",
+        markdownPdfTip: "把預覽寫成一個 PDF 檔案（A4，淺色主題）。",
+        pdfFailed: "匯出 PDF 失敗：{error}",
+        pdfFallback: "找不到 Edge 或 Chrome——已改為開啟列印對話框，請在其中選擇「另存為 PDF」。",
 
         confirm: {
             titleSudo: "特權操作（sudo）",
@@ -271,6 +275,9 @@ const zhTW: Messages = {
         sandboxHint: "含腳本 · 沙箱內執行 · 無網路",
         rememberSession: "本次工作階段自動播放",
         navigatedAway: "該動態圖試圖載入外部頁面，已停止",
+        unrenderable: "沒能畫出這張圖：原始碼無法解析。",
+        copySource: "複製原始碼",
+        showSource: "檢視原始碼",
     },
 
     toolGroup: {

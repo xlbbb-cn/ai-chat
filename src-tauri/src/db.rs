@@ -459,6 +459,35 @@ pub fn delete_message(
     Ok(())
 }
 
+/// Delete every message a session stored after `after_message_id`.
+///
+/// Retrying a failed turn removes what the failed attempt produced, and the
+/// transcript alone is not enough: the partial assistant row is persisted too,
+/// so a reload would bring it back. The cutoff is scoped to one session, and
+/// rows before it (the user message being retried) stay untouched.
+pub(crate) fn delete_history_after(
+    db: &Connection,
+    session_id: &str,
+    after_message_id: i64,
+) -> Result<usize, String> {
+    db.execute(
+        "DELETE FROM history WHERE session_id = ?1 AND id > ?2",
+        rusqlite::params![session_id, after_message_id],
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Backend of `deleteMessagesAfter` — see [`delete_history_after`].
+#[tauri::command]
+pub fn delete_messages_after(
+    session_id: String,
+    after_message_id: i64,
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<usize, String> {
+    let db = state.db.lock().unwrap();
+    delete_history_after(&db, &session_id, after_message_id)
+}
+
 /// Fork a session: copy all messages up to and including `up_to_message_id`
 /// from `source_session_id` into a new session `new_session_id`.
 /// Returns the number of messages copied.
@@ -1628,6 +1657,41 @@ mod tests {
         let sessions = query_history_sessions(&conn, Some("%")).unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].session_id, "literal");
+    }
+
+    /// Retrying a failed turn deletes what the attempt produced after the user
+    /// message, and nothing else: the retried message itself survives, earlier
+    /// turns stay, and another session's history is untouched.
+    #[test]
+    fn delete_history_after_keeps_the_cutoff_and_other_sessions() {
+        let conn = test_conn();
+        insert(&conn, "retry", "user", "first question");
+        insert(&conn, "retry", "assistant", "first answer");
+        insert(&conn, "retry", "user", "retried question");
+        insert(&conn, "retry", "assistant", "failed attempt 1");
+        insert(&conn, "retry", "assistant", "failed attempt 2");
+        insert(&conn, "other", "user", "other question");
+        insert(&conn, "other", "assistant", "other answer");
+
+        let cutoff: i64 = conn
+            .query_row(
+                "SELECT id FROM history WHERE session_id = 'retry' AND content = 'retried question'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        let removed = delete_history_after(&conn, "retry", cutoff).unwrap();
+        assert_eq!(removed, 2, "both failed assistant rows are removed");
+
+        let kept = query_session_messages(&conn, "retry").unwrap();
+        assert_eq!(kept.len(), 3, "earlier turns and the retried message stay");
+        assert_eq!(kept[2].content, "retried question");
+        assert_eq!(
+            query_session_messages(&conn, "other").unwrap().len(),
+            2,
+            "another session is never touched"
+        );
     }
 
     /// The list payload carries a title snippet only — never the full row.

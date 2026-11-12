@@ -17,6 +17,7 @@ mod backup;
 mod db;
 mod evolution_maintenance;
 mod figures;
+mod html_pdf;
 mod instance;
 mod llm_complete;
 mod logger;
@@ -159,7 +160,7 @@ fn import_profile_archive(app: &AppHandle, profile_path: &Path) {
 fn show_about(app: &AppHandle) {
     app.dialog()
         .message(format!(
-            "About AI Chat\n\nAI Chat\nOpenAI-compatible desktop assistant\nVersion {}",
+            "About Rabbit Chat Studio\n\nRabbit Chat Studio\nOpenAI-compatible desktop assistant\nVersion {}",
             env!("CARGO_PKG_VERSION")
         ))
         .buttons(MessageDialogButtons::Ok)
@@ -243,6 +244,25 @@ async fn app_import_profile(app: AppHandle, path: String) -> Result<(), String> 
     tauri::async_runtime::spawn_blocking(move || backup::import_profile(&app, &profile_path))
         .await
         .map_err(|err| format!("Backup import task failed: {err}"))?
+}
+
+/// Print an exported document — a Markdown draft, a reply — to `out_path`.
+///
+/// The HTML is built in the webview — it owns the rendered markup, KaTeX and
+/// all — and printed here by a headless Chromium. `NO_PDF_ENGINE` means no
+/// browser is installed, which the frontend answers with the print dialog
+/// rather than an error.
+#[tauri::command]
+async fn app_export_pdf(html: String, out_path: String) -> Result<String, String> {
+    if html.trim().is_empty() {
+        return Err("The document is empty".into());
+    }
+    if out_path.trim().is_empty() {
+        return Err("PDF path is empty".into());
+    }
+    let out = PathBuf::from(out_path);
+    html_pdf::export(&html, &out).await?;
+    Ok(out.to_string_lossy().into_owned())
 }
 
 fn resolve_workspace_path(
@@ -1589,7 +1609,7 @@ pub fn run() {
                     .dialog()
                     .file()
                     .add_filter("Backup", &["zip"])
-                    .set_file_name("ai-chat.backup.zip")
+                    .set_file_name("rabbit-chat-studio.backup.zip")
                     .blocking_save_file()
                 {
                     if let Some(profile_path) = path.into_path().ok() {
@@ -1718,7 +1738,8 @@ pub fn run() {
                 .expect("failed to create edit menu");
 
                 let about_item =
-                    MenuItem::with_id(app, ABOUT_MENU_ID, "About AI Chat", true, None::<&str>)
+                    MenuItem::with_id(app, ABOUT_MENU_ID, "About Rabbit Chat Studio", true,
+                        None::<&str>)
                         .expect("failed to create about menu item");
                 let issue_item = MenuItem::with_id(
                     app,
@@ -2018,6 +2039,7 @@ pub fn run() {
             app_open_markdown,
             app_export_profile,
             app_import_profile,
+            app_export_pdf,
             skills::list_skills,
             skills::save_skill,
             skills::delete_skill,
@@ -2032,6 +2054,7 @@ pub fn run() {
             db::load_session_messages,
             db::delete_history,
             db::delete_message,
+            db::delete_messages_after,
             db::fork_session,
             db::list_session_meta,
             db::update_session_meta,

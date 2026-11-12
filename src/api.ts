@@ -522,6 +522,13 @@ export async function stopServeProcess(serveId: string): Promise<string> {
 export interface StreamCallbacks {
   onToken: (token: string) => void;
   onReasoningToken?: (token: string) => void;
+  /**
+   * The backend retried a failed streaming attempt. The payload is the exact
+   * text the failed attempt had streamed — drop it from the running
+   * accumulator so the retry's regenerated tokens are not appended after the
+   * partial text of the dead attempt.
+   */
+  onRetry?: (payload: { content: string; reasoning: string }) => void;
   onDone: () => void;
   onError: (err: string) => void;
   onAgentTaskStart?: (e: AgentTaskEvent) => void;
@@ -582,6 +589,12 @@ export async function chatCompletion(
       callbacks.onReasoningToken(e.payload);
     }
   });
+  const unRetry = await listen<{ content: string; reasoning: string }>(
+    "chat-retry",
+    (e) => {
+      callbacks.onRetry?.(e.payload);
+    },
+  );
   const unDone = await listen<void>("chat-done", () => {
     finish();
   });
@@ -604,7 +617,7 @@ export async function chatCompletion(
     callbacks.onAgentAggregateDone?.(e.payload?.task_count ?? 0);
   });
 
-  unlisteners.push(unToken, unReasoning, unDone, unError, unTaskStart, unTaskDone, unTaskError, unPlanStart, unAggDone);
+  unlisteners.push(unToken, unReasoning, unRetry, unDone, unError, unTaskStart, unTaskDone, unTaskError, unPlanStart, unAggDone);
 
   invoke("chat_completion", {
     messages: messages.map((m) => ({
@@ -754,6 +767,21 @@ export async function updateSessionMeta(
 
 export async function deleteMessage(messageId: number): Promise<void> {
   return invoke("delete_message", { messageId });
+}
+
+/**
+ * Delete every stored message after `afterMessageId` in one session.
+ *
+ * Retrying a failed turn regenerates the answer after a user message, so the
+ * partial rows the failed attempt persisted must go before the new request —
+ * otherwise a reload would replay them next to the retried reply. Returns the
+ * number of rows removed.
+ */
+export async function deleteMessagesAfter(
+  sessionId: string,
+  afterMessageId: number
+): Promise<number> {
+  return invoke("delete_messages_after", { sessionId, afterMessageId });
 }
 
 export async function forkSession(
@@ -1072,6 +1100,17 @@ export async function getSessionStats(sessionId: string): Promise<SessionStats> 
 
 export async function saveMarkdownFile(path: string, content: string): Promise<void> {
   return invoke("save_markdown_file", { path, content });
+}
+
+/**
+ * Write a standalone HTML document to `outPath` as a PDF.
+ *
+ * Printing happens in Rust with a headless Chromium: the webview can lay the
+ * document out but cannot write a PDF file. Rejects with `NO_PDF_ENGINE` when
+ * no browser is installed.
+ */
+export async function exportPdf(html: string, outPath: string): Promise<string> {
+  return invoke("app_export_pdf", { html, outPath });
 }
 
 // ─── App menu (custom titlebar) ──────────────────────────────────────────────

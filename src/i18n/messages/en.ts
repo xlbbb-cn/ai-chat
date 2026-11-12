@@ -62,7 +62,7 @@ const en = {
         appMenuRestoreBackup: "Restore backup…",
         appMenuMarkdownEdit: "Markdown edit…",
         appMenuReportIssue: "Report an issue…",
-        appMenuAbout: "About AI Chat",
+        appMenuAbout: "About Rabbit Chat Studio",
 
         workspaceSwitch: "Switch workspace",
         workspaceSwitchAria: "Workspace {workspace} — switch workspace",
@@ -207,6 +207,11 @@ const en = {
         previewColumn: "Preview",
         markdownPlaceholder: "Write markdown here...",
         markdownPreviewEmpty: "Markdown preview will appear here.",
+        markdownPdf: "Export PDF",
+        markdownPdfTip: "Write the preview to a PDF file (A4, light theme).",
+        pdfFailed: "PDF export failed: {error}",
+        pdfFallback:
+            "No Edge or Chrome found — opened the print dialog instead. Choose \"Save as PDF\" there.",
 
         confirm: {
             titleSudo: "Privileged operation (sudo)",
@@ -298,6 +303,9 @@ const en = {
         sandboxHint: "Contains script · runs sandboxed · no network",
         rememberSession: "Play automatically this session",
         navigatedAway: "This figure tried to load an outside page, so it was stopped",
+        unrenderable: "This figure could not be drawn: the source did not parse.",
+        copySource: "Copy source",
+        showSource: "Show source",
     },
 
     toolGroup: {
@@ -457,7 +465,7 @@ const en = {
                 "Request and interaction logs older than this are deleted at startup and by the Interaction Monitor's “Compact DB”. 0 keeps logs forever. Chat history is never pruned. Change it and press Save to apply.",
             singleInstance: "Run a single instance",
             singleInstanceHint:
-                "Launching AI Chat again brings the running window to the front instead of opening a second copy. When off, every launch gets its own window on a temporary copy of this configuration. Applies after restarting the app.",
+                "Launching Rabbit Chat Studio again brings the running window to the front instead of opening a second copy. When off, every launch gets its own window on a temporary copy of this configuration. Applies after restarting the app.",
             backgroundTools: "Background execution",
             backgroundToolsHint:
                 "Let the assistant run slow tools as background tasks (`run_in_background: true`): `run_cmd`, `run_shell`, `file_actions` search, every MCP tool and `call_subagent`. The result is delivered automatically before the next request and the turn stays open until it arrives. Sub-agents never receive the flag.",

@@ -2535,7 +2535,7 @@ mod tests {
     impl TempWorkspace {
         fn new(tag: &str) -> Self {
             let dir = std::env::temp_dir().join(format!(
-                "ai-chat-memory-test-{tag}-{}-{}",
+                "rabbit-chat-studio-memory-test-{tag}-{}-{}",
                 std::process::id(),
                 chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
             ));

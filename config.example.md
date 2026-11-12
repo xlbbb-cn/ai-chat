@@ -3,9 +3,9 @@
 This project stores runtime configuration in app data as config.json.
 
 Typical locations:
-- Windows: %APPDATA%/../Local/ai-chat/config.json (depends on Tauri app data path)
-- macOS: ~/Library/Application Support/ai-chat/config.json
-- Linux: ~/.local/share/ai-chat/config.json
+- Windows: %APPDATA%/com.leonard.aichat/config.json (Tauri `app_data_dir()` = `<data dir>/<identifier>`)
+- macOS: ~/Library/Application Support/com.leonard.aichat/config.json
+- Linux: ~/.local/share/com.leonard.aichat/config.json
 
 ## Example
 

@@ -24,7 +24,7 @@ const RELEASES_URL: &str = "https://api.github.com/repos/xlbbb-cn/ai-chat/releas
 /// Only these URLs may be handed to the OS by `open_release_page`.
 const RELEASE_URL_PREFIX: &str = "https://github.com/xlbbb-cn/ai-chat/";
 /// GitHub rejects requests without a User-Agent.
-const USER_AGENT: &str = "ai-chat-desktop";
+const USER_AGENT: &str = "rabbit-chat-studio-desktop";
 const DOWNLOAD_PROGRESS_EVENT: &str = "update-download-progress";
 /// Emit at most one progress event per this many downloaded bytes.
 const PROGRESS_STEP: u64 = 256 * 1024;
@@ -83,6 +83,20 @@ fn build_client() -> Result<reqwest::Client, String> {
 
 fn platform_tag() -> String {
     format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
+}
+
+/// True when this build runs out of an MSIX install (`…\WindowsApps\<PackageFullName>\`),
+/// i.e. it came from the Microsoft Store.
+///
+/// The Store channel owns updates for packaged builds: the GitHub updater would hand the
+/// user an NSIS installer for a second, unpackaged copy of the same app, so `check_update`
+/// reports "already latest" instead of offering it.
+pub(crate) fn is_store_packaged() -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|path| path.to_str().map(|p| p.to_ascii_lowercase()))
+        .map(|path| path.contains("\\windowsapps\\"))
+        .unwrap_or(false)
 }
 
 /// "v1.2.3" / "1.2.3-beta.1" -> "1.2.3"
@@ -301,6 +315,27 @@ pub async fn check_update(
         None => state.config.lock().unwrap().include_prerelease_updates,
     };
     let current_version = app.package_info().version.to_string();
+
+    if is_store_packaged() {
+        state
+            .logger
+            .lock()
+            .unwrap()
+            .log("info", "update check skipped: MSIX/Store build");
+        return Ok(UpdateInfo {
+            latest_version: current_version.clone(),
+            current_version,
+            has_update: false,
+            release_name: String::new(),
+            release_notes: String::new(),
+            release_url: RELEASE_URL_PREFIX.to_string(),
+            published_at: None,
+            prerelease: false,
+            assets: Vec::new(),
+            has_platform_asset: true,
+            platform: platform_tag(),
+        });
+    }
 
     let releases = fetch_releases().await?;
 
@@ -539,14 +574,14 @@ mod tests {
 
     #[test]
     fn classifies_bundles_and_ignores_manifests() {
-        assert_eq!(classify_asset("AI.Chat_1.1.1_x64-setup.exe"), Some("nsis"));
-        assert_eq!(classify_asset("AI.Chat_1.1.1_x64_en-US.msi"), Some("msi"));
-        assert_eq!(classify_asset("AI.Chat_1.1.1_aarch64.dmg"), Some("dmg"));
-        assert_eq!(classify_asset("AI.Chat_1.1.1_amd64.AppImage"), Some("appimage"));
-        assert_eq!(classify_asset("AI.Chat_1.1.1_amd64.deb"), Some("deb"));
-        assert_eq!(classify_asset("AI.Chat-1.1.1-1.x86_64.rpm"), Some("rpm"));
+        assert_eq!(classify_asset("Rabbit.Chat.Studio_1.1.1_x64-setup.exe"), Some("nsis"));
+        assert_eq!(classify_asset("Rabbit.Chat.Studio_1.1.1_x64_en-US.msi"), Some("msi"));
+        assert_eq!(classify_asset("Rabbit.Chat.Studio_1.1.1_aarch64.dmg"), Some("dmg"));
+        assert_eq!(classify_asset("Rabbit.Chat.Studio_1.1.1_amd64.AppImage"), Some("appimage"));
+        assert_eq!(classify_asset("Rabbit.Chat.Studio_1.1.1_amd64.deb"), Some("deb"));
+        assert_eq!(classify_asset("Rabbit.Chat.Studio-1.1.1-1.x86_64.rpm"), Some("rpm"));
         assert_eq!(classify_asset("latest.json"), None);
-        assert_eq!(classify_asset("AI.Chat.app.tar.gz.sig"), None);
+        assert_eq!(classify_asset("Rabbit.Chat.Studio.app.tar.gz.sig"), None);
     }
 
     /// The CI uploads `-setup.exe`, `.dmg`, `.AppImage`, `.deb` and `.rpm`; older releases
@@ -555,10 +590,10 @@ mod tests {
     fn recommends_only_matching_platform_assets() {
         let release = serde_json::json!({
             "assets": [
-                { "name": "AI.Chat_1.1.4_aarch64.dmg", "browser_download_url": "https://github.com/x/a", "size": 1 },
-                { "name": "AI.Chat_1.1.4_x64_en-US.msi", "browser_download_url": "https://github.com/x/b", "size": 2 },
-                { "name": "AI.Chat_1.1.4_x64-setup.exe", "browser_download_url": "https://github.com/x/c", "size": 3 },
-                { "name": "AI.Chat_1.1.4_amd64.AppImage", "browser_download_url": "https://github.com/x/d", "size": 4 }
+                { "name": "Rabbit.Chat.Studio_1.1.4_aarch64.dmg", "browser_download_url": "https://github.com/x/a", "size": 1 },
+                { "name": "Rabbit.Chat.Studio_1.1.4_x64_en-US.msi", "browser_download_url": "https://github.com/x/b", "size": 2 },
+                { "name": "Rabbit.Chat.Studio_1.1.4_x64-setup.exe", "browser_download_url": "https://github.com/x/c", "size": 3 },
+                { "name": "Rabbit.Chat.Studio_1.1.4_amd64.AppImage", "browser_download_url": "https://github.com/x/d", "size": 4 }
             ]
         });
         let assets = collect_assets(&release);
@@ -571,15 +606,15 @@ mod tests {
             .collect();
 
         if cfg!(target_os = "windows") {
-            assert_eq!(recommended, vec!["AI.Chat_1.1.4_x64-setup.exe"]);
+            assert_eq!(recommended, vec!["Rabbit.Chat.Studio_1.1.4_x64-setup.exe"]);
             assert_eq!(assets[0].kind, "nsis");
         } else if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
-            assert_eq!(recommended, vec!["AI.Chat_1.1.4_aarch64.dmg"]);
+            assert_eq!(recommended, vec!["Rabbit.Chat.Studio_1.1.4_aarch64.dmg"]);
         } else if cfg!(target_os = "macos") {
             // Intel macOS: this fixture only ships an arm64 disk image.
             assert!(recommended.is_empty());
         } else if cfg!(target_os = "linux") {
-            assert_eq!(recommended, vec!["AI.Chat_1.1.4_amd64.AppImage"]);
+            assert_eq!(recommended, vec!["Rabbit.Chat.Studio_1.1.4_amd64.AppImage"]);
         }
 
         // Foreign-platform bundles stay listed (so users can grab them manually).
@@ -589,8 +624,8 @@ mod tests {
     #[test]
     fn sanitizes_asset_names() {
         assert_eq!(
-            sanitize_file_name("AI.Chat_1.1.4_x64-setup.exe").unwrap(),
-            "AI.Chat_1.1.4_x64-setup.exe"
+            sanitize_file_name("Rabbit.Chat.Studio_1.1.4_x64-setup.exe").unwrap(),
+            "Rabbit.Chat.Studio_1.1.4_x64-setup.exe"
         );
         // Only the last path component survives, so a crafted name cannot escape the folder.
         assert_eq!(sanitize_file_name("../../evil.exe").unwrap(), "evil.exe");

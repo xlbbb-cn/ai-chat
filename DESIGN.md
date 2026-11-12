@@ -1,4 +1,4 @@
-# AI Chat — Design System
+# Rabbit Chat Studio — Design System
 
 > **This file is the source of truth for every visual change in this repository.**
 > Read it before touching a `.css` file or writing JSX that carries styling.
@@ -901,6 +901,27 @@ transcript renders those diagrams too — as the same card.
   the drawn SVG; since the colours are baked, exporting a dark transcript would
   otherwise put dark blocks on a white page, so the export renders each diagram
   again with the print tokens.
+
+### Markdown editor
+
+Titlebar `⋯` → "Markdown edit…" opens a two-column overlay over the chat:
+the source on the left, the rendered preview (`react-markdown` + KaTeX + GFM)
+on the right.
+
+- **Header actions are secondary.** `toolbar-btn`, right-aligned before
+  Cancel; Electric Blue stays on "Save" (`send-btn`) alone. "Export PDF" leads
+  the group and carries an icon — it is a different kind of action from the two
+  text buttons beside it.
+- **A PDF leaves the app as a file, and it is always light.** The preview is
+  cloned and printed in the print palette (`--c-text` on `#ffffff`, hairlines,
+  A4 with 16 mm margins), never in the screen's colours — a dark transcript
+  must not become a dark sheet. Bars and scrollbars the preview shows on screen
+  (the table's horizontal scroll, for one) become plain page flow.
+- **The file manager is the confirmation.** A finished export reveals the file
+  in Explorer/Finder; floating notices stay reserved for warnings and errors, so
+  a success never borrows their colour. A cancelled save dialog does nothing at
+  all. The transcript's export button takes the same route (`utils/pdfExport`),
+  so a reply also leaves as a file — same dialog, same palette, same reveal.
 
 ### Interaction monitor
 

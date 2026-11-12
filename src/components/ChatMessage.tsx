@@ -15,9 +15,9 @@ import MarkdownIt from "markdown-it";
 import hljs from "highlight.js";
 import "highlight.js/styles/github.css";
 import "katex/dist/katex.min.css";
-import katexCssUrl from "katex/dist/katex.min.css?url";
-import razerF5FontUrl from "../assets/Web Fonts/9b77a61b70b873a0f298ad6fbc801666.woff2?url";
 import { katexMathPlugin } from "../utils/markdownMath";
+import { escapeHtml } from "../utils/printDocument";
+import { exportHtmlAsPdf, type PdfExportResult } from "../utils/pdfExport";
 import { extractFigures, type FigureSpec } from "../utils/figures";
 import { mountFigures, saveAllFigures } from "../utils/figureCard";
 import {
@@ -30,6 +30,7 @@ import { mentionDisplayName } from "../composerFiles";
 // `t` (module-level) is used by the markdown-it renderer rules, which run
 // outside the React tree; the hook keeps the component re-rendering on change.
 import { t as text, useI18n } from "../i18n";
+import type { ChatNoticeTone } from "./ChatNotice";
 import {
   FontAwesomeIcon,
   faCodeBranch,
@@ -43,14 +44,6 @@ import {
 import "./ChatMessage.css";
 
 import { writeText as tauriWriteText } from "@tauri-apps/plugin-clipboard-manager";
-
-const escapeHtml = (value: string): string =>
-  value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 
 /**
  * Image sources a reply may embed.
@@ -157,105 +150,14 @@ function renderMarkdown(instance: MarkdownIt, source: string): string {
   }
 }
 
-function buildPrintableMessageHtml(contentHtml: string, exportedAt: string): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>${escapeHtml(exportedAt)}</title>
-    <link rel="stylesheet" href="${escapeHtml(katexCssUrl)}" data-katex-css />
-    <style>
-      @font-face {
-        font-family: "RazerF5";
-        src: url("${razerF5FontUrl}") format("woff2");
-        font-weight: 400;
-        font-style: normal;
-      }
-
-      :root {
-        color-scheme: light;
-        font-family: "RazerF5", "Segoe UI", "Microsoft YaHei", sans-serif;
-        /* A figure's SVG is written in theme tokens; this document is its own
-           document, so it needs the light values those names stand for. */
-        --c-surface: #ffffff;
-        --c-surface-2: #f6f7f8;
-        --c-bg: #ffffff;
-        --c-text: #171a20;
-        --c-body: #2b2f36;
-        --c-muted: #5c5e62;
-        --c-border-s: #e8eaed;
-        --c-border-i: #d9dce1;
-        --c-accent: #3e6ae1;
-        --c-success: #1f8a3b;
-        --c-warning: #b07500;
-        --c-danger: #c0392b;
-      }
-
-      * {
-        box-sizing: border-box;
-      }
-
-      body {
-        margin: 0;
-        padding: 32px;
-        background: #ffffff;
-        color: #171a20;
-        font-size: 14px;
-        line-height: 1.6;
-        word-break: break-word;
-      }
-
-      main {
-        width: 100%;
-      }
-
-      p {
-        margin: 0 0 0.75em;
-      }
-
-      ul,
-      ol {
-        margin: 0 0 0.75em;
-        padding-left: 1.5em;
-      }
-
-      li {
-        margin-bottom: 0.25em;
-      }
-
-      pre {
-        margin: 0.75em 0;
-        padding: 12px 14px;
-        background: #f4f4f4;
-        border: 1px solid #e5e7eb;
-        border-radius: 8px;
-        overflow-x: auto;
-        white-space: pre-wrap;
-      }
-
-      code {
-        font-family: "RazerF5", "Cascadia Code", "Consolas", "Microsoft YaHei", monospace;
-      }
-
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        margin: 0.75em 0;
-      }
-
-      th,
-      td {
-        border: 1px solid #d1d5db;
-        padding: 8px 10px;
-        text-align: left;
-        vertical-align: top;
-      }
-
-      th {
-        background: #f3f4f6;
-      }
-
+/**
+ * Rules only a reply's own markup needs.
+ *
+ * The shared shell — light palette, prose rules, page box — lives in
+ * `utils/printDocument`; what stays here is what a chat message adds: figure
+ * cards, plus the canvas and frame substitutions a clone cannot carry.
+ */
+const MESSAGE_PRINT_CSS = `
       .code-block-toolbar {
         display: none !important;
       }
@@ -306,13 +208,7 @@ function buildPrintableMessageHtml(contentHtml: string, exportedAt: string): str
       .chat-figure-status {
         display: none !important;
       }
-    </style>
-  </head>
-  <body>
-    <main>${contentHtml}</main>
-  </body>
-</html>`;
-}
+`;
 
 /**
  * The reply as standalone HTML for print / PDF.
@@ -369,68 +265,32 @@ async function printableMessageHtml(root: HTMLElement | null, fallback: string):
   return clone.innerHTML;
 }
 
-function exportAssistantMessagePdf(contentHtml: string, messageId: string) {
-  const iframe = document.createElement("iframe");
-  const exportedAt = `assistant-message-${messageId}`;
-
-  iframe.style.position = "fixed";
-  iframe.style.right = "0";
-  iframe.style.bottom = "0";
-  iframe.style.width = "0";
-  iframe.style.height = "0";
-  iframe.style.border = "0";
-  iframe.setAttribute("aria-hidden", "true");
-
-  const cleanup = () => {
-    iframe.remove();
-  };
-
-  iframe.addEventListener("load", () => {
-    const frameWindow = iframe.contentWindow;
-    const frameDocument = frameWindow?.document;
-    if (!frameWindow || !frameDocument) {
-      cleanup();
-      return;
-    }
-
-    frameDocument.open();
-    frameDocument.write(buildPrintableMessageHtml(contentHtml, exportedAt));
-    frameDocument.close();
-
-    const handleAfterPrint = () => {
-      frameWindow.removeEventListener("afterprint", handleAfterPrint);
-      window.setTimeout(cleanup, 0);
-    };
-
-    frameWindow.addEventListener("afterprint", handleAfterPrint);
-
-    // Wait for the KaTeX stylesheet before printing so formulas are laid out.
-    let printed = false;
-    const doPrint = () => {
-      if (printed) return;
-      printed = true;
-      frameWindow.focus();
-      frameWindow.print();
-    };
-
-    const katexLink = frameDocument.querySelector<HTMLLinkElement>("link[data-katex-css]");
-    if (katexLink) {
-      katexLink.addEventListener("load", doPrint, { once: true });
-      katexLink.addEventListener("error", doPrint, { once: true });
-      // Fallback in case neither event fires (e.g. served from cache).
-      window.setTimeout(doPrint, 400);
-    } else {
-      window.setTimeout(doPrint, 50);
-    }
-  }, { once: true });
-
-  document.body.appendChild(iframe);
+/**
+ * Hand the reply's printable HTML to the shared PDF export.
+ *
+ * The same route the Markdown editor takes: a real file, chosen in a save
+ * dialog, printed by Rust. The caller reports the result, because only it has
+ * the transcript's notice channel.
+ */
+function exportAssistantMessagePdf(contentHtml: string, messageId: string): Promise<PdfExportResult> {
+  return exportHtmlAsPdf({
+    title: `assistant-message-${messageId}`,
+    bodyHtml: contentHtml,
+    extraCss: MESSAGE_PRINT_CSS,
+    // An id is not a filename: strip what Windows refuses in a path.
+    defaultPath: `assistant-message-${messageId.replace(/[^\w.-]+/g, "-")}.pdf`,
+  });
 }
 
 interface Props {
   message: Message;
   showRetry?: boolean;
   onRetry?: () => void;
+  /**
+   * Report a problem upward. The transcript has no notice of its own: exports
+   * and saves fail into the app's one notice slot, like every other action.
+   */
+  onNotice?: (message: string, tone?: ChatNoticeTone) => void;
   onDelete?: (messageId: string) => void;
   onFork?: (messageId: string) => void;
   dbId?: number;
@@ -841,7 +701,7 @@ function writingTailHost(content: HTMLElement): HTMLElement {
   return host;
 }
 
-export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onFork, dbId, onConfirm, onCancelBackground, backgroundTasks, backgroundWaiting, skillNames, agentTokens, sessionId, todoActive }: Props) {
+export function ChatMessage({ message, showRetry = false, onRetry, onNotice, onDelete, onFork, dbId, onConfirm, onCancelBackground, backgroundTasks, backgroundWaiting, skillNames, agentTokens, sessionId, todoActive }: Props) {
   const { t } = useI18n();
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
@@ -1380,7 +1240,13 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
                 // Building the document may re-render diagrams, so it is async.
                 void printableMessageHtml(contentRef.current, renderedMainContent)
                   .then((html) => exportAssistantMessagePdf(html, message.id))
-                  .catch((error) => console.error("Message export failed", error));
+                  .then((result) => {
+                    if (result === "printed") onNotice?.(t("app.pdfFallback"), "warning");
+                  })
+                  .catch((error) => {
+                    console.error("Message export failed", error);
+                    onNotice?.(t("app.pdfFailed", { error: String(error) }));
+                  });
               }}
               disabled={!mainContent.trim()}
               title={t("chat.exportTitle")}

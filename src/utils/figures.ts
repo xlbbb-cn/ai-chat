@@ -38,13 +38,24 @@
  * The scan is line-based and fence-aware: a figure only counts at the top
  * level, so a `svg` example inside a ```markdown block — fenced *or* 4-space
  * indented — stays code, and so does one inside a paragraph's inline `code`
- * span (counted across lines, since a span may cross them). It is also
+ * span (counted across lines, since a span may cross them). One indented shape
+ * is a figure: a block a list item encloses, in which the item supplies the
+ * margin and markdown-it reads a fence too (see `fenceLines.ts`). It is also
  * tolerant of a half-written block while a reply streams — an unterminated
  * figure becomes `pending` instead of flashing back to raw text. A reply that
  * *ends* mid-fence falls back to a plain code block once the stream is over,
  * because that is what markdown-it renders and `Drawing…` would be a lie.
  */
 
+import {
+  INDENTED_CODE,
+  fenceIsOpen,
+  isFenceClose,
+  readFence,
+  slotIndent,
+  splitLines,
+  stripIndent,
+} from "./fenceLines";
 import { slotToken as sharedSlotToken } from "./slotTokens";
 
 export type FigureKind = "svg" | "carve" | "flow" | "html-fig";
@@ -86,20 +97,11 @@ const SLOT_MARKER = "\u2063F";
 
 const slotToken = (index: number): string => sharedSlotToken(SLOT_MARKER, index);
 
-const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})[ \t]*([^\s`]*)[ \t]*(.*)$/;
-const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
 
-/** A CommonMark indented code block: 4 spaces or a tab. */
-const INDENTED_CODE = /^(?: {4}|\t)/;
 
 /** An indented code block cannot interrupt a paragraph (CommonMark §4.4). */
 const canStartIndentedCode = (prose: string[]): boolean =>
   prose.length === 0 || prose[prose.length - 1].trim() === "";
-
-function isFenceClose(line: string, fence: string): boolean {
-  const match = FENCE_CLOSE.exec(line);
-  return Boolean(match) && match![1][0] === fence[0] && match![1].length >= fence.length;
-}
 
 /** `svg #parabola 抛体轨迹` → name `parabola`, title `抛体轨迹`. */
 function parseFenceMeta(rest: string, body: string, kind: FigureKind): { title: string; name: string } {
@@ -245,7 +247,7 @@ export function extractFigures(
 ): ExtractedFigures {
   const figures: FigureSpec[] = [];
   const out: string[] = [];
-  const lines = markdown.split("\n");
+  const lines = splitLines(markdown);
   let prose: string[] = [];
 
   const flushProse = () => {
@@ -257,7 +259,8 @@ export function extractFigures(
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
-    const open = FENCE_OPEN.exec(line);
+    const opening = readFence(line);
+    const open = opening && fenceIsOpen(opening, lines, i) ? opening : null;
     if (!open) {
       // An indented code block (4+ spaces, or a tab) is code in CommonMark as
       // well: it must bypass the raw-tag scan like a fenced block does, or an
@@ -288,7 +291,7 @@ export function extractFigures(
       i += 1;
       continue;
     }
-    const fence = open[1];
+    const fence = open.fence;
     let end = -1;
     for (let j = i + 1; j < lines.length; j += 1) {
       if (isFenceClose(lines[j], fence)) {
@@ -296,21 +299,26 @@ export function extractFigures(
         break;
       }
     }
-    const body = lines.slice(i + 1, end === -1 ? lines.length : end);
-    const kind = FIGURE_LANGS[(open[2] ?? "").toLowerCase()];
+    // A block nested in a list item is dedented: its body reaches the figure
+    // parser the way the model wrote it, without the item's margin.
+    const body = stripIndent(
+      lines.slice(i + 1, end === -1 ? lines.length : end).join("\n"),
+      open.indent,
+    );
+    const kind = FIGURE_LANGS[open.lang];
     if (kind && (end !== -1 || opts.streaming)) {
       flushProse();
-      const meta = parseFenceMeta(open[3] ?? "", body.join("\n"), kind);
+      const meta = parseFenceMeta(open.rest, body, kind);
       figures.push({
         kind,
-        source: body.join("\n"),
+        source: body,
         title: meta.title,
         name: meta.name,
         // No closing fence yet: the card shows the pen for every kind, and an
         // `html-fig` is no exception (its frame waits for the settle commit).
         pending: end === -1,
       });
-      out.push(slotToken(figures.length - 1));
+      out.push(slotIndent(open.indent) + slotToken(figures.length - 1));
     } else {
       // An ordinary code block is copied verbatim — and it must bypass the
       // raw-tag scan: an `svg` example inside a ```markdown block is code, so

@@ -227,9 +227,9 @@ impl Instance {
         match self.shadow_id() {
             Some(id) => {
                 let label = id.rsplit('-').next().unwrap_or(id.as_str());
-                format!("AI Chat — {} [shadow {label}]", workspace.display())
+                format!("Rabbit Chat Studio — {} [shadow {label}]", workspace.display())
             }
-            None => format!("AI Chat — {}", workspace.display()),
+            None => format!("Rabbit Chat Studio — {}", workspace.display()),
         }
     }
 
@@ -563,7 +563,7 @@ mod tests {
 
     fn temp_root(label: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
-            "ai-chat-instance-{label}-{}",
+            "rabbit-chat-studio-instance-{label}-{}",
             uuid::Uuid::new_v4()
         ));
         fs::create_dir_all(&dir).expect("temp dir");
@@ -780,7 +780,7 @@ mod tests {
         // Primary: the historical title, unchanged.
         assert_eq!(
             instance.window_title(Path::new("/ws")),
-            "AI Chat — /ws"
+            "Rabbit Chat Studio — /ws"
         );
         instance.role = Role::Shadow;
         instance.shadow_dir = Some(root.join("app").join(SHADOW_DIR).join("config-1-a1b2c3d4"));

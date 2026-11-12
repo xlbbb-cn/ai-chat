@@ -1,39 +1,39 @@
-# AI Chat
+# Rabbit Chat Studio
 
 **Turn any OpenAI-compatible model into a workspace-aware desktop agent — Skills, tools, sub-agents and a local, auditable request log.**
 
 [Wiki](https://github.com/xlbbb-cn/ai-chat/wiki) · [中文](./README.zh.md) · [Latest release](https://github.com/xlbbb-cn/ai-chat/releases/latest) · [Quick start](#quick-start)
 
-![AI Chat — big models plan, local tools execute](docs/banner.png)
+![Rabbit Chat Studio — big models plan, local tools execute](docs/banner.png)
 
 <p align="center">
-  <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/AI-Chat-Windows-x64-setup.exe"><img alt="Download for Windows" src="https://img.shields.io/badge/Download-Windows%20.exe-3E6AE1?style=for-the-badge&logo=windows11&logoColor=white" height="38"></a>
+  <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/Rabbit-Chat-Studio-Windows-x64-setup.exe"><img alt="Download for Windows" src="https://img.shields.io/badge/Download-Windows%20.exe-3E6AE1?style=for-the-badge&logo=windows11&logoColor=white" height="38"></a>
   &nbsp;
-  <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/AI-Chat-macOS-Apple-Silicon.dmg"><img alt="Download for macOS" src="https://img.shields.io/badge/Download-macOS%20.dmg-3E6AE1?style=for-the-badge&logo=apple&logoColor=white" height="38"></a>
+  <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/Rabbit-Chat-Studio-macOS-Apple-Silicon.dmg"><img alt="Download for macOS" src="https://img.shields.io/badge/Download-macOS%20.dmg-3E6AE1?style=for-the-badge&logo=apple&logoColor=white" height="38"></a>
   &nbsp;
-  <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/AI-Chat-Linux-x86_64.AppImage"><img alt="Download for Linux" src="https://img.shields.io/badge/Download-Linux%20.AppImage-3E6AE1?style=for-the-badge&logo=linux&logoColor=white" height="38"></a>
+  <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/Rabbit-Chat-Studio-Linux-x86_64.AppImage"><img alt="Download for Linux" src="https://img.shields.io/badge/Download-Linux%20.AppImage-3E6AE1?style=for-the-badge&logo=linux&logoColor=white" height="38"></a>
 </p>
 
 <p align="center">
-  <code>winget install Leonard.AIChat</code> &nbsp;·&nbsp; <code>brew install --cask ai-chat</code> &nbsp;·&nbsp; <code>scoop install ai-chat</code><br>
-  <sub>Windows: the winget manifest is in review (<a href="https://github.com/microsoft/winget-pkgs/pull/458061">winget-pkgs#458061</a>). Homebrew and Scoop manifests are not published yet — the installers above work today. Intel Mac: <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/AI-Chat-macOS-Intel.dmg">.dmg</a>.</sub>
+  <code>winget install XLBBB.RabbitChatStudio</code> &nbsp;·&nbsp; <code>brew install --cask rabbit-chat-studio</code> &nbsp;·&nbsp; <code>scoop install rabbit-chat-studio</code><br>
+  <sub>Windows: the winget manifest is in review (<a href="https://github.com/microsoft/winget-pkgs/pull/458061">winget-pkgs#458061</a>). Homebrew and Scoop manifests are not published yet — the installers above work today. Intel Mac: <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/Rabbit-Chat-Studio-macOS-Intel.dmg">.dmg</a>.</sub>
 </p>
 
 <p align="center">
-  <a href="./LICENSE"><img alt="License: GPL-2.0-only" src="https://img.shields.io/badge/license-GPL--2.0-blue.svg"></a>
+  <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green.svg"></a>
   <a href="https://github.com/xlbbb-cn/ai-chat/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/xlbbb-cn/ai-chat?style=social"></a>
   <a href="https://github.com/xlbbb-cn/ai-chat/issues"><img alt="GitHub issues" src="https://img.shields.io/github/issues/xlbbb-cn/ai-chat"></a>
   <a href="https://github.com/xlbbb-cn/ai-chat/pulls"><img alt="GitHub pull requests" src="https://img.shields.io/github/issues-pr/xlbbb-cn/ai-chat"></a>
   <a href="https://github.com/xlbbb-cn/ai-chat/commits"><img alt="Last commit" src="https://img.shields.io/github/last-commit/xlbbb-cn/ai-chat"></a>
 </p>
 
-## Why AI Chat
+## Why Rabbit Chat Studio
 
-Chat is the easy part. AI Chat gives the agent a workspace, real utilities (memory, timers, todos) and an audit trail — without imposing a persona.
+Chat is the easy part. Rabbit Chat Studio gives the agent a workspace, real utilities (memory, timers, todos) and an audit trail — without imposing a persona.
 
 **Core philosophy:** first principles; freedom returned to you (tools, LLM API, prompts); a minimal, professional interface.
 
-| Feature | **AI Chat** | DeepSeek Harness | Cherry Studio | Chatbox | LM Studio |
+| Feature | **Rabbit Chat Studio** | DeepSeek Harness | Cherry Studio | Chatbox | LM Studio |
 | --- | :---: | :---: | :---: | :---: | :---: |
 | **Skill sandbox** — one skill root per workspace (`.data/skills`), root pinned to its `SKILL.md` | ✅ | ✅ OS-sandboxed workspaces | ◐ agent workspaces | — | — |
 | **Self-evolution** — the assistant installs/edits/deletes its own skills, keeps verified facts in a dedicated memory scope | ✅ | ◐ plugin creation via chat | — | — | — |
@@ -50,7 +50,7 @@ Chat is the easy part. AI Chat gives the agent a workspace, real utilities (memo
 
 ## Table of Contents
 
-- [Why AI Chat](#why-ai-chat)
+- [Why Rabbit Chat Studio](#why-rabbit-chat-studio)
 - [Introduction](#introduction)
 - [Documentation](#documentation)
 - [Core Features](#core-features)
@@ -68,7 +68,7 @@ Chat is the easy part. AI Chat gives the agent a workspace, real utilities (memo
 
 ## Introduction
 
-AI Chat is a desktop AI assistant application that connects to any OpenAI-compatible model service. It not only supports chat but also extends capabilities through Skills and Tools. It saves configurations, session histories, and request logs locally, making it suitable for personal productivity and experimental engineering scenarios.
+Rabbit Chat Studio is a desktop AI assistant application that connects to any OpenAI-compatible model service. It not only supports chat but also extends capabilities through Skills and Tools. It saves configurations, session histories, and request logs locally, making it suitable for personal productivity and experimental engineering scenarios.
 
 Use cases:
 
@@ -262,7 +262,7 @@ Build artifacts are located in:
 
 ### C. Installation
 
-- Windows: `winget install --id Leonard.AIChat -e`, or run the NSIS installer from the bundle directory
+- Windows: `winget install --id XLBBB.RabbitChatStudio -e`, or run the NSIS installer from the bundle directory
 - macOS: Use .app / .dmg (depending on the build target)
 - Linux: Use .deb / .AppImage / .rpm (depending on the build target)
 
@@ -337,7 +337,7 @@ Security recommendations:
 ## Project Structure
 
 ```text
-ai-chat/
+rabbit-chat-studio/
 ├─ src/                 # React frontend
 ├─ src-tauri/           # Rust + Tauri backend
 │  ├─ src/lib.rs        # App entry and command registration
@@ -401,5 +401,5 @@ Other boundaries:
 
 ## License
 
-This project is licensed under the GNU General Public License v2.0 only (GPL-2.0-only). See the `LICENSE` file for details.
+This project is licensed under the MIT License. See the `LICENSE` file for details.
 

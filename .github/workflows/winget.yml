@@ -1,7 +1,7 @@
 # 每个正式 Release 发布后，把其中的 NSIS 安装包自动提交到 microsoft/winget-pkgs。
 #
 # 前置条件（只需配置一次）：
-#   1. Leonard.AIChat 至少有一个版本已合并进 winget-pkgs（首个 PR）；
+#   1. XLBBB.RabbitChatStudio 至少有一个版本已合并进 winget-pkgs（首个 PR）；
 #   2. 在 xlbbb-cn 账号下 fork microsoft/winget-pkgs；
 #   3. 仓库 Secrets 配置 WINGET_TOKEN：classic PAT，勾选 public_repo + workflow。
 #
@@ -69,7 +69,7 @@ jobs:
       - name: Submit to winget-pkgs
         uses: vedantmgoyal9/winget-releaser@main
         with:
-          identifier: Leonard.AIChat
+          identifier: XLBBB.RabbitChatStudio
           version: ${{ steps.meta.outputs.version }}
           release-tag: ${{ steps.meta.outputs.tag }}
           installers-regex: '_x64-setup\.exe$' # 只提交 NSIS 安装包，忽略 .msi

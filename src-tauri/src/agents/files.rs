@@ -841,7 +841,7 @@ mod tests {
     use super::*;
 
     fn temp_root(label: &str) -> PathBuf {
-        let path = std::env::temp_dir().join(format!("ai-chat-agents-{label}-{}", Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("rabbit-chat-studio-agents-{label}-{}", Uuid::new_v4()));
         fs::create_dir_all(&path).expect("temp agents root");
         path
     }

@@ -1304,7 +1304,7 @@ async fn stdio_init(
             "params": {
                 "protocolVersion": "2025-03-26",
                 "capabilities": {},
-                "clientInfo": { "name": "ai-chat", "version": "0.1.0" }
+                "clientInfo": { "name": "rabbit-chat-studio", "version": "0.1.0" }
             },
             "id": 1
         });
@@ -1577,7 +1577,7 @@ fn init_request_json() -> serde_json::Value {
         "params": {
             "protocolVersion": "2025-03-26",
             "capabilities": {},
-            "clientInfo": { "name": "ai-chat", "version": "0.1.0" }
+            "clientInfo": { "name": "rabbit-chat-studio", "version": "0.1.0" }
         },
         "id": 1
     })
@@ -2514,7 +2514,7 @@ mod tests {
             .map(|d| d.as_nanos())
             .unwrap_or(0);
         let dir =
-            std::env::temp_dir().join(format!("ai-chat-roster-{}-{nanos}", std::process::id()));
+            std::env::temp_dir().join(format!("rabbit-chat-studio-roster-{}-{nanos}", std::process::id()));
         fs::create_dir_all(&dir).expect("temp workspace");
         dir
     }

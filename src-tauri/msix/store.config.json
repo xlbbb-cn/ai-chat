@@ -1,0 +1,12 @@
+{
+  "_comment": "Microsoft Store 产品身份（已按 Partner Center → 产品 → 产品身份 填入）。三个值必须与后台逐字符一致，改产品身份时同步这里。",
+  "packageName": "XLBBB.RabbitChatStudio",
+  "publisher": "CN=2514CB06-3D94-4243-9E5E-0B1D1B3A8380",
+  "publisherDisplayName": "XLBBB",
+  "displayName": "Rabbit Chat Studio",
+  "description": "OpenAI-compatible AI chat client with skills, tools, MCP servers and sub-agents",
+  "executable": "rabbit-chat-studio.exe",
+  "minWindowsVersion": "10.0.19041.0",
+  "maxWindowsVersionTested": "10.0.26100.0",
+  "languages": ["en-us", "zh-cn"]
+}

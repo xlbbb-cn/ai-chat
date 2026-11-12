@@ -332,7 +332,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let dir = std::env::temp_dir().join(format!(
-            "ai-chat-skill-merge-{tag}-{}-{nanos}",
+            "rabbit-chat-studio-skill-merge-{tag}-{}-{nanos}",
             std::process::id()
         ));
         fs::create_dir_all(&dir).unwrap();

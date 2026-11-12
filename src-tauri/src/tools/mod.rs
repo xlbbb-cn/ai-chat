@@ -233,6 +233,42 @@ pub(crate) fn truncate_tool_output(output: String) -> String {
     )
 }
 
+/// Machine label rendered into the `run_shell` schema (`Windows 11
+/// Professional 10.0.22631`, `Mac OS 15.3`, `Ubuntu 24.04`, …), so the model
+/// knows which shell language to write without an extra prompt line. Cached
+/// because `os_info::get()` probes the OS and the tool payload is rebuilt at
+/// every request boundary.
+fn machine_label() -> &'static str {
+    static LABEL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    LABEL.get_or_init(|| {
+        let info = os_info::get();
+        // Windows reports `Type::Windows` + a bare kernel version and keeps
+        // the marketing name ("Windows 11 Pro") in `edition`; everywhere else
+        // the type already is the name.
+        let name = info
+            .edition()
+            .map(str::to_string)
+            .filter(|edition| !edition.trim().is_empty())
+            .unwrap_or_else(|| info.os_type().to_string());
+        format!("{name} {}", info.version())
+    })
+}
+
+/// Interpreter every `run_shell` call uses in this build. The desktop platform
+/// is known at compile time, so the model never chooses a shell per call:
+/// Windows builds run PowerShell (`pwsh`, falling back to Windows PowerShell),
+/// Linux/macOS builds run bash.
+#[cfg(windows)]
+pub(crate) const RUN_SHELL_TYPE: &str = "pwsh";
+#[cfg(not(windows))]
+pub(crate) const RUN_SHELL_TYPE: &str = "bash";
+
+/// Script language the prompt tells the model to write, matching [`RUN_SHELL_TYPE`].
+#[cfg(windows)]
+const RUN_SHELL_LANGUAGE: &str = "PowerShell (pwsh)";
+#[cfg(not(windows))]
+const RUN_SHELL_LANGUAGE: &str = "bash";
+
 /// Build the tool list advertised to the model.
 ///
 /// `self_evolution` adds the dedicated `evolution` memory scope to the memory
@@ -279,19 +315,24 @@ pub fn get_all_tools(
     }
 
     if want_run_shell {
+        // The OS label and the fixed script language live in the tool schema:
+        // the model only needs to know which language to write, never which
+        // interpreter to run (that is compiled in with the desktop platform).
+        let machine = machine_label();
+        let language = RUN_SHELL_LANGUAGE;
         tools.push(json!({
             "type": "function",
             "function": {
                 "name": "run_shell",
-                "description": "Execute or manage a shell script under the same risk assessment and confirmation rules as `run_cmd`.\n\nThe script starts in the working directory (the workspace root for the main chat, the task directory inside a sub-agent mission) but may `cd` and run anything — pipes, loops, redirections, absolute paths. Use it when a PATH-resolved program is not enough.\n\n`run_type: \"direct\"` (default) runs to completion and returns the output. `run_type: \"serve\"` starts a long-lived child (HTTP service, watcher…) and returns a `serve_id`; then `action: \"list\"` shows the processes and `action: \"stop\"` kills one id (or `serve_id: \"all\"`). Serve processes die with this chat turn and at app exit.",
+                "description": format!(
+                    "Execute or manage a shell script under the same risk assessment and confirmation rules as `run_cmd`.\n\n\
+                     This machine runs {machine}. The shell is fixed for this build: write {language} scripts (there is no shell-type argument to choose).\n\n\
+                     The script starts in the working directory (the workspace root for the main chat, the task directory inside a sub-agent mission) but may `cd` and run anything — pipes, loops, redirections, absolute paths. Use it when a PATH-resolved program is not enough.\n\n\
+                     `run_type: \"direct\"` (default) runs to completion and returns the output. `run_type: \"serve\"` starts a long-lived child (HTTP service, watcher…) and returns a `serve_id`; then `action: \"list\"` shows the processes and `action: \"stop\"` kills one id (or `serve_id: \"all\"`). Serve processes die with this chat turn and at app exit."
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "type": {
-                            "type": "string",
-                            "enum": ["powershell",  "bash"],
-                            "description": "Shell to use. On Windows prefer 'powershell'; on Linux/macOS use 'bash'."
-                        },
                         "run_type": {
                             "type": "string",
                             "enum": ["direct", "serve"],
@@ -324,8 +365,7 @@ pub fn get_all_tools(
                             "maximum": 3600,
                             "description": "Optional timeout for run_type 'direct', in seconds (default 30). Ignored for serve processes, which run until stopped, the turn ends or the app exits."
                         }
-                    },
-                    "required": ["type"]
+                    }
                 }
             }
         }));
@@ -901,7 +941,7 @@ mod tests {
     use uuid::Uuid;
 
     fn make_temp_dir(label: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("ai-chat-tools-{label}-{}", Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("rabbit-chat-studio-tools-{label}-{}", Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -929,6 +969,35 @@ mod tests {
 
         assert!(actions(&memory_tool(true)).contains(&"consolidate".to_string()));
         assert!(!actions(&memory_tool(false)).contains(&"consolidate".to_string()));
+    }
+
+    /// The OS label is injected through the `run_shell` schema and the script
+    /// language is fixed by the build — the model is never asked to pick an
+    /// interpreter per call.
+    #[test]
+    fn run_shell_schema_carries_the_machine_and_fixes_the_shell() {
+        let tools = super::get_all_tools(&["run_shell".to_string()], false, false);
+        let run_shell = tools
+            .iter()
+            .find(|tool| tool["function"]["name"] == "run_shell")
+            .expect("run_shell advertised");
+        let machine = super::machine_label();
+
+        let description = run_shell["function"]["description"]
+            .as_str()
+            .expect("description is a string");
+        assert!(description.contains(machine), "{description}");
+        assert!(
+            description.contains(super::RUN_SHELL_LANGUAGE),
+            "{description}"
+        );
+        assert!(matches!(super::RUN_SHELL_TYPE, "bash" | "pwsh"));
+
+        let properties = &run_shell["function"]["parameters"]["properties"];
+        assert!(
+            properties["type"].is_null(),
+            "the shell type must not be a model-facing argument"
+        );
     }
 
     /// `mcp_self` is the mode's capability switch: advertised only while
@@ -3160,7 +3229,11 @@ pub async fn execute_tool(
             .await
         }
         "run_shell" => {
-            let shell_type = args["type"].as_str().unwrap_or("powershell").to_string();
+            // The interpreter is a build-time property of this desktop app
+            // (Windows → pwsh, Linux/macOS → bash). A `type` supplied by an old
+            // prompt or a reused tool call is ignored: the model writes the
+            // script, the build decides what runs it.
+            let shell_type = RUN_SHELL_TYPE.to_string();
             let run_type = args["run_type"]
                 .as_str()
                 .unwrap_or("direct")
@@ -3219,15 +3292,6 @@ pub async fn execute_tool(
 
             let code = args["code"].as_str().unwrap_or("").to_string();
 
-            // Only known shell types are supported; anything else is rejected
-            // before risk assessment so an attacker cannot smuggle an
-            // arbitrary `cmd_type` through the scoring pipeline.
-            if !matches!(shell_type.as_str(), "bash" | "sh" | "powershell" | "pwsh") {
-                return format!(
-                    "Error: unsupported shell type '{}'. Supported: bash, sh, powershell, pwsh",
-                    shell_type
-                );
-            }
             if code.trim().is_empty() {
                 return "Error: run_shell requires a non-empty 'code' argument.".to_string();
             }

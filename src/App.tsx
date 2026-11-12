@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } fr
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, listAgentMentions, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState, setWindowVibrancy, savePastedFile, importWorkspacePaths } from "./api";
+import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, listAgentMentions, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, deleteMessagesAfter, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState, setWindowVibrancy, savePastedFile, importWorkspacePaths } from "./api";
 
 import { ChatMessage, ChatMessageBoundary } from "./components/ChatMessage";
 import { ToolCallGroup } from "./components/ToolCallGroup";
@@ -73,6 +73,8 @@ import { activeAgentQuery, hasAgentToken, scoreAgentMention } from "./agentMenti
 import type { AgentMentionOption } from "./agentMention";
 import { isGenerationStopped, isLocale, stripGenerationStopped, useI18n } from "./i18n";
 import { formatCountdown } from "./utils/time";
+import { MARKDOWN_PRINT_CSS } from "./utils/printDocument";
+import { exportHtmlAsPdf } from "./utils/pdfExport";
 import {
   FontAwesomeIcon,
   faBrain,
@@ -81,6 +83,7 @@ import {
   faPaperclip,
   faPenToSquare,
   faPlug,
+  faPrint,
   faRobot,
   faRotateRight,
   faScrewdriverWrench,
@@ -331,14 +334,6 @@ function hasContextContent(m: Message): boolean {
   return content.trim().length > 0 || Boolean(m.reasoning_content?.trim());
 }
 
-/** An assistant turn that ended with an error or a user stop. */
-function isInterruptedAssistant(m: Message): boolean {
-  return (
-    m.role === "assistant" &&
-    (Boolean(m.error) || m.status === "error" || m.status === "stopped")
-  );
-}
-
 /**
  * The action a failed turn offers in its notice. Resuming only makes sense when
  * the turn left something usable behind — an immediate rate limit with no
@@ -390,6 +385,20 @@ interface MarkdownEditPayload {
 const SIDEBAR_SPRING = { type: "spring" as const, stiffness: 320, damping: 32 };
 const SIDEBAR_SHOWN = { opacity: 1, x: 0, pointerEvents: "auto" as const };
 const SIDEBAR_HIDDEN = { opacity: 0, x: -20, pointerEvents: "none" as const };
+
+/**
+ * The goal-loop end marker (`[goal:DONE]`) is a backend control signal: the
+ * main loop reads it from the streamed answer to decide whether the turn may
+ * end, but it must never reach the transcript bubble or the persisted row.
+ * Keep in sync with `GOAL_DONE_MARKER` in `src-tauri/src/llm_complete.rs`.
+ */
+const GOAL_DONE_MARKER = "[goal:DONE]";
+
+/** Remove every goal-loop marker and the blank tail it leaves behind. */
+function stripGoalDoneMarker(text: string): string {
+  if (!text.includes(GOAL_DONE_MARKER)) return text;
+  return text.split(GOAL_DONE_MARKER).join("").trimEnd();
+}
 
 export default function App() {
   const { t, locale, setLocale } = useI18n();
@@ -611,6 +620,10 @@ export default function App() {
   const [markdownPath, setMarkdownPath] = useState("");
   const [markdownDraft, setMarkdownDraft] = useState("");
   const [markdownSaving, setMarkdownSaving] = useState(false);
+  /** The PDF engine runs outside the app; a second click must not start another. */
+  const [markdownPdfBusy, setMarkdownPdfBusy] = useState(false);
+  /** The preview is the document source: what is printed is what is shown. */
+  const markdownPreviewRef = useRef<HTMLDivElement>(null);
   /** Pending delay timers created by the `timer_set` tool (soonest first). */
   const [timers, setTimers] = useState<TimerEntry[]>([]);
   /** Cross-platform "system awake" lock, shown as a badge above the input. */
@@ -660,6 +673,15 @@ export default function App() {
   const paletteRef = useRef<Palette>("default");
   const currentAssistantMessageIdRef = useRef<string | null>(null);
   const hasRunningToolCallRef = useRef(false);
+  /**
+   * The latest `saveHistory` write of the current turn. A failed attempt
+   * persists its partial reply asynchronously; retrying truncates the session
+   * before the next request, so it must wait for that insert to land first —
+   * otherwise the deleted row could be written right after the DELETE.
+   */
+  const pendingTurnWriteRef = useRef<Promise<unknown> | null>(null);
+  /** True while a retry is cleaning up before its request starts. */
+  const retryingRef = useRef(false);
   const currentToolCallsRef = useRef<ToolCallEntry[]>([]);
   /** Mission bus of the current turn; old bus events must not touch new rows. */
   const currentMbusIdRef = useRef<string | null>(null);
@@ -2257,7 +2279,7 @@ export default function App() {
         ];
       });
 
-    saveHistory(
+    pendingTurnWriteRef.current = saveHistory(
       sessionId,
       "user",
       serializeContentForDb(apiContent),
@@ -2276,6 +2298,12 @@ export default function App() {
     const cleanup = await chatCompletion(history, activeSkillIds, sessionId, selectedModel, {
       onToken(token) {
         accumulatedContent += token;
+        // Never surface the goal-loop marker: it is the last thing the model
+        // writes, so trimming it the moment it completes keeps the live
+        // bubble identical to the settled one.
+        if (accumulatedContent.endsWith(GOAL_DONE_MARKER)) {
+          accumulatedContent = accumulatedContent.slice(0, -GOAL_DONE_MARKER.length);
+        }
         const shouldMarkDone = hasRunningToolCallRef.current;
         if (shouldMarkDone) hasRunningToolCallRef.current = false;
         setBackgroundWaiting(0);
@@ -2312,6 +2340,34 @@ export default function App() {
           )
         );
       },
+      onRetry({ content, reasoning }) {
+        // The failed attempt's tokens were appended verbatim, so dropping its
+        // exact tail restores the accumulator to the pre-request state; the
+        // retry then re-streams the whole response. A tail that does not
+        // match (should not happen) is left in place rather than guessed at.
+        // The backend's attempt text still carries the goal-loop marker the
+        // live accumulator already dropped — compare against the same form.
+        const tail = stripGoalDoneMarker(content);
+        if (tail && accumulatedContent.endsWith(tail)) {
+          accumulatedContent = accumulatedContent.slice(
+            0,
+            accumulatedContent.length - tail.length
+          );
+        }
+        if (reasoning && accumulatedReasoning.endsWith(reasoning)) {
+          accumulatedReasoning = accumulatedReasoning.slice(
+            0,
+            accumulatedReasoning.length - reasoning.length
+          );
+        }
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, content: accumulatedContent, reasoning_content: accumulatedReasoning }
+              : m
+          )
+        );
+      },
       onDone() {
         setBackgroundWaiting(0);
         // Settle the still-running steps before persisting: the transcript
@@ -2326,6 +2382,10 @@ export default function App() {
           }
           return { ...e, status: "done" as const };
         });
+        // The goal-loop marker is a control signal; it never reaches the
+        // transcript or the persisted row (belt and braces — `onToken` already
+        // drops the trailing form).
+        accumulatedContent = stripGoalDoneMarker(accumulatedContent);
         // Deliveries are stored on the assistant row: one turn is one row, and
         // the reply was generated after the model saw them.
         const deliveredInjections = currentInjectionsRef.current;
@@ -2348,7 +2408,7 @@ export default function App() {
           return prev
             .filter((m) => !m.id.startsWith("agent-progress-"))
             .map((m) => {
-              if (m.id === assistantId) return { ...m, streaming: false, ...(finalToolCalls?.length ? { tool_calls: finalToolCalls } : {}) };
+              if (m.id === assistantId) return { ...m, content: accumulatedContent, streaming: false, ...(finalToolCalls?.length ? { tool_calls: finalToolCalls } : {}) };
               return m;
             });
         });
@@ -2380,6 +2440,9 @@ export default function App() {
         });
         // The transcript holds no failure row any more, so a turn that can
         // still be pushed forward offers "continue" from the notice.
+        // The goal-loop marker is a control signal; never persist it or seed
+        // the "continue" action with it.
+        accumulatedContent = stripGoalDoneMarker(accumulatedContent);
         setError(
           err,
           "error",
@@ -2399,6 +2462,7 @@ export default function App() {
                 ? {
                     ...m,
                     error: err,
+                    content: accumulatedContent,
                     status: "error" as const,
                     streaming: false,
                     ...(settledToolCalls.length ? { tool_calls: settledToolCalls } : {}),
@@ -2411,7 +2475,7 @@ export default function App() {
         // is stored separately and is never replayed as model content.
         const deliveredInjections = currentInjectionsRef.current;
         if (accumulatedContent.trim() || accumulatedReasoning.trim() || settledToolCalls.length > 0) {
-          saveHistory(
+          pendingTurnWriteRef.current = saveHistory(
             sessionId,
             "assistant",
             accumulatedContent,
@@ -2551,7 +2615,52 @@ export default function App() {
   }, [pendingAutoPrompts, streaming, profileExporting, sendMessage]);
 
   const retryPendingUserMessage = useCallback(async () => {
-    if (streaming || !pendingRetryMessageId) return;
+    if (streaming || !pendingRetryMessageId || retryingRef.current) return;
+
+    // A retry regenerates the last answer, so the user message it belongs to is
+    // the cut-off: everything the failed attempt produced after it — assistant
+    // replies, transient progress rows — goes away before the new request. It
+    // has to leave the database too, not only the transcript, otherwise a
+    // reload would bring the failed rows back next to the retried reply.
+    const retryIndex = messages.findIndex((m) => m.id === pendingRetryMessageId);
+    if (retryIndex < 0) return;
+    const retryBase = messages.slice(0, retryIndex + 1);
+    const retriedUser = retryBase[retryBase.length - 1];
+    const discarded = messages.slice(retryIndex + 1);
+
+    // Freeze the retry button (and the composer) while the cleanup runs: the
+    // request is not streaming yet, so `streaming` cannot be the only guard.
+    retryingRef.current = true;
+    setStreaming(true);
+    setError(null);
+    try {
+      // A failed turn persists its partial reply asynchronously. Truncating
+      // before that insert lands would leave the row behind, so wait for the
+      // turn's last history write first.
+      const pendingWrite = pendingTurnWriteRef.current;
+      if (pendingWrite) await pendingWrite.catch(() => undefined);
+      pendingTurnWriteRef.current = null;
+      if (retriedUser.dbId !== undefined) {
+        await deleteMessagesAfter(sessionId, retriedUser.dbId);
+      } else {
+        // The user row never reached the database: remove whatever the failed
+        // attempt did persist, so it cannot reappear on the next load.
+        const orphaned = discarded
+          .map((m) => m.dbId)
+          .filter((id): id is number => id !== undefined);
+        if (orphaned.length > 0) {
+          await Promise.all(orphaned.map((id) => deleteMessage(id)));
+        }
+      }
+    } catch (err) {
+      // Nothing has been removed from the transcript yet, so the retry can be
+      // pressed again once the cause is fixed.
+      retryingRef.current = false;
+      setStreaming(false);
+      setError(t("app.deleteFailed", { error: String(err) }));
+      return;
+    }
+    retryingRef.current = false;
 
     const assistantId = crypto.randomUUID();
     const assistantMsg: Message = { id: assistantId, role: "assistant", content: "", streaming: true };
@@ -2565,29 +2674,13 @@ export default function App() {
     setBackgroundWaiting(0);
 
     followBottomRef.current = true;
-    setMessages((prev) => [...prev, assistantMsg]);
-    setStreaming(true);
-    setError(null);
+    // Atomic replacement: the failed rows are already gone from the database,
+    // so they must leave the transcript at the same moment — not `prev` plus
+    // the new bubble, which would leave the old failure visible.
+    setMessages([...retryBase, assistantMsg]);
     // A new request starts with no token figures yet — the usage bar above the
     // input must sweep until this request's `chat-usage` arrives.
     setUsageReady(false);
-
-    // A retry regenerates the last answer: drop the trailing interrupted
-    // assistant turn(s), plus transient progress rows, so the request ends at
-    // the user message. Partial turns from earlier in the session stay.
-    const retryBase = [...messages];
-    while (retryBase.length > 0) {
-      const last = retryBase[retryBase.length - 1];
-      if (last.id.startsWith("agent-progress-") || last.role === "tool_group") {
-        retryBase.pop();
-        continue;
-      }
-      if (isInterruptedAssistant(last)) {
-        retryBase.pop();
-        continue;
-      }
-      break;
-    }
 
     const history = retryBase
       .filter((m) => !m.streaming && m.role !== "tool_group" && hasContextContent(m))
@@ -2616,6 +2709,12 @@ export default function App() {
     const cleanup = await chatCompletion(history, activeSkillIds, sessionId, selectedModel, {
       onToken(token) {
         accumulatedContent += token;
+        // Never surface the goal-loop marker: it is the last thing the model
+        // writes, so trimming it the moment it completes keeps the live
+        // bubble identical to the settled one.
+        if (accumulatedContent.endsWith(GOAL_DONE_MARKER)) {
+          accumulatedContent = accumulatedContent.slice(0, -GOAL_DONE_MARKER.length);
+        }
         const shouldMarkDone = hasRunningToolCallRef.current;
         if (shouldMarkDone) hasRunningToolCallRef.current = false;
         setBackgroundWaiting(0);
@@ -2652,6 +2751,34 @@ export default function App() {
           )
         );
       },
+      onRetry({ content, reasoning }) {
+        // The failed attempt's tokens were appended verbatim, so dropping its
+        // exact tail restores the accumulator to the pre-request state; the
+        // retry then re-streams the whole response. A tail that does not
+        // match (should not happen) is left in place rather than guessed at.
+        // The backend's attempt text still carries the goal-loop marker the
+        // live accumulator already dropped — compare against the same form.
+        const tail = stripGoalDoneMarker(content);
+        if (tail && accumulatedContent.endsWith(tail)) {
+          accumulatedContent = accumulatedContent.slice(
+            0,
+            accumulatedContent.length - tail.length
+          );
+        }
+        if (reasoning && accumulatedReasoning.endsWith(reasoning)) {
+          accumulatedReasoning = accumulatedReasoning.slice(
+            0,
+            accumulatedReasoning.length - reasoning.length
+          );
+        }
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, content: accumulatedContent, reasoning_content: accumulatedReasoning }
+              : m
+          )
+        );
+      },
       onDone() {
         setBackgroundWaiting(0);
         const finalToolCalls = currentToolCallsRef.current.map((e) => {
@@ -2661,6 +2788,10 @@ export default function App() {
           }
           return { ...e, status: "done" as const };
         });
+        // The goal-loop marker is a control signal; it never reaches the
+        // transcript or the persisted row (belt and braces — `onToken` already
+        // drops the trailing form).
+        accumulatedContent = stripGoalDoneMarker(accumulatedContent);
         // Deliveries are stored on the assistant row: one turn is one row, and
         // the reply was generated after the model saw them.
         const deliveredInjections = currentInjectionsRef.current;
@@ -2683,7 +2814,7 @@ export default function App() {
           return prev
             .filter((m) => !m.id.startsWith("agent-progress-"))
             .map((m) => {
-              if (m.id === assistantId) return { ...m, streaming: false, ...(finalToolCalls?.length ? { tool_calls: finalToolCalls } : {}) };
+              if (m.id === assistantId) return { ...m, content: accumulatedContent, streaming: false, ...(finalToolCalls?.length ? { tool_calls: finalToolCalls } : {}) };
               return m;
             });
         });
@@ -2714,6 +2845,9 @@ export default function App() {
         // Same as the first-turn handler: the failure is reported through the
         // notice, and the notice carries the resume action when there is
         // anything left to resume.
+        // The goal-loop marker is a control signal; never persist it or seed
+        // the "continue" action with it.
+        accumulatedContent = stripGoalDoneMarker(accumulatedContent);
         setError(
           err,
           "error",
@@ -2733,6 +2867,7 @@ export default function App() {
                 ? {
                     ...m,
                     error: err,
+                    content: accumulatedContent,
                     status: "error" as const,
                     streaming: false,
                     ...(settledToolCalls.length ? { tool_calls: settledToolCalls } : {}),
@@ -2744,7 +2879,7 @@ export default function App() {
         // reload or continuation can use it; the error itself stays UI-only.
         const deliveredInjections = currentInjectionsRef.current;
         if (accumulatedContent.trim() || accumulatedReasoning.trim() || settledToolCalls.length > 0) {
-          saveHistory(
+          pendingTurnWriteRef.current = saveHistory(
             sessionId,
             "assistant",
             accumulatedContent,
@@ -3226,6 +3361,35 @@ export default function App() {
       setError(t("app.markdownSaveFailed", { error: String(err) }));
     } finally {
       setMarkdownSaving(false);
+    }
+  }
+
+  /**
+   * Write the draft's preview to a PDF file.
+   *
+   * The preview DOM is cloned instead of the markdown being rendered again:
+   * what leaves the app is exactly what the right-hand column shows. Building a
+  * self-contained document (KaTeX inlined, system fonts) is what lets another
+  * process print it; `exportHtmlAsPdf` owns the save dialog and the fallback.
+   */
+  async function handleExportMarkdownPdf() {
+    if (!markdownDraft.trim() || markdownPdfBusy) return;
+    const suggested = markdownPath.trim()
+      ? `${markdownPath.replace(/\.[^./\\]+$/, "")}.pdf`
+      : "markdown.pdf";
+    setMarkdownPdfBusy(true);
+    try {
+      const result = await exportHtmlAsPdf({
+        title: suggested.replace(/^.*[\\/]/, ""),
+        bodyHtml: markdownPreviewRef.current?.innerHTML ?? "",
+        extraCss: MARKDOWN_PRINT_CSS,
+        defaultPath: suggested,
+      });
+      if (result === "printed") setError(t("app.pdfFallback"), "warning");
+    } catch (err) {
+      setError(t("app.pdfFailed", { error: String(err) }));
+    } finally {
+      setMarkdownPdfBusy(false);
     }
   }
 
@@ -3821,6 +3985,20 @@ export default function App() {
                   <button
                     type="button"
                     className="toolbar-btn"
+                    onClick={handleExportMarkdownPdf}
+                    disabled={markdownPdfBusy || !markdownDraft.trim()}
+                    title={t("app.markdownPdfTip")}
+                  >
+                    <FontAwesomeIcon
+                      icon={markdownPdfBusy ? faSpinner : faPrint}
+                      spin={markdownPdfBusy}
+                      aria-hidden="true"
+                    />
+                    {t("app.markdownPdf")}
+                  </button>
+                  <button
+                    type="button"
+                    className="toolbar-btn"
                     onClick={() => setMarkdownEditorOpen(false)}
                     disabled={markdownSaving}
                   >
@@ -3848,7 +4026,7 @@ export default function App() {
                 </div>
                 <div className="markdown-editor-column">
                   <span>{t("app.previewColumn")}</span>
-                  <div className="markdown-editor-preview">
+                  <div className="markdown-editor-preview" ref={markdownPreviewRef}>
                     {markdownDraft.trim()
                       ? <MarkdownPreview content={markdownDraft} />
                       : <p className="markdown-editor-preview-empty">{t("app.markdownPreviewEmpty")}</p>}
@@ -4287,6 +4465,7 @@ export default function App() {
                   dbId={m.dbId}
                   onConfirm={respondToolCallConfirm}
                   onCancelBackground={handleCancelBackgroundTask}
+                  onNotice={setError}
                   backgroundTasks={
                     m.role === "assistant" && m.id === messages[messages.length - 1]?.id
                       ? backgroundTasks

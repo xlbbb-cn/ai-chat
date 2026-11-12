@@ -836,7 +836,7 @@ mod tests {
 
     fn temp_workspace(label: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
-            "ai-chat-scripts-{label}-{}",
+            "rabbit-chat-studio-scripts-{label}-{}",
             Uuid::new_v4()
         ));
         fs::create_dir_all(workspace::scripts_root(&dir)).unwrap();

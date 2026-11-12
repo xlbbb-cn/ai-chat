@@ -47,6 +47,7 @@ export {
     faPen,
     faPenToSquare,
     faPlug,
+    faPrint,
     faRobot,
     faRotateRight,
     faScrewdriverWrench,

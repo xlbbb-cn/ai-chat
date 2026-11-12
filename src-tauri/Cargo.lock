@@ -40,42 +40,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ai-chat"
-version = "3.2.0"
-dependencies = [
- "base64 0.22.1",
- "chrono",
- "diffy",
- "dirs 5.0.1",
- "futures-util",
- "globset",
- "ignore",
- "libc",
- "lopdf",
- "os_info",
- "pdf2md-rs",
- "regex",
- "reqwest 0.12.28",
- "rusqlite",
- "serde",
- "serde_json",
- "serde_yaml",
- "tauri",
- "tauri-build",
- "tauri-plugin-clipboard-manager",
- "tauri-plugin-dialog",
- "tauri-plugin-opener",
- "tauri-plugin-single-instance",
- "tiktoken-rs",
- "tokio",
- "uuid",
- "window-vibrancy 0.8.1",
- "windows-sys 0.59.0",
- "zbus",
- "zip",
-]
-
-[[package]]
 name = "alloc-no-stdlib"
 version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3757,6 +3721,42 @@ name = "r-efi"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
+
+[[package]]
+name = "rabbit-chat-studio"
+version = "3.2.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "diffy",
+ "dirs 5.0.1",
+ "futures-util",
+ "globset",
+ "ignore",
+ "libc",
+ "lopdf",
+ "os_info",
+ "pdf2md-rs",
+ "regex",
+ "reqwest 0.12.28",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-clipboard-manager",
+ "tauri-plugin-dialog",
+ "tauri-plugin-opener",
+ "tauri-plugin-single-instance",
+ "tiktoken-rs",
+ "tokio",
+ "uuid",
+ "window-vibrancy 0.8.1",
+ "windows-sys 0.59.0",
+ "zbus",
+ "zip",
+]
 
 [[package]]
 name = "rand"

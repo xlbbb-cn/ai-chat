@@ -12,6 +12,8 @@
  * the canvas keeps its pixels and the listeners stay attached.
  */
 
+import { writeText as tauriWriteText } from "@tauri-apps/plugin-clipboard-manager";
+
 import { openFiguresDir, saveFigure, saveFigureHtml } from "../api";
 import { t as text } from "../i18n";
 import {
@@ -214,15 +216,84 @@ function addButton(
   return button;
 }
 
-/** The source as a code block: an unrenderable figure still shows its markup. */
-function showSource(parts: CardParts, source: string): void {
-  parts.figure.dataset.figureState = "invalid";
+/**
+ * What a card shows when its source cannot be drawn.
+ *
+ * One line and a copy action, with the source behind a fold: the transcript is
+ * a place to read, and a wall of markup that failed to parse is not. The text
+ * stays one click away because it is the only way to see what went wrong.
+ * Shared with `mermaidDiagrams.ts`, whose cards are the same card.
+ */
+export function showUnrenderable(
+  figure: HTMLElement,
+  viewport: HTMLElement,
+  source: string,
+  message: string = text("figure.unrenderable"),
+): void {
+  figure.dataset.figureState = "invalid";
+
+  const block = document.createElement("div");
+  block.className = "chat-figure-invalid";
+
+  const line = document.createElement("p");
+  line.className = "chat-figure-notice";
+  line.textContent = message;
+
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.className = "chat-figure-btn chat-figure-copy";
+  copy.textContent = text("figure.copySource");
+  copy.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void copySource(source);
+    copy.textContent = text("common.copied");
+    window.setTimeout(() => {
+      copy.textContent = text("figure.copySource");
+    }, 1200);
+  });
+
+  const fold = document.createElement("details");
+  fold.className = "chat-figure-source-fold";
+  const summary = document.createElement("summary");
+  summary.textContent = text("figure.showSource");
   const pre = document.createElement("pre");
   pre.className = "hljs chat-figure-source";
   const code = document.createElement("code");
   code.textContent = source;
   pre.appendChild(code);
-  parts.viewport.replaceChildren(pre);
+  fold.append(summary, pre);
+
+  block.append(line, copy, fold);
+  viewport.replaceChildren(block);
+}
+
+/** Clipboard the app's way: the Tauri plugin first, the web API as fallback. */
+async function copySource(source: string): Promise<void> {
+  try {
+    await tauriWriteText(source);
+    return;
+  } catch {
+    /* no Tauri behind the page: fall through to the web API */
+  }
+  try {
+    await navigator.clipboard?.writeText(source);
+  } catch {
+    /* refused or unavailable: the fold still holds the text */
+  }
+}
+
+/** The source would not draw: say so, and keep the markup folded away. */
+function showSource(
+  parts: CardParts,
+  source: string,
+  reason: string,
+  message?: string,
+): void {
+  console.warn(
+    `[figures] ${parts.figure.dataset.figureKind ?? "figure"} not drawn (${reason})`,
+  );
+  showUnrenderable(parts.figure, parts.viewport, source, message);
 }
 
 /** Where a saved file lands, plus the failure message. Shared by both kinds. */
@@ -278,7 +349,7 @@ function buildSvgCard(spec: FigureSpec, index: number): FigureHandle {
   if (markup) parts.viewport.innerHTML = markup;
   const svg = parts.viewport.querySelector<SVGSVGElement>("svg");
   if (!svg) {
-    showSource(parts, spec.source);
+    showSource(parts, spec.source, "sanitised markup held no svg");
     return unrenderable(parts);
   }
 
@@ -317,7 +388,7 @@ function buildCarveCard(spec: FigureSpec, index: number): FigureHandle {
 
   const scene: CarveScene | null = parseCarve(spec.source);
   if (!scene) {
-    showSource(parts, spec.source);
+    showSource(parts, spec.source, "scene did not parse");
     return unrenderable(parts);
   }
 
@@ -449,7 +520,7 @@ function buildFlowCard(spec: FigureSpec, index: number): FigureHandle {
 
   const parsed = parseFlow(spec.source);
   if (!parsed) {
-    showSource(parts, spec.source);
+    showSource(parts, spec.source, "flowchart did not parse");
     return unrenderable(parts);
   }
 
@@ -488,7 +559,7 @@ function buildFlowCard(spec: FigureSpec, index: number): FigureHandle {
         // A spec that parsed but did not lay out shows its source, like a
         // scene that parsed but drew nothing.
         if (!svg) {
-          showSource(parts, spec.source);
+          showSource(parts, spec.source, "layout produced no svg");
           return;
         }
         svg.classList.add("chat-figure-svg");
@@ -496,7 +567,7 @@ function buildFlowCard(spec: FigureSpec, index: number): FigureHandle {
         fitFlowDiagram(svg, parts.viewport, parts.figure);
         parts.figure.dataset.figureState = "ready";
       })
-      .catch(() => showSource(parts, spec.source))
+      .catch((error: unknown) => showSource(parts, spec.source, String(error)))
       .finally(() => {
         busy = false;
         if (queued) {
@@ -583,11 +654,9 @@ function buildHtmlCard(
   }
 
   if (!spec.source.trim() || spec.source.length > MAX_HTML_SOURCE) {
-    // Too large is not "broken": the source is intact and worth showing, and the
-    // status line says why it did not run.
-    showSource(parts, spec.source);
-    parts.status.dataset.state = "error";
-    parts.status.textContent = text("figure.htmlTooLarge");
+    // Too large is not "broken": the source is intact and worth keeping, so the
+    // card states why it did not run and leaves the markup a click away.
+    showSource(parts, spec.source, "html fragment too large", text("figure.htmlTooLarge"));
     return unrenderable(parts);
   }
 
