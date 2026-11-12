@@ -331,7 +331,7 @@ Rules that follow:
   5.1–7:1 on the transcript; `--c-text` 10.2–15.5:1 and `--c-muted` 4.7–6.2:1 on
   a `--c-window` band. The `--c-muted` floor (4.5:1) holds everywhere, so the
   fallback never weakens a palette's guarantee.
-- The scrim blur on `.file-mention-popup`, `.model-select-popup-shell`,
+- The scrim blur on `.file-mention-popup`, `.dropdown-popup`,
   `.settings-page` and `.prompt-editor-overlay` is kept: those open over the
   transcript, which is opaque enough to blur.
 - **The blur stays honest.** The bands blur the wash, never text: the transcript
@@ -451,7 +451,7 @@ focus/active ring of primary buttons.
 ### Legacy aliases that must stay
 
 `--c-text-secondary` (→ Pewter), `--c-bg-secondary` (→ alternate surface). They are
-referenced by `ModelSelect.css` and `ProfilePanel.css`; removing them silently
+referenced by `ModelSelect.css`; removing them silently
 breaks those rules.
 
 ---
@@ -536,14 +536,52 @@ font-size: 14px;                 /* 13px in the compact Settings zone */
 transition: border-color var(--t-dur) var(--t-ease);
 ```
 
-Focus is a **border-colour change to `--c-accent`** — no glow, no ring, no shadow.
-Placeholder uses `--c-placeholder`. Selects hide the native arrow and paint the
-inline SVG chevron from `--icon-chevron` — a glyph token (one neutral grey per
-theme), because a data URI cannot read `currentColor`. The list a select opens is
-drawn by the platform over its own surface, so `option` rows carry the opaque
-`--c-surface` / `--c-text` pair (one rule in `App.css`): a row that inherited the
-translucent `--c-field` washes out there, and in the dark palettes it leaves
-near-white text on a surface the page never chose.
+Focus is a **border-colour change to `--c-accent-text`** — no glow, no ring, no shadow.
+Placeholder uses `--c-placeholder`.
+
+A `<select>` is never a native one. The list it opens is drawn by the platform —
+GTK on Linux, a menu on macOS, its own popup on Windows — so the OS, not this
+document, would author the control's loudest state. Every picker goes through
+`components/Dropdown.tsx` instead; the platform-drawn `option` pair left `App.css`
+with the last native select.
+
+### Dropdowns
+
+One primitive: a field-shaped trigger plus a `Portal`-mounted listbox, classes
+only in `App.css` (`.dropdown-trigger*`, `.dropdown-chevron`, `.dropdown-popup`,
+`.dropdown-list`, `.dropdown-option*`, `.dropdown-scrollbar*`). A component sheet
+may add a width cap, a leading glyph or a row's own badges — never a frame.
+
+| Part | Spec |
+|---|---|
+| Trigger | The field anatomy above: 34px, 1px `--c-border-i`, 4px radius, `--c-field` fill, 13px in the compact zone. **No hover fill** — a closed dropdown is a field, not a button |
+| Trigger, focus / open | `border-color: var(--c-accent-text)`. No ring, no glow, no elevation; `aria-expanded` carries the same tint |
+| Arrow | `.dropdown-chevron`: 10×6 masked glyph tinted by `currentColor` — `--c-muted` at rest, `--c-text` when the trigger is hovered, `--c-accent-text` while open or keyboard-focused. It flips 180° on `--t-dur`/`--t-ease` and holds still under `prefers-reduced-motion` |
+| Popup | `--c-popup` surface, 1px `--c-border-i`, 4px, 4px inner padding, 6px gap to the trigger, 12px viewport margin, and it flips upwards when the room below is short |
+| Row | `min-height: 28px`, `padding: 4px 8px`, 4px radius, 13px. One active fill: `--c-accent-soft` — the pointer and the keyboard move the *same* row |
+| Row, selected | `--c-accent-text` label at `font-weight: 500`, never 600 |
+| Scroll | The native bar is hidden and a 2px `--c-muted` indicator at 45% opacity is drawn in the DOM (WebKit ignores `::-webkit-scrollbar`); it turns `--c-accent-text` while the popup is hovered |
+
+A trigger is exactly as wide as its call site says and no wider: it shows the
+field's value, so it never grows at the expense of a neighbouring input. A list
+whose values run long — absolute paths, model ids — gets a **width floor on the
+popup** instead (`minPopupWidth`, as the model picker does for long ids); the
+popup is clamped to the viewport and grows towards the room.
+
+The titlebar workspace indicator is the one picker that is **not** this
+primitive: its trigger is the label that marks the active workspace (12px, red
+hairline), and replacing it with a 34px field would turn the window's identity
+line into a form control. The list it opens is therefore a **menu** — the app
+menu's frame and rows — not a field's listbox. Both are single-select popups
+with one active fill; what changes is the chrome they hang from.
+
+The arrow is a **mask, not a picture**. `--icon-chevron` holds the shape only —
+10×6, a shallow 35° chevron, 1.25px stroke, butt caps, miter join — so the token
+carries no ink and one definition serves every theme, palette and glass level;
+the primitive paints it with `currentColor`. A painted data URI would freeze a
+grey into the token, need a second definition per theme, and still lose the
+hover/open tint — which is why the shape sits at `linecap: butt` next to the
+field's 1px hairline rather than shouting over it.
 
 ### Toggle switch
 
@@ -996,7 +1034,9 @@ every other surface — no shadow, one hairline, one accent.
 | Window buttons | 34×28, 4px radius, `--c-muted` glyph at 12px; hover `--c-hover` + `--c-text`; active `--c-active` |
 | Close button | Destructive variant: hover is `--c-danger-soft` fill + `--c-danger` glyph |
 | App menu (`⋯`) | `--c-surface`, 1px `--c-border-i`, 4px radius, no shadow; rows 32px, 13px/400, hover `--c-hover` |
-| Workspace label | 12px `--c-muted`, ellipsized; 1px `--c-danger` underline at a 2px offset marks the active workspace |
+| Workspace indicator | 12px `--c-muted`, ellipsized; 1px `--c-danger` underline at a 2px offset marks the active workspace |
+| Workspace indicator, control | 22px tall, `0 6px` padding, 4px radius; hover / open / focus is a colour change only — `--c-hover` fill, `--c-text` label, no ring, no size change; the underline stays (it marks, it does not interact). 55% opacity for an inert row |
+| Workspace switcher popup | The app menu's frame and rows (32px, 13px), anchored left under the indicator; `min-width: 260px`, `max-width: min(420px, 60vw)` so two paths still read, `max-height` with the native bar hidden (it is a menu, not a panel list). A row is `name` + 11px `--c-muted` parent path with ellipsis, plus an 11px note: `--c-muted` for the current workspace, `--c-warning` for a folder that is gone |
 | Placement | Windows/Linux: minimize / maximize / close on the right; macOS: close / minimize / maximize on the left |
 
 The titlebar is `position: fixed` at `z-index: 2000`, above every overlay, so the
@@ -1229,6 +1269,24 @@ but *script on that thread*. Markup, CSS and SVG animation cannot block it.
 
 ---
 
+## PATCH v1.8 — the workspace indicator is the switcher
+
+The titlebar already named the active workspace, and the only way to change it
+was Settings → Workspace, behind a Save. Making the label itself the entry
+point removes a round trip without adding a second place to *look* for the
+workspace: the thing that names it is the thing that changes it.
+
+| Tempting | Here, and why |
+|---|---|
+| swap the label for a field-shaped `Dropdown` trigger | **refused.** The trigger would become a 34px bordered control sitting next to the window title, and the one line that marks *which* workspace this window is would stop being a label. The indicator keeps its typography and hairline; only a hover / open fill distinguishes a control from a mark |
+| let the list keep the "stage it, then Save" rule | **refused.** A shortcut that still needs a second confirmation is the thing it was meant to replace. Settings stays staged (it is a form) and the titlebar applies immediately — two affordances, two contracts, both labelled as such |
+| apply the switch by re-sending the whole `AppConfig` from the renderer | **refused.** The popup holds no form, so it has no business writing fields it never showed; `set_workspace_dir` sets that one field on the live config |
+| keep a workspace field in Settings once the titlebar owns it | **removed — two pickers for one field, and the staged one could revert a switch.** The panel is a form for everything else; `handleSave` / `handleLanguageChange` / `applyMessageEditor` take `workspace_dir` from a fresh `getConfig()` |
+| switch mid-turn and let the streaming reply land wherever it lands | **refused at both layers.** A running turn resolves tool paths and writes rows through the workspace it started in; the rows disable while `turnStartedAt` is set and the command returns an error for a hand-crafted call |
+| draw a thin scrollbar in a 10-row menu | **refused.** The bar is reserved for the transcript and the panel lists; a menu caps its own height and hides it |
+
+---
+
 ## Do's and Don'ts
 
 ### Do
@@ -1267,7 +1325,7 @@ but *script on that thread*. Markup, CSS and SVG animation cannot block it.
 
 | File | Owns |
 |---|---|
-| `src/App.css` | **All tokens**, app shell, toolbar, **titlebar / window chrome**, transcript, **floating chat notices**, input row, dialogs, markdown editor, scrollbars, shared primitives |
+| `src/App.css` | **All tokens**, app shell, toolbar, **titlebar / window chrome**, transcript, **floating chat notices**, input row, dialogs, markdown editor, scrollbars, shared primitives (**incl. the dropdown primitive**) |
 | `src/components/ChatMessage.css` | Transcript turns, reasoning, code blocks, tables (`--ts-*` are aliases of `--c-*`) |
 | `src/utils/figures.ts` | Figure extraction (`svg` / `carve` / `html-fig` fences, raw tags) — slot tokens handed to the transcript |
 | `src/utils/figureCard.ts` | The `.chat-figure` card: sanitised SVG, three.js canvas, sandboxed frame, save action, per-source cache |
@@ -1280,9 +1338,10 @@ but *script on that thread*. Markup, CSS and SVG animation cannot block it.
 | `src/components/FileMentionPopup.css` | Composer mention popup — one surface shared by the `@file`, `/skill` and `+agent` pickers; `SlashMentionPopup.css` / `AgentMentionPopup.css` only add the glyph colour and the left-to-right description |
 | `src/components/{Skills,Mcp,Tools,Agents,History}Panel.css` | Panel-specific layout only — chrome comes from the shared primitives |
 | `src/components/SettingsPanel.css` | Settings page (`--t-*` are aliases of `--c-*`) |
-| `src/components/ModelSelect.css` | Model picker trigger + portal popup |
+| `src/components/Dropdown.tsx` | The one select / listbox (trigger, portal, keyboard contract) — the only dropdown in the app |
+| `src/components/ModelSelect.css` | Model picker: the trigger's width cap and the capability badges, on the shared dropdown primitive |
 | `src/components/TitleBar.tsx` | Custom window chrome: drag region, window controls, `⋯` app menu (styles in `App.css`) |
-| `src/components/{Update,Monitor,AgentMission,Profile}Panel.css` | Feature surfaces, self-contained — `MonitorPanel.css` also owns the two log panes and the session-report strip |
+| `src/components/{Update,Monitor,AgentMission}Panel.css` | Feature surfaces, self-contained — `MonitorPanel.css` also owns the two log panes and the session-report strip |
 
 ### Theme plumbing
 

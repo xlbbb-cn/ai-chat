@@ -312,8 +312,7 @@ body:has(> .settings-overlay) .sidebar {
    border-only focus state. */
 
 .settings-page input,
-.settings-page textarea,
-.settings-page select {
+.settings-page textarea {
   width: 100%;
   box-sizing: border-box;
   height: 34px;
@@ -336,24 +335,13 @@ body:has(> .settings-overlay) .sidebar {
 }
 
 .settings-page input:focus,
-.settings-page textarea:focus,
-.settings-page select:focus {
+.settings-page textarea:focus {
   border-color: var(--t-accent-text);
 }
 
 .settings-page input::placeholder,
 .settings-page textarea::placeholder {
   color: var(--t-placeholder);
-}
-
-/* Minimal select arrow — a simple SVG chevron */
-.settings-page select {
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: var(--icon-chevron);
-  background-repeat: no-repeat;
-  background-position: right 11px center;
-  padding-right: 30px;
 }
 
 /* ---- Checkbox ---- */
@@ -501,49 +489,11 @@ body:has(> .settings-overlay) .sidebar {
   color: var(--t-danger);
 }
 
-/* ---- Workspace directory row ---- */
-
-.workspace-dir-row {
-  display: flex;
-  align-items: stretch;
-  gap: 8px;
-  min-width: 0;
-}
-
-.workspace-dir-row input {
-  flex: 1 1 auto;
-  min-width: 0;
-  cursor: pointer;
-  text-overflow: ellipsis;
-}
-
-.workspace-dir-row input:hover:not(:focus) {
-  border-color: var(--t-border-i);
-}
-
-.workspace-dir-row .settings-btn {
-  flex: 0 0 auto;
-  min-height: 34px;
-}
-
-.workspace-dir-clear {
-  padding: 4px 10px !important;
-}
-
-/* Recent workspaces: an action picker next to the directory field. It never
-   holds the value (it stays on its placeholder), so it only needs room for the
-   ellipsised path. */
-.workspace-dir-history {
-  flex: 0 1 200px;
-  min-width: 120px;
-  text-overflow: ellipsis;
-}
-
 /* ===================================================================
    Buttons — 4px radius, 34px height, colour-only transitions at
    var(--t-dur). No shadows, no scale transforms. Rows that need a
-   smaller control override the min-height locally (28px in a profile
-   row, 32px in the prompt editor).
+   smaller control override the min-height locally (32px in the prompt
+   editor).
    =================================================================== */
 
 .settings-btn {
@@ -610,79 +560,6 @@ body:has(> .settings-overlay) .sidebar {
 .settings-btn-danger:hover:not(:disabled) {
   background: var(--c-active);
   color: var(--t-danger);
-}
-
-/* ===================================================================
-   Profile section — flat rows on Light Ash, no borders
-   =================================================================== */
-
-.profile-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.profile-section-title {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--t-text);
-}
-
-.profile-create-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px;
-  align-items: center;
-}
-
-.profile-create-row input {
-  min-width: 0;
-}
-
-.profile-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.profile-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 12px;
-  background: var(--c-btn);
-  border-radius: 4px;
-}
-
-.profile-item-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.profile-item-name {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--t-text);
-}
-
-.profile-item-meta {
-  font-size: 12px;
-  color: var(--t-muted);
-}
-
-.profile-item-actions {
-  display: flex;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.profile-item-actions .settings-btn {
-  min-height: 28px;
-  padding: 3px 10px;
-  font-size: 12px;
 }
 
 /* ===================================================================

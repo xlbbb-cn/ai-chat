@@ -12,8 +12,6 @@ const zhCN: Messages = {
         collapse: "收起面板",
         delete: "删除",
         edit: "编辑",
-        apply: "应用",
-        applying: "应用中…",
         add: "添加",
         all: "全部",
         none: "全不选",
@@ -22,8 +20,6 @@ const zhCN: Messages = {
         retry: "重试",
         done: "完成",
         loading: "加载中…",
-        browse: "浏览…",
-        picking: "选择中…",
         copy: "复制",
         copied: "已复制！",
         enable: "启用",
@@ -53,11 +49,20 @@ const zhCN: Messages = {
         appMenuOpenDataDir: "打开应用数据目录",
         appMenuOpenWorkspaceDir: "打开工作区目录",
         appMenuOpenDeliverables: "打开交付物文件夹",
-        appMenuSaveProfile: "导出配置…",
-        appMenuRestoreProfile: "恢复配置…",
+        appMenuSaveBackup: "导出备份…",
+        appMenuRestoreBackup: "恢复备份…",
         appMenuMarkdownEdit: "Markdown 编辑…",
         appMenuReportIssue: "反馈问题…",
         appMenuAbout: "关于 AI Chat",
+
+        workspaceSwitch: "切换工作区",
+        workspaceSwitchAria: "当前工作区 {workspace} — 切换工作区",
+        workspaceCurrent: "当前",
+        workspaceMissing: "不存在",
+        workspacePickOther: "选择其他文件夹…",
+        workspacePickTitle: "选择工作区文件夹",
+        workspaceBusy: "回复仍在进行，回合结束后可切换。",
+        workspaceShadowNote: "此窗口使用独立的设置副本，工作区历史共用。",
 
         emptyStart: "开始一段对话",
         emptyHint: "使用{skills}设置系统提示词，或在{settings}中配置 API。",
@@ -81,10 +86,10 @@ const zhCN: Messages = {
             failed: "记忆整理失败：{error}",
         },
 
-        profileExportLabel: "正在导出并压缩配置…",
-        profileExportPreparing: "正在准备导出配置…",
-        profileExportHint: "导出期间对话已锁定，发送功能不可用。",
-        profileExportFailed: "配置导出失败：{error}",
+        backupExportLabel: "正在导出并压缩备份…",
+        backupExportPreparing: "正在准备导出备份…",
+        backupExportHint: "导出期间对话已锁定，发送功能不可用。",
+        backupExportFailed: "备份导出失败：{error}",
 
         updateAvailable: "新版本 {version} 可用 —— 当前版本 {current}。",
         viewUpdate: "查看更新",
@@ -299,12 +304,11 @@ const zhCN: Messages = {
     settings: {
         aria: "设置",
         title: "设置",
-        subtitle: "管理外观、工作区、API 与运行时选项。",
+        subtitle: "管理外观、API 与运行时选项。",
         navAria: "设置分区",
 
         sections: {
             appearance: "外观",
-            workspace: "工作区与配置",
             api: "API 与模型",
             system: "系统消息",
             advanced: "高级",
@@ -334,30 +338,6 @@ const zhCN: Messages = {
             languageHint: "立即生效，并保存到配置中。",
         },
 
-        workspace: {
-            title: "工作区与配置",
-            subtitle: "技能、工具和文件所在的目录，以及已保存的配置方案。",
-            dirLabel: "工作区目录",
-            defaultDir: "默认工作区目录",
-            browseTitle: "浏览文件夹",
-            reset: "重置",
-            resetTitle: "使用默认工作区目录",
-            resetAria: "将工作区目录重置为默认值",
-            historyPlaceholder: "最近使用的工作区…",
-            historyTitle: "切换到之前用过的工作区",
-            selfEvolution: "启用自我进化模式",
-            selfEvolutionHint: "允许助手在工作区内自行演进技能。开启期间“文件操作”和“记忆”工具会强制启用并锁定，助手还会把已验证的关键事实（运行环境、正确的工具用法、常用文件位置）记录到专属的自进化记忆区。助手还可以自建 MCP 服务器（`mcp_self`）：脚本存放在 .data/mcp，经你确认后作为本地进程启动。",
-            profilesTitle: "配置方案",
-            profileNamePlaceholder: "配置名称",
-            saveCurrent: "保存当前配置",
-            profileMeta: "{tools} 个工具 · {agents} 个智能体",
-            applyTitle: "应用此配置",
-            deleteAria: "删除配置 {name}",
-            instancePrimaryHint:
-                "已关闭「单实例运行」：再次启动会打开独立窗口，各自使用独立工作区与本配置的独立副本。",
-            instanceShadowHint:
-                "本窗口运行在配置的临时副本上：工作区与设置互不影响，关闭窗口后这里的改动不会保留。",
-        },
 
         api: {
             title: "API 与模型",
@@ -447,6 +427,8 @@ const zhCN: Messages = {
             subAgentMainHelp: "子代理请求主代理协助",
             subAgentMainHelpHint:
                 "允许 `llm` 子代理在运行过程中调用 `ask_main_agent`。后端会用主模型、真实会话历史、已启用技能、MCP 和主工具集起一个有上限的协助者，收集资料后交还给子代理，子代理继续自己的任务。`cli`/`cloud` 子代理无法使用。",
+            selfEvolution: "启用自我进化模式",
+            selfEvolutionHint: "允许助手在工作区内自行演进技能。开启期间“文件操作”和“记忆”工具会强制启用并锁定，助手还会把已验证的关键事实（运行环境、正确的工具用法、常用文件位置）记录到专属的自进化记忆区。助手还可以自建 MCP 服务器（`mcp_self`）：脚本存放在 .data/mcp，经你确认后作为本地进程启动。",
             interactionMonitor: "交互监视器",
             agentMissions: "智能体任务监视器",
             evolutionMemory: "自进化记忆",
@@ -935,17 +917,6 @@ const zhCN: Messages = {
         statusStopped: "已停止",
     },
 
-    profile: {
-        title: "配置方案",
-        newPlaceholder: "新配置名称",
-        saveCurrent: "保存当前配置",
-        empty: "尚未保存任何配置",
-        metaTools: "{count} 个工具",
-        metaAgents: "{count} 个智能体",
-        metaMcp: "{count} 个 MCP 服务器",
-        updated: "更新于：{date}",
-        deleteConfirm: "删除配置 “{name}”？",
-    },
 };
 
 export default zhCN;

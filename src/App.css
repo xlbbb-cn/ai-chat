@@ -50,12 +50,15 @@
   --c-placeholder: #8E8E8E;
   /* Silver Fog — placeholders, disabled */
   --c-text-secondary: #5C5E62;
-  /* The chevron a `<select>` draws instead of the native arrow. A data URI
-     cannot read `currentColor`, so the glyph ships as a token — one neutral
-     grey per theme, never a literal in a component sheet. #8A8A8A is the
-     lightest grey that still clears the 3:1 a glyph needs on Cream's canvas
-     (3.15:1 there, 3.45:1 on white); the dark block lifts it to 4.5:1. */
-  --icon-chevron: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3e%3cpath d='M1 1l4 4 4-4' stroke='%238A8A8A' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3e%3c/svg%3e");
+  /* The dropdown chevron ships as a *shape*, not as a picture: the primitive
+     masks this glyph and paints it with `currentColor`, so one arrow follows
+     the field's state (muted → text on hover → accent while open) and every
+     theme, palette and glass level, without a second colour token or a dark
+     override. The data URI therefore carries no ink — only the stroke's alpha
+     matters. Geometry: a 10×6 box holding a shallow 35° chevron at 1.25px with
+     butt caps and a miter join, so the arrow sits beside the field's 1px
+     hairline instead of shouting over it. */
+  --icon-chevron: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3e%3cpath d='M1.5 1.75 5 4.25 8.5 1.75' fill='none' stroke='%23000' stroke-width='1.25' stroke-linecap='butt' stroke-linejoin='miter'/%3e%3c/svg%3e");
 
   /* Hairlines — separation without borders */
   --c-border: #EEEEEE;
@@ -260,10 +263,6 @@
   --c-muted: #8E8E93;
   --c-placeholder: #6B6E73;
   --c-text-secondary: #8E8E93;
-  /* Same glyph, lifted off the Carbon Dark surface: #8B9099 is 4.9:1 on
-     `--c-surface` and still 4.2:1 on Sakura Dark's plum. */
-  --icon-chevron: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3e%3cpath d='M1 1l4 4 4-4' stroke='%238B9099' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3e%3c/svg%3e");
-
   --c-border: rgba(255, 255, 255, 0.08);
   --c-border-s: rgba(255, 255, 255, 0.05);
   --c-border-i: rgba(255, 255, 255, 0.16);
@@ -642,7 +641,7 @@ html[data-vibrancy] .chat-area {
    what is behind them even though it cannot blur the desktop. They are the one
    place where `backdrop-filter` still earns its cost under vibrancy. */
 html[data-vibrancy] .file-mention-popup,
-html[data-vibrancy] .model-select-popup-shell {
+html[data-vibrancy] .dropdown-popup {
   -webkit-backdrop-filter: blur(var(--glass-blur-scrim));
   backdrop-filter: blur(var(--glass-blur-scrim));
 }
@@ -716,22 +715,11 @@ html[data-glass-fallback]:not([data-glass="off"]) .chat-area {
 /* Popups, the Settings page and the prompt editor keep their scrim blur: they
    open over the transcript, which is opaque enough to blur. */
 html[data-glass-fallback]:not([data-glass="off"]) .file-mention-popup,
-html[data-glass-fallback]:not([data-glass="off"]) .model-select-popup-shell,
+html[data-glass-fallback]:not([data-glass="off"]) .dropdown-popup,
 html[data-glass-fallback]:not([data-glass="off"]) .settings-page,
 html[data-glass-fallback]:not([data-glass="off"]) .prompt-editor-overlay {
   -webkit-backdrop-filter: blur(var(--glass-blur-scrim));
   backdrop-filter: blur(var(--glass-blur-scrim));
-}
-
-/* The list a `<select>` opens is drawn by the platform, and it paints each row
-   over its own surface rather than over the page. A row that inherits the field
-   fill therefore stops being opaque there — `--c-field` is 40% of the surface
-   under `data-vibrancy` — so in the dark palettes near-white text can land on a
-   popup surface the page never chose. Rows carry their own opaque pair instead,
-   which reads the same in every theme, palette and glass level. */
-select option {
-  background-color: var(--c-surface);
-  color: var(--c-text);
 }
 
 body {
@@ -810,20 +798,56 @@ body {
 
 /* The only elastic item in the title cluster: when the window narrows, the
    workspace name ellipsizes while the title and the sleep badge stay intact.
-   The red hairline marks the active workspace — see DESIGN.md → Window chrome. */
-.titlebar-workspace {
+   The red hairline marks the active workspace — see DESIGN.md → Window chrome.
+
+   The indicator is also the picker: clicking it opens the recorded workspaces.
+   It keeps the label's typography (12px, hairline underline) and only gains a
+   hover / open fill, so the bar reads the same as before it was a control. */
+.titlebar-workspace-wrap {
+  position: relative;
+  display: flex;
   flex: 0 1 auto;
   min-width: 0;
+}
+
+.titlebar-workspace {
+  display: block;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  height: 22px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-family: inherit;
   font-size: 12px;
+  line-height: 1.4;
   color: var(--c-muted);
+  text-align: left;
+  cursor: pointer;
   text-decoration: underline;
   text-decoration-color: var(--c-danger);
   text-decoration-thickness: 1px;
   text-decoration-skip-ink: none;
   text-underline-offset: 2px;
+  transition: color var(--t-dur) var(--t-ease),
+    background-color var(--t-dur) var(--t-ease);
+}
+
+/* Focus is a colour change here too (no ring anywhere in the chrome). */
+.titlebar-workspace:hover,
+.titlebar-workspace.is-open,
+.titlebar-workspace:focus-visible {
+  background: var(--c-hover);
+  color: var(--c-text);
+}
+
+.titlebar-workspace:active {
+  background: var(--c-active);
 }
 
 /* "Sleep blocked" badge: the cross-platform lock holds while a timer is
@@ -939,6 +963,83 @@ body {
   height: 1px;
   margin: 4px 0;
   background: var(--c-border);
+}
+
+/* ── Workspace switcher ─────────────────────────────────────────────────────
+   The list the indicator opens is a menu, not a dropdown field: same frame and
+   rows as the app menu, left-aligned under the label. A row carries one name,
+   the muted parent path and a state note — never a second frame. These rules
+   follow `.titlebar-menu` on purpose: they refine that frame, so equal
+   specificity must resolve in their favour. */
+.titlebar-workspace-menu {
+  left: 0;
+  right: auto;
+  min-width: 260px;
+  max-width: min(420px, 60vw);
+  max-height: min(320px, 60vh);
+  overflow-y: auto;
+  /* A menu is not the transcript: it caps its height and hides the native bar
+     (DESIGN.md → Scrollbars). */
+  scrollbar-width: none;
+}
+
+.titlebar-workspace-menu::-webkit-scrollbar {
+  display: none;
+}
+
+.titlebar-workspace-item {
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.workspace-item-name {
+  flex: 0 1 auto;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.titlebar-workspace-item.is-current .workspace-item-name {
+  color: var(--c-accent-text);
+  font-weight: 500;
+}
+
+.workspace-item-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: var(--c-muted);
+}
+
+.workspace-item-note {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--c-muted);
+}
+
+.workspace-item-note.is-missing {
+  color: var(--c-warning);
+}
+
+.titlebar-workspace-item:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.titlebar-workspace-item:disabled:hover {
+  background: transparent;
+}
+
+/* Informational line inside a titlebar menu (why a row is inert, which window
+   this is) — 11px muted, never a control. */
+.titlebar-menu-note {
+  margin: 0;
+  padding: 4px 10px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--c-muted);
 }
 
 /* Sidebar */
@@ -2312,48 +2413,12 @@ button.rabbit-hop-bunny:focus-visible {
 
 /* ---- Thinking depth (reasoning_effort) selector ---- */
 
-/* Wrapper owns the brain glyph: a native `<option>` cannot carry markup, so
-   the icon sits behind the select instead of prefixing every entry. */
-.reasoning-select-wrap {
-  position: relative;
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-}
-
-.reasoning-select-icon {
-  position: absolute;
-  left: 8px;
-  font-size: 11px;
-  color: var(--c-muted);
-  pointer-events: none;
-}
-
+/* The shared `.dropdown-trigger` primitive (App.css) draws the field and hosts
+   the brain glyph; only the width is local, so the composer row stays tight. */
 .reasoning-select {
-  min-height: 34px;
+  flex: 0 0 auto;
+  width: auto;
   max-width: 140px;
-  padding: 0 22px 0 23px;
-  border: 1px solid var(--c-border-i);
-  border-radius: 4px;
-  background: var(--c-field);
-  color: var(--c-text);
-  font-size: 13px;
-  outline: none;
-  font-family: inherit;
-  transition: border-color var(--t-dur) var(--t-ease);
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: var(--icon-chevron);
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-}
-
-.reasoning-select:focus {
-  border-color: var(--c-accent-text);
-}
-
-.reasoning-select:disabled {
-  opacity: 0.6;
 }
 
 /* Primary CTA — the one place Electric Blue is allowed. Colour-only motion:
@@ -3013,4 +3078,257 @@ button.rabbit-hop-bunny:focus-visible {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+
+/* ===================================================================
+   Dropdowns — the one select / listbox primitive
+
+   A native `<select>` opens a list drawn by the platform — GTK on Linux, a
+   menu on macOS, its own popup on Windows — so "one design system" and "the
+   OS paints the list" cannot both be true. `components/Dropdown.tsx` renders
+   the field itself and the list through the shared `Portal`; every picker in
+   the app goes through it, and these are the only classes it needs.
+
+   Trigger = a field: 34px, 1px hairline, 4px radius, `--c-field` fill, the
+   `--icon-chevron` glyph, accent border on focus *and* while open. No hover
+   fill: a closed dropdown reads as a field, not as a button — the hover
+   affordance lives in the arrow instead (see `.dropdown-chevron`). The compact
+   variant carries the 13px of the Settings / composer zone.
+
+   Popup = the shared popup surface (`--c-popup`, 4px padding, 4px rows) with
+   the one active-row fill every list in the app uses: `--c-accent-soft`.
+   =================================================================== */
+
+.dropdown-trigger {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  box-sizing: border-box;
+  height: 34px;
+  padding: 0 11px;
+  border: 1px solid var(--c-border-i);
+  border-radius: var(--r-sm);
+  background-color: var(--c-field);
+  color: var(--c-text);
+  font-family: inherit;
+  font-size: 14px;
+  text-align: left;
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  transition: border-color var(--t-dur) var(--t-ease);
+}
+
+.dropdown-trigger--compact {
+  font-size: 13px;
+}
+
+/* A leading glyph sits inside the field instead of behind a transparent
+   native control, so the padding only has to clear icon + gap. */
+.dropdown-trigger--icon {
+  padding-left: 8px;
+}
+
+/* Focus is a border-colour change. `aria-expanded` carries the same tint while
+   the list is open, which is the only "open" affordance the field needs. */
+.dropdown-trigger:focus-visible,
+.dropdown-trigger[aria-expanded="true"] {
+  border-color: var(--c-accent-text);
+}
+
+.dropdown-trigger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.dropdown-icon {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--c-muted);
+}
+
+.dropdown-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- The arrow ----
+
+   Masked, not painted: the trigger tints it with `currentColor`, so the one
+   shape walks through the app's colour vocabulary instead of freezing a grey
+   into a data URI. Rest = `--c-muted` (the text-secondary grey a glyph may
+   wear), hover = `--c-text` (the field answers without a fill), open or
+   keyboard-focused = `--c-accent-text`, the same accent the border takes, and
+   the glyph flips 180° on the shared motion token. The flip is a state cue on
+   a 6px glyph, never a layout shift — `prefers-reduced-motion` drops it. */
+
+.dropdown-chevron {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 6px;
+  color: var(--c-muted);
+  background-color: currentColor;
+  -webkit-mask-image: var(--icon-chevron);
+  mask-image: var(--icon-chevron);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  transform-origin: 50% 50%;
+  transition:
+    color var(--t-dur) var(--t-ease),
+    transform var(--t-dur) var(--t-ease);
+}
+
+.dropdown-trigger:hover:not(:disabled) .dropdown-chevron {
+  color: var(--c-text);
+}
+
+.dropdown-trigger:focus-visible .dropdown-chevron,
+.dropdown-trigger[aria-expanded="true"] .dropdown-chevron {
+  color: var(--c-accent-text);
+}
+
+.dropdown-trigger[aria-expanded="true"] .dropdown-chevron {
+  transform: rotate(180deg);
+}
+
+/* ---- The list ---- */
+
+.dropdown-popup {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  overflow: hidden;
+  background: var(--c-popup);
+  border: 1px solid var(--c-border-i);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-lg);
+  animation: dropdown-in var(--t-dur) var(--t-ease);
+}
+
+.dropdown-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 4px;
+  /* The native bar is replaced by the 2px indicator drawn by Dropdown.tsx:
+     WebKit on macOS ignores ::-webkit-scrollbar, so CSS alone cannot size it. */
+  scrollbar-width: none;
+}
+
+.dropdown-list::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.dropdown-scrollbar {
+  position: absolute;
+  top: 4px;
+  right: 2px;
+  bottom: 4px;
+  width: 2px;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.dropdown-scrollbar-thumb {
+  position: absolute;
+  left: 0;
+  width: 2px;
+  border-radius: 2px;
+  /* Subtle by default, so the 2px bar reads as a hint rather than as chrome. */
+  background: var(--c-muted);
+  opacity: 0.45;
+  transition: opacity var(--t-dur) var(--t-ease);
+}
+
+/* Same "active scroll" language as the panel scrollbars. */
+.dropdown-popup:hover .dropdown-scrollbar-thumb {
+  background: var(--c-accent-text);
+  opacity: 1;
+}
+
+@keyframes dropdown-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dropdown-popup {
+    animation: none;
+  }
+
+  /* The arrow keeps its accent tint while open, but stops flipping. */
+  .dropdown-chevron {
+    transform: none;
+    transition: none;
+  }
+}
+
+/* A row is one line of 13px text on the popup surface. The pointer and the
+   keyboard drive the same `active` row, so there is exactly one fill to
+   learn: `--c-accent-soft`. */
+.dropdown-option {
+  display: flex;
+  align-items: center;
+  gap: 4px 12px;
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  color: var(--c-text);
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dropdown-option.active {
+  background: var(--c-accent-soft);
+}
+
+.dropdown-option[aria-disabled="true"] {
+  color: var(--c-muted);
+  cursor: not-allowed;
+}
+
+.dropdown-option-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The selected value is marked by colour, never by weight: the row keeps its
+   400 so the list line spacing cannot shift between rows. */
+.dropdown-option.selected .dropdown-option-label {
+  color: var(--c-accent-text);
+}
+
+/* Rows that carry right-hand content (capability badges) may wrap instead of
+   truncating the name away. */
+.dropdown-option--rich {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.dropdown-option-extra {
+  flex: 0 1 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
 }

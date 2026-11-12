@@ -7,6 +7,7 @@ import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrches
 import { ChatMessage, ChatMessageBoundary } from "./components/ChatMessage";
 import { ToolCallGroup } from "./components/ToolCallGroup";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { Dropdown } from "./components/Dropdown";
 import { ModelSelect } from "./components/ModelSelect";
 import { SkillsPanel } from "./components/SkillsPanel";
 import { HistoryPanel } from "./components/HistoryPanel";
@@ -723,10 +724,10 @@ export default function App() {
     setActiveToolCount((cfg.selected_tools ?? []).length);
     setSelfEvolutionMode(cfg.self_evolution_mode ?? false);
     // A result bubble belongs to the workspace/config it was produced in; a
-    // reload, profile import or workspace switch must not carry it over.
+    // reload, backup import or workspace switch must not carry it over.
     setDreamResult(null);
     // The config is the source of truth for the UI language (localStorage is
-    // only a first-paint cache), so a profile import can switch it too.
+    // only a first-paint cache), so a backup import can switch it too.
     if (isLocale(cfg.language)) setLocale(cfg.language);
     return cfg;
   }, [setLocale]);
@@ -1081,15 +1082,6 @@ export default function App() {
     };
   }, []);
 
-  useEffect(() => {
-    const unlisten = listen("request-set-workspace-dir", () => {
-      setSidebar("settings");
-    });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, []);
-
   // A workspace switch swaps the whole workspace-scoped state: config reload,
   // skill status (the previous workspace's selection must not leak into the
   // new one), and the database that backs the history sidebar.
@@ -1319,9 +1311,9 @@ export default function App() {
   useEffect(() => {
     const unlisten = listen("profile-restored", async () => {
       try {
-        // A restored profile can reference skills that are absent from the
+        // A restored backup can reference skills that are absent from the
         // current workspace, so re-validate before activating them. The
-        // `+agent` roster is refreshed too: a profile swap can enable or
+        // `+agent` roster is refreshed too: a backup swap can enable or
         // disable sub-agents.
         const [, servers, mentions] = await Promise.all([
           applyConfigToUi(),
@@ -1360,7 +1352,7 @@ export default function App() {
         setProfileExporting(false);
         setProfileExportPhase("idle");
         setProfileExportStatus("");
-        setError(t("app.profileExportFailed", { error: e.payload }));
+        setError(t("app.backupExportFailed", { error: e.payload }));
       })
     );
 
@@ -3542,7 +3534,7 @@ export default function App() {
     (value: string, caret: number) => {
       // Embedded roles shape a NEW conversation. Once a turn exists the role
       // snapshot is frozen in the backend, so the popup would lie about being
-      // able to change it. Injection mode and profile export disable it too.
+      // able to change it. Injection mode and backup export disable it too.
       if (streaming || profileExporting || messages.length > 0) {
         closeAgentMention();
         return;
@@ -4105,12 +4097,12 @@ export default function App() {
           <div className="profile-export-progress" role="progressbar" aria-busy="true" aria-live="polite">
             <div className="profile-export-progress-label">
               {profileExportPhase === "preparing"
-                ? t("app.profileExportPreparing")
+                ? t("app.backupExportPreparing")
                 : profileExportPhase === "status"
                   ? profileExportStatus
-                  : t("app.profileExportLabel")}
+                  : t("app.backupExportLabel")}
             </div>
-            <div className="profile-export-progress-hint">{t("app.profileExportHint")}</div>
+            <div className="profile-export-progress-hint">{t("app.backupExportHint")}</div>
             <div className="profile-export-progress-track">
               <div className="profile-export-progress-fill" />
             </div>
@@ -4494,28 +4486,22 @@ export default function App() {
               onChange={setSelectedModel}
             />
             {reasoningSupported && (
-              // A native `<option>` cannot hold markup, so the brain glyph is a
-              // sibling of the select rather than a prefix on every option.
-              <div className="reasoning-select-wrap">
-                <FontAwesomeIcon
-                  icon={faBrain}
-                  className="reasoning-select-icon"
-                  aria-hidden="true"
-                />
-                <select
-                  className="reasoning-select"
-                  title={t("app.reasoningDepthTitle")}
-                  aria-label={t("app.reasoningDepth")}
-                  value={reasoningEffort}
-                  onChange={(e) => void handleReasoningEffortChange(e.target.value)}
-                  disabled={streaming || profileExporting}
-                >
-                  <option value="">{t("app.reasoningDefault")}</option>
-                  <option value="low">{t("app.reasoningLow")}</option>
-                  <option value="medium">{t("app.reasoningMedium")}</option>
-                  <option value="high">{t("app.reasoningHigh")}</option>
-                </select>
-              </div>
+              <Dropdown
+                className="reasoning-select"
+                label={t("app.reasoningDepth")}
+                title={t("app.reasoningDepthTitle")}
+                icon={faBrain}
+                compact
+                value={reasoningEffort}
+                onChange={(next) => void handleReasoningEffortChange(next)}
+                disabled={streaming || profileExporting}
+                options={[
+                  { value: "", label: t("app.reasoningDefault") },
+                  { value: "low", label: t("app.reasoningLow") },
+                  { value: "medium", label: t("app.reasoningMedium") },
+                  { value: "high", label: t("app.reasoningHigh") },
+                ]}
+              />
             )}
             <button
               className="send-btn"

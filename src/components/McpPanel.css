@@ -311,8 +311,7 @@
     font-style: italic;
 }
 
-.mcp-input,
-.mcp-select {
+.mcp-input {
     height: 34px;
     border: 1px solid var(--c-border-i);
     border-radius: 4px;
@@ -327,18 +326,8 @@
     font-family: inherit;
 }
 
-.mcp-input:focus,
-.mcp-select:focus {
+.mcp-input:focus {
     border-color: var(--c-accent-text);
-}
-
-.mcp-select {
-    appearance: none;
-    -webkit-appearance: none;
-    background-image: var(--icon-chevron);
-    background-repeat: no-repeat;
-    background-position: right 11px center;
-    padding-right: 30px;
 }
 
 .mcp-textarea {

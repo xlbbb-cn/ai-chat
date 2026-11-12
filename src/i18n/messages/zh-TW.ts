@@ -12,8 +12,6 @@ const zhTW: Messages = {
         collapse: "收合面板",
         delete: "刪除",
         edit: "編輯",
-        apply: "套用",
-        applying: "套用中…",
         add: "新增",
         all: "全部",
         none: "全不選",
@@ -22,8 +20,6 @@ const zhTW: Messages = {
         retry: "重試",
         done: "完成",
         loading: "載入中…",
-        browse: "瀏覽…",
-        picking: "選擇中…",
         copy: "複製",
         copied: "已複製！",
         enable: "啟用",
@@ -53,11 +49,20 @@ const zhTW: Messages = {
         appMenuOpenDataDir: "開啟應用程式資料夾",
         appMenuOpenWorkspaceDir: "開啟工作區資料夾",
         appMenuOpenDeliverables: "開啟交付物資料夾",
-        appMenuSaveProfile: "匯出設定檔…",
-        appMenuRestoreProfile: "還原設定檔…",
+        appMenuSaveBackup: "匯出備份…",
+        appMenuRestoreBackup: "還原備份…",
         appMenuMarkdownEdit: "Markdown 編輯…",
         appMenuReportIssue: "回報問題…",
         appMenuAbout: "關於 AI Chat",
+
+        workspaceSwitch: "切換工作區",
+        workspaceSwitchAria: "目前工作區 {workspace} — 切換工作區",
+        workspaceCurrent: "目前",
+        workspaceMissing: "不存在",
+        workspacePickOther: "選擇其他資料夾…",
+        workspacePickTitle: "選擇工作區資料夾",
+        workspaceBusy: "回覆仍在進行，回合結束後可切換。",
+        workspaceShadowNote: "此視窗使用獨立的設定副本，工作區歷史共用。",
 
         emptyStart: "開始一段對話",
         emptyHint: "使用{skills}設定系統提示詞，或在{settings}中設定 API。",
@@ -81,10 +86,10 @@ const zhTW: Messages = {
             failed: "記憶整理失敗：{error}",
         },
 
-        profileExportLabel: "正在匯出並壓縮設定檔…",
-        profileExportPreparing: "正在準備匯出設定檔…",
-        profileExportHint: "匯出期間對話已鎖定，無法送出訊息。",
-        profileExportFailed: "設定檔匯出失敗：{error}",
+        backupExportLabel: "正在匯出並壓縮備份…",
+        backupExportPreparing: "正在準備匯出備份…",
+        backupExportHint: "匯出期間對話已鎖定，無法送出訊息。",
+        backupExportFailed: "備份匯出失敗：{error}",
 
         updateAvailable: "新版本 {version} 已發佈 —— 目前版本為 {current}。",
         viewUpdate: "查看更新",
@@ -299,12 +304,11 @@ const zhTW: Messages = {
     settings: {
         aria: "設定",
         title: "設定",
-        subtitle: "管理外觀、工作區、API 與執行階段選項。",
+        subtitle: "管理外觀、API 與執行階段選項。",
         navAria: "設定分區",
 
         sections: {
             appearance: "外觀",
-            workspace: "工作區與設定檔",
             api: "API 與模型",
             system: "系統訊息",
             advanced: "進階",
@@ -334,30 +338,6 @@ const zhTW: Messages = {
             languageHint: "立即生效，並儲存至設定檔中。",
         },
 
-        workspace: {
-            title: "工作區與設定檔",
-            subtitle: "技能、工具與檔案所在的目錄，以及已儲存的設定檔。",
-            dirLabel: "工作區目錄",
-            defaultDir: "預設工作區目錄",
-            browseTitle: "瀏覽資料夾",
-            reset: "重設",
-            resetTitle: "使用預設工作區目錄",
-            resetAria: "將工作區目錄重設為預設值",
-            historyPlaceholder: "最近使用的工作區…",
-            historyTitle: "切換到之前用過的工作區",
-            selfEvolution: "啟用自我演化模式",
-            selfEvolutionHint: "允許助理在工作區內自行演化技能。開啟期間「檔案操作」與「記憶」工具會強制啟用並鎖定，助理還會把已驗證的關鍵事實（執行環境、正確的工具用法、常用檔案位置）記錄到專屬的自我演化記憶區。助理也可以自建 MCP 伺服器（`mcp_self`）：腳本存放在 .data/mcp，經你確認後作為本機行程啟動。",
-            profilesTitle: "設定檔",
-            profileNamePlaceholder: "設定檔名稱",
-            saveCurrent: "儲存目前設定",
-            profileMeta: "{tools} 個工具 · {agents} 個代理",
-            applyTitle: "套用此設定檔",
-            deleteAria: "刪除設定檔 {name}",
-            instancePrimaryHint:
-                "已關閉「單實例執行」：再次啟動會開啟獨立視窗，各自使用獨立工作區與本設定的獨立副本。",
-            instanceShadowHint:
-                "本視窗執行在設定的臨時副本上：工作區與設定互不影響，關閉視窗後這裡的變更不會保留。",
-        },
 
         api: {
             title: "API 與模型",
@@ -447,6 +427,8 @@ const zhTW: Messages = {
             subAgentMainHelp: "子代理請求主代理協助",
             subAgentMainHelpHint:
                 "允許 `llm` 子代理在執行過程中呼叫 `ask_main_agent`。後端會用主模型、真實會話歷史、已啟用技能、MCP 和主工具集啟動一個有上限的協助者，收集資料後交還給子代理，子代理繼續自己的任務。`cli`/`cloud` 子代理無法使用。",
+            selfEvolution: "啟用自我演化模式",
+            selfEvolutionHint: "允許助理在工作區內自行演化技能。開啟期間「檔案操作」與「記憶」工具會強制啟用並鎖定，助理還會把已驗證的關鍵事實（執行環境、正確的工具用法、常用檔案位置）記錄到專屬的自我演化記憶區。助理也可以自建 MCP 伺服器（`mcp_self`）：腳本存放在 .data/mcp，經你確認後作為本機行程啟動。",
             interactionMonitor: "互動監視器",
             agentMissions: "代理任務監視器",
             evolutionMemory: "自我演化記憶",
@@ -935,17 +917,6 @@ const zhTW: Messages = {
         statusStopped: "已停止",
     },
 
-    profile: {
-        title: "設定檔",
-        newPlaceholder: "新設定檔名稱",
-        saveCurrent: "儲存目前設定",
-        empty: "尚未儲存任何設定檔",
-        metaTools: "{count} 個工具",
-        metaAgents: "{count} 個代理",
-        metaMcp: "{count} 個 MCP 伺服器",
-        updated: "更新於：{date}",
-        deleteConfirm: "刪除設定檔「{name}」？",
-    },
 };
 
 export default zhTW;

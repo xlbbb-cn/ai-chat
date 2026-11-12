@@ -1,10 +1,9 @@
-//! Profile backup: export / import of the application state.
+//! Backup: export / import of the application state.
 //!
-//! An exported profile is a zip archive laid out as:
+//! An exported backup is a zip archive laid out as:
 //!
 //! ```text
 //! config.json             AppConfig
-//! profiles.json           named profiles (copy of the app-data profiles.json)
 //! mcp_servers.json        MCP servers created by hand (the MCP panel)
 //! sub_agents.json         sub-agent runtime config + orchestration
 //! agents/...              `llm` agent definitions (md, app-wide)
@@ -19,7 +18,7 @@
 //! ```
 //!
 //! Every `workspace/...` entry is read from (and restored into) the hidden
-//! `<workspace>/.data` directory of the *active* workspace, so a profile is
+//! `<workspace>/.data` directory of the *active* workspace, so a backup is
 //! portable across machines and workspaces. The zip layout is flat: the
 //! `workspace/` prefix stands for `<workspace>/.data/`. Import applies
 //! `config.json` first (which may switch the active workspace) and then
@@ -41,7 +40,7 @@ const PROFILE_EXPORT_DONE_EVENT: &str = "profile-export-done";
 const PROFILE_EXPORT_ERROR_EVENT: &str = "profile-export-error";
 pub(crate) const PROFILE_RESTORED_EVENT: &str = "profile-restored";
 
-/// Workspace-scoped state directories that are part of a profile backup, as
+/// Workspace-scoped state directories that are part of a backup, as
 /// `(zip name, path under <workspace>/.data)`.
 fn workspace_backup_dirs(workspace_dir: &Path) -> [(&'static str, PathBuf); 5] {
     [
@@ -189,15 +188,6 @@ fn export_profile(app: &AppHandle, profile_path: &Path) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     write_text_entry(&mut zip, "config.json", &config_json)?;
 
-    emit_profile_export_status(app, "Writing profiles.json");
-    let profiles_json = if state.profiles_path.exists() {
-        fs::read_to_string(&state.profiles_path).map_err(|e| e.to_string())?
-    } else {
-        serde_json::to_string_pretty(&serde_json::json!({ "profiles": [] }))
-            .map_err(|e| e.to_string())?
-    };
-    write_text_entry(&mut zip, "profiles.json", &profiles_json)?;
-
     emit_profile_export_status(app, "Writing mcp_servers.json");
     let mcp_json = serde_json::json!({ "servers": mcp::load_servers(&state.mcp_servers_path) });
     let mcp_json = serde_json::to_string_pretty(&mcp_json).map_err(|e| e.to_string())?;
@@ -279,7 +269,7 @@ fn export_profile(app: &AppHandle, profile_path: &Path) -> Result<(), String> {
     zip.finish().map_err(|e| e.to_string())?;
     state.logger.lock().unwrap().log(
         "INFO",
-        &format!("Profile saved to {}", profile_path.display()),
+        &format!("Backup saved to {}", profile_path.display()),
     );
     Ok(())
 }
@@ -289,7 +279,7 @@ fn export_profile(app: &AppHandle, profile_path: &Path) -> Result<(), String> {
 pub(crate) fn spawn_profile_export(app: AppHandle, profile_path: PathBuf) {
     std::thread::spawn(move || {
         let _ = app.emit(PROFILE_EXPORT_START_EVENT, ());
-        emit_profile_export_status(&app, "Preparing to export profile...");
+        emit_profile_export_status(&app, "Preparing backup export...");
 
         match export_profile(&app, &profile_path) {
             Ok(()) => {
@@ -356,7 +346,7 @@ fn restore_workspace_dirs(
 
         state.logger.lock().unwrap().log(
             "INFO",
-            &format!("Restored workspace/{dir_name} from profile archive"),
+            &format!("Restored workspace/{dir_name} from backup archive"),
         );
     }
 
@@ -373,7 +363,7 @@ fn restore_workspace_dirs(
         fs::write(&status_path, contents).map_err(|e| e.to_string())?;
         state.logger.lock().unwrap().log(
             "INFO",
-            "Restored workspace/skills.status from profile archive",
+            "Restored workspace/skills.status from backup archive",
         );
     }
 
@@ -396,14 +386,14 @@ fn restore_workspace_dirs(
             state.bump_mcp_revision();
             state.logger.lock().unwrap().log(
                 "INFO",
-                "Restored workspace/mcp.conf from profile archive",
+                "Restored workspace/mcp.conf from backup archive",
             );
         } else {
             state
                 .logger
                 .lock()
                 .unwrap()
-                .log("WARN", "Ignored an unreadable workspace/mcp.conf in the profile archive");
+                .log("WARN", "Ignored an unreadable workspace/mcp.conf in the backup archive");
         }
     }
 
@@ -459,7 +449,7 @@ fn restore_agent_files(
         .logger
         .lock()
         .unwrap()
-        .log("INFO", "Restored agents/ from profile archive");
+        .log("INFO", "Restored agents/ from backup archive");
     Ok(())
 }
 
@@ -471,7 +461,7 @@ pub(crate) fn import_profile(app: &AppHandle, profile_path: &Path) -> Result<(),
     let config: AppConfig = {
         let mut config_file = archive
             .by_name("config.json")
-            .map_err(|_| "missing config.json in profile archive".to_string())?;
+            .map_err(|_| "missing config.json in backup archive".to_string())?;
         let mut config_json = String::new();
         config_file
             .read_to_string(&mut config_json)
@@ -516,24 +506,8 @@ pub(crate) fn import_profile(app: &AppHandle, profile_path: &Path) -> Result<(),
         } else {
             state.logger.lock().unwrap().log(
                 "WARN",
-                "Ignored mcp_servers.json from profile archive: not a valid servers file",
+                "Ignored mcp_servers.json from backup archive: not a valid servers file",
             );
-        }
-    }
-
-    if let Ok(mut profiles_file) = archive.by_name("profiles.json") {
-        let mut profiles_json = String::new();
-        profiles_file
-            .read_to_string(&mut profiles_json)
-            .map_err(|e| e.to_string())?;
-        // Only restore a real profiles file: archives written before this
-        // module existed stored a copy of config.json under this name.
-        let is_profiles_file = serde_json::from_str::<serde_json::Value>(&profiles_json)
-            .ok()
-            .and_then(|value| value.get("profiles").map(|profiles| profiles.is_array()))
-            .unwrap_or(false);
-        if is_profiles_file {
-            fs::write(&state.profiles_path, profiles_json).map_err(|e| e.to_string())?;
         }
     }
 
@@ -559,7 +533,7 @@ pub(crate) fn import_profile(app: &AppHandle, profile_path: &Path) -> Result<(),
     let _ = app.emit(PROFILE_RESTORED_EVENT, ());
     state.logger.lock().unwrap().log(
         "INFO",
-        &format!("Profile restored from {}", profile_path.display()),
+        &format!("Backup restored from {}", profile_path.display()),
     );
     Ok(())
 }

@@ -32,27 +32,11 @@
     color: var(--c-text);
 }
 
+/* The execution-mode picker is the shared dropdown primitive; it only has to
+   stop filling the row the way a stacked field would. */
 .orch-select {
-    padding: 4px 24px 4px 8px;
-    border: 1px solid var(--c-border-i);
-    border-radius: var(--r-sm);
-    background: var(--c-surface);
-    color: var(--c-text);
-    font-size: 13px;
-    font-family: inherit;
-    cursor: pointer;
-    outline: none;
-    appearance: none;
-    -webkit-appearance: none;
-    background-image: var(--icon-chevron);
-    background-repeat: no-repeat;
-    background-position: right 8px center;
-    transition: border-color 0.2s, box-shadow 0.2s;
-}
-
-.orch-select:focus {
-    border-color: var(--c-accent-text);
-    box-shadow: 0 0 0 3px var(--c-accent-soft);
+    flex: 0 0 auto;
+    width: auto;
 }
 
 .orch-number {
@@ -382,8 +366,7 @@
 }
 
 .agent-editor input,
-.agent-editor textarea,
-.agent-editor select {
+.agent-editor textarea {
     padding: 8px 12px;
     background: var(--c-surface);
     border: 1px solid var(--c-border-i);
@@ -397,8 +380,7 @@
 }
 
 .agent-editor input:focus,
-.agent-editor textarea:focus,
-.agent-editor select:focus {
+.agent-editor textarea:focus {
     border-color: var(--c-accent-text);
     box-shadow: 0 0 0 3px var(--c-accent-soft);
 }

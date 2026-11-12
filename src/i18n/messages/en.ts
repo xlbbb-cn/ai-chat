@@ -21,8 +21,6 @@ const en = {
         collapse: "Collapse panel",
         delete: "Delete",
         edit: "Edit",
-        apply: "Apply",
-        applying: "Applying...",
         add: "Add",
         all: "All",
         none: "None",
@@ -31,8 +29,6 @@ const en = {
         retry: "Retry",
         done: "Done",
         loading: "Loading...",
-        browse: "Browse…",
-        picking: "Picking…",
         copy: "Copy",
         copied: "Copied!",
         enable: "Enable",
@@ -62,11 +58,21 @@ const en = {
         appMenuOpenDataDir: "Open app data directory",
         appMenuOpenWorkspaceDir: "Open workspace directory",
         appMenuOpenDeliverables: "Open deliverables folder",
-        appMenuSaveProfile: "Save profile…",
-        appMenuRestoreProfile: "Restore profile…",
+        appMenuSaveBackup: "Back up…",
+        appMenuRestoreBackup: "Restore backup…",
         appMenuMarkdownEdit: "Markdown edit…",
         appMenuReportIssue: "Report an issue…",
         appMenuAbout: "About AI Chat",
+
+        workspaceSwitch: "Switch workspace",
+        workspaceSwitchAria: "Workspace {workspace} — switch workspace",
+        workspaceCurrent: "Current",
+        workspaceMissing: "Not found",
+        workspacePickOther: "Choose another folder…",
+        workspacePickTitle: "Choose a workspace folder",
+        workspaceBusy: "A reply is still streaming — switch when the turn ends.",
+        workspaceShadowNote:
+            "This window keeps its own settings; the workspace history is shared.",
 
         emptyStart: "Start a conversation",
         emptyHint: "Use {skills} to set a system prompt, or configure the API in {settings}.",
@@ -90,10 +96,10 @@ const en = {
             failed: "Memory maintenance failed: {error}",
         },
 
-        profileExportLabel: "Exporting and compressing profile...",
-        profileExportPreparing: "Preparing profile export...",
-        profileExportHint: "Chat is locked during export and sending is disabled.",
-        profileExportFailed: "Profile export failed: {error}",
+        backupExportLabel: "Exporting and compressing the backup...",
+        backupExportPreparing: "Preparing the backup export...",
+        backupExportHint: "Chat is locked during export and sending is disabled.",
+        backupExportFailed: "Backup export failed: {error}",
 
         updateAvailable: "New version {version} is available — you are on {current}.",
         viewUpdate: "View update",
@@ -331,12 +337,11 @@ const en = {
     settings: {
         aria: "Settings",
         title: "Settings",
-        subtitle: "Manage appearance, workspace, API and runtime options.",
+        subtitle: "Manage appearance, API and runtime options.",
         navAria: "Settings sections",
 
         sections: {
             appearance: "Appearance",
-            workspace: "Workspace & Profiles",
             api: "API & Model",
             system: "System Message",
             advanced: "Advanced",
@@ -366,31 +371,6 @@ const en = {
             languageHint: "Applies immediately and is stored in your configuration.",
         },
 
-        workspace: {
-            title: "Workspace & Profiles",
-            subtitle: "Directory for skills, tools and files, plus saved configuration profiles.",
-            dirLabel: "Workspace directory",
-            defaultDir: "Default workspace directory",
-            browseTitle: "Browse for a folder",
-            reset: "Reset",
-            resetTitle: "Use the default workspace directory",
-            resetAria: "Reset workspace directory to default",
-            historyPlaceholder: "Recent workspaces…",
-            historyTitle: "Switch to a workspace you used before",
-            selfEvolution: "Enable Self-Evolution Mode",
-            selfEvolutionHint:
-                "Let the assistant evolve its own skills inside the workspace. The file actions and memory tools stay enabled while the mode is on, and the assistant keeps verified facts (runtime environment, correct tool usage, file locations) in a dedicated evolution memory. The assistant may also build its own MCP servers (`mcp_self`) — scripts under .data/mcp, started as local processes after your confirmation.",
-            profilesTitle: "Configuration Profiles",
-            profileNamePlaceholder: "Profile name",
-            saveCurrent: "Save Current",
-            profileMeta: "{tools} tools · {agents} agents",
-            applyTitle: "Apply this profile",
-            deleteAria: "Delete profile {name}",
-            instancePrimaryHint:
-                "“Run a single instance” is off: launching AI Chat again opens a separate window with its own workspace and its own copy of this configuration.",
-            instanceShadowHint:
-                "This window runs on a temporary copy of the configuration — its workspace and settings are its own, and changes made here are discarded when you close it.",
-        },
 
         api: {
             title: "API & Model",
@@ -484,6 +464,9 @@ const en = {
             subAgentMainHelp: "Sub-agent main-agent help",
             subAgentMainHelpHint:
                 "Let `llm` sub-agents call `ask_main_agent` while they run. A bounded helper run with the main model, the real conversation history, enabled skills, MCP servers and the main tool set collects the material and hands it back, then the sub-agent continues its own task. `cli`/`cloud` agents cannot use it.",
+            selfEvolution: "Enable Self-Evolution Mode",
+            selfEvolutionHint:
+                "Let the assistant evolve its own skills inside the workspace. The file actions and memory tools stay enabled while the mode is on, and the assistant keeps verified facts (runtime environment, correct tool usage, file locations) in a dedicated evolution memory. The assistant may also build its own MCP servers (`mcp_self`) — scripts under .data/mcp, started as local processes after your confirmation.",
             interactionMonitor: "Interaction monitor",
             agentMissions: "Agent missions monitor",
             evolutionMemory: "Evolution memory",
@@ -994,17 +977,6 @@ const en = {
         statusStopped: "stopped",
     },
 
-    profile: {
-        title: "Profiles",
-        newPlaceholder: "New profile name",
-        saveCurrent: "Save Current Config",
-        empty: "No profiles saved",
-        metaTools: { one: "{count} tool", other: "{count} tools" },
-        metaAgents: { one: "{count} agent", other: "{count} agents" },
-        metaMcp: { one: "{count} MCP server", other: "{count} MCP servers" },
-        updated: "Updated: {date}",
-        deleteConfirm: "Delete profile \"{name}\"?",
-    },
 } as const;
 
 /** A pluralised message: `one` is used when `t()` receives `count: 1`. */

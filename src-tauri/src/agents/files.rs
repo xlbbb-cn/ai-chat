@@ -836,30 +836,6 @@ pub fn append_index_agents(agents: &mut Vec<SubAgent>, index: &AgentIndex, root:
     }
 }
 
-/// Ensure a `llm` agent has a file on disk, then point it at that file.
-///
-/// Used when applying a profile: the profile carries a full definition
-/// snapshot, so a missing file is recreated (identical content is not
-/// rewritten, preserving the original file's mtime).
-pub fn materialize_agent(root: &Path, agent: &mut SubAgent) -> Result<(), String> {
-    let relative = agent
-        .file
-        .as_deref()
-        .and_then(|value| normalize_relative(value).ok())
-        .unwrap_or_else(|| unique_agent_path(root, CUSTOM_CATEGORY, &agent.name));
-
-    let definition = definition_from_agent(agent);
-    write_definition(root, &relative, &definition)?;
-
-    agent.file = Some(relative.clone());
-    agent.configured = true;
-    agent.parse_error = None;
-    if agent.id.trim().is_empty() {
-        agent.id = id_for_relative(&relative);
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

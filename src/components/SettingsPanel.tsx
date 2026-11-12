@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { fetchModels, fetchModelMetadata, getAppVersion, getConfig, getInstanceInfo, getWorkspaceDir, saveConfig, listProfiles, saveProfile, deleteProfile, applyProfile, listMcpServers, listSubAgents, getAgentOrchestration } from "../api";
-import type { AppConfig, GlassEffect, InstanceInfo, ModelMetadata, ModelSettings, Palette, Profile, RequestHeader } from "../types";
+import { fetchModels, fetchModelMetadata, getAppVersion, getConfig, saveConfig } from "../api";
+import type { AppConfig, GlassEffect, ModelMetadata, ModelSettings, Palette, RequestHeader } from "../types";
 import { LOCALE_LABELS, LOCALES, useI18n, type Locale, type MessageKey } from "../i18n";
 import { matchModelCatalog, isDeepSeekModel } from "../utils/modelMetadata";
 import { FontAwesomeIcon, faCaretDown, faCheck, faXmark } from "../icons";
@@ -10,6 +9,7 @@ import { MonitorPanel } from "./MonitorPanel";
 import { AgentMissionPanel } from "./AgentMissionPanel";
 import { MemoryPanel } from "./MemoryPanel";
 import { Portal } from "./Portal";
+import { Dropdown } from "./Dropdown";
 import { UpdatePanel } from "./UpdatePanel";
 import "./SettingsPanel.css";
 
@@ -112,11 +112,6 @@ function normalizeConversationHeader(name: string | undefined): string | undefin
   return trimmed ? trimmed : undefined;
 }
 
-/** Windows paths differ only in case and separator style. */
-function samePath(a: string, b: string): boolean {
-  return a.replace(/\\/g, "/").toLowerCase() === b.replace(/\\/g, "/").toLowerCase();
-}
-
 /**
  * Turn-guard fields (rounds / tool calls / failure limit) are whole numbers
  * where `0` means "no limit". An empty box clears the override so the backend
@@ -130,7 +125,6 @@ function parseLimitInput(value: string): number | undefined {
 
 const SETTINGS_SECTIONS: { id: string; labelKey: MessageKey }[] = [
   { id: "appearance", labelKey: "settings.sections.appearance" },
-  { id: "workspace", labelKey: "settings.sections.workspace" },
   { id: "api", labelKey: "settings.sections.api" },
   { id: "system", labelKey: "settings.sections.system" },
   { id: "advanced", labelKey: "settings.sections.advanced" },
@@ -169,14 +163,6 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
   const [metadataSummary, setMetadataSummary] = useState<{ matched: number; total: number } | null>(null);
   const [manualModel, setManualModel] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(true);
-  const [workspaceDirActual, setWorkspaceDirActual] = useState("");
-  /**
-   * Which window this is. A shadow window runs on a temporary copy of the
-   * configuration (see `src-tauri/src/instance.rs`), so its changes are gone
-   * when it closes — the workspace row has to say so.
-   */
-  const [instanceInfo, setInstanceInfo] = useState<InstanceInfo | null>(null);
-  const [pickingWorkspace, setPickingWorkspace] = useState(false);
   const [isMessageEditorOpen, setIsMessageEditorOpen] = useState(false);
   const [messageDraft, setMessageDraft] = useState("");
   const [messageSaving, setMessageSaving] = useState(false);
@@ -185,10 +171,6 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
   const [showMemoryMonitor, setShowMemoryMonitor] = useState(false);
   const [showUpdatePanel, setShowUpdatePanel] = useState(false);
   const [appVersion, setAppVersion] = useState("");
-  const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [newProfileName, setNewProfileName] = useState("");
-  const [profileSaving, setProfileSaving] = useState(false);
-  const [profileApplying, setProfileApplying] = useState<string | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const [activeSection, setActiveSection] = useState<string>(SETTINGS_SECTIONS[0].id);
 
@@ -211,9 +193,6 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
   }
 
   useEffect(() => {
-    getWorkspaceDir().then(setWorkspaceDirActual).catch(console.error);
-    getInstanceInfo().then(setInstanceInfo).catch(console.error);
-    listProfiles().then(setProfiles).catch(console.error);
     getAppVersion().then(setAppVersion).catch(console.error);
   }, []);
 
@@ -244,44 +223,6 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
    * pretending the user can turn it off.
    */
   const dsFormatAuto = isDeepSeekModel(config.model, currentMetadata);
-
-  /** The active workspace (`""` while the default app-data one is in use). */
-  const currentWorkspace = config.workspace_dir ?? workspaceDirActual;
-  /**
-   * History entries other than the active workspace. The dropdown is a
-   * shortcut, so it stays hidden until there is somewhere else to switch to.
-   */
-  const otherWorkspaces = (config.workspace_history ?? []).filter(
-    (dir) => dir.trim() !== "" && !samePath(dir, currentWorkspace)
-  );
-
-  async function handlePickWorkspace() {
-    if (pickingWorkspace) return;
-    setPickingWorkspace(true);
-    try {
-      const selected = await openDialog({
-        directory: true,
-        multiple: false,
-        title: t("settings.workspace.dirLabel"),
-        defaultPath: config.workspace_dir || workspaceDirActual || undefined,
-      });
-      if (typeof selected === "string" && selected) {
-        setConfig((prev) => ({ ...prev, workspace_dir: selected }));
-      }
-    } catch (err) {
-      console.error("Failed to open directory picker:", err);
-    } finally {
-      setPickingWorkspace(false);
-    }
-  }
-
-  function handleClearWorkspace() {
-    setConfig((prev) => {
-      const { workspace_dir: _drop, ...rest } = prev;
-      void _drop;
-      return rest;
-    });
-  }
 
   function addCustomHeader() {
     setConfig((prev) => ({
@@ -373,12 +314,14 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
   async function handleSave() {
     setSaving(true);
     try {
-      // `selected_tools` is owned by the tools panel, not by this form.
-      // Re-read it before saving so that changing the workspace (or any other
-      // setting) doesn't roll back tool toggles made while this panel was open.
+      // `selected_tools` is owned by the tools panel and `workspace_dir` by the
+      // titlebar switcher — neither belongs to this form. Re-read both before
+      // saving so that toggling a tool or switching workspace while this panel
+      // was open is never rolled back by "Save Changes".
       const persisted = await getConfig();
       const normalized: AppConfig = {
         ...config,
+        workspace_dir: persisted.workspace_dir,
         conversation_id_header: normalizeConversationHeader(config.conversation_id_header),
         custom_headers: normalizeCustomHeaders(config.custom_headers),
         model_catalog: modelCatalog,
@@ -389,11 +332,6 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
       };
       await saveConfig(normalized);
       setConfig(normalized);
-      // The backend records the just-saved workspace in `workspace_history`
-      // while writing the file, so pick that up instead of leaving the
-      // dropdown stale until the panel is reopened.
-      const fresh = await getConfig();
-      setConfig((prev) => ({ ...prev, workspace_history: fresh.workspace_history ?? [] }));
       setSaved(true);
       onConfigSaved?.(normalized);
       setTimeout(() => setSaved(false), 2000);
@@ -423,6 +361,8 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
       const normalized: AppConfig = {
         ...config,
         language: next,
+        // Owned by the titlebar switcher — never roll a switch back.
+        workspace_dir: persisted.workspace_dir,
         conversation_id_header: normalizeConversationHeader(config.conversation_id_header),
         custom_headers: normalizeCustomHeaders(config.custom_headers),
         // Owned by the tools panel — never roll those back.
@@ -443,16 +383,18 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
   }
 
   async function applyMessageEditor() {
-    const normalized: AppConfig = {
-      ...config,
-      conversation_id_header: normalizeConversationHeader(config.conversation_id_header),
-      custom_headers: normalizeCustomHeaders(config.custom_headers),
-      system_message: messageDraft,
-      model_catalog: modelCatalog,
-    };
-
     setMessageSaving(true);
     try {
+      const persisted = await getConfig();
+      const normalized: AppConfig = {
+        ...config,
+        // Owned by the titlebar switcher — never roll a switch back.
+        workspace_dir: persisted.workspace_dir,
+        conversation_id_header: normalizeConversationHeader(config.conversation_id_header),
+        custom_headers: normalizeCustomHeaders(config.custom_headers),
+        system_message: messageDraft,
+        model_catalog: modelCatalog,
+      };
       await saveConfig(normalized);
       setConfig(normalized);
       setSaved(true);
@@ -463,63 +405,6 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
       console.error(e);
     } finally {
       setMessageSaving(false);
-    }
-  }
-
-  async function handleSaveProfile() {
-    if (!newProfileName.trim()) return;
-    setProfileSaving(true);
-    try {
-      const [mcpServers, agents, orchestration] = await Promise.all([
-        listMcpServers(),
-        listSubAgents(),
-        getAgentOrchestration(),
-      ]);
-      const profile: Profile = {
-        name: newProfileName.trim(),
-        selected_tools: config.selected_tools || [],
-        agents,
-        orchestration,
-        mcp_servers: mcpServers,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      await saveProfile(profile);
-      setNewProfileName("");
-      const updated = await listProfiles();
-      setProfiles(updated);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setProfileSaving(false);
-    }
-  }
-
-  async function handleApplyProfile(name: string) {
-    setProfileApplying(name);
-    try {
-      await applyProfile(name);
-      const cfg = await getConfig();
-      const modelCatalog = mergeModels(cfg.model_catalog, [cfg.model]);
-      setConfig({ ...cfg, model_catalog: modelCatalog, model_settings: cfg.model_settings ?? {} });
-      onThemePreview?.(cfg.theme);
-      onConfigSaved?.(cfg);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setProfileApplying(null);
-    }
-  }
-
-  async function handleDeleteProfile(name: string) {
-    try {
-      await deleteProfile(name);
-      const updated = await listProfiles();
-      setProfiles(updated);
-    } catch (e) {
-      console.error(e);
     }
   }
 
@@ -658,168 +543,6 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
             </div>
           </section>
 
-          <section id="settings-section-workspace" className="settings-section">
-            <div className="settings-section-head">
-              <h3>{t("settings.workspace.title")}</h3>
-              <p>{t("settings.workspace.subtitle")}</p>
-            </div>
-            <div className="settings-section-body">
-              <div className="settings-field-row settings-field-row-stacked">
-                <span className="settings-field-label">{t("settings.workspace.dirLabel")}</span>
-                <div className="workspace-dir-row">
-                  {otherWorkspaces.length > 0 && (
-                    <select
-                      className="workspace-dir-history"
-                      value=""
-                      title={t("settings.workspace.historyTitle")}
-                      aria-label={t("settings.workspace.historyTitle")}
-                      onChange={(e) => {
-                        const dir = e.target.value;
-                        if (!dir) return;
-                        // Staged only, like the directory picker: the row still
-                        // applies with "Save Changes".
-                        setConfig((prev) => ({ ...prev, workspace_dir: dir }));
-                      }}
-                    >
-                      <option value="">{t("settings.workspace.historyPlaceholder")}</option>
-                      {otherWorkspaces.map((dir) => (
-                        <option key={dir} value={dir} title={dir}>
-                          {dir}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  <input
-                    type="text"
-                    readOnly
-                    value={config.workspace_dir ?? ""}
-                    placeholder={workspaceDirActual || t("settings.workspace.defaultDir")}
-                    title={config.workspace_dir || workspaceDirActual || t("settings.workspace.defaultDir")}
-                    onClick={handlePickWorkspace}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        handlePickWorkspace();
-                      }
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="settings-btn"
-                    onClick={handlePickWorkspace}
-                    disabled={pickingWorkspace}
-                    title={t("settings.workspace.browseTitle")}
-                  >
-                    {pickingWorkspace ? t("common.picking") : t("common.browse")}
-                  </button>
-                  {config.workspace_dir && (
-                    <button
-                      type="button"
-                      className="settings-btn workspace-dir-clear"
-                      onClick={handleClearWorkspace}
-                      title={t("settings.workspace.resetTitle")}
-                      aria-label={t("settings.workspace.resetAria")}
-                    >
-                      {t("settings.workspace.reset")}
-                    </button>
-                  )}
-                </div>
-                {instanceInfo?.role === "shadow" ? (
-                  <small className="settings-field-hint">
-                    {t("settings.workspace.instanceShadowHint")}
-                  </small>
-                ) : instanceInfo && !(config.single_instance ?? true) ? (
-                  <small className="settings-field-hint">
-                    {t("settings.workspace.instancePrimaryHint")}
-                  </small>
-                ) : null}
-              </div>
-
-              <label className="settings-checkbox">
-                <input
-                  type="checkbox"
-                  checked={config.self_evolution_mode ?? false}
-                  onChange={(e) =>
-                    setConfig((prev) => {
-                      const enabled = e.target.checked;
-                      return {
-                        ...prev,
-                        self_evolution_mode: enabled,
-                        selected_tools: withSelfEvolutionTools(
-                          prev.selected_tools,
-                          enabled
-                        ),
-                      };
-                    })
-                  }
-                />
-                <div className="settings-checkbox-copy">
-                  <span>{t("settings.workspace.selfEvolution")}</span>
-                  <small>{t("settings.workspace.selfEvolutionHint")}</small>
-                </div>
-              </label>
-
-              <div className="settings-divider" />
-
-              <div className="profile-section">
-                <div className="profile-section-title">{t("settings.workspace.profilesTitle")}</div>
-                <div className="profile-create-row">
-                  <input
-                    type="text"
-                    value={newProfileName}
-                    onChange={(e) => setNewProfileName(e.target.value)}
-                    placeholder={t("settings.workspace.profileNamePlaceholder")}
-                    onKeyDown={(e) => e.key === "Enter" && handleSaveProfile()}
-                  />
-                  <button
-                    type="button"
-                    className="settings-btn"
-                    onClick={handleSaveProfile}
-                    disabled={!newProfileName.trim() || profileSaving}
-                  >
-                    {profileSaving ? t("common.saving") : t("settings.workspace.saveCurrent")}
-                  </button>
-                </div>
-                {profiles.length > 0 && (
-                  <div className="profile-list">
-                    {profiles.map((profile) => (
-                      <div key={profile.name} className="profile-item">
-                        <div className="profile-item-info">
-                          <span className="profile-item-name">{profile.name}</span>
-                          <span className="profile-item-meta">
-                            {t("settings.workspace.profileMeta", {
-                              tools: profile.selected_tools.length,
-                              agents: profile.agents.length,
-                            })}
-                          </span>
-                        </div>
-                        <div className="profile-item-actions">
-                          <button
-                            type="button"
-                            className="settings-btn"
-                            onClick={() => handleApplyProfile(profile.name)}
-                            disabled={profileApplying !== null}
-                            title={t("settings.workspace.applyTitle")}
-                          >
-                            {profileApplying === profile.name ? t("common.applying") : t("common.apply")}
-                          </button>
-                          <button
-                            type="button"
-                            className="settings-btn settings-btn-danger"
-                            onClick={() => handleDeleteProfile(profile.name)}
-                            aria-label={t("settings.workspace.deleteAria", { name: profile.name })}
-                          >
-                            <FontAwesomeIcon icon={faXmark} />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </section>
-
           <section id="settings-section-api" className="settings-section">
             <div className="settings-section-head">
               <h3>{t("settings.api.title")}</h3>
@@ -849,14 +572,13 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
 
                 <label className="settings-field-row settings-field-row-stacked">
                   <span className="settings-field-label">{t("settings.api.model")}</span>
-                  <select
+                  <Dropdown
+                    label={t("settings.api.model")}
+                    compact
                     value={config.model}
-                    onChange={(e) => setConfig({ ...config, model: e.target.value })}
-                  >
-                    {modelCatalog.map((name) => (
-                      <option key={name} value={name}>{name}</option>
-                    ))}
-                  </select>
+                    onChange={(model) => setConfig({ ...config, model })}
+                    options={modelCatalog.map((name) => ({ value: name, label: name }))}
+                  />
                 </label>
               </div>
 
@@ -1310,18 +1032,21 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
 
               <label className="settings-field-row settings-field-row-stacked">
                 <span className="settings-field-label">{t("settings.runtime.loggerOutput")}</span>
-                <select
+                <Dropdown
+                  label={t("settings.runtime.loggerOutput")}
+                  compact
                   value={config.logger_output ?? "file"}
-                  onChange={(e) =>
+                  onChange={(logger_output) =>
                     setConfig((prev) => ({
                       ...prev,
-                      logger_output: e.target.value as "file" | "println",
+                      logger_output: logger_output as "file" | "println",
                     }))
                   }
-                >
-                  <option value="file">{t("settings.runtime.loggerFile")}</option>
-                  <option value="println">{t("settings.runtime.loggerPrintln")}</option>
-                </select>
+                  options={[
+                    { value: "file", label: t("settings.runtime.loggerFile") },
+                    { value: "println", label: t("settings.runtime.loggerPrintln") },
+                  ]}
+                />
               </label>
               <label className="settings-field-row settings-field-row-stacked">
                 <span className="settings-field-label">{t("settings.runtime.retention")}</span>
@@ -1342,6 +1067,32 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
                 <small className="settings-field-hint">
                   {t("settings.runtime.retentionHint")}
                 </small>
+              </label>
+
+              <div className="settings-divider" />
+
+              <label className="settings-checkbox">
+                <input
+                  type="checkbox"
+                  checked={config.self_evolution_mode ?? false}
+                  onChange={(e) =>
+                    setConfig((prev) => {
+                      const enabled = e.target.checked;
+                      return {
+                        ...prev,
+                        self_evolution_mode: enabled,
+                        selected_tools: withSelfEvolutionTools(
+                          prev.selected_tools,
+                          enabled
+                        ),
+                      };
+                    })
+                  }
+                />
+                <div className="settings-checkbox-copy">
+                  <span>{t("settings.runtime.selfEvolution")}</span>
+                  <small>{t("settings.runtime.selfEvolutionHint")}</small>
+                </div>
               </label>
 
               {(sessionId || config.self_evolution_mode) && <div className="settings-divider" />}

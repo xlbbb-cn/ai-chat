@@ -27,6 +27,7 @@ import {
 } from "../icons";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { Portal } from "./Portal";
+import { Dropdown } from "./Dropdown";
 import "./AgentsPanel.css";
 
 interface ToolOption {
@@ -575,13 +576,16 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
           </label>
           <label>
             {t("agents.cliPromptVia")}
-            <select
+            <Dropdown
+              label={t("agents.cliPromptVia")}
+              compact
               value={agent.cli.prompt_via}
-              onChange={(e) => updateCli({ prompt_via: e.target.value })}
-            >
-              <option value="arg">{t("agents.cliPromptViaArg")}</option>
-              <option value="stdin">{t("agents.cliPromptViaStdin")}</option>
-            </select>
+              onChange={(prompt_via) => updateCli({ prompt_via })}
+              options={[
+                { value: "arg", label: t("agents.cliPromptViaArg") },
+                { value: "stdin", label: t("agents.cliPromptViaStdin") },
+              ]}
+            />
             <small className="agent-field-hint">{t("agents.cliPromptViaHint")}</small>
           </label>
           <label>
@@ -1239,16 +1243,19 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
 
             <div className="orch-row">
               <span>{t("agents.executionMode")}</span>
-              <select
+              <Dropdown
                 className="orch-select"
+                label={t("agents.executionMode")}
+                compact
                 value={orchestration.mode}
-                onChange={(e) =>
-                  handleSaveOrchestration({ ...orchestration, mode: e.target.value as "parallel" | "sequential" })
+                onChange={(mode) =>
+                  handleSaveOrchestration({ ...orchestration, mode: mode as "parallel" | "sequential" })
                 }
-              >
-                <option value="parallel">{t("agents.modeParallel")}</option>
-                <option value="sequential">{t("agents.modeSequential")}</option>
-              </select>
+                options={[
+                  { value: "parallel", label: t("agents.modeParallel") },
+                  { value: "sequential", label: t("agents.modeSequential") },
+                ]}
+              />
             </div>
 
             <div className="orch-row">

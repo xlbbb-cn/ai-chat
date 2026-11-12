@@ -350,6 +350,22 @@ export interface InstanceInfo {
   main_config_path: string;
 }
 
+/**
+ * One row of the titlebar workspace switcher (`workspace_history_entries`).
+ *
+ * The list is derived on the backend — recorded history plus the *resolved*
+ * current workspace — so the popup never has to rebuild it from `AppConfig`,
+ * which only knows `workspace_dir: None` for the default (app-data) workspace
+ * and not the path that resolves to.
+ */
+export interface WorkspaceHistoryEntry {
+  path: string;
+  /** `false` once the folder was moved or deleted since it was last used. */
+  exists: boolean;
+  /** The workspace this window shows right now. */
+  current: boolean;
+}
+
 export interface AppConfig {
   api_base_url: string;
   api_key: string;
@@ -441,8 +457,8 @@ export interface AppConfig {
   /**
    * Workspaces activated so far, most recent first (the backend caps the list
    * at 10 and dedupes it case-insensitively). Filled by `apply_config`, so it
-   * also reflects switches made through profiles or a backup restore; the
-   * Settings workspace row offers it as a dropdown shortcut. A shadow window
+   * also reflects switches made by the titlebar switcher and a backup
+   * restore; the titlebar indicator offers it as a menu. A shadow window
    * merges the entries it collected back into the shared config on exit, so
    * every window's dropdown sees the workspaces the others opened.
    */
@@ -467,7 +483,7 @@ export interface AppConfig {
   glass_effect?: GlassEffect;
   /**
    * UI language. Kept in the config so it survives restarts and travels with
-   * exported profiles; the frontend also caches it in `localStorage` so the
+   * exported backups; the frontend also caches it in `localStorage` so the
    * very first paint does not flash the wrong language.
    */
   language?: Language;
@@ -844,7 +860,7 @@ export interface AgentTaskReasoningEvent {
   token: string;
 }
 
-/** Legacy standalone CLI agent (pre agent-type profiles), kept for imports. */
+/** Legacy standalone CLI agent (pre typed sub-agents), kept for imports. */
 export interface LegacyCliAgent {
   id: string;
   name: string;
@@ -997,18 +1013,6 @@ export interface AgentMissionSnapshot {
   help_notes?: string;
   active_tasks: AgentMissionTask[];
   active_task_count: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface Profile {
-  name: string;
-  selected_tools: string[];
-  agents: SubAgent[];
-  orchestration: AgentOrchestration;
-  /** Legacy standalone CLI agents (pre agent-type profiles). */
-  cli_agents?: LegacyCliAgent[];
-  mcp_servers: McpServer[];
   created_at: string;
   updated_at: string;
 }

@@ -22,7 +22,6 @@ import type {
   CliProbe,
   CloudProbe,
   KeyValue,
-  Profile,
   SkillsStatus,
   ServeProcessInfo,
   SavedFigure,
@@ -36,6 +35,7 @@ import type {
   UpdateDownloadProgress,
   WorkspaceFileEntry,
   WorkspaceFileRange,
+  WorkspaceHistoryEntry,
 } from "./types";
 
 export async function getConfig(): Promise<AppConfig> {
@@ -65,6 +65,24 @@ export async function confirmCommand(
 
 export async function getWorkspaceDir(): Promise<string> {
   return invoke("get_workspace_dir");
+}
+
+/**
+ * Switch the workspace in place — the titlebar workspace indicator.
+ *
+ * Unlike the Settings form (which stages `workspace_dir` until "Save Changes"),
+ * this applies immediately and touches only that one field. `null` restores the
+ * default (app-data) workspace. Returns the resolved path, and the backend
+ * emits `workspace-changed`, so the rest of the UI reloads on its own. Refused
+ * while a turn is streaming.
+ */
+export async function setWorkspaceDir(workspaceDir: string | null): Promise<string> {
+  return invoke("set_workspace_dir", { workspaceDir });
+}
+
+/** The workspaces the titlebar switcher offers, newest first. */
+export async function getWorkspaceHistory(): Promise<WorkspaceHistoryEntry[]> {
+  return invoke("workspace_history_entries");
 }
 
 /**
@@ -1075,30 +1093,12 @@ export async function openMarkdownFile(path: string): Promise<void> {
   return invoke("app_open_markdown", { path });
 }
 
-/** Export the profile archive to a path the caller picked. */
+/** Export the backup archive to a path the caller picked. */
 export async function exportProfileTo(path: string): Promise<void> {
   return invoke("app_export_profile", { path });
 }
 
-/** Restore a profile archive from a path the caller picked. */
+/** Restore a backup archive from a path the caller picked. */
 export async function importProfileFrom(path: string): Promise<void> {
   return invoke("app_import_profile", { path });
-}
-
-// ─── Named Profiles ──────────────────────────────────────────────────────────
-
-export async function listProfiles(): Promise<Profile[]> {
-  return invoke("list_profiles");
-}
-
-export async function saveProfile(profile: Profile): Promise<void> {
-  return invoke("save_profile_config", { profile });
-}
-
-export async function deleteProfile(name: string): Promise<void> {
-  return invoke("delete_profile_config", { name });
-}
-
-export async function applyProfile(name: string): Promise<void> {
-  return invoke("apply_profile_config", { name });
 }

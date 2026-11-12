@@ -18,17 +18,20 @@ import {
 import {
     exportProfileTo,
     getAppVersion,
+    getInstanceInfo,
     getWorkspaceDir,
+    getWorkspaceHistory,
     importProfileFrom,
     openAppDataDir,
     openIssuePage,
     openMarkdownFile,
     openWorkspaceDir,
     openWorkspaceTmpDir,
+    setWorkspaceDir,
 } from "../api";
 import { useI18n } from "../i18n";
 import { formatCountdown } from "../utils/time";
-import type { SleepLockState } from "../types";
+import type { SleepLockState, WorkspaceHistoryEntry } from "../types";
 
 /**
  * The app ships frameless (`decorations: false`), so the drag region and the
@@ -50,6 +53,12 @@ function workspaceLabel(dir: string): string {
     return dir.split(/[\\/]/).filter(Boolean).pop() || dir;
 }
 
+/** `/home/leonard/projects/acme` → `/home/leonard/projects` (`""` at the root). */
+function workspaceParent(dir: string): string {
+    const index = Math.max(dir.lastIndexOf("/"), dir.lastIndexOf("\\"));
+    return index > 0 ? dir.slice(0, index) : "";
+}
+
 interface Props {
     /** Backend "keep the machine awake" lock. The titlebar badge is its only
      *  surface: it is informational, not a control. */
@@ -66,8 +75,15 @@ export function TitleBar({ sleepLock, turnStartedAt, now }: Props) {
     const [maximized, setMaximized] = useState(false);
     const [menuOpen, setMenuOpen] = useState(false);
     const [workspace, setWorkspace] = useState("");
+    const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
+    const [workspaceEntries, setWorkspaceEntries] = useState<WorkspaceHistoryEntry[]>([]);
+    /** A shadow window works on a temporary config copy (`instance.rs`), so
+     *  its workspace switch is window-local and the switcher says so. */
+    const [shadow, setShadow] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
     const triggerRef = useRef<HTMLButtonElement>(null);
+    const workspaceMenuRef = useRef<HTMLDivElement>(null);
+    const workspaceTriggerRef = useRef<HTMLButtonElement>(null);
     // The maximize glyph must follow the real window state — it also changes
     // when the user double-clicks the drag region or uses the OS shortcut.
     useEffect(() => {
@@ -106,6 +122,13 @@ export function TitleBar({ sleepLock, turnStartedAt, now }: Props) {
                 .catch(() => { });
         };
         load();
+        // A shadow window (single-instance off) works on a temporary config
+        // copy: switching its workspace only moves this window.
+        getInstanceInfo()
+            .then((info) => {
+                if (!disposed) setShadow(info.role === "shadow");
+            })
+            .catch(() => { });
         const unlisten = listen<string>("workspace-changed", load);
         return () => {
             disposed = true;
@@ -117,6 +140,43 @@ export function TitleBar({ sleepLock, turnStartedAt, now }: Props) {
         setMenuOpen(false);
         if (refocus) triggerRef.current?.focus();
     }, []);
+
+    const closeWorkspaceMenu = useCallback((refocus = false) => {
+        setWorkspaceMenuOpen(false);
+        if (refocus) workspaceTriggerRef.current?.focus();
+    }, []);
+
+    /**
+     * A streaming reply owns the workspace it started in — its tool paths and
+     * its database handle belong to that one — so switching waits for the turn
+     * to end. The backend refuses the same case (`set_workspace_dir`).
+     */
+    const workspaceBusy = turnStartedAt !== null;
+
+    /** Read the rows on open: another window (or Settings) may have changed
+     *  the list since the last time the popup was shown. */
+    const toggleWorkspaceMenu = useCallback(() => {
+        if (workspaceMenuOpen) {
+            setWorkspaceMenuOpen(false);
+            return;
+        }
+        setWorkspaceMenuOpen(true);
+        getWorkspaceHistory()
+            .then(setWorkspaceEntries)
+            .catch(() => setWorkspaceEntries([]));
+    }, [workspaceMenuOpen]);
+
+    // Keyboard path: opening lands on the current row, so Tab / Enter work
+    // without a mouse and Escape hands focus back to the indicator.
+    useEffect(() => {
+        if (!workspaceMenuOpen) return;
+        const items = workspaceMenuRef.current?.querySelectorAll<HTMLButtonElement>(
+            ".titlebar-menu-item:not(:disabled)"
+        );
+        if (!items || items.length === 0) return;
+        const all = Array.from(items);
+        (all.find((item) => item.classList.contains("is-current")) ?? all[0]).focus();
+    }, [workspaceMenuOpen]);
 
     // Dismiss on outside click / Escape while open (same pattern as ModelSelect).
     useEffect(() => {
@@ -138,6 +198,26 @@ export function TitleBar({ sleepLock, turnStartedAt, now }: Props) {
         };
     }, [menuOpen, closeMenu]);
 
+    // The workspace popup dismisses the same way as the app menu.
+    useEffect(() => {
+        if (!workspaceMenuOpen) return;
+        const onPointerDown = (event: PointerEvent) => {
+            if (workspaceMenuRef.current?.contains(event.target as Node)) return;
+            setWorkspaceMenuOpen(false);
+        };
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key !== "Escape") return;
+            event.stopPropagation();
+            closeWorkspaceMenu(true);
+        };
+        document.addEventListener("pointerdown", onPointerDown, true);
+        document.addEventListener("keydown", onKeyDown, true);
+        return () => {
+            document.removeEventListener("pointerdown", onPointerDown, true);
+            document.removeEventListener("keydown", onKeyDown, true);
+        };
+    }, [workspaceMenuOpen, closeWorkspaceMenu]);
+
     /** Run a menu action, closing the popup first and surfacing failures. */
     const run = useCallback(
         async (action: () => Promise<void>) => {
@@ -152,6 +232,39 @@ export function TitleBar({ sleepLock, turnStartedAt, now }: Props) {
         [closeMenu],
     );
 
+    /**
+     * The switcher applies immediately — that is its whole point, unlike the
+     * Settings form which stages `workspace_dir` behind "Save Changes". The
+     * command touches only that one field and returns the resolved path, while
+     * `workspace-changed` refreshes everything else in the window.
+     */
+    const switchWorkspace = async (dir: string | null) => {
+        closeWorkspaceMenu();
+        try {
+            setWorkspace(await setWorkspaceDir(dir));
+        } catch (err) {
+            await messageDialog(String(err), { title: "AI Chat", kind: "error" })
+                .catch(() => { });
+        }
+    };
+
+    /** "Choose another folder…" — the same native picker Settings uses. */
+    const pickWorkspace = async () => {
+        closeWorkspaceMenu();
+        try {
+            const selected = await openDialog({
+                directory: true,
+                multiple: false,
+                title: t("app.workspacePickTitle"),
+                defaultPath: workspace || undefined,
+            });
+            if (typeof selected === "string" && selected) await switchWorkspace(selected);
+        } catch (err) {
+            await messageDialog(String(err), { title: "AI Chat", kind: "error" })
+                .catch(() => { });
+        }
+    };
+
     const handleOpenDataDir = () => run(openAppDataDir);
 
     const handleOpenWorkspaceDir = () => run(openWorkspaceDir);
@@ -159,21 +272,21 @@ export function TitleBar({ sleepLock, turnStartedAt, now }: Props) {
     /** `<workspace>/.data/tmp` — the sub-agent deliverable exchange area. */
     const handleOpenDeliverablesDir = () => run(openWorkspaceTmpDir);
 
-    const handleSaveProfile = () =>
+    const handleSaveBackup = () =>
         run(async () => {
             const path = await saveDialog({
-                defaultPath: "ai-chat.profile.zip",
-                filters: [{ name: "Profile", extensions: ["zip"] }],
+                defaultPath: "ai-chat.backup.zip",
+                filters: [{ name: "Backup", extensions: ["zip"] }],
             });
             if (path) await exportProfileTo(path);
         });
 
-    const handleRestoreProfile = () =>
+    const handleRestoreBackup = () =>
         run(async () => {
             const path = await openDialog({
                 multiple: false,
                 directory: false,
-                filters: [{ name: "Profile", extensions: ["zip"] }],
+                filters: [{ name: "Backup", extensions: ["zip"] }],
             });
             if (typeof path === "string") await importProfileFrom(path);
         });
@@ -243,9 +356,85 @@ export function TitleBar({ sleepLock, turnStartedAt, now }: Props) {
                     AI Chat
                 </span>
                 {workspace && (
-                    <span className="titlebar-workspace" title={workspace} data-tauri-drag-region>
-                        {workspaceLabel(workspace)}
-                    </span>
+                    <div className="titlebar-workspace-wrap" ref={workspaceMenuRef}>
+                        <button
+                            ref={workspaceTriggerRef}
+                            type="button"
+                            className={`titlebar-workspace ${workspaceMenuOpen ? "is-open" : ""}`}
+                            title={workspace}
+                            aria-label={t("app.workspaceSwitchAria", {
+                                workspace: workspaceLabel(workspace),
+                            })}
+                            aria-haspopup="menu"
+                            aria-expanded={workspaceMenuOpen}
+                            onClick={toggleWorkspaceMenu}
+                        >
+                            {workspaceLabel(workspace)}
+                        </button>
+                        {workspaceMenuOpen && (
+                            <div
+                                className="titlebar-menu titlebar-workspace-menu"
+                                role="menu"
+                                aria-label={t("app.workspaceSwitch")}
+                            >
+                                {workspaceEntries.map((entry) => (
+                                    <button
+                                        key={entry.path}
+                                        type="button"
+                                        role="menuitemradio"
+                                        aria-checked={entry.current}
+                                        className={`titlebar-menu-item titlebar-workspace-item ${entry.current
+                                            ? "is-current"
+                                            : ""
+                                            }`}
+                                        title={entry.path}
+                                        disabled={workspaceBusy}
+                                        onClick={() => void switchWorkspace(entry.path)}
+                                    >
+                                        <span className="workspace-item-name">
+                                            {workspaceLabel(entry.path)}
+                                        </span>
+                                        <span className="workspace-item-path">
+                                            {workspaceParent(entry.path)}
+                                        </span>
+                                        {entry.current ? (
+                                            <span className="workspace-item-note">
+                                                {t("app.workspaceCurrent")}
+                                            </span>
+                                        ) : (
+                                            !entry.exists && (
+                                                <span className="workspace-item-note is-missing">
+                                                    {t("app.workspaceMissing")}
+                                                </span>
+                                            )
+                                        )}
+                                    </button>
+                                ))}
+                                {workspaceBusy && (
+                                    <p className="titlebar-menu-note">
+                                        {t("app.workspaceBusy")}
+                                    </p>
+                                )}
+                                {workspaceEntries.length > 0 && (
+                                    <div className="titlebar-menu-sep" role="separator" />
+                                )}
+                                <button
+                                    type="button"
+                                    role="menuitem"
+                                    className="titlebar-menu-item"
+                                    disabled={workspaceBusy}
+                                    onClick={() => void pickWorkspace()}
+                                >
+                                    {t("app.workspacePickOther")}
+                                </button>
+                                {shadow && (
+                                    <p className="titlebar-menu-note">
+                                        {t("app.workspaceShadowNote")}
+                                    </p>
+                                )}
+                            </div>
+                        )}
+                    </div>
                 )}
                 {sleepLock.active && (
                     <span
@@ -306,17 +495,17 @@ export function TitleBar({ sleepLock, turnStartedAt, now }: Props) {
                             type="button"
                             role="menuitem"
                             className="titlebar-menu-item"
-                            onClick={handleSaveProfile}
+                            onClick={handleSaveBackup}
                         >
-                            {t("app.appMenuSaveProfile")}
+                            {t("app.appMenuSaveBackup")}
                         </button>
                         <button
                             type="button"
                             role="menuitem"
                             className="titlebar-menu-item"
-                            onClick={handleRestoreProfile}
+                            onClick={handleRestoreBackup}
                         >
-                            {t("app.appMenuRestoreProfile")}
+                            {t("app.appMenuRestoreBackup")}
                         </button>
                         <div className="titlebar-menu-sep" role="separator" />
                         <button

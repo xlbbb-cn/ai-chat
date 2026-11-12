@@ -22,6 +22,7 @@ import {
     faScroll,
     faXmark,
 } from "../icons";
+import { Dropdown } from "./Dropdown";
 import "./McpPanel.css";
 
 interface Props {
@@ -292,16 +293,17 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                     />
 
                     <label>{t("mcp.transport")}</label>
-                    <select
-                        className="mcp-select"
+                    <Dropdown
+                        label={t("mcp.transport")}
                         value={editing.transport}
-                        onChange={(e) => setEditing({ ...editing, transport: e.target.value as McpTransport })}
-                    >
-                        <option value="stdio">{t("mcp.transportStdio")}</option>
-                        <option value="sse">{t("mcp.transportSse")}</option>
-                        <option value="http">{t("mcp.transportHttp")}</option>
-                        <option value="stream-http">{t("mcp.transportStreamHttp")}</option>
-                    </select>
+                        onChange={(transport) => setEditing({ ...editing, transport: transport as McpTransport })}
+                        options={[
+                            { value: "stdio", label: t("mcp.transportStdio") },
+                            { value: "sse", label: t("mcp.transportSse") },
+                            { value: "http", label: t("mcp.transportHttp") },
+                            { value: "stream-http", label: t("mcp.transportStreamHttp") },
+                        ]}
+                    />
 
                     {editing.transport === "stdio" ? (
                         <>

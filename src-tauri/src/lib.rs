@@ -38,8 +38,8 @@ use tools::{timer, todos};
 
 const OPEN_APP_DATA_DIR_MENU_ID: &str = "open-app-data-dir";
 const OPEN_WORKSPACE_DIR_MENU_ID: &str = "open-workspace-dir";
-const SAVE_PROFILE_MENU_ID: &str = "save-profile";
-const RESTORE_PROFILE_MENU_ID: &str = "restore-profile";
+const SAVE_BACKUP_MENU_ID: &str = "save-backup";
+const RESTORE_BACKUP_MENU_ID: &str = "restore-backup";
 const MARKDOWN_EDIT_MENU_ID: &str = "markdown-edit";
 const OPEN_ISSUE_MENU_ID: &str = "open-issue";
 const ABOUT_MENU_ID: &str = "about";
@@ -62,8 +62,7 @@ pub const RETIRED_TOOL_IDS: [&str; 1] = ["knowledge_graph"];
 ///
 /// The assistant must be able to edit its own skills (`file_actions`) and to
 /// remember what it learned (`memory`). While the mode is on they cannot be
-/// switched off — not from the Tools panel, not by applying a profile, and not
-/// by hand-editing `config.json`.
+/// switched off — not from the Tools panel and not by hand-editing `config.json`.
 pub const SELF_EVOLUTION_REQUIRED_TOOLS: [&str; 2] = ["file_actions", "memory"];
 
 /// How many workspaces `AppConfig::workspace_history` keeps.
@@ -145,14 +144,14 @@ fn read_markdown_into_editor(app: &AppHandle, markdown_path: &Path) {
     }
 }
 
-/// Restore a profile archive and log failures without interrupting the caller.
+/// Restore a backup archive and log failures without interrupting the caller.
 fn import_profile_archive(app: &AppHandle, profile_path: &Path) {
     if let Err(err) = backup::import_profile(app, profile_path) {
         app.state::<AppState>()
             .logger
             .lock()
             .unwrap()
-            .log("ERROR", &format!("Restore profile failed: {err}"));
+            .log("ERROR", &format!("Restore backup failed: {err}"));
     }
 }
 
@@ -227,7 +226,7 @@ fn app_open_markdown(app: AppHandle, path: String) {
 #[tauri::command]
 fn app_export_profile(app: AppHandle, path: String) -> Result<(), String> {
     if path.trim().is_empty() {
-        return Err("Profile path is empty".into());
+        return Err("Backup path is empty".into());
     }
     backup::spawn_profile_export(app, PathBuf::from(path));
     Ok(())
@@ -236,14 +235,14 @@ fn app_export_profile(app: AppHandle, path: String) -> Result<(), String> {
 #[tauri::command]
 async fn app_import_profile(app: AppHandle, path: String) -> Result<(), String> {
     if path.trim().is_empty() {
-        return Err("Profile path is empty".into());
+        return Err("Backup path is empty".into());
     }
     let profile_path = PathBuf::from(path);
     // Import rewrites the workspace and the SQLite snapshot, so keep it off
     // the IPC thread.
     tauri::async_runtime::spawn_blocking(move || backup::import_profile(&app, &profile_path))
         .await
-        .map_err(|err| format!("Profile import task failed: {err}"))?
+        .map_err(|err| format!("Backup import task failed: {err}"))?
 }
 
 fn resolve_workspace_path(
@@ -311,8 +310,8 @@ pub(crate) fn apply_config(
     config: AppConfig,
 ) -> Result<(), String> {
     // Self-evolution mode owns `file_actions` and `memory`: they are forced
-    // on before anything is written, so no caller (UI, profile, backup
-    // restore) can switch them off while the mode is active.
+    // on before anything is written, so no caller (UI, backup restore) can switch them off while the
+    // mode is active.
     let mut config = config;
     config.strip_retired_tools();
     config.enforce_self_evolution_tools();
@@ -321,7 +320,7 @@ pub(crate) fn apply_config(
     // The workspace history lives in the persisted config, so the resolved
     // path must be recorded *before* the file is written. Resolving it here
     // (the switch logic below reuses the value) means every route that
-    // applies a config — Settings save, profile apply, backup restore — feeds
+    // applies a config — Settings save, titlebar switch, backup restore — feeds
     // the same list.
     let new_workspace_path =
         resolve_workspace_path(app, &state.instance, config.workspace_dir.as_deref())?;
@@ -545,8 +544,8 @@ pub struct AppConfig {
     pub workspace_dir: Option<String>,
     /// Workspaces that were actually activated, newest first (capped at
     /// `WORKSPACE_HISTORY_LIMIT`). Recorded by `apply_config`, so every route
-    /// that switches the workspace (Settings save, profile apply, backup
-    /// restore) feeds the same list; the Settings row offers it as a dropdown.
+    /// that switches the workspace (Settings save, titlebar switch, backup
+    /// restore) feeds the same list; the titlebar indicator offers it as a menu.
     #[serde(default)]
     pub workspace_history: Vec<String>,
     #[serde(default)]
@@ -660,7 +659,7 @@ impl AppConfig {
     /// Clamp the turn guards to their hard ceilings.
     ///
     /// Called on every config write (and on startup), so neither a hand-edited
-    /// `config.json` nor an imported profile can set a number the loops would
+    /// `config.json` nor an imported backup can set a number the loops would
     /// still have to iterate towards.
     fn normalize_turn_limits(&mut self) {
         self.main_agent_max_rounds = self
@@ -783,7 +782,6 @@ pub struct AppState {
     pub workspace_dir: Mutex<PathBuf>,
     pub mcp_servers_path: PathBuf,
     pub agents_config_path: PathBuf,
-    pub profiles_path: PathBuf,
     pub db: Mutex<Connection>,
     pub logger: Mutex<AppLogger>,
     /// Per-turn stop flag, published by `stop_chat_completion` (Stop button).
@@ -1267,6 +1265,95 @@ fn get_workspace_dir(state: State<'_, AppState>) -> String {
         .to_string()
 }
 
+/// Windows paths differ only in case and separator style, so the workspace
+/// switcher compares them the way the history dedup does.
+fn same_workspace_path(a: &str, b: &str) -> bool {
+    let normalize = |value: &str| {
+        value
+            .trim()
+            .trim_end_matches(['/', '\\'])
+            .replace('\\', "/")
+            .to_lowercase()
+    };
+    normalize(a) == normalize(b)
+}
+
+/// Switch the workspace in place — the titlebar's workspace indicator.
+///
+/// The Settings panel *stages* `workspace_dir` and only applies it on "Save
+/// Changes"; the titlebar is a shortcut, so it writes that one field onto the
+/// current config instead of round-tripping the whole form. A form copy that
+/// predates another panel's edit must never overwrite it, which is why this is
+/// a dedicated command (same reason as `set_model_context_length`).
+#[tauri::command]
+fn set_workspace_dir(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    workspace_dir: Option<String>,
+) -> Result<String, String> {
+    // A running turn owns the workspace it started in: its tool calls resolve
+    // paths against it, and its rows are written through the database handle
+    // the switch closes. The UI disables the rows while streaming; this guard
+    // is what makes a hand-crafted invoke fail instead of corrupting a turn.
+    if state
+        .active_turn
+        .lock()
+        .map(|active| active.is_some())
+        .unwrap_or(false)
+    {
+        return Err(
+            "A reply is still streaming — switch the workspace when the turn ends.".to_string(),
+        );
+    }
+
+    let mut config = state.config.lock().unwrap().clone();
+    config.workspace_dir = workspace_dir
+        .map(|dir| dir.trim().to_string())
+        .filter(|dir| !dir.is_empty());
+    apply_config(&app, &state, config)?;
+    Ok(state
+        .workspace_dir
+        .lock()
+        .unwrap()
+        .to_string_lossy()
+        .to_string())
+}
+
+/// One row of the titlebar workspace switcher.
+#[derive(Debug, Clone, Serialize)]
+struct WorkspaceHistoryEntry {
+    path: String,
+    /// Whether the folder is still on disk — a recorded workspace may have
+    /// been moved or deleted since it was last used.
+    exists: bool,
+    /// Whether this is the workspace the window shows now. Compared against
+    /// the *resolved* path, so the default (app-data) workspace highlights
+    /// correctly even though `config.workspace_dir` is `None` there.
+    current: bool,
+}
+
+/// The workspaces the titlebar switcher offers — one call, everything the
+/// popup needs.
+///
+/// The list is derived (recorded history + resolved current path), so the UI
+/// never rebuilds it from `AppConfig`: that only knows `workspace_dir: None`
+/// for the default workspace, not the path it resolves to.
+#[tauri::command]
+fn workspace_history_entries(state: State<'_, AppState>) -> Vec<WorkspaceHistoryEntry> {
+    let current = state.workspace_dir.lock().unwrap().to_string_lossy().to_string();
+    let config = state.config.lock().unwrap();
+    config
+        .workspace_history
+        .iter()
+        .filter(|entry| !entry.trim().is_empty())
+        .map(|entry| WorkspaceHistoryEntry {
+            path: entry.clone(),
+            exists: PathBuf::from(entry).is_dir(),
+            current: same_workspace_path(entry, &current),
+        })
+        .collect()
+}
+
 /// Which window this is: the primary, or a shadow running on a temporary copy
 /// of the configuration (see `instance.rs`). The Settings panel uses it to
 /// explain why this window's changes will not be remembered.
@@ -1278,132 +1365,6 @@ fn get_instance_info(state: State<'_, AppState>) -> instance::InstanceInfo {
 #[tauri::command]
 fn save_markdown_file(path: String, content: String) -> Result<(), String> {
     fs::write(PathBuf::from(path), content).map_err(|e| e.to_string())
-}
-
-// ─── Named Profiles ──────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Profile {
-    pub name: String,
-    pub selected_tools: Vec<String>,
-    pub agents: Vec<agents::SubAgent>,
-    pub orchestration: agents::AgentOrchestration,
-    /// Legacy standalone CLI agents (pre agent-type profiles). Migrated into
-    /// `agents` with `agent_type = "cli"` when the profile is applied.
-    #[serde(default)]
-    pub cli_agents: Vec<agents::LegacyCliAgent>,
-    pub mcp_servers: Vec<mcp::McpServer>,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct ProfilesFile {
-    profiles: Vec<Profile>,
-}
-
-fn load_profiles(path: &PathBuf) -> Vec<Profile> {
-    if !path.exists() {
-        return vec![];
-    }
-    fs::read_to_string(path)
-        .ok()
-        .and_then(|s| serde_json::from_str::<ProfilesFile>(&s).ok())
-        .map(|f| f.profiles)
-        .unwrap_or_default()
-}
-
-fn save_profiles(path: &PathBuf, profiles: &[Profile]) -> Result<(), String> {
-    let file = ProfilesFile {
-        profiles: profiles.to_vec(),
-    };
-    let json = serde_json::to_string_pretty(&file).map_err(|e| e.to_string())?;
-    fs::write(path, json).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn list_profiles(state: State<'_, AppState>) -> Vec<Profile> {
-    load_profiles(&state.profiles_path)
-}
-
-#[tauri::command]
-fn save_profile_config(state: State<'_, AppState>, profile: Profile) -> Result<(), String> {
-    let mut profiles = load_profiles(&state.profiles_path);
-
-    // Update timestamps
-    let now = chrono::Utc::now().to_rfc3339();
-    let mut updated_profile = profile;
-
-    if let Some(existing) = profiles.iter_mut().find(|p| p.name == updated_profile.name) {
-        updated_profile.created_at = existing.created_at.clone();
-        updated_profile.updated_at = now;
-        *existing = updated_profile;
-    } else {
-        updated_profile.created_at = now.clone();
-        updated_profile.updated_at = now;
-        profiles.push(updated_profile);
-    }
-
-    save_profiles(&state.profiles_path, &profiles)
-}
-
-#[tauri::command]
-fn delete_profile_config(state: State<'_, AppState>, name: String) -> Result<(), String> {
-    let mut profiles = load_profiles(&state.profiles_path);
-    profiles.retain(|p| p.name != name);
-    save_profiles(&state.profiles_path, &profiles)
-}
-
-#[tauri::command]
-fn apply_profile_config(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    name: String,
-) -> Result<(), String> {
-    let profiles = load_profiles(&state.profiles_path);
-    let profile = profiles
-        .into_iter()
-        .find(|p| p.name == name)
-        .ok_or_else(|| format!("Profile '{}' not found", name))?;
-
-    // Update config with the profile's selected tools. Skill enablement is not
-    // part of a profile: it is per-workspace state (`<workspace>/.data/skills.status`).
-    let mut config = state.config.lock().unwrap().clone();
-    config.selected_tools = profile.selected_tools;
-
-    apply_config(&app, &state, config)?;
-
-    // Save agents config (legacy standalone CLI agents are folded into the
-    // typed agent list by the normalizing save). An `llm` agent's definition
-    // lives in `agents/**/*.md`, so the profile snapshot is materialized on
-    // disk first; identical files are left untouched.
-    let agents_root = agents::files::agents_root(&state.agents_config_path);
-    let mut profile_agents = profile.agents;
-    for agent in &mut profile_agents {
-        if agents::normalize_agent_type(&agent.agent_type) == agents::AGENT_TYPE_LLM {
-            agents::files::materialize_agent(&agents_root, agent)?;
-        }
-    }
-    let agents_config = agents::AgentsConfig {
-        version: 2,
-        agents: profile_agents,
-        orchestration: profile.orchestration,
-        cli_agents: profile.cli_agents,
-    };
-    agents::save_agents_config_file(&state.agents_config_path, &agents_config)?;
-
-    // Save MCP servers
-    let mcp_file = mcp::McpServersFile {
-        servers: profile.mcp_servers,
-    };
-    let mcp_json = serde_json::to_string_pretty(&mcp_file).map_err(|e| e.to_string())?;
-    fs::write(&state.mcp_servers_path, mcp_json).map_err(|e| e.to_string())?;
-    // The roster changed wholesale: a running turn must rebuild its MCP tool
-    // segment instead of calling tools the profile removed.
-    state.bump_mcp_revision();
-
-    let _ = app.emit(backup::PROFILE_RESTORED_EVENT, ());
-    Ok(())
 }
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
@@ -1601,23 +1562,23 @@ pub fn run() {
                 open_app_data_dir(app);
             } else if event.id() == OPEN_WORKSPACE_DIR_MENU_ID {
                 let _ = open_workspace_dir(app);
-            } else if event.id() == SAVE_PROFILE_MENU_ID {
+            } else if event.id() == SAVE_BACKUP_MENU_ID {
                 if let Some(path) = app
                     .dialog()
                     .file()
-                    .add_filter("Profile", &["zip"])
-                    .set_file_name("ai-chat.profile.zip")
+                    .add_filter("Backup", &["zip"])
+                    .set_file_name("ai-chat.backup.zip")
                     .blocking_save_file()
                 {
                     if let Some(profile_path) = path.into_path().ok() {
                         backup::spawn_profile_export(app.clone(), profile_path);
                     }
                 }
-            } else if event.id() == RESTORE_PROFILE_MENU_ID {
+            } else if event.id() == RESTORE_BACKUP_MENU_ID {
                 if let Some(path) = app
                     .dialog()
                     .file()
-                    .add_filter("Profile", &["zip"])
+                    .add_filter("Backup", &["zip"])
                     .blocking_pick_file()
                 {
                     if let Some(profile_path) = path.into_path().ok() {
@@ -1672,18 +1633,18 @@ pub fn run() {
                     None::<&str>,
                 )
                 .expect("failed to create workspace menu item");
-                let save_profile_item = MenuItem::with_id(
+                let save_backup_item = MenuItem::with_id(
                     app,
-                    SAVE_PROFILE_MENU_ID,
-                    "Save Profile...",
+                    SAVE_BACKUP_MENU_ID,
+                    "Save Backup...",
                     true,
                     None::<&str>,
                 )
                 .expect("failed to create menu item");
-                let restore_profile_item = MenuItem::with_id(
+                let restore_backup_item = MenuItem::with_id(
                     app,
-                    RESTORE_PROFILE_MENU_ID,
-                    "Restore Profile...",
+                    RESTORE_BACKUP_MENU_ID,
+                    "Restore Backup...",
                     true,
                     None::<&str>,
                 )
@@ -1701,8 +1662,8 @@ pub fn run() {
                     "File",
                     true,
                     &[
-                        &save_profile_item,
-                        &restore_profile_item,
+                        &save_backup_item,
+                        &restore_backup_item,
                         &open_app_data_dir_item,
                         &open_workspace_dir_item,
                     ],
@@ -1782,7 +1743,6 @@ pub fn run() {
 
             let mcp_servers_path = data_dir.join("mcp_servers.json");
             let agents_config_path = data_dir.join("sub_agents.json");
-            let profiles_path = data_dir.join("profiles.json");
             let config = if config_path.exists() {
                 fs::read_to_string(&config_path)
                     .ok()
@@ -1875,7 +1835,6 @@ pub fn run() {
                 logger: Mutex::new(app_logger),
                 mcp_servers_path: mcp_servers_path.clone(),
                 agents_config_path,
-                profiles_path,
                 chat_cancelled: Mutex::new(Arc::new(AtomicBool::new(false))),
                 evolution_maintenance: Mutex::new(None),
                 turn_seq: AtomicU64::new(1),
@@ -2016,6 +1975,8 @@ pub fn run() {
             fetch_models,
             model_metadata::fetch_model_metadata,
             get_workspace_dir,
+            set_workspace_dir,
+            workspace_history_entries,
             get_instance_info,
             set_window_vibrancy,
             workspace_files::list_workspace_files,
@@ -2088,10 +2049,6 @@ pub fn run() {
             timer::get_sleep_lock_state,
             tools::serve::list_serve_processes,
             tools::serve::stop_serve_process,
-            list_profiles,
-            save_profile_config,
-            delete_profile_config,
-            apply_profile_config,
             update::check_update,
             update::download_update,
             update::open_update_file,
@@ -2353,5 +2310,17 @@ mod tests {
             config.workspace_history[0],
             format!("C:\\tmp\\ws{}", WORKSPACE_HISTORY_LIMIT + 4)
         );
+    }
+
+    /// The titlebar switcher marks the active row by comparing the recorded
+    /// entry against the *resolved* workspace path.
+    #[test]
+    fn workspace_paths_compare_across_case_and_separators() {
+        assert!(same_workspace_path("D:\\projects\\alpha", "d:/projects/alpha"));
+        // A trailing separator is not a different workspace.
+        assert!(same_workspace_path("/home/leonard/acme/", "/home/leonard/acme"));
+        assert!(same_workspace_path("  /home/leonard/acme  ", "/home/leonard/acme"));
+        assert!(!same_workspace_path("/home/leonard/acme", "/home/leonard/acme2"));
+        assert!(!same_workspace_path("C:\\one", "C:\\two"));
     }
 }

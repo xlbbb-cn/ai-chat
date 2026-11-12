@@ -152,9 +152,9 @@ Three execution tools with deliberately different scopes:
 - Per-workspace state in a hidden `<workspace>/.data` directory: SQLite database, memory, todos, skills, skill status and pending delay timers
 - SQLite for chat history and API request monitoring data (switches with the workspace)
 - Request monitoring panel for listing, details, and deletion
-- Profile export/import via zip archives (config, tools, agents and their `agents/` definitions, MCP servers, workspace memory/todos/skills)
+- Backup export/import via zip archives (config, tools, agents and their `agents/` definitions, MCP servers, workspace memory/todos/skills)
 - Extra windows run as shadow instances: each writes only a forked config copy with its own workspace, while the shared config stays with the primary window
-- Workspace directory setting in the UI
+- Workspace switching from the titlebar's workspace indicator (recent workspaces plus a folder picker)
 
 ---
 
@@ -357,7 +357,7 @@ Runtime layout — app data holds the application files, the workspace holds its
 
 ```text
 <app data>/                 config.json, app.log, mcp_servers.json, sub_agents.json,
-                            profiles.json, agents/ (llm definitions + index.yaml
+                            agents/ (llm definitions + index.yaml
                             discovery manifest), shadow/ (per-window config forks),
                             workspace/ (default workspace)
 <workspace>/.data/          chat.db, memory/{user,repo,evolution}/, todos/, skills/,
