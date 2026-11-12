@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } fr
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, listAgentMentions, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState, setWindowVibrancy, savePastedFile, importWorkspacePaths } from "./api";
+import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, listAgentMentions, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, deleteMessagesAfter, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState, setWindowVibrancy, savePastedFile, importWorkspacePaths } from "./api";
 
 import { ChatMessage, ChatMessageBoundary } from "./components/ChatMessage";
 import { ToolCallGroup } from "./components/ToolCallGroup";
@@ -328,14 +328,6 @@ function hasContextContent(m: Message): boolean {
   if (m.role !== "assistant") return true;
   const content = typeof m.content === "string" ? stripGenerationStopped(m.content) : "";
   return content.trim().length > 0 || Boolean(m.reasoning_content?.trim());
-}
-
-/** An assistant turn that ended with an error or a user stop. */
-function isInterruptedAssistant(m: Message): boolean {
-  return (
-    m.role === "assistant" &&
-    (Boolean(m.error) || m.status === "error" || m.status === "stopped")
-  );
 }
 
 /**
@@ -673,6 +665,15 @@ export default function App() {
   const paletteRef = useRef<Palette>("default");
   const currentAssistantMessageIdRef = useRef<string | null>(null);
   const hasRunningToolCallRef = useRef(false);
+  /**
+   * The latest `saveHistory` write of the current turn. A failed attempt
+   * persists its partial reply asynchronously; retrying truncates the session
+   * before the next request, so it must wait for that insert to land first —
+   * otherwise the deleted row could be written right after the DELETE.
+   */
+  const pendingTurnWriteRef = useRef<Promise<unknown> | null>(null);
+  /** True while a retry is cleaning up before its request starts. */
+  const retryingRef = useRef(false);
   const currentToolCallsRef = useRef<ToolCallEntry[]>([]);
   /** Mission bus of the current turn; old bus events must not touch new rows. */
   const currentMbusIdRef = useRef<string | null>(null);
@@ -2279,7 +2280,7 @@ export default function App() {
         ];
       });
 
-    saveHistory(
+    pendingTurnWriteRef.current = saveHistory(
       sessionId,
       "user",
       serializeContentForDb(apiContent),
@@ -2475,7 +2476,7 @@ export default function App() {
         // is stored separately and is never replayed as model content.
         const deliveredInjections = currentInjectionsRef.current;
         if (accumulatedContent.trim() || accumulatedReasoning.trim() || settledToolCalls.length > 0) {
-          saveHistory(
+          pendingTurnWriteRef.current = saveHistory(
             sessionId,
             "assistant",
             accumulatedContent,
@@ -2615,7 +2616,52 @@ export default function App() {
   }, [pendingAutoPrompts, streaming, profileExporting, sendMessage]);
 
   const retryPendingUserMessage = useCallback(async () => {
-    if (streaming || !pendingRetryMessageId) return;
+    if (streaming || !pendingRetryMessageId || retryingRef.current) return;
+
+    // A retry regenerates the last answer, so the user message it belongs to is
+    // the cut-off: everything the failed attempt produced after it — assistant
+    // replies, transient progress rows — goes away before the new request. It
+    // has to leave the database too, not only the transcript, otherwise a
+    // reload would bring the failed rows back next to the retried reply.
+    const retryIndex = messages.findIndex((m) => m.id === pendingRetryMessageId);
+    if (retryIndex < 0) return;
+    const retryBase = messages.slice(0, retryIndex + 1);
+    const retriedUser = retryBase[retryBase.length - 1];
+    const discarded = messages.slice(retryIndex + 1);
+
+    // Freeze the retry button (and the composer) while the cleanup runs: the
+    // request is not streaming yet, so `streaming` cannot be the only guard.
+    retryingRef.current = true;
+    setStreaming(true);
+    setError(null);
+    try {
+      // A failed turn persists its partial reply asynchronously. Truncating
+      // before that insert lands would leave the row behind, so wait for the
+      // turn's last history write first.
+      const pendingWrite = pendingTurnWriteRef.current;
+      if (pendingWrite) await pendingWrite.catch(() => undefined);
+      pendingTurnWriteRef.current = null;
+      if (retriedUser.dbId !== undefined) {
+        await deleteMessagesAfter(sessionId, retriedUser.dbId);
+      } else {
+        // The user row never reached the database: remove whatever the failed
+        // attempt did persist, so it cannot reappear on the next load.
+        const orphaned = discarded
+          .map((m) => m.dbId)
+          .filter((id): id is number => id !== undefined);
+        if (orphaned.length > 0) {
+          await Promise.all(orphaned.map((id) => deleteMessage(id)));
+        }
+      }
+    } catch (err) {
+      // Nothing has been removed from the transcript yet, so the retry can be
+      // pressed again once the cause is fixed.
+      retryingRef.current = false;
+      setStreaming(false);
+      setError(t("app.deleteFailed", { error: String(err) }));
+      return;
+    }
+    retryingRef.current = false;
 
     const assistantId = crypto.randomUUID();
     const assistantMsg: Message = { id: assistantId, role: "assistant", content: "", streaming: true };
@@ -2629,29 +2675,13 @@ export default function App() {
     setBackgroundWaiting(0);
 
     followBottomRef.current = true;
-    setMessages((prev) => [...prev, assistantMsg]);
-    setStreaming(true);
-    setError(null);
+    // Atomic replacement: the failed rows are already gone from the database,
+    // so they must leave the transcript at the same moment — not `prev` plus
+    // the new bubble, which would leave the old failure visible.
+    setMessages([...retryBase, assistantMsg]);
     // A new request starts with no token figures yet — the usage bar above the
     // input must sweep until this request's `chat-usage` arrives.
     setUsageReady(false);
-
-    // A retry regenerates the last answer: drop the trailing interrupted
-    // assistant turn(s), plus transient progress rows, so the request ends at
-    // the user message. Partial turns from earlier in the session stay.
-    const retryBase = [...messages];
-    while (retryBase.length > 0) {
-      const last = retryBase[retryBase.length - 1];
-      if (last.id.startsWith("agent-progress-") || last.role === "tool_group") {
-        retryBase.pop();
-        continue;
-      }
-      if (isInterruptedAssistant(last)) {
-        retryBase.pop();
-        continue;
-      }
-      break;
-    }
 
     const history = retryBase
       .filter((m) => !m.streaming && m.role !== "tool_group" && hasContextContent(m))
@@ -2850,7 +2880,7 @@ export default function App() {
         // reload or continuation can use it; the error itself stays UI-only.
         const deliveredInjections = currentInjectionsRef.current;
         if (accumulatedContent.trim() || accumulatedReasoning.trim() || settledToolCalls.length > 0) {
-          saveHistory(
+          pendingTurnWriteRef.current = saveHistory(
             sessionId,
             "assistant",
             accumulatedContent,

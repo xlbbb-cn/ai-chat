@@ -735,6 +735,21 @@ export async function deleteMessage(messageId: number): Promise<void> {
   return invoke("delete_message", { messageId });
 }
 
+/**
+ * Delete every stored message after `afterMessageId` in one session.
+ *
+ * Retrying a failed turn regenerates the answer after a user message, so the
+ * partial rows the failed attempt persisted must go before the new request —
+ * otherwise a reload would replay them next to the retried reply. Returns the
+ * number of rows removed.
+ */
+export async function deleteMessagesAfter(
+  sessionId: string,
+  afterMessageId: number
+): Promise<number> {
+  return invoke("delete_messages_after", { sessionId, afterMessageId });
+}
+
 export async function forkSession(
   sourceSessionId: string,
   newSessionId: string,

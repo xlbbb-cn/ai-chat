@@ -2049,6 +2049,7 @@ pub fn run() {
             db::load_session_messages,
             db::delete_history,
             db::delete_message,
+            db::delete_messages_after,
             db::fork_session,
             db::list_session_meta,
             db::update_session_meta,
