@@ -273,55 +273,25 @@ pub fn app_open_figures_dir(app: AppHandle) -> Result<(), String> {
 /// sanitizer strips, coordinates it cannot compute, and a `carve` scene that
 /// is prose instead of JSON.
 pub fn prompt_block() -> String {
-    "Figures — you can draw, and the user can save what you draw:\n\
-     - Flowcharts: a fenced `flow` block holding one JSON object — declare nodes and \
-     edges, never coordinates; the renderer measures the text and lays the graph out. \
-     Example: `{\"direction\":\"LR\",\"anim\":\"flow\",\"nodes\":[{\"id\":\"a\",\"label\":\
-     \"提交代码\",\"shape\":\"start\"},{\"id\":\"b\",\"label\":\"CI 通过?\",\"shape\":\
-     \"decision\"},{\"id\":\"c\",\"label\":\"发布\",\"tone\":\"accent\"}],\"edges\":[\
-     {\"from\":\"a\",\"to\":\"b\",\"label\":\"push\"},{\"from\":\"b\",\"to\":\"c\",\"label\":\
-     \"绿色\"}]}`. Shapes: `process` (default), `start`/`end` (stadium), `decision` \
-     (diamond), `io`, `database`. Tones: `default`, `accent`, `success`, `warning`, \
-     `danger`. Edges take an optional `label`. `anim`: `flow` (packets travel the \
-     edges), `step` (nodes light up in order), or omit for static; optional `speed` \
-     0.5–3. No self-loops; keep labels short. Use `flow` for every flowchart — it is \
-     saved as a PNG like any drawn figure, and animated ones play on their own.\n\
-     - 2D: a fenced `svg` block (or an inline `<svg>` element) holding one complete \
-     `<svg viewBox=\"0 0 W H\" …>…</svg>`. Keep every colour on the interface's tokens \
-     (`fill=\"var(--c-accent)\"`, `stroke=\"currentColor\"`, `var(--c-text)`, \
-     `var(--c-muted)`, `var(--c-border-i)`, and `fill-opacity` steps for shades) instead of \
-     literal hex values, so the figure follows light/dark and every palette. Scripts, \
-     `<foreignObject>`, `<image>`, `<a>`, event handlers and external `url()` references \
-     are stripped before rendering.\n\
-     - 3D: a fenced `carve` block holding one JSON object: \
-     `{\"camera\":{\"yaw\":35,\"pitch\":22},\"objects\":[{\"type\":\"box\",\"size\":[2,1,1],\"at\":[0,0,0]}]}`. \
-     Types: `box` (`size`), `sphere` (`r`), `cylinder`/`cone` (`r`, `h`), `torus` (`r`, `tube`), \
-     `plane` (`size`), `line` (`points`), `edge` (`from`/`to` — a line with an arrowhead \
-     at `to`, optional `\"dashed\": true`). Optional per object: `rot: [x,y,z]`, \
-     `color: accent|success|warning|danger|text|muted`, `opacity`, `wireframe`, `label` \
-     (text above the object — name the parts of a scene diagram with it). A soft \
-     contact shadow is drawn by default (`\"shadow\": false` opts out); `grid: true` / \
-     `axes: true` add reference geometry. It renders with three.js in a canvas the \
-     user can orbit by dragging.\n\
-     - Dynamic (motion or interaction beyond what `flow` animates): a fenced `html-fig` \
-     block (or an inline `<html-fig>…</html-fig>`) holding one self-contained HTML5 \
-     fragment — markup, `<style>` and `<script>`, with no external files: the frame's \
-     CSP blocks the network and every external `src`/`href`. A flowchart that must be \
-     *touched* (click a node to expand it, drag boxes) is an `html-fig`; a moving \
-     flowchart is `flow` with `anim`. It runs in a sandboxed frame whose \
-     `:root` already carries the app's tokens (`--c-bg`, `--c-surface`, \
-     `--c-surface-2`, `--c-text`, `--c-body`, `--c-muted`, `--c-border`, \
-     `--c-border-i`, `--c-accent`, `--c-accent-soft`, `--c-on-accent`, \
-     `--c-success`, `--c-warning`, `--c-danger`, `--c-code`), a 13px body on \
-     `--c-surface`, and `@media (prefers-reduced-motion: reduce)` is honoured. Size \
-     the drawing by its content — never `height: 100vh`, the card measures the frame \
-     and grows with it. Use it \
-     only when the figure must move or be touched; a static chart stays an `svg`, \
-     and an `html-fig` is saved as `.html` rather than PNG.\n\
-     - All four accept a title after the language on the fence line (`svg 抛体轨迹`) and a \
-     `#name` token used for the file name (`carve #orbit 椭圆轨道`).\n\
-     - Every figure gets a save button; images land in `<workspace>/figures/` as PNG, \
-     dynamic figures as `.html`."
+    "Figures: you can draw; users can save drawings.\n\
+     - `flow` (flowcharts): fenced JSON block with nodes/edges (no coordinates). \
+     Example: `{\"direction\":\"LR\",\"anim\":\"flow\",\"nodes\":[{\"id\":\"a\",\"label\":\"Start\",\"shape\":\"start\"},{\"id\":\"b\",\"label\":\"OK?\",\"shape\":\"decision\"},{\"id\":\"c\",\"label\":\"Ship\",\"tone\":\"accent\"}],\"edges\":[{\"from\":\"a\",\"to\":\"b\"},{\"from\":\"b\",\"to\":\"c\",\"label\":\"yes\"}]}`. \
+     Shapes: `process` (default), `start`/`end`, `decision`, `io`, `database`. \
+     Tones: `default`,`accent`,`success`,`warning`,`danger`. Edge `label` optional. \
+     `anim`: `flow` (edge packets), `step` (node sequence), or omit (static); `speed` 0.5–3. No self-loops; short labels. Prefer `flow` for flowcharts.\n\
+     - `svg` (2D): fenced `svg` block or inline `<svg>` with complete `<svg viewBox=\"0 0 W H\">`. \
+     Use UI tokens, not hex: `var(--c-accent)`, `currentColor`, `var(--c-text)`, `var(--c-muted)`, `var(--c-border-i)`, `fill-opacity` for shades. \
+     Scripts, `<foreignObject>`, `<image>`, `<a>`, handlers, and external `url()` are stripped.\n\
+     - `carve` (3D): fenced JSON block, e.g. `{\"camera\":{\"yaw\":35,\"pitch\":22},\"objects\":[{\"type\":\"box\",\"size\":[2,1,1],\"at\":[0,0,0]}]}`. \
+     Types: `box(size)`, `sphere(r)`, `cylinder/cone(r,h)`, `torus(r,tube)`, `plane(size)`, `line(points)`, `edge(from,to,dashed?)`. \
+     Object opts: `rot[x,y,z]`, `color` (accent|success|warning|danger|text|muted), `opacity`, `wireframe`, `label`. \
+     Scene opts: `shadow:false` to disable, `grid:true`, `axes:true`. Rendered with three.js (orbit by drag).\n\
+     - `html-fig` (dynamic/interactive): fenced or inline self-contained HTML fragment (`markup`/`<style>`/`<script>`), no external files/assets (CSP blocks network). \
+     Use only when motion/interaction is needed beyond `flow`; static charts use `svg`. \
+     Runs in sandboxed frame with app tokens (`--c-bg/surface/surface-2/text/body/muted/border/border-i/accent/accent-soft/on-accent/success/warning/danger/code`), 13px body on `--c-surface`, respects `prefers-reduced-motion`. \
+     Size by content (never `100vh`). Saved as `.html`.\n\
+     - Fence line may include title and `#name` (used as filename), e.g. `svg Projectile` or `carve #orbit Orbit`.\n\
+     - All figures have a save button: images -> `<workspace>/figures/*.png`, dynamic -> `<workspace>/figures/*.html`."
         .to_string()
 }
 
@@ -333,15 +303,11 @@ pub fn prompt_block() -> String {
 /// model has to get right by hand. Static like [`prompt_block`], for the same
 /// prompt-caching reason.
 pub fn mermaid_prompt_block() -> String {
-    "Diagrams — you can draw, and the transcript renders what you draw:\n\
-     - Use a fenced `mermaid` block holding Mermaid source: `flowchart`, `sequenceDiagram`, \
-     `classDiagram`, `stateDiagram-v2`, `erDiagram`, `gantt`, `pie`, `mindmap`, `timeline`. \
-     Example: a fence opened with `mermaid` followed by `flowchart LR` and `  A[request] --> B[gateway]`.\n\
-     - Put a title after the language on the fence line (`mermaid 请求链路`); it becomes the \
-     diagram caption.\n\
-     - Keep labels short, and quote any label holding parentheses, brackets or slashes: \
-     `A[\"GET /v1/chat (stream)\"]`.\n\
-     - Do not hand-write `<svg>` or `carve` blocks: Mermaid is the diagram format here."
+    "Diagrams: use a fenced `mermaid` block (rendered in transcript).\n\
+     - Supported: `flowchart`, `sequenceDiagram`, `classDiagram`, `stateDiagram-v2`, `erDiagram`, `gantt`, `pie`, `mindmap`, `timeline`. \
+     Example: ```mermaid / `flowchart LR` / `  A[request] --> B[gateway]```.\n\
+     - Fence title becomes caption (e.g. `mermaid Request flow`). Keep labels short; quote labels with `()[]/`, e.g. `A[\"GET /v1/chat (stream)\"]`.\n\
+     - Do not hand-write `<svg>` or `carve`; use Mermaid for diagrams."
         .to_string()
 }
 
