@@ -30,7 +30,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::llm_complete::{
-    apply_completion_token_limit, build_http_client, resolve_reasoning_effort,
+    apply_completion_token_limit, build_stream_client, resolve_reasoning_effort,
     sanitize_tool_pairs, stream_llm_request, upstream_request_headers, StreamOptions,
 };
 use crate::tools;
@@ -399,7 +399,7 @@ async fn run_inner(
         "{}/chat/completions",
         config.api_base_url.trim_end_matches('/')
     );
-    let client = build_http_client()?;
+    let client = build_stream_client()?;
     let headers = upstream_request_headers(&config, MISSION_ID);
     let started = Instant::now();
     let mut total_tokens: u32 = 0;

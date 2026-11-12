@@ -2320,6 +2320,31 @@ export default function App() {
           )
         );
       },
+      onRetry({ content, reasoning }) {
+        // The failed attempt's tokens were appended verbatim, so dropping its
+        // exact tail restores the accumulator to the pre-request state; the
+        // retry then re-streams the whole response. A tail that does not
+        // match (should not happen) is left in place rather than guessed at.
+        if (content && accumulatedContent.endsWith(content)) {
+          accumulatedContent = accumulatedContent.slice(
+            0,
+            accumulatedContent.length - content.length
+          );
+        }
+        if (reasoning && accumulatedReasoning.endsWith(reasoning)) {
+          accumulatedReasoning = accumulatedReasoning.slice(
+            0,
+            accumulatedReasoning.length - reasoning.length
+          );
+        }
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, content: accumulatedContent, reasoning_content: accumulatedReasoning }
+              : m
+          )
+        );
+      },
       onDone() {
         setBackgroundWaiting(0);
         // Settle the still-running steps before persisting: the transcript
@@ -2657,6 +2682,31 @@ export default function App() {
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId ? { ...m, reasoning_content: accumulatedReasoning } : m
+          )
+        );
+      },
+      onRetry({ content, reasoning }) {
+        // The failed attempt's tokens were appended verbatim, so dropping its
+        // exact tail restores the accumulator to the pre-request state; the
+        // retry then re-streams the whole response. A tail that does not
+        // match (should not happen) is left in place rather than guessed at.
+        if (content && accumulatedContent.endsWith(content)) {
+          accumulatedContent = accumulatedContent.slice(
+            0,
+            accumulatedContent.length - content.length
+          );
+        }
+        if (reasoning && accumulatedReasoning.endsWith(reasoning)) {
+          accumulatedReasoning = accumulatedReasoning.slice(
+            0,
+            accumulatedReasoning.length - reasoning.length
+          );
+        }
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, content: accumulatedContent, reasoning_content: accumulatedReasoning }
+              : m
           )
         );
       },

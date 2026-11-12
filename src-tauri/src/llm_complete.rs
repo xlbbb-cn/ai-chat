@@ -581,6 +581,9 @@ mod tests {
             format!("{MID_TURN_INJECTION_PREFIX}\nstop"),
             format!("{BACKGROUND_RESULT_PREFIX}\noutput"),
             format!("{CONTEXT_BUDGET_MARKER}\nstop"),
+            format!("{CONTEXT_CONTINUE_MARKER}\ncontinue"),
+            format!("{CONTEXT_LENGTH_MARKER}\ncontinue"),
+            format!("{CONTEXT_GOAL_MARKER}\ncontinue"),
         ] {
             assert!(
                 !is_frontend_user_message(&json!({ "role": "user", "content": notice })),
@@ -757,6 +760,53 @@ mod tests {
     }
 
     #[test]
+    fn retryable_statuses_cover_the_transient_relay_errors() {
+        for status in [408, 429, 500, 502, 503, 504, 529] {
+            assert!(
+                is_retryable_status(reqwest::StatusCode::from_u16(status).unwrap()),
+                "{status} should be retryable"
+            );
+        }
+        for status in [400, 401, 403, 404, 422] {
+            assert!(
+                !is_retryable_status(reqwest::StatusCode::from_u16(status).unwrap()),
+                "{status} must not be retried"
+            );
+        }
+    }
+
+    #[test]
+    fn retry_after_header_parses_seconds_and_caps() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        assert_eq!(parse_retry_after_header(&headers), None);
+
+        headers.insert("retry-after", "7".parse().unwrap());
+        assert_eq!(parse_retry_after_header(&headers), Some(Duration::from_secs(7)));
+
+        // Hostile values are capped so a header cannot stall the turn.
+        headers.insert("retry-after", "9999".parse().unwrap());
+        assert_eq!(
+            parse_retry_after_header(&headers),
+            Some(Duration::from_secs(30))
+        );
+
+        // The HTTP-date form is deliberately ignored (falls back to backoff).
+        headers.insert(
+            "retry-after",
+            "Wed, 21 Oct 2026 07:28:00 GMT".parse().unwrap(),
+        );
+        assert_eq!(parse_retry_after_header(&headers), None);
+    }
+
+    #[test]
+    fn premature_connection_close_is_retryable() {
+        // hyper's message when a chunked body ends before the terminator.
+        assert!(is_retryable_network_error(
+            "error sending request for url (https://relay/v1): connection closed before message completed"
+        ));
+    }
+
+    #[test]
     fn estimate_prompt_tokens_counts_messages_and_tools() {
         let messages = vec![
             json!({ "role": "user", "content": "abcdefgh" }),
@@ -911,6 +961,23 @@ const CONTEXT_BUDGET_MARKER: &str = "INTERNAL CONTEXT - TURN BUDGET";
 /// never ends silently.
 const BUDGET_FALLBACK_ANSWER: &str =
     "The turn stopped after reaching its tool budget without a written answer. Narrow the request, or raise the limit in Settings → Advanced.";
+/// Marks the backend nudge pushed when the model tried to end the turn while
+/// the session's todo list still has unfinished items (goal loop). A user-role
+/// message excluded from frontend-history counting like the other notices.
+const CONTEXT_GOAL_MARKER: &str = "INTERNAL CONTEXT - GOAL LOOP";
+/// Marks the backend nudge pushed when the response hit the provider's output
+/// token cap (`finish_reason: "length"`) mid-answer.
+const CONTEXT_LENGTH_MARKER: &str = "INTERNAL CONTEXT - OUTPUT TRUNCATED";
+/// The explicit end-of-turn marker the model writes into its final answer to
+/// conclude a goal loop (or stop while items are still open, e.g. blocked).
+/// Keep in sync with the goal-loop prompt wording below.
+const GOAL_DONE_MARKER: &str = "[goal:DONE]";
+/// Upper bound of goal-loop continuations per turn. Each one spends a round
+/// anyway, but a model that keeps answering without working must not loop
+/// forever even with an unlimited round budget.
+const GOAL_LOOP_MAX_NUDGES: u32 = 4;
+/// Upper bound of continuation requests after a `length` truncation.
+const MAX_LENGTH_CONTINUES: u32 = 2;
 const CONTEXT_SUMMARY_MAX_LINES: usize = 120;
 /// Hard cap on a generated (LLM) summary. Dense output; cutting further is
 /// the sign the summarizer ignored the prompt — better a truncated summary
@@ -1441,6 +1508,7 @@ fn is_retryable_network_error(err: &str) -> bool {
     let patterns = [
         "socket connection was closed unexpectedly",
         "connection reset",
+        "connection closed",
         "broken pipe",
         "connection aborted",
         "timed out",
@@ -1450,6 +1518,27 @@ fn is_retryable_network_error(err: &str) -> bool {
         "stream error",
     ];
     patterns.iter().any(|p| lower.contains(p))
+}
+
+/// Transient HTTP statuses worth retrying with backoff. Relays answer with
+/// 429/5xx far more often than with network-level errors, and matching the
+/// error body alone ("timed out", …) misses every one of them — a mid-turn
+/// rate limit or overload then killed the whole turn for no reason.
+fn is_retryable_status(status: reqwest::StatusCode) -> bool {
+    matches!(status.as_u16(), 408 | 429 | 500 | 502 | 503 | 504 | 529)
+}
+
+/// `Retry-After` as delta-seconds (the HTTP-date form is ignored). Capped so a
+/// hostile header cannot stall the turn for minutes.
+fn parse_retry_after_header(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
+    let value = headers
+        .get(reqwest::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse::<u64>()
+        .ok()?;
+    Some(Duration::from_secs(value.min(30)))
 }
 
 pub(crate) fn extract_upstream_error_message(body: &str) -> String {
@@ -1472,6 +1561,26 @@ pub(crate) fn build_http_client() -> Result<Client, String> {
     Client::builder()
         .connect_timeout(Duration::from_secs(12))
         .timeout(Duration::from_secs(300))
+        .pool_idle_timeout(Duration::from_secs(90))
+        .tcp_keepalive(Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {e}"))
+}
+
+/// Client for streaming chat requests.
+///
+/// Unlike [`build_http_client`] there is NO total request timeout: reqwest's
+/// `timeout` covers the whole response body, which for an SSE stream is the
+/// entire generation — a thinking model (or a slow relay) that streams longer
+/// than the limit died mid-answer no matter how healthy the connection was.
+/// Liveness is enforced per read instead: [`ClientBuilder::read_timeout`]
+/// fails when no bytes arrive for the interval, so a stalled upstream errors
+/// quickly (and retries) while a slow-but-alive stream may run arbitrarily
+/// long. Every caller that runs `stream_llm_request` must use this builder.
+pub(crate) fn build_stream_client() -> Result<Client, String> {
+    Client::builder()
+        .connect_timeout(Duration::from_secs(12))
+        .read_timeout(Duration::from_secs(120))
         .pool_idle_timeout(Duration::from_secs(90))
         .tcp_keepalive(Duration::from_secs(60))
         .build()
@@ -1916,8 +2025,8 @@ fn extract_summary_body(content: &str) -> Option<String> {
 /// backend-generated notice? Pinned blocks (skills context, summaries, todo
 /// lists, mission reports) are classified before this check; what remains to
 /// exclude are the mid-turn injection, background results, the turn-budget
-/// marker and the post-compression continuation nudge, each with a stable
-/// text prefix.
+/// marker, the post-compression continuation nudge, the output-truncation
+/// continuation and the goal-loop nudge — each with a stable text prefix.
 fn is_frontend_user_message(msg: &Value) -> bool {
     if msg.get("role").and_then(|v| v.as_str()) != Some("user") {
         return false;
@@ -1927,6 +2036,8 @@ fn is_frontend_user_message(msg: &Value) -> bool {
         && !text.starts_with(BACKGROUND_RESULT_PREFIX)
         && !text.starts_with(CONTEXT_BUDGET_MARKER)
         && !text.starts_with(CONTEXT_CONTINUE_MARKER)
+        && !text.starts_with(CONTEXT_LENGTH_MARKER)
+        && !text.starts_with(CONTEXT_GOAL_MARKER)
 }
 
 /// Count the frontend (UI) messages inside a message slice — the coverage a
@@ -2686,6 +2797,28 @@ pub(crate) fn ensure_reasoning_passthrough(req_body: &mut Value, ds_format: bool
 
 // ─── Unified streaming helper ─────────────────────────────────────────────────
 
+/// Announced before a streaming attempt is retried: the payload is the exact
+/// text the failed attempt had streamed, so the frontend can truncate its
+/// accumulator by that tail and the retry re-streams the response cleanly
+/// (without it, regenerated tokens would be appended after the partial text).
+const CHAT_RETRY_EVENT: &str = "chat-retry";
+
+fn announce_stream_retry(
+    app: &AppHandle,
+    opts: &StreamOptions<'_>,
+    content: &str,
+    reasoning: &str,
+) {
+    // Main chat only: sub-agent tokens land in task rows that have no clear
+    // event, and UI-less callers (summaries, planner) have nothing to clear.
+    if opts.task_id.is_none() && opts.emit_tokens {
+        let _ = app.emit(
+            CHAT_RETRY_EVENT,
+            json!({ "content": content, "reasoning": reasoning }),
+        );
+    }
+}
+
 /// Stream one completion request according to `opts`.
 /// Returns StreamResult with finish_reason, accumulated tool_calls, content, and token counts.
 pub async fn stream_llm_request(
@@ -2729,12 +2862,18 @@ pub async fn stream_llm_request(
         };
 
         if !res.status().is_success() {
+            let status = res.status();
+            let retry_after = parse_retry_after_header(res.headers());
             let err_body = res.text().await.unwrap_or_default();
             let err = extract_upstream_error_message(&err_body);
-            let retryable = is_retryable_http_error_body(&err_body) && attempt < STREAM_MAX_RETRIES;
+            let retryable = (is_retryable_http_error_body(&err_body) || is_retryable_status(status))
+                && attempt < STREAM_MAX_RETRIES;
             last_err = Some(err.clone());
             if retryable {
-                tokio::time::sleep(Duration::from_millis(retry_backoff_ms(attempt))).await;
+                tokio::time::sleep(
+                    retry_after.unwrap_or_else(|| Duration::from_millis(retry_backoff_ms(attempt))),
+                )
+                .await;
                 continue;
             }
             if opts.emit_errors {
@@ -2751,6 +2890,7 @@ pub async fn stream_llm_request(
         let mut completion_tokens: u32 = 0;
         let mut cached_tokens: Option<u32> = None;
         let mut got_tool_calls = false;
+        let mut saw_done = false;
         let mut stream_error: Option<String> = None;
 
         let mut stream = res.bytes_stream();
@@ -2773,10 +2913,17 @@ pub async fn stream_llm_request(
                 Ok(bytes) => bytes,
                 Err(err) => {
                     let err = err.to_string();
+                    // A connection that drops mid-stream is retried even when
+                    // tokens already arrived: the `chat-retry` event carries
+                    // exactly what this attempt streamed, so a UI appending
+                    // tokens live can drop that tail before the retry
+                    // re-streams the response. Sub-agent task rows have no
+                    // clear event yet, so they keep the fail-fast path when
+                    // something was already streamed.
                     let can_retry = is_retryable_network_error(&err)
-                        && content.is_empty()
-                        && tool_calls.is_empty()
-                        && attempt < STREAM_MAX_RETRIES;
+                        && attempt < STREAM_MAX_RETRIES
+                        && (opts.task_id.is_none()
+                            || (content.is_empty() && tool_calls.is_empty()));
                     if can_retry {
                         stream_error = Some(err);
                         break 'stream_loop;
@@ -2806,13 +2953,20 @@ pub async fn stream_llm_request(
                 if line.is_empty() {
                     continue;
                 }
-                if line == "data: [DONE]" {
-                    break 'stream_loop;
-                }
-                let Some(json_str) = line.strip_prefix("data: ") else {
+                // SSE payloads tolerate a missing space after the colon; some
+                // relays send `data:[DONE]` / `data:{...}` without one, and the
+                // old exact `data: ` match silently dropped those lines.
+                let Some(payload) = line.strip_prefix("data:").map(str::trim_start) else {
                     continue;
                 };
-                let Ok(parsed) = serde_json::from_str::<Value>(json_str) else {
+                if payload == "[DONE]" {
+                    saw_done = true;
+                    break 'stream_loop;
+                }
+                if payload.is_empty() {
+                    continue;
+                }
+                let Ok(parsed) = serde_json::from_str::<Value>(payload) else {
                     continue;
                 };
                 process_stream_chunk(
@@ -2833,31 +2987,66 @@ pub async fn stream_llm_request(
         }
 
         let trailing_line = buffer.trim();
-        if !trailing_line.is_empty() && trailing_line != "data: [DONE]" {
-            if let Some(json_str) = trailing_line.strip_prefix("data: ") {
-                if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
-                    process_stream_chunk(
-                        app,
-                        &parsed,
-                        &opts,
-                        &mut finish_reason,
-                        &mut tool_calls,
-                        &mut content,
-                        &mut reasoning_content,
-                        &mut prompt_tokens,
-                        &mut completion_tokens,
-                        &mut cached_tokens,
-                        &mut got_tool_calls,
-                        &mut meter,
-                    );
+        if !trailing_line.is_empty() {
+            if let Some(payload) = trailing_line.strip_prefix("data:").map(str::trim_start) {
+                if payload == "[DONE]" {
+                    saw_done = true;
+                } else if !payload.is_empty() {
+                    if let Ok(parsed) = serde_json::from_str::<Value>(payload) {
+                        process_stream_chunk(
+                            app,
+                            &parsed,
+                            &opts,
+                            &mut finish_reason,
+                            &mut tool_calls,
+                            &mut content,
+                            &mut reasoning_content,
+                            &mut prompt_tokens,
+                            &mut completion_tokens,
+                            &mut cached_tokens,
+                            &mut got_tool_calls,
+                            &mut meter,
+                        );
+                    }
                 }
             }
         }
 
         if let Some(err) = stream_error {
+            // Announce AFTER the trailing-line processing above, so the
+            // payload covers everything this attempt streamed (a chunk
+            // boundary can split the error from a complete final line).
+            announce_stream_retry(app, &opts, &content, &reasoning_content);
             last_err = Some(err);
             tokio::time::sleep(Duration::from_millis(retry_backoff_ms(attempt))).await;
             continue;
+        }
+
+        // ── Stream completeness evidence ────────────────────────────────────
+        // A stream that ends without an explicit `finish_reason` or the
+        // `[DONE]` sentinel was cut off (a proxy closed the connection early;
+        // a clean EOF is indistinguishable from a complete body). Ending the
+        // turn there silently truncated the reply, so treat it as an error:
+        // retryable when nothing usable arrived, a visible failure otherwise.
+        if finish_reason.is_empty() && !saw_done {
+            let err = format!(
+                "stream closed without finish_reason/[DONE] (received {} chars, {} tool call(s))",
+                content.chars().count(),
+                tool_calls.len()
+            );
+            let can_retry = attempt < STREAM_MAX_RETRIES
+                && (opts.task_id.is_none()
+                    || (content.is_empty() && tool_calls.is_empty()));
+            last_err = Some(err.clone());
+            if can_retry {
+                announce_stream_retry(app, &opts, &content, &reasoning_content);
+                tokio::time::sleep(Duration::from_millis(retry_backoff_ms(attempt))).await;
+                continue;
+            }
+            if opts.emit_errors {
+                let _ = app.emit("chat-error", err.clone());
+            }
+            return Err(err);
         }
 
         // Sub-agent mode: clear tool_calls if the LLM never signalled tool use
@@ -3734,7 +3923,12 @@ async fn run_chat_turn(
         while it has unfinished items. Continue from an existing list and move items \
         `pending` → `in_progress` → `completed` as you work; `add` items when a new \
         multi-step task begins. The UI mirrors every change live, so never leave stale \
-        items behind.";
+        items behind. \
+        GOAL LOOP: while the list has unfinished items, a final answer does NOT end the \
+        turn — it is continued automatically so you keep working; do not write a final \
+        summary with goals open. End the turn explicitly by writing [goal:DONE] in your \
+        final answer, either when the goal is fully reached or when you are blocked and \
+        need the user (state plainly what is blocking you).";
         if !system_content.is_empty() {
             system_content.push_str("\n\n");
         }
@@ -3925,7 +4119,9 @@ async fn run_chat_turn(
         "{}/chat/completions",
         config.api_base_url.trim_end_matches('/')
     );
-    let client = build_http_client()?;
+    // Streaming client: no total timeout (a long thinking turn must not die at
+    // 300 s), liveness via read_timeout instead. See `build_stream_client`.
+    let client = build_stream_client()?;
     // Resolved once per turn so every round and retry of this session carries
     // the same conversation id (and the same custom headers).
     let request_headers = upstream_request_headers(&config, &session_id);
@@ -3976,6 +4172,16 @@ async fn run_chat_turn(
     let mut loaded_this_turn: std::collections::HashSet<String> = std::collections::HashSet::new();
     // How many times this turn has been held open for background results.
     let mut background_hold_rounds: u32 = 0;
+    // Goal-loop continuations this turn (todo list still unfinished).
+    let mut goal_nudges: u32 = 0;
+    // Continuations after a `finish_reason: "length"` truncation.
+    let mut length_continues: u32 = 0;
+    // The goal loop only applies while the todos tool is part of the payload
+    // (same condition as the TODOS guidance block above).
+    let todos_tool_enabled = config
+        .selected_tools
+        .iter()
+        .any(|t| t == "todo_list" || t == "todo");
 
     // ── Turn budget & tool failure guard ────────────────────────────────────
     // The loop below is model-driven: it repeats for as long as the reply
@@ -4519,6 +4725,32 @@ still missing."
             break;
         }
 
+        // ── Tool-round determination ─────────────────────────────────────────
+        // A round is authoritative in two dialects: the standard
+        // `finish_reason: "tool_calls"`, and relays that stream the calls but
+        // close the chunk stream with "stop" (or no finish_reason at all).
+        // Dropping the accumulated calls on the non-standard dialects ended
+        // the turn mid-task without a tool ever running — execute the round
+        // instead, and log when the dialect was non-standard so the relay can
+        // be identified in app.log. "length" is excluded: cut-off arguments
+        // are regenerated by the continuation below, never executed.
+        let tool_round = !sr.tool_calls.is_empty()
+            && (sr.finish_reason == "tool_calls"
+                || sr.finish_reason == "stop"
+                || sr.finish_reason.is_empty());
+        if tool_round && sr.finish_reason != "tool_calls" {
+            log_event(
+                &state,
+                "WARN",
+                format!(
+                    "tool calls arrived with finish_reason '{}', executing the round anyway: session_id={}, calls={}",
+                    if sr.finish_reason.is_empty() { "(none)" } else { &sr.finish_reason },
+                    session_id,
+                    sr.tool_calls.len()
+                ),
+            );
+        }
+
         // ── Wrap-up answer ───────────────────────────────────────────────────
         // The budget was spent before this request, so it went out with
         // `tool_choice: "none"`: whatever comes back is the answer for this
@@ -4533,6 +4765,74 @@ still missing."
             break;
         }
 
+        // ── Output-truncation continuation ──────────────────────────────────
+        // `finish_reason: "length"` means the provider cut the response at the
+        // output token cap — with thinking models that cap includes the
+        // reasoning, so the answer can be empty or cut mid-sentence, and
+        // streamed tool-call arguments can be truncated. Ending the turn here
+        // silently delivered half an answer; a bounded continuation lets the
+        // model pick up where it stopped. Truncated tool calls are never
+        // executed (see `tool_round`); the model regenerates them.
+        if sr.finish_reason == "length" {
+            if length_continues < MAX_LENGTH_CONTINUES {
+                length_continues += 1;
+                if !sr.content.is_empty() {
+                    let mut assistant_msg = json!({
+                        "role": "assistant",
+                        "content": sr.content,
+                    });
+                    if !sr.reasoning_content.is_empty() {
+                        assistant_msg["reasoning_content"] = json!(sr.reasoning_content);
+                    }
+                    all_messages.push(assistant_msg);
+                }
+                all_messages.push(json!({
+                    "role": "user",
+                    "content": format!(
+                        "{CONTEXT_LENGTH_MARKER}\nThe previous response was cut off by the output token limit \
+(finish_reason \"length\"{}). Continue from exactly where it stopped — do not repeat what is already written.",
+                        if sr.tool_calls.is_empty() {
+                            String::new()
+                        } else {
+                            format!(
+                                "; {} truncated tool call(s) were discarded and must be re-issued completely",
+                                sr.tool_calls.len()
+                            )
+                        }
+                    ),
+                }));
+                let _ = app.emit(
+                    "chat-token",
+                    format!(
+                        "\n\n[System] Output hit the token limit (continuation {length_continues}/{MAX_LENGTH_CONTINUES}) — continuing.\n\n"
+                    ),
+                );
+                log_event(
+                    &state,
+                    "WARN",
+                    format!(
+                        "output truncated by max_tokens, continuing: session_id={}, continuation={length_continues}, content_chars={}",
+                        session_id,
+                        sr.content.chars().count()
+                    ),
+                );
+                continue;
+            }
+            let _ = app.emit(
+                "chat-token",
+                "\n\n[System] Output hit the token limit again — ending the turn with the truncated answer.\n\n",
+            );
+            log_event(
+                &state,
+                "WARN",
+                format!(
+                    "output truncated by max_tokens, continuation budget spent: session_id={session_id}"
+                ),
+            );
+            // Fall through: the final-answer branch ends the turn with what
+            // the model managed to produce.
+        }
+
         // After compression, the previous response was generated against the
         // full (uncompressed) context. If that response was a final answer
         // (no tool calls), the task is *not* yet finished — re-enter the loop
@@ -4540,7 +4840,7 @@ still missing."
         // continue. When the response carries tool calls, fall through to
         // execute them; the next iteration will naturally use the compressed
         // context.
-        if compressed_this_turn && (sr.finish_reason != "tool_calls" || sr.tool_calls.is_empty()) {
+        if compressed_this_turn && !tool_round {
             if !sr.content.is_empty() {
                 let mut assistant_msg = json!({
                     "role": "assistant",
@@ -4568,7 +4868,7 @@ still missing."
             continue;
         }
 
-        if sr.finish_reason != "tool_calls" || sr.tool_calls.is_empty() {
+        if !tool_round {
             // A background task started earlier in this turn may produce its
             // result only after this answer was generated. Delivering a final
             // answer that ignores that output would be wrong, so the turn is
@@ -4634,6 +4934,73 @@ still missing."
                         tools::background::BACKGROUND_TASK_STATE_EVENT,
                         snapshot,
                     );
+                }
+            }
+
+            // ── Goal loop ────────────────────────────────────────────────────
+            // With the todos tool enabled, a final answer does not end the
+            // turn while the session's list still has unfinished items: the
+            // model is nudged back to work (bounded), and it ends the turn
+            // explicitly by writing [goal:DONE] into its final answer —
+            // either because the goal is fully reached, or because it is
+            // blocked and needs the user.
+            if todos_tool_enabled
+                && !sr.content.contains(GOAL_DONE_MARKER)
+                && goal_nudges < GOAL_LOOP_MAX_NUDGES
+            {
+                let workspace_dir = state.workspace_dir.lock().unwrap().clone();
+                let fresh_list = todos::active_list_snapshot(&workspace_dir, &session_id)
+                    .ok()
+                    .flatten();
+                let unfinished = fresh_list
+                    .as_ref()
+                    .map(|list| list.pending + list.in_progress > 0)
+                    .unwrap_or(false);
+                if unfinished {
+                    goal_nudges += 1;
+                    if !sr.content.is_empty() {
+                        let mut assistant_msg = json!({
+                            "role": "assistant",
+                            "content": sr.content,
+                        });
+                        if !sr.reasoning_content.is_empty() {
+                            assistant_msg["reasoning_content"] = json!(sr.reasoning_content);
+                        }
+                        all_messages.push(assistant_msg);
+                    }
+                    // Re-render from the FRESH snapshot: the model may have
+                    // just completed items through the todos tool, so the
+                    // block injected at turn start is stale.
+                    let list_block = fresh_list
+                        .as_ref()
+                        .and_then(|list| todos::render_list_block(list))
+                        .unwrap_or_else(|| {
+                            "The active todo list still has unfinished items.".to_string()
+                        });
+                    all_messages.push(json!({
+                        "role": "user",
+                        "content": format!(
+                            "{CONTEXT_GOAL_MARKER}\nYour final answer did not end the turn: the todo \
+list still has unfinished items.\n\n{list_block}\n\nContinue working on them now — use your tools, \
+and update the list (pending → in_progress → completed) as you go. End your reply with [goal:DONE] \
+only when every item is done, or when you are blocked and need the user."
+                        ),
+                    }));
+                    let _ = app.emit(
+                        "chat-token",
+                        format!(
+                            "\n\n[System] Todo list still has unfinished items (continuation {goal_nudges}/{GOAL_LOOP_MAX_NUDGES}) — continuing.\n\n"
+                        ),
+                    );
+                    log_event(
+                        &state,
+                        "INFO",
+                        format!(
+                            "goal loop: todo list unfinished, continuing: session_id={}, nudge={goal_nudges}",
+                            session_id
+                        ),
+                    );
+                    continue;
                 }
             }
 
@@ -4884,7 +5251,7 @@ still missing."
                         "{}/chat/completions",
                         config.api_base_url.trim_end_matches('/')
                     );
-                    match build_http_client() {
+                    match build_stream_client() {
                         Ok(client) => {
                             if config.background_tools && background_requested(&background_args) {
                                 let agent = agent.clone();

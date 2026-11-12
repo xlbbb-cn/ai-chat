@@ -488,6 +488,13 @@ export async function stopServeProcess(serveId: string): Promise<string> {
 export interface StreamCallbacks {
   onToken: (token: string) => void;
   onReasoningToken?: (token: string) => void;
+  /**
+   * The backend retried a failed streaming attempt. The payload is the exact
+   * text the failed attempt had streamed — drop it from the running
+   * accumulator so the retry's regenerated tokens are not appended after the
+   * partial text of the dead attempt.
+   */
+  onRetry?: (payload: { content: string; reasoning: string }) => void;
   onDone: () => void;
   onError: (err: string) => void;
   onAgentTaskStart?: (e: AgentTaskEvent) => void;
@@ -548,6 +555,12 @@ export async function chatCompletion(
       callbacks.onReasoningToken(e.payload);
     }
   });
+  const unRetry = await listen<{ content: string; reasoning: string }>(
+    "chat-retry",
+    (e) => {
+      callbacks.onRetry?.(e.payload);
+    },
+  );
   const unDone = await listen<void>("chat-done", () => {
     finish();
   });
@@ -570,7 +583,7 @@ export async function chatCompletion(
     callbacks.onAgentAggregateDone?.(e.payload?.task_count ?? 0);
   });
 
-  unlisteners.push(unToken, unReasoning, unDone, unError, unTaskStart, unTaskDone, unTaskError, unPlanStart, unAggDone);
+  unlisteners.push(unToken, unReasoning, unRetry, unDone, unError, unTaskStart, unTaskDone, unTaskError, unPlanStart, unAggDone);
 
   invoke("chat_completion", {
     messages: messages.map((m) => ({

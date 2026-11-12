@@ -15,7 +15,7 @@ const LLM_DEFAULT_MAX_COMLETE_TOKENS: u32 = 8_192;
 use crate::{
     db::EmbeddedRole,
     llm_complete::{
-        apply_completion_token_limit, apply_request_headers, content_to_text,
+        apply_completion_token_limit, apply_request_headers, build_stream_client, content_to_text,
         extract_upstream_error_message, has_authorization_header, resolve_reasoning_effort,
         sanitize_tool_pairs, stream_llm_request, upstream_request_headers, StreamOptions,
     },
@@ -2332,7 +2332,10 @@ pub async fn orchestrate(
         return Err("No enabled sub-agents configured".to_string());
     }
 
-    let client = Client::new();
+    // Streaming client (planning calls are streamed too): adds the connect +
+    // read timeouts `Client::new()` has none of, so a stalled gateway fails
+    // and retries instead of hanging the whole turn.
+    let client = build_stream_client()?;
     let url = format!(
         "{}/chat/completions",
         config.api_base_url.trim_end_matches('/')
