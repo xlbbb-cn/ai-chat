@@ -1,26 +1,26 @@
-# AI Chat
+# Rabbit Chat Studio
 
 **把任意 OpenAI 兼容模型变成工作区感知的桌面 Agent —— Skills、工具与 Sub-Agent 开箱即用，每一次请求都留在本机可查。**
 
 [Wiki](https://github.com/xlbbb-cn/ai-chat/wiki) · [English](./README.md) · [最新版本](https://github.com/xlbbb-cn/ai-chat/releases/latest) · [快速开始](#快速开始)
 
-![AI Chat —— 大模型负责规划，本地工具负责执行](docs/banner.png)
+![Rabbit Chat Studio —— 大模型负责规划，本地工具负责执行](docs/banner.png)
 
 <p align="center">
-  <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/AI-Chat-Windows-x64-setup.exe"><img alt="下载 Windows 安装包" src="https://img.shields.io/badge/Download-Windows%20.exe-3E6AE1?style=for-the-badge&logo=windows11&logoColor=white" height="38"></a>
+  <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/Rabbit-Chat-Studio-Windows-x64-setup.exe"><img alt="下载 Windows 安装包" src="https://img.shields.io/badge/Download-Windows%20.exe-3E6AE1?style=for-the-badge&logo=windows11&logoColor=white" height="38"></a>
   &nbsp;
-  <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/AI-Chat-macOS-Apple-Silicon.dmg"><img alt="下载 macOS 安装包" src="https://img.shields.io/badge/Download-macOS%20.dmg-3E6AE1?style=for-the-badge&logo=apple&logoColor=white" height="38"></a>
+  <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/Rabbit-Chat-Studio-macOS-Apple-Silicon.dmg"><img alt="下载 macOS 安装包" src="https://img.shields.io/badge/Download-macOS%20.dmg-3E6AE1?style=for-the-badge&logo=apple&logoColor=white" height="38"></a>
   &nbsp;
-  <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/AI-Chat-Linux-x86_64.AppImage"><img alt="下载 Linux 安装包" src="https://img.shields.io/badge/Download-Linux%20.AppImage-3E6AE1?style=for-the-badge&logo=linux&logoColor=white" height="38"></a>
+  <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/Rabbit-Chat-Studio-Linux-x86_64.AppImage"><img alt="下载 Linux 安装包" src="https://img.shields.io/badge/Download-Linux%20.AppImage-3E6AE1?style=for-the-badge&logo=linux&logoColor=white" height="38"></a>
 </p>
 
 <p align="center">
-  <code>winget install Leonard.AIChat</code> &nbsp;·&nbsp; <code>brew install --cask ai-chat</code> &nbsp;·&nbsp; <code>scoop install ai-chat</code><br>
-  <sub>Windows 的 winget 清单仍在审核中（<a href="https://github.com/microsoft/winget-pkgs/pull/458061">winget-pkgs#458061</a>）；Homebrew 与 Scoop 清单尚未发布，当前请直接使用上方安装包。Intel Mac 请下载 <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/AI-Chat-macOS-Intel.dmg">.dmg</a>。</sub>
+  <code>winget install XLBBB.RabbitChatStudio</code> &nbsp;·&nbsp; <code>brew install --cask rabbit-chat-studio</code> &nbsp;·&nbsp; <code>scoop install rabbit-chat-studio</code><br>
+  <sub>Windows 的 winget 清单仍在审核中（<a href="https://github.com/microsoft/winget-pkgs/pull/458061">winget-pkgs#458061</a>）；Homebrew 与 Scoop 清单尚未发布，当前请直接使用上方安装包。Intel Mac 请下载 <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/Rabbit-Chat-Studio-macOS-Intel.dmg">.dmg</a>。</sub>
 </p>
 
 <p align="center">
-  <a href="./LICENSE"><img alt="许可证：GPL-2.0-only" src="https://img.shields.io/badge/license-GPL--2.0-blue.svg"></a>
+  <a href="./LICENSE"><img alt="许可证：MIT" src="https://img.shields.io/badge/license-MIT-green.svg"></a>
   <a href="https://github.com/xlbbb-cn/ai-chat/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/xlbbb-cn/ai-chat?style=social"></a>
   <a href="https://github.com/xlbbb-cn/ai-chat/issues"><img alt="GitHub issues" src="https://img.shields.io/github/issues/xlbbb-cn/ai-chat"></a>
   <a href="https://github.com/xlbbb-cn/ai-chat/pulls"><img alt="GitHub pull requests" src="https://img.shields.io/github/issues-pr/xlbbb-cn/ai-chat"></a>
@@ -29,11 +29,11 @@
 
 ## 差异点
 
-聊天只是起点。AI Chat 给 Agent 一个工作区、一套真正可用的工具（记忆、定时器、待办），以及可查的执行记录 —— 并且不替用户设定人设。
+聊天只是起点。Rabbit Chat Studio 给 Agent 一个工作区、一套真正可用的工具（记忆、定时器、待办），以及可查的执行记录 —— 并且不替用户设定人设。
 
 **核心初衷：** 第一性原理；把自由还给用户（工具、LLM API、提示词）；界面简约、专业。
 
-| 能力 | **AI Chat** | DeepSeek Harness | Cherry Studio | Chatbox | LM Studio |
+| 能力 | **Rabbit Chat Studio** | DeepSeek Harness | Cherry Studio | Chatbox | LM Studio |
 | --- | :---: | :---: | :---: | :---: | :---: |
 | **Skills 沙箱** —— 每个工作区**唯一**的技能根目录 `.data/skills`，根目录锁定在自身 `SKILL.md` | ✅ | ✅ 系统级沙箱工作区 | ◐ Agent 工作区 | — | — |
 | **自我进化** —— 助手自行安装/修改/删除技能，并把已验证的关键事实存进专属记忆区 | ✅ | ◐ 对话式创建插件 | — | — | — |
@@ -68,7 +68,7 @@
 
 ## 项目介绍
 
-AI Chat 是一个桌面端 AI 助手应用，支持接入任意 OpenAI 兼容模型服务。它不仅能聊天，还能通过技能（Skills）和工具（Tools）扩展能力，并且在本地保存配置、历史会话与请求日志，适合个人效率场景与工程化实验场景。
+Rabbit Chat Studio 是一个桌面端 AI 助手应用，支持接入任意 OpenAI 兼容模型服务。它不仅能聊天，还能通过技能（Skills）和工具（Tools）扩展能力，并且在本地保存配置、历史会话与请求日志，适合个人效率场景与工程化实验场景。
 
 适用场景：
 
@@ -262,7 +262,7 @@ npm run tauri build
 
 ### C. 安装方式
 
-- Windows：`winget install --id Leonard.AIChat -e`，或运行 bundle 目录中的 NSIS 安装包
+- Windows：`winget install --id XLBBB.RabbitChatStudio -e`，或运行 bundle 目录中的 NSIS 安装包
 - macOS：使用 .app / .dmg（按构建目标）
 - Linux：使用 .deb / .AppImage / .rpm（按构建目标）
 
@@ -335,7 +335,7 @@ git push origin v2.0.0
 ## 项目结构
 
 ```text
-ai-chat/
+rabbit-chat-studio/
 ├─ src/                 # React 前端
 ├─ src-tauri/           # Rust + Tauri 后端
 │  ├─ src/lib.rs        # 应用入口与命令注册
@@ -397,5 +397,5 @@ ai-chat/
 
 ## 许可证
 
-本项目采用 GNU 通用公共许可证第 2 版（GPL-2.0-only）授权，详见 `LICENSE` 文件。
+本项目采用 MIT 许可证授权，详见 `LICENSE` 文件。
 

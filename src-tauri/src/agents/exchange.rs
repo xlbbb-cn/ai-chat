@@ -318,7 +318,7 @@ mod tests {
 
     fn temp_workspace(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
-            "ai-chat-exchange-{tag}-{}",
+            "rabbit-chat-studio-exchange-{tag}-{}",
             Uuid::new_v4().simple()
         ));
         fs::create_dir_all(&dir).unwrap();

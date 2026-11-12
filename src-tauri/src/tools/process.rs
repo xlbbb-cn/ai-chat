@@ -712,7 +712,7 @@ mod tests {
         use std::fs;
 
         let workspace = std::env::temp_dir().join(format!(
-            "ai-chat-run-script-{}",
+            "rabbit-chat-studio-run-script-{}",
             uuid::Uuid::new_v4()
         ));
         let scripts_dir = crate::workspace::scripts_root(&workspace);

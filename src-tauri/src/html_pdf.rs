@@ -139,7 +139,7 @@ pub fn file_url(path: &Path) -> String {
 /// that left the previous export in place.
 pub async fn export(html: &str, out: &Path) -> Result<(), String> {
     let engine = engine().ok_or_else(|| NO_ENGINE.to_string())?;
-    let work = std::env::temp_dir().join(format!("ai-chat-pdf-{}", uuid::Uuid::new_v4()));
+    let work = std::env::temp_dir().join(format!("rabbit-chat-studio-pdf-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&work)
         .map_err(|err| format!("Failed to create the print workspace: {err}"))?;
     let result = run(&engine, html, out, &work).await;
@@ -285,7 +285,7 @@ mod tests {
             eprintln!("skipped: no Chromium engine on this machine");
             return;
         }
-        let dir = std::env::temp_dir().join(format!("ai-chat-pdf-test-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("rabbit-chat-studio-pdf-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let out = dir.join("out.pdf");
         let html = concat!(

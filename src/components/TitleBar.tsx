@@ -94,7 +94,7 @@ export function TitleBar({ sleepLock, turnStartedAt, now }: Props) {
         };
     }, []);
 
-    // The Rust side writes `AI Chat — <workspace>` into the native title (the
+    // The Rust side writes `Rabbit Chat Studio — <workspace>` into the native title (the
     // taskbar text). With no native titlebar, surface the workspace here.
     useEffect(() => {
         let disposed = false;
@@ -145,7 +145,7 @@ export function TitleBar({ sleepLock, turnStartedAt, now }: Props) {
             try {
                 await action();
             } catch (err) {
-                await messageDialog(String(err), { title: "AI Chat", kind: "error" })
+                await messageDialog(String(err), { title: "Rabbit Chat Studio", kind: "error" })
                     .catch(() => { });
             }
         },
@@ -162,7 +162,7 @@ export function TitleBar({ sleepLock, turnStartedAt, now }: Props) {
     const handleSaveProfile = () =>
         run(async () => {
             const path = await saveDialog({
-                defaultPath: "ai-chat.profile.zip",
+                defaultPath: "rabbit-chat-studio.profile.zip",
                 filters: [{ name: "Profile", extensions: ["zip"] }],
             });
             if (path) await exportProfileTo(path);
@@ -195,8 +195,8 @@ export function TitleBar({ sleepLock, turnStartedAt, now }: Props) {
         run(async () => {
             const version = await getAppVersion();
             await messageDialog(
-                `About AI Chat\n\nAI Chat\nOpenAI-compatible desktop assistant\nVersion ${version}`,
-                { title: "AI Chat", kind: "info" },
+                `About Rabbit Chat Studio\n\nRabbit Chat Studio\nOpenAI-compatible desktop assistant\nVersion ${version}`,
+                { title: "Rabbit Chat Studio", kind: "info" },
             );
         });
 
@@ -240,7 +240,7 @@ export function TitleBar({ sleepLock, turnStartedAt, now }: Props) {
             {IS_MAC && controls}
             <div className="titlebar-drag" data-tauri-drag-region>
                 <span className="titlebar-title" data-tauri-drag-region>
-                    AI Chat
+                    Rabbit Chat Studio
                 </span>
                 {workspace && (
                     <span className="titlebar-workspace" title={workspace} data-tauri-drag-region>

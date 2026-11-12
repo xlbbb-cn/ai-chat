@@ -3,7 +3,7 @@ name = "knowledge-graph"
 version = "0.1.0"
 edition = "2021"
 description = "Knowledge graph client library: engine settings plus a Neo4j (Bolt) backend behind a small async trait"
-license = "GPL-2.0-only"
+license = "MIT"
 
 [lib]
 name = "knowledge_graph"

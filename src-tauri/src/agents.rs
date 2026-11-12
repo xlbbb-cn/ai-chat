@@ -6115,7 +6115,7 @@ mod tests {
 
     #[test]
     fn resolve_task_cwd_is_sandboxed_and_creates_missing_directories() {
-        let root = std::env::temp_dir().join(format!("ai-chat-cwd-{}", Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!("rabbit-chat-studio-cwd-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&root).expect("temp workspace");
 
         // Unset / "." → the workspace root itself.
@@ -6354,7 +6354,7 @@ mod tests {
     }
 
     fn temp_agents_dir(label: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("ai-chat-agents-{label}-{}", Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("rabbit-chat-studio-agents-{label}-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&dir).expect("temp dir");
         dir
     }

@@ -66,7 +66,7 @@ const en = {
         appMenuRestoreProfile: "Restore profile…",
         appMenuMarkdownEdit: "Markdown edit…",
         appMenuReportIssue: "Report an issue…",
-        appMenuAbout: "About AI Chat",
+        appMenuAbout: "About Rabbit Chat Studio",
 
         emptyStart: "Start a conversation",
         emptyHint: "Use {skills} to set a system prompt, or configure the API in {settings}.",
@@ -395,7 +395,7 @@ const en = {
             applyTitle: "Apply this profile",
             deleteAria: "Delete profile {name}",
             instancePrimaryHint:
-                "“Run a single instance” is off: launching AI Chat again opens a separate window with its own workspace and its own copy of this configuration.",
+                "“Run a single instance” is off: launching Rabbit Chat Studio again opens a separate window with its own workspace and its own copy of this configuration.",
             instanceShadowHint:
                 "This window runs on a temporary copy of the configuration — its workspace and settings are its own, and changes made here are discarded when you close it.",
         },
@@ -485,7 +485,7 @@ const en = {
                 "Request and interaction logs older than this are deleted at startup and by the Interaction Monitor's “Compact DB”. 0 keeps logs forever. Chat history is never pruned. Change it and press Save to apply.",
             singleInstance: "Run a single instance",
             singleInstanceHint:
-                "Launching AI Chat again brings the running window to the front instead of opening a second copy. When off, every launch gets its own window on a temporary copy of this configuration. Applies after restarting the app.",
+                "Launching Rabbit Chat Studio again brings the running window to the front instead of opening a second copy. When off, every launch gets its own window on a temporary copy of this configuration. Applies after restarting the app.",
             backgroundTools: "Background execution",
             backgroundToolsHint:
                 "Let the assistant run slow tools as background tasks (`run_in_background: true`): `run_cmd`, `run_shell`, `file_actions` search, every MCP tool and `call_subagent`. The result is delivered automatically before the next request and the turn stays open until it arrives. Sub-agents never receive the flag.",

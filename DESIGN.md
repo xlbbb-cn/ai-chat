@@ -1,4 +1,4 @@
-# AI Chat — Design System
+# Rabbit Chat Studio — Design System
 
 > **This file is the source of truth for every visual change in this repository.**
 > Read it before touching a `.css` file or writing JSX that carries styling.

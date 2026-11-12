@@ -863,7 +863,7 @@ mod tests {
     impl TempSkillsRoot {
         fn new(tag: &str) -> Self {
             let dir = std::env::temp_dir().join(format!(
-                "ai-chat-skills-test-{}-{}",
+                "rabbit-chat-studio-skills-test-{}-{}",
                 tag,
                 std::process::id()
             ));

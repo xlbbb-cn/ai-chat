@@ -161,7 +161,7 @@ fn import_profile_archive(app: &AppHandle, profile_path: &Path) {
 fn show_about(app: &AppHandle) {
     app.dialog()
         .message(format!(
-            "About AI Chat\n\nAI Chat\nOpenAI-compatible desktop assistant\nVersion {}",
+            "About Rabbit Chat Studio\n\nRabbit Chat Studio\nOpenAI-compatible desktop assistant\nVersion {}",
             env!("CARGO_PKG_VERSION")
         ))
         .buttons(MessageDialogButtons::Ok)
@@ -1626,7 +1626,7 @@ pub fn run() {
                     .dialog()
                     .file()
                     .add_filter("Profile", &["zip"])
-                    .set_file_name("ai-chat.profile.zip")
+                    .set_file_name("rabbit-chat-studio.profile.zip")
                     .blocking_save_file()
                 {
                     if let Some(profile_path) = path.into_path().ok() {
@@ -1755,7 +1755,8 @@ pub fn run() {
                 .expect("failed to create edit menu");
 
                 let about_item =
-                    MenuItem::with_id(app, ABOUT_MENU_ID, "About AI Chat", true, None::<&str>)
+                    MenuItem::with_id(app, ABOUT_MENU_ID, "About Rabbit Chat Studio", true,
+                        None::<&str>)
                         .expect("failed to create about menu item");
                 let issue_item = MenuItem::with_id(
                     app,

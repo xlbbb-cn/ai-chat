@@ -13,7 +13,7 @@ bytes ──▶ extract ──▶ layout ──▶ router ──▶ parse ──
                                  scanned
 ```
 
-The crate is a workspace member of `ai-chat`; the desktop app links it as a
+The crate is a workspace member of `rabbit-chat-studio`; the desktop app links it as a
 library. Nothing here reads arguments or writes to stdout — the caller decides
 what to do with the `Conversion`.
 
@@ -188,4 +188,4 @@ CIDs under a Latin name, and an ordinary WinAnsi run with one high byte in it.
 
 ## License
 
-GPL-2.0-only, like the rest of the workspace.
+MIT, like the rest of the workspace.

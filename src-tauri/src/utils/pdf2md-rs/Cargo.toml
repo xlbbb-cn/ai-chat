@@ -4,7 +4,7 @@ version = "0.2.0"
 edition = "2021"
 rust-version = "1.80"
 description = "PDF (plain text and academic papers) to Markdown: PDFOxide text extraction, page layout analysis, unified IR, Markdown renderer"
-license = "GPL-2.0-only"
+license = "MIT"
 
 [lib]
 name = "pdf2md_rs"

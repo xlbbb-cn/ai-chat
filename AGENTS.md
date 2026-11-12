@@ -1,4 +1,4 @@
-# AI Chat — Tauri 2.0 (Rust + React)
+# Rabbit Chat Studio — Tauri 2.0 (Rust + React)
 
 Desktop AI chat client (Tauri 2 + React 19 + TS + Vite, Rust backend) that talks to any OpenAI-compatible API and adds **Skills**, **Tools**, and **Sub-Agents**.
 
@@ -210,7 +210,7 @@ This is enforced by the skills/tools layer. Don't add code that lets a skill esc
 
 ## Tauri 2 specifics for this repo
 
-- **Identifier**: `com.leonard.aichat` (set in `tauri.conf.json`).
+- **Identifier**: `com.leonard.aichat` (set in `tauri.conf.json`). It kept this value when the app was renamed to *Rabbit Chat Studio*: the identifier names the user's config directory, so changing it would orphan every existing install's settings. The display name lives in `productName`/`title`; the binary is `rabbit-chat-studio.exe`.
 - **Window label**: `main` (the only window).
 - **Window chrome is custom**: `decorations: false` + `shadow: true`; `src/components/TitleBar.tsx` draws the drag region (`data-tauri-drag-region`) and the window buttons via `@tauri-apps/api/window`. The required permissions live in `capabilities/default.json` (`allow-start-dragging`, `allow-minimize`, `allow-toggle-maximize`, `allow-close`, …). The titlebar is fixed above overlays; fullscreen pages start at `top: var(--titlebar-h)` (`src/App.css`). The native File/Tools/About menu stays for macOS, and the same actions are exposed as commands (`app_open_data_dir`, `app_open_workspace_dir`, `app_open_issue_page`, `app_open_markdown`, `app_export_profile`, `app_import_profile`) for the titlebar's `⋯` menu.
 - **Plugins registered in `lib.rs`**: `tauri-plugin-opener`, `tauri-plugin-dialog`, `tauri-plugin-clipboard-manager`, plus `tauri-plugin-single-instance` — registered **first**, **release builds only** (`#[cfg(not(debug_assertions))]`, so `tauri dev` can run alongside an installed copy of the same identifier) and only while `config.single_instance` is on. Because the plugin has to be installed before the builder exists (a second process is exited by the plugin itself), the switch is pre-read from `config.json` via `dirs::data_dir()/<identifier>` (the same path as Tauri's `app_data_dir()` — on Windows `%APPDATA%`, Roaming); a change applies on the next launch. The second launch hands its arguments to the first instance, which unminimizes/shows/focuses the `main` window (setters only — on Windows the callback runs on the main thread inside `WM_COPYDATA`, where Tauri dispatches window messages inline). No `fs` / `shell` / `http` plugins. If you need them, add the crate to `Cargo.toml`, register with `.plugin(...)`, AND add the permission to `src-tauri/capabilities/default.json` (Tauri 2 denies by default).

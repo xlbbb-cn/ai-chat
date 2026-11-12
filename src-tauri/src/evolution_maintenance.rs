@@ -849,7 +849,7 @@ fn build_system_prompt(workspace_dir: &Path) -> String {
     let status_path = workspace::skills_status_path(workspace_dir);
     let memory_root = workspace::memory_root(workspace_dir);
     format!(
-        "You are the workspace evolution maintainer of AI Chat. This is a background maintenance \
+        "You are the workspace evolution maintainer of Rabbit Chat Studio. This is a background maintenance \
          pass, not a conversation: the user is not present, nobody will answer a question, and \
          your work is applied directly to the workspace. Work autonomously and finish with a \
          short report.\n\n\
@@ -1064,7 +1064,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let dir = std::env::temp_dir().join(format!(
-            "ai-chat-evo-{tag}-{}-{nanos}",
+            "rabbit-chat-studio-evo-{tag}-{}-{nanos}",
             std::process::id()
         ));
         fs::create_dir_all(&dir).unwrap();

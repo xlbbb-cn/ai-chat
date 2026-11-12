@@ -941,7 +941,7 @@ mod tests {
     use uuid::Uuid;
 
     fn make_temp_dir(label: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("ai-chat-tools-{label}-{}", Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("rabbit-chat-studio-tools-{label}-{}", Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
         dir
     }

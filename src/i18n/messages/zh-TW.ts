@@ -57,7 +57,7 @@ const zhTW: Messages = {
         appMenuRestoreProfile: "還原設定檔…",
         appMenuMarkdownEdit: "Markdown 編輯…",
         appMenuReportIssue: "回報問題…",
-        appMenuAbout: "關於 AI Chat",
+        appMenuAbout: "關於 Rabbit Chat Studio",
 
         emptyStart: "開始一段對話",
         emptyHint: "使用{skills}設定系統提示詞，或在{settings}中設定 API。",
