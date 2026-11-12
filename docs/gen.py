@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Generate docs/architecture.html — a self-contained architecture map for AI Chat.
+"""Generate docs/architecture.html — a self-contained architecture map for
+Rabbit Chat Studio.
 
 Static inline SVG, computed coordinates, no external assets. Colours come from
 the design tokens in src/App.css so the document matches the product.
@@ -681,7 +682,7 @@ def build_html(d1, d2, d3):
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>AI Chat · 架构图</title>
+<title>Rabbit Chat Studio · 架构图</title>
 <style>{CSS}</style>
 </head>
 <body>
@@ -690,17 +691,17 @@ def build_html(d1, d2, d3):
   <div class="top"><button id="themeToggle" type="button" aria-label="主题">跟随系统</button></div>
 
   <header>
-    <p class="eyebrow">architecture map · v2.9.7</p>
-    <h1>AI Chat</h1>
+    <p class="eyebrow">architecture map · v3.2.0</p>
+    <h1>Rabbit Chat Studio</h1>
     <p class="lede">Tauri 2 桌面客户端：React 19 前端 + Rust 后端，把任意 OpenAI 兼容 API 变成带技能、
       工具与子智能体的工作台。下图自上而下是一条调用链——界面只通过 invoke 与事件和 Rust 通信，
       所有「能做事」的能力都在后端，虚线框是项目之外的依赖。</p>
     <div class="meta">
       <span>Tauri 2 · React 19 · Rust</span>
-      <span>Rust 76 文件 / 5.97 万行</span>
-      <span>前端 38 文件 / 1.93 万行</span>
+      <span>Rust 78 文件 / 6.22 万行</span>
+      <span>前端 54 文件 / 1.44 万行（.ts/.tsx）</span>
       <span>SQLite · 单文件</span>
-      <span>GPL-2.0-only</span>
+      <span>MIT</span>
     </div>
   </header>
 
@@ -842,7 +843,7 @@ def build_html(d1, d2, d3):
   </section>
 
   <footer>
-    <span>依据 v2.9.7 源码实测：90 命令 · 45 事件 · 8 表 · 76 个 Rust 文件</span>
+    <span>依据 v3.2.0 源码实测：98 命令 · 43 事件 · 8 表 · 78 个 Rust 文件</span>
     <span>颜色取自 src/App.css 设计令牌</span>
   </footer>
 

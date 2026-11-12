@@ -9,6 +9,156 @@ npm run changelog -- --from <上一个 tag> --to <本次 tag> --details --write
 条目按 Conventional Commits 的类型分组，作用域加粗；工作区里提交标题是英文、正文是中文，
 所以带 `--details` 时是中英对照。
 
+## [v3.2.0](https://github.com/xlbbb-cn/ai-chat/releases/tag/v3.2.0) — 2026-11-12
+
+### 新增
+
+- add Microsoft Store (MSIX) packaging pipeline ([`88bedb5`](https://github.com/xlbbb-cn/ai-chat/commit/88bedb581601a21725941507bbb7753990fa4b9e))
+  - scripts/build-msix.ps1 + 'npm run msix': makeappx packaging, 4-part version, optional dev cert
+  - src-tauri/msix/: full-trust Desktop Bridge manifest, Partner Center identity in store.config.json
+  - update: skip the GitHub updater on Store installs (WindowsApps path detection)
+  - CI: build the .msix in the windows job, keep it as an Actions artifact only
+  - docs/store-publishing.md + docs/store/: policy mapping, certification notes, privacy policy
+  - scripts/capture-store-screenshots.ps1 for store screenshots
+
+### 重构
+
+- rename AI Chat to Rabbit Chat Studio, relicense to MIT ([`18e27e1`](https://github.com/xlbbb-cn/ai-chat/commit/18e27e100cd1296e0c471b791d8bac75d71225ce))
+  - display name, productName, crate and binary become Rabbit Chat Studio / rabbit-chat-studio
+  - MSIX identity target: XLBBB.RabbitChatStudio, CI stable assets renamed to Rabbit-Chat-Studio-*
+  - identifier com.leonard.aichat, repo slug and the ai-chat.locale key stay put (user config continuity)
+  - GPL-2.0-only -> MIT: LICENSE, Cargo/package manifests, README badges, architecture doc, store copy
+  - winget id follows to XLBBB.RabbitChatStudio (winget-pkgs#458061 for Leonard.AIChat was closed)
+
+**完整对比**：[v3.1.1...v3.2.0](https://github.com/xlbbb-cn/ai-chat/compare/v3.1.1...v3.2.0)
+
+## [v3.1.1](https://github.com/xlbbb-cn/ai-chat/releases/tag/v3.1.1) — 2026-11-12
+
+### 修复
+
+- **figures**: keep a diagram out of the code path in the transcript ([`a513b0e`](https://github.com/xlbbb-cn/ai-chat/commit/a513b0e8abf1b187866c93b8796767976293fc6e))
+
+### 杂项
+
+- **icons**: regenerate the app icons ([`4ead3ca`](https://github.com/xlbbb-cn/ai-chat/commit/4ead3ca2884d8013b1f980d3b17fbcacbbb11129))
+
+**完整对比**：[v3.1.0...v3.1.1](https://github.com/xlbbb-cn/ai-chat/compare/v3.1.0...v3.1.1)
+
+## [v3.1.0](https://github.com/xlbbb-cn/ai-chat/releases/tag/v3.1.0) — 2026-11-12
+
+### 新增
+
+- **chat**: write a reply's PDF export to a file, not through the print dialog ([`9028336`](https://github.com/xlbbb-cn/ai-chat/commit/9028336c152640a299b44c885a02b4c2fce2a9b3))
+- **markdown**: export the editor draft to a real PDF file ([`154b5f9`](https://github.com/xlbbb-cn/ai-chat/commit/154b5f9bf4f7deb2fcaa3e14db8720196cae0bd3))
+- **tools**: fix run_shell's shell at build time and carry the host OS in its schema ([`2c56c61`](https://github.com/xlbbb-cn/ai-chat/commit/2c56c61a1b24acaf479dde3cca9b065ecc870be7))
+- **figures**: declarative flow charts and scene-diagram vocabulary for carve ([`dbea81e`](https://github.com/xlbbb-cn/ai-chat/commit/dbea81e4fcbf477df9ced1ec712327caffe121c6))
+  - `flow` fence (or raw <flow> tag): JSON spec of nodes (6 shapes, 5 tones), labelled edges, LR/TB direction. Node sizes are measured text, positions are dagre's, colours are baked interface tokens — light/dark and every palette follow on re-render. Wide graphs scroll past 2.5x the card; tall TB charts never letterbox. Lazy dagre chunk.
+  - Motion without script: anim "flow" (dashes + an SMIL packet per edge) and "step" (rank-order reveal) play on the settle commit without the script-consent gate, honour prefers-reduced-motion twice (build time and inside the emitted style), and still save as PNG.
+  - carve: `edge` objects (line + cone arrowhead, dashed option), `label` sprites with a surface halo, a soft contact shadow by default, and MeshStandardMaterial shading — a scene diagram, not floating solids.
+  - prompt: flow is the flowchart path, html-fig narrows to touch/ interaction, carve documents edge/label/shadow; the prompt's own flow example is test-pinned as valid JSON. #name also parses at the end of a fence line.
+- **figures**: render dynamic HTML5 figures as sandboxed html-fig cards ([`398e91a`](https://github.com/xlbbb-cn/ai-chat/commit/398e91adbce01b3fcde41b2d688bf1402a9a72fd))
+  - utils/htmlFigure.ts (new): token projection into the frame document, the CSP, the height reporter, buildFrameDocument/buildStandaloneDocument
+  - figures.rs: save_figure_html + check_html_document, dynamic-figure bullet in the drawing prompt
+  - figureCard.ts: buildHtmlCard, the execution gate and the navigation guard, FigureHandle.beforeMount/dispose
+  - ChatMessage.tsx: settle-commit rebuild so a deferred frame can mount
+- **glass**: keep the frost on platforms with no window backdrop ([`2a01081`](https://github.com/xlbbb-cn/ai-chat/commit/2a01081d277b12a50a2cc2cefa5c7be04b015c2b))
+
+### 修复
+
+- **chat**: truncate the failed turn before retrying ([`b7d3d6b`](https://github.com/xlbbb-cn/ai-chat/commit/b7d3d6bce3d5fffa0d74297acc3f77d7b7b3e0b7))
+- **ui**: keep the [goal:DONE] control marker out of the chat bubble ([`89f3c51`](https://github.com/xlbbb-cn/ai-chat/commit/89f3c51148f8a7c7681a77c25898d08bf24b8fc2))
+- **llm**: stop the chat turn from dying silently mid-task ([`887519a`](https://github.com/xlbbb-cn/ai-chat/commit/887519a22305c365c2944441ebcdf559c81b9258))
+  - stream requests without a total timeout (read_timeout 120s instead of the 300s wall that killed every long thinking stream)
+  - execute streamed tool calls also when finish_reason is "stop"/absent (relay dialects); "length" truncations are regenerated, never executed
+  - continue once or twice after finish_reason "length" instead of silently ending the turn with a half answer
+  - treat a stream that closes without finish_reason/[DONE] as an error instead of truncating silently
+  - retry transient HTTP statuses (429/5xx) honoring Retry-After
+  - retry mid-stream disconnects even when tokens already streamed: a new chat-retry event lets the frontend drop the dead attempt tail first; after 3 attempts the turn fails with the error visible
+  - goal loop: with the todos tool on, a final answer does not end the turn while the list has open items; the model ends explicitly with [goal:DONE] (bounded at 4 continuations)
+
+### 杂项
+
+- **figuers**: op figuers system prompt ([`f2a72a5`](https://github.com/xlbbb-cn/ai-chat/commit/f2a72a57a33719a276853d14c17d77473b69ec97))
+
+**完整对比**：[v3.0.0...v3.1.0](https://github.com/xlbbb-cn/ai-chat/compare/v3.0.0...v3.1.0)
+
+## [v3.0.0](https://github.com/xlbbb-cn/ai-chat/releases/tag/v3.0.0) — 2026-11-11
+
+### 新增
+
+- **composer**: embed a sub-agent role with +agent in a new conversation ([`f0f30d9`](https://github.com/xlbbb-cn/ai-chat/commit/f0f30d925d63ba343fe901d5d4f3f1530bd54e29))
+- **figures**: draw with Mermaid when the enhanced toggle is off ([`260dfe9`](https://github.com/xlbbb-cn/ai-chat/commit/260dfe9fc9c4be5a922ee0e1dcb0a7200d529d04))
+- **ui**: report an issue from the titlebar, above About ([`2c1c790`](https://github.com/xlbbb-cn/ai-chat/commit/2c1c790234a003cb9e2614036dd16f2b5ddb9b2a))
+- **composer**: address tmp files as @@name and name attachments instead of listing them ([`00fc6a9`](https://github.com/xlbbb-cn/ai-chat/commit/00fc6a9dce17d257b270c345cae134b8c8234ef7))
+- **composer**: a pasted or dropped file becomes an @ mention under .data/tmp ([`406edd5`](https://github.com/xlbbb-cn/ai-chat/commit/406edd5dda4a0e95623b8efca2ad42180bab4dbd))
+- **ui**: the reply can draw, in two dimensions and in three ([`b895af2`](https://github.com/xlbbb-cn/ai-chat/commit/b895af20af3b5a25d515e7bb024753b5b178d372))
+- **ui**: the transcript as glass under the desktop ([`bf865d7`](https://github.com/xlbbb-cn/ai-chat/commit/bf865d7a555f0ec0dd8292824290c9141ecccf3e))
+- **ui**: spring-driven sidebar motion with framer-motion ([`1156002`](https://github.com/xlbbb-cn/ai-chat/commit/1156002e1b4adabe7ec6c04c135492cf67aa5817))
+- **ui**: frosted glass as a window-level DWM backdrop ([`04553a5`](https://github.com/xlbbb-cn/ai-chat/commit/04553a5f1e480643d93f6192df91ea247a9ae95a))
+  - the window is transparent and the desktop behind it is blurred by DWM, not by CSS: window-vibrancy applies the Windows 11 system backdrop DWMSBT_TRANSIENTWINDOW (Acrylic) rather than Mica, because Mica only samples the wallpaper and reads as a flat pane; Mica stays as the fallback, and apply_mica still runs first for DWMWA_USE_IMMERSIVE_DARK_MODE so the Acrylic tint follows the app theme instead of the system one
+  - new set_window_vibrancy(level, dark) command, applied in setup and from Settings, returns the kind that is now in effect; <html data-vibrancy> is written only when a backdrop really is applied, so a host without one keeps the opaque canvas instead of showing a raw or black window
+  - --c-window (24 / 40 / 58% of --c-surface for subtle / standard / strong) takes over --glass-backdrop under data-vibrancy: titlebar, sidebar, toolbar, input area and panel headers turn translucent over the blurred desktop while .messages keeps its opaque --c-bg, so reading and scrolling are untouched
+  - Settings -> Appearance: the glass level drives the native backdrop live, and a theme change re-applies it so the Mica/Acrylic light-dark variant follows
+  - docs: DESIGN.md (Window vibrancy section + the --c-window token row), config.example.md, AGENTS.md and the three i18n glass hints
+
+### 修复
+
+- **figures**: clean up a failed Mermaid draw and an export rejection ([`f076b32`](https://github.com/xlbbb-cn/ai-chat/commit/f076b3293a662aa1990bd2168a456639f0bde442))
+- **figures**: keep a drawing inside its card and code out of the scan ([`23bbfba`](https://github.com/xlbbb-cn/ai-chat/commit/23bbfbafe61dc1fc91dd11535fdda0e4a50bd9ef))
+- **chat**: broadcast the end of background tasks their turn tore down ([`aeba54c`](https://github.com/xlbbb-cn/ai-chat/commit/aeba54c877568ea51bfac7d54bf4ea53b88e8f28))
+- **ui**: readable select rows and chevrons in the dark palettes ([`9c782bc`](https://github.com/xlbbb-cn/ai-chat/commit/9c782bcdfb28d097fa3a724507b74c82673fd4fb))
+
+### 文档
+
+- add a self-contained architecture map ([`8b0ea99`](https://github.com/xlbbb-cn/ai-chat/commit/8b0ea994391aee90084bb3430ae96e9917ab8a62))
+  - docs/architecture.html: layers, one chat turn and the sub-agent pipeline as inline SVG, coloured by the design tokens in src/App.css
+  - docs/gen.py: regenerates the page with no dependencies (python3 docs/gen.py)
+  - README + README.zh.md: link the map from Documentation, Tech Stack and Architecture, and the project tree
+
+### 其它
+
+- add： update README ([`1c0fd8b`](https://github.com/xlbbb-cn/ai-chat/commit/1c0fd8bf3c32e62acaa51dee3741b8bcf11f9946))
+
+**完整对比**：[v2.9.7...v3.0.0](https://github.com/xlbbb-cn/ai-chat/compare/v2.9.7...v3.0.0)
+
+## [v2.9.7](https://github.com/xlbbb-cn/ai-chat/releases/tag/v2.9.7) — 2026-11-10
+
+### 新增
+
+- show maintenance progress and results on the empty state ([`49f7618`](https://github.com/xlbbb-cn/ai-chat/commit/49f7618e7eacffcd0f3f912ed969aa006ed1c67e))
+  - running events carry phase/round/toolCalls and drive the status line (Dreaming Scene N/M) that replaces the empty-state greeting
+  - a completed pass leaves a clickable result bubble with the model's report; clicking it restores the greeting
+  - partial passes persist a resume note in the evolution memory scope and the next pass continues from it; budget wrap-up ends with a report instead of an error
+
+### 杂项
+
+- bump version to 2.9.7 ([`cff16d0`](https://github.com/xlbbb-cn/ai-chat/commit/cff16d0d0b96565ab0690019ff0622b8975955f0))
+
+**完整对比**：[v2.9.6...v2.9.7](https://github.com/xlbbb-cn/ai-chat/compare/v2.9.6...v2.9.7)
+
+## [v2.9.6](https://github.com/xlbbb-cn/ai-chat/releases/tag/v2.9.6) — 2026-11-10
+
+### 新增
+
+- add nap-face evolution maintenance with resumable progress ([`70a36a4`](https://github.com/xlbbb-cn/ai-chat/commit/70a36a499467f7ee41e86e71c9d1b7b9602f1902))
+- **chat**: LLM-structured context compression with cross-turn replacement ([`0f52872`](https://github.com/xlbbb-cn/ai-chat/commit/0f52872502d953fd4dfc7dc0a56ddd72b471605c))
+  - Summarize older context with a 9-section compact prompt (intent, concepts, files, errors/fixes, problem solving, all user messages, pending, current work, next step) via the main model; mechanical line summarizer stays as a fallback so compression never fails a turn.
+  - Preserve tool traces: tool rounds render as a one-line ledger (name(args) -> result preview) in both the summarizer input and the fallback; the recent window only starts on a clean round boundary.
+  - Inject the summary as a user message with continuation framing, placed before the remaining history (stable prompt-cache prefix).
+  - Replace the covered history across turns: session_summaries now stores covered_messages + boundary_text; the next turn verifies the boundary and drops the summarized prefix (stale summaries are discarded safely).
+  - Add a predictive pre-check (~4 chars/token, tools included, saturation guard) and reactive recovery on provider context-overflow errors (one hard compression + single retry).
+  - db migration for the new coverage columns; 12 new unit tests.
+
+### 文档
+
+- update READMEs and CHANGELOG for v2.9.5 ([`e19dff4`](https://github.com/xlbbb-cn/ai-chat/commit/e19dff43b965809b8df27f3d234a9acb8fef88de))
+
+### 杂项
+
+- bump version to 2.9.6 ([`ec21d20`](https://github.com/xlbbb-cn/ai-chat/commit/ec21d209a5c178feb67d1126cbe9fd5ddb89dcd9))
+
+**完整对比**：[v2.9.5...v2.9.6](https://github.com/xlbbb-cn/ai-chat/compare/v2.9.5...v2.9.6)
+
 ## [v2.9.5](https://github.com/xlbbb-cn/ai-chat/releases/tag/v2.9.5) — 2026-11-10
 
 ### 新增
