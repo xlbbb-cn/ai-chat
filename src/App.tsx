@@ -2,7 +2,9 @@ import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } fr
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, listAgentMentions, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, deleteMessagesAfter, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState, setWindowVibrancy, savePastedFile, importWorkspacePaths } from "./api";
+import { save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, listAgentMentions, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, exportMarkdownPdf, deleteMessage, deleteMessagesAfter, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState, setWindowVibrancy, savePastedFile, importWorkspacePaths } from "./api";
 
 import { ChatMessage, ChatMessageBoundary } from "./components/ChatMessage";
 import { ToolCallGroup } from "./components/ToolCallGroup";
@@ -72,6 +74,7 @@ import { activeAgentQuery, hasAgentToken, scoreAgentMention } from "./agentMenti
 import type { AgentMentionOption } from "./agentMention";
 import { isGenerationStopped, isLocale, stripGenerationStopped, useI18n } from "./i18n";
 import { formatCountdown } from "./utils/time";
+import { buildPrintDocumentHtml, printHtmlDocument, MARKDOWN_PRINT_CSS } from "./utils/printDocument";
 import {
   FontAwesomeIcon,
   faBrain,
@@ -80,6 +83,7 @@ import {
   faPaperclip,
   faPenToSquare,
   faPlug,
+  faPrint,
   faRobot,
   faRotateRight,
   faScrewdriverWrench,
@@ -616,6 +620,10 @@ export default function App() {
   const [markdownPath, setMarkdownPath] = useState("");
   const [markdownDraft, setMarkdownDraft] = useState("");
   const [markdownSaving, setMarkdownSaving] = useState(false);
+  /** The PDF engine runs outside the app; a second click must not start another. */
+  const [markdownPdfBusy, setMarkdownPdfBusy] = useState(false);
+  /** The preview is the document source: what is printed is what is shown. */
+  const markdownPreviewRef = useRef<HTMLDivElement>(null);
   /** Pending delay timers created by the `timer_set` tool (soonest first). */
   const [timers, setTimers] = useState<TimerEntry[]>([]);
   /** Cross-platform "system awake" lock, shown as a badge above the input. */
@@ -3365,6 +3373,56 @@ export default function App() {
     }
   }
 
+  /**
+   * Write the draft's preview to a PDF file.
+   *
+   * The preview DOM is cloned instead of the markdown being rendered again:
+   * what leaves the app is exactly what the right-hand column shows. Building a
+   * self-contained document (KaTeX inlined, system fonts) is what lets another
+   * process print it; with no Chromium on the machine the system print dialog
+   * takes over, so the feature degrades instead of failing.
+   */
+  async function handleExportMarkdownPdf() {
+    if (!markdownDraft.trim() || markdownPdfBusy) return;
+    const suggested = markdownPath.trim()
+      ? `${markdownPath.replace(/\.[^./\\]+$/, "")}.pdf`
+      : "markdown.pdf";
+    const target = await saveDialog({
+      defaultPath: suggested,
+      filters: [{ name: "PDF", extensions: ["pdf"] }],
+    });
+    if (!target) return;
+
+    setMarkdownPdfBusy(true);
+    try {
+      const printOptions = {
+        title: suggested.replace(/^.*[\\/]/, ""),
+        bodyHtml: markdownPreviewRef.current?.innerHTML ?? "",
+        extraCss: MARKDOWN_PRINT_CSS,
+      };
+      const html = await buildPrintDocumentHtml({ ...printOptions, standalone: true });
+      let saved: string | null = null;
+      try {
+        saved = await exportMarkdownPdf(html, target);
+      } catch (err) {
+        if (String(err) !== "NO_PDF_ENGINE") throw err;
+      }
+      if (saved) {
+        // The file manager is the confirmation: a notice is reserved for
+        // warnings and errors.
+        void revealItemInDir(saved).catch(console.error);
+        return;
+      }
+      // No Chromium on this machine: the system print dialog does the same job.
+      printHtmlDocument(await buildPrintDocumentHtml(printOptions));
+      setError(t("app.markdownPdfFallback"), "warning");
+    } catch (err) {
+      setError(t("app.markdownPdfFailed", { error: String(err) }));
+    } finally {
+      setMarkdownPdfBusy(false);
+    }
+  }
+
   /** The thinking-depth control only makes sense for reasoning-capable models. */
   const reasoningEffort = reasoningEfforts[selectedModel] ?? "";
   // Shown for catalogue-matched reasoning models, and kept for any model that
@@ -3956,6 +4014,20 @@ export default function App() {
                   <button
                     type="button"
                     className="toolbar-btn"
+                    onClick={handleExportMarkdownPdf}
+                    disabled={markdownPdfBusy || !markdownDraft.trim()}
+                    title={t("app.markdownPdfTip")}
+                  >
+                    <FontAwesomeIcon
+                      icon={markdownPdfBusy ? faSpinner : faPrint}
+                      spin={markdownPdfBusy}
+                      aria-hidden="true"
+                    />
+                    {t("app.markdownPdf")}
+                  </button>
+                  <button
+                    type="button"
+                    className="toolbar-btn"
                     onClick={() => setMarkdownEditorOpen(false)}
                     disabled={markdownSaving}
                   >
@@ -3983,7 +4055,7 @@ export default function App() {
                 </div>
                 <div className="markdown-editor-column">
                   <span>{t("app.previewColumn")}</span>
-                  <div className="markdown-editor-preview">
+                  <div className="markdown-editor-preview" ref={markdownPreviewRef}>
                     {markdownDraft.trim()
                       ? <MarkdownPreview content={markdownDraft} />
                       : <p className="markdown-editor-preview-empty">{t("app.markdownPreviewEmpty")}</p>}

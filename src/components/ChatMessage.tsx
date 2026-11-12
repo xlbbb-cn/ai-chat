@@ -15,9 +15,8 @@ import MarkdownIt from "markdown-it";
 import hljs from "highlight.js";
 import "highlight.js/styles/github.css";
 import "katex/dist/katex.min.css";
-import katexCssUrl from "katex/dist/katex.min.css?url";
-import razerF5FontUrl from "../assets/Web Fonts/9b77a61b70b873a0f298ad6fbc801666.woff2?url";
 import { katexMathPlugin } from "../utils/markdownMath";
+import { buildPrintDocumentHtml, escapeHtml, printHtmlDocument } from "../utils/printDocument";
 import { extractFigures, type FigureSpec } from "../utils/figures";
 import { mountFigures, saveAllFigures } from "../utils/figureCard";
 import {
@@ -43,14 +42,6 @@ import {
 import "./ChatMessage.css";
 
 import { writeText as tauriWriteText } from "@tauri-apps/plugin-clipboard-manager";
-
-const escapeHtml = (value: string): string =>
-  value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 
 /**
  * Image sources a reply may embed.
@@ -157,105 +148,14 @@ function renderMarkdown(instance: MarkdownIt, source: string): string {
   }
 }
 
-function buildPrintableMessageHtml(contentHtml: string, exportedAt: string): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>${escapeHtml(exportedAt)}</title>
-    <link rel="stylesheet" href="${escapeHtml(katexCssUrl)}" data-katex-css />
-    <style>
-      @font-face {
-        font-family: "RazerF5";
-        src: url("${razerF5FontUrl}") format("woff2");
-        font-weight: 400;
-        font-style: normal;
-      }
-
-      :root {
-        color-scheme: light;
-        font-family: "RazerF5", "Segoe UI", "Microsoft YaHei", sans-serif;
-        /* A figure's SVG is written in theme tokens; this document is its own
-           document, so it needs the light values those names stand for. */
-        --c-surface: #ffffff;
-        --c-surface-2: #f6f7f8;
-        --c-bg: #ffffff;
-        --c-text: #171a20;
-        --c-body: #2b2f36;
-        --c-muted: #5c5e62;
-        --c-border-s: #e8eaed;
-        --c-border-i: #d9dce1;
-        --c-accent: #3e6ae1;
-        --c-success: #1f8a3b;
-        --c-warning: #b07500;
-        --c-danger: #c0392b;
-      }
-
-      * {
-        box-sizing: border-box;
-      }
-
-      body {
-        margin: 0;
-        padding: 32px;
-        background: #ffffff;
-        color: #171a20;
-        font-size: 14px;
-        line-height: 1.6;
-        word-break: break-word;
-      }
-
-      main {
-        width: 100%;
-      }
-
-      p {
-        margin: 0 0 0.75em;
-      }
-
-      ul,
-      ol {
-        margin: 0 0 0.75em;
-        padding-left: 1.5em;
-      }
-
-      li {
-        margin-bottom: 0.25em;
-      }
-
-      pre {
-        margin: 0.75em 0;
-        padding: 12px 14px;
-        background: #f4f4f4;
-        border: 1px solid #e5e7eb;
-        border-radius: 8px;
-        overflow-x: auto;
-        white-space: pre-wrap;
-      }
-
-      code {
-        font-family: "RazerF5", "Cascadia Code", "Consolas", "Microsoft YaHei", monospace;
-      }
-
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        margin: 0.75em 0;
-      }
-
-      th,
-      td {
-        border: 1px solid #d1d5db;
-        padding: 8px 10px;
-        text-align: left;
-        vertical-align: top;
-      }
-
-      th {
-        background: #f3f4f6;
-      }
-
+/**
+ * Rules only a reply's own markup needs.
+ *
+ * The shared shell — light palette, prose rules, page box — lives in
+ * `utils/printDocument`; what stays here is what a chat message adds: figure
+ * cards, plus the canvas and frame substitutions a clone cannot carry.
+ */
+const MESSAGE_PRINT_CSS = `
       .code-block-toolbar {
         display: none !important;
       }
@@ -306,13 +206,7 @@ function buildPrintableMessageHtml(contentHtml: string, exportedAt: string): str
       .chat-figure-status {
         display: none !important;
       }
-    </style>
-  </head>
-  <body>
-    <main>${contentHtml}</main>
-  </body>
-</html>`;
-}
+`;
 
 /**
  * The reply as standalone HTML for print / PDF.
@@ -370,61 +264,17 @@ async function printableMessageHtml(root: HTMLElement | null, fallback: string):
 }
 
 function exportAssistantMessagePdf(contentHtml: string, messageId: string) {
-  const iframe = document.createElement("iframe");
-  const exportedAt = `assistant-message-${messageId}`;
-
-  iframe.style.position = "fixed";
-  iframe.style.right = "0";
-  iframe.style.bottom = "0";
-  iframe.style.width = "0";
-  iframe.style.height = "0";
-  iframe.style.border = "0";
-  iframe.setAttribute("aria-hidden", "true");
-
-  const cleanup = () => {
-    iframe.remove();
-  };
-
-  iframe.addEventListener("load", () => {
-    const frameWindow = iframe.contentWindow;
-    const frameDocument = frameWindow?.document;
-    if (!frameWindow || !frameDocument) {
-      cleanup();
-      return;
-    }
-
-    frameDocument.open();
-    frameDocument.write(buildPrintableMessageHtml(contentHtml, exportedAt));
-    frameDocument.close();
-
-    const handleAfterPrint = () => {
-      frameWindow.removeEventListener("afterprint", handleAfterPrint);
-      window.setTimeout(cleanup, 0);
-    };
-
-    frameWindow.addEventListener("afterprint", handleAfterPrint);
-
-    // Wait for the KaTeX stylesheet before printing so formulas are laid out.
-    let printed = false;
-    const doPrint = () => {
-      if (printed) return;
-      printed = true;
-      frameWindow.focus();
-      frameWindow.print();
-    };
-
-    const katexLink = frameDocument.querySelector<HTMLLinkElement>("link[data-katex-css]");
-    if (katexLink) {
-      katexLink.addEventListener("load", doPrint, { once: true });
-      katexLink.addEventListener("error", doPrint, { once: true });
-      // Fallback in case neither event fires (e.g. served from cache).
-      window.setTimeout(doPrint, 400);
-    } else {
-      window.setTimeout(doPrint, 50);
-    }
-  }, { once: true });
-
-  document.body.appendChild(iframe);
+  void buildPrintDocumentHtml({
+    title: `assistant-message-${messageId}`,
+    bodyHtml: contentHtml,
+    extraCss: MESSAGE_PRINT_CSS,
+  })
+    .then(printHtmlDocument)
+    .catch((error) => {
+      // The button is the only export path here, so a failure is logged rather
+      // than thrown out of the click handler.
+      console.error("PDF export failed", error);
+    });
 }
 
 interface Props {

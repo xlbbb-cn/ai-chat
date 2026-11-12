@@ -201,6 +201,11 @@ const en = {
         previewColumn: "Preview",
         markdownPlaceholder: "Write markdown here...",
         markdownPreviewEmpty: "Markdown preview will appear here.",
+        markdownPdf: "Export PDF",
+        markdownPdfTip: "Write the preview to a PDF file (A4, light theme).",
+        markdownPdfFailed: "PDF export failed: {error}",
+        markdownPdfFallback:
+            "No Edge or Chrome found — opened the print dialog instead. Choose \"Save as PDF\" there.",
 
         confirm: {
             titleSudo: "Privileged operation (sudo)",

@@ -182,6 +182,10 @@ const zhCN: Messages = {
         previewColumn: "预览",
         markdownPlaceholder: "在此编写 Markdown…",
         markdownPreviewEmpty: "Markdown 预览将显示在这里。",
+        markdownPdf: "导出 PDF",
+        markdownPdfTip: "把预览写成一个 PDF 文件（A4，浅色主题）。",
+        markdownPdfFailed: "导出 PDF 失败：{error}",
+        markdownPdfFallback: "未找到 Edge 或 Chrome——已改为打开打印对话框，请在其中选择“另存为 PDF”。",
 
         confirm: {
             titleSudo: "特权操作（sudo）",

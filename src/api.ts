@@ -1068,6 +1068,17 @@ export async function saveMarkdownFile(path: string, content: string): Promise<v
   return invoke("save_markdown_file", { path, content });
 }
 
+/**
+ * Write a standalone HTML document to `outPath` as a PDF.
+ *
+ * Printing happens in Rust with a headless Chromium: the webview can lay the
+ * document out but cannot write a PDF file. Rejects with `NO_PDF_ENGINE` when
+ * no browser is installed.
+ */
+export async function exportMarkdownPdf(html: string, outPath: string): Promise<string> {
+  return invoke("app_export_markdown_pdf", { html, outPath });
+}
+
 // ─── App menu (custom titlebar) ──────────────────────────────────────────────
 
 /** Open the app data directory in the OS file manager. */
