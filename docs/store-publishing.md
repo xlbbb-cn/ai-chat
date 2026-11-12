@@ -249,11 +249,13 @@ CI 稳定产物名（`Rabbit-Chat-Studio-*`）、README 下载链接、winget id
 老用户升级注意：NSIS 安装目录随 `productName` 变成 `Rabbit Chat Studio`，升级会装到新目录（配置不受影响，
 配置在 identifier 目录里）。对外说明里建议让老用户先卸载旧版再装新版。
 
-还有两处**仍是旧字样**，需要人工处理：
+还有一处**仍是旧字样**，需要人工处理：
 
-1. `docs/banner.png` —— README 头图里写的是 AI Chat，需要重做（截图也要新名称的窗口）。
-2. winget：旧 id `Leonard.AIChat` 的 PR（winget-pkgs#458061）已关闭；新 id 定为 `XLBBB.RabbitChatStudio`，
+1. winget：旧 id `Leonard.AIChat` 的 PR（winget-pkgs#458061）已关闭；新 id 定为 `XLBBB.RabbitChatStudio`，
    `.github/workflows/winget.yml` 与两份 README 的安装命令已同步，后续发版按新 id 提交。
+
+`docs/banner.png` 已按新名称重绘（`.data/tmp/banner/build.sh` 是可重复运行的生成脚本）；商店截图
+仍需在装好新名称窗口的机器上重拍。
 
 ---
 
