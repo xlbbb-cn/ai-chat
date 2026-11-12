@@ -5487,6 +5487,10 @@ only when every item is done, or when you are blocked and need the user."
     // tool, record it so it survives across sessions. Self-evolution mode
     // routes it into the dedicated evolution area instead of `repo`.
     if let Some(answer) = final_answer {
+        // The goal-loop marker is a control signal, not answer text — it must
+        // not leak into the memory entry the answer produces.
+        let answer = answer.split(GOAL_DONE_MARKER).collect::<Vec<_>>().join("");
+        let answer = answer.trim_end();
         let memory_enabled = config.effective_tools().iter().any(|t| t == "memory");
         if memory_enabled
             && !memory_tool_called

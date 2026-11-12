@@ -390,6 +390,20 @@ const SIDEBAR_SPRING = { type: "spring" as const, stiffness: 320, damping: 32 };
 const SIDEBAR_SHOWN = { opacity: 1, x: 0, pointerEvents: "auto" as const };
 const SIDEBAR_HIDDEN = { opacity: 0, x: -20, pointerEvents: "none" as const };
 
+/**
+ * The goal-loop end marker (`[goal:DONE]`) is a backend control signal: the
+ * main loop reads it from the streamed answer to decide whether the turn may
+ * end, but it must never reach the transcript bubble or the persisted row.
+ * Keep in sync with `GOAL_DONE_MARKER` in `src-tauri/src/llm_complete.rs`.
+ */
+const GOAL_DONE_MARKER = "[goal:DONE]";
+
+/** Remove every goal-loop marker and the blank tail it leaves behind. */
+function stripGoalDoneMarker(text: string): string {
+  if (!text.includes(GOAL_DONE_MARKER)) return text;
+  return text.split(GOAL_DONE_MARKER).join("").trimEnd();
+}
+
 export default function App() {
   const { t, locale, setLocale } = useI18n();
   /** Spring physics must be off when the OS asks for reduced motion. */
@@ -2284,6 +2298,12 @@ export default function App() {
     const cleanup = await chatCompletion(history, activeSkillIds, sessionId, selectedModel, {
       onToken(token) {
         accumulatedContent += token;
+        // Never surface the goal-loop marker: it is the last thing the model
+        // writes, so trimming it the moment it completes keeps the live
+        // bubble identical to the settled one.
+        if (accumulatedContent.endsWith(GOAL_DONE_MARKER)) {
+          accumulatedContent = accumulatedContent.slice(0, -GOAL_DONE_MARKER.length);
+        }
         const shouldMarkDone = hasRunningToolCallRef.current;
         if (shouldMarkDone) hasRunningToolCallRef.current = false;
         setBackgroundWaiting(0);
@@ -2325,10 +2345,13 @@ export default function App() {
         // exact tail restores the accumulator to the pre-request state; the
         // retry then re-streams the whole response. A tail that does not
         // match (should not happen) is left in place rather than guessed at.
-        if (content && accumulatedContent.endsWith(content)) {
+        // The backend's attempt text still carries the goal-loop marker the
+        // live accumulator already dropped — compare against the same form.
+        const tail = stripGoalDoneMarker(content);
+        if (tail && accumulatedContent.endsWith(tail)) {
           accumulatedContent = accumulatedContent.slice(
             0,
-            accumulatedContent.length - content.length
+            accumulatedContent.length - tail.length
           );
         }
         if (reasoning && accumulatedReasoning.endsWith(reasoning)) {
@@ -2359,6 +2382,10 @@ export default function App() {
           }
           return { ...e, status: "done" as const };
         });
+        // The goal-loop marker is a control signal; it never reaches the
+        // transcript or the persisted row (belt and braces — `onToken` already
+        // drops the trailing form).
+        accumulatedContent = stripGoalDoneMarker(accumulatedContent);
         // Deliveries are stored on the assistant row: one turn is one row, and
         // the reply was generated after the model saw them.
         const deliveredInjections = currentInjectionsRef.current;
@@ -2381,7 +2408,7 @@ export default function App() {
           return prev
             .filter((m) => !m.id.startsWith("agent-progress-"))
             .map((m) => {
-              if (m.id === assistantId) return { ...m, streaming: false, ...(finalToolCalls?.length ? { tool_calls: finalToolCalls } : {}) };
+              if (m.id === assistantId) return { ...m, content: accumulatedContent, streaming: false, ...(finalToolCalls?.length ? { tool_calls: finalToolCalls } : {}) };
               return m;
             });
         });
@@ -2413,6 +2440,9 @@ export default function App() {
         });
         // The transcript holds no failure row any more, so a turn that can
         // still be pushed forward offers "continue" from the notice.
+        // The goal-loop marker is a control signal; never persist it or seed
+        // the "continue" action with it.
+        accumulatedContent = stripGoalDoneMarker(accumulatedContent);
         setError(
           err,
           "error",
@@ -2432,6 +2462,7 @@ export default function App() {
                 ? {
                     ...m,
                     error: err,
+                    content: accumulatedContent,
                     status: "error" as const,
                     streaming: false,
                     ...(settledToolCalls.length ? { tool_calls: settledToolCalls } : {}),
@@ -2649,6 +2680,12 @@ export default function App() {
     const cleanup = await chatCompletion(history, activeSkillIds, sessionId, selectedModel, {
       onToken(token) {
         accumulatedContent += token;
+        // Never surface the goal-loop marker: it is the last thing the model
+        // writes, so trimming it the moment it completes keeps the live
+        // bubble identical to the settled one.
+        if (accumulatedContent.endsWith(GOAL_DONE_MARKER)) {
+          accumulatedContent = accumulatedContent.slice(0, -GOAL_DONE_MARKER.length);
+        }
         const shouldMarkDone = hasRunningToolCallRef.current;
         if (shouldMarkDone) hasRunningToolCallRef.current = false;
         setBackgroundWaiting(0);
@@ -2690,10 +2727,13 @@ export default function App() {
         // exact tail restores the accumulator to the pre-request state; the
         // retry then re-streams the whole response. A tail that does not
         // match (should not happen) is left in place rather than guessed at.
-        if (content && accumulatedContent.endsWith(content)) {
+        // The backend's attempt text still carries the goal-loop marker the
+        // live accumulator already dropped — compare against the same form.
+        const tail = stripGoalDoneMarker(content);
+        if (tail && accumulatedContent.endsWith(tail)) {
           accumulatedContent = accumulatedContent.slice(
             0,
-            accumulatedContent.length - content.length
+            accumulatedContent.length - tail.length
           );
         }
         if (reasoning && accumulatedReasoning.endsWith(reasoning)) {
@@ -2719,6 +2759,10 @@ export default function App() {
           }
           return { ...e, status: "done" as const };
         });
+        // The goal-loop marker is a control signal; it never reaches the
+        // transcript or the persisted row (belt and braces — `onToken` already
+        // drops the trailing form).
+        accumulatedContent = stripGoalDoneMarker(accumulatedContent);
         // Deliveries are stored on the assistant row: one turn is one row, and
         // the reply was generated after the model saw them.
         const deliveredInjections = currentInjectionsRef.current;
@@ -2741,7 +2785,7 @@ export default function App() {
           return prev
             .filter((m) => !m.id.startsWith("agent-progress-"))
             .map((m) => {
-              if (m.id === assistantId) return { ...m, streaming: false, ...(finalToolCalls?.length ? { tool_calls: finalToolCalls } : {}) };
+              if (m.id === assistantId) return { ...m, content: accumulatedContent, streaming: false, ...(finalToolCalls?.length ? { tool_calls: finalToolCalls } : {}) };
               return m;
             });
         });
@@ -2772,6 +2816,9 @@ export default function App() {
         // Same as the first-turn handler: the failure is reported through the
         // notice, and the notice carries the resume action when there is
         // anything left to resume.
+        // The goal-loop marker is a control signal; never persist it or seed
+        // the "continue" action with it.
+        accumulatedContent = stripGoalDoneMarker(accumulatedContent);
         setError(
           err,
           "error",
@@ -2791,6 +2838,7 @@ export default function App() {
                 ? {
                     ...m,
                     error: err,
+                    content: accumulatedContent,
                     status: "error" as const,
                     streaming: false,
                     ...(settledToolCalls.length ? { tool_calls: settledToolCalls } : {}),
