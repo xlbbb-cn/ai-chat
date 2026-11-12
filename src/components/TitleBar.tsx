@@ -68,9 +68,19 @@ interface Props {
     turnStartedAt: number | null;
     /** 1 s heartbeat owned by the app shell (the delay timers use it too). */
     now: number;
+    /** Runs right before a workspace switch is applied. Every sidebar panel
+     *  reads workspace-scoped state (skills, memory, tools, MCP, history), so
+     *  the shell closes them first instead of letting them repaint against the
+     *  workspace that is being replaced. */
+    onBeforeWorkspaceSwitch?: () => void;
 }
 
-export function TitleBar({ sleepLock, turnStartedAt, now }: Props) {
+export function TitleBar({
+    sleepLock,
+    turnStartedAt,
+    now,
+    onBeforeWorkspaceSwitch,
+}: Props) {
     const { t } = useI18n();
     const [maximized, setMaximized] = useState(false);
     const [menuOpen, setMenuOpen] = useState(false);
@@ -240,6 +250,7 @@ export function TitleBar({ sleepLock, turnStartedAt, now }: Props) {
      */
     const switchWorkspace = async (dir: string | null) => {
         closeWorkspaceMenu();
+        onBeforeWorkspaceSwitch?.();
         try {
             setWorkspace(await setWorkspaceDir(dir));
         } catch (err) {

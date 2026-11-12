@@ -36,6 +36,7 @@ import type {
   WorkspaceFileEntry,
   WorkspaceFileRange,
   WorkspaceHistoryEntry,
+  RequestHeader,
 } from "./types";
 
 export async function getConfig(): Promise<AppConfig> {
@@ -291,8 +292,23 @@ export interface RemoteModel {
   context_length?: number;
 }
 
-export async function fetchModels(): Promise<RemoteModel[]> {
-  return invoke("fetch_models");
+/**
+ * Ask an endpoint for its `/models` listing.
+ *
+ * The settings panel passes the values currently in its form, so an API key can
+ * be tried before it is saved; omitting them falls back to the saved config.
+ * Nothing is written back either way.
+ */
+export async function fetchModels(endpoint?: {
+  apiBaseUrl?: string;
+  apiKey?: string;
+  customHeaders?: RequestHeader[];
+}): Promise<RemoteModel[]> {
+  return invoke("fetch_models", {
+    apiBaseUrl: endpoint?.apiBaseUrl ?? null,
+    apiKey: endpoint?.apiKey ?? null,
+    customHeaders: endpoint?.customHeaders ?? null,
+  });
 }
 
 /**

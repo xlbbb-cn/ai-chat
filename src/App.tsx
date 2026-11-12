@@ -3808,6 +3808,7 @@ export default function App() {
         sleepLock={sleepLock}
         turnStartedAt={turnStartedAt}
         now={timerTick}
+        onBeforeWorkspaceSwitch={closeSidebar}
       />
       {markdownEditorOpen && (
         <Portal>

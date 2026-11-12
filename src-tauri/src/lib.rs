@@ -1007,9 +1007,31 @@ fn set_model_context_length(
 }
 
 #[tauri::command]
-async fn fetch_models(state: State<'_, AppState>) -> Result<Vec<RemoteModel>, String> {
-    let config = state.config.lock().unwrap().clone();
-    let url = format!("{}/models", config.api_base_url.trim_end_matches('/'));
+async fn fetch_models(
+    state: State<'_, AppState>,
+    api_base_url: Option<String>,
+    api_key: Option<String>,
+    custom_headers: Option<Vec<RequestHeader>>,
+) -> Result<Vec<RemoteModel>, String> {
+    // The settings panel must be able to list the models of an endpoint it has
+    // not saved yet, so the caller may override the connection fields. `None`
+    // keeps the saved configuration, and nothing here is ever written back.
+    let mut config = state.config.lock().unwrap().clone();
+    if let Some(base_url) = api_base_url {
+        config.api_base_url = base_url;
+    }
+    if let Some(key) = api_key {
+        config.api_key = key;
+    }
+    if let Some(headers) = custom_headers {
+        config.custom_headers = headers;
+    }
+
+    let base_url = config.api_base_url.trim().trim_end_matches('/').to_string();
+    if base_url.is_empty() {
+        return Err("Enter the API base URL before fetching the model list.".to_string());
+    }
+    let url = format!("{base_url}/models");
 
     let client = llm_complete::build_http_client()?;
     let headers = llm_complete::custom_request_headers(&config);

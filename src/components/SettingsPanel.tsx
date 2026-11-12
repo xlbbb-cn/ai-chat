@@ -256,7 +256,13 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
       // The capability catalogue is an independent public feed, so treat it as
       // best-effort: an unreachable mirror must never block the model list.
       const [remoteModels, metadataEntries] = await Promise.all([
-        fetchModels(),
+        // Fetch with what the form holds, not what was last saved: an API key
+        // can be tried (and its model list listed) before "Save Changes".
+        fetchModels({
+          apiBaseUrl: config.api_base_url,
+          apiKey: config.api_key,
+          customHeaders: normalizeCustomHeaders(config.custom_headers),
+        }),
         fetchModelMetadata().catch((err) => {
           setMetadataError(String(err));
           return [] as ModelMetadata[];

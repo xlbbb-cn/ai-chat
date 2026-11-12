@@ -975,7 +975,10 @@ body {
   left: 0;
   right: auto;
   min-width: 260px;
-  max-width: min(420px, 60vw);
+  /* Wider than a plain menu: the rows have to fit a whole folder name. The
+     ceiling keeps a long parent path from stretching the popup to the edge of
+     a narrow window. */
+  max-width: min(480px, calc(100vw - 96px));
   max-height: min(320px, 60vh);
   overflow-y: auto;
   /* A menu is not the transcript: it caps its height and hides the native bar
@@ -992,11 +995,11 @@ body {
   white-space: nowrap;
 }
 
+/* The folder name is the identity of the row, so it is never truncated — it
+   keeps its natural width and the parent path gives up space first. */
 .workspace-item-name {
-  flex: 0 1 auto;
-  max-width: 60%;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .titlebar-workspace-item.is-current .workspace-item-name {
