@@ -26,7 +26,16 @@
  */
 
 import { t as text } from "../i18n";
-import { watchTheme, readToken } from "./figureCard";
+import { showUnrenderable, watchTheme, readToken } from "./figureCard";
+import {
+  INDENTED_CODE,
+  fenceIsOpen,
+  isFenceClose,
+  readFence,
+  slotIndent,
+  splitLines,
+  stripIndent,
+} from "./fenceLines";
 import { expandSlots, hashSource, slotHost, slotToken } from "./slotTokens";
 
 export interface DiagramSpec {
@@ -47,38 +56,30 @@ export interface ExtractedDiagrams {
 const SLOT_MARKER = "\u2063M";
 const SLOT_OPTIONS = { marker: SLOT_MARKER, className: "chat-mermaid-slot", datasetKey: "mermaidSlot" };
 
-const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})[ \t]*([^\s`]*)[ \t]*(.*)$/;
-const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
-
-/** A CommonMark indented code block: 4 spaces or a tab. */
-const INDENTED_CODE = /^(?: {4}|\t)/;
-
-function isFenceClose(line: string, fence: string): boolean {
-  const match = FENCE_CLOSE.exec(line);
-  return Boolean(match) && match![1][0] === fence[0] && match![1].length >= fence.length;
-}
-
 /**
  * Cut `mermaid` fences out of rendered markdown, leaving a slot token behind.
  *
- * Fence-aware and indentation-aware like `extractFigures`: a `mermaid` example
- * inside another fence or a 4-space indented block stays code. An unclosed
+ * Fence-aware and indentation-aware like `extractFigures` (both use
+ * `fenceLines.ts`): a `mermaid` example inside another fence or a 4-space
+ * indented block stays code, while a block a list item encloses is a diagram —
+ * and is dedented before Mermaid sees it. An unclosed
  * fence becomes a `pending` card while the reply streams (so the block does not
  * flash back to raw text on every token) and an ordinary code block once it is
  * over — markdown-it renders an unclosed fence as code, and a card stuck on
  * `Drawing…` would be a lie.
  */
 export function extractDiagrams(source: string, options: { streaming: boolean }): ExtractedDiagrams {
-  const lines = source.split("\n");
+  const lines = splitLines(source);
   const out: string[] = [];
   const diagrams: DiagramSpec[] = [];
   let i = 0;
 
   while (i < lines.length) {
     const line = lines[i];
-    const open = FENCE_OPEN.exec(line);
+    const opening = readFence(line);
+    const open = opening && fenceIsOpen(opening, lines, i) ? opening : null;
     if (open) {
-      const fence = open[1];
+      const fence = open.fence;
       let end = -1;
       for (let j = i + 1; j < lines.length; j += 1) {
         if (isFenceClose(lines[j], fence)) {
@@ -86,15 +87,18 @@ export function extractDiagrams(source: string, options: { streaming: boolean })
           break;
         }
       }
-      const lang = (open[2] ?? "").toLowerCase();
+      const lang = open.lang;
       if (lang === "mermaid" && (end !== -1 || options.streaming)) {
-        const body = lines.slice(i + 1, end === -1 ? lines.length : end);
+        const body = stripIndent(
+          lines.slice(i + 1, end === -1 ? lines.length : end).join("\n"),
+          open.indent,
+        );
         diagrams.push({
-          source: body.join("\n").trim(),
-          title: (open[3] ?? "").trim(),
+          source: body.trim(),
+          title: open.rest.trim(),
           pending: end === -1,
         });
-        out.push(slotToken(SLOT_MARKER, diagrams.length - 1));
+        out.push(slotIndent(open.indent) + slotToken(SLOT_MARKER, diagrams.length - 1));
       } else {
         out.push(...lines.slice(i, end === -1 ? lines.length : end + 1));
       }
@@ -417,15 +421,14 @@ function buildCard(spec: DiagramSpec, index: number): DiagramHandle {
     return handle;
   }
 
-  const showSource = () => {
-    // A diagram that cannot be drawn shows its source, exactly like a figure.
-    figure.dataset.figureState = "invalid";
-    const pre = document.createElement("pre");
-    pre.className = "hljs chat-figure-source";
-    const code = document.createElement("code");
-    code.textContent = spec.source;
-    pre.append(code);
-    viewport.replaceChildren(pre);
+  // A diagram that cannot be drawn says so in one line and keeps its source a
+  // click away, exactly like a figure (see `showUnrenderable`).
+  const showSource = (reason: string) => {
+    console.warn(`[figures] mermaid diagram not drawn (${reason})`, {
+      title: spec.title,
+      source: spec.source.slice(0, 400),
+    });
+    showUnrenderable(figure, viewport, spec.source);
   };
 
   let busy = false;
@@ -448,7 +451,7 @@ function buildCard(spec: DiagramSpec, index: number): DiagramHandle {
         viewport.innerHTML = markup;
         const svg = viewport.querySelector("svg");
         if (!svg) {
-          showSource();
+          showSource("render produced no svg");
           return;
         }
         svg.classList.add("chat-mermaid-svg");
@@ -457,7 +460,7 @@ function buildCard(spec: DiagramSpec, index: number): DiagramHandle {
         fitDiagram(svg, viewport);
         figure.dataset.figureState = "ready";
       })
-      .catch(() => showSource())
+      .catch((error: unknown) => showSource(String(error)))
       .finally(() => {
         busy = false;
         if (queued) {

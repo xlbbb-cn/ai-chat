@@ -297,6 +297,9 @@ const en = {
         sandboxHint: "Contains script · runs sandboxed · no network",
         rememberSession: "Play automatically this session",
         navigatedAway: "This figure tried to load an outside page, so it was stopped",
+        unrenderable: "This figure could not be drawn: the source did not parse.",
+        copySource: "Copy source",
+        showSource: "Show source",
     },
 
     toolGroup: {

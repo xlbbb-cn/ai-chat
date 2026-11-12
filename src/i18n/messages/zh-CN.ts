@@ -270,6 +270,9 @@ const zhCN: Messages = {
         sandboxHint: "含脚本 · 沙箱内运行 · 无网络",
         rememberSession: "本次会话自动播放",
         navigatedAway: "该动态图试图加载外部页面，已停止",
+        unrenderable: "没能画出这张图：源码无法解析。",
+        copySource: "复制源码",
+        showSource: "查看源码",
     },
 
     toolGroup: {

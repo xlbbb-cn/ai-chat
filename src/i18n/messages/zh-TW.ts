@@ -270,6 +270,9 @@ const zhTW: Messages = {
         sandboxHint: "含腳本 · 沙箱內執行 · 無網路",
         rememberSession: "本次工作階段自動播放",
         navigatedAway: "該動態圖試圖載入外部頁面，已停止",
+        unrenderable: "沒能畫出這張圖：原始碼無法解析。",
+        copySource: "複製原始碼",
+        showSource: "檢視原始碼",
     },
 
     toolGroup: {
