@@ -1075,8 +1075,8 @@ export async function saveMarkdownFile(path: string, content: string): Promise<v
  * document out but cannot write a PDF file. Rejects with `NO_PDF_ENGINE` when
  * no browser is installed.
  */
-export async function exportMarkdownPdf(html: string, outPath: string): Promise<string> {
-  return invoke("app_export_markdown_pdf", { html, outPath });
+export async function exportPdf(html: string, outPath: string): Promise<string> {
+  return invoke("app_export_pdf", { html, outPath });
 }
 
 // ─── App menu (custom titlebar) ──────────────────────────────────────────────

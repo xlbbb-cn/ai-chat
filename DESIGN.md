@@ -882,7 +882,8 @@ on the right.
 - **The file manager is the confirmation.** A finished export reveals the file
   in Explorer/Finder; floating notices stay reserved for warnings and errors, so
   a success never borrows their colour. A cancelled save dialog does nothing at
-  all.
+  all. The transcript's export button takes the same route (`utils/pdfExport`),
+  so a reply also leaves as a file — same dialog, same palette, same reveal.
 
 ### Interaction monitor
 

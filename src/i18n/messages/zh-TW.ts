@@ -184,8 +184,8 @@ const zhTW: Messages = {
         markdownPreviewEmpty: "Markdown 預覽將顯示在這裡。",
         markdownPdf: "匯出 PDF",
         markdownPdfTip: "把預覽寫成一個 PDF 檔案（A4，淺色主題）。",
-        markdownPdfFailed: "匯出 PDF 失敗：{error}",
-        markdownPdfFallback: "找不到 Edge 或 Chrome——已改為開啟列印對話框，請在其中選擇「另存為 PDF」。",
+        pdfFailed: "匯出 PDF 失敗：{error}",
+        pdfFallback: "找不到 Edge 或 Chrome——已改為開啟列印對話框，請在其中選擇「另存為 PDF」。",
 
         confirm: {
             titleSudo: "特權操作（sudo）",

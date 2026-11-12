@@ -1,7 +1,8 @@
-//! HTML → PDF for the Markdown editor.
+//! HTML → PDF for everything the app exports as a document.
 //!
-//! The editor's preview is rendered HTML (react-markdown + KaTeX + GFM tables),
-//! so the only faithful route to a `.pdf` is a browser print engine. The app's
+//! What is exported is rendered HTML — the Markdown editor's preview
+//! (react-markdown + KaTeX + GFM tables) or a reply with its figure cards — so
+//! the only faithful route to a `.pdf` is a browser print engine. The app's
 //! own webview cannot do it: wry exposes no `PrintToPdfAsync`, and calling
 //! `print()` only opens a dialog. A headless Chromium is therefore started on
 //! the document — Edge on Windows (always installed there), Chrome or Chromium
@@ -138,7 +139,7 @@ pub fn file_url(path: &Path) -> String {
 /// that left the previous export in place.
 pub async fn export(html: &str, out: &Path) -> Result<(), String> {
     let engine = engine().ok_or_else(|| NO_ENGINE.to_string())?;
-    let work = std::env::temp_dir().join(format!("ai-chat-mdpdf-{}", uuid::Uuid::new_v4()));
+    let work = std::env::temp_dir().join(format!("ai-chat-pdf-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&work)
         .map_err(|err| format!("Failed to create the print workspace: {err}"))?;
     let result = run(&engine, html, out, &work).await;
@@ -284,7 +285,7 @@ mod tests {
             eprintln!("skipped: no Chromium engine on this machine");
             return;
         }
-        let dir = std::env::temp_dir().join(format!("ai-chat-mdpdf-test-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("ai-chat-pdf-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let out = dir.join("out.pdf");
         let html = concat!(

@@ -203,8 +203,8 @@ const en = {
         markdownPreviewEmpty: "Markdown preview will appear here.",
         markdownPdf: "Export PDF",
         markdownPdfTip: "Write the preview to a PDF file (A4, light theme).",
-        markdownPdfFailed: "PDF export failed: {error}",
-        markdownPdfFallback:
+        pdfFailed: "PDF export failed: {error}",
+        pdfFallback:
             "No Edge or Chrome found — opened the print dialog instead. Choose \"Save as PDF\" there.",
 
         confirm: {

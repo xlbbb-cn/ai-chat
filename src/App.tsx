@@ -2,9 +2,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } fr
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, listAgentMentions, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, exportMarkdownPdf, deleteMessage, deleteMessagesAfter, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState, setWindowVibrancy, savePastedFile, importWorkspacePaths } from "./api";
+import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, listAgentMentions, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, deleteMessagesAfter, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState, setWindowVibrancy, savePastedFile, importWorkspacePaths } from "./api";
 
 import { ChatMessage, ChatMessageBoundary } from "./components/ChatMessage";
 import { ToolCallGroup } from "./components/ToolCallGroup";
@@ -74,7 +72,8 @@ import { activeAgentQuery, hasAgentToken, scoreAgentMention } from "./agentMenti
 import type { AgentMentionOption } from "./agentMention";
 import { isGenerationStopped, isLocale, stripGenerationStopped, useI18n } from "./i18n";
 import { formatCountdown } from "./utils/time";
-import { buildPrintDocumentHtml, printHtmlDocument, MARKDOWN_PRINT_CSS } from "./utils/printDocument";
+import { MARKDOWN_PRINT_CSS } from "./utils/printDocument";
+import { exportHtmlAsPdf } from "./utils/pdfExport";
 import {
   FontAwesomeIcon,
   faBrain,
@@ -3378,46 +3377,25 @@ export default function App() {
    *
    * The preview DOM is cloned instead of the markdown being rendered again:
    * what leaves the app is exactly what the right-hand column shows. Building a
-   * self-contained document (KaTeX inlined, system fonts) is what lets another
-   * process print it; with no Chromium on the machine the system print dialog
-   * takes over, so the feature degrades instead of failing.
+  * self-contained document (KaTeX inlined, system fonts) is what lets another
+  * process print it; `exportHtmlAsPdf` owns the save dialog and the fallback.
    */
   async function handleExportMarkdownPdf() {
     if (!markdownDraft.trim() || markdownPdfBusy) return;
     const suggested = markdownPath.trim()
       ? `${markdownPath.replace(/\.[^./\\]+$/, "")}.pdf`
       : "markdown.pdf";
-    const target = await saveDialog({
-      defaultPath: suggested,
-      filters: [{ name: "PDF", extensions: ["pdf"] }],
-    });
-    if (!target) return;
-
     setMarkdownPdfBusy(true);
     try {
-      const printOptions = {
+      const result = await exportHtmlAsPdf({
         title: suggested.replace(/^.*[\\/]/, ""),
         bodyHtml: markdownPreviewRef.current?.innerHTML ?? "",
         extraCss: MARKDOWN_PRINT_CSS,
-      };
-      const html = await buildPrintDocumentHtml({ ...printOptions, standalone: true });
-      let saved: string | null = null;
-      try {
-        saved = await exportMarkdownPdf(html, target);
-      } catch (err) {
-        if (String(err) !== "NO_PDF_ENGINE") throw err;
-      }
-      if (saved) {
-        // The file manager is the confirmation: a notice is reserved for
-        // warnings and errors.
-        void revealItemInDir(saved).catch(console.error);
-        return;
-      }
-      // No Chromium on this machine: the system print dialog does the same job.
-      printHtmlDocument(await buildPrintDocumentHtml(printOptions));
-      setError(t("app.markdownPdfFallback"), "warning");
+        defaultPath: suggested,
+      });
+      if (result === "printed") setError(t("app.pdfFallback"), "warning");
     } catch (err) {
-      setError(t("app.markdownPdfFailed", { error: String(err) }));
+      setError(t("app.pdfFailed", { error: String(err) }));
     } finally {
       setMarkdownPdfBusy(false);
     }
@@ -4494,6 +4472,7 @@ export default function App() {
                   dbId={m.dbId}
                   onConfirm={respondToolCallConfirm}
                   onCancelBackground={handleCancelBackgroundTask}
+                  onNotice={setError}
                   backgroundTasks={
                     m.role === "assistant" && m.id === messages[messages.length - 1]?.id
                       ? backgroundTasks

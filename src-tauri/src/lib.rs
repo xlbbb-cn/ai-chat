@@ -17,10 +17,10 @@ mod backup;
 mod db;
 mod evolution_maintenance;
 mod figures;
+mod html_pdf;
 mod instance;
 mod llm_complete;
 mod logger;
-mod markdown_pdf;
 // `src/utils/` is a plain folder holding standalone crates (workspace members
 // `pdf2md-rs` and `knowledge-graph`), not a module: nothing here declares it.
 pub mod mcp;
@@ -247,14 +247,14 @@ async fn app_import_profile(app: AppHandle, path: String) -> Result<(), String> 
         .map_err(|err| format!("Profile import task failed: {err}"))?
 }
 
-/// Print a Markdown editor draft to `out_path` as PDF.
+/// Print an exported document — a Markdown draft, a reply — to `out_path`.
 ///
-/// The HTML is built in the webview — it owns the rendered preview, KaTeX and
+/// The HTML is built in the webview — it owns the rendered markup, KaTeX and
 /// all — and printed here by a headless Chromium. `NO_PDF_ENGINE` means no
 /// browser is installed, which the frontend answers with the print dialog
 /// rather than an error.
 #[tauri::command]
-async fn app_export_markdown_pdf(html: String, out_path: String) -> Result<String, String> {
+async fn app_export_pdf(html: String, out_path: String) -> Result<String, String> {
     if html.trim().is_empty() {
         return Err("The document is empty".into());
     }
@@ -262,7 +262,7 @@ async fn app_export_markdown_pdf(html: String, out_path: String) -> Result<Strin
         return Err("PDF path is empty".into());
     }
     let out = PathBuf::from(out_path);
-    markdown_pdf::export(&html, &out).await?;
+    html_pdf::export(&html, &out).await?;
     Ok(out.to_string_lossy().into_owned())
 }
 
@@ -2055,7 +2055,7 @@ pub fn run() {
             app_open_markdown,
             app_export_profile,
             app_import_profile,
-            app_export_markdown_pdf,
+            app_export_pdf,
             skills::list_skills,
             skills::save_skill,
             skills::delete_skill,

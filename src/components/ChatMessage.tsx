@@ -16,7 +16,8 @@ import hljs from "highlight.js";
 import "highlight.js/styles/github.css";
 import "katex/dist/katex.min.css";
 import { katexMathPlugin } from "../utils/markdownMath";
-import { buildPrintDocumentHtml, escapeHtml, printHtmlDocument } from "../utils/printDocument";
+import { escapeHtml } from "../utils/printDocument";
+import { exportHtmlAsPdf, type PdfExportResult } from "../utils/pdfExport";
 import { extractFigures, type FigureSpec } from "../utils/figures";
 import { mountFigures, saveAllFigures } from "../utils/figureCard";
 import {
@@ -29,6 +30,7 @@ import { mentionDisplayName } from "../composerFiles";
 // `t` (module-level) is used by the markdown-it renderer rules, which run
 // outside the React tree; the hook keeps the component re-rendering on change.
 import { t as text, useI18n } from "../i18n";
+import type { ChatNoticeTone } from "./ChatNotice";
 import {
   FontAwesomeIcon,
   faCodeBranch,
@@ -263,24 +265,32 @@ async function printableMessageHtml(root: HTMLElement | null, fallback: string):
   return clone.innerHTML;
 }
 
-function exportAssistantMessagePdf(contentHtml: string, messageId: string) {
-  void buildPrintDocumentHtml({
+/**
+ * Hand the reply's printable HTML to the shared PDF export.
+ *
+ * The same route the Markdown editor takes: a real file, chosen in a save
+ * dialog, printed by Rust. The caller reports the result, because only it has
+ * the transcript's notice channel.
+ */
+function exportAssistantMessagePdf(contentHtml: string, messageId: string): Promise<PdfExportResult> {
+  return exportHtmlAsPdf({
     title: `assistant-message-${messageId}`,
     bodyHtml: contentHtml,
     extraCss: MESSAGE_PRINT_CSS,
-  })
-    .then(printHtmlDocument)
-    .catch((error) => {
-      // The button is the only export path here, so a failure is logged rather
-      // than thrown out of the click handler.
-      console.error("PDF export failed", error);
-    });
+    // An id is not a filename: strip what Windows refuses in a path.
+    defaultPath: `assistant-message-${messageId.replace(/[^\w.-]+/g, "-")}.pdf`,
+  });
 }
 
 interface Props {
   message: Message;
   showRetry?: boolean;
   onRetry?: () => void;
+  /**
+   * Report a problem upward. The transcript has no notice of its own: exports
+   * and saves fail into the app's one notice slot, like every other action.
+   */
+  onNotice?: (message: string, tone?: ChatNoticeTone) => void;
   onDelete?: (messageId: string) => void;
   onFork?: (messageId: string) => void;
   dbId?: number;
@@ -691,7 +701,7 @@ function writingTailHost(content: HTMLElement): HTMLElement {
   return host;
 }
 
-export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onFork, dbId, onConfirm, onCancelBackground, backgroundTasks, backgroundWaiting, skillNames, agentTokens, sessionId, todoActive }: Props) {
+export function ChatMessage({ message, showRetry = false, onRetry, onNotice, onDelete, onFork, dbId, onConfirm, onCancelBackground, backgroundTasks, backgroundWaiting, skillNames, agentTokens, sessionId, todoActive }: Props) {
   const { t } = useI18n();
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
@@ -1230,7 +1240,13 @@ export function ChatMessage({ message, showRetry = false, onRetry, onDelete, onF
                 // Building the document may re-render diagrams, so it is async.
                 void printableMessageHtml(contentRef.current, renderedMainContent)
                   .then((html) => exportAssistantMessagePdf(html, message.id))
-                  .catch((error) => console.error("Message export failed", error));
+                  .then((result) => {
+                    if (result === "printed") onNotice?.(t("app.pdfFallback"), "warning");
+                  })
+                  .catch((error) => {
+                    console.error("Message export failed", error);
+                    onNotice?.(t("app.pdfFailed", { error: String(error) }));
+                  });
               }}
               disabled={!mainContent.trim()}
               title={t("chat.exportTitle")}
