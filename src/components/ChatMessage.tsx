@@ -1,6 +1,7 @@
 import type { BackgroundTaskState, ChatInjection, Message, MessageContent } from "../types";
 import {
   Component,
+  memo,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -701,7 +702,7 @@ function writingTailHost(content: HTMLElement): HTMLElement {
   return host;
 }
 
-export function ChatMessage({ message, showRetry = false, onRetry, onNotice, onDelete, onFork, dbId, onConfirm, onCancelBackground, backgroundTasks, backgroundWaiting, skillNames, agentTokens, sessionId, todoActive }: Props) {
+function ChatMessageRow({ message, showRetry = false, onRetry, onNotice, onDelete, onFork, dbId, onConfirm, onCancelBackground, backgroundTasks, backgroundWaiting, skillNames, agentTokens, sessionId, todoActive }: Props) {
   const { t } = useI18n();
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
@@ -1305,6 +1306,17 @@ export function ChatMessage({ message, showRetry = false, onRetry, onNotice, onD
     </div>
   );
 }
+
+/**
+ * One transcript row, memoised on shallow prop equality.
+ *
+ * A streamed token swaps the `messages` array but keeps every untouched row's
+ * object identity (`prev.map` returns the same object for other ids), and the
+ * callbacks handed down are stable across a turn — so the grown row is the
+ * only one that re-renders. Without this the whole history is reconciled, and
+ * every row's layout effects re-checked, once per token.
+ */
+export const ChatMessage = memo(ChatMessageRow);
 
 /**
  * Keeps one broken message from taking the transcript down with it.

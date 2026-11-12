@@ -680,6 +680,18 @@ export default function App() {
    * otherwise the deleted row could be written right after the DELETE.
    */
   const pendingTurnWriteRef = useRef<Promise<unknown> | null>(null);
+  /**
+   * Latest transcript, readable from click handlers without listing `messages`
+   * in their dependency arrays. Every streamed token swaps the array, so a
+   * callback that depended on it would change identity once per delta and
+   * defeat `React.memo` on the transcript rows — the whole history would
+   * re-render per token. Synced in a layout effect (before paint) so a handler
+   * can never read a transcript older than the committed render.
+   */
+  const messagesDataRef = useRef<Message[]>(messages);
+  useLayoutEffect(() => {
+    messagesDataRef.current = messages;
+  }, [messages]);
   /** True while a retry is cleaning up before its request starts. */
   const retryingRef = useRef(false);
   const currentToolCallsRef = useRef<ToolCallEntry[]>([]);
@@ -2913,7 +2925,7 @@ export default function App() {
   }, [messages, streaming, pendingRetryMessageId, activeSkillIds, sessionId, selectedModel, useAgentsEnabled, t, flushUndeliveredInjections]);
 
   const handleDeleteMessage = useCallback(async (messageId: string) => {
-    const msg = messages.find((m) => m.id === messageId);
+    const msg = messagesDataRef.current.find((m) => m.id === messageId);
     if (!msg || msg.dbId === undefined) return;
 
     try {
@@ -2922,10 +2934,14 @@ export default function App() {
     } catch (err) {
       setError(t("app.deleteFailed", { error: String(err) }));
     }
-  }, [messages, t]);
+  }, [t]);
 
   const handleForkMessage = useCallback(async (messageId: string) => {
-    const msg = messages.find((m) => m.id === messageId);
+    // One snapshot for the whole handler: the transcript is replaced per
+    // streamed token, and a fork must cut at the row the user clicked, not at
+    // whatever arrived between the click and the reload.
+    const transcript = messagesDataRef.current;
+    const msg = transcript.find((m) => m.id === messageId);
     if (!msg || msg.dbId === undefined) return;
 
     const newSessionId = crypto.randomUUID();
@@ -2933,7 +2949,7 @@ export default function App() {
       await forkSession(sessionId, newSessionId, msg.dbId);
       // Reload history panel will pick up the new session on next open
       // Switch to the new session
-      const forkedMessages = messages
+      const forkedMessages = transcript
         .filter((m) => m.dbId !== undefined && m.dbId <= msg.dbId!)
         .map((m) => ({ ...m, id: crypto.randomUUID() }));
       followBottomRef.current = true;
@@ -2947,7 +2963,7 @@ export default function App() {
     } catch (err) {
       setError(t("app.forkFailed", { error: String(err) }));
     }
-  }, [messages, sessionId, resetEmbeddedAgents, t]);
+  }, [sessionId, resetEmbeddedAgents, t]);
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (backupExporting) {
@@ -4449,8 +4465,14 @@ export default function App() {
               )}
             </div>
           )}
-          {messages.map((m) =>
-            m.role === "tool_group" ? (
+          {messages.map((m) => {
+            // Only the row that can actually offer a retry receives the
+            // callback: its identity changes with the transcript, and handing
+            // it to every row would re-render the whole history per token.
+            const retryable =
+              m.role === "user" && m.id === pendingRetryMessageId && !streaming;
+            const newest = m.id === messages[messages.length - 1]?.id;
+            return m.role === "tool_group" ? (
               <ToolCallGroup key={m.id} message={m} onConfirm={respondToolCallConfirm} onCancelBackground={handleCancelBackgroundTask} />
             ) : (
               // One row failing to render must not blank the transcript, so
@@ -4458,8 +4480,8 @@ export default function App() {
               <ChatMessageBoundary key={m.id}>
                 <ChatMessage
                   message={m}
-                  showRetry={m.role === "user" && m.id === pendingRetryMessageId && !streaming}
-                  onRetry={retryPendingUserMessage}
+                  showRetry={retryable}
+                  onRetry={retryable ? retryPendingUserMessage : undefined}
                   onDelete={handleDeleteMessage}
                   onFork={handleForkMessage}
                   dbId={m.dbId}
@@ -4467,14 +4489,10 @@ export default function App() {
                   onCancelBackground={handleCancelBackgroundTask}
                   onNotice={setError}
                   backgroundTasks={
-                    m.role === "assistant" && m.id === messages[messages.length - 1]?.id
-                      ? backgroundTasks
-                      : undefined
+                    m.role === "assistant" && newest ? backgroundTasks : undefined
                   }
                   backgroundWaiting={
-                    m.role === "assistant" && m.id === messages[messages.length - 1]?.id
-                      ? backgroundWaiting
-                      : undefined
+                    m.role === "assistant" && newest ? backgroundWaiting : undefined
                   }
                   sessionId={sessionId}
                   todoActive={m.role === "assistant" && m.id === todoMessageId}
@@ -4483,7 +4501,7 @@ export default function App() {
                 />
               </ChatMessageBoundary>
             )
-          )}
+          })}
         </div>
 
         {/* Input */}
