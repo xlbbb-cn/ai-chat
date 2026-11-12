@@ -79,6 +79,26 @@ to a **published** (non-draft) GitHub Release for the tag (also kept as workflow
 - `.github/workflows/winget.yml` auto-submits each published release's NSIS `-setup.exe` to `microsoft/winget-pkgs` via `winget-releaser`; it first waits for the asset upload to finish and needs the `WINGET_TOKEN` secret (classic PAT, `public_repo` + `workflow`) plus a `microsoft/winget-pkgs` fork under `xlbbb-cn`.
 - `releaseDraft: false` publishes the Release as soon as the first platform finishes; remaining assets upload afterwards, so downstream consumers (e.g. winget) must wait for the NSIS `.exe` to appear.
 
+### Microsoft Store (MSIX)
+
+`scripts/build-msix.ps1` (`npm run msix`) packs the release exe into an unsigned `.msix` with the Windows
+SDK (`makeappx`); the identity lives in `src-tauri/msix/store.config.json` (Partner Center product
+identity) and the manifest in `Package.appxmanifest.template`, so a name/publisher change is one JSON
+edit. Tauri has no MSIX target, hence our own step; the Store re-signs what you upload, so submission
+uses the unsigned file. The `windows-x86_64` CI job runs the same script with `-SkipBuild` after
+`tauri-action` and keeps the `.msix` as an Actions artifact (never a Release asset — end users cannot
+install an unsigned package). Runbook, submission fields and policy mapping: `docs/store-publishing.md`.
+
+- MSIX runs the app as a full-trust Desktop Bridge package (`runFullTrust`,
+  `EntryPoint="Windows.FullTrustApplication"`): filesystem and process access are unchanged, but writes
+  under AppData land in `%LOCALAPPDATA%\Packages\<PFN>\LocalCache\…`, and child processes started by the
+  app see the same redirected view — CLI agents therefore do not share the login state of the user's own
+  terminal. Do not declare a WebView2 framework package dependency (Store installs with it fail); rely on
+  the machine's Evergreen runtime and keep `MinVersion` at Windows 10 2004.
+- `update::is_store_packaged()` keeps the GitHub updater out of Store builds: when the exe runs from
+  `…\WindowsApps\…`, `check_update` answers "already latest" instead of pointing users at the NSIS
+  installer for a second copy.
+
 ## Architecture
 
 - **Entry points**: `src/main.tsx` → `src/App.tsx`; Rust `src-tauri/src/main.rs` → `src-tauri/src/lib.rs` (command registration, state, app setup).

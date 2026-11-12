@@ -34,27 +34,27 @@ jobs:
             rustTargets: aarch64-apple-darwin
             args: '--target aarch64-apple-darwin'
             # README 的 releases/latest/download/... 链接依赖这些不带版本号的副本。
-            stableAsset: AI-Chat-macOS-Apple-Silicon.dmg
+            stableAsset: Rabbit-Chat-Studio-macOS-Apple-Silicon.dmg
             bundleGlob: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
           - name: macOS (Intel)
             platform: macos-latest
             slug: macos-x86_64
             rustTargets: x86_64-apple-darwin
             args: '--target x86_64-apple-darwin'
-            stableAsset: AI-Chat-macOS-Intel.dmg
+            stableAsset: Rabbit-Chat-Studio-macOS-Intel.dmg
             bundleGlob: src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
           - name: Linux (x86_64)
             platform: ubuntu-22.04
             slug: linux-x86_64
             rustTargets: ''
             args: ''
-            stableAsset: AI-Chat-Linux-x86_64.AppImage
+            stableAsset: Rabbit-Chat-Studio-Linux-x86_64.AppImage
             bundleGlob: src-tauri/target/release/bundle/appimage/*.AppImage
           - name: Windows (x86_64)
             platform: windows-latest
             slug: windows-x86_64
             rustTargets: ''
-            stableAsset: AI-Chat-Windows-x64-setup.exe
+            stableAsset: Rabbit-Chat-Studio-Windows-x64-setup.exe
             bundleGlob: src-tauri/target/release/bundle/nsis/*-setup.exe
             # Windows 只提供 NSIS -setup.exe（不再产出 .msi）。
             args: '--bundles nsis'
@@ -158,7 +158,7 @@ jobs:
         with:
           # 只有 tag 触发的运行才创建 / 更新 Release；手动触发只产出 Actions 产物
           tagName: ${{ github.event_name == 'push' && github.ref_name || '' }}
-          releaseName: ${{ github.event_name == 'push' && 'AI Chat v__VERSION__' || '' }}
+          releaseName: ${{ github.event_name == 'push' && 'Rabbit Chat Studio v__VERSION__' || '' }}
           releaseBody: |
             ${{ steps.notes.outputs.body }}
 
@@ -195,3 +195,20 @@ jobs:
           cp "$src" "$dest"
           gh release upload "${GITHUB_REF_NAME}" "$dest" --clobber
           echo "Uploaded ${{ matrix.stableAsset }} from $src"
+
+      # Microsoft Store 提交用的 MSIX（Tauri 不出这个格式，见 scripts/build-msix.ps1 与
+      # docs/store-publishing.md）。tauri-action 已经构建好 exe，这里只打包；身份值读
+      # src-tauri/msix/store.config.json。产物只作为 Actions artifact 保留，不进 Release：
+      # 它是未签名包，只该上传到 Partner Center。
+      - name: Build MSIX for Microsoft Store
+        if: matrix.slug == 'windows-x86_64'
+        shell: pwsh
+        run: ./scripts/build-msix.ps1 -SkipBuild
+
+      - name: Upload MSIX
+        if: matrix.slug == 'windows-x86_64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rabbit-Chat-Studio-MSIX
+          path: src-tauri/target/msix/msix/*.msix
+          if-no-files-found: error
