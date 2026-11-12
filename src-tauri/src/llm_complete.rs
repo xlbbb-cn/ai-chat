@@ -1,5 +1,4 @@
 use futures_util::StreamExt;
-use os_info;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -1049,9 +1048,8 @@ fn background_label(name: &str, args: &Value) -> String {
             }
         }
         "run_shell" => {
-            let shell = args["type"].as_str().unwrap_or("shell");
             let code = args["code"].as_str().unwrap_or("");
-            format!("{shell}: {code}")
+            format!("{}: {code}", tools::RUN_SHELL_TYPE)
         }
         "file_actions" => {
             let path = args["path"].as_str().unwrap_or(".");
@@ -3414,22 +3412,16 @@ async fn run_chat_turn(
     // Track active skill name→directory pairs for skill_read tool injection.
     let mut active_skill_dirs: Vec<(String, PathBuf)> = Vec::new();
 
-    let os_info = os_info::get();
-    let os_sys_msg = format!(
-        "user's machine: {} {}",
-        os_info.os_type(),
-        os_info.version()
-    );
-
+    // The machine's OS name and version are advertised by the `run_shell` tool
+    // schema itself (tools::get_all_tools), next to the fixed script language
+    // they explain, instead of sitting in this system prompt.
     if !system_content.is_empty() {
         system_content.push_str("\n\n");
     }
-    system_content.push_str(&os_sys_msg);
     system_content.push_str(
-        "\n\n\
-        Explicit invocation: {tool:<name>} / {mcp:<server>.<tool>} / {skill:<name>} are direct \
+        "Explicit invocation: {tool:<name>} / {mcp:<server>.<tool>} / {skill:<name>} are direct \
         requests — call the tool or load the skill before answering, no confirmation needed.",
-    ); //Add system info & explicit invocation syntax to system prompt
+    ); //Add explicit invocation syntax to system prompt
 
     let ws_skills_dir = crate::workspace::skills_root(&workspace_dir_for_roots);
 

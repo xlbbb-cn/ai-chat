@@ -180,6 +180,20 @@ chcp 65001 > $null; \
     }
 }
 
+/// PowerShell 7+ (`pwsh`) when it is installed, else the built-in Windows
+/// PowerShell — which is what a Windows build's `run_shell` uses, so the
+/// modern shell is preferred rather than required.
+fn pwsh_program() -> &'static str {
+    static PROGRAM: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+    PROGRAM.get_or_init(|| {
+        if crate::agents::cli::resolve_executable("pwsh").is_ok() {
+            "pwsh"
+        } else {
+            "powershell"
+        }
+    })
+}
+
 fn format_process_output(output: std::process::Output, hint: OutputDecodeHint) -> String {
     let stdout = decode_process_bytes(&output.stdout, hint);
     let stderr = decode_process_bytes(&output.stderr, hint);
@@ -350,7 +364,16 @@ pub(crate) fn build_command_with_path(
             c
         }
         "powershell" | "pwsh" => {
-            let mut c = tokio::process::Command::new("powershell");
+            // `pwsh` (the Windows build's shell) runs PowerShell 7+ when it is
+            // installed and falls back to Windows PowerShell; the explicit
+            // `powershell` cmd_type keeps the built-in shell, so existing
+            // 5.1-only scripts are not silently moved to a different engine.
+            let program = if cmd_type == "pwsh" {
+                pwsh_program()
+            } else {
+                "powershell"
+            };
+            let mut c = tokio::process::Command::new(program);
             let wrapped = wrap_powershell_script_for_utf8(code);
             c.args(["-NoProfile", "-NonInteractive", "-Command", &wrapped]);
             c

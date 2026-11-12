@@ -242,7 +242,7 @@ pub(super) fn build_workspace_scoped_shell_code(
     code: &str,
 ) -> String {
     match shell_type {
-        "powershell" => format!(
+        "powershell" | "pwsh" => format!(
             "Set-Location -LiteralPath {};\n{}",
             quote_powershell_literal(&start_dir.display().to_string()),
             code

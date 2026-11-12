@@ -512,8 +512,8 @@ pub async fn start(
          shell: {shell_type}\n\
          status: running\n\n\
          It keeps running for the rest of this chat turn. Manage it with:\n\
-         - `run_shell` {{\"type\":\"{shell_type}\",\"run_type\":\"serve\",\"action\":\"list\"}}\n\
-         - `run_shell` {{\"type\":\"{shell_type}\",\"run_type\":\"serve\",\"action\":\"stop\",\"serve_id\":\"{id}\"}}\n\n\
+         - `run_shell` {{\"run_type\":\"serve\",\"action\":\"list\"}}\n\
+         - `run_shell` {{\"run_type\":\"serve\",\"action\":\"stop\",\"serve_id\":\"{id}\"}}\n\n\
          The process tree is stopped with verified termination when this chat turn ends, and at app exit."
     )
 }
