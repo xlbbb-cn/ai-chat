@@ -48,7 +48,7 @@ const zhCN: Messages = {
         appMenu: "应用菜单",
         appMenuOpenDataDir: "打开应用数据目录",
         appMenuOpenWorkspaceDir: "打开工作区目录",
-        appMenuOpenDeliverables: "打开交付物文件夹",
+        appMenuOpenDeliverables: "打开临时文件夹",
         appMenuSaveBackup: "导出备份…",
         appMenuRestoreBackup: "恢复备份…",
         appMenuMarkdownEdit: "Markdown 编辑…",

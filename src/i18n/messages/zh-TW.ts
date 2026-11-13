@@ -48,7 +48,7 @@ const zhTW: Messages = {
         appMenu: "應用程式選單",
         appMenuOpenDataDir: "開啟應用程式資料夾",
         appMenuOpenWorkspaceDir: "開啟工作區資料夾",
-        appMenuOpenDeliverables: "開啟交付物資料夾",
+        appMenuOpenDeliverables: "開啟臨時資料夾",
         appMenuSaveBackup: "匯出備份…",
         appMenuRestoreBackup: "還原備份…",
         appMenuMarkdownEdit: "Markdown 編輯…",

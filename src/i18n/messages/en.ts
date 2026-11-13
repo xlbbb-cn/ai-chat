@@ -57,7 +57,7 @@ const en = {
         appMenu: "App menu",
         appMenuOpenDataDir: "Open app data directory",
         appMenuOpenWorkspaceDir: "Open workspace directory",
-        appMenuOpenDeliverables: "Open deliverables folder",
+        appMenuOpenDeliverables: "Open Tmp folder",
         appMenuSaveBackup: "Back up…",
         appMenuRestoreBackup: "Restore backup…",
         appMenuMarkdownEdit: "Markdown edit…",

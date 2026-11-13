@@ -481,9 +481,9 @@ export function TitleBar({
                             type="button"
                             role="menuitem"
                             className="titlebar-menu-item"
-                            onClick={handleOpenDataDir}
+                            onClick={handleOpenDeliverablesDir}
                         >
-                            {t("app.appMenuOpenDataDir")}
+                            {t("app.appMenuOpenDeliverables")}
                         </button>
                         <button
                             type="button"
@@ -497,9 +497,9 @@ export function TitleBar({
                             type="button"
                             role="menuitem"
                             className="titlebar-menu-item"
-                            onClick={handleOpenDeliverablesDir}
+                            onClick={handleOpenDataDir}
                         >
-                            {t("app.appMenuOpenDeliverables")}
+                            {t("app.appMenuOpenDataDir")}
                         </button>
                         <div className="titlebar-menu-sep" role="separator" />
                         <button
