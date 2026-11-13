@@ -8,7 +8,7 @@
 
 /* The header bar itself is the shared `.panel-header` primitive (App.css). */
 .history-search-wrap {
-  padding: 9px 10px;
+  padding: 9px 10px 10px;
   border-bottom: 1px solid var(--c-border);
   flex-shrink: 0;
 }
@@ -19,44 +19,93 @@
   color: var(--c-placeholder);
 }
 
+/* Search field — the glyph and the clear action live inside the field
+   instead of adding a second row of chrome. */
+.history-search-field {
+  position: relative;
+}
+
+.history-search-icon {
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  transform: translateY(-50%);
+  font-size: 11px;
+  color: var(--c-placeholder);
+  pointer-events: none;
+}
+
 .history-search-input {
   width: 100%;
   box-sizing: border-box;
+  height: 34px;
+  padding: 0 30px;
   border: 1px solid var(--c-border-i);
   border-radius: var(--r-sm);
-  padding: 7px 11px;
+  font-family: inherit;
   font-size: 13px;
   color: var(--c-text);
   background: var(--c-field);
   outline: none;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition: border-color var(--t-dur) var(--t-ease);
 }
 
 .history-search-input:focus {
   border-color: var(--c-accent-text);
-  box-shadow: 0 0 0 3px var(--c-accent-soft);
 }
 
 .history-search-input::placeholder {
   color: var(--c-placeholder);
 }
 
+.history-search-clear {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  transform: translateY(-50%);
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--c-muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background-color var(--t-dur) var(--t-ease),
+    color var(--t-dur) var(--t-ease);
+}
+
+.history-search-clear:hover {
+  background: var(--c-hover);
+  color: var(--c-text);
+}
+
+.history-search-clear:focus-visible {
+  outline: 1px solid var(--c-accent-text);
+  outline-offset: 0;
+}
+
+/* Segmented tab strip: one hairline around three cells, with the selected
+   cell's fill drawn by the travelling layer underneath the labels. */
 .history-tabs {
   position: relative;
   display: flex;
-  gap: 4px;
   margin-top: 8px;
+  border: 1px solid var(--c-border-i);
+  border-radius: var(--r-sm);
+  overflow: hidden;
 }
 
-/* The selected tab is one travelling fill, not a per-button background —
-   switching tabs slides it instead of blinking between buttons. */
 .history-tabs-indicator {
   position: absolute;
   top: 0;
   bottom: 0;
   left: 0;
   z-index: 0;
-  box-sizing: border-box;
   border-radius: var(--r-sm);
   background: var(--c-accent-soft);
   pointer-events: none;
@@ -72,17 +121,23 @@
   align-items: center;
   justify-content: center;
   gap: 5px;
-  border: 1px solid var(--c-border-i);
+  min-height: 30px;
+  padding: 4px 6px;
+  border: none;
+  border-right: 1px solid var(--c-border-i);
+  border-radius: 0;
   background: transparent;
   color: var(--c-muted);
+  font-family: inherit;
   font-size: 12px;
-  padding: 4px 7px;
-  border-radius: var(--r-sm);
   cursor: pointer;
-  transition: background-color var(--t-dur) var(--t-ease),
-    color var(--t-dur) var(--t-ease),
-    border-color var(--t-dur) var(--t-ease);
   white-space: nowrap;
+  transition: background-color var(--t-dur) var(--t-ease),
+    color var(--t-dur) var(--t-ease);
+}
+
+.history-tab:last-child {
+  border-right: none;
 }
 
 .history-tab:hover:not(.active) {
@@ -90,22 +145,24 @@
   color: var(--c-text);
 }
 
-/* The indicator owns the fill and the accent outline; the button only
-   carries the label, so the layer below stays visible. */
+/* The indicator owns the fill and the accent label; the button only carries
+   the text, so the layer below stays visible. */
 .history-tab.active {
   background: transparent;
-  border-color: transparent;
   color: var(--c-accent-text);
+  font-weight: 500;
 }
 
+.history-tab:focus-visible {
+  outline: 1px solid var(--c-accent-text);
+  outline-offset: -2px;
+}
+
+/* List padding, the row anatomy and the empty state are shared (App.css).
+   This block only keeps the scrolling coordinate space of the selection
+   layer. */
 .history-list {
   position: relative;
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
 }
 
 /* One highlight shared by every row: it lives behind the content, in the
@@ -128,27 +185,16 @@
     height var(--t-dur) var(--t-ease);
 }
 
-.history-empty {
-  color: var(--c-muted);
-  font-size: 13px;
-  text-align: center;
-  margin-top: 18px;
+.history-item {
+  z-index: 1;
+  cursor: pointer;
 }
 
-.history-item {
-  position: relative;
-  z-index: 1;
-  padding: 8px 10px;
-  border-radius: var(--r-sm);
-  background: transparent;
-  cursor: pointer;
-  border: 1px solid transparent;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 4px;
-  transition: background-color var(--t-dur) var(--t-ease),
-    border-color var(--t-dur) var(--t-ease);
+/* The selected row is drawn by the layer behind it; its two neighbouring
+   hairlines would cut that fill into a strip. */
+.history-item.active::before,
+.history-item.active + .history-item::before {
+  opacity: 0;
 }
 
 .history-item:focus-visible {
@@ -173,10 +219,6 @@
   min-width: 0;
 }
 
-.history-item:hover {
-  background: var(--c-hover);
-}
-
 .history-item.disabled {
   cursor: not-allowed;
   opacity: 0.65;
@@ -184,7 +226,6 @@
 
 .history-item.disabled:hover {
   background: transparent;
-  border-color: transparent;
 }
 
 /* Session messages are fetched on click; dim the row until they arrive. */
@@ -223,7 +264,7 @@
 .history-actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 0;
   flex-shrink: 0;
 }
 
@@ -231,22 +272,33 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
+  width: 24px;
+  height: 24px;
+  padding: 0;
   border: none;
-  cursor: pointer;
-  font-size: 12px;
-  opacity: 0;
-  transition: opacity 0.2s, transform 0.2s, color 0.2s;
-  padding: 4px;
-  color: var(--c-muted);
   border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--c-muted);
+  font-size: 12px;
   line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  /* The actions are out of layout only visually; without this an invisible
+     delete button would still sit under the pointer at the row's right edge. */
+  pointer-events: none;
+  transition: opacity var(--t-dur) var(--t-ease),
+    background-color var(--t-dur) var(--t-ease),
+    color var(--t-dur) var(--t-ease);
 }
 
 .history-action-btn:hover {
-  transform: scale(1.05);
-  color: var(--c-text);
   background: var(--c-hover);
+  color: var(--c-text);
+}
+
+.history-action-btn:focus-visible {
+  outline: 1px solid var(--c-accent-text);
+  outline-offset: 0;
 }
 
 .history-action-btn.fav {
@@ -262,14 +314,19 @@
   color: var(--c-danger);
 }
 
-.history-item:hover .history-action-btn {
+/* Keyboard users see the same actions as pointer users. */
+.history-item:hover .history-action-btn,
+.history-item:focus-within .history-action-btn {
   opacity: 0.7;
 }
 
+.history-item:hover .history-action-btn,
+.history-item:focus-within .history-action-btn,
 .history-action-btn:hover,
 .history-action-btn.fav,
 .history-action-btn.on {
   opacity: 1 !important;
+  pointer-events: auto;
 }
 
 .history-item.disabled .history-action-btn {
@@ -284,29 +341,28 @@
   box-sizing: border-box;
   border: 1px solid var(--c-accent-text);
   border-radius: var(--r-sm);
-  padding: 3px 7px;
-  font-size: 13px;
+  padding: 2px 6px;
+  font-family: inherit;
+  font-size: 14px;
   color: var(--c-text);
   background: var(--c-field);
   outline: none;
-  box-shadow: 0 0 0 3px var(--c-accent-soft);
 }
 
 .history-item.active {
   background: transparent;
   cursor: default;
-  border-color: transparent;
 }
 
-.history-item.active:hover {
+.history-item.active:hover,
+.history-item.active:focus-within {
   background: transparent;
-  border-color: transparent;
 }
 
 .history-preview {
   flex: 1;
   min-width: 0;
-  font-size: 13px;
+  font-size: 14px;
   /* A session title is the row's headline: Medium, while the metadata and
      timestamp below stay Regular at 12px in the secondary greys. */
   font-weight: 500;
@@ -314,7 +370,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  letter-spacing: -0.005em;
+  letter-spacing: normal;
 }
 
 .history-meta {
@@ -324,6 +380,7 @@
   white-space: nowrap;
   font-size: 12px;
   color: var(--c-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .history-created {
@@ -331,13 +388,16 @@
   white-space: nowrap;
   font-size: 12px;
   color: var(--c-placeholder);
+  font-variant-numeric: tabular-nums;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .history-tabs-indicator,
   .history-selection,
   .history-tab,
-  .history-item {
+  .history-item,
+  .history-action-btn,
+  .history-search-clear {
     transition: none;
   }
 }

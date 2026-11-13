@@ -2400,8 +2400,8 @@ button.rabbit-hop-bunny:focus-visible {
 /* Square-cornered switch: a precision control rather than a pill, so it
    reads as part of the same 4px system as every button and input. */
 .toggle-switch-slider {
-  width: 38px;
-  height: 22px;
+  width: 36px;
+  height: 20px;
   background: var(--c-border-i);
   border-radius: 4px;
   transition: background-color var(--t-dur) var(--t-ease);
@@ -2414,9 +2414,9 @@ button.rabbit-hop-bunny:focus-visible {
   position: absolute;
   top: 3px;
   left: 3px;
-  width: 16px;
-  height: 16px;
-  background: #FFFFFF;
+  width: 14px;
+  height: 14px;
+  background: var(--c-knob);
   border-radius: 2px;
   transition: transform var(--t-dur) var(--t-ease);
 }
@@ -2432,6 +2432,11 @@ button.rabbit-hop-bunny:focus-visible {
 .toggle-switch input:disabled+.toggle-switch-slider {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.toggle-switch input:focus-visible+.toggle-switch-slider {
+  outline: 2px solid var(--c-accent-text);
+  outline-offset: 2px;
 }
 
 .chat-input {
@@ -2913,10 +2918,8 @@ button.rabbit-hop-bunny:focus-visible {
    tweaks are listed below.
    ══════════════════════════════════════════ */
 
-/* Toggle switch knob (slightly darker fill in dark mode) */
-[data-theme="dark"] .toggle-switch-slider::after {
-  background: #F4F4F4;
-}
+/* Toggle switch knob uses `--c-knob` in both themes: the one white fill that
+   stays white on every palette. */
 
 /* ══════════════════════════════════════════════════════════════════
    Shared primitives
@@ -2957,6 +2960,132 @@ button.rabbit-hop-bunny:focus-visible {
   position: sticky;
   top: 0;
   z-index: 2;
+}
+
+/* Disclosure row that opens a compact block of settings — the Tools footer's
+   auto-accept list and the Sub Agents panel's orchestration settings. One
+   primitive for both, so the target, weight and chevron cannot drift apart. */
+.section-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--c-text);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-align: left;
+  cursor: pointer;
+}
+
+.section-toggle:focus-visible {
+  outline: 1px solid var(--c-accent-text);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+.section-toggle-chevron {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--c-muted);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   Side panel lists
+
+   Every list that lives in the glass sidebar (History, Skills, Tools,
+   MCP, Sub Agents) is one flat row language. The panel's own frost is
+   the surface: a row has no card, no outline and no elevation, and a
+   faint inset hairline separates it from its neighbour. Hover and
+   keyboard focus fill the row; the one accent treatment belongs to the
+   current session's travelling selection layer in HistoryPanel.
+   ══════════════════════════════════════════════════════════════════ */
+
+.history-list,
+.skills-list,
+.tools-list,
+.mcp-list,
+.agents-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 8px 10px;
+  display: flex;
+  flex-direction: column;
+}
+
+.history-item,
+.skill-item,
+.tool-item,
+.mcp-server-item,
+.agent-item {
+  position: relative;
+  /* The list is a flex column, so a row must never be squeezed below its
+     content: History measures row geometry for the travelling selection. */
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 10px;
+  border-radius: var(--r-sm);
+  background: transparent;
+  transition: background-color var(--t-dur) var(--t-ease);
+}
+
+/* One hairline between rows, inset so it reads as a separator rather than a
+   box drawn around a card. A switched-off row is muted, not inert — its
+   switch and actions stay reachable. */
+.history-item + .history-item::before,
+.skill-item + .skill-item::before,
+.tool-item + .tool-item::before,
+.mcp-server-item + .mcp-server-item::before,
+.agent-item + .agent-item::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 10px;
+  right: 10px;
+  height: 1px;
+  background: var(--c-border-s);
+  pointer-events: none;
+}
+
+.history-item:hover,
+.skill-item:hover,
+.tool-item:hover,
+.mcp-server-item:hover,
+.agent-item:hover,
+.history-item:focus-within,
+.skill-item:focus-within,
+.tool-item:focus-within,
+.mcp-server-item:focus-within,
+.agent-item:focus-within {
+  background: var(--c-hover);
+}
+
+.skill-item.disabled,
+.tool-item.disabled,
+.mcp-server-item.disabled {
+  opacity: 0.55;
+}
+
+.history-empty,
+.skills-empty,
+.mcp-empty,
+.agents-empty {
+  margin: 0;
+  padding: 24px 12px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--c-muted);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════

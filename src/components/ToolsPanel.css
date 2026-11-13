@@ -9,7 +9,8 @@
     overflow-y: auto;
 }
 
-/* The header bar itself is the shared `.panel-header` primitive (App.css). */
+/* The header bar itself is the shared `.panel-header` primitive (App.css);
+   the list and its row anatomy are shared too (see App.css). */
 .tools-description {
     font-size: 13px;
     color: var(--c-muted);
@@ -17,47 +18,17 @@
     line-height: 1.5;
 }
 
-.tools-list {
-    flex: 1;
-    overflow-y: auto;
-    padding: 10px 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-/* Flat row — a Pale Silver hairline is the only thing separating it from the
-   canvas. No shadow, no scale, and the hover only deepens the outline. */
-.tool-item {
-    border: 1px solid var(--c-border-i);
-    border-radius: 4px;
-    padding: 10px 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    background: var(--c-surface);
-    transition: opacity var(--t-dur) var(--t-ease),
-        border-color var(--t-dur) var(--t-ease);
-}
-
-.tool-item:hover {
-    border-color: var(--c-muted);
-}
-
-.tool-item.disabled {
-    opacity: 0.55;
-}
-
 .tool-row {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
 }
 
 .tool-info {
     flex: 1;
     display: flex;
     flex-direction: column;
+    gap: 2px;
     min-width: 0;
 }
 
@@ -80,84 +51,21 @@
     color: var(--c-accent-text);
 }
 
-.tool-name.active {
-    color: var(--c-accent-text);
-}
-
 .tool-transport {
     font-size: 12px;
+    line-height: 1.45;
     color: var(--c-muted);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-}
-
-/* Square-cornered switch — a precision control, not a pill, so it belongs to
-   the same 4px system as every button and input in the app. */
-.tool-toggle {
-    position: relative;
-    width: 36px;
-    height: 20px;
-    flex-shrink: 0;
-}
-
-.tool-toggle input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-}
-
-.tool-toggle-slider {
-    position: absolute;
-    cursor: pointer;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: var(--c-border-i);
-    transition: background-color var(--t-dur) var(--t-ease);
-    border-radius: 4px;
-}
-
-.tool-toggle-slider:before {
-    position: absolute;
-    content: "";
-    height: 14px;
-    width: 14px;
-    left: 3px;
-    bottom: 3px;
-    background-color: var(--c-knob);
-    transition: transform var(--t-dur) var(--t-ease);
-    border-radius: 2px;
-}
-
-.tool-toggle input:checked+.tool-toggle-slider {
-    background-color: var(--c-accent);
-}
-
-.tool-toggle input:checked+.tool-toggle-slider:before {
-    transform: translateX(16px);
-}
-
-.tool-toggle input:focus-visible+.tool-toggle-slider {
-    outline: 2px solid var(--c-accent-text);
-    outline-offset: 2px;
-}
-
-/* Locked by self-evolution mode — the switch stays on and cannot be turned
-   off, so it reads as locked rather than merely inert. */
-.tool-toggle input:disabled+.tool-toggle-slider {
-    cursor: not-allowed;
-    opacity: 0.65;
 }
 
 .tool-locked {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 400;
-    line-height: 16px;
+    line-height: 15px;
     color: var(--c-muted);
-    border: 1px solid var(--c-border-i);
+    border: 1px solid var(--c-border);
     border-radius: 4px;
     padding: 0 4px;
     white-space: nowrap;
@@ -166,7 +74,8 @@
 
 .tool-actions {
     display: flex;
-    gap: 4px;
+    align-items: center;
+    gap: 0;
     flex-shrink: 0;
 }
 
@@ -174,14 +83,17 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    background: none;
+    width: 24px;
+    height: 24px;
+    padding: 0;
     border: none;
-    cursor: pointer;
-    font-size: 13px;
+    border-radius: var(--r-sm);
+    background: transparent;
     color: var(--c-muted);
-    padding: 4px 6px;
-    border-radius: 4px;
+    font-size: 12px;
     font-family: inherit;
+    line-height: 1;
+    cursor: pointer;
     transition: background-color var(--t-dur) var(--t-ease),
         color var(--t-dur) var(--t-ease);
 }
@@ -189,6 +101,11 @@
 .tool-action-btn:hover {
     background: var(--c-hover);
     color: var(--c-text);
+}
+
+.tool-action-btn:focus-visible {
+    outline: 1px solid var(--c-accent-text);
+    outline-offset: 0;
 }
 
 .tool-action-btn.danger:hover {
@@ -202,14 +119,14 @@
 }
 
 .tool-desc-expanded {
-    font-size: 13px;
+    font-size: 12px;
     color: var(--c-muted);
     padding: 8px 10px;
-    margin-top: 6px;
+    margin-top: 4px;
     line-height: 1.5;
     white-space: pre-line;
     background: var(--c-surface-2);
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     border: 1px solid var(--c-border-s);
 }
 
@@ -222,45 +139,10 @@
     flex-shrink: 0;
 }
 
-.tools-footer-toggle {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    width: 100%;
-    padding: 0;
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    text-align: left;
-    font-family: inherit;
-    color: var(--c-text);
-}
-
-.tools-footer-toggle:focus-visible {
-    outline: 2px solid var(--c-accent-text);
-    outline-offset: 2px;
-    border-radius: var(--r-sm);
-}
-
-.tools-footer-title {
-    font-size: 14px;
-    color: var(--c-text);
-    letter-spacing: normal;
-}
-
-.tools-footer-chevron {
-    display: inline-flex;
-    align-items: center;
-    flex-shrink: 0;
-    font-size: 11px;
-    color: var(--c-muted);
-}
-
 .auto-accept-list {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 2px;
     padding-top: 4px;
     /* Compact rows; also cap the height so a long list scrolls inside the
        section instead of squeezing the tool list away on short screens. */
@@ -269,33 +151,33 @@
     overscroll-behavior: contain;
 }
 
-/* Master "auto-approve everything" switch — emphasised over the per-kind rows. */
-.auto-accept-option-all {
-    border-color: var(--c-accent-text);
-}
-
+/* Master "auto-approve everything" switch — emphasised by weight, not by a
+   second accent rule around the row. */
 .auto-accept-option-all .auto-accept-name {
-    font-weight: 600;
+    font-weight: 500;
     color: var(--c-accent-text);
 }
 
 .auto-accept-option {
-    border: 1px solid var(--c-border-i);
-    border-radius: 4px;
-    padding: 9px 12px;
-    background: var(--c-surface);
+    border: none;
+    border-radius: var(--r-sm);
+    padding: 7px 8px;
+    background: transparent;
     cursor: pointer;
-    transition: border-color var(--t-dur) var(--t-ease),
-        background-color var(--t-dur) var(--t-ease);
+    transition: background-color var(--t-dur) var(--t-ease);
     display: flex;
     align-items: center;
     gap: 8px;
     flex-shrink: 0;
 }
 
-.auto-accept-option:hover {
-    border-color: var(--c-muted);
-    background: var(--c-surface-2);
+.auto-accept-option:hover,
+.auto-accept-option:focus-within {
+    background: var(--c-hover);
+}
+
+.auto-accept-option:has(input:checked) {
+    background: var(--c-accent-soft);
 }
 
 .auto-accept-checkbox {

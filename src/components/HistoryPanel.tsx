@@ -9,10 +9,12 @@ import {
   faBoxArchive,
   faBoxOpen,
   faListCheck,
+  faMagnifyingGlass,
   faPenToSquare,
   faStar,
   faStarOutline,
   faTrash,
+  faXmark,
   type IconDefinition,
 } from "../icons";
 import "./HistoryPanel.css";
@@ -32,16 +34,51 @@ interface Props {
 
 type HistoryTab = "all" | "favorites" | "archived";
 
+const DAY_MS = 86_400_000;
+
+function startOfDay(date: Date): number {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
+/**
+ * Short, list-scale timestamp: the time of day for today, "yesterday", the
+ * weekday inside the last week, then a date. The full date stays available
+ * as the row's tooltip.
+ */
 function formatHistoryTimestamp(timestamp: string, locale: Locale): string {
   const parsed = Date.parse(timestamp);
   if (Number.isNaN(parsed)) return timestamp;
 
+  const then = new Date(parsed);
+  const now = new Date();
+  const dayDiff = Math.round((startOfDay(now) - startOfDay(then)) / DAY_MS);
+
+  if (dayDiff === 0) {
+    return new Intl.DateTimeFormat(locale, {
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(then);
+  }
+  if (dayDiff === 1) {
+    return new Intl.RelativeTimeFormat(locale, { numeric: "auto" }).format(-1, "day");
+  }
+  if (dayDiff > 1 && dayDiff < 7) {
+    return new Intl.DateTimeFormat(locale, { weekday: "short" }).format(then);
+  }
+
   return new Intl.DateTimeFormat(locale, {
-    year: "numeric",
+    year: then.getFullYear() === now.getFullYear() ? undefined : "numeric",
     month: "short",
     day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
+  }).format(then);
+}
+
+function formatHistoryTimestampFull(timestamp: string, locale: Locale): string {
+  const parsed = Date.parse(timestamp);
+  if (Number.isNaN(parsed)) return timestamp;
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: "medium",
+    timeStyle: "short",
   }).format(parsed);
 }
 
@@ -224,12 +261,17 @@ export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, disable
    * widths depend on the locale.
    */
   useLayoutEffect(() => {
+    const tabs = tabsRef.current;
+    const active = tabRefs.current.get(activeTab);
+    if (!tabs || !active) {
+      setTabIndicator(null);
+      return;
+    }
+
     const measure = () => {
-      const active = tabRefs.current.get(activeTab);
-      if (!active) {
-        setTabIndicator(null);
-        return;
-      }
+      // `offsetLeft` and the absolutely positioned indicator share the same
+      // origin (the container's padding edge), so the cell's offset is used
+      // as-is; adding the border width here would shift the fill left.
       setTabIndicator({ left: active.offsetLeft, width: active.offsetWidth });
     };
 
@@ -421,14 +463,33 @@ export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, disable
       </div>
 
       <div className="history-search-wrap">
-        <input
-          className="history-search-input"
-          type="text"
-          value={searchKeyword}
-          onChange={(e) => setSearchKeyword(e.target.value)}
-          placeholder={t("history.searchPlaceholder")}
-          aria-label={t("history.searchAria")}
-        />
+        <div className="history-search-field">
+          <FontAwesomeIcon
+            className="history-search-icon"
+            icon={faMagnifyingGlass}
+            aria-hidden="true"
+          />
+          <input
+            className="history-search-input"
+            type="text"
+            value={searchKeyword}
+            onChange={(e) => setSearchKeyword(e.target.value)}
+            placeholder={t("history.searchPlaceholder")}
+            aria-label={t("history.searchAria")}
+          />
+          {searchKeyword && (
+            <button
+              type="button"
+              className="history-search-clear"
+              onClick={() => setSearchKeyword("")}
+              onMouseDown={(e) => e.preventDefault()}
+              aria-label={t("history.clearSearch")}
+              title={t("history.clearSearch")}
+            >
+              <FontAwesomeIcon icon={faXmark} />
+            </button>
+          )}
+        </div>
         {disableSessionSwitch && (
           <p className="history-switch-hint">{t("history.switchHint")}</p>
         )}
@@ -578,7 +639,12 @@ export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, disable
                     {isLoading ? t("history.loading") : t("history.messageCount", { count: summary.message_count })}
                     {isCurrent ? t("history.current") : ""}{isArchived ? t("history.archived") : ""}
                   </span>
-                  <span className="history-created">{t("history.created", { date: createdAt })}</span>
+                  <span
+                    className="history-created"
+                    title={formatHistoryTimestampFull(summary.created_at, locale)}
+                  >
+                    {createdAt}
+                  </span>
                 </div>
               </div>
             );

@@ -18,6 +18,8 @@ import {
   FontAwesomeIcon,
   faAnglesLeft,
   faCheck,
+  faChevronDown,
+  faChevronUp,
   faFolderOpen,
   faGear,
   faPen,
@@ -297,6 +299,11 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
   const [search, setSearch] = useState("");
   /** Sidebar filter by enablement: "all" | "enabled" | "disabled". */
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  /**
+   * Advanced orchestration rows are folded by default so the agent list keeps
+   * the panel's height; the master "Enable mode" switch stays visible.
+   */
+  const [orchestrationExpanded, setOrchestrationExpanded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   /** Per-model context windows — the same map the backend budgets from. */
   const [modelContextLengths, setModelContextLengths] = useState<Record<string, number>>({});
@@ -1187,7 +1194,17 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
         <>
           {/* ── Orchestration Settings ── */}
           <div className="orchestration-settings">
-            <div className="orch-title">{t("agents.orchestration")}</div>
+            <button
+              type="button"
+              className="section-toggle"
+              onClick={() => setOrchestrationExpanded((expanded) => !expanded)}
+              aria-expanded={orchestrationExpanded}
+            >
+              <span>{t("agents.orchestration")}</span>
+              <span className="section-toggle-chevron">
+                <FontAwesomeIcon icon={orchestrationExpanded ? faChevronUp : faChevronDown} />
+              </span>
+            </button>
 
             <div className="orch-row">
               <span>{t("agents.enableMode")}</span>
@@ -1205,113 +1222,117 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
               </label>
             </div>
 
-            <div className="orch-row">
-              <span>{t("agents.autoConfigure")}</span>
-              <label className="toggle-switch">
-                <input
-                  type="checkbox"
-                  checked={orchestration.auto_configure}
-                  onChange={(e) =>
-                    handleSaveOrchestration({ ...orchestration, auto_configure: e.target.checked })
-                  }
-                />
-                <span className="toggle-switch-slider" />
-              </label>
-            </div>
+            {orchestrationExpanded && (
+              <div className="orch-body">
+                <div className="orch-row">
+                  <span>{t("agents.autoConfigure")}</span>
+                  <label className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={orchestration.auto_configure}
+                      onChange={(e) =>
+                        handleSaveOrchestration({ ...orchestration, auto_configure: e.target.checked })
+                      }
+                    />
+                    <span className="toggle-switch-slider" />
+                  </label>
+                </div>
 
-            <div className="orch-row">
-              <span>{t("agents.plannerModel")}</span>
-              <Dropdown
-                className="orch-select"
-                label={t("agents.plannerModel")}
-                compact
-                value={orchestration.planner_model ?? ""}
-                onChange={(model) =>
-                  // Empty means inherit; the backend normalizes the same way,
-                  // so a blank pick and an absent field cannot disagree.
-                  handleSaveOrchestration({ ...orchestration, planner_model: model || null })
-                }
-                options={[
-                  {
-                    value: "",
-                    label: t("agents.plannerModelInherit", {
-                      model: fallbackModel.trim() || "…",
-                    }),
-                  },
-                  ...plannerModelOptions.map((model) => ({ value: model, label: model })),
-                ]}
-              />
-            </div>
-            <div className="agent-field-hint">{t("agents.plannerModelHint")}</div>
+                <div className="orch-row">
+                  <span>{t("agents.plannerModel")}</span>
+                  <Dropdown
+                    className="orch-select"
+                    label={t("agents.plannerModel")}
+                    compact
+                    value={orchestration.planner_model ?? ""}
+                    onChange={(model) =>
+                      // Empty means inherit; the backend normalizes the same way,
+                      // so a blank pick and an absent field cannot disagree.
+                      handleSaveOrchestration({ ...orchestration, planner_model: model || null })
+                    }
+                    options={[
+                      {
+                        value: "",
+                        label: t("agents.plannerModelInherit", {
+                          model: fallbackModel.trim() || "…",
+                        }),
+                      },
+                      ...plannerModelOptions.map((model) => ({ value: model, label: model })),
+                    ]}
+                  />
+                </div>
+                <div className="agent-field-hint">{t("agents.plannerModelHint")}</div>
 
-            <div className="orch-row">
-              <span>{t("agents.mbus")}</span>
-              <label className="toggle-switch">
-                <input
-                  type="checkbox"
-                  checked={orchestration.mbus_enabled}
-                  onChange={(e) =>
-                    handleSaveOrchestration({ ...orchestration, mbus_enabled: e.target.checked })
-                  }
-                />
-                <span className="toggle-switch-slider" />
-              </label>
-            </div>
-            <div className="agent-field-hint">{t("agents.mbusHint")}</div>
+                <div className="orch-row">
+                  <span>{t("agents.mbus")}</span>
+                  <label className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={orchestration.mbus_enabled}
+                      onChange={(e) =>
+                        handleSaveOrchestration({ ...orchestration, mbus_enabled: e.target.checked })
+                      }
+                    />
+                    <span className="toggle-switch-slider" />
+                  </label>
+                </div>
+                <div className="agent-field-hint">{t("agents.mbusHint")}</div>
 
-            <div className="orch-row">
-              <span>{t("agents.mbusPairLimit")}</span>
-              <input
-                className="orch-number"
-                type="number"
-                min={0}
-                max={20}
-                value={orchestration.mbus_pair_limit}
-                disabled={!orchestration.mbus_enabled}
-                onChange={(e) => {
-                  // 0 is meaningful (cap off), so an empty field must fall back
-                  // to the default rather than silently disabling the cap.
-                  const raw = e.target.value.trim();
-                  const parsed = raw === "" ? 4 : Number(raw);
-                  const value = Number.isFinite(parsed)
-                    ? Math.max(0, Math.min(20, Math.trunc(parsed)))
-                    : 4;
-                  handleSaveOrchestration({ ...orchestration, mbus_pair_limit: value });
-                }}
-              />
-            </div>
-            <div className="agent-field-hint">{t("agents.mbusPairLimitHint")}</div>
+                <div className="orch-row">
+                  <span>{t("agents.mbusPairLimit")}</span>
+                  <input
+                    className="orch-number"
+                    type="number"
+                    min={0}
+                    max={20}
+                    value={orchestration.mbus_pair_limit}
+                    disabled={!orchestration.mbus_enabled}
+                    onChange={(e) => {
+                      // 0 is meaningful (cap off), so an empty field must fall back
+                      // to the default rather than silently disabling the cap.
+                      const raw = e.target.value.trim();
+                      const parsed = raw === "" ? 4 : Number(raw);
+                      const value = Number.isFinite(parsed)
+                        ? Math.max(0, Math.min(20, Math.trunc(parsed)))
+                        : 4;
+                      handleSaveOrchestration({ ...orchestration, mbus_pair_limit: value });
+                    }}
+                  />
+                </div>
+                <div className="agent-field-hint">{t("agents.mbusPairLimitHint")}</div>
 
-            <div className="orch-row">
-              <span>{t("agents.executionMode")}</span>
-              <Dropdown
-                className="orch-select"
-                label={t("agents.executionMode")}
-                compact
-                value={orchestration.mode}
-                onChange={(mode) =>
-                  handleSaveOrchestration({ ...orchestration, mode: mode as "parallel" | "sequential" })
-                }
-                options={[
-                  { value: "parallel", label: t("agents.modeParallel") },
-                  { value: "sequential", label: t("agents.modeSequential") },
-                ]}
-              />
-            </div>
+                <div className="orch-row">
+                  <span>{t("agents.executionMode")}</span>
+                  <Dropdown
+                    className="orch-select"
+                    label={t("agents.executionMode")}
+                    compact
+                    value={orchestration.mode}
+                    onChange={(mode) =>
+                      handleSaveOrchestration({ ...orchestration, mode: mode as "parallel" | "sequential" })
+                    }
+                    options={[
+                      { value: "parallel", label: t("agents.modeParallel") },
+                      { value: "sequential", label: t("agents.modeSequential") },
+                    ]}
+                  />
+                </div>
 
-            <div className="orch-row">
-              <span>{t("agents.maxConcurrency")}</span>
-              <input
-                className="orch-number"
-                type="number"
-                min={1}
-                max={10}
-                value={orchestration.max_concurrent}
-                onChange={(e) =>
-                  handleSaveOrchestration({ ...orchestration, max_concurrent: Number(e.target.value) || 3 })
-                }
-              />
-            </div>
+                <div className="orch-row">
+                  <span>{t("agents.maxConcurrency")}</span>
+                  <input
+                    className="orch-number"
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={orchestration.max_concurrent}
+                    onChange={(e) =>
+                      handleSaveOrchestration({ ...orchestration, max_concurrent: Number(e.target.value) || 3 })
+                    }
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           {/* ── Filter ── */}
@@ -1386,7 +1407,7 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
                   return (
                     <div
                       key={agent.id}
-                      className={`agent-item ${agent.enabled ? "active" : ""}`}
+                      className="agent-item"
                       onClick={() => {
                         if (!agent.parse_error) handleToggleAgent(agent);
                       }}

@@ -227,7 +227,7 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                         >
                             <div className="tool-row">
                                 <label
-                                    className="tool-toggle"
+                                    className="toggle-switch"
                                     title={
                                         locked
                                             ? t("tools.lockedBySelfEvolution")
@@ -242,11 +242,11 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                                         disabled={locked}
                                         onChange={() => toggleTool(tool.id)}
                                     />
-                                    <span className="tool-toggle-slider" />
+                                    <span className="toggle-switch-slider" />
                                 </label>
                                 <div className="tool-info">
                                     <span
-                                        className={`tool-name ${enabled ? "active" : ""}`}
+                                        className="tool-name"
                                         onClick={() => toggleTool(tool.id)}
                                     >
                                         {t(tool.nameKey)}
@@ -285,12 +285,12 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
             <div className="tools-footer-section">
                 <button
                     type="button"
-                    className="tools-footer-toggle"
+                    className="section-toggle"
                     onClick={() => setAutoAcceptExpanded((expanded) => !expanded)}
                     aria-expanded={autoAcceptExpanded}
                 >
-                    <span className="tools-footer-title">{t("tools.autoAccept")}</span>
-                    <span className="tools-footer-chevron">
+                    <span>{t("tools.autoAccept")}</span>
+                    <span className="section-toggle-chevron">
                         <FontAwesomeIcon icon={autoAcceptExpanded ? faChevronUp : faChevronDown} />
                     </span>
                 </button>

@@ -783,6 +783,7 @@ const zhTW: Messages = {
         title: "歷史",
         searchPlaceholder: "以關鍵字搜尋工作階段",
         searchAria: "搜尋歷史工作階段",
+        clearSearch: "清除搜尋",
         switchHint: "正在生成回覆，暫時無法切換工作階段",
         tabAll: "全部",
         tabFavorites: "收藏",
@@ -796,7 +797,7 @@ const zhTW: Messages = {
         current: " · 目前",
         archived: " · 已封存",
         loading: "載入中…",
-        created: "建立於 {date}",
+
         addFavorite: "加入收藏",
         removeFavorite: "移除收藏",
         rename: "重新命名工作階段",

@@ -16,11 +16,13 @@
     flex-shrink: 0;
 }
 
-.orch-title {
-    font-size: 12px;
-    color: var(--c-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+/* Advanced rows of the orchestration disclosure. The section starts folded in
+   AgentsPanel.tsx, so the agent list keeps the panel's height while the
+   disclosure label and the master switch stay visible. */
+.orch-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
 }
 
 .orch-row {
@@ -60,22 +62,6 @@
 .orch-number:focus {
     border-color: var(--c-accent-text);
     box-shadow: 0 0 0 3px var(--c-accent-soft);
-}
-
-.agents-list {
-    flex: 1;
-    overflow-y: auto;
-    padding: 8px 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-}
-
-.agents-empty {
-    padding: 18px 12px;
-    text-align: center;
-    font-size: 13px;
-    color: var(--c-placeholder);
 }
 
 .agents-filter {
@@ -162,18 +148,18 @@
 .agent-group {
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 0;
 }
 
 .agent-group + .agent-group {
-    margin-top: 10px;
+    margin-top: 8px;
 }
 
 .agent-group-title {
     display: flex;
     align-items: baseline;
     gap: 6px;
-    padding: 2px 10px;
+    padding: 8px 10px 2px;
     font-size: 12px;
     color: var(--c-muted);
 }
@@ -183,31 +169,14 @@
     color: var(--c-placeholder);
 }
 
+/* Row anatomy lives in App.css with every other sidebar list. This rule is
+   only the button reset the group markup needs. */
 .agent-item {
-    padding: 8px 10px;
-    border-radius: var(--r-sm);
-    background: transparent;
     cursor: pointer;
-    border: 1px solid transparent;
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 6px;
-    transition: background-color 0.2s, border-color 0.2s, box-shadow 0.2s;
     width: 100%;
     text-align: left;
     font-family: inherit;
     color: inherit;
-}
-
-.agent-item:hover {
-    background: var(--c-hover);
-}
-
-.agent-item.active {
-    background: var(--c-surface);
-    border-color: var(--c-accent-text);
-    box-shadow: 0 0 0 3px var(--c-accent-soft);
 }
 
 .agent-content {
@@ -226,13 +195,14 @@
 }
 
 .agent-name {
-    font-size: 13px;
+    font-size: 14px;
+    font-weight: 500;
     color: var(--c-text);
     flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    letter-spacing: -0.005em;
+    letter-spacing: normal;
 }
 
 .agent-emoji {
@@ -276,35 +246,25 @@
     margin-top: 4px;
 }
 
+/* Metadata is neutral by construction: a hairline, no fill and no accent.
+   The type of a tag (tool / model / file / MCP) is carried by its text. */
 .agent-tool-tag {
     font-size: 11px;
-    padding: 1px 7px;
-    background: var(--c-accent-soft);
-    color: var(--c-accent-text);
-    border-radius: var(--r-sm);
-    border: 1px solid var(--c-accent-soft);
-}
-
-.agent-tool-tag.model {
-    background: var(--c-success-soft);
-    color: var(--c-success);
-    border-color: var(--c-success-soft);
-}
-
-.agent-tool-tag.file {
-    background: var(--c-surface-2);
+    line-height: 15px;
+    padding: 0 4px;
     color: var(--c-muted);
-    border-color: var(--c-border);
+    background: transparent;
+    border-radius: var(--r-sm);
+    border: 1px solid var(--c-border);
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.agent-tool-tag.mcp {
-    background: var(--c-surface-2);
-    color: var(--c-text);
-    border-color: var(--c-border);
+.agent-tool-tag.model {
+    color: var(--c-body);
+    border-color: var(--c-border-i);
 }
 
 .agent-status-badge {
@@ -673,24 +633,12 @@
 .agent-type-badge {
     flex-shrink: 0;
     font-size: 10px;
-    padding: 1px 6px;
+    line-height: 15px;
+    padding: 0 4px;
     border-radius: var(--r-sm);
-    border: 1px solid var(--c-border-i);
+    border: 1px solid var(--c-border);
     color: var(--c-muted);
-    background: var(--c-surface);
-    text-transform: none;
-}
-
-.agent-type-badge.cli {
-    border-color: var(--c-accent-soft);
-    color: var(--c-accent-text);
-    background: var(--c-accent-soft);
-}
-
-.agent-type-badge.cloud {
-    border-color: var(--c-success-soft);
-    color: var(--c-success);
-    background: var(--c-success-soft);
+    background: transparent;
 }
 
 .agent-target {

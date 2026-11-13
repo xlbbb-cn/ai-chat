@@ -42,6 +42,7 @@ export {
     faGear,
     faImages,
     faListCheck,
+    faMagnifyingGlass,
     faMinus,
     faPaperclip,
     faPen,

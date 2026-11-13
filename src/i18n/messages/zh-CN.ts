@@ -783,6 +783,7 @@ const zhCN: Messages = {
         title: "历史",
         searchPlaceholder: "按关键词搜索会话",
         searchAria: "搜索历史会话",
+        clearSearch: "清除搜索",
         switchHint: "正在生成回复，暂时无法切换会话",
         tabAll: "全部",
         tabFavorites: "收藏",
@@ -796,7 +797,7 @@ const zhCN: Messages = {
         current: " · 当前",
         archived: " · 已归档",
         loading: "加载中…",
-        created: "创建于 {date}",
+
         addFavorite: "加入收藏",
         removeFavorite: "取消收藏",
         rename: "重命名会话",

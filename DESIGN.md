@@ -525,6 +525,16 @@ change or an underline.
 4px radius. Hover → `--c-hover` fill + `--c-text`. Destructive variant →
 `--c-danger-soft` fill + `--c-danger` glyph.
 
+### Disclosure row
+
+`.section-toggle` folds a compact settings block (Tools → auto-accept, Sub
+Agents → orchestration settings): a full-width transparent button with a
+14px/500 `--c-text` label on the left and an 11px `--c-muted` chevron on the
+right, plus `aria-expanded` and a 1px `--c-accent-text` focus outline. The body
+is rendered only while expanded. A collapsed section must never hide its master
+control — the primary switch of the section stays outside the fold, so the
+collapsed state still tells the user whether the feature is on.
+
 ### Inputs, textareas, selects
 
 ```css
@@ -600,6 +610,53 @@ padding: 10px 12px;
 
 Hover deepens the outline to `--c-muted`. **No shadow, no lift, no scale.** A
 disabled row is `opacity: .55`.
+
+#### Side-panel list rows
+
+The five sidebar lists (`.history-list`, `.skills-list`, `.tools-list`,
+`.mcp-list`, `.agents-list`) share one flat row language. The panel's own frost
+is the surface, so a sidebar row is *not* a card — the rule above describes
+cards elsewhere (popups, mission rows, forms):
+
+```css
+/* the list */
+padding: 4px 8px 10px;
+display: flex;
+flex-direction: column;
+
+/* a row */
+position: relative;
+padding: 9px 10px;
+border-radius: var(--r-sm);
+background: transparent;
+
+/* the separator: one inset hairline between neighbours */
+.history-item + .history-item::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 10px;
+  right: 10px;
+  height: 1px;
+  background: var(--c-border-s);
+}
+```
+
+- Hover and keyboard focus fill the row with `--c-hover`; there is no outline,
+  no lift and no scale. The hairline stays — it is the list's structure, not a
+  hover state.
+- Titles are 14px/500 `--c-text`; metadata is 12px `--c-muted` (timestamps in
+  `--c-placeholder`, tabular numerals). No negative tracking.
+- A switched-off row is `opacity: .55`; its switch and actions stay reachable.
+- The only accent in a list is the current History session: `.history-selection`
+  (`--c-accent-soft` fill + 2px `--c-accent` leading rule) is drawn once behind
+  the rows so it travels between sessions instead of blinking on each row. The
+  History filter tabs use the same travelling-fill idea, and the selected
+  auto-accept row in the Tools footer uses `--c-accent-soft`.
+- `.toggle-switch` (36×20, `--c-knob`) is the only switch in a row; a panel
+  stylesheet must not declare a local toggle.
+- Row actions are 24×24 transparent icon buttons in `--c-muted`; hover →
+  `--c-hover` + `--c-text`, destructive → `--c-danger-soft` + `--c-danger`.
 
 ### Provenance badge
 
@@ -982,8 +1039,8 @@ Nothing in between.
 | Sidebar | `width: 400px`; 1px right hairline drawn by `.sidebar::after`, starting `--panel-header-h` down so it never crosses the header band |
 | Panel header | `.panel-header` (shared, `App.css`): `min-height: var(--panel-header-h)` = 49px so its hairline lands on the chat toolbar's, `padding: 6px 12px`, frosted `--glass-backdrop`, 1px hairline, title + one `faAnglesLeft` collapse chevron and nothing else |
 | Panel footer | `padding: 10px 12px`, 1px hairline |
-| Panel list | `padding: 10px 12px`, `gap: 6px` |
-| Panel row | `padding: 10px 12px` |
+| Panel list | `padding: 4px 8px 10px`; the rows sit flush, separated by a 1px inset hairline (no `gap`) |
+| Panel row | `padding: 9px 10px`, `gap: 4px`, transparent on the panel's frost, `--r-sm`; hover/focus-within `--c-hover` |
 | Settings nav | `180px` column, item `min-height: 28px`, `font-size: 13px` |
 | Settings content | `padding: 14px 16px 20px`, `gap: 14px` |
 | Settings section | `gap: 10px`, `padding-bottom: 14px`, 1px hairline |
@@ -1146,9 +1203,10 @@ blurring past behind it is the effect, not an accident.
 | `border-right: 1px solid rgba(255,255,255,.35)` | the `.sidebar::after` hairline stays the structural edge; there is no lit edge on the panel — its top is tucked under the titlebar — only the `--shadow-side` shade |
 | `box-shadow: 10px 0 30px rgba(0,0,0,.04)` | `--shadow-side` = `10px 0 30px var(--c-panel-shade)` (`rgba(0,0,0,.05)` light, `.32` dark), applied **only** to `.sidebar` |
 | `border-radius: 10px` rows, `rgba(var(--primary-color-rgb), .08)` fills | rows keep `--r-sm` and use `--c-accent-soft` / `--c-hover`; there is no `--primary-color-rgb`, and no second way to spell the accent |
+| card rows: `--c-surface` + 1px outline | **refused for sidebar lists** — the panel's frost is the surface. Rows are transparent, there is no outline and no elevation; one inset `--c-border-s` hairline separates neighbours (see *Side-panel list rows*) |
 | active row = soft fill + theme indicator | `.history-selection` is `--c-accent-soft` with a `2px --c-accent` leading bar and **no** outline. The filter tabs' travelling indicator lost its accent outline for the same reason: a box around the label read as a form field |
-| hover `rgba(0,0,0,.03)` | `--c-hover`, and the row's hairline is dropped on hover — the fill alone marks the row, so the list stops looking like a table |
-| title Medium, meta smaller / lower contrast | `.history-preview` `500` at `13px`; `.history-meta` and `.history-created` stay `400` at `12px` in `--c-muted` / `--c-placeholder` |
+| hover `rgba(0,0,0,.03)` | `--c-hover`; the separator hairline stays, because it is the list's structure rather than a hover state. Only the two hairlines around the selected History row are hidden, so the travelling fill reads as one continuous row |
+| title Medium, meta smaller / lower contrast | `.history-preview` `500` at `14px`; `.history-meta` and `.history-created` stay `400` at `12px` in `--c-muted` / `--c-placeholder` |
 | gradient on the selected row | **refused** — gradients are palette-only (Cream washes); a translucent fill does the same job without a second colour system |
 
 ---

@@ -838,6 +838,7 @@ const en = {
         title: "History",
         searchPlaceholder: "Search sessions by keyword",
         searchAria: "Search history sessions",
+        clearSearch: "Clear search",
         switchHint: "A reply is being generated, switching sessions is temporarily unavailable",
         tabAll: "All",
         tabFavorites: "Favorites",
@@ -851,7 +852,7 @@ const en = {
         current: " · current",
         archived: " · archived",
         loading: "Loading…",
-        created: "Created {date}",
+
         addFavorite: "Add to favorites",
         removeFavorite: "Remove from favorites",
         rename: "Rename session",

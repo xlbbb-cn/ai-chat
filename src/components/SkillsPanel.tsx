@@ -212,6 +212,9 @@ export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
       ) : (
         <>
           <div className="skills-list">
+            {skills.length === 0 && (
+              <p className="skills-empty">{t("skills.empty")}</p>
+            )}
             {skills.map((skill) => {
               const isActive = activeSkillIds.includes(skill.name);
               return (
@@ -220,17 +223,17 @@ export function SkillsPanel({ activeSkillIds, onToggle, onClose }: Props) {
                   className={`skill-item ${!isActive ? "disabled" : ""}`}
                 >
                   <div className="skill-row">
-                    <label className="skill-toggle" title={isActive ? t("common.disable") : t("common.enable")}>
+                    <label className="toggle-switch" title={isActive ? t("common.disable") : t("common.enable")}>
                       <input
                         type="checkbox"
                         checked={isActive}
                         onChange={(e) => onToggle(skill.name, e.target.checked)}
                       />
-                      <span className="skill-toggle-slider" />
+                      <span className="toggle-switch-slider" />
                     </label>
                     <div className="skill-info">
                       <span
-                        className={`skill-name ${isActive ? "active" : ""}`}
+                        className="skill-name"
                         onClick={() => onToggle(skill.name, !isActive)}
                       >
                         {skill.name}

@@ -392,17 +392,17 @@ export function McpPanel({ onClose, onServersChange }: Props) {
                 {servers.map((s) => (
                     <div key={s.id} className={`mcp-server-item ${s.enabled ? "enabled" : "disabled"}`}>
                         <div className="mcp-server-row">
-                            <label className="mcp-toggle" title={s.enabled ? t("common.disable") : t("common.enable")}>
+                            <label className="toggle-switch" title={s.enabled ? t("common.disable") : t("common.enable")}>
                                 <input
                                     type="checkbox"
                                     checked={s.enabled}
                                     onChange={() => void toggleEnabled(s)}
                                 />
-                                <span className="mcp-toggle-slider" />
+                                <span className="toggle-switch-slider" />
                             </label>
                             <div className="mcp-server-info">
                                 <span
-                                    className={`mcp-server-name ${s.enabled ? "active" : ""}`}
+                                    className="mcp-server-name"
                                     title={t("mcp.toggleTitle", {
                                         action: s.enabled ? t("common.disable") : t("common.enable"),
                                         name: s.name,
