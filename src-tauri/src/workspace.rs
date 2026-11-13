@@ -141,6 +141,144 @@ pub fn ensure_data_layout(workspace_dir: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Whether `dir` can be opened as the workspace right now.
+///
+/// Deliberately stricter than [`prepare_workspace`]: nothing is created, so a
+/// workspace whose drive was unplugged or whose folder was moved is reported
+/// instead of being rebuilt as an empty workspace in its place. The `.data`
+/// layout is probed too, because on a read-only volume that is the first thing
+/// to fail and the failure would otherwise abort the startup.
+pub fn check_startup_workspace(dir: &Path) -> Result<(), String> {
+    if dir.as_os_str().is_empty() {
+        return Err("the path is empty".to_string());
+    }
+    match std::fs::metadata(dir) {
+        Ok(meta) if meta.is_dir() => {}
+        Ok(_) => return Err(format!("'{}' is not a directory", dir.display())),
+        Err(err) => return Err(describe_missing(dir, &err)),
+    }
+    ensure_data_layout(dir).map_err(|err| {
+        format!(
+            "the data directory '{}' cannot be written: {err}",
+            data_root(dir).display()
+        )
+    })
+}
+
+/// Make `dir` usable as a workspace, creating it when it is not there.
+///
+/// This is the explicit choice path (`set_workspace_dir`): the user picked that
+/// folder, so an absent directory is created instead of rejected. Startup never
+/// uses it; it goes through [`check_startup_workspace`] so a vanished workspace
+/// falls back to the default one.
+pub fn prepare_workspace(dir: &Path) -> Result<(), String> {
+    if dir.as_os_str().is_empty() {
+        return Err("the path is empty".to_string());
+    }
+    match std::fs::metadata(dir) {
+        Ok(meta) if meta.is_dir() => {}
+        Ok(_) => return Err(format!("'{}' is not a directory", dir.display())),
+        Err(_) => std::fs::create_dir_all(dir)
+            .map_err(|err| format!("'{}' cannot be created ({err})", dir.display()))?,
+    }
+    ensure_data_layout(dir).map_err(|err| {
+        format!(
+            "the data directory '{}' cannot be written: {err}",
+            data_root(dir).display()
+        )
+    })
+}
+
+/// Why a workspace path is not there, in terms of what the user has to fix.
+///
+/// A gap in the middle of the path means the volume is gone (`E:\gone\ws` with
+/// `E:` unplugged), a gap at the end means only the folder is missing.
+fn describe_missing(dir: &Path, err: &std::io::Error) -> String {
+    let nearest = dir
+        .ancestors()
+        .skip(1)
+        .find(|ancestor| !ancestor.as_os_str().is_empty() && ancestor.exists());
+    // A relative path is never a volume problem.
+    if nearest.is_none() && !dir.is_relative() {
+        return format!(
+            "the volume holding '{}' is not available ({err})",
+            dir.display()
+        );
+    }
+    format!("'{}' does not exist ({err})", dir.display())
+}
+
+/// Windows paths compare case- and separator-insensitively.
+fn same_path(a: &Path, b: &Path) -> bool {
+    let normalize = |path: &Path| {
+        let text = path.to_string_lossy().replace('\\', "/");
+        let text = text.trim_end_matches('/').to_string();
+        if cfg!(windows) {
+            text.to_lowercase()
+        } else {
+            text
+        }
+    };
+    normalize(a) == normalize(b)
+}
+
+/// The workspace a window opens at startup.
+pub struct StartupWorkspace {
+    /// The directory to open: the configured one, or the default one.
+    pub path: PathBuf,
+    /// `Some(reason)` when the configured workspace was unusable and `path` is
+    /// the default workspace, for `app.log`.
+    pub fallback: Option<String>,
+}
+
+/// Pick the workspace a window opens: the configured one when it is still
+/// there, the default one otherwise.
+///
+/// The configuration keeps the configured path either way — a drive that is
+/// only temporarily gone comes back, and the next start returns to it — so this
+/// decides what this start opens and never rewrites the choice.
+pub fn resolve_startup_workspace(configured: Option<&Path>, default: PathBuf) -> StartupWorkspace {
+    let mut fallback: Option<String> = None;
+    // Configuring the default workspace explicitly is not a fallback: the same
+    // directory opens either way, and it may legitimately not exist yet.
+    let candidate = configured
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .filter(|dir| !same_path(dir, &default));
+    if let Some(dir) = candidate {
+        match check_startup_workspace(dir) {
+            Ok(()) => {
+                return StartupWorkspace {
+                    path: dir.to_path_buf(),
+                    fallback: None,
+                }
+            }
+            Err(reason) => {
+                fallback = Some(format!(
+                    "workspace '{}' is unavailable: {reason}",
+                    dir.display()
+                ));
+            }
+        }
+    }
+    // The default workspace is ours to create (first launch, or the fallback
+    // above). A failure is only reported: opening the database then fails the
+    // same way it did before this fallback existed.
+    if let Err(err) = prepare_workspace(&default) {
+        let note = format!(
+            "the default workspace '{}' could not be prepared: {err}",
+            default.display()
+        );
+        fallback = Some(match fallback {
+            Some(reason) => format!("{reason}; {note}"),
+            None => note,
+        });
+    }
+    StartupWorkspace {
+        path: default,
+        fallback,
+    }
+}
+
 #[cfg(windows)]
 fn mark_hidden(path: &Path) {
     use std::os::windows::ffi::OsStrExt;
@@ -195,5 +333,89 @@ mod tests {
             skills_status_path(workspace),
             workspace.join(".data").join("skills.status")
         );
+    }
+
+    /// A private scratch root per test; removed again by the test itself.
+    fn scratch(tag: &str) -> PathBuf {
+        let base = std::env::temp_dir().join(format!(
+            "rabbit-workspace-{tag}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        base
+    }
+
+    #[test]
+    fn an_existing_configured_workspace_is_opened_as_is() {
+        let root = scratch("existing");
+        let configured = root.join("mine");
+        std::fs::create_dir_all(&configured).unwrap();
+        let resolved = resolve_startup_workspace(Some(&configured), root.join("default"));
+        assert_eq!(resolved.path, configured);
+        assert!(resolved.fallback.is_none());
+        // The database can be opened right after: the layout is there.
+        assert!(data_root(&configured).is_dir());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_vanished_configured_workspace_falls_back_without_recreating_it() {
+        let root = scratch("vanished");
+        std::fs::create_dir_all(&root).unwrap();
+        let gone = root.join("gone");
+        let default = root.join("default");
+        let resolved = resolve_startup_workspace(Some(&gone), default.clone());
+        assert_eq!(resolved.path, default);
+        assert!(resolved.fallback.unwrap().contains("does not exist"));
+        // The rule: a workspace that is not there is not rebuilt in its place.
+        assert!(!gone.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_file_at_the_configured_path_falls_back() {
+        let root = scratch("file");
+        std::fs::create_dir_all(&root).unwrap();
+        let file = root.join("notes.txt");
+        std::fs::write(&file, "x").unwrap();
+        let default = root.join("default");
+        let resolved = resolve_startup_workspace(Some(&file), default.clone());
+        assert_eq!(resolved.path, default);
+        assert!(resolved.fallback.unwrap().contains("not a directory"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn no_configured_workspace_prepares_the_default_one_without_a_fallback() {
+        let root = scratch("default");
+        let default = root.join("workspace");
+        let resolved = resolve_startup_workspace(None, default.clone());
+        assert_eq!(resolved.path, default);
+        assert!(resolved.fallback.is_none());
+        assert!(data_root(&default).is_dir());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_default_workspace_is_not_a_fallback_even_when_missing() {
+        let root = scratch("same");
+        let default = root.join("workspace");
+        let resolved = resolve_startup_workspace(Some(&default), default.clone());
+        assert_eq!(resolved.path, default);
+        assert!(resolved.fallback.is_none());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_explicit_choice_is_created_but_a_blocked_one_is_an_error() {
+        let root = scratch("prepare");
+        let picked = root.join("picked");
+        prepare_workspace(&picked).unwrap();
+        assert!(data_root(&picked).is_dir());
+        let blocked = root.join("notes.txt");
+        std::fs::write(&blocked, "x").unwrap();
+        assert!(prepare_workspace(&blocked).is_err());
+        assert!(prepare_workspace(&blocked.join("child")).is_err());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

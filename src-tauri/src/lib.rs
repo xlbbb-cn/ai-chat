@@ -1350,6 +1350,19 @@ fn set_workspace_dir(
         );
     }
 
+    // The user picked this folder, so it may be created — but it has to be
+    // usable *before* the config is written: `apply_config` persists the path
+    // first and opens the database afterwards, so an unusable folder (a missing
+    // drive, a path that is really a file, a read-only volume) would be saved
+    // and the window would keep pointing at a workspace it never opened.
+    if let Some(dir) = workspace_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|dir| !dir.is_empty())
+    {
+        workspace::prepare_workspace(Path::new(dir))?;
+    }
+
     let mut config = state.config.lock().unwrap().clone();
     config.workspace_dir = workspace_dir
         .map(|dir| dir.trim().to_string())
@@ -1806,12 +1819,22 @@ pub fn run() {
             // Resolve the active workspace first: the database, memory, todo
             // lists and skills all live in its hidden `.data` directory, so the
             // workspace must be known before the database is opened.
-            let workspace_dir = match config.workspace_dir.as_deref().filter(|s| !s.is_empty()) {
-                Some(dir) => PathBuf::from(dir),
-                None => instance.default_workspace(data_dir.join("workspace")),
-            };
-            fs::create_dir_all(&workspace_dir).ok();
-            workspace::ensure_data_layout(&workspace_dir).ok();
+            // A configured workspace has to be there *now*: an unplugged drive
+            // or a moved folder would otherwise be recreated as an empty
+            // workspace and its history would look lost, so such a start falls
+            // back to the default (app-data) workspace. The configuration keeps
+            // the user's path — plug the drive back in and the next start
+            // returns to it; the reason goes to `app.log` below.
+            let resolved = workspace::resolve_startup_workspace(
+                config
+                    .workspace_dir
+                    .as_deref()
+                    .filter(|s| !s.is_empty())
+                    .map(Path::new),
+                instance.default_workspace(data_dir.join("workspace")),
+            );
+            let workspace_fallback = resolved.fallback;
+            let workspace_dir = resolved.path;
             // First launch (or a config that never carried a choice): adopt the
             // OS user-interface language once and persist it. The value is a
             // decision, not a default — a pick in Settings or an imported
@@ -1833,7 +1856,12 @@ pub fn run() {
             // Seed the history with the workspace we are about to open: on the
             // first launch after the upgrade this is the only entry, and it
             // becomes pickable again as soon as the user switches away once.
-            if config.remember_workspace(&workspace_dir.to_string_lossy()) {
+            // A fallback start records nothing: the configured path is still
+            // the user's choice, and the switcher would otherwise fill up with
+            // the default workspace they never picked.
+            if workspace_fallback.is_none()
+                && config.remember_workspace(&workspace_dir.to_string_lossy())
+            {
                 config_dirty = true;
             }
             // One write for both: the first launch seeds the history and the
@@ -1860,6 +1888,9 @@ pub fn run() {
                     "INFO",
                     &format!("UI language: {language} (adopted from the system)"),
                 );
+            }
+            if let Some(reason) = workspace_fallback.as_deref() {
+                app_logger.log("WARN", &format!("Workspace fallback: {reason}"));
             }
 
             if swept > 0 {
