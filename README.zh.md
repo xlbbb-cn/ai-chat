@@ -2,7 +2,7 @@
 
 **把任意 OpenAI 兼容模型变成工作区感知的桌面 Agent —— Skills、工具与 Sub-Agent 开箱即用，每一次请求都留在本机可查。**
 
-[Wiki](https://github.com/xlbbb-cn/ai-chat/wiki) · [English](./README.md) · [最新版本](https://github.com/xlbbb-cn/ai-chat/releases/latest) · [快速开始](#快速开始)
+[官网](https://xlbbb-cn.github.io/ai-chat/) · [Wiki](https://github.com/xlbbb-cn/ai-chat/wiki) · [English](./README.md) · [最新版本](https://github.com/xlbbb-cn/ai-chat/releases/latest) · [快速开始](#快速开始)
 
 ![Rabbit Chat Studio —— 大模型负责规划，本地工具负责执行](docs/banner.png)
 
