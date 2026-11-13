@@ -9,6 +9,19 @@ npm run changelog -- --from <上一个 tag> --to <本次 tag> --details --write
 条目按 Conventional Commits 的类型分组，作用域加粗；工作区里提交标题是英文、正文是中文，
 所以带 `--details` 时是中英对照。
 
+## [v3.3.1](https://github.com/xlbbb-cn/ai-chat/releases/tag/v3.3.1) — 2026-11-13
+
+### 修复
+
+- **monitor**: read the interaction log after the turn, not on a timer ([`fa800b6`](https://github.com/xlbbb-cn/ai-chat/commit/fa800b6463a3836ab2c7fae294a1d31e34794890))
+- **workspace**: fall back to the app-data workspace when the path is gone ([`d15ce1b`](https://github.com/xlbbb-cn/ai-chat/commit/d15ce1b3db1fb9c6691c764324d4433a990904e4))
+
+### 其它
+
+- **subagent**: break llm ([`c2de7f8`](https://github.com/xlbbb-cn/ai-chat/commit/c2de7f8d7213c96253614f20fc796b1823a5fa62))
+
+**完整对比**：[v3.3.0...v3.3.1](https://github.com/xlbbb-cn/ai-chat/compare/v3.3.0...v3.3.1)
+
 ## [v3.3.0](https://github.com/xlbbb-cn/ai-chat/releases/tag/v3.3.0) — 2026-11-13
 
 ### 新增
