@@ -28,6 +28,7 @@ pub mod model_metadata;
 mod pdf_mentions;
 mod process_guard;
 mod skills;
+mod system_locale;
 mod tools;
 mod turn_guard;
 mod update;
@@ -1811,10 +1812,33 @@ pub fn run() {
             };
             fs::create_dir_all(&workspace_dir).ok();
             workspace::ensure_data_layout(&workspace_dir).ok();
+            // First launch (or a config that never carried a choice): adopt the
+            // OS user-interface language once and persist it. The value is a
+            // decision, not a default — a pick in Settings or an imported
+            // backup is never overwritten — so the UI cannot silently switch
+            // language later when the system language changes.
+            let mut config_dirty = false;
+            let mut adopted_language: Option<String> = None;
+            if !config
+                .language
+                .as_deref()
+                .is_some_and(system_locale::is_supported)
+            {
+                if let Some(locale) = system_locale::detect() {
+                    config.language = Some(locale.to_string());
+                    adopted_language = config.language.clone();
+                    config_dirty = true;
+                }
+            }
             // Seed the history with the workspace we are about to open: on the
             // first launch after the upgrade this is the only entry, and it
             // becomes pickable again as soon as the user switches away once.
             if config.remember_workspace(&workspace_dir.to_string_lossy()) {
+                config_dirty = true;
+            }
+            // One write for both: the first launch seeds the history and the
+            // language, a later launch usually writes nothing at all.
+            if config_dirty {
                 if let Ok(json) = serde_json::to_string_pretty(&config) {
                     instance.write_config(&config_path, &json).ok();
                 }
@@ -1831,6 +1855,12 @@ pub fn run() {
                 data_dir.join("app.log"),
             );
             app_logger.log("INFO", "Logger initialized");
+            if let Some(language) = adopted_language.as_deref() {
+                app_logger.log(
+                    "INFO",
+                    &format!("UI language: {language} (adopted from the system)"),
+                );
+            }
 
             if swept > 0 {
                 app_logger.log(
