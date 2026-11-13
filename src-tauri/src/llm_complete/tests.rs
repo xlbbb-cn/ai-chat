@@ -692,3 +692,60 @@ fn estimate_prompt_tokens_counts_messages_and_tools() {
     assert_eq!(estimate_prompt_tokens(&[], &[]), 0);
 }
 
+// ─── Empty-completion detection ─────────────────────────────────────────────
+//
+// A relay can close an aborted generation with a usage chunk and `[DONE]` and
+// nothing else (no content, no tool call, no `finish_reason`). Once accepted as
+// an answer it ended the turn silently, leaving the previous partial text on
+// screen and the task unfinished — `stream_llm_request` now treats it as a
+// failed attempt instead.
+
+fn tool_call(id: &str) -> (String, String, String) {
+    (id.to_string(), "run_shell".to_string(), "{}".to_string())
+}
+
+#[test]
+fn empty_completion_is_unusable_without_content_or_tool_call() {
+    assert!(stream::is_empty_completion("", &[]));
+    // Whitespace-only replies are empty too (models emit those on a stall).
+    assert!(stream::is_empty_completion("  \n\t ", &[]));
+}
+
+#[test]
+fn empty_completion_accepts_content_or_tool_call() {
+    assert!(!stream::is_empty_completion("done", &[]));
+    // A tool call is a usable round even without narration.
+    assert!(!stream::is_empty_completion("", &[tool_call("call_1")]));
+    assert!(!stream::is_empty_completion("reading", &[tool_call("call_1")]));
+}
+
+// ─── Tool-round history message ─────────────────────────────────────────────
+//
+// The round's narration must survive into the request history: the UI shows it,
+// and a model that cannot see what it just told the user re-reads files and
+// repeats itself mid-turn. A round with no narration keeps `null`.
+
+fn streamed_call(id: &str) -> Value {
+    json!({ "id": id, "type": "function", "function": { "name": "run_shell", "arguments": "{}" } })
+}
+
+#[test]
+fn tool_round_message_keeps_the_narration() {
+    let msg = stream::assistant_tool_message("我先读一下稿件。", "", vec![streamed_call("c1")]);
+    assert_eq!(msg["role"], json!("assistant"));
+    assert_eq!(msg["content"], json!("我先读一下稿件。"));
+    assert_eq!(msg["tool_calls"], json!([streamed_call("c1")]));
+    assert!(msg.get("reasoning_content").is_none());
+}
+
+#[test]
+fn tool_round_message_leaves_silent_rounds_null() {
+    let msg = stream::assistant_tool_message("   ", "", vec![streamed_call("c1")]);
+    assert_eq!(msg["content"], Value::Null);
+}
+
+#[test]
+fn tool_round_message_carries_thinking_along() {
+    let msg = stream::assistant_tool_message("done", "让我看看目录", vec![]);
+    assert_eq!(msg["reasoning_content"], json!("让我看看目录"));
+}

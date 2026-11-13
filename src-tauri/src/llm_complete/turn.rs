@@ -1723,6 +1723,24 @@ only when every item is done, or when you are blocked and need the user."
                 }
             }
 
+            // Defensive: `stream_chat_request` already rejects an empty
+            // completion, so this is only reachable if that check is ever lost
+            // again. Never close the transcript on nothing — the user would be
+            // left with the previous partial text and a task that stopped
+            // mid-way. Surface it as a failure the retry button can act on.
+            if sr.content.trim().is_empty() {
+                let err =
+                    "the model returned an empty reply, so the turn stopped before producing an answer"
+                        .to_string();
+                log_event(
+                    &state,
+                    "WARN",
+                    format!("empty final answer, ending the turn: session_id={session_id}"),
+                );
+                let _ = app.emit("chat-error", err.clone());
+                return Err(err);
+            }
+
             final_answer = Some(sr.content.clone());
             break;
         }
@@ -1738,15 +1756,14 @@ only when every item is done, or when you are blocked and need the user."
                 })
             })
             .collect();
-        let mut assistant_msg = json!({
-            "role": "assistant",
-            "content": null,
-            "tool_calls": assistant_tcs
-        });
-        if !sr.reasoning_content.is_empty() {
-            assistant_msg["reasoning_content"] = json!(sr.reasoning_content);
-        }
-        all_messages.push(assistant_msg);
+        // The round's narration and its thinking ride along with the calls (see
+        // `assistant_tool_message`): dropping them lost the line the model had
+        // just told the user.
+        all_messages.push(assistant_tool_message(
+            &sr.content,
+            &sr.reasoning_content,
+            assistant_tcs,
+        ));
 
         let mut pending_skill_context_messages: Vec<Value> = vec![];
 

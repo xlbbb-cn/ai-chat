@@ -568,6 +568,45 @@ pub(crate) fn ensure_tool_call_ids(tool_calls: &mut [(String, String, String)]) 
     }
 }
 
+/// A finished stream that carries neither text nor a tool call produced
+/// nothing usable. Relays close an aborted generation politely — a usage
+/// chunk then `[DONE]`, no `finish_reason`, no content — so the completeness
+/// check above cannot tell it apart from a real answer. Accepting it ended the
+/// turn on an empty reply: the transcript stopped on the previous partial text
+/// and the task died mid-way.
+pub(crate) fn is_empty_completion(content: &str, tool_calls: &[(String, String, String)]) -> bool {
+    content.trim().is_empty() && tool_calls.is_empty()
+}
+
+/// Build the assistant message that carries a finished tool-call round back
+/// into the request history.
+///
+/// `content` keeps the narration the model streamed next to its calls: the UI
+/// already shows that text, so dropping it only here made the model forget what
+/// it had just told the user — it re-read files and repeated itself. A round
+/// that streamed no text keeps `null`, never an empty string.
+///
+/// `reasoning_content` rides along unmodified because thinking-mode APIs
+/// require it on every tool-call turn.
+pub(crate) fn assistant_tool_message(
+    content: &str,
+    reasoning_content: &str,
+    tool_calls: Vec<Value>,
+) -> Value {
+    let mut msg = json!({
+        "role": "assistant",
+        "content": Value::Null,
+        "tool_calls": tool_calls,
+    });
+    if !content.trim().is_empty() {
+        msg["content"] = json!(content);
+    }
+    if !reasoning_content.is_empty() {
+        msg["reasoning_content"] = json!(reasoning_content);
+    }
+    msg
+}
+
 pub(crate) fn truncate_text(value: &str, max_chars: usize) -> String {
     value.chars().take(max_chars).collect::<String>()
 }
@@ -873,6 +912,34 @@ pub async fn stream_llm_request(
                     || (content.is_empty() && tool_calls.is_empty()));
             last_err = Some(err.clone());
             if can_retry {
+                announce_stream_retry(app, &opts, &content, &reasoning_content);
+                tokio::time::sleep(Duration::from_millis(retry_backoff_ms(attempt))).await;
+                continue;
+            }
+            if opts.emit_errors {
+                let _ = app.emit("chat-error", err.clone());
+            }
+            return Err(err);
+        }
+
+        // ── Empty completion ────────────────────────────────────────────────
+        // `[DONE]` + usage with no content and no tool call: a relay closed an
+        // aborted generation mid-answer (observed after a large prompt, right
+        // after a mission report is injected). Nothing usable arrived, so this
+        // is not an answer — retry while attempts remain, then fail loudly
+        // instead of letting the turn end on an empty reply.
+        if is_empty_completion(&content, &tool_calls) {
+            let err = format!(
+                "empty completion: no content and no tool call (finish_reason: {}, {} reasoning char(s))",
+                if finish_reason.is_empty() {
+                    "(none)"
+                } else {
+                    finish_reason.as_str()
+                },
+                reasoning_content.chars().count()
+            );
+            last_err = Some(err.clone());
+            if attempt < STREAM_MAX_RETRIES {
                 announce_stream_retry(app, &opts, &content, &reasoning_content);
                 tokio::time::sleep(Duration::from_millis(retry_backoff_ms(attempt))).await;
                 continue;
