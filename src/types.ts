@@ -391,7 +391,8 @@ export interface AppConfig {
    * Per-model capabilities learned from the merged public capability catalogue
    * (models.dev, OpenRouter, `basellm/llm-metadata`) when the model catalogue
    * was refreshed ("Fetch Models From API"). Keyed by the remote model id;
-   * `model_name` inside the value is the catalogue entry it was matched to.
+   * `model_name` inside the value is the catalogue entry it was matched to,
+   * stored normalised (lowercase, flattened).
    * Informational only — never sent upstream.
    */
   model_metadata?: Record<string, ModelMetadata>;
@@ -556,10 +557,12 @@ export interface ModelSettings {
  * `fetch_model_metadata`, and — once matched — persisted per remote model id in
  * {@link AppConfig.model_metadata}.
  *
- * `model_name` is the catalogue entry the model was matched to, which is not
- * necessarily identical to the remote model id; `match_score` records how close
- * the two names were (1 = identical after normalisation). Mirrors the Rust
- * `ModelMetadata` struct in `src-tauri/src/model_metadata.rs`.
+ * `model_name` is the catalogue entry the model was matched to, stored
+ * normalised (lowercase, flattened — see `normalizeModelName` in
+ * `src/utils/modelMetadata.ts`), so it is not necessarily identical to the
+ * remote model id; `match_score` records how close the two names were
+ * (1 = identical after normalisation). Mirrors the Rust `ModelMetadata` struct
+ * in `src-tauri/src/model_metadata.rs`.
  */
 export interface ModelMetadata {
   model_name: string;

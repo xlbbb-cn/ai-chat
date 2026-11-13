@@ -3,7 +3,7 @@ import { fetchModels, fetchModelMetadata, getAppVersion, getConfig, saveConfig }
 import type { AppConfig, GlassEffect, ModelMetadata, ModelSettings, Palette, RequestHeader } from "../types";
 import { LOCALE_LABELS, LOCALES, useI18n, type Locale, type MessageKey } from "../i18n";
 import { matchModelCatalog, isDeepSeekModel } from "../utils/modelMetadata";
-import { FontAwesomeIcon, faCaretDown, faCheck, faXmark } from "../icons";
+import { FontAwesomeIcon, faCaretDown, faCheck, faSpinner, faXmark } from "../icons";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { MonitorPanel } from "./MonitorPanel";
 import { AgentMissionPanel } from "./AgentMissionPanel";
@@ -591,7 +591,14 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
               <div className="settings-field-grid">
                 <div className="settings-field-row settings-field-row-stacked">
                   <span className="settings-field-label">{t("settings.api.modelCatalog")}</span>
-                  <button type="button" className="settings-btn settings-btn-tinted" onClick={handleFetchModels} disabled={loadingModels}>
+                  <button
+                    type="button"
+                    className="settings-btn settings-btn-tinted"
+                    onClick={handleFetchModels}
+                    disabled={loadingModels}
+                    aria-busy={loadingModels}
+                  >
+                    {loadingModels && <FontAwesomeIcon icon={faSpinner} spin aria-hidden="true" />}
                     {loadingModels ? t("settings.api.loadingModels") : t("settings.api.fetchModels")}
                   </button>
                   {modelsError && <div className="settings-error">{modelsError}</div>}

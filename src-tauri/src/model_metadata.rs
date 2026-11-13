@@ -19,9 +19,14 @@
 //! (see `src/utils/modelMetadata.ts`). Matched entries are persisted per model
 //! in `AppConfig::model_metadata`.
 //!
-//! The three feeds are downloaded together and merged into one entry per model
-//! (see [`merge_catalogs`]: a lower-priority source only fills the fields the
-//! higher-priority one left empty, and contributes the models the others miss).
+//! The three feeds are downloaded together and merged into one entry per
+//! *normalised* model name (see [`merge_catalogs`]: a lower-priority source
+//! only fills the fields the higher-priority one left empty, and contributes
+//! the models the others miss). Normalisation happens once, after the fetch:
+//! every stored `model_name` is lowercase and flattened by
+//! [`normalize_model_name`], so enriching a pulled model is the same
+//! normalisation followed by a direct comparison — the similarity scorer in
+//! `src/utils/modelMetadata.ts` only covers ids the catalogue does not know.
 //! The merged result is written to `<app_data>/model_metadata.json` — ~2 900
 //! entries, ~1.2 MB — and refreshed at most weekly, so a restart, a restart
 //! without network, or a slow mirror all still serve the catalogue. A source
@@ -60,10 +65,14 @@ const LLM_METADATA_URL: &str = "https://basellm.github.io/llm-metadata/api/newap
 /// Merged catalogue inside `<app_data>`, with its `updated_at` timestamp.
 const CATALOG_FILE: &str = "model_metadata.json";
 
-/// Bumped when the persisted shape changes in a way an older reader could not
-/// cope with. Entries themselves are read leniently (every field has a default),
-/// so this is currently informational.
-const CATALOG_VERSION: u32 = 1;
+/// Bumped when the persisted shape changes. `2` stores `model_name`
+/// normalised (lowercase, flattened — [`merge_catalogs`] writes the merge key
+/// back into the entry), so a catalogue written by an older build is parsed
+/// and kept as the offline fallback but never served as fresh: a new build
+/// re-downloads instead of trusting stored names from before the
+/// normalisation. Entries themselves are still read leniently (every field
+/// has a default).
+const CATALOG_VERSION: u32 = 2;
 
 /// How long a downloaded catalogue is reused (file *and* memory) before the
 /// feeds are fetched again.
@@ -135,7 +144,10 @@ const PREFERRED_PROVIDERS: &[&str] = &[
 /// `src/types.ts` — keep both in sync.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelMetadata {
-    /// Catalogue name this entry (or the matched remote model) refers to.
+    /// Catalogue name this entry (or the matched remote model) refers to,
+    /// stored normalised: lowercase and flattened to hyphen-separated tokens
+    /// by [`normalize_model_name`]. Matching a pulled model is therefore one
+    /// normalisation of the remote id followed by a direct comparison.
     pub model_name: String,
     #[serde(default)]
     pub vendor: String,
@@ -214,8 +226,11 @@ const SOURCES: &[Source] = &[
 ];
 
 /// Last catalogue loaded from disk or network, kept so repeated calls (every
-/// Settings refresh) do not re-read or re-parse the file.
+/// Settings refresh) do not re-read or re-parse the file. The format version
+/// rides along so a stale-format file remembered as the offline fallback
+/// cannot come back through [`cached_fresh`] as if it were current.
 struct CachedCatalog {
+    version: u32,
     updated_at: u64,
     entries: Vec<ModelMetadata>,
 }
@@ -248,16 +263,27 @@ fn is_fresh(updated_at: u64) -> bool {
     now_secs().saturating_sub(updated_at) < CATALOG_TTL_SECS
 }
 
+/// Is a parsed catalogue usable as the *fresh* answer — written by the current
+/// format and inside the TTL window? A version mismatch (a file from an older
+/// build, stored before the names were normalised) parses fine and stays the
+/// offline fallback, but it must never be served as fresh, or a new build
+/// would keep matching against the old stored names until the TTL expires.
+fn catalog_is_fresh(catalog: &CatalogFile) -> bool {
+    catalog.version == CATALOG_VERSION && is_fresh(catalog.updated_at)
+}
+
 /// Entries of a catalogue that is still fresh, when one is in memory.
 fn cached_fresh() -> Option<Vec<ModelMetadata>> {
     let guard = cache().lock().ok()?;
     let entry = guard.as_ref()?;
-    is_fresh(entry.updated_at).then(|| entry.entries.clone())
+    (entry.version == CATALOG_VERSION && is_fresh(entry.updated_at))
+        .then(|| entry.entries.clone())
 }
 
 fn remember(catalog: &CatalogFile) {
     if let Ok(mut guard) = cache().lock() {
         *guard = Some(CachedCatalog {
+            version: catalog.version,
             updated_at: catalog.updated_at,
             entries: catalog.entries.clone(),
         });
@@ -280,8 +306,9 @@ fn warn(app: &tauri::AppHandle, message: &str) {
 /// merged into one entry per model.
 ///
 /// Served from memory, then from `<app_data>/model_metadata.json` while that
-/// file is younger than [`CATALOG_TTL_SECS`]; otherwise the three feeds are
-/// downloaded, merged, written back and returned. `force` skips both caches.
+/// file is younger than [`CATALOG_TTL_SECS`] and written by the current
+/// [`CATALOG_VERSION`]; otherwise the three feeds are downloaded, merged,
+/// written back and returned. `force` skips both caches.
 ///
 /// A failed download is reported as an error so the caller can degrade
 /// gracefully — the model list itself never depends on this feed — but an
@@ -302,7 +329,10 @@ pub async fn fetch_model_metadata(
     let path = catalog_path(&app)?;
     if !force {
         if let Some(catalog) = read_catalog(&path) {
-            let fresh = is_fresh(catalog.updated_at);
+            // An older format is remembered (it still serves as the offline
+            // fallback when every feed fails) but not answered as fresh, so
+            // this build re-downloads instead of trusting its stored names.
+            let fresh = catalog_is_fresh(&catalog);
             remember(&catalog);
             if fresh {
                 return Ok(catalog.entries);
@@ -445,9 +475,12 @@ async fn download(client: &reqwest::Client, url: &str) -> Result<serde_json::Val
 /// Merge catalogues, in priority order, into one entry per normalised name.
 ///
 /// Keyed by [`normalize_model_name`], so `openai/gpt-4o`, `gpt-4o` and
-/// `gpt-4o-2024-08-06` collapse into a single entry — the first (highest
-/// priority) name is kept for display, later sources only fill what is missing
-/// and OR the capability flags.
+/// `gpt-4o-2024-08-06` collapse into a single entry — and the key is written
+/// back into the stored `model_name`. The persisted catalogue is therefore
+/// flat: lowercase, one entry per normalised name, whatever raw spelling a
+/// parser saw. This is the one normalisation step after the fetch; the
+/// parsers stay shape-specific and never normalise themselves. Later sources
+/// only fill what is missing and OR the capability flags.
 ///
 /// Order matters: the caller passes the parser output in [`SOURCES`] order
 /// (models.dev → OpenRouter → llm-metadata), so a model's limits and vendor
@@ -458,11 +491,12 @@ fn merge_catalogs(parts: Vec<Vec<ModelMetadata>>) -> Vec<ModelMetadata> {
     let mut index: HashMap<String, usize> = HashMap::new();
 
     for entries in parts {
-        for entry in entries {
+        for mut entry in entries {
             let key = normalize_model_name(&entry.model_name);
             if key.is_empty() {
                 continue;
             }
+            entry.model_name = key.clone();
             match index.get(&key) {
                 Some(&at) => merge_into(&mut merged[at], &entry),
                 None => {
@@ -916,6 +950,33 @@ mod tests {
         assert!(parse_llm_metadata_entry(&serde_json::json!({ "model_name": "  " })).is_none());
     }
 
+    /// The feed wraps the array in `{ data: [...], message, success }`; a bare
+    /// array is accepted too, so an upstream format tweak does not break the
+    /// source.
+    #[test]
+    fn reads_llm_metadata_wrapped_and_bare() {
+        let entry_body = serde_json::json!({
+            "model_name": "gpt-4o",
+            "vendor_name": "OpenAI",
+            "tags": "Tools,128K"
+        });
+        let wrapped = serde_json::json!({
+            "message": "ok",
+            "success": true,
+            "data": [entry_body.clone()]
+        });
+        let bare = serde_json::json!([entry_body]);
+
+        for body in [wrapped, bare] {
+            let entries = parse_llm_metadata(&body);
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0].model_name, "gpt-4o");
+            assert_eq!(entries[0].vendor, "OpenAI");
+            assert_eq!(entries[0].context_length, Some(128_000));
+            assert!(entries[0].supports_tools);
+        }
+    }
+
     /// The Rust normaliser has to agree with `normalizeModelName` in
     /// `src/utils/modelMetadata.ts`, otherwise the merge groups models the
     /// frontend matches separately.
@@ -958,7 +1019,10 @@ mod tests {
         let merged = merge_catalogs(vec![vec![base], vec![fallback], vec![third]]);
         assert_eq!(merged.len(), 1);
         let only = &merged[0];
-        assert_eq!(only.model_name, "GPT-4o", "the top source's name is kept");
+        assert_eq!(
+            only.model_name, "gpt-4o",
+            "the top source's entry is kept, under its normalised name"
+        );
         assert_eq!(only.context_length, Some(200_000), "models.dev wins");
         assert_eq!(only.max_output_tokens, Some(16_384), "models.dev wins");
         assert_eq!(only.description, "Omni model", "gap filled by openrouter");
@@ -977,6 +1041,51 @@ mod tests {
                 LLM_METADATA_SOURCE.to_string()
             ]
         );
+    }
+
+    /// The catalogue is stored flat: every persisted name is already its own
+    /// normalised form and each normalised key appears exactly once, so the
+    /// frontend matches a remote id with one normalisation plus a direct
+    /// comparison and the file cannot carry duplicate spellings of a model.
+    #[test]
+    fn merged_names_are_normalised_and_unique() {
+        let merged = merge_catalogs(vec![
+            parse_llm_metadata(&serde_json::json!({
+                "data": [
+                    { "model_name": "OpenAI/GPT-4o", "tags": "Tools" },
+                    { "model_name": "GLM-5.3", "tags": "Reasoning" }
+                ]
+            })),
+            parse_models_dev(&serde_json::json!({
+                "zai": { "name": "Z.ai", "models": {
+                    "GLM-5.3": { "id": "zai-org/GLM-5.3", "name": "GLM-5.3" }
+                }}
+            })),
+            parse_openrouter(&serde_json::json!({
+                "data": [
+                    { "id": "google/gemini-4-hydrogen" },
+                    { "id": "openai/gpt-4o-2024-08-06" }
+                ]
+            })),
+        ]);
+
+        // `OpenAI/GPT-4o` and `openai/gpt-4o-2024-08-06` share `gpt-4o`;
+        // `GLM-5.3` arrives twice and is merged; the namespaces are dropped.
+        assert_eq!(merged.len(), 3);
+        let names: Vec<&str> = merged
+            .iter()
+            .map(|entry| entry.model_name.as_str())
+            .collect();
+        assert!(names.contains(&"gpt-4o"));
+        assert!(names.contains(&"glm-5-3"));
+        assert!(names.contains(&"gemini-4-hydrogen"));
+        for name in &names {
+            assert_eq!(
+                normalize_model_name(name),
+                *name,
+                "stored name {name:?} is not its own normalised form"
+            );
+        }
     }
 
     /// Pins the priority order the rest of the module assumes.
@@ -1022,10 +1131,12 @@ mod tests {
             }
         });
 
-        let entries = parse_models_dev(&body);
-        assert_eq!(entries.len(), 1);
-        let entry = &entries[0];
-        assert_eq!(entry.model_name, "GLM-5.3");
+        // Routed through the merge so the test pins what is actually stored:
+        // the parser's raw `GLM-5.3` is flattened to `glm-5-3` on the way in.
+        let merged = merge_catalogs(vec![parse_models_dev(&body)]);
+        assert_eq!(merged.len(), 1);
+        let entry = &merged[0];
+        assert_eq!(entry.model_name, "glm-5-3");
         assert_eq!(entry.vendor, "Z.ai");
         assert_eq!(entry.context_length, Some(262_144));
         assert_eq!(entry.max_output_tokens, Some(131_072));
@@ -1087,10 +1198,11 @@ mod tests {
             }]
         });
 
-        let entries = parse_openrouter(&body);
-        assert_eq!(entries.len(), 1);
-        let entry = &entries[0];
-        assert_eq!(entry.model_name, "google/gemini-4-hydrogen");
+        // Through the merge as well: the namespaced id is stored flattened.
+        let merged = merge_catalogs(vec![parse_openrouter(&body)]);
+        assert_eq!(merged.len(), 1);
+        let entry = &merged[0];
+        assert_eq!(entry.model_name, "gemini-4-hydrogen");
         assert_eq!(entry.vendor, "google");
         assert_eq!(entry.context_length, Some(1_048_576));
         assert_eq!(entry.max_output_tokens, Some(65_536));
@@ -1117,6 +1229,29 @@ mod tests {
         assert!(entries[2].open_weights);
     }
 
+    /// The top-level `context_length` wins; a feed that only reports the
+    /// window under `top_provider` is still read.
+    #[test]
+    fn openrouter_context_length_falls_back_to_top_provider() {
+        let only_top = parse_openrouter(&serde_json::json!({
+            "data": [{
+                "id": "vendor/model",
+                "top_provider": { "context_length": 131072, "max_completion_tokens": 8192 }
+            }]
+        }));
+        assert_eq!(only_top[0].context_length, Some(131_072));
+        assert_eq!(only_top[0].max_output_tokens, Some(8_192));
+
+        let both = parse_openrouter(&serde_json::json!({
+            "data": [{
+                "id": "vendor/model",
+                "context_length": 1048576,
+                "top_provider": { "context_length": 131072 }
+            }]
+        }));
+        assert_eq!(both[0].context_length, Some(1_048_576));
+    }
+
     #[test]
     fn tolerates_empty_and_foreign_payloads() {
         for parse in [parse_llm_metadata, parse_models_dev, parse_openrouter] {
@@ -1134,6 +1269,26 @@ mod tests {
         assert!(!is_fresh(now - 8 * 24 * 60 * 60));
         // A stamp in the future is treated as fresh, not as "re-download".
         assert!(is_fresh(now + 3600));
+    }
+
+    /// A catalogue written by an older format parses (it stays the offline
+    /// fallback) but never counts as fresh, so a new build re-downloads
+    /// instead of serving stored names from before the normalisation.
+    #[test]
+    fn version_mismatch_is_not_fresh() {
+        let mut catalog = CatalogFile {
+            version: 1,
+            updated_at: now_secs(),
+            entries: vec![entry("gpt-4o", MODELS_DEV_SOURCE)],
+        };
+        assert!(!catalog_is_fresh(&catalog));
+
+        catalog.version = CATALOG_VERSION;
+        assert!(catalog_is_fresh(&catalog));
+
+        // The current format outside the TTL window is stale all the same.
+        catalog.updated_at = now_secs() - 8 * 24 * 60 * 60;
+        assert!(!catalog_is_fresh(&catalog));
     }
 
     #[test]

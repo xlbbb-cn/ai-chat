@@ -6,20 +6,22 @@
  * A provider's `/models` listing and the catalogue frequently disagree on the
  * exact name: gateways (new-api / one-api / LiteLLM / OpenRouter / Bedrock)
  * prefix a vendor, append a date stamp or a variant suffix, and upstream
- * renames models over time. So instead of requiring an exact id we score every
- * catalogue entry against the id and keep the closest one above a similarity
- * floor.
+ * renames models over time. The catalogue stores normalised names (lowercase,
+ * flattened — the Rust merge writes `normalizeModelName`'s output back into
+ * `model_name`), so matching normalises the remote id once and:
  *
- * Scores are computed on a normalised form (see `normalizeModelName`):
- *
- * 1. identical normalised names score `1.0`;
- * 2. a name that is a contiguous token run of the other one
- *    (`llama-4-scout-17b-16e-instruct` inside `cerebras-llama-4-scout-...`)
- *    scores `0.65 ... 0.95`, scaled by how much of the longer name it covers;
- * 3. otherwise a blend of token Dice coefficient (order-insensitive word
- *    overlap) and character-level similarity (edit distance);
- * 4. a modality mismatch (image / video / speech / embedding model vs chat
- *    model) halves whatever the name similarity produced.
+ * 1. an equal normalised name is a direct hit and scores `1.0` — the common
+ *    case, and a map lookup in `matchModelCatalog`;
+ * 2. ids the catalogue does not know fall through to a similarity score, and
+ *    the closest entry above a floor wins:
+ *     - a name that is a contiguous token run of the other one
+ *       (`llama-4-scout-17b-16e-instruct` inside `cerebras-llama-4-scout-...`)
+ *       scores `0.65 ... 0.95`, scaled by how much of the longer name it
+ *       covers;
+ *     - otherwise a blend of token Dice coefficient (order-insensitive word
+ *       overlap) and character-level similarity (edit distance);
+ *     - a modality mismatch (image / video / speech / embedding model vs chat
+ *       model) halves whatever the name similarity produced.
  *
  * Anything below `MIN_MATCH_SCORE` is treated as "no match" — reporting no
  * capabilities is better than reporting the wrong ones.
@@ -201,7 +203,14 @@ function levenshtein(a: string, b: string): number {
     return previous[b.length];
 }
 
-/** Similarity (0-1) between a remote model id and a catalogue name. */
+/**
+ * Similarity (0-1) between a remote model id and a catalogue name.
+ *
+ * The catalogue stores normalised names and `normalizeModelName` is
+ * idempotent, so passing an already-normalised name through again is safe —
+ * which keeps this scorer usable against `config.model_metadata` entries
+ * persisted before the catalogue was flattened.
+ */
 export function modelNameSimilarity(remoteId: string, candidateName: string): number {
     const query = normalizeModelName(remoteId);
     const candidate = normalizeModelName(candidateName);
@@ -237,44 +246,31 @@ export function modelNameSimilarity(remoteId: string, candidateName: string): nu
 }
 
 /**
- * Pick the catalogue entry closest to `modelId`.
- *
- * Returns a copy of the winning entry with `match_score` set (ready to persist
- * in `AppConfig.model_metadata`), or `null` when nothing scores at least
- * `MIN_MATCH_SCORE`. Ties prefer an exact raw-name match, then the entry whose
- * normalised name is closest in length.
+ * Scored fallback of `matchModelMetadata`: no entry shares the id's normalised
+ * name, so keep the closest one above `MIN_MATCH_SCORE`. Ties prefer the entry
+ * whose normalised name is closest in length.
  */
-export function matchModelMetadata(
+function fallbackMatch(
     modelId: string,
+    normalizedQuery: string,
     entries: readonly ModelMetadata[],
 ): ModelMetadata | null {
-    const rawQuery = modelId.trim().toLowerCase();
-    const normalizedQuery = normalizeModelName(modelId);
-
     let best: ModelMetadata | null = null;
     let bestScore = 0;
     let bestLengthDelta = Number.POSITIVE_INFINITY;
-    let bestExact = false;
 
     for (const entry of entries) {
         const score = modelNameSimilarity(modelId, entry.model_name);
         if (score < MIN_MATCH_SCORE) continue;
 
-        const exact = entry.model_name.trim().toLowerCase() === rawQuery;
         const lengthDelta = Math.abs(
             normalizeModelName(entry.model_name).length - normalizedQuery.length,
         );
 
-        const better =
-            score > bestScore ||
-            (score === bestScore &&
-                ((exact && !bestExact) || (exact === bestExact && lengthDelta < bestLengthDelta)));
-
-        if (better) {
+        if (score > bestScore || (score === bestScore && lengthDelta < bestLengthDelta)) {
             best = entry;
             bestScore = score;
             bestLengthDelta = lengthDelta;
-            bestExact = exact;
         }
     }
 
@@ -282,8 +278,39 @@ export function matchModelMetadata(
 }
 
 /**
- * Match a whole model catalogue in one pass. Unmatched ids are simply absent
- * from the result.
+ * Pick the catalogue entry for `modelId`.
+ *
+ * Phase 1 is the direct hit: the stored name is already normalised, so an
+ * equal normalised name is a full match (score `1.0`). Phase 2 — only for ids
+ * the catalogue does not know — is `fallbackMatch`, which keeps renamed models
+ * (`deepseek-chat-v3.1` → `deepseek-chat`) matched without guessing wildly.
+ *
+ * Returns a copy of the winning entry with `match_score` set (ready to persist
+ * in `AppConfig.model_metadata`), or `null` when nothing matches.
+ */
+export function matchModelMetadata(
+    modelId: string,
+    entries: readonly ModelMetadata[],
+): ModelMetadata | null {
+    const normalizedQuery = normalizeModelName(modelId);
+    if (!normalizedQuery) return null;
+
+    for (const entry of entries) {
+        if (normalizeModelName(entry.model_name) === normalizedQuery) {
+            return { ...entry, match_score: 1 };
+        }
+    }
+
+    return fallbackMatch(modelId, normalizedQuery, entries);
+}
+
+/**
+ * Match a whole model catalogue in one pass.
+ *
+ * The catalogue holds one entry per normalised name, so the common case — the
+ * id exists in it, behind a gateway prefix / date stamp / variant suffix — is
+ * a map lookup after one normalisation of the id; only the misses reach the
+ * similarity scorer. Unmatched ids are simply absent from the result.
  */
 export function matchModelCatalog(
     modelIds: readonly string[],
@@ -292,9 +319,21 @@ export function matchModelCatalog(
     const matched: Record<string, ModelMetadata> = {};
     if (entries.length === 0) return matched;
 
+    const byNormalizedName = new Map<string, ModelMetadata>();
+    for (const entry of entries) {
+        const key = normalizeModelName(entry.model_name);
+        if (key && !byNormalizedName.has(key)) byNormalizedName.set(key, entry);
+    }
+
     for (const id of modelIds) {
-        const match = matchModelMetadata(id, entries);
-        if (match) matched[id] = match;
+        const normalizedQuery = normalizeModelName(id);
+        const exact = normalizedQuery ? byNormalizedName.get(normalizedQuery) : undefined;
+        if (exact) {
+            matched[id] = { ...exact, match_score: 1 };
+        } else if (normalizedQuery) {
+            const match = fallbackMatch(id, normalizedQuery, entries);
+            if (match) matched[id] = match;
+        }
     }
     return matched;
 }
