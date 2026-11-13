@@ -385,6 +385,15 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
     }
   }
 
+  /** Close the edit sheet and drop the draft. The header ✕ and the sheet's
+   * Cancel are the same action, so they share this path. */
+  function cancelEdit() {
+    setDraft(null);
+    setContextEdit(null);
+    setProbe(null);
+    setSaveError(null);
+  }
+
   /**
    * Persist the context-window edit for the model currently selected in the
    * draft. It is stored per model id (shared by every agent using it) and read
@@ -997,129 +1006,457 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
   };
 
   return (
-    <div className="agents-panel">
-      <div className="panel-header">
-        <h2>{t("agents.title")}</h2>
-        <div className="agents-header-actions">
-          <button className="close-btn" onClick={onClose} aria-label={t("common.collapse")}>
-            <FontAwesomeIcon icon={faAnglesLeft} />
+    <div className="agents-workspace">
+      <div className="agents-panel">
+        <div className="panel-header">
+          <h2>{t("agents.title")}</h2>
+          <div className="agents-header-actions">
+            <button className="close-btn" onClick={onClose} aria-label={t("common.collapse")}>
+              <FontAwesomeIcon icon={faAnglesLeft} />
+            </button>
+          </div>
+        </div>
+
+        {/* ── Orchestration Settings ── */}
+        <div className="orchestration-settings">
+          <div className="orch-title">{t("agents.orchestration")}</div>
+
+          <div className="orch-row">
+            <span>{t("agents.enableMode")}</span>
+            <label className="toggle-switch">
+              <input
+                type="checkbox"
+                checked={useAgentsEnabled}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  onToggleUseAgents(checked);
+                  handleSaveOrchestration({ ...orchestration, use_agents: checked });
+                }}
+              />
+              <span className="toggle-switch-slider" />
+            </label>
+          </div>
+
+          <div className="orch-row">
+            <span>{t("agents.autoConfigure")}</span>
+            <label className="toggle-switch">
+              <input
+                type="checkbox"
+                checked={orchestration.auto_configure}
+                onChange={(e) =>
+                  handleSaveOrchestration({ ...orchestration, auto_configure: e.target.checked })
+                }
+              />
+              <span className="toggle-switch-slider" />
+            </label>
+          </div>
+
+          <div className="orch-row">
+            <span>{t("agents.plannerModel")}</span>
+            <Dropdown
+              className="orch-select"
+              label={t("agents.plannerModel")}
+              compact
+              value={orchestration.planner_model ?? ""}
+              onChange={(model) =>
+                // Empty means inherit; the backend normalizes the same way,
+                // so a blank pick and an absent field cannot disagree.
+                handleSaveOrchestration({ ...orchestration, planner_model: model || null })
+              }
+              options={[
+                {
+                  value: "",
+                  label: t("agents.plannerModelInherit", {
+                    model: fallbackModel.trim() || "…",
+                  }),
+                },
+                ...plannerModelOptions.map((model) => ({ value: model, label: model })),
+              ]}
+            />
+          </div>
+          <div className="agent-field-hint">{t("agents.plannerModelHint")}</div>
+
+          <div className="orch-row">
+            <span>{t("agents.mbus")}</span>
+            <label className="toggle-switch">
+              <input
+                type="checkbox"
+                checked={orchestration.mbus_enabled}
+                onChange={(e) =>
+                  handleSaveOrchestration({ ...orchestration, mbus_enabled: e.target.checked })
+                }
+              />
+              <span className="toggle-switch-slider" />
+            </label>
+          </div>
+          <div className="agent-field-hint">{t("agents.mbusHint")}</div>
+
+          <div className="orch-row">
+            <span>{t("agents.mbusPairLimit")}</span>
+            <input
+              className="orch-number"
+              type="number"
+              min={0}
+              max={20}
+              value={orchestration.mbus_pair_limit}
+              disabled={!orchestration.mbus_enabled}
+              onChange={(e) => {
+                // 0 is meaningful (cap off), so an empty field must fall back
+                // to the default rather than silently disabling the cap.
+                const raw = e.target.value.trim();
+                const parsed = raw === "" ? 4 : Number(raw);
+                const value = Number.isFinite(parsed)
+                  ? Math.max(0, Math.min(20, Math.trunc(parsed)))
+                  : 4;
+                handleSaveOrchestration({ ...orchestration, mbus_pair_limit: value });
+              }}
+            />
+          </div>
+          <div className="agent-field-hint">{t("agents.mbusPairLimitHint")}</div>
+
+          <div className="orch-row">
+            <span>{t("agents.executionMode")}</span>
+            <Dropdown
+              className="orch-select"
+              label={t("agents.executionMode")}
+              compact
+              value={orchestration.mode}
+              onChange={(mode) =>
+                handleSaveOrchestration({ ...orchestration, mode: mode as "parallel" | "sequential" })
+              }
+              options={[
+                { value: "parallel", label: t("agents.modeParallel") },
+                { value: "sequential", label: t("agents.modeSequential") },
+              ]}
+            />
+          </div>
+
+          <div className="orch-row">
+            <span>{t("agents.maxConcurrency")}</span>
+            <input
+              className="orch-number"
+              type="number"
+              min={1}
+              max={10}
+              value={orchestration.max_concurrent}
+              onChange={(e) =>
+                handleSaveOrchestration({ ...orchestration, max_concurrent: Number(e.target.value) || 3 })
+              }
+            />
+          </div>
+        </div>
+
+        {/* ── Filter ── */}
+        <div className="agents-filter">
+          <input
+            className="panel-search-input"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t("agents.searchPlaceholder")}
+            aria-label={t("agents.searchPlaceholder")}
+          />
+          <div
+            className="agents-status-filter"
+            role="group"
+            aria-label={t("agents.filterByStatus")}
+          >
+            {STATUS_FILTERS.map((value) => (
+              <button
+                key={value}
+                type="button"
+                className={`agents-status-filter-btn${statusFilter === value ? " active" : ""}`}
+                aria-pressed={statusFilter === value}
+                onClick={() => setStatusFilter(value)}
+              >
+                <span>{t(STATUS_FILTER_LABEL_KEYS[value])}</span>
+                <span className="agents-status-filter-count">{filterCounts[value]}</span>
+              </button>
+            ))}
+          </div>
+          <div className="agents-filter-row">
+            <span className="agents-count">
+              {t("agents.enabledCount", { enabled: enabledCount, total: agents.length })}
+            </span>
+            <div className="agents-filter-actions">
+              <button
+                type="button"
+                className="mcp-action-btn"
+                title={t("agents.rescan")}
+                onClick={handleRefresh}
+                disabled={refreshing}
+              >
+                <FontAwesomeIcon icon={faRotateRight} spin={refreshing} />
+              </button>
+              <button
+                type="button"
+                className="mcp-action-btn"
+                title={t("agents.openFolder")}
+                onClick={() => openAgentsDir().catch(console.error)}
+              >
+                <FontAwesomeIcon icon={faFolderOpen} />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Agent List ── */}
+        <div className="agents-list">
+          {agents.length === 0 && (
+            <div className="agents-empty">{t("agents.empty")}</div>
+          )}
+          {agents.length > 0 && visibleAgents.length === 0 && (
+            <div className="agents-empty">{t("agents.noResults")}</div>
+          )}
+          {groups.map((group) => (
+            <div key={group.category || "__uncategorized"} className="agent-group">
+              <div className="agent-group-title">
+                <span>{groupLabel(group.category)}</span>
+                <span className="agent-group-count">{group.agents.length}</span>
+              </div>
+              {group.agents.map((agent) => {
+                const st = agentStatuses[agent.id];
+                return (
+                  <div
+                    key={agent.id}
+                    className={`agent-item ${agent.enabled ? "active" : ""}`}
+                    onClick={() => {
+                      if (!agent.parse_error) handleToggleAgent(agent);
+                    }}
+                  >
+                    <div className="agent-content">
+                      <div className="agent-title-row">
+                        <label className="toggle-switch" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={agent.enabled}
+                            disabled={Boolean(agent.parse_error)}
+                            onChange={() => handleToggleAgent(agent)}
+                          />
+                          <span className="toggle-switch-slider" />
+                        </label>
+                        {agent.emoji && (
+                          <span className="agent-emoji" aria-hidden="true">
+                            {agent.emoji}
+                          </span>
+                        )}
+                        <span className="agent-name">{agent.name}</span>
+                        <span className={`agent-type-badge ${agent.agent_type}`}>
+                          {t(TYPE_LABEL_KEYS[agent.agent_type] ?? "agents.typeLlm")}
+                        </span>
+                        {agent.parse_error && (
+                          <span className="agent-status-badge error">
+                            <FontAwesomeIcon icon={faTriangleExclamation} />
+                            {t("agents.statusError")}
+                          </span>
+                        )}
+                        {statusIcon(agent.id)}
+                        <div className="skill-actions" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            className="mcp-action-btn"
+                            title={t("common.edit")}
+                            onClick={() => {
+                              setProbe(null);
+                              setSaveError(null);
+                              setContextEdit(null);
+                              setDraft(toDraft({ ...agent }));
+                            }}
+                          >
+                            <FontAwesomeIcon icon={faPen} />
+                          </button>
+                          {canDeleteAgent(agent) && (
+                            <button
+                              className="mcp-action-btn danger"
+                              title={t("common.delete")}
+                              onClick={() => handleDeleteAgent(agent)}
+                            >
+                              <FontAwesomeIcon icon={faXmark} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <span className="agent-desc">{agent.description}</span>
+                      {agent.parse_error && (
+                        <span className="agent-summary error">
+                          {t("agents.parseError", { error: agent.parse_error })}
+                        </span>
+                      )}
+                      <span className="agent-target">{agentTarget(agent)}</span>
+                      {st && st.status === "done" && st.summary && (
+                        <span className="agent-summary">
+                          <FontAwesomeIcon icon={faCheck} />
+                          {st.summary}
+                        </span>
+                      )}
+                      {st && st.status === "error" && st.error && (
+                        <span className="agent-summary error">
+                          <FontAwesomeIcon icon={faXmark} />
+                          {st.error}
+                        </span>
+                      )}
+                      {st && st.tokens && (
+                        <span className="agent-tokens">{st.tokens} tokens</span>
+                      )}
+                      {agent.agent_type === "llm" && (
+                        <div className="agent-tools-row">
+                          {agent.allowed_tools.map((tool) => (
+                            <span key={tool} className="agent-tool-tag">{tool}</span>
+                          ))}
+                          {agent.enable_mcp && (
+                            <span className="agent-tool-tag mcp">MCP</span>
+                          )}
+                          {agent.model && (
+                            <span className="agent-tool-tag model">{agent.model}</span>
+                          )}
+                          {agent.file && (
+                            <span className="agent-tool-tag file">{agent.file}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+
+        <div className="agents-footer">
+          <button
+            className="btn-primary"
+            onClick={() => {
+              setContextEdit(null);
+              setDraft(toDraft(emptyAgent()));
+            }}
+          >
+            {t("agents.newAgent")}
           </button>
         </div>
       </div>
 
+      {/* ── Agent Editor ── */}
       {draft ? (
-        /* ── Agent Editor ── */
-        <div className="agent-editor">
-          <label>
-            {t("agents.typeLabel")}
-            <div className="agent-type-switch">
-              {AGENT_TYPES.map((type) => (
-                <button
-                  key={type}
-                  type="button"
-                  className={`agent-type-option${draft.agent.agent_type === type ? " active" : ""}`}
-                  onClick={() =>
-                    updateAgent({
-                      agent_type: type,
-                      ...(type === "llm" && draft.agent.allowed_tools.length === 0
-                        ? { allowed_tools: [...DEFAULT_LLM_TOOLS] }
-                        : {}),
-                    })
-                  }
-                  disabled={draft.typeLocked}
-                >
-                  {t(TYPE_LABEL_KEYS[type])}
-                </button>
-              ))}
-            </div>
-            <small className="agent-field-hint">
-              {draft.typeLocked ? t("agents.typeLockedHint") : t("agents.typeHint")}
-            </small>
-          </label>
-
-          <label>
-            {t("agents.name")}
-            <input
-              value={draft.agent.name}
-              onChange={(e) => updateAgent({ name: e.target.value })}
-              placeholder={t("agents.namePlaceholder")}
-            />
-          </label>
-          <label>
-            {t("agents.description")}
-            <input
-              value={draft.agent.description}
-              onChange={(e) => updateAgent({ description: e.target.value })}
-              placeholder={t("agents.descriptionPlaceholder")}
-            />
-          </label>
-
-          {draft.agent.agent_type === "llm" && (
-            <div className="agent-editor-row">
-              <label className="agent-emoji-field">
-                {t("agents.emoji")}
-                <input
-                  value={draft.agent.emoji ?? ""}
-                  maxLength={16}
-                  onChange={(e) => updateAgent({ emoji: e.target.value || undefined })}
-                  placeholder="🤖"
-                />
-                <small className="agent-field-hint">{t("agents.emojiHint")}</small>
-              </label>
-              <label style={{ flex: 1 }}>
-                {t("agents.color")}
-                <input
-                  value={draft.agent.color ?? ""}
-                  onChange={(e) => updateAgent({ color: e.target.value || undefined })}
-                  placeholder="purple"
-                />
-                <small className="agent-field-hint">{t("agents.colorHint")}</small>
-              </label>
-            </div>
-          )}
-
-          {draft.agent.agent_type === "llm" && (
-            <small className="agent-field-hint agent-source-file">
-              {draft.agent.file
-                ? t("agents.sourceFile", { file: draft.agent.file })
-                : t("agents.definitionStorageHint")}
-            </small>
-          )}
-
-          {renderTypeSpecificForms()}
-
-          {draft.agent.agent_type !== "llm" && (
-            <div className="orch-row">
-              <span>{t("agents.requireApproval")}</span>
-              <label className="toggle-switch">
-                <input
-                  type="checkbox"
-                  checked={draft.agent.require_approval}
-                  onChange={(e) => updateAgent({ require_approval: e.target.checked })}
-                />
-                <span className="toggle-switch-slider" />
-              </label>
-            </div>
-          )}
-          {draft.agent.agent_type !== "llm" && (
-            <small className="agent-field-hint">{t("agents.requireApprovalHint")}</small>
-          )}
-
-          {draft.agent.agent_type !== "llm" && (
-            <div className="cli-agent-probe-row">
-              <button type="button" className="btn-secondary" onClick={handleProbe}>
-                {t("agents.probe")}
+        <section className="agents-editor-pane" aria-labelledby="agent-edit-title">
+          <div className="panel-header">
+            <h2 id="agent-edit-title">{draft.agent.name.trim() || t("agents.newAgentTitle")}</h2>
+            <div className="agents-header-actions">
+              <button className="close-btn" onClick={cancelEdit} aria-label={t("common.close")}>
+                <FontAwesomeIcon icon={faXmark} />
               </button>
-              <span className="agent-field-hint">
-                {draft.agent.agent_type === "cli" ? t("agents.probeCliHint") : t("agents.probeCloudHint")}
-              </span>
             </div>
-          )}
-          {probe && <pre className={`cli-agent-probe-result ${probe.status}`}>{probe.text}</pre>}
+          </div>
+          <div className="agent-editor">
+            <label>
+              {t("agents.typeLabel")}
+              <div className="agent-type-switch">
+                {AGENT_TYPES.map((type) => (
+                  <button
+                    key={type}
+                    type="button"
+                    className={`agent-type-option${draft.agent.agent_type === type ? " active" : ""}`}
+                    onClick={() =>
+                      updateAgent({
+                        agent_type: type,
+                        ...(type === "llm" && draft.agent.allowed_tools.length === 0
+                          ? { allowed_tools: [...DEFAULT_LLM_TOOLS] }
+                          : {}),
+                      })
+                    }
+                    disabled={draft.typeLocked}
+                  >
+                    {t(TYPE_LABEL_KEYS[type])}
+                  </button>
+                ))}
+              </div>
+              <small className="agent-field-hint">
+                {draft.typeLocked ? t("agents.typeLockedHint") : t("agents.typeHint")}
+              </small>
+            </label>
 
-          {saveError && <div className="agent-save-error">{saveError}</div>}
+            <label>
+              {t("agents.name")}
+              <input
+                value={draft.agent.name}
+                onChange={(e) => updateAgent({ name: e.target.value })}
+                placeholder={t("agents.namePlaceholder")}
+              />
+            </label>
+            <label>
+              {t("agents.description")}
+              <input
+                value={draft.agent.description}
+                onChange={(e) => updateAgent({ description: e.target.value })}
+                placeholder={t("agents.descriptionPlaceholder")}
+              />
+            </label>
 
-          <div className="editor-actions">
+            {draft.agent.agent_type === "llm" && (
+              <div className="agent-editor-row">
+                <label className="agent-emoji-field">
+                  {t("agents.emoji")}
+                  <input
+                    value={draft.agent.emoji ?? ""}
+                    maxLength={16}
+                    onChange={(e) => updateAgent({ emoji: e.target.value || undefined })}
+                    placeholder="🤖"
+                  />
+                  <small className="agent-field-hint">{t("agents.emojiHint")}</small>
+                </label>
+                <label style={{ flex: 1 }}>
+                  {t("agents.color")}
+                  <input
+                    value={draft.agent.color ?? ""}
+                    onChange={(e) => updateAgent({ color: e.target.value || undefined })}
+                    placeholder="purple"
+                  />
+                  <small className="agent-field-hint">{t("agents.colorHint")}</small>
+                </label>
+              </div>
+            )}
+
+            {draft.agent.agent_type === "llm" && (
+              <small className="agent-field-hint agent-source-file">
+                {draft.agent.file
+                  ? t("agents.sourceFile", { file: draft.agent.file })
+                  : t("agents.definitionStorageHint")}
+              </small>
+            )}
+
+            {renderTypeSpecificForms()}
+
+            {draft.agent.agent_type !== "llm" && (
+              <div className="orch-row">
+                <span>{t("agents.requireApproval")}</span>
+                <label className="toggle-switch">
+                  <input
+                    type="checkbox"
+                    checked={draft.agent.require_approval}
+                    onChange={(e) => updateAgent({ require_approval: e.target.checked })}
+                  />
+                  <span className="toggle-switch-slider" />
+                </label>
+              </div>
+            )}
+            {draft.agent.agent_type !== "llm" && (
+              <small className="agent-field-hint">{t("agents.requireApprovalHint")}</small>
+            )}
+
+            {draft.agent.agent_type !== "llm" && (
+              <div className="cli-agent-probe-row">
+                <button type="button" className="btn-secondary" onClick={handleProbe}>
+                  {t("agents.probe")}
+                </button>
+                <span className="agent-field-hint">
+                  {draft.agent.agent_type === "cli" ? t("agents.probeCliHint") : t("agents.probeCloudHint")}
+                </span>
+              </div>
+            )}
+            {probe && <pre className={`cli-agent-probe-result ${probe.status}`}>{probe.text}</pre>}
+
+            {saveError && <div className="agent-save-error">{saveError}</div>}
+
+          </div>
+
+          <div className="agent-edit-actions">
             <button
               className="btn-primary"
               onClick={handleSaveAgent}
@@ -1127,379 +1464,56 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
             >
               {saving ? t("common.saving") : t("common.save")}
             </button>
-            <button
-              className="btn-secondary"
-              onClick={() => {
-                setDraft(null);
-                setContextEdit(null);
-                setProbe(null);
-                setSaveError(null);
-              }}
-            >
+            <button className="btn-secondary" onClick={cancelEdit}>
               {t("common.cancel")}
             </button>
           </div>
-
-          {isPromptEditorOpen && (
-            <Portal>
-              <div className="prompt-editor-overlay" role="dialog" aria-modal="true" aria-label={t("agents.promptEditor.aria")}>
-                <div className="prompt-editor-shell">
-                  <div className="prompt-editor-header">
-                    <h3>{t("agents.promptEditor.title")}</h3>
-                    <div className="prompt-editor-actions">
-                      <button type="button" className="btn-secondary" onClick={() => setIsPromptEditorOpen(false)}>
-                        {t("common.cancel")}
-                      </button>
-                      <button type="button" className="btn-primary" onClick={applyPromptEditor}>
-                        {t("common.done")}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="prompt-editor-body">
-                    <div className="prompt-column">
-                      <span>{t("app.markdownColumn")}</span>
-                      <textarea
-                        className="prompt-editor-textarea"
-                        value={promptDraft}
-                        onChange={(e) => setPromptDraft(e.target.value)}
-                        placeholder={t("agents.promptEditor.placeholder")}
-                      />
-                    </div>
-
-                    <div className="prompt-column">
-                      <span>{t("app.previewColumn")}</span>
-                      <div className="prompt-preview">
-                        {promptDraft.trim() ? (
-                          <MarkdownPreview content={promptDraft} />
-                        ) : (
-                          <p className="prompt-preview-empty">{t("app.markdownPreviewEmpty")}</p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </Portal>
-          )}
-        </div>
+        </section>
       ) : (
-        <>
-          {/* ── Orchestration Settings ── */}
-          <div className="orchestration-settings">
-            <div className="orch-title">{t("agents.orchestration")}</div>
+        <div className="agents-editor-pane agents-editor-empty">{t("agents.selectToEdit")}</div>
+      )}
 
-            <div className="orch-row">
-              <span>{t("agents.enableMode")}</span>
-              <label className="toggle-switch">
-                <input
-                  type="checkbox"
-                  checked={useAgentsEnabled}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    onToggleUseAgents(checked);
-                    handleSaveOrchestration({ ...orchestration, use_agents: checked });
-                  }}
-                />
-                <span className="toggle-switch-slider" />
-              </label>
-            </div>
-
-            <div className="orch-row">
-              <span>{t("agents.autoConfigure")}</span>
-              <label className="toggle-switch">
-                <input
-                  type="checkbox"
-                  checked={orchestration.auto_configure}
-                  onChange={(e) =>
-                    handleSaveOrchestration({ ...orchestration, auto_configure: e.target.checked })
-                  }
-                />
-                <span className="toggle-switch-slider" />
-              </label>
-            </div>
-
-            <div className="orch-row">
-              <span>{t("agents.plannerModel")}</span>
-              <Dropdown
-                className="orch-select"
-                label={t("agents.plannerModel")}
-                compact
-                value={orchestration.planner_model ?? ""}
-                onChange={(model) =>
-                  // Empty means inherit; the backend normalizes the same way,
-                  // so a blank pick and an absent field cannot disagree.
-                  handleSaveOrchestration({ ...orchestration, planner_model: model || null })
-                }
-                options={[
-                  {
-                    value: "",
-                    label: t("agents.plannerModelInherit", {
-                      model: fallbackModel.trim() || "…",
-                    }),
-                  },
-                  ...plannerModelOptions.map((model) => ({ value: model, label: model })),
-                ]}
-              />
-            </div>
-            <div className="agent-field-hint">{t("agents.plannerModelHint")}</div>
-
-            <div className="orch-row">
-              <span>{t("agents.mbus")}</span>
-              <label className="toggle-switch">
-                <input
-                  type="checkbox"
-                  checked={orchestration.mbus_enabled}
-                  onChange={(e) =>
-                    handleSaveOrchestration({ ...orchestration, mbus_enabled: e.target.checked })
-                  }
-                />
-                <span className="toggle-switch-slider" />
-              </label>
-            </div>
-            <div className="agent-field-hint">{t("agents.mbusHint")}</div>
-
-            <div className="orch-row">
-              <span>{t("agents.mbusPairLimit")}</span>
-              <input
-                className="orch-number"
-                type="number"
-                min={0}
-                max={20}
-                value={orchestration.mbus_pair_limit}
-                disabled={!orchestration.mbus_enabled}
-                onChange={(e) => {
-                  // 0 is meaningful (cap off), so an empty field must fall back
-                  // to the default rather than silently disabling the cap.
-                  const raw = e.target.value.trim();
-                  const parsed = raw === "" ? 4 : Number(raw);
-                  const value = Number.isFinite(parsed)
-                    ? Math.max(0, Math.min(20, Math.trunc(parsed)))
-                    : 4;
-                  handleSaveOrchestration({ ...orchestration, mbus_pair_limit: value });
-                }}
-              />
-            </div>
-            <div className="agent-field-hint">{t("agents.mbusPairLimitHint")}</div>
-
-            <div className="orch-row">
-              <span>{t("agents.executionMode")}</span>
-              <Dropdown
-                className="orch-select"
-                label={t("agents.executionMode")}
-                compact
-                value={orchestration.mode}
-                onChange={(mode) =>
-                  handleSaveOrchestration({ ...orchestration, mode: mode as "parallel" | "sequential" })
-                }
-                options={[
-                  { value: "parallel", label: t("agents.modeParallel") },
-                  { value: "sequential", label: t("agents.modeSequential") },
-                ]}
-              />
-            </div>
-
-            <div className="orch-row">
-              <span>{t("agents.maxConcurrency")}</span>
-              <input
-                className="orch-number"
-                type="number"
-                min={1}
-                max={10}
-                value={orchestration.max_concurrent}
-                onChange={(e) =>
-                  handleSaveOrchestration({ ...orchestration, max_concurrent: Number(e.target.value) || 3 })
-                }
-              />
-            </div>
-          </div>
-
-          {/* ── Filter ── */}
-          <div className="agents-filter">
-            <input
-              className="panel-search-input"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={t("agents.searchPlaceholder")}
-              aria-label={t("agents.searchPlaceholder")}
-            />
-            <div
-              className="agents-status-filter"
-              role="group"
-              aria-label={t("agents.filterByStatus")}
-            >
-              {STATUS_FILTERS.map((value) => (
-                <button
-                  key={value}
-                  type="button"
-                  className={`agents-status-filter-btn${statusFilter === value ? " active" : ""}`}
-                  aria-pressed={statusFilter === value}
-                  onClick={() => setStatusFilter(value)}
-                >
-                  <span>{t(STATUS_FILTER_LABEL_KEYS[value])}</span>
-                  <span className="agents-status-filter-count">{filterCounts[value]}</span>
-                </button>
-              ))}
-            </div>
-            <div className="agents-filter-row">
-              <span className="agents-count">
-                {t("agents.enabledCount", { enabled: enabledCount, total: agents.length })}
-              </span>
-              <div className="agents-filter-actions">
-                <button
-                  type="button"
-                  className="mcp-action-btn"
-                  title={t("agents.rescan")}
-                  onClick={handleRefresh}
-                  disabled={refreshing}
-                >
-                  <FontAwesomeIcon icon={faRotateRight} spin={refreshing} />
-                </button>
-                <button
-                  type="button"
-                  className="mcp-action-btn"
-                  title={t("agents.openFolder")}
-                  onClick={() => openAgentsDir().catch(console.error)}
-                >
-                  <FontAwesomeIcon icon={faFolderOpen} />
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* ── Agent List ── */}
-          <div className="agents-list">
-            {agents.length === 0 && (
-              <div className="agents-empty">{t("agents.empty")}</div>
-            )}
-            {agents.length > 0 && visibleAgents.length === 0 && (
-              <div className="agents-empty">{t("agents.noResults")}</div>
-            )}
-            {groups.map((group) => (
-              <div key={group.category || "__uncategorized"} className="agent-group">
-                <div className="agent-group-title">
-                  <span>{groupLabel(group.category)}</span>
-                  <span className="agent-group-count">{group.agents.length}</span>
+      {isPromptEditorOpen && (
+        <Portal>
+          <div className="prompt-editor-overlay" role="dialog" aria-modal="true" aria-label={t("agents.promptEditor.aria")}>
+            <div className="prompt-editor-shell">
+              <div className="prompt-editor-header">
+                <h3>{t("agents.promptEditor.title")}</h3>
+                <div className="prompt-editor-actions">
+                  <button type="button" className="btn-secondary" onClick={() => setIsPromptEditorOpen(false)}>
+                    {t("common.cancel")}
+                  </button>
+                  <button type="button" className="btn-primary" onClick={applyPromptEditor}>
+                    {t("common.done")}
+                  </button>
                 </div>
-                {group.agents.map((agent) => {
-                  const st = agentStatuses[agent.id];
-                  return (
-                    <div
-                      key={agent.id}
-                      className={`agent-item ${agent.enabled ? "active" : ""}`}
-                      onClick={() => {
-                        if (!agent.parse_error) handleToggleAgent(agent);
-                      }}
-                    >
-                      <div className="agent-content">
-                        <div className="agent-title-row">
-                          <label className="toggle-switch" onClick={(e) => e.stopPropagation()}>
-                            <input
-                              type="checkbox"
-                              checked={agent.enabled}
-                              disabled={Boolean(agent.parse_error)}
-                              onChange={() => handleToggleAgent(agent)}
-                            />
-                            <span className="toggle-switch-slider" />
-                          </label>
-                          {agent.emoji && (
-                            <span className="agent-emoji" aria-hidden="true">
-                              {agent.emoji}
-                            </span>
-                          )}
-                          <span className="agent-name">{agent.name}</span>
-                          <span className={`agent-type-badge ${agent.agent_type}`}>
-                            {t(TYPE_LABEL_KEYS[agent.agent_type] ?? "agents.typeLlm")}
-                          </span>
-                          {agent.parse_error && (
-                            <span className="agent-status-badge error">
-                              <FontAwesomeIcon icon={faTriangleExclamation} />
-                              {t("agents.statusError")}
-                            </span>
-                          )}
-                          {statusIcon(agent.id)}
-                          <div className="skill-actions" onClick={(e) => e.stopPropagation()}>
-                            <button
-                              className="mcp-action-btn"
-                              title={t("common.edit")}
-                              onClick={() => {
-                                setProbe(null);
-                                setSaveError(null);
-                                setContextEdit(null);
-                                setDraft(toDraft({ ...agent }));
-                              }}
-                            >
-                              <FontAwesomeIcon icon={faPen} />
-                            </button>
-                            {canDeleteAgent(agent) && (
-                              <button
-                                className="mcp-action-btn danger"
-                                title={t("common.delete")}
-                                onClick={() => handleDeleteAgent(agent)}
-                              >
-                                <FontAwesomeIcon icon={faXmark} />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                        <span className="agent-desc">{agent.description}</span>
-                        {agent.parse_error && (
-                          <span className="agent-summary error">
-                            {t("agents.parseError", { error: agent.parse_error })}
-                          </span>
-                        )}
-                        <span className="agent-target">{agentTarget(agent)}</span>
-                        {st && st.status === "done" && st.summary && (
-                          <span className="agent-summary">
-                            <FontAwesomeIcon icon={faCheck} />
-                            {st.summary}
-                          </span>
-                        )}
-                        {st && st.status === "error" && st.error && (
-                          <span className="agent-summary error">
-                            <FontAwesomeIcon icon={faXmark} />
-                            {st.error}
-                          </span>
-                        )}
-                        {st && st.tokens && (
-                          <span className="agent-tokens">{st.tokens} tokens</span>
-                        )}
-                        {agent.agent_type === "llm" && (
-                          <div className="agent-tools-row">
-                            {agent.allowed_tools.map((tool) => (
-                              <span key={tool} className="agent-tool-tag">{tool}</span>
-                            ))}
-                            {agent.enable_mcp && (
-                              <span className="agent-tool-tag mcp">MCP</span>
-                            )}
-                            {agent.model && (
-                              <span className="agent-tool-tag model">{agent.model}</span>
-                            )}
-                            {agent.file && (
-                              <span className="agent-tool-tag file">{agent.file}</span>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
               </div>
-            ))}
-          </div>
 
-          <div className="agents-footer">
-            <button
-              className="btn-primary"
-              onClick={() => {
-                setContextEdit(null);
-                setDraft(toDraft(emptyAgent()));
-              }}
-            >
-              {t("agents.newAgent")}
-            </button>
+              <div className="prompt-editor-body">
+                <div className="prompt-column">
+                  <span>{t("app.markdownColumn")}</span>
+                  <textarea
+                    className="prompt-editor-textarea"
+                    value={promptDraft}
+                    onChange={(e) => setPromptDraft(e.target.value)}
+                    placeholder={t("agents.promptEditor.placeholder")}
+                  />
+                </div>
+
+                <div className="prompt-column">
+                  <span>{t("app.previewColumn")}</span>
+                  <div className="prompt-preview">
+                    {promptDraft.trim() ? (
+                      <MarkdownPreview content={promptDraft} />
+                    ) : (
+                      <p className="prompt-preview-empty">{t("app.markdownPreviewEmpty")}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-        </>
+        </Portal>
       )}
     </div>
   );

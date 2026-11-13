@@ -4104,7 +4104,7 @@ export default function App() {
       )}
       {/* Sidebar */}
       <AnimatePresence>
-      {sidebar && (
+      {sidebar && sidebar !== "agents" && (
         <motion.aside
           key="sidebar"
           className="sidebar"
@@ -4113,7 +4113,7 @@ export default function App() {
           exit={SIDEBAR_HIDDEN}
           transition={reducedMotion ? { duration: 0 } : SIDEBAR_SPRING}
         >
-          <div className={`sidebar-shell ${sidebar === "settings" ? "panel-settings" : ""} ${sidebar === "skills" ? "panel-skills" : ""} ${sidebar === "history" ? "panel-history" : ""} ${sidebar === "tools" ? "panel-tools" : ""} ${sidebar === "mcp" ? "panel-mcp" : ""} ${sidebar === "agents" ? "panel-agents" : ""}`} key={sidebar}>
+          <div className={`sidebar-shell ${sidebar === "settings" ? "panel-settings" : ""} ${sidebar === "skills" ? "panel-skills" : ""} ${sidebar === "history" ? "panel-history" : ""} ${sidebar === "tools" ? "panel-tools" : ""} ${sidebar === "mcp" ? "panel-mcp" : ""}`} key={sidebar}>
             {sidebar === "skills" && (
               <SkillsPanel
                 activeSkillIds={activeSkillIds}
@@ -4184,19 +4184,23 @@ export default function App() {
                 onClose={closeSidebar}
               />
             )}
-            {sidebar === "agents" && (
-              <AgentsPanel
-                onClose={closeSidebar}
-                onAgentsChange={(count) => setActiveAgentCount(count)}
-                useAgentsEnabled={useAgentsEnabled}
-                onToggleUseAgents={setUseAgentsEnabled}
-                agentStatuses={agentStatuses}
-              />
-            )}
           </div>
         </motion.aside>
       )}
       </AnimatePresence>
+
+      {/* Sub-agents open a sheet of their own instead of the 400px sidebar: the
+          roster and the form both need width, and the transcript stays readable
+          on the right third. */}
+      {sidebar === "agents" && (
+        <AgentsPanel
+          onClose={closeSidebar}
+          onAgentsChange={(count) => setActiveAgentCount(count)}
+          useAgentsEnabled={useAgentsEnabled}
+          onToggleUseAgents={setUseAgentsEnabled}
+          agentStatuses={agentStatuses}
+        />
+      )}
 
       {/* Main chat area */}
       <div className="chat-area" onClick={handleChatAreaClick}>

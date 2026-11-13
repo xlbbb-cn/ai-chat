@@ -644,6 +644,8 @@ const zhTW: Messages = {
         modeSequential: "循序",
         maxConcurrency: "最大並行數",
         empty: "尚無代理。點選下方按鈕即可建立。",
+        newAgentTitle: "新增代理",
+        selectToEdit: "在左側選擇一個代理開始編輯。",
         newAgent: "+ 新增代理",
         typeLabel: "代理類型",
         typeLlm: "LLM",

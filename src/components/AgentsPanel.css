@@ -478,6 +478,88 @@
     gap: 8px;
 }
 
+/* The sub-agent workspace: two thirds of the window as a sheet of its own. The
+   roster and the form both need width, and the transcript stays readable on the
+   right. Opaque `--c-bg` like `.prompt-editor-overlay` and `.settings-page` — a
+   surface this large must not re-sample a blurred backdrop while it glides in.
+   The right edge is the seam: this tool renders no 400px sidebar, so nothing
+   else draws a divider there. */
+.agents-workspace {
+    position: fixed;
+    top: var(--titlebar-h);
+    left: 0;
+    bottom: 0;
+    width: 66.666%;
+    z-index: 900;
+    display: flex;
+    background: var(--c-bg);
+    border-right: 1px solid var(--c-border);
+    animation: sheet-in 200ms var(--t-ease);
+}
+
+@keyframes sheet-in {
+    from {
+        opacity: 0;
+        transform: translateX(12px);
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .agents-workspace {
+        animation: none;
+    }
+}
+
+/* Roster column: the panel's own stack, narrowed so the form gets the room. */
+.agents-workspace > .agents-panel {
+    flex: 0 0 320px;
+    width: 320px;
+    border-right: 1px solid var(--c-border);
+}
+
+.agents-editor-pane {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.agents-editor-empty {
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    color: var(--c-muted);
+    font-size: 13px;
+    text-align: center;
+}
+
+/* The band keeps the shared `.panel-header` recipe (the prompt editor's header
+   does the same over an opaque sheet) but must not be squeezed by the form. */
+.agents-workspace .panel-header {
+    flex-shrink: 0;
+}
+
+/* Centre the form in the wide pane without touching the field markup: the
+   gutters grow once the pane passes 760px, so inputs keep a reading width. */
+.agents-editor-pane .agent-editor {
+    padding: 18px max(20px, calc((100% - 760px) / 2));
+}
+
+.agent-edit-actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+    padding: 12px max(20px, calc((100% - 760px) / 2));
+    border-top: 1px solid var(--c-border);
+    background: var(--c-bg);
+}
+
 .prompt-editor-overlay {
     position: fixed;
     inset: 0;

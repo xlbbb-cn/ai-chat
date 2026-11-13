@@ -266,6 +266,20 @@ is faintly readable — the sidebar is a `position: fixed` overlay, so the
 message column really does continue beneath it. Cards inside the panel keep
 `--c-surface`: only the pane is translucent, never the content.
 
+One tool leaves the sidebar entirely: the sub-agent workspace
+(`.agents-workspace`). Sub-agents need a roster *and* a form, so the tool opens
+a sheet of its own — `position: fixed`, `left: 0`, `width: 66.666%` of the
+window, `z-index: 900`, below the titlebar's `2000` — and no 400px sidebar is
+rendered for it. Inside, the sheet is one row: the roster column (`.agents-panel`
+narrowed to `320px`, holding the orchestration card, the filter, the list and
+the New Agent button) and `.agents-editor-pane`, which shows the form or the
+`agents.selectToEdit` empty state. The transcript stays readable on the right
+third. It is **not** a new glass variation: a surface this large would re-sample
+a blurred backdrop on every frame of its entrance, so it paints opaque `--c-bg`,
+exactly like `.prompt-editor-overlay` and `.settings-page`. Its `border-right`
+is the seam against the transcript — there is no `.sidebar::after` here to draw
+one.
+
 #### Window-less backdrop (`data-glass-fallback`)
 
 A window backdrop is the one part of the material the app cannot ask for

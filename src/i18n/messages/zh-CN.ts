@@ -644,6 +644,8 @@ const zhCN: Messages = {
         modeSequential: "串行",
         maxConcurrency: "最大并发数",
         empty: "还没有智能体。点击下方按钮创建一个。",
+        newAgentTitle: "新建智能体",
+        selectToEdit: "在左侧选择一个智能体开始编辑。",
         newAgent: "+ 新建智能体",
         typeLabel: "智能体类型",
         typeLlm: "LLM",

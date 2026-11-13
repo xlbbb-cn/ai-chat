@@ -696,6 +696,9 @@ const en = {
         modeSequential: "Sequential",
         maxConcurrency: "Max concurrency",
         empty: "No agents yet. Click the button below to create one.",
+        /** Title of the edit sheet when the draft has no name yet. */
+        newAgentTitle: "New agent",
+        selectToEdit: "Select an agent on the left to start editing.",
         newAgent: "+ New Agent",
         typeLabel: "Agent type",
         typeLlm: "LLM",

@@ -143,6 +143,11 @@
      land on the same row — the window chrome reads as one band across it. */
   --panel-header-h: 49px;
 
+  /* Width of the side panel. Anything that has to sit beside it (the agent
+     edit sheet) starts at this edge, so the two read one constant instead of
+     two hard-coded 400px values. */
+  --sidebar-w: 400px;
+
   /* Frosted glass — one blur recipe for every translucent surface, scaled
      globally by the level blocks below (`[data-glass="..."]`, written on
      <html> by `applyGlassEffect` in App.tsx). `--glass-backdrop` is the fill
@@ -1109,7 +1114,7 @@ body {
 
 /* Sidebar */
 .sidebar {
-  width: 400px;
+  width: var(--sidebar-w);
   position: fixed;
   top: var(--titlebar-h);
   left: 0;
