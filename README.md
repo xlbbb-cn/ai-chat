@@ -349,7 +349,7 @@ rabbit-chat-studio/
 │  ├─ src/tools/        # tools module (memory, file_actions, patch, risk, ...)
 │  ├─ src/mcp.rs        # MCP transports; main pool + per-agent AgentMcpSession
 │  └─ src/db.rs
-├─ docs/                # architecture.html (layers / one turn / sub-agents) + gen.py
+├─ docs/                # architecture.html + gen.py, and site/ (GitHub Pages landing page)
 └─ README.md
 ```
 

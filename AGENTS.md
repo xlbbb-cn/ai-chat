@@ -87,7 +87,7 @@ identity) and the manifest in `Package.appxmanifest.template`, so a name/publish
 edit. Tauri has no MSIX target, hence our own step; the Store re-signs what you upload, so submission
 uses the unsigned file. The `windows-x86_64` CI job runs the same script with `-SkipBuild` after
 `tauri-action` and keeps the `.msix` as an Actions artifact (never a Release asset — end users cannot
-install an unsigned package). Runbook, submission fields and policy mapping: `docs/store-publishing.md`.
+install an unsigned package). Runbook, submission fields and policy mapping: `docs/store/store-publishing.md`.
 
 - MSIX runs the app as a full-trust Desktop Bridge package (`runFullTrust`,
   `EntryPoint="Windows.FullTrustApplication"`): filesystem and process access are unchanged, but writes
@@ -101,15 +101,16 @@ install an unsigned package). Runbook, submission fields and policy mapping: `do
 
 ## Website (GitHub Pages)
 
-`site/` is a dependency-free static landing page, deployed by `.github/workflows/pages.yml`
-(`push` to `main` touching `site/**` or `docs/architecture.html`, or `workflow_dispatch`).
+`docs/site/` is a dependency-free static landing page, deployed by `.github/workflows/pages.yml`
+(`push` to `main` touching `docs/site/**` or `docs/architecture.html`, or `workflow_dispatch`).
 Live URL: `https://xlbbb-cn.github.io/ai-chat/` — the repository needs Pages set to
-**Source: GitHub Actions** once (Settings → Pages).
+**Source: GitHub Actions** once (Settings → Pages). Only this one folder is published; the rest of
+`docs/` (`gen.py`, `store/…`, `banner.png`) stays repository-only.
 
 - **No build step, relative paths only.** The page is served from a project sub-path, so every asset
   reference is `./assets/…`. The only absolute links are in `404.html`, because GitHub serves it for
   unknown paths at any depth and relative assets would break there.
-- **`DESIGN.md` still applies.** Tokens are copied into `site/assets/site.css` (light + dark). The
+- **`DESIGN.md` still applies.** Tokens are copied into `docs/site/assets/site.css` (light + dark). The
   accent is the primary CTA only, radius is 4px, there are no shadows, and hairlines do the
   separating. Change a token in `src/App.css`? Mirror it in the site stylesheet.
 - **Copy comes from the READMEs.** Feature and boundary claims are `README.zh.md` / `README.md`
@@ -117,19 +118,19 @@ Live URL: `https://xlbbb-cn.github.io/ai-chat/` — the repository needs Pages s
   (`releases/latest/download/…`), so a new tag needs no site edit — keep them in sync with
   `stableAsset` in `release.yml` if a filename ever changes.
 - **i18n:** Chinese is the markup default (the page renders with JS off); English lives in the `EN`
-  dictionary in `site/assets/site.js` and is applied through `data-i18n` / `data-i18n-html`.
-  A new string needs both halves: the zh text in `site/index.html` and the `EN` entry.
+  dictionary in `docs/site/assets/site.js` and is applied through `data-i18n` / `data-i18n-html`.
+  A new string needs both halves: the zh text in `docs/site/index.html` and the `EN` entry.
   Use `data-i18n-html` whenever the string contains markup (inline `<code>`), otherwise the text
   swap drops the element.
-- **The architecture page is generated, never committed.** The workflow copies
-  `docs/architecture.html` into the artifact; `site/architecture.html` is gitignored so a local copy
-  for preview cannot be pushed.
+- **The architecture page is generated, never committed into the site.** `python3 docs/gen.py`
+  writes `docs/architecture.html`; the workflow copies it to `docs/site/architecture.html` inside the
+  artifact, so the source stays single and the copy is gitignored.
 
 Preview locally (any static server; the folder has no build step):
 
 ```powershell
-Copy-Item docs/architecture.html site/architecture.html -Force
-node .data/tmp/serve.cjs 8765 .   # then open http://127.0.0.1:8765/site/
+Copy-Item docs/architecture.html docs/site/architecture.html -Force
+node .data/tmp/serve.cjs 8765 .   # then open http://127.0.0.1:8765/docs/site/
 ```
 
 Check the page in both themes, both languages and at ≈390px width before pushing.
@@ -352,11 +353,15 @@ src-tauri/
 
 scripts/sync-version.cjs   # 3-way version sync (pkg / cargo / tauri.conf)
 
-site/                      # GitHub Pages landing page — plain HTML/CSS/JS, no build step
-  index.html               #   single page; zh-CN markup + EN dictionary in assets/site.js
-  assets/site.css          #   tokens mirrored from src/App.css (DESIGN.md contract)
-  assets/site.js           #   theme, language, OS detection, copy buttons
-  404.html                 #   Pages 404 (self-contained, absolute /ai-chat/ links)
+docs/                      # docs/ itself is not published; only docs/site/ is
+  site/                    # GitHub Pages landing page — plain HTML/CSS/JS, no build step
+    index.html             #   single page; zh-CN markup + EN dictionary in assets/site.js
+    assets/site.css        #   tokens mirrored from src/App.css (DESIGN.md contract)
+    assets/site.js         #   theme, language, OS detection, copy buttons
+    404.html               #   Pages 404 (self-contained, absolute /ai-chat/ links)
+  architecture.html        # generated by gen.py (layers / one turn / sub-agents)
+  gen.py                   # regenerates architecture.html
+  store/                   # Microsoft Store runbook, privacy policy, certification notes
 ```
 
 ## Composer attachments (paste / drop)

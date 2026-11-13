@@ -1,17 +1,17 @@
-# 把 site/ 发布到 GitHub Pages（纯静态，无构建步骤）。
+# 把 docs/site/ 发布到 GitHub Pages（纯静态，无构建步骤）。
 #
 # 仓库设置里需要一次性打开：Settings → Pages → Build and deployment → Source: GitHub Actions。
 # 站点地址：https://xlbbb-cn.github.io/ai-chat/
 #
 # 架构图 docs/architecture.html 由 docs/gen.py 生成，部署前复制进站点，
-# 保持单一来源（不要在 site/ 里提交副本，见 .gitignore）。
+# 保持单一来源（不要在 docs/site/ 里提交副本，见 .gitignore）。
 name: Pages
 
 on:
   push:
     branches: [main]
     paths:
-      - 'site/**'
+      - 'docs/site/**'
       - 'docs/architecture.html'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Sync generated architecture page
-        run: cp docs/architecture.html site/architecture.html
+        run: cp docs/architecture.html docs/site/architecture.html
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
@@ -46,7 +46,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: docs/site
 
       - name: Deploy
         id: deployment

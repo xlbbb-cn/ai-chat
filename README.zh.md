@@ -347,7 +347,7 @@ rabbit-chat-studio/
 │  ├─ src/tools/        # 工具模块（memory / file_actions / patch / risk 等）
 │  ├─ src/mcp.rs        # MCP 传输；主进程池 + 每个任务的 AgentMcpSession
 │  └─ src/db.rs
-├─ docs/                # architecture.html（分层 / 一次对话轮 / 子智能体）+ gen.py
+├─ docs/                # architecture.html + gen.py，以及 site/（GitHub Pages 站点）
 └─ README.md
 ```
 

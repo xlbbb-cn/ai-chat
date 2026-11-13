@@ -265,13 +265,15 @@ CI 稳定产物名（`Rabbit-Chat-Studio-*`）、README 下载链接、winget id
 
 [`docs/store/privacy-policy.md`](store/privacy-policy.md) 已定稿，缺一个公网 URL：
 
-1. 仓库 → **Settings → Pages** → Source 选 *Deploy from a branch*，分支 `main`，目录 **`/docs`**，保存。
-2. 一两分钟后打开 <https://xlbbb-cn.github.io/ai-chat/store/privacy-policy.html>
-   （Jekyll 会把 `.md` 渲染成 `.html`；若 404，先看 Pages 的构建状态）。
+站点只发布 `docs/site/`（Actions，见 `.github/workflows/pages.yml`），隐私政策不在其中，所以
+另外给它一个公网 URL：
+
+1. 最省事：把这份文本贴成一页 GitHub Wiki（`https://github.com/xlbbb-cn/ai-chat/wiki`）。
+2. 或者在 `docs/site/` 里加一页 `privacy-policy.html`（同一份文本），随站点发布，
+   约一两分钟后访问 <https://xlbbb-cn.github.io/ai-chat/privacy-policy.html>。
 3. 这一行 URL 填进 Partner Center → Properties → **Privacy policy URL**。
 
-不想公开 `/docs` 下其它文件，就单独开一个 `gh-pages` 分支只放隐私政策。注意 URL 不能是
-`raw.githubusercontent.com`（会被当成下载而不是网页）。
+注意 URL 不能是 `raw.githubusercontent.com`（会被当成下载而不是网页）。
 
 ### 11.2 认证备注（政策 10.3 可测试性）
 
