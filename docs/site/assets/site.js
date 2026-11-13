@@ -17,7 +17,7 @@
     'hero.download': 'Download for Windows',
     'hero.allPlatforms': 'All platforms',
     'hero.repo': 'View on GitHub',
-    'hero.fine': 'Windows installer · macOS (Apple Silicon / Intel) · Linux AppImage. Point it at an API key or a local model and you are done.',
+    'hero.fine': 'Windows installer or Microsoft Store · macOS (Apple Silicon / Intel) · Linux AppImage. Point it at an API key or a local model and you are done.',
 
     'mock.user': 'Run the tests, fix only the failing one. Touch nothing else.',
     'mock.reply': 'Reading the workspace AGENTS.md first, then running the tests.',
@@ -78,6 +78,7 @@
     'dl.title': 'Download',
     'dl.version': 'Latest release:',
     'dl.win': 'x64 · NSIS installer',
+    'dl.store': 'Windows 10 2004+ · installed and updated by the Store',
     'dl.macArm': 'M-series chips',
     'dl.macIntel': 'Intel chips',
     'dl.linux': 'x86_64 · AppImage',
@@ -101,8 +102,10 @@
     'quote.note': 'No default persona, no hidden rewriting: your system message is the base, and only tool and skill instructions are appended.',
 
     'footer.license': 'MIT license',
+    'footer.store': 'Microsoft Store',
     'footer.releases': 'Releases',
     'footer.licenseLink': 'License',
+    'footer.privacy': 'Privacy policy',
     'footer.issues': 'Issues',
     'footer.note': 'This page loads no third-party scripts or trackers.',
 

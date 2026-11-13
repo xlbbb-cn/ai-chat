@@ -89,6 +89,14 @@ uses the unsigned file. The `windows-x86_64` CI job runs the same script with `-
 `tauri-action` and keeps the `.msix` as an Actions artifact (never a Release asset — end users cannot
 install an unsigned package). Runbook, submission fields and policy mapping: `docs/store/store-publishing.md`.
 
+- **Live listing**: <https://apps.microsoft.com/detail/9MV82J9G95GS> (Store ID `9MV82J9G95GS`,
+  protocol link `ms-windows-store://pdp/?productid=9MV82J9G95GS`). Because the store build is an MSIX
+  package, its AppData lives under `%LOCALAPPDATA%\Packages\XLBBB.RabbitChatStudio\LocalCache\…` and does
+  **not** share config with the NSIS installer build (the workspace `.data` stays shared). New versions
+  are submitted by hand (`docs/store/store-publishing.md` §7) or with `msstore publish` from
+  `.github/workflows/store.yml` (§12) — that needs four Partner Center secrets, a Manager-role Entra app
+  and one earlier manual submission; the workflow skips itself when they are missing.
+
 - MSIX runs the app as a full-trust Desktop Bridge package (`runFullTrust`,
   `EntryPoint="Windows.FullTrustApplication"`): filesystem and process access are unchanged, but writes
   under AppData land in `%LOCALAPPDATA%\Packages\<PFN>\LocalCache\…`, and child processes started by the
@@ -125,6 +133,15 @@ Live URL: `https://xlbbb-cn.github.io/ai-chat/` — the repository needs Pages s
 - **The architecture page is generated, never committed into the site.** `python3 docs/gen.py`
   writes `docs/architecture.html`; the workflow copies it to `docs/site/architecture.html` inside the
   artifact, so the source stays single and the copy is gitignored.
+
+- **Two pages, one policy text.** `docs/site/privacy-policy.html` (bilingual, no JS, tokens only) is the
+  public URL for the Privacy policy required by the Store; its source of truth is
+  `docs/store/privacy-policy.md`. Edit both together.
+
+- **The wiki is a separate repo.** `git@github.com:xlbbb-cn/ai-chat.wiki.git` (HTTPS to github.com is
+  reset in some environments, SSH works; the main repo uses SSH too). Pages come in EN/zh pairs —
+  `Quick-Start.md` ↔ `快速开始.md` — plus shared `_Sidebar.md` / `_Footer.md`. Pushing to `master`
+  publishes instantly, so clone into `.data/tmp/`, review, then push.
 
 Preview locally (any static server; the folder has no build step):
 

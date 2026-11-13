@@ -1,0 +1,146 @@
+# 把一个 tag 的 MSIX 包提交到 Microsoft Store（可选通道，默认手动触发）。
+#
+# 为什么不挂 v* tag：提交即进审核，审核期内撤不回来。打 tag 常常是为了热修，
+# 让它顺带把版本丢进商店不合适，所以这里只留 workflow_dispatch。
+#
+# 前置条件（只需配置一次，见 docs/store/store-publishing.md §12）：
+#   1. 产品的首版已在 Partner Center 人工提交并上架（Store ID 9MV82J9G95GS）；
+#   2. Partner Center 账号已绑定 Microsoft Entra 租户，并给一个 Entra 应用 Manager 角色；
+#   3. 仓库 Secrets 配置 PARTNER_CENTER_TENANT_ID / _CLIENT_ID / _CLIENT_SECRET / _SELLER_ID。
+# 缺任意一个 secret 时整个 job 跳过并提示，不会让流水线变红。
+name: Publish to Microsoft Store
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要提交的 tag（例如 v3.2.0），留空用最新 tag'
+        required: false
+      commit:
+        description: '上传后立即提交审核（关闭则只留草稿，之后手工 msstore submission publish）'
+        type: boolean
+        default: true
+
+run-name: Store ${{ inputs.tag || github.ref_name }}
+
+concurrency:
+  group: store-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      STORE_ID: 9MV82J9G95GS
+      COMMIT_INPUT: ${{ inputs.commit }}
+      PARTNER_CENTER_TENANT_ID: ${{ secrets.PARTNER_CENTER_TENANT_ID }}
+      PARTNER_CENTER_CLIENT_ID: ${{ secrets.PARTNER_CENTER_CLIENT_ID }}
+      PARTNER_CENTER_CLIENT_SECRET: ${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}
+      PARTNER_CENTER_SELLER_ID: ${{ secrets.PARTNER_CENTER_SELLER_ID }}
+    steps:
+      - name: Check Partner Center secrets
+        id: guard
+        shell: pwsh
+        run: |
+          $missing = @(
+            'PARTNER_CENTER_TENANT_ID', 'PARTNER_CENTER_CLIENT_ID',
+            'PARTNER_CENTER_CLIENT_SECRET', 'PARTNER_CENTER_SELLER_ID'
+          ) | Where-Object { -not [Environment]::GetEnvironmentVariable($_) }
+          if ($missing.Count -gt 0) {
+            Write-Host "::warning::缺少 secret：$($missing -join ', ')；跳过商店提交。配置方法见 docs/store/store-publishing.md §12。"
+            "ready=false" >> $env:GITHUB_OUTPUT
+          } else {
+            "ready=true" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Checkout
+        if: steps.guard.outputs.ready == 'true'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          # 版本号由 sync-version 从「最新 tag」推导，需要完整 tag 列表
+          fetch-depth: 0
+          fetch-tags: true
+
+      # 与 release.yml 相同的两条：官方 crates.io、且本次 tag 必须是最新 tag，
+      # 否则构建出来的版本号会和 tag 不一致，MSIX 会被商店拒。
+      - name: Use official crates.io
+        if: steps.guard.outputs.ready == 'true'
+        shell: bash
+        run: rm -f .cargo/config.toml
+
+      - name: Verify tag is the latest tag
+        if: steps.guard.outputs.ready == 'true'
+        shell: bash
+        run: |
+          latest="$(git tag --sort=-creatordate | head -n 1)"
+          if [ "${latest}" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::要提交的是 ${GITHUB_REF_NAME}，但最新 tag 是 ${latest}；版本号会按最新 tag 同步，商店会拒收。请用最新 tag 重跑。"
+            exit 1
+          fi
+
+      - name: Setup Node.js
+        if: steps.guard.outputs.ready == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Setup Rust
+        if: steps.guard.outputs.ready == 'true'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        if: steps.guard.outputs.ready == 'true'
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: store
+
+      - name: Install dependencies
+        if: steps.guard.outputs.ready == 'true'
+        run: npm ci
+
+      # 产出 src-tauri\target\msix\msix\*.msix。Store 会用微软证书重签，这里不签名。
+      - name: Build MSIX
+        if: steps.guard.outputs.ready == 'true'
+        shell: pwsh
+        run: npm run msix
+
+      - name: Setup Microsoft Store Developer CLI
+        if: steps.guard.outputs.ready == 'true'
+        uses: microsoft/microsoft-store-apppublisher@v1.1
+
+      - name: Configure Microsoft Store Developer CLI
+        if: steps.guard.outputs.ready == 'true'
+        shell: pwsh
+        run: |
+          msstore reconfigure `
+            --tenantId $env:PARTNER_CENTER_TENANT_ID `
+            --sellerId $env:PARTNER_CENTER_SELLER_ID `
+            --clientId $env:PARTNER_CENTER_CLIENT_ID `
+            --clientSecret $env:PARTNER_CENTER_CLIENT_SECRET
+
+      - name: Publish package
+        if: steps.guard.outputs.ready == 'true'
+        shell: pwsh
+        run: |
+          $msix = Get-ChildItem 'src-tauri\target\msix\msix\*.msix' |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $msix) { throw 'MSIX 产物不存在：先确认 Build MSIX 这一步成功。' }
+          Write-Host "提交包：$($msix.Name)"
+
+          $publishArgs = @('-i', $msix.FullName, '-id', $env:STORE_ID)
+          if ($env:COMMIT_INPUT -ne 'true') { $publishArgs += '--noCommit' }
+          msstore publish @publishArgs
+
+          if ($env:COMMIT_INPUT -eq 'true') {
+            Write-Host "::notice::已提交审核，进度：msstore submission status $env:STORE_ID"
+          } else {
+            Write-Host "::notice::已上传为草稿。检查后提交：msstore submission publish $env:STORE_ID"
+          }
+          "https://apps.microsoft.com/detail/$env:STORE_ID" >> $env:GITHUB_STEP_SUMMARY

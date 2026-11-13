@@ -2,6 +2,10 @@
 
 面向本仓库的实操手册：怎么把 Rabbit Chat Studio 打成 Store 能收的包、提交时要填什么、MSIX 下哪些行为会变。
 
+> **已上架**：<https://apps.microsoft.com/detail/9MV82J9G95GS>（Store ID `9MV82J9G95GS`，
+> 协议链接 `ms-windows-store://pdp/?productid=9MV82J9G95GS`）。首版是人工提交的；后续版本可以照第 7 节手工重复，
+> 也可以按第 12 节交给 CI。
+
 ---
 
 ## 1. 两条可走的路（先选）
@@ -140,6 +144,7 @@ WACK 静态校验（可选，也要管理员）：
 1. 改版本、打 `v*` tag → CI 出 NSIS 安装包（`release.yml`）。
 2. `npm run msix -- -SkipBuild`（CI 的 Windows job 也会产出 `.msix` 作为 Actions artifact）。
 3. Partner Center → 该产品 → **Update** → 上传新 `.msix`（版本号必须递增，例如 `3.1.2.0`）→ 提交。
+   自动化版本：`msstore publish … -id 9MV82J9G95GS`，见第 12 节。
 4. 首次认证一般 24–48 小时；后续更新通常更快。
 
 ---
@@ -268,12 +273,14 @@ CI 稳定产物名（`Rabbit-Chat-Studio-*`）、README 下载链接、winget id
 站点只发布 `docs/site/`（Actions，见 `.github/workflows/pages.yml`），隐私政策不在其中，所以
 另外给它一个公网 URL：
 
-1. 最省事：把这份文本贴成一页 GitHub Wiki（`https://github.com/xlbbb-cn/ai-chat/wiki`）。
-2. 或者在 `docs/site/` 里加一页 `privacy-policy.html`（同一份文本），随站点发布，
-   约一两分钟后访问 <https://xlbbb-cn.github.io/ai-chat/privacy-policy.html>。
-3. 这一行 URL 填进 Partner Center → Properties → **Privacy policy URL**。
+**已落地（方案 2）**：`docs/site/privacy-policy.html` 是同一份文本的页面版（中英双语，无脚本），随站点发布，
+地址 <https://xlbbb-cn.github.io/ai-chat/privacy-policy.html>。剩下的是人工那一步：
+Partner Center → Properties → **Privacy policy URL** 填这个地址，并顺手把 Store listing 描述
+末尾那行 `Privacy policy: ` 补上同一个 URL。
 
 注意 URL 不能是 `raw.githubusercontent.com`（会被当成下载而不是网页）。
+
+（备选方案：把文本贴成一页 GitHub Wiki `https://github.com/xlbbb-cn/ai-chat/wiki`，效果相同。）
 
 ### 11.2 认证备注（政策 10.3 可测试性）
 
@@ -312,3 +319,64 @@ pwsh -File scripts/capture-store-screenshots.ps1 -DelaySeconds 5  # 留时间切
 4. **Submission options** → 勾选「使用生成式 AI」；`runFullTrust` 理由粘 §11.2 那段。
 5. **Notes for certification** → 粘 §11.2 英文全文。
 6. **Submit** —— 审核通常 1–3 个工作日；被拒会给出具体政策条款，按条款改再重新提交即可。
+
+---
+
+## 12. 自动提交（可选，`msstore` CLI）
+
+手工走第 7 节每版约 5 分钟，还要记得版本号。想让它进 CI，用官方的 `msstore`
+（Microsoft Store Developer CLI）：它本质是 Store Submission API 的封装，自己处理 SAS 上传与提交轮询。
+**没有任何"Store 主动从 GitHub 拉新版本"的机制**——包必须每次上传，MSIX 就是这样设计的。
+
+### 前提（一次性，人工在网页上做）
+
+1. Partner Center 账号已绑定 Microsoft Entra 租户。
+2. Entra 里注册一个应用（单租户即可），生成 **client secret**，记下 `tenantId` / `clientId` / `clientSecret`。
+3. Partner Center → **Account settings → User management → Microsoft Entra applications** → 添加该应用，
+   角色 **Manager**（不给 Manager 会 403）。
+4. Seller ID：Partner Center → Account settings → **Account details** → Seller ID。
+5. 产品必须已经人工提交成功过一次（本产品满足）：API 只能更新已有提交，不能创建产品。
+
+### 四个 secret（仓库 → Settings → Secrets and variables → Actions）
+
+| Secret | 值 |
+|---|---|
+| `PARTNER_CENTER_TENANT_ID` | Entra 租户 ID |
+| `PARTNER_CENTER_CLIENT_ID` | 应用（客户端）ID |
+| `PARTNER_CENTER_CLIENT_SECRET` | client secret |
+| `PARTNER_CENTER_SELLER_ID` | Seller ID |
+
+`.github/workflows/store.yml` 读这四个值；缺任意一个时整个 job 跳过并打印提示，不会失败。
+
+### 本地先跑一遍
+
+```powershell
+winget install Microsoft.DotNet.DesktopRuntime.9          # 运行 CLI 的前置
+winget install "Microsoft Store Developer CLI"           # 之后命令名是 msstore
+msstore reconfigure --tenantId <tid> --sellerId <seller> --clientId <cid> --clientSecret <secret>
+npm run msix -- -SkipBuild
+
+# 先传包但不提交，留在草稿里检查
+msstore publish -i src-tauri/target/msix/msix/XLBBB.RabbitChatStudio_3.1.1.0_x64.msix -id 9MV82J9G95GS --noCommit
+msstore submission get 9MV82J9G95GS                       # 看包和元数据
+msstore submission publish 9MV82J9G95GS                   # 确认后提交审核
+```
+
+`--noCommit` 只上传、不提交；不带它就是"上传 + 直接提交审核"。
+
+### 坑
+
+- **只支持免费产品**：官方文档写明 MSIX 的更新操作目前仅限免费应用（本应用 $0，OK）。
+- **版本必须递增**：`3.1.1` → `3.1.1.0` 由 `scripts/build-msix.ps1` 处理；同一版本重提会被拒。
+- **不能撤回**：提交即进审核（1–3 个工作日），审核期内改不了也撤不了。
+- **`publish` 会覆盖草稿**：已经发布过提交时，`msstore publish` 会删掉现有草稿、从上次已发布的提交重建，
+  草稿里改过的元数据会丢。要改文案就先 `publish`、再 `submission update`，别反过来。
+- **CLI 只换包**：商店列表的文案、截图、隐私政策 URL 仍在 Partner Center 里改。
+- **不要把 Store 包当 GitHub Release 用**：Store 包带 package identity，给 GitHub 用户的是
+  `release.yml` 出的 `-setup.exe`。
+- 凭据只放 Actions secret；本地跑完把 `msstore` 的配置清掉，不要留在机器上。
+
+### 为什么默认手动触发
+
+`store.yml` 用 `workflow_dispatch` 而不是挂 `v*` tag：打 tag 常常是为了热修，而提交进商店就撤不回来。
+等这条链跑顺了，再在 `release.yml` 里加一个 `needs` 依赖去调用它。

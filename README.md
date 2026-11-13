@@ -2,12 +2,14 @@
 
 **Turn any OpenAI-compatible model into a workspace-aware desktop agent — Skills, tools, sub-agents and a local, auditable request log.**
 
-[Website](https://xlbbb-cn.github.io/ai-chat/) · [Wiki](https://github.com/xlbbb-cn/ai-chat/wiki) · [中文](./README.zh.md) · [Latest release](https://github.com/xlbbb-cn/ai-chat/releases/latest) · [Quick start](#quick-start)
+[Website](https://xlbbb-cn.github.io/ai-chat/) · [Wiki](https://github.com/xlbbb-cn/ai-chat/wiki) · [中文](./README.zh.md) · [Microsoft Store](https://apps.microsoft.com/detail/9MV82J9G95GS) · [Latest release](https://github.com/xlbbb-cn/ai-chat/releases/latest) · [Quick start](#quick-start)
 
 ![Rabbit Chat Studio — big models plan, local tools execute](docs/banner.png)
 
 <p align="center">
   <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/Rabbit-Chat-Studio-Windows-x64-setup.exe"><img alt="Download for Windows" src="https://img.shields.io/badge/Download-Windows%20.exe-3E6AE1?style=for-the-badge&logo=windows11&logoColor=white" height="38"></a>
+  &nbsp;
+  <a href="https://apps.microsoft.com/detail/9MV82J9G95GS"><img alt="Get it from Microsoft Store" src="https://img.shields.io/badge/Get%20it-Microsoft%20Store-3E6AE1?style=for-the-badge&logo=microsoft&logoColor=white" height="38"></a>
   &nbsp;
   <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/Rabbit-Chat-Studio-macOS-Apple-Silicon.dmg"><img alt="Download for macOS" src="https://img.shields.io/badge/Download-macOS%20.dmg-3E6AE1?style=for-the-badge&logo=apple&logoColor=white" height="38"></a>
   &nbsp;
@@ -262,7 +264,8 @@ Build artifacts are located in:
 
 ### C. Installation
 
-- Windows: `winget install --id XLBBB.RabbitChatStudio -e`, or run the NSIS installer from the bundle directory
+- Windows, Microsoft Store: [apps.microsoft.com/detail/9MV82J9G95GS](https://apps.microsoft.com/detail/9MV82J9G95GS) — the Store delivers and updates the build. The Store package is MSIX, so its app config is virtualised under `%LOCALAPPDATA%\Packages\XLBBB.RabbitChatStudio\LocalCache` and does not share settings with the NSIS build (the workspace `.data` folder is shared either way).
+- Windows, installer: `winget install --id XLBBB.RabbitChatStudio -e`, or run the NSIS installer from the latest release / the bundle directory
 - macOS: Use .app / .dmg (depending on the build target)
 - Linux: Use .deb / .AppImage / .rpm (depending on the build target)
 
@@ -294,6 +297,7 @@ git push origin v2.0.0
 - macOS builds are ad-hoc signed (no Apple Developer certificate yet), so the first launch needs "Right click → Open" or System Settings → Privacy & Security → "Open Anyway".
 - `Actions → Release → Run workflow` runs the same build without creating a release (smoke test).
 - Installed builds check the newest **published** release on startup and show an in-app banner with release notes and a direct download for the matching bundle (toggle it under Settings → About & Updates). Draft releases are never visible to the update check.
+- Store builds update through the Store instead: the in-app check reports "up to date" whenever the executable runs from `\WindowsApps\` (`update::is_store_packaged`), so nobody is pointed at a second GitHub install.
 
 ---
 

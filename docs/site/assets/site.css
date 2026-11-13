@@ -625,7 +625,7 @@ h2 {
 
 .dl-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 1px;
   background: var(--c-border);
   border: 1px solid var(--c-border);
@@ -828,6 +828,9 @@ html[lang="en"] .dl-card.is-current .dl-os::after { content: "· your system"; }
   .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .doc-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dl-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* Five cards over two columns: let the last one fill the row instead of
+     leaving an empty cell, which would show as a hairline-coloured block. */
+  .dl-grid > :last-child { grid-column: 1 / -1; }
   .steps { grid-template-columns: minmax(0, 1fr); gap: 22px; }
 }
 

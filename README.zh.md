@@ -2,12 +2,14 @@
 
 **把任意 OpenAI 兼容模型变成工作区感知的桌面 Agent —— Skills、工具与 Sub-Agent 开箱即用，每一次请求都留在本机可查。**
 
-[官网](https://xlbbb-cn.github.io/ai-chat/) · [Wiki](https://github.com/xlbbb-cn/ai-chat/wiki) · [English](./README.md) · [最新版本](https://github.com/xlbbb-cn/ai-chat/releases/latest) · [快速开始](#快速开始)
+[官网](https://xlbbb-cn.github.io/ai-chat/) · [Wiki](https://github.com/xlbbb-cn/ai-chat/wiki) · [English](./README.md) · [Microsoft Store](https://apps.microsoft.com/detail/9MV82J9G95GS) · [最新版本](https://github.com/xlbbb-cn/ai-chat/releases/latest) · [快速开始](#快速开始)
 
 ![Rabbit Chat Studio —— 大模型负责规划，本地工具负责执行](docs/banner.png)
 
 <p align="center">
   <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/Rabbit-Chat-Studio-Windows-x64-setup.exe"><img alt="下载 Windows 安装包" src="https://img.shields.io/badge/Download-Windows%20.exe-3E6AE1?style=for-the-badge&logo=windows11&logoColor=white" height="38"></a>
+  &nbsp;
+  <a href="https://apps.microsoft.com/detail/9MV82J9G95GS"><img alt="从 Microsoft Store 获取" src="https://img.shields.io/badge/Microsoft%20Store-Get%20it-3E6AE1?style=for-the-badge&logo=microsoft&logoColor=white" height="38"></a>
   &nbsp;
   <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/Rabbit-Chat-Studio-macOS-Apple-Silicon.dmg"><img alt="下载 macOS 安装包" src="https://img.shields.io/badge/Download-macOS%20.dmg-3E6AE1?style=for-the-badge&logo=apple&logoColor=white" height="38"></a>
   &nbsp;
@@ -262,7 +264,8 @@ npm run tauri build
 
 ### C. 安装方式
 
-- Windows：`winget install --id XLBBB.RabbitChatStudio -e`，或运行 bundle 目录中的 NSIS 安装包
+- Windows（Microsoft Store）：[apps.microsoft.com/detail/9MV82J9G95GS](https://apps.microsoft.com/detail/9MV82J9G95GS) —— 由商店安装并负责更新。商店版是 MSIX 包，应用配置被重定向到 `%LOCALAPPDATA%\Packages\XLBBB.RabbitChatStudio\LocalCache`，与 NSIS 版不共享；工作区里的 `.data` 两个版本共用。
+- Windows（安装包）：`winget install --id XLBBB.RabbitChatStudio -e`，或运行最新 Release / bundle 目录中的 NSIS 安装包
 - macOS：使用 .app / .dmg（按构建目标）
 - Linux：使用 .deb / .AppImage / .rpm（按构建目标）
 
@@ -292,6 +295,7 @@ git push origin v2.0.0
 - macOS 产物为 ad-hoc 签名（暂无 Apple 开发者证书），首次打开需要在「系统设置 → 隐私与安全性」选择「仍要打开」，或右键 App → 打开。
 - 也可在 `Actions → Release → Run workflow` 手动触发，只构建不创建 Release（用于验证流程）。
 - 已安装的旧版本会在启动时检查最新**已发布**的 Release，并在应用内提示新版本、展示更新说明、直接下载匹配当前系统的安装包（可在「设置 → About & Updates」关闭）。草稿状态的 Release 不会被检查到。
+- 商店版走商店自己的更新通道：可执行文件位于 `\WindowsApps\` 时，应用内检查直接返回「已是最新」（`update::is_store_packaged`），不会把用户引到 GitHub 再装第二份。
 
 ---
 
