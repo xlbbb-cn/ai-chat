@@ -257,7 +257,8 @@ CI 稳定产物名（`Rabbit-Chat-Studio-*`）、README 下载链接、winget id
 还有一处**仍是旧字样**，需要人工处理：
 
 1. winget：旧 id `Leonard.AIChat` 的 PR（winget-pkgs#458061）已关闭；新 id 定为 `XLBBB.RabbitChatStudio`，
-   `.github/workflows/winget.yml` 与两份 README 的安装命令已同步，后续发版按新 id 提交。
+   但清单还没被接受，**当前没有包管理器渠道**：`.github/workflows/winget.yml` 保留但不生效，README / 站点 / wiki
+   已把 winget、Homebrew、Scoop 的安装命令下掉，只保留 Microsoft Store 与 NSIS 安装包。
 
 `docs/banner.png` 已按新名称重绘（`.data/tmp/banner/build.sh` 是可重复运行的生成脚本）；商店截图
 仍需在装好新名称窗口的机器上重拍。

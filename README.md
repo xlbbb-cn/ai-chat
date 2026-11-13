@@ -17,8 +17,8 @@
 </p>
 
 <p align="center">
-  <code>winget install XLBBB.RabbitChatStudio</code> &nbsp;·&nbsp; <code>brew install --cask rabbit-chat-studio</code> &nbsp;·&nbsp; <code>scoop install rabbit-chat-studio</code><br>
-  <sub>Windows: the winget manifest is in review (<a href="https://github.com/microsoft/winget-pkgs/pull/458061">winget-pkgs#458061</a>). Homebrew and Scoop manifests are not published yet — the installers above work today. Intel Mac: <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/Rabbit-Chat-Studio-macOS-Intel.dmg">.dmg</a>.</sub>
+  <code>Microsoft Store</code> &nbsp;·&nbsp; <code>NSIS .exe</code> &nbsp;·&nbsp; <code>macOS .dmg</code> &nbsp;·&nbsp; <code>Linux .AppImage</code><br>
+  <sub>Windows 10 2004+ / 11: install from the <a href="https://apps.microsoft.com/detail/9MV82J9G95GS">Microsoft Store</a>, or run the NSIS installer from the latest release. winget / Homebrew / Scoop packages are not available yet. Intel Mac: <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/Rabbit-Chat-Studio-macOS-Intel.dmg">.dmg</a>.</sub>
 </p>
 
 <p align="center">
@@ -265,11 +265,11 @@ Build artifacts are located in:
 ### C. Installation
 
 - Windows, Microsoft Store: [apps.microsoft.com/detail/9MV82J9G95GS](https://apps.microsoft.com/detail/9MV82J9G95GS) — the Store delivers and updates the build. The Store package is MSIX, so its app config is virtualised under `%LOCALAPPDATA%\Packages\XLBBB.RabbitChatStudio\LocalCache` and does not share settings with the NSIS build (the workspace `.data` folder is shared either way).
-- Windows, installer: `winget install --id XLBBB.RabbitChatStudio -e`, or run the NSIS installer from the latest release / the bundle directory
+- Windows, installer: run the NSIS installer from the latest release / the bundle directory
 - macOS: Use .app / .dmg (depending on the build target)
 - Linux: Use .deb / .AppImage / .rpm (depending on the build target)
 
-> The winget package is still under review in [microsoft/winget-pkgs#458061](https://github.com/microsoft/winget-pkgs/pull/458061); until it is merged, use the installer from the GitHub Release.
+> There is no package-manager channel yet: winget, Homebrew and Scoop manifests are not published. Install from the Microsoft Store or the NSIS installer above.
 
 > On Windows, if you encounter GNU linker or WebView2 issues, switch to the MSVC toolchain.
 
@@ -293,7 +293,7 @@ git push origin v2.0.0
 - The Release body is filled by the same workflow from the commits between the previous tag and this one (`scripts/gen-changelog.cjs`, grouped by Conventional Commits type), so there are no hand-written release notes.
 - `CHANGELOG.md` comes from that script too: run `npm run changelog -- --from <prev-tag> --to <tag> --details --write` before tagging to keep it current.
 - The release is published as soon as the first platform finishes; the remaining installers upload afterwards.
-- Each published release also submits its NSIS installer to `microsoft/winget-pkgs` through `.github/workflows/winget.yml` (requires the `WINGET_TOKEN` secret and an existing package entry).
+- `.github/workflows/winget.yml` is kept for later but stays inactive: it can only submit to `microsoft/winget-pkgs` once the package has been accepted there (the earlier PR was closed) and the `WINGET_TOKEN` secret exists.
 - macOS builds are ad-hoc signed (no Apple Developer certificate yet), so the first launch needs "Right click → Open" or System Settings → Privacy & Security → "Open Anyway".
 - `Actions → Release → Run workflow` runs the same build without creating a release (smoke test).
 - Installed builds check the newest **published** release on startup and show an in-app banner with release notes and a direct download for the matching bundle (toggle it under Settings → About & Updates). Draft releases are never visible to the update check.

@@ -17,8 +17,8 @@
 </p>
 
 <p align="center">
-  <code>winget install XLBBB.RabbitChatStudio</code> &nbsp;·&nbsp; <code>brew install --cask rabbit-chat-studio</code> &nbsp;·&nbsp; <code>scoop install rabbit-chat-studio</code><br>
-  <sub>Windows 的 winget 清单仍在审核中（<a href="https://github.com/microsoft/winget-pkgs/pull/458061">winget-pkgs#458061</a>）；Homebrew 与 Scoop 清单尚未发布，当前请直接使用上方安装包。Intel Mac 请下载 <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/Rabbit-Chat-Studio-macOS-Intel.dmg">.dmg</a>。</sub>
+  <code>Microsoft Store</code> &nbsp;·&nbsp; <code>NSIS .exe</code> &nbsp;·&nbsp; <code>macOS .dmg</code> &nbsp;·&nbsp; <code>Linux .AppImage</code><br>
+  <sub>Windows 10 2004+ / 11：从 <a href="https://apps.microsoft.com/detail/9MV82J9G95GS">Microsoft Store</a> 安装，或运行最新 Release 的 NSIS 安装包。winget / Homebrew / Scoop 暂未提供。Intel Mac 请下载 <a href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/Rabbit-Chat-Studio-macOS-Intel.dmg">.dmg</a>。</sub>
 </p>
 
 <p align="center">
@@ -265,11 +265,11 @@ npm run tauri build
 ### C. 安装方式
 
 - Windows（Microsoft Store）：[apps.microsoft.com/detail/9MV82J9G95GS](https://apps.microsoft.com/detail/9MV82J9G95GS) —— 由商店安装并负责更新。商店版是 MSIX 包，应用配置被重定向到 `%LOCALAPPDATA%\Packages\XLBBB.RabbitChatStudio\LocalCache`，与 NSIS 版不共享；工作区里的 `.data` 两个版本共用。
-- Windows（安装包）：`winget install --id XLBBB.RabbitChatStudio -e`，或运行最新 Release / bundle 目录中的 NSIS 安装包
+- Windows（安装包）：运行最新 Release / bundle 目录中的 NSIS 安装包
 - macOS：使用 .app / .dmg（按构建目标）
 - Linux：使用 .deb / .AppImage / .rpm（按构建目标）
 
-> winget 包仍在审核中（[microsoft/winget-pkgs#458061](https://github.com/microsoft/winget-pkgs/pull/458061)），合并前请先从 GitHub Release 下载安装包。
+> 暂时没有包管理器渠道：winget、Homebrew、Scoop 清单都还没发布，请用上面的 Microsoft Store 或 NSIS 安装包。
 
 > Windows 上如果遇到 GNU linker 与 WebView2 相关问题，建议切换到 MSVC 工具链构建。
 
@@ -291,7 +291,7 @@ git push origin v2.0.0
 
 - 版本号取自最新的 git tag（`npm run build` 内部会执行 `sync-version:git-tag`），因此本次推送的 tag 必须是最新 tag，否则流程会直接失败提示。
 - Release 在第一个平台构建完成时就会发布，其余平台的安装包随后陆续上传。
-- 每个正式 Release 还会通过 `.github/workflows/winget.yml` 把 NSIS 安装包自动提交到 `microsoft/winget-pkgs`（需要 `WINGET_TOKEN` secret，且仓库中已存在该包的版本）。
+- `.github/workflows/winget.yml` 先留着但不生效：要等包被 `microsoft/winget-pkgs` 接受（之前那个 PR 已关闭）并配好 `WINGET_TOKEN` secret 才能提交。
 - macOS 产物为 ad-hoc 签名（暂无 Apple 开发者证书），首次打开需要在「系统设置 → 隐私与安全性」选择「仍要打开」，或右键 App → 打开。
 - 也可在 `Actions → Release → Run workflow` 手动触发，只构建不创建 Release（用于验证流程）。
 - 已安装的旧版本会在启动时检查最新**已发布**的 Release，并在应用内提示新版本、展示更新说明、直接下载匹配当前系统的安装包（可在「设置 → About & Updates」关闭）。草稿状态的 Release 不会被检查到。

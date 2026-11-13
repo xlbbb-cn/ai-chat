@@ -1,5 +1,8 @@
 # 每个正式 Release 发布后，把其中的 NSIS 安装包自动提交到 microsoft/winget-pkgs。
 #
+# ⚠️ 当前不生效：XLBBB.RabbitChatStudio 还没进入 microsoft/winget-pkgs（首个 PR 已关闭），
+# 包被接受之前本工作流跑不出结果。文件先保留，等清单接受后再启用。
+#
 # 前置条件（只需配置一次）：
 #   1. XLBBB.RabbitChatStudio 至少有一个版本已合并进 winget-pkgs（首个 PR）；
 #   2. 在 xlbbb-cn 账号下 fork microsoft/winget-pkgs；
