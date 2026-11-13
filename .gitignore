@@ -30,5 +30,5 @@ dist-ssr
 # Store 截图（本地生成，只用于上传）
 docs/store/screenshots/
 
-# 架构图在 docs/architecture.html 维护，部署时复制进站点；本地预览的副本不要提交
+# 架构图由 docs/gen.py 生成到 docs/site/architecture.html（部署时 CI 现生成）；不要提交这个副本
 docs/site/architecture.html

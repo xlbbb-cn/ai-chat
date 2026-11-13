@@ -88,8 +88,6 @@ Rabbit Chat Studio 是一个桌面端 AI 助手应用，支持接入任意 OpenA
 - [English Wiki](https://github.com/xlbbb-cn/ai-chat/wiki) — 英文主站，包含安装、聊天与模型、工作区、技能、工具、记忆/待办/定时器、MCP、子智能体、提示词与上下文、配置与备份、监控、更新、安全、开发构建和常见问题。
 - [简体中文 Wiki](https://github.com/xlbbb-cn/ai-chat/wiki/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87) — 每个页面的完整简体中文对照。
 
-此外，仓库内附有一页[架构图](docs/architecture.html)：分层结构、一次对话轮的请求流水线、子智能体编排，单个自包含 HTML 文件，双击即可在浏览器里打开，无需构建。架构变动后运行 `python3 docs/gen.py` 重新生成。
-
 ---
 
 ## 核心功能
@@ -212,7 +210,7 @@ Rabbit Chat Studio 是一个桌面端 AI 助手应用，支持接入任意 OpenA
 - 前端 invoke 调用 Rust 命令
 - Rust 通过事件向前端推送 chat-token / chat-done / chat-error / chat-usage
 
-这三层背后的完整关系 —— 分层、一次对话轮内部的请求流水线、子智能体编排 —— 都画在 [docs/architecture.html](docs/architecture.html)。
+这三层背后的完整关系 —— 分层、一次对话轮内部的请求流水线、子智能体编排 —— 都画在[架构图](https://xlbbb-cn.github.io/ai-chat/architecture.html)。
 
 ---
 
@@ -351,7 +349,7 @@ rabbit-chat-studio/
 │  ├─ src/tools/        # 工具模块（memory / file_actions / patch / risk 等）
 │  ├─ src/mcp.rs        # MCP 传输；主进程池 + 每个任务的 AgentMcpSession
 │  └─ src/db.rs
-├─ docs/                # architecture.html + gen.py，以及 site/（GitHub Pages 站点）
+├─ docs/                # gen.py（架构图生成器）和 site/（GitHub Pages 站点）
 └─ README.md
 ```
 

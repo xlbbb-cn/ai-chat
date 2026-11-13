@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Generate docs/architecture.html — a self-contained architecture map for
+"""Generate docs/site/architecture.html — a self-contained architecture map for
 Rabbit Chat Studio.
 
 Static inline SVG, computed coordinates, no external assets. Colours come from
 the design tokens in src/App.css so the document matches the product.
 
-Usage:  python3 docs/gen.py      (writes docs/architecture.html, no dependencies)
+Usage:  python3 docs/gen.py      (writes docs/site/architecture.html, no dependencies)
 """
 
 import html

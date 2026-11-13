@@ -3,8 +3,8 @@
 # 仓库设置里需要一次性打开：Settings → Pages → Build and deployment → Source: GitHub Actions。
 # 站点地址：https://xlbbb-cn.github.io/ai-chat/
 #
-# 架构图 docs/architecture.html 由 docs/gen.py 生成，部署前复制进站点，
-# 保持单一来源（不要在 docs/site/ 里提交副本，见 .gitignore）。
+# 架构图由 docs/gen.py 生成，部署前在 CI 里跑一次（gen.py 直接写
+# docs/site/architecture.html），保持单一来源（不要在 docs/site/ 里提交副本，见 .gitignore）。
 name: Pages
 
 on:
@@ -12,7 +12,7 @@ on:
     branches: [main]
     paths:
       - 'docs/site/**'
-      - 'docs/architecture.html'
+      - 'docs/gen.py'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -37,8 +37,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Sync generated architecture page
-        run: cp docs/architecture.html docs/site/architecture.html
+      - name: Generate architecture page
+        run: python3 docs/gen.py
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
