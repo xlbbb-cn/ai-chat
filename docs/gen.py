@@ -222,7 +222,7 @@ BANDS = [
                  ("mcp.rs", "stdio / SSE / HTTP · 主池 + 每任务会话", "core"),
                  ("db.rs", "SQLite 访问层", "core"),
                  ("evolution_maintenance.rs", "静默维护轮 · 20 轮 / 60 调用 / 15 分钟", "n"),
-                 ("model_metadata.rs", "llm-metadata 目录 · 上下文与能力", "n"),
+                 ("model_metadata.rs", "三源能力目录 · 上下文与能力", "n"),
                  ("pdf_mentions.rs", "@paper.pdf#2 → Markdown（pdf2md-rs）", "n"),
                  ("workspace_files.rs", "文件浏览 · 分片读取 · 二进制", "n"),
                  ("backup.rs", "profile 导出 / 导入", "n"),
@@ -262,7 +262,7 @@ BANDS = [
                  ("本机 CLI", "opencode · Claude Code · Codex", "ext"),
                  ("Neo4j", "knowledge-graph crate", "ext"),
                  ("GitHub Releases", "更新检查与下载", "ext"),
-                 ("llm-metadata 目录", "模型能力元数据", "ext"),
+                 ("模型能力目录", "模型能力元数据", "ext"),
              ]),
          ]),
 ]

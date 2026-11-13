@@ -361,7 +361,7 @@ const zhCN: Messages = {
             contextWindow: "“{model}” 的上下文窗口（tokens）",
             contextPlaceholder: "自动（由服务端报告或使用默认值）",
             contextHint:
-                "当 API 报告上下文窗口时会自动填充（OpenRouter、Groq、vLLM 等），否则使用匹配到的 llm-metadata 元数据。两者都没有的 OpenAI 兼容接口可在此手动配置 —— 该值用于智能体的上下文预算。",
+                "当 API 报告上下文窗口时会自动填充（OpenRouter、Groq、vLLM 等），否则使用匹配到的能力目录数据。两者都没有的 OpenAI 兼容接口可在此手动配置 —— 该值用于智能体的上下文预算。",
             capabilities: "模型能力",
             capabilitiesEmpty: "暂无 “{model}” 的能力数据，请点击“从 API 获取模型”加载。",
             capabilitiesMatched: "匹配到 “{name}” · 相似度 {percent}%",
@@ -375,6 +375,7 @@ const zhCN: Messages = {
             capabilityOpenWeights: "开源权重",
             capabilityDeprecated: "已弃用",
             capabilityContext: "{tokens} 上下文",
+            capabilityMaxOutput: "{tokens} 输出上限",
             conversationHeader: "会话 ID 请求头",
             conversationHeaderHint:
                 "每个请求中携带聊天会话 ID 的请求头名称。留空则使用默认的 “x-conversation-id”。",

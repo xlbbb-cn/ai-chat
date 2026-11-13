@@ -388,10 +388,11 @@ export interface AppConfig {
    */
   model_context_lengths?: Record<string, number>;
   /**
-   * Per-model capabilities learned from the public `basellm/llm-metadata`
-   * catalogue when the model catalogue was refreshed ("Fetch Models From API").
-   * Keyed by the remote model id; `model_name` inside the value is the
-   * catalogue entry it was matched to. Informational only — never sent upstream.
+   * Per-model capabilities learned from the merged public capability catalogue
+   * (models.dev, OpenRouter, `basellm/llm-metadata`) when the model catalogue
+   * was refreshed ("Fetch Models From API"). Keyed by the remote model id;
+   * `model_name` inside the value is the catalogue entry it was matched to.
+   * Informational only — never sent upstream.
    */
   model_metadata?: Record<string, ModelMetadata>;
   /**
@@ -547,9 +548,12 @@ export interface ModelSettings {
 }
 
 /**
- * Capability metadata for one model, published by the public
- * [`basellm/llm-metadata`](https://github.com/basellm/llm-metadata) catalogue
- * (`fetch_model_metadata`) and — once matched — persisted per remote model id in
+ * Capability metadata for one model, merged from three public catalogues —
+ * [`models.dev`](https://models.dev/api.json),
+ * [`OpenRouter`](https://openrouter.ai/api/v1/models) and
+ * [`basellm/llm-metadata`](https://github.com/basellm/llm-metadata) (in that
+ * priority order, so models.dev supplies the numbers) — by
+ * `fetch_model_metadata`, and — once matched — persisted per remote model id in
  * {@link AppConfig.model_metadata}.
  *
  * `model_name` is the catalogue entry the model was matched to, which is not
@@ -561,10 +565,19 @@ export interface ModelMetadata {
   model_name: string;
   vendor?: string;
   description?: string;
-  /** Raw catalogue tags, e.g. `["Tools", "Reasoning", "1M"]`. */
+  /**
+   * Raw llm-metadata tags, e.g. `["Tools", "Reasoning", "1M"]`. Only that feed
+   * publishes tags, so an entry known to the other two starts empty and is
+   * filled from there.
+   */
   tags?: string[];
-  /** Context window in tokens, parsed from the catalogue size tag. */
+  /** Context window in tokens (`limit.context`, `context_length`, size tag). */
   context_length?: number;
+  /**
+   * Largest completion the model accepts, when a source reports one
+   * (`limit.output` on models.dev, `max_completion_tokens` on OpenRouter).
+   */
+  max_output_tokens?: number;
   supports_tools?: boolean;
   /** "Thinking" / chain-of-thought models. */
   supports_reasoning?: boolean;
@@ -573,6 +586,11 @@ export interface ModelMetadata {
   supports_audio?: boolean;
   open_weights?: boolean;
   deprecated?: boolean;
+  /**
+   * Catalogues that contributed to this entry, in priority order:
+   * `models.dev`, `openrouter`, `llm-metadata`.
+   */
+  sources?: string[];
   /** 0–1 name similarity; only present on persisted (matched) entries. */
   match_score?: number;
 }

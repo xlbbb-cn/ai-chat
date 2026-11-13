@@ -1,5 +1,7 @@
 /**
- * Matching of remote model ids against the `basellm/llm-metadata` catalogue.
+ * Matching of remote model ids against the merged model-metadata catalogue
+ * (`models.dev` + OpenRouter + `basellm/llm-metadata`, see
+ * `src-tauri/src/model_metadata.rs`).
  *
  * A provider's `/models` listing and the catalogue frequently disagree on the
  * exact name: gateways (new-api / one-api / LiteLLM / OpenRouter / Bedrock)

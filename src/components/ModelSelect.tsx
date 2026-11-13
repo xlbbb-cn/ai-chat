@@ -17,7 +17,7 @@ interface Props {
     models: string[];
     /** Currently selected model id. */
     value: string;
-    /** Capability metadata per model id, from the llm-metadata catalogue. */
+    /** Capability metadata per model id, from the merged catalogue. */
     metadata: Record<string, ModelMetadata>;
     disabled?: boolean;
     onChange: (model: string) => void;

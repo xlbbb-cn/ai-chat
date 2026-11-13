@@ -680,9 +680,18 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
                           })}
                         </span>
                       ) : null}
-                      {capabilityBadges.length === 0 && !currentMetadata.context_length && (
-                        <span className="model-capability-badge muted">{t("common.none")}</span>
-                      )}
+                      {currentMetadata.max_output_tokens ? (
+                        <span className="model-capability-badge muted">
+                          {t("settings.api.capabilityMaxOutput", {
+                            tokens: formatTokenCount(currentMetadata.max_output_tokens),
+                          })}
+                        </span>
+                      ) : null}
+                      {capabilityBadges.length === 0 &&
+                        !currentMetadata.context_length &&
+                        !currentMetadata.max_output_tokens && (
+                          <span className="model-capability-badge muted">{t("common.none")}</span>
+                        )}
                     </div>
                     <small className="settings-field-hint">
                       {t("settings.api.capabilitiesMatched", {
@@ -690,6 +699,9 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
                         percent: Math.round((currentMetadata.match_score ?? 1) * 100),
                       })}
                       {currentMetadata.vendor ? ` · ${currentMetadata.vendor}` : ""}
+                      {currentMetadata.sources?.length
+                        ? ` · ${currentMetadata.sources.join(", ")}`
+                        : ""}
                     </small>
                     {currentMetadata.description && (
                       <small className="settings-field-hint">{currentMetadata.description}</small>

@@ -33,8 +33,9 @@ Windows 上应用数据目录一般是 `%APPDATA%\com.leonard.aichat`。如果�
   Key 只保存在本机配置文件里，只在请求该服务商时使用。服务商如何处理这些内容取决于它自己的隐私政策。
 - **第三方 MCP 服务器 / 子代理 / CLI 工具**：如果你启用它们，应用会把提示和相关上下文交给这些
   你自行配置的进程或服务；它们由你选择和授权，其数据处理以各自条款为准。
-- **模型元数据目录**：在设置里刷新模型列表时，应用可能查询公开的 llm-metadata 目录以获取模型的
-  上下文长度与能力，这一查询只包含模型名称，不包含对话内容。
+- **模型元数据目录**：在设置里刷新模型列表时，应用会查询三个公开目录（`models.dev`、`openrouter.ai`、`basellm.github.io`
+  的 llm-metadata）以获取模型的上下文长度与能力，最多每周一次，
+  合并后的结果保存在本机应用数据目录；这些查询只包含模型名称，不包含对话内容。
 - **更新检查**：启动时（可在设置中关闭「启动时检查更新」）会请求 GitHub Releases API
   （`api.github.com`）获取版本号，请求不含任何个人数据。
 - 除上述情形外，应用不会把数据发送给任何第三方。
@@ -102,8 +103,10 @@ behaviour, removed when the package is uninstalled.
   provider handles the content is governed by its own privacy policy.
 - **Third-party MCP servers / sub-agents / CLI tools**: if you enable them, the app hands prompts and
   related context to those processes or services that you configured and authorised.
-- **Model metadata catalogue**: refreshing the model list may query a public llm-metadata catalogue for
-  context window and capabilities. That request contains model names only, never conversation content.
+- **Model metadata catalogues**: refreshing the model list queries three public catalogues for context
+  windows and capabilities (`models.dev`, `openrouter.ai`, `basellm.github.io` llm-metadata) at most
+  once a week, and stores the merged result in the local app-data directory. Those requests contain
+  model names only, never conversation content.
 - **Update check**: on startup (can be turned off in settings) the app calls the GitHub Releases API
   (`api.github.com`) for version numbers. No personal data is included.
 - Beyond the above, no data is sent to any third party.

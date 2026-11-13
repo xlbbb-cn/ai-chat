@@ -395,7 +395,7 @@ const en = {
             contextWindow: "Context window for “{model}” (tokens)",
             contextPlaceholder: "auto (provider-reported or default)",
             contextHint:
-                "Auto-filled when the API reports a context window (OpenRouter, Groq, vLLM…), and otherwise from the matched llm-metadata catalogue entry. OpenAI-compatible endpoints that expose neither can be configured manually here — the value is used for agent context budgeting.",
+                "Auto-filled when the API reports a context window (OpenRouter, Groq, vLLM…), and otherwise from the matched capability catalogue entry. OpenAI-compatible endpoints that expose neither can be configured manually here — the value is used for agent context budgeting.",
             capabilities: "Model capabilities",
             capabilitiesEmpty:
                 "No capability data for “{model}” yet — use “Fetch Models From API” to load it.",
@@ -410,6 +410,7 @@ const en = {
             capabilityOpenWeights: "Open weights",
             capabilityDeprecated: "Deprecated",
             capabilityContext: "{tokens} context",
+            capabilityMaxOutput: "{tokens} max output",
             conversationHeader: "Conversation ID header",
             conversationHeaderHint:
                 "Header name that carries the chat session id in every request. Leave empty to use the default “x-conversation-id”.",

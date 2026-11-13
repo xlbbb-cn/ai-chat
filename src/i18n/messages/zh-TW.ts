@@ -361,7 +361,7 @@ const zhTW: Messages = {
             contextWindow: "「{model}」的上下文視窗（tokens）",
             contextPlaceholder: "自動（由服務端回報或使用預設值）",
             contextHint:
-                "當 API 回報上下文視窗時會自動填入（OpenRouter、Groq、vLLM 等），否則使用符合到的 llm-metadata 中繼資料。兩者都沒有的 OpenAI 相容端點可在此手動設定 —— 該值用於代理的上下文預算。",
+                "當 API 回報上下文視窗時會自動填入（OpenRouter、Groq、vLLM 等），否則使用符合到的能力目錄資料。兩者都沒有的 OpenAI 相容端點可在此手動設定 —— 該值用於代理的上下文預算。",
             capabilities: "模型能力",
             capabilitiesEmpty: "尚無「{model}」的能力資料，請點擊「從 API 取得模型」載入。",
             capabilitiesMatched: "符合到「{name}」· 相似度 {percent}%",
@@ -375,6 +375,7 @@ const zhTW: Messages = {
             capabilityOpenWeights: "開源權重",
             capabilityDeprecated: "已棄用",
             capabilityContext: "{tokens} 上下文",
+            capabilityMaxOutput: "{tokens} 輸出上限",
             conversationHeader: "工作階段 ID 標頭",
             conversationHeaderHint:
                 "每個請求中攜帶聊天工作階段 ID 的標頭名稱。留空則使用預設的「x-conversation-id」。",

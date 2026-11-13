@@ -570,7 +570,7 @@ export default function App() {
   const [maxTokens, setMaxTokens] = useState<number | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>(["gpt-4o-mini"]);
   const [selectedModel, setSelectedModel] = useState("gpt-4o-mini");
-  /** Capabilities per model, learned from the llm-metadata catalogue. */
+  /** Capabilities per model, learned from the merged capability catalogue. */
   const [modelMetadata, setModelMetadata] = useState<Record<string, ModelMetadata>>({});
   /**
    * Capabilities of the model currently selected in the toolbar. Declared here

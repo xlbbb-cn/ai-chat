@@ -313,11 +313,15 @@ export async function fetchModels(endpoint?: {
 
 /**
  * Model capability catalogue (tools / reasoning / vision / files, context
- * windows …) from the public `basellm/llm-metadata` feed. Entries are returned
- * unfiltered — match them against the remote model ids with
- * `matchModelMetadata` from `utils/modelMetadata`.
+ * windows, max output …) merged from three public feeds: `models.dev`,
+ * OpenRouter and `basellm/llm-metadata` (in that priority order). Entries are
+ * returned unfiltered — match them
+ * against the remote model ids with `matchModelMetadata` from
+ * `utils/modelMetadata`.
  *
- * The backend serves a 6-hour memory cache; pass `force` to re-download.
+ * The backend persists the merged catalogue in `<app_data>/model_metadata.json`
+ * and re-downloads it weekly, serving the file (even a stale one) when the
+ * network is down; pass `force` to bypass both caches.
  */
 export async function fetchModelMetadata(force = false): Promise<ModelMetadata[]> {
   return invoke("fetch_model_metadata", { force });
