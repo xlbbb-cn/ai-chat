@@ -26,15 +26,6 @@ dist-ssr
 
 .data/
 
-# 本地测试用书籍，勿入库
-/学会生存：如何成为一个生存能力很强的人.pdf
 
 # Store 截图（本地生成，只用于上传）
-<<<<<<< HEAD
 docs/store/screenshots/
-=======
-docs\store\screenshots/
-
-# 官网预览时从 docs/ 复制的架构页（部署时由 .github/workflows/pages.yml 生成）
-site/architecture.html
->>>>>>> main
