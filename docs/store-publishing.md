@@ -277,6 +277,11 @@ CI 稳定产物名（`Rabbit-Chat-Studio-*`）、README 下载链接、winget id
 两步测试步骤（DeepSeek endpoint + 测试 key + `deepseek-flash`）、`runFullTrust` 理由、生成式 AI 披露、
 网络访问清单。**真实测试 key 不写进仓库**，粘贴时换成私密渠道的那份。
 
+提交页「受限的功能」里 runFullTrust 的申请理由见
+[`docs/store/runfulltrust-justification.md`](store/runfulltrust-justification.md)（中英各一份，
+中文界面用中文那段）。清单只声明了这一项受限能力，没有 `broadFileSystemAccess` 等其它项；
+首次批准后该产品沿用，后续版本不必重填。
+
 测试凭据本身（2026-11-12 验证可用）：
 
 | 字段 | 值 |

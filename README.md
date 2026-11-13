@@ -2,7 +2,7 @@
 
 **Turn any OpenAI-compatible model into a workspace-aware desktop agent — Skills, tools, sub-agents and a local, auditable request log.**
 
-[Wiki](https://github.com/xlbbb-cn/ai-chat/wiki) · [中文](./README.zh.md) · [Latest release](https://github.com/xlbbb-cn/ai-chat/releases/latest) · [Quick start](#quick-start)
+[Website](https://xlbbb-cn.github.io/ai-chat/) · [Wiki](https://github.com/xlbbb-cn/ai-chat/wiki) · [中文](./README.zh.md) · [Latest release](https://github.com/xlbbb-cn/ai-chat/releases/latest) · [Quick start](#quick-start)
 
 ![Rabbit Chat Studio — big models plan, local tools execute](docs/banner.png)
 

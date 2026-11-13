@@ -99,6 +99,41 @@ install an unsigned package). Runbook, submission fields and policy mapping: `do
   `…\WindowsApps\…`, `check_update` answers "already latest" instead of pointing users at the NSIS
   installer for a second copy.
 
+## Website (GitHub Pages)
+
+`site/` is a dependency-free static landing page, deployed by `.github/workflows/pages.yml`
+(`push` to `main` touching `site/**` or `docs/architecture.html`, or `workflow_dispatch`).
+Live URL: `https://xlbbb-cn.github.io/ai-chat/` — the repository needs Pages set to
+**Source: GitHub Actions** once (Settings → Pages).
+
+- **No build step, relative paths only.** The page is served from a project sub-path, so every asset
+  reference is `./assets/…`. The only absolute links are in `404.html`, because GitHub serves it for
+  unknown paths at any depth and relative assets would break there.
+- **`DESIGN.md` still applies.** Tokens are copied into `site/assets/site.css` (light + dark). The
+  accent is the primary CTA only, radius is 4px, there are no shadows, and hairlines do the
+  separating. Change a token in `src/App.css`? Mirror it in the site stylesheet.
+- **Copy comes from the READMEs.** Feature and boundary claims are `README.zh.md` / `README.md`
+  content, not new marketing. Download buttons use the stable Release asset names
+  (`releases/latest/download/…`), so a new tag needs no site edit — keep them in sync with
+  `stableAsset` in `release.yml` if a filename ever changes.
+- **i18n:** Chinese is the markup default (the page renders with JS off); English lives in the `EN`
+  dictionary in `site/assets/site.js` and is applied through `data-i18n` / `data-i18n-html`.
+  A new string needs both halves: the zh text in `site/index.html` and the `EN` entry.
+  Use `data-i18n-html` whenever the string contains markup (inline `<code>`), otherwise the text
+  swap drops the element.
+- **The architecture page is generated, never committed.** The workflow copies
+  `docs/architecture.html` into the artifact; `site/architecture.html` is gitignored so a local copy
+  for preview cannot be pushed.
+
+Preview locally (any static server; the folder has no build step):
+
+```powershell
+Copy-Item docs/architecture.html site/architecture.html -Force
+node .data/tmp/serve.cjs 8765 .   # then open http://127.0.0.1:8765/site/
+```
+
+Check the page in both themes, both languages and at ≈390px width before pushing.
+
 ## Architecture
 
 - **Entry points**: `src/main.tsx` → `src/App.tsx`; Rust `src-tauri/src/main.rs` → `src-tauri/src/lib.rs` (command registration, state, app setup).
@@ -316,6 +351,12 @@ src-tauri/
   Cargo.toml
 
 scripts/sync-version.cjs   # 3-way version sync (pkg / cargo / tauri.conf)
+
+site/                      # GitHub Pages landing page — plain HTML/CSS/JS, no build step
+  index.html               #   single page; zh-CN markup + EN dictionary in assets/site.js
+  assets/site.css          #   tokens mirrored from src/App.css (DESIGN.md contract)
+  assets/site.js           #   theme, language, OS detection, copy buttons
+  404.html                 #   Pages 404 (self-contained, absolute /ai-chat/ links)
 ```
 
 ## Composer attachments (paste / drop)

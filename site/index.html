@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rabbit Chat Studio — 工作区感知的桌面 AI Agent</title>
+<meta name="description" content="把任意 OpenAI 兼容模型变成工作区感知的桌面 Agent。Skills 沙箱、自我进化记忆、Sub-Agent 编排与 MCP 开箱即用；配置、历史与每一次请求都留在本机可查。Windows / macOS / Linux，MIT 许可，无需注册账号。">
+<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#171A20" media="(prefers-color-scheme: dark)">
+<link rel="canonical" href="https://xlbbb-cn.github.io/ai-chat/">
+<link rel="icon" href="./assets/favicon.png" sizes="256x256" type="image/png">
+<link rel="icon" href="./favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="./assets/favicon.png">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Rabbit Chat Studio">
+<meta property="og:title" content="Rabbit Chat Studio — 工作区感知的桌面 AI Agent">
+<meta property="og:description" content="Skills 沙箱、自我进化记忆、Sub-Agent 编排、MCP、本地请求审计。任一 OpenAI 兼容模型，配置与历史都在本机。">
+<meta property="og:url" content="https://xlbbb-cn.github.io/ai-chat/">
+<meta property="og:image" content="https://xlbbb-cn.github.io/ai-chat/assets/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Rabbit Chat Studio — 工作区感知的桌面 AI Agent">
+<meta name="twitter:description" content="Skills 沙箱、自我进化记忆、Sub-Agent 编排、MCP、本地请求审计。任一 OpenAI 兼容模型，配置与历史都在本机。">
+<meta name="twitter:image" content="https://xlbbb-cn.github.io/ai-chat/assets/og.jpg">
+
+<link rel="preload" href="./assets/razer-f5.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="./assets/site.css">
+<script>
+  /* Resolve the saved theme before first paint so the page never flashes. */
+  try {
+    var t = localStorage.getItem('rabbit-site-theme');
+    if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+  } catch (e) {}
+</script>
+</head>
+<body>
+<a class="skip" href="#main"><span data-i18n="a11y.skip">跳到主要内容</span></a>
+
+<header class="site-header">
+  <div class="wrap nav">
+    <a class="brand" href="./">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span>Rabbit Chat Studio</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="#capabilities" data-i18n="nav.capabilities">能力</a>
+      <a href="#compare" data-i18n="nav.compare">差异</a>
+      <a href="#security" data-i18n="nav.security">边界</a>
+      <a href="#start" data-i18n="nav.start">开始</a>
+      <a href="#docs" data-i18n="nav.docs">文档</a>
+      <a class="nav-ext" href="https://github.com/xlbbb-cn/ai-chat" rel="noopener">GitHub</a>
+    </nav>
+    <div class="nav-tools">
+      <button class="icon-btn" id="lang-toggle" type="button" aria-label="Switch to English">EN</button>
+      <button class="icon-btn" id="theme-toggle" type="button" aria-label="切换主题" title="切换主题">
+        <svg class="i-sun" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><circle cx="8" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.5 1.5M11.5 11.5L13 13M13 3l-1.5 1.5M4.5 11.5L3 13" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
+        <svg class="i-moon" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M13.5 10.2A6 6 0 0 1 5.8 2.5a6 6 0 1 0 7.7 7.7z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div class="hero-copy">
+        <p class="eyebrow mono" data-i18n="hero.eyebrow">Tauri 2 · MIT · 本地优先</p>
+        <h1 data-i18n="hero.title">把任意 OpenAI 兼容模型，变成工作区感知的桌面 Agent。</h1>
+        <p class="lede" data-i18n="hero.lede">Skills 沙箱、自我进化记忆、Sub-Agent 编排与 MCP 开箱即用。配置、历史与每一次请求都留在这台机器上，随时可查：没有注册，没有账号，没有隐藏改写。</p>
+        <div class="cta-row">
+          <a class="btn btn-primary" id="hero-download" href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/Rabbit-Chat-Studio-Windows-x64-setup.exe" data-i18n="hero.download">下载 Windows 版</a>
+          <a class="btn btn-secondary" href="#download" data-i18n="hero.allPlatforms">全部平台</a>
+          <a class="text-link" href="https://github.com/xlbbb-cn/ai-chat" rel="noopener" data-i18n="hero.repo">在 GitHub 查看</a>
+        </div>
+        <p class="fine" data-i18n="hero.fine">Windows 安装包 · macOS（Apple Silicon / Intel）· Linux AppImage。填一个 API Key，或者接本地模型就能用。</p>
+        <p class="detect" id="detect" hidden></p>
+      </div>
+
+      <div class="mock" role="img" aria-label="界面示意：一次带工具调用、技能与后台任务的对话">
+        <div class="mock-bar">
+          <span class="mock-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="mock-title mono">Rabbit Chat Studio</span>
+          <span class="mock-path mono">~/projects/store</span>
+        </div>
+        <div class="mock-body">
+          <div class="msg-user"><span data-i18n="mock.user">把测试跑一遍，只修失败的那个。别动其它文件。</span></div>
+          <div class="msg-agent">
+            <p class="mock-model mono" data-i18n="mock.model">deepseek-v4 · 12 个工具 · evolution 记忆已载入</p>
+            <p data-i18n="mock.reply">先读工作区的 AGENTS.md，再跑测试。</p>
+            <div class="tool">
+              <span class="tool-name mono">run_cmd</span>
+              <span class="tool-arg mono">npm test -- --run</span>
+              <span class="tool-state ok"><span data-i18n="mock.state1">完成 · 4.2s</span></span>
+            </div>
+            <div class="tool">
+              <span class="tool-name mono">background_task</span>
+              <span class="tool-arg mono">wait bg-3f2a</span>
+              <span class="tool-state run"><span data-i18n="mock.state2">后台执行中</span></span>
+            </div>
+            <div class="chips">
+              <span class="chip mono">.data/skills/code-plan</span>
+              <span class="chip mono">evolution · python-is-store-stub</span>
+            </div>
+          </div>
+        </div>
+        <div class="mock-composer">
+          <span class="mock-placeholder" data-i18n="mock.placeholder">输入消息，回车发送…</span>
+          <span class="mock-send" data-i18n="mock.send">发送</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="capabilities" class="section">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="sec-num mono">01</span>
+        <h2 data-i18n="cap.title">核心能力</h2>
+      </div>
+      <p class="section-lede" data-i18n="cap.lede">聊天只是起点。给 Agent 一个工作区、一套真正可用的工具，以及一份能查的执行记录。</p>
+      <div class="cards">
+        <article class="card">
+          <h3 data-i18n="cap.skills.title">Skills 沙箱</h3>
+          <p data-i18n-html="cap.skills.body">每个工作区只有一个技能根目录 <code>.data/skills</code>，每个技能锁定在自己的 SKILL.md 里；启用状态同样按工作区保存。</p>
+        </article>
+        <article class="card">
+          <h3 data-i18n="cap.evo.title">自我进化</h3>
+          <p data-i18n-html="cap.evo.body">助手可以给自己安装、修改、删除技能，并把验证过的事实写进 evolution 记忆；每次改动都留下 <code>.bak.n</code> 备份。</p>
+        </article>
+        <article class="card">
+          <h3 data-i18n="cap.agents.title">Sub-Agent 编排</h3>
+          <p data-i18n-html="cap.agents.body">llm / cli / cloud 三种运行时，定义是文件化的 <code>agents/&lt;分类&gt;/&lt;slug&gt;.md</code>；每个子代理单独配模型、工具白名单与 MCP。</p>
+        </article>
+        <article class="card">
+          <h3 data-i18n="cap.tools.title">内置工具</h3>
+          <p data-i18n-html="cap.tools.body">四级记忆、待办、延时定时器、文件操作与补丁。<code>run_cmd</code> 只运行 PATH 上的程序，<code>run_shell</code> 每个脚本都要过风险引擎。</p>
+        </article>
+        <article class="card">
+          <h3 data-i18n="cap.mcp.title">MCP</h3>
+          <p data-i18n="cap.mcp.body">stdio / SSE / HTTP / Streamable HTTP 四种传输，可做连通性测试；子代理任务各自持有独立的 server 进程，结束即退出。</p>
+        </article>
+        <article class="card">
+          <h3 data-i18n="cap.audit.title">本地审计与后台执行</h3>
+          <p data-i18n="cap.audit.body">请求体、token、耗时、状态与错误写进本地 SQLite；慢工具、MCP 调用和子代理可以后台跑，模型继续往下走。</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section id="compare" class="section">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="sec-num mono">02</span>
+        <h2 data-i18n="cmp.title">和常见客户端比，差在哪</h2>
+      </div>
+      <p class="section-lede" data-i18n="cmp.lede">同样是聊天界面，区别在于 Agent 有没有工作区、权限边界和可回放的记录。</p>
+      <div class="table-wrap">
+        <table class="matrix">
+          <thead>
+            <tr>
+              <th scope="col" data-i18n="cmp.col.cap">能力</th>
+              <th scope="col" class="hl">Rabbit Chat Studio</th>
+              <th scope="col">DeepSeek Harness</th>
+              <th scope="col">Cherry Studio</th>
+              <th scope="col">Chatbox</th>
+              <th scope="col">LM Studio</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row" data-i18n="cmp.r1">Skills 沙箱 · 唯一技能根目录</th>
+              <td class="hl"><span class="mark yes" role="img" aria-label="原生">✓</span></td>
+              <td><span class="mark part" role="img" aria-label="部分">◐</span></td>
+              <td><span class="mark part" role="img" aria-label="部分">◐</span></td>
+              <td><span class="mark no" role="img" aria-label="未提供">—</span></td>
+              <td><span class="mark no" role="img" aria-label="未提供">—</span></td>
+            </tr>
+            <tr>
+              <th scope="row" data-i18n="cmp.r2">自我进化 · 自装技能 + 专属记忆</th>
+              <td class="hl"><span class="mark yes" role="img" aria-label="原生">✓</span></td>
+              <td><span class="mark part" role="img" aria-label="部分">◐</span></td>
+              <td><span class="mark no" role="img" aria-label="未提供">—</span></td>
+              <td><span class="mark no" role="img" aria-label="未提供">—</span></td>
+              <td><span class="mark no" role="img" aria-label="未提供">—</span></td>
+            </tr>
+            <tr>
+              <th scope="row" data-i18n="cmp.r3">内置 Agent 工具 · 记忆 / 定时器 / 待办</th>
+              <td class="hl"><span class="mark yes" role="img" aria-label="原生">✓</span></td>
+              <td><span class="mark part" role="img" aria-label="部分">◐</span></td>
+              <td><span class="mark part" role="img" aria-label="部分">◐</span></td>
+              <td><span class="mark no" role="img" aria-label="未提供">—</span></td>
+              <td><span class="mark no" role="img" aria-label="未提供">—</span></td>
+            </tr>
+            <tr>
+              <th scope="row" data-i18n="cmp.r4">无需账户登录</th>
+              <td class="hl"><span class="mark yes" role="img" aria-label="原生">✓</span></td>
+              <td><span class="mark part" role="img" aria-label="部分">◐</span></td>
+              <td><span class="mark yes" role="img" aria-label="原生">✓</span></td>
+              <td><span class="mark yes" role="img" aria-label="原生">✓</span></td>
+              <td><span class="mark yes" role="img" aria-label="原生">✓</span></td>
+            </tr>
+            <tr>
+              <th scope="row" data-i18n="cmp.r5">提示词自主 · 无默认人设</th>
+              <td class="hl"><span class="mark yes" role="img" aria-label="原生">✓</span></td>
+              <td><span class="mark part" role="img" aria-label="部分">◐</span></td>
+              <td><span class="mark part" role="img" aria-label="部分">◐</span></td>
+              <td><span class="mark part" role="img" aria-label="部分">◐</span></td>
+              <td><span class="mark part" role="img" aria-label="部分">◐</span></td>
+            </tr>
+            <tr>
+              <th scope="row" data-i18n="cmp.r6">本地请求审计</th>
+              <td class="hl"><span class="mark yes" role="img" aria-label="原生">✓</span></td>
+              <td><span class="mark yes" role="img" aria-label="原生">✓</span></td>
+              <td><span class="mark part" role="img" aria-label="部分">◐</span></td>
+              <td><span class="mark part" role="img" aria-label="部分">◐</span></td>
+              <td><span class="mark part" role="img" aria-label="部分">◐</span></td>
+            </tr>
+            <tr>
+              <th scope="row" data-i18n="cmp.r7">后台执行 · 慢工具不堵回合</th>
+              <td class="hl"><span class="mark yes" role="img" aria-label="原生">✓</span></td>
+              <td><span class="mark yes" role="img" aria-label="原生">✓</span></td>
+              <td><span class="mark no" role="img" aria-label="未提供">—</span></td>
+              <td><span class="mark no" role="img" aria-label="未提供">—</span></td>
+              <td><span class="mark no" role="img" aria-label="未提供">—</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="footnote" data-i18n="cmp.note">✓ 原生 · ◐ 部分或相近 · — 未提供。基于 2026 年 11 月的公开文档整理。</p>
+    </div>
+  </section>
+
+  <section id="security" class="section">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="sec-num mono">03</span>
+        <h2 data-i18n="sec.title">能力越大，边界就要写得越清楚</h2>
+      </div>
+      <p class="section-lede" data-i18n="sec.lede">三个执行工具的作用域刻意不同，越权的一条路径被单独挡在外面。</p>
+      <div class="table-wrap">
+        <table class="matrix two">
+          <thead>
+            <tr>
+              <th scope="col" data-i18n="sec.col.tool">工具</th>
+              <th scope="col" data-i18n="sec.col.scope">能触达的范围</th>
+              <th scope="col" data-i18n="sec.col.guard">约束方式</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row" class="mono">file_actions</th><td data-i18n="sec.f.scope">工作区根目录之内，含隐藏的 .data（工作区数据库除外）</td><td data-i18n="sec.f.guard">路径沙箱：工作区外路径、../ 逃逸与符号链接逃逸一律拒绝</td></tr>
+            <tr><th scope="row" class="mono">run_cmd</th><td data-i18n="sec.c.scope">一个由系统通过 PATH 解析的程序</td><td data-i18n="sec.c.guard">名称校验，风险评估 L0–L6，L0–L3 需确认</td></tr>
+            <tr><th scope="row" class="mono">run_shell</th><td data-i18n="sec.s.scope">任意位置，包括工作区之外</td><td data-i18n="sec.s.guard">每个脚本先过风险引擎与语法门禁，L0–L3 需确认</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="footnote" data-i18n="sec.note">自我进化模式允许助手改写自己的指令：请限定在受控工作区、短时使用，事后检查 .bak 备份。MCP 工具参数会原样转发，接入外部服务前先做最小权限验证。</p>
+    </div>
+  </section>
+
+  <section id="start" class="section">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="sec-num mono">04</span>
+        <h2 data-i18n="start.title">三步开始</h2>
+      </div>
+      <ol class="steps">
+        <li>
+          <span class="step-num mono">01</span>
+          <h3 data-i18n="start.s1.title">装好客户端</h3>
+          <p data-i18n="start.s1.body">下载对应平台的安装包，双击安装。Windows 使用 NSIS 安装器，macOS 提供 Apple Silicon 与 Intel 两个 dmg。</p>
+        </li>
+        <li>
+          <span class="step-num mono">02</span>
+          <h3 data-i18n="start.s2.title">接上模型</h3>
+          <p data-i18n="start.s2.body">OpenAI 兼容的 base URL + API Key，或者本地网关；不用注册账号，也没有强制登录。</p>
+        </li>
+        <li>
+          <span class="step-num mono">03</span>
+          <h3 data-i18n="start.s3.title">选一个工作区</h3>
+          <p data-i18n="start.s3.body">工作区就是 Agent 的活动范围：技能、记忆、待办和数据库都放在它的 .data 目录里。</p>
+        </li>
+      </ol>
+
+      <div id="download" class="download">
+        <div class="dl-head">
+          <h3 data-i18n="dl.title">下载</h3>
+          <span class="footnote" id="dl-version"><span data-i18n="dl.version">最新版本：</span><a href="https://github.com/xlbbb-cn/ai-chat/releases/latest" rel="noopener">GitHub Releases</a></span>
+        </div>
+        <div class="dl-grid">
+          <a class="dl-card" data-os="windows" href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/Rabbit-Chat-Studio-Windows-x64-setup.exe">
+            <span class="dl-os">Windows</span>
+            <span class="dl-file mono">Rabbit-Chat-Studio-Windows-x64-setup.exe</span>
+            <span class="dl-note" data-i18n="dl.win">x64 · NSIS 安装器</span>
+          </a>
+          <a class="dl-card" data-os="mac-arm" href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/Rabbit-Chat-Studio-macOS-Apple-Silicon.dmg">
+            <span class="dl-os">macOS · Apple Silicon</span>
+            <span class="dl-file mono">Rabbit-Chat-Studio-macOS-Apple-Silicon.dmg</span>
+            <span class="dl-note" data-i18n="dl.macArm">M 系列芯片</span>
+          </a>
+          <a class="dl-card" data-os="mac-intel" href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/Rabbit-Chat-Studio-macOS-Intel.dmg">
+            <span class="dl-os">macOS · Intel</span>
+            <span class="dl-file mono">Rabbit-Chat-Studio-macOS-Intel.dmg</span>
+            <span class="dl-note" data-i18n="dl.macIntel">Intel 芯片</span>
+          </a>
+          <a class="dl-card" data-os="linux" href="https://github.com/xlbbb-cn/ai-chat/releases/latest/download/Rabbit-Chat-Studio-Linux-x86_64.AppImage">
+            <span class="dl-os">Linux</span>
+            <span class="dl-file mono">Rabbit-Chat-Studio-Linux-x86_64.AppImage</span>
+            <span class="dl-note" data-i18n="dl.linux">x86_64 · AppImage</span>
+          </a>
+        </div>
+
+        <div class="pkg">
+          <div class="pkg-head">
+            <span data-i18n="dl.pkgTitle">包管理器</span>
+            <span class="footnote" data-i18n="dl.pkgNote">winget 清单仍在审核，Homebrew 与 Scoop 清单尚未发布；当前请使用上面的安装包。</span>
+          </div>
+          <div class="pkg-row">
+            <code class="mono">winget install XLBBB.RabbitChatStudio</code>
+            <button class="copy" type="button" data-copy="winget install XLBBB.RabbitChatStudio" data-i18n="dl.copy">复制</button>
+          </div>
+          <div class="pkg-row">
+            <code class="mono">brew install --cask rabbit-chat-studio</code>
+            <button class="copy" type="button" data-copy="brew install --cask rabbit-chat-studio" data-i18n="dl.copy">复制</button>
+          </div>
+          <div class="pkg-row">
+            <code class="mono">scoop install rabbit-chat-studio</code>
+            <button class="copy" type="button" data-copy="scoop install rabbit-chat-studio" data-i18n="dl.copy">复制</button>
+          </div>
+        </div>
+
+        <details class="dev">
+          <summary data-i18n="dl.devTitle">从源码构建</summary>
+          <p class="footnote" data-i18n="dl.devReq">需要 Node.js 20.19+（或 22.12+）与 Rust stable；Windows 建议使用 MSVC 工具链。</p>
+          <div class="code-block">
+            <pre><code>npm install
+cargo install tauri-cli --version "^2"
+npm run tauri dev</code></pre>
+            <button class="copy" type="button" data-copy="npm install&#10;cargo install tauri-cli --version &quot;^2&quot;&#10;npm run tauri dev" data-i18n="dl.copy">复制</button>
+          </div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <section id="docs" class="section">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="sec-num mono">05</span>
+        <h2 data-i18n="docs.title">文档</h2>
+      </div>
+      <p class="section-lede" data-i18n="docs.lede">从安装到配置、技能、MCP 与子代理，Wiki 里有完整的中英对照教程。</p>
+      <div class="doc-grid">
+        <a class="doc-card" href="https://github.com/xlbbb-cn/ai-chat/wiki" rel="noopener">
+          <span class="doc-title" data-i18n="docs.wiki">Wiki</span>
+          <span class="doc-note" data-i18n="docs.wikiNote">安装、模型、工作区、技能、工具、MCP、子代理与常见问题</span>
+        </a>
+        <a class="doc-card" href="./architecture.html">
+          <span class="doc-title" data-i18n="docs.arch">架构图</span>
+          <span class="doc-note" data-i18n="docs.archNote">分层结构、一次对话轮的请求流水线、子智能体编排</span>
+        </a>
+        <a class="doc-card" href="https://github.com/xlbbb-cn/ai-chat#readme" rel="noopener">
+          <span class="doc-title">README</span>
+          <span class="doc-note" data-i18n="docs.readmeNote">差异点、配置说明、项目结构与安全边界</span>
+        </a>
+        <a class="doc-card" href="https://github.com/xlbbb-cn/ai-chat/releases" rel="noopener">
+          <span class="doc-title" data-i18n="docs.releases">更新记录</span>
+          <span class="doc-note" data-i18n="docs.releasesNote">每个版本的安装包与变更</span>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <section class="quote-section">
+    <div class="wrap quote">
+      <p data-i18n="quote.body">大模型负责认知与规划，本地工具负责执行与验证，应用框架负责边界与记录。</p>
+      <p class="quote-note" data-i18n="quote.note">没有默认人设，没有隐藏改写：你的 system message 是基底，只追加工具与技能说明。</p>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-inner">
+    <div class="footer-brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span>Rabbit Chat Studio</span>
+      <span class="footnote" data-i18n="footer.license">MIT 许可证</span>
+    </div>
+    <nav class="footer-links" aria-label="Footer">
+      <a href="https://github.com/xlbbb-cn/ai-chat" rel="noopener">GitHub</a>
+      <a href="https://github.com/xlbbb-cn/ai-chat/wiki" rel="noopener">Wiki</a>
+      <a href="https://github.com/xlbbb-cn/ai-chat/releases" rel="noopener" data-i18n="footer.releases">发布</a>
+      <a href="https://github.com/xlbbb-cn/ai-chat/blob/main/LICENSE" rel="noopener" data-i18n="footer.licenseLink">许可证</a>
+      <a href="https://github.com/xlbbb-cn/ai-chat/issues" rel="noopener" data-i18n="footer.issues">反馈</a>
+    </nav>
+    <p class="footnote footer-note" data-i18n="footer.note">本页不加载第三方脚本与追踪代码。</p>
+  </div>
+</footer>
+
+<script src="./assets/site.js" defer></script>
+</body>
+</html>
