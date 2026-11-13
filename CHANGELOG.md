@@ -9,6 +9,125 @@ npm run changelog -- --from <上一个 tag> --to <本次 tag> --details --write
 条目按 Conventional Commits 的类型分组，作用域加粗；工作区里提交标题是英文、正文是中文，
 所以带 `--details` 时是中英对照。
 
+## [v3.3.0](https://github.com/xlbbb-cn/ai-chat/releases/tag/v3.3.0) — 2026-11-13
+
+### 新增
+
+- **site**: hero web create ([`ba26871`](https://github.com/xlbbb-cn/ai-chat/commit/ba2687183591658aa2017f9dc20b60c988afcdc2))
+- **ui**: unify sidebar list rows and fold orchestration settings ([`d3ce53c`](https://github.com/xlbbb-cn/ai-chat/commit/d3ce53c0aadf9a655245072404f46084227bfba4))
+  - Give History, Skills, Tools, MCP and Agents one flat row language: transparent rows, inset hairlines and a --c-hover hover/focus fill.
+  - Share the 36x20 toggle switch, neutralise agent type/tool badges and flatten the Tools auto-accept footer.
+  - Add a leading History search glyph and clear action, one segmented tab control, and relative timestamps with a full-date tooltip.
+  - Fold the orchestration rows from smart selection through max concurrency behind a shared .section-toggle; Enable mode stays visible.
+  - Document the side-panel list rows and disclosure primitive in DESIGN.md.
+- **models**: store the catalogue flat and match normalised names exactly ([`89789ed`](https://github.com/xlbbb-cn/ai-chat/commit/89789ed835e9aa31ba0ef34fa2fb8f5229c010f8))
+  - model_metadata.rs: the merge writes the normalisation key back into `model_name`, so every stored entry is lowercase and flattened (`gpt-4o`, `glm-5-3`) and the file holds one entry per normalised name; the three parsers stay shape-specific (models.dev's nested providers, OpenRouter's `data[]` with `architecture` / `top_provider`, llm-metadata's `{data:[...]}` with comma-separated `tags`)
+  - the catalogue format is bumped to 2: an older file still parses and serves as the offline fallback, but `catalog_is_fresh` (and the memory cache) treat a version mismatch as expired, so a new build re-downloads instead of matching against pre-normalisation names for the rest of the TTL
+  - modelMetadata.ts: `matchModelCatalog` indexes entries by normalised name and returns the direct hit with `match_score: 1`; only unknown ids reach the existing similarity scorer (`fallbackMatch`, MIN_MATCH_SCORE unchanged), so `deepseek-chat-v3.1` still finds `deepseek-chat`
+  - SettingsPanel: the Fetch Models button shows a Font Awesome spinner plus `aria-busy` while the model list and the catalogue build load (the first build downloads ~7 MB), and `.settings-btn` gains a 6px gap for the icon
+  - tests: the merged catalogue must equal its own normalisation with unique keys, llm-metadata is read wrapped or bare, OpenRouter falls back to `top_provider.context_length`, and a version-1 file never counts as fresh; the parser tests now assert the stored flattened names
+  - Verified: `cargo test model_metadata::` 19 passed, the ignored live merge passes against the public feeds, `tsc --noEmit` clean, `vite build` succeeds.
+- **models**: merge three capability catalogues into one weekly file ([`964cf20`](https://github.com/xlbbb-cn/ai-chat/commit/964cf20d57ec1434ba7d30766a7cbf3593bebde7))
+  - `src-tauri/src/model_metadata.rs`: three parsers behind `build_catalog`, a `<app_data>/model_metadata.json` snapshot (`version`, `updated_at`, `entries`) with a 7-day TTL, an atomic `.json.tmp` + rename write and a `tokio::sync::Mutex` around the refresh so two Settings panels download once. Resolution is memory -> file -> network; a single failing feed logs a WARN and the merge continues, and when every feed fails the stale file is still served, so the model list never depends on this feature. `force` bypasses both caches.
+  - Real data: 2930 entries (was ~370), 2806 with a context window and 2682 with a max-output limit, 1.2 MB on disk; llm-metadata keeps 62 entries the others miss.
+  - OpenRouter writes `"hugging_face_id": ""` for closed models, so the parser must require a non-empty id -- `gpt-4o` was being flagged as open weights.
+  - `src/types.ts`, `SettingsPanel.tsx`: `max_output_tokens` and `sources` are surfaced as an output-limit badge plus the source list in the match hint; en / zh-CN / zh-TW catalogues and the doc comments of `api.ts`, `modelMetadata.ts`, `ModelSelect.tsx` and `App.tsx` follow the merged feed.
+  - AGENTS.md, config.example.md, the store privacy policy (three hosts instead of one), `docs/gen.py` + the generated architecture page and the wiki pages no longer describe the feature as a single llm-metadata download.
+  - Verified: `cargo test` 406 passed / 2 ignored (live-network), the ignored `live_merge_produces_a_usable_catalogue` passes against the public feeds, `tsc --noEmit` clean, `vite build` succeeds.
+- **agents**: let the planner run on its own model ([`6be2a48`](https://github.com/xlbbb-cn/ai-chat/commit/6be2a48f9ce84a95f01cebb6b54d23cea6ce6c23))
+  - agents/config.rs: `AgentOrchestration.planner_model` (missing or blank = inherit) is normalized in `normalize_config`, so load and save agree, and `planner_model_or` is the single resolver for every planner call
+  - agents/planning.rs: orchestrate() resolves the model once and hands the same one to select_agents, plan_tasks and the supervisor
+  - AgentsPanel: a picker after "Smart agent selection" offers "Follow the main model" plus the composer's catalogue, and keeps a configured id that has since left the catalogue
+  - AGENTS.md: document the field next to Agent orchestration
+- **i18n**: adopt the OS UI language on first launch ([`47b3d53`](https://github.com/xlbbb-cn/ai-chat/commit/47b3d5341ed9674b32fee71ea8ce119f4a098f97))
+  - src-tauri/src/system_locale.rs: detect() reads the OS user-interface language (Windows GetUserDefaultUILanguage -> LCIDToLocaleName, macOS `defaults read -g AppleLocale`, Linux LC_ALL / LC_MESSAGES / LANG) and maps it with the same rule as the frontend's detectSystemLocale() (Hant/TW/HK/MO -> zh-TW, any other Chinese tag -> zh-CN, else -> en)
+  - lib.rs setup: when config.language is missing or not one of the three, claim the detected locale and persist it in the single startup write that already seeds workspace_history; a pick in Settings or an imported backup is never overwritten, and a shadow window writes only its own copy
+  - detectSystemLocale() stays the fallback for the very first paint
+  - AGENTS.md: document the rule next to Theming
+- **site**: add web site ([`c3e42df`](https://github.com/xlbbb-cn/ai-chat/commit/c3e42df315bbd02b9e0ad5995cfa8dc377f26085))
+- **settings**: fetch models before saving; workspace switcher polish ([`03d9bc4`](https://github.com/xlbbb-cn/ai-chat/commit/03d9bc4d7ce3bcf0a8f254541105cd6bf0a3be20))
+  - `fetch_models` takes the endpoint the settings form currently holds (base url, api key, custom headers) instead of reading the saved config, so "Fetch Models From API" works before "Save Changes". Nothing is written back, and an empty base url fails with a clear message.
+  - Titlebar workspace list: the folder name is never truncated (it is the identity of the row), the parent path is the only part allowed to ellipsize, and the popup ceiling grew to 480px so a whole name fits.
+  - Switching workspace closes the sidebar first (`onBeforeWorkspaceSwitch`), so no panel repaints against the workspace being replaced.
+- **ui**: switch workspaces from the titlebar, one dropdown, no named profiles ([`d7fd4fe`](https://github.com/xlbbb-cn/ai-chat/commit/d7fd4fe3d600973cf6aa34c101cfcbb531238038))
+  - The workspace indicator is the picker now: clicking it lists the recent workspaces (`workspace_history_entries`, current/missing marked) and applies one immediately through `set_workspace_dir`, which writes that single field onto the live config and is refused while a reply is streaming. The menu also offers "choose another folder" and notes that a shadow window keeps its own settings copy while sharing the history.
+  - `src/components/Dropdown.tsx` is the one listbox primitive (portal, viewport clamp, keyboard contract); ModelSelect, the agents panel and the MCP inspector use it instead of their bespoke selects, and the duplicated CSS is gone.
+  - The workspace row is removed: the titlebar owns `workspace_dir`, and every save path (`handleSave`, `handleLanguageChange`, `applyMessageEditor`) takes it from a fresh `getConfig()`, so a switch made while the panel is open can no longer be rolled back by "Save Changes". Self-evolution mode moved to Runtime.
+  - Named profiles deleted end to end: `list_profiles` / `save_profile_config` / `delete_profile_config` / `apply_profile_config`, `ProfilesFile`, `AppState::profiles_path`, `AppState::profiles.json`, the unused `materialize_agent`, the Settings section, `ProfilePanel`, the `Profile` type and the i18n keys.
+  - The backup archive no longer packs or restores `profiles.json`, and the export/import wording, menu ids and default file name say "backup".
+
+### 修复
+
+- **site**: generate the architecture page in the Pages deploy ([`9287bac`](https://github.com/xlbbb-cn/ai-chat/commit/9287bac2e855066151b4669cb337dfd61892a1e4))
+- **i18n**: the app menu entry opens the tmp folder, not deliverables ([`720a778`](https://github.com/xlbbb-cn/ai-chat/commit/720a7783839bb22c9c52dd7f67d04a47bffd0c43))
+- **ui**: keep the orchestration picker off the row label ([`e1adb75`](https://github.com/xlbbb-cn/ai-chat/commit/e1adb7563a9bf9933b9225f529095113877316e1))
+
+### 性能
+
+- **chat**: stop re-rendering the whole transcript on every streamed token ([`b799225`](https://github.com/xlbbb-cn/ai-chat/commit/b79922541394589bc9f5589c1138c3af7c747aab))
+  - 根因：流式 token 通过 `prev.map` 只替换增长的那一行（未变行对象身份不变），但 `ChatMessage` 没做 memo，且 `handleDeleteMessage` / `handleForkMessage` 的依赖数组里有 `messages`——每来一个 token 就换一次身份，于是整段历史每个 token 重建一次
+  - 新增 `messagesDataRef`（`useLayoutEffect` 同步，handler 永远读不到比已提交渲染更旧的 transcript），两个 handler 改读它并从依赖数组里去掉 `messages`：删除/分叉的语义与原先的闭包取值一致，只是不再让回调身份跟着 token 变
+  - `onRetry` 只传给真正会显示重试按钮的那一行（其余为 `undefined`），它的依赖里仍有 `messages`
+  - `ChatMessage` 改成 `memo(ChatMessageRow)`，另两个 memo 化 props（`backgroundTasks`/`backgroundWaiting`）只在最新一行传入，`todoMessageId` 是字符串、`skillNames`/`agentTokens` 的依赖与流式无关
+  - 逐项核对：delete [t]、fork [sessionId, resetEmbeddedAgents, t]、confirm [updateActiveAssistantToolCalls([]), t]、cancelBackground [input, streaming, sessionId, backupExporting]——流式期间都不变
+  - 验证：`tsc --noEmit` 无错、`vite build` 通过；本机没有 jsdom / testing-library，故未做渲染次数量化，Memo 的安全前提（props 身份稳定）由上面的依赖数组审计保证
+- **db**: index the two log tables ([`e05c0e3`](https://github.com/xlbbb-cn/ai-chat/commit/e05c0e3ee0f2f5eb223a7f012ba91d61d854a42f))
+  - `api_requests` 与 `interaction_log` 只有表没有索引，而它们被三类查询反复扫：Monitor 列表按 session_id 取并按 id 倒序、会话报告按 session_id 取、保留策略按 timestamp 删。加 4 个幂等索引（每表 `(session_id, id)` 与 `timestamp`），`CREATE INDEX IF NOT EXISTS` 对老库同样安全
+  - 20 万行 interaction_log 实测：Monitor 列表 32 ms → 1 ms（SCAN → SEARCH USING COVERING INDEX）；保留策略 DELETE 89 ms → 0.3 ms，而这条在每次启动都会跑（lib.rs prune_old_logs）；api_requests 按会话查询 5 ms → <0.5 ms
+  - cargo test 389 passed / 1 ignored
+
+### 重构
+
+- **site**: move the landing page into docs/site/ ([`def58d7`](https://github.com/xlbbb-cn/ai-chat/commit/def58d7e190db33212d22a2d7341fac1fdd6669e))
+  - site/* -> docs/site/* (everything inside the page uses relative paths, so no markup changed; git records the moves as renames)
+  - pages.yml publishes docs/site and still copies docs/architecture.html in as docs/site/architecture.html; triggers now watch docs/site/** and docs/architecture.html
+  - .gitignore: drop the local preview copy of architecture.html
+  - AGENTS.md, READMEs: new paths, and the note that only docs/site/ is published
+  - docs/store-publishing.md -> docs/store/store-publishing.md, with the Pages section corrected: the site is deployed by Actions from docs/site/, so the privacy policy needs its own public URL
+- split the three god files into topic modules ([`6079d0a`](https://github.com/xlbbb-cn/ai-chat/commit/6079d0acfde547ee9dae3d4f96cec496edf8a7b0))
+  - `agents.rs` 6613 → 656 行 + `agents/{config,mission,planning,execution,helper,tests}.rs`。`#[tauri::command]` 全部留在模块根：属性会同时生成 `__cmd__*` / `__tauri_command_name_*`，`generate_handler!` 按 `agents::<name>` 取名，搬走就连不上；公开类型保持 `pub`，只有原本私有的项放宽到 `pub(crate)`，crate 外可见性没变
+  - `llm_complete.rs` 5677 → 342 行 + `llm_complete/{stream,background,context,conclusion,turn,tests}.rs`。`chat_completion` 同理留在根模块
+  - `tools/mod.rs` 3499 → 74 行 + `execute.rs`（run_cmd 与分发）/ `schema.rs`（工具 JSON 目录）/ `tests.rs`；`split_command_line`、`machine_label` 等被兄弟模块引用的辅助函数从 `mod.rs` 重新导出，`super::name` 路径不变
+  - `instance.rs` 的测试同样移出到 `instance/tests.rs`
+  - 纯搬运，没有改一行逻辑：函数名集合逐模块比对前后完全一致（agents 364、llm_complete 123、tools 544、instance 38）；`cargo check --all-targets` 零 warning，`cargo test` 389 passed / 1 ignored
+- finish the profile → backup rename and dedupe drifted helpers ([`d67b058`](https://github.com/xlbbb-cn/ai-chat/commit/d67b0585561c9934290e9a84f675a4906bdb179b))
+  - `profile` → `backup` 收尾：命令 app_export_profile / app_import_profile → app_export_backup / app_import_backup（Rust 命令 + TitleBar/api 包装），事件 profile-export-* / profile-restored → backup-export-* / backup-restored，前端 exportProfileTo / importProfileFrom、profileExporting|Phase|Status、CSS .profile-export-progress* 一并改名，AGENTS.md 的命令清单同步；界面早就叫 Backup，代码里的旧名到此为止
+  - 新增 src-tauri/src/util.rs：now_ms（原来 5 份拷贝，外加 mcp.rs 的 u64 变体 → now_ms_u64）、truncate_chars / truncate_with_ellipsis / truncate_with_trailing_ellipsis（三种语义此前共用 truncate_chars 一个名字，差异只写在各自的函数体里）、slugify(text, max)；agents/files.rs 与 tools/mcp_self.rs 只保留各自的空值兜底（agent-<uuid> / server）
+  - 新增 src/utils/format.ts：formatBytes（MonitorPanel 固定 0/1 位小数、UpdatePanel 自适应，同一尺寸在两处读数不同）、formatDate、escapeHtml（markdownMath 与 printDocument 各一份）
+  - 硬编码色进 token：App.css 六个 token 块补 --c-knob / --c-favorite，三个暗色块另加 --c-syn-* 八色；ChatMessage.css 的 hljs 覆盖、三处 toggle 滑块、收藏星、三处 mask 渐变全部改走 token
+
+### 文档
+
+- drop winget/brew/scoop install commands until the packages exist ([`403a747`](https://github.com/xlbbb-cn/ai-chat/commit/403a747c908f84213b0a05db9a658d8799311d18))
+- **store**: link the Microsoft Store listing from README, site and wiki-facing docs ([`41fcebf`](https://github.com/xlbbb-cn/ai-chat/commit/41fcebf162efd5957f901f1cec748521db7d4bc9))
+- redraw the README banner with the current product name ([`bdad7f7`](https://github.com/xlbbb-cn/ai-chat/commit/bdad7f7590b123c746c5dbda911728dab121b95d))
+  - docs/banner.png 重绘为 1672×941、8-bit、193 KB：暗色渐变 + 强调色光晕 + 应用图标 + 新名称 + 中英副标题 + 版本页脚，配色取自界面 token（#141E38/#3E6AE1/#9DB7FF）
+  - 生成脚本可重复运行：`.data/tmp/banner/build.sh`（先量文本宽度再排版，中文用 Noto Sans CJK）
+  - store-publishing.md 的待办同步：banner 已处理，商店截图仍需在装好新名称窗口的机器上重拍
+
+### 杂项
+
+- **icons**: refresh the app, store and favicon artwork ([`a5bb7f7`](https://github.com/xlbbb-cn/ai-chat/commit/a5bb7f7dddeb196a4a9f49b6a41d4f9dff26dcb6))
+- drop the dead CSS, IPC commands and exports left by the panel rework ([`0afdbaa`](https://github.com/xlbbb-cn/ai-chat/commit/0afdbaa18bedf3c53513ded9857ba188199e22e4))
+  - 死 CSS：.message-export-*（ChatMessage，已被 .message-action-buttons 取代）、.history-delete-btn 五条（HistoryPanel，已由 .history-action-btn 取代）、AgentsPanel 里退役的 “CLI agents” 列表（.cli-agents-block / -header / -intro / -empty、.cli-agent-item / -info / -command / -hint / -probe-hint），保留仍在用的 .cli-agent-probe-row 与 -probe-result*
+  - 不可达的 api_requests 监控通道：db.rs 的 ApiRequestRecord / ApiRequestDetail 与 list/get/delete/clear_api_requests 四个命令、lib.rs 注册、api.ts 的两个类型与四个包装。Monitor 面板改读 interaction_log 之后没有任何调用方；api_requests 表本身仍在（llm_complete 写入、会话统计与日志保留策略在读），因此只退通道不退表
+  - db::delete_session_meta 与 api/db::clear_interactions 一并删除：命令注册齐全但前端没有入口，面板的“清除”走 clear_logs
+  - 未引用导出清空（审计脚本现为 total: 0）：FILE_EXTENSIONS、getActiveLocale、LegacyCliAgent、AgentMbusDeliveredEvent
+  - docs/gen.py 的实测计数同步为 92 命令 · 48 事件（删掉 6 个命令后的真实值），architecture.html 重新生成
+  - 验证：tsc 无错、vite build 通过（主 chunk 1 908.71 kB / gzip 601.10 kB 不变）、cargo check --all-targets 零 warning、cargo test 389 passed / 1 ignored
+- **build**: trim the main chunk and refresh stale docs after the merge ([`38851b1`](https://github.com/xlbbb-cn/ai-chat/commit/38851b1bf2989baf1c2b87e86296a67cb672ace4))
+  - highlight.js 改走 lib/common，再补 12 个常用语法（dockerfile、powershell、nginx、cmake、dart、elixir 等）；主 chunk 2692 kB → 1909 kB，gzip 851 kB → 601 kB
+  - 删掉无引用的字体资源：.eot/.svg/.ttf、重复的 RazerF5.ttf、Web Fonts Demo.html、react.svg，共 1.39 MB；@font-face 只留 woff2/woff
+  - .gitignore 里的 docs\store\screenshots/ 用了反斜杠，任何平台都匹配不到，改成正斜杠
+  - CHANGELOG 用 gen-changelog.cjs 补齐 v2.9.6 → v3.2.0 六个版本（共 150 行）
+  - docs/gen.py 仍写着旧名 AI Chat 与 GPL-2.0-only，重跑会把 architecture.html 改回旧值；同步为 Rabbit Chat Studio / MIT，并按源码实测刷新计数
+
+### 其它
+
+- gitignore ([`b81e932`](https://github.com/xlbbb-cn/ai-chat/commit/b81e9320cac9efea3e32c6dc08fab2438c4b46db))
+
+**完整对比**：[v3.2.0...v3.3.0](https://github.com/xlbbb-cn/ai-chat/compare/v3.2.0...v3.3.0)
+
 ## [v3.2.0](https://github.com/xlbbb-cn/ai-chat/releases/tag/v3.2.0) — 2026-11-12
 
 ### 新增
