@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { listInteractions, getInteraction, clearLogs, compactDatabase, getSessionStats } from "../api";
 import type { InteractionLogRecord, InteractionLogDetail, SessionStats } from "../api";
 import { useI18n } from "../i18n";
@@ -8,6 +8,11 @@ import "./MonitorPanel.css";
 
 interface Props {
     sessionId: string;
+    /**
+     * A turn is streaming. The log rows are written by the streaming thread, so
+     * the panel shows a "wait for the turn" notice instead of reading them.
+     */
+    busy?: boolean;
     onClose: () => void;
 }
 
@@ -147,51 +152,64 @@ function ReportTile({
     );
 }
 
-export function MonitorPanel({ sessionId, onClose }: Props) {
+export function MonitorPanel({ sessionId, busy = false, onClose }: Props) {
     const { t, locale } = useI18n();
     const [interactions, setInteractions] = useState<InteractionLogRecord[]>([]);
     const [selectedInteraction, setSelectedInteraction] = useState<InteractionLogDetail | null>(null);
     const [stats, setStats] = useState<SessionStats | null>(null);
     const [loading, setLoading] = useState(false);
-    const [autoRefresh, setAutoRefresh] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
+    /** Bumped by the refresh button to re-run the load effect. */
+    const [reloadToken, setReloadToken] = useState(0);
     const [maintenance, setMaintenance] = useState<"idle" | "clearing" | "compacting">("idle");
     const [status, setStatus] = useState("");
+    /** Set while a turn runs, so the load that follows it can wait a beat. */
+    const afterTurn = useRef(false);
 
-    // Load interactions + the session report. The report is aggregated in SQL
-    // (`get_session_stats`), so it stays exact even though the list is capped.
+    // Read the log on open, after a turn ends and on demand — never while a
+    // turn is running: that is when the rows are being written, and a
+    // half-written session only costs the writer its lock. The two commands
+    // are independent, so a failing report never blanks the list.
     useEffect(() => {
+        if (busy) {
+            afterTurn.current = true;
+            setLoading(false);
+            return;
+        }
         let cancelled = false;
+        // A finished turn writes its last rows just before `busy` flips, so a
+        // load that follows one gives the writer a beat to land them.
+        const delay = afterTurn.current ? 500 : 0;
+        afterTurn.current = false;
 
         const load = async () => {
-            try {
-                setLoading(true);
-                const [rows, sessionStats] = await Promise.all([
-                    listInteractions(sessionId),
-                    getSessionStats(sessionId),
-                ]);
-                if (cancelled) return;
-                setInteractions(rows);
-                setStats(sessionStats);
-            } catch (err) {
-                console.error("Failed to load interactions:", err);
-            } finally {
-                if (!cancelled) setLoading(false);
+            setLoading(true);
+            const [rowsResult, statsResult] = await Promise.allSettled([
+                listInteractions(sessionId),
+                getSessionStats(sessionId),
+            ]);
+            if (cancelled) return;
+            if (rowsResult.status === "fulfilled") {
+                setInteractions(rowsResult.value);
+                setLoadError(null);
+            } else {
+                console.error("Failed to load interactions:", rowsResult.reason);
+                setLoadError(String(rowsResult.reason));
             }
+            if (statsResult.status === "fulfilled") {
+                setStats(statsResult.value);
+            } else {
+                console.error("Failed to load the session report:", statsResult.reason);
+            }
+            setLoading(false);
         };
 
-        load();
-
-        if (autoRefresh) {
-            const interval = setInterval(load, 2000);
-            return () => {
-                cancelled = true;
-                clearInterval(interval);
-            };
-        }
+        const timer = setTimeout(load, delay);
         return () => {
             cancelled = true;
+            clearTimeout(timer);
         };
-    }, [sessionId, autoRefresh]);
+    }, [sessionId, busy, reloadToken]);
 
     // Load selected interaction detail
     const handleSelectInteraction = async (record: InteractionLogRecord) => {
@@ -231,6 +249,7 @@ export function MonitorPanel({ sessionId, onClose }: Props) {
             const removed = await clearLogs();
             setSelectedInteraction(null);
             setInteractions([]);
+            setLoadError(null);
             setStats(await getSessionStats(sessionId));
             setStatus(t("monitor.removed", { count: removed }));
         } catch (err) {
@@ -286,14 +305,15 @@ export function MonitorPanel({ sessionId, onClose }: Props) {
                     <h2>{t("monitor.title")}</h2>
                     <div className="monitor-controls">
                         {status && <span className="monitor-status">{status}</span>}
-                        <label className="monitor-checkbox">
-                            <input
-                                type="checkbox"
-                                checked={autoRefresh}
-                                onChange={(e) => setAutoRefresh(e.target.checked)}
-                            />
-                            <span>{t("monitor.autoRefresh")}</span>
-                        </label>
+                        <button
+                            type="button"
+                            className="monitor-action-btn"
+                            onClick={() => setReloadToken((token) => token + 1)}
+                            disabled={busy || loading || maintenance !== "idle"}
+                            title={t("monitor.refresh")}
+                        >
+                            {t("monitor.refresh")}
+                        </button>
                         <button
                             type="button"
                             className="monitor-action-btn"
@@ -339,8 +359,12 @@ export function MonitorPanel({ sessionId, onClose }: Props) {
                                 )}
                             </div>
                             <div className="monitor-list">
-                                {interactions.length === 0 ? (
-                                    <div className="monitor-empty">{t("monitor.noInteractions")}</div>
+                                {busy ? (
+                                    <div className="monitor-empty">{t("monitor.waitForTurn")}</div>
+                                ) : interactions.length === 0 ? (
+                                    <div className="monitor-empty">
+                                        {loadError ? t("monitor.loadFailed") : t("monitor.noInteractions")}
+                                    </div>
                                 ) : (
                                     interactions.map((interaction) => {
                                         const rowCache =
@@ -464,122 +488,124 @@ export function MonitorPanel({ sessionId, onClose }: Props) {
                         </div>
                     </div>
 
-                    {/* Bottom third: analysis report of this session */}
-                    <section className="monitor-report" aria-label={t("monitor.report.aria")}>
-                        <div className="monitor-report-header">
-                            <h3>{t("monitor.report.title")}</h3>
-                            {!reportEmpty && <span className="monitor-report-hint">{t("monitor.report.hint")}</span>}
-                        </div>
-
-                        {reportEmpty || !stats ? (
-                            <div className="monitor-report-empty">{t("monitor.report.empty")}</div>
-                        ) : (
-                            <div className="monitor-report-body">
-                                <div className="monitor-report-tiles">
-                                    <ReportTile
-                                        label={t("monitor.report.totalTokens")}
-                                        value={formatTokens(stats.prompt_tokens + stats.completion_tokens)}
-                                        detail={t("monitor.report.tokenSplit", {
-                                            prompt: formatTokens(stats.prompt_tokens),
-                                            completion: formatTokens(stats.completion_tokens),
-                                        })}
-                                    />
-                                    <ReportTile
-                                        label={t("monitor.report.cacheHit")}
-                                        value={formatTokens(stats.hit_tokens)}
-                                        meter={cacheRate}
-                                        detail={
-                                            stats.cache_reported_requests > 0
-                                                ? t("monitor.report.cacheReported", {
-                                                    hits: stats.cache_hit_requests,
-                                                    reported: stats.cache_reported_requests,
-                                                })
-                                                : t("monitor.report.noCacheData")
-                                        }
-                                    />
-                                    <ReportTile
-                                        label={t("monitor.report.cacheMiss")}
-                                        value={formatTokens(stats.miss_tokens)}
-                                        meter={100 - cacheRate}
-                                        detail={percent(stats.miss_tokens, stats.prompt_tokens)}
-                                    />
-                                    <ReportTile
-                                        label={t("monitor.report.context")}
-                                        value={contextPercent === null ? "—" : `${contextPercent}%`}
-                                        meter={contextPercent ?? 0}
-                                        tone={contextPercent !== null && contextPercent >= 85 ? "danger" : "accent"}
-                                        detail={
-                                            contextPercent === null
-                                                ? t("monitor.report.contextUnknown")
-                                                : t("monitor.report.contextDetail", {
-                                                    used: formatTokens(stats.context_tokens),
-                                                    window: formatTokens(stats.context_window),
-                                                })
-                                        }
-                                    />
-                                    <ReportTile
-                                        label={t("monitor.report.requests")}
-                                        value={String(stats.requests)}
-                                        detail={t("monitor.report.requestDetail", {
-                                            failed: stats.failed_requests + stats.llm_errors,
-                                            avg: averageDuration(stats.total_request_ms, stats.requests),
-                                        })}
-                                    />
-                                    <ReportTile
-                                        label={t("monitor.report.reasoning")}
-                                        value={
-                                            stats.reasoning_requests > 0
-                                                ? averageDuration(stats.reasoning_ms_total, stats.reasoning_requests)
-                                                : "—"
-                                        }
-                                        detail={
-                                            stats.reasoning_requests > 0
-                                                ? t("monitor.report.reasoningDetail", {
-                                                    count: stats.reasoning_requests,
-                                                    total: formatDuration(stats.reasoning_ms_total),
-                                                    ttft: averageDuration(
-                                                        stats.first_token_ms_total,
-                                                        stats.first_token_requests
-                                                    ),
-                                                })
-                                                : t("monitor.report.reasoningNone")
-                                        }
-                                    />
-                                    <ReportTile
-                                        label={t("monitor.report.toolCalls")}
-                                        value={String(stats.tool_calls)}
-                                        detail={t("monitor.report.toolDetail", {
-                                            failed: stats.tool_failures,
-                                            avg: averageDuration(stats.total_tool_ms, stats.tool_calls),
-                                        })}
-                                    />
-                                </div>
-
-                                <div className="monitor-report-tools">
-                                    <h4>{t("monitor.report.toolRanking")}</h4>
-                                    {stats.tools.length === 0 ? (
-                                        <p className="monitor-report-none">{t("monitor.report.noTools")}</p>
-                                    ) : (
-                                        <ul className="report-tool-list">
-                                            {stats.tools.map((tool) => (
-                                                <li className="report-tool-row" key={tool.name}>
-                                                    <span className="report-tool-name">{tool.name}</span>
-                                                    <span className="report-tool-calls">
-                                                        {t("monitor.report.toolRow", { count: tool.calls })}
-                                                    </span>
-                                                    {tool.failures > 0 && (
-                                                        <span className="report-tool-failures">
-                                                            {t("monitor.report.toolFailures", { count: tool.failures })}
-                                                        </span>
-                                                    )}
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    )}
-                                </div>
+                    {/* Bottom third: analysis report of this session (absent while a turn runs) */}
+                    {!busy && (
+                        <section className="monitor-report" aria-label={t("monitor.report.aria")}>
+                            <div className="monitor-report-header">
+                                <h3>{t("monitor.report.title")}</h3>
+                                {!reportEmpty && <span className="monitor-report-hint">{t("monitor.report.hint")}</span>}
                             </div>
-                        )}
-                    </section>
+
+                            {reportEmpty || !stats ? (
+                                <div className="monitor-report-empty">{t("monitor.report.empty")}</div>
+                            ) : (
+                                <div className="monitor-report-body">
+                                    <div className="monitor-report-tiles">
+                                        <ReportTile
+                                            label={t("monitor.report.totalTokens")}
+                                            value={formatTokens(stats.prompt_tokens + stats.completion_tokens)}
+                                            detail={t("monitor.report.tokenSplit", {
+                                                prompt: formatTokens(stats.prompt_tokens),
+                                                completion: formatTokens(stats.completion_tokens),
+                                            })}
+                                        />
+                                        <ReportTile
+                                            label={t("monitor.report.cacheHit")}
+                                            value={formatTokens(stats.hit_tokens)}
+                                            meter={cacheRate}
+                                            detail={
+                                                stats.cache_reported_requests > 0
+                                                    ? t("monitor.report.cacheReported", {
+                                                        hits: stats.cache_hit_requests,
+                                                        reported: stats.cache_reported_requests,
+                                                    })
+                                                    : t("monitor.report.noCacheData")
+                                            }
+                                        />
+                                        <ReportTile
+                                            label={t("monitor.report.cacheMiss")}
+                                            value={formatTokens(stats.miss_tokens)}
+                                            meter={100 - cacheRate}
+                                            detail={percent(stats.miss_tokens, stats.prompt_tokens)}
+                                        />
+                                        <ReportTile
+                                            label={t("monitor.report.context")}
+                                            value={contextPercent === null ? "—" : `${contextPercent}%`}
+                                            meter={contextPercent ?? 0}
+                                            tone={contextPercent !== null && contextPercent >= 85 ? "danger" : "accent"}
+                                            detail={
+                                                contextPercent === null
+                                                    ? t("monitor.report.contextUnknown")
+                                                    : t("monitor.report.contextDetail", {
+                                                        used: formatTokens(stats.context_tokens),
+                                                        window: formatTokens(stats.context_window),
+                                                    })
+                                            }
+                                        />
+                                        <ReportTile
+                                            label={t("monitor.report.requests")}
+                                            value={String(stats.requests)}
+                                            detail={t("monitor.report.requestDetail", {
+                                                failed: stats.failed_requests + stats.llm_errors,
+                                                avg: averageDuration(stats.total_request_ms, stats.requests),
+                                            })}
+                                        />
+                                        <ReportTile
+                                            label={t("monitor.report.reasoning")}
+                                            value={
+                                                stats.reasoning_requests > 0
+                                                    ? averageDuration(stats.reasoning_ms_total, stats.reasoning_requests)
+                                                    : "—"
+                                            }
+                                            detail={
+                                                stats.reasoning_requests > 0
+                                                    ? t("monitor.report.reasoningDetail", {
+                                                        count: stats.reasoning_requests,
+                                                        total: formatDuration(stats.reasoning_ms_total),
+                                                        ttft: averageDuration(
+                                                            stats.first_token_ms_total,
+                                                            stats.first_token_requests
+                                                        ),
+                                                    })
+                                                    : t("monitor.report.reasoningNone")
+                                            }
+                                        />
+                                        <ReportTile
+                                            label={t("monitor.report.toolCalls")}
+                                            value={String(stats.tool_calls)}
+                                            detail={t("monitor.report.toolDetail", {
+                                                failed: stats.tool_failures,
+                                                avg: averageDuration(stats.total_tool_ms, stats.tool_calls),
+                                            })}
+                                        />
+                                    </div>
+
+                                    <div className="monitor-report-tools">
+                                        <h4>{t("monitor.report.toolRanking")}</h4>
+                                        {stats.tools.length === 0 ? (
+                                            <p className="monitor-report-none">{t("monitor.report.noTools")}</p>
+                                        ) : (
+                                            <ul className="report-tool-list">
+                                                {stats.tools.map((tool) => (
+                                                    <li className="report-tool-row" key={tool.name}>
+                                                        <span className="report-tool-name">{tool.name}</span>
+                                                        <span className="report-tool-calls">
+                                                            {t("monitor.report.toolRow", { count: tool.calls })}
+                                                        </span>
+                                                        {tool.failures > 0 && (
+                                                            <span className="report-tool-failures">
+                                                                {t("monitor.report.toolFailures", { count: tool.failures })}
+                                                            </span>
+                                                        )}
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </section>
+                    )}
                 </div>
             </div>
         </div>

@@ -20,6 +20,8 @@ interface Props {
   onPalettePreview?: (palette: Palette) => void;
   onGlassPreview?: (glass: GlassEffect) => void;
   sessionId?: string;
+  /** A turn is streaming — the interaction monitor waits for it to finish. */
+  turnActive?: boolean;
 }
 
 /**
@@ -152,7 +154,7 @@ function formatTokenCount(tokens: number): string {
   return String(tokens);
 }
 
-export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalettePreview, onGlassPreview, sessionId }: Props) {
+export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalettePreview, onGlassPreview, sessionId, turnActive = false }: Props) {
   const { t, locale, setLocale } = useI18n();
   const [config, setConfig] = useState<AppConfig>(defaultConfig);
   const [saving, setSaving] = useState(false);
@@ -1252,7 +1254,7 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
 
       {showMonitor && (
         <Portal>
-          <MonitorPanel sessionId={sessionId!} onClose={() => setShowMonitor(false)} />
+          <MonitorPanel sessionId={sessionId!} busy={turnActive} onClose={() => setShowMonitor(false)} />
         </Portal>
       )}
 

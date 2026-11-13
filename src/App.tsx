@@ -4069,6 +4069,7 @@ export default function App() {
           <div className="settings-overlay">
             <SettingsPanel
               sessionId={sessionId}
+              turnActive={streaming}
               onClose={closeSidebar}
               onThemePreview={(theme) => {
                 themeRef.current = theme ?? "auto";

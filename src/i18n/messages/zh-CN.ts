@@ -836,7 +836,9 @@ const zhCN: Messages = {
     monitor: {
         aria: "交互监视器",
         title: "交互监视器",
-        autoRefresh: "自动刷新",
+        refresh: "刷新",
+        waitForTurn: "对话进行中 —— 结束后可查看交互记录。",
+        loadFailed: "交互记录加载失败",
         clearLogs: "清空日志",
         clearing: "清空中…",
         clearTitle: "删除所有请求与交互日志（保留聊天历史）",

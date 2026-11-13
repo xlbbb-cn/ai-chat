@@ -1014,6 +1014,13 @@ used to be was the last hardcoded surface in the system.
   stores NULL, so the average is never diluted by non-thinking models and the
   tile reads `—` instead of `0.0s`. `first_token_ms` (any first delta) is its
   detail line; both ride along in the `llm_api` interaction metadata.
+- **Read after the turn, never during it.** The log is read when the dialog
+  opens, again when a turn ends and on demand (`Refresh` in the controls row) —
+  not on a timer: a running turn is still writing those rows, so it would read a
+  half-written session while holding the writer's connection. While a turn runs
+  the list pane says so in one line and the report third stays hidden. Each row
+  carries a 150-character preview per side, cut in SQL (`substr`), so a
+  tool-heavy session transfers kilobytes instead of its whole payload.
 - **Contrast picks** (measured over all six palette × theme combinations, 11px
   text ≥ 4.5:1): the accent wash of a selected row costs ~1.5 steps from meta
   text, so `.selected` steps its badge / actor / time / preview up to

@@ -1053,49 +1053,75 @@ pub fn save_interaction_log(
     Ok(())
 }
 
-#[tauri::command]
-pub fn list_interactions(
-    session_id: String,
-    state: tauri::State<'_, crate::AppState>,
+/// Preview width of a list row. The Monitor shows one clamped line per side;
+/// `get_interaction` carries the full payload for the detail pane.
+const PREVIEW_CHARS: i64 = 150;
+/// Error text shown under a row (the full text stays in the detail view).
+const ERROR_PREVIEW_CHARS: i64 = 500;
+/// Rows per session in the Monitor list.
+const INTERACTION_PAGE: i64 = 500;
+
+/// The Monitor's list query.
+///
+/// The previews are cut **in SQL** (`substr` counts characters for TEXT, so CJK
+/// payloads are never split): reading the whole `input_data` / `output_data`
+/// first and truncating in Rust pulled up to tens of megabytes per session and
+/// held the shared connection for the whole copy.
+pub fn query_interactions(
+    conn: &rusqlite::Connection,
+    session_id: &str,
 ) -> Result<Vec<InteractionLogRecord>, String> {
-    let db = state.db.lock().unwrap();
-    let mut stmt = db
+    let mut stmt = conn
         .prepare(
             "SELECT id, COALESCE(session_id,''), COALESCE(interaction_type,''), \
              COALESCE(timestamp,''), COALESCE(actor,''), COALESCE(action_name,''), \
-             COALESCE(error_message,''), COALESCE(duration_ms,0), \
-             COALESCE(input_data,''), COALESCE(output_data,''), COALESCE(metadata,'{}') \
+             substr(COALESCE(error_message,''),1,?2), COALESCE(duration_ms,0), \
+             substr(COALESCE(input_data,''),1,?3), substr(COALESCE(output_data,''),1,?3), \
+             substr(COALESCE(metadata,'{}'),1,4000) \
              FROM interaction_log \
              WHERE session_id = ?1 \
-             ORDER BY id DESC LIMIT 500",
+             ORDER BY id DESC LIMIT ?4",
         )
         .map_err(|e| e.to_string())?;
 
     let records = stmt
-        .query_map(rusqlite::params![session_id], |row| {
-            let input: String = row.get(8)?;
-            let output: String = row.get(9)?;
-            let input_preview: String = input.chars().take(150).collect();
-            let output_preview: String = output.chars().take(150).collect();
-            Ok(InteractionLogRecord {
-                id: row.get(0)?,
-                session_id: row.get(1)?,
-                interaction_type: row.get(2)?,
-                timestamp: row.get(3)?,
-                actor: row.get(4)?,
-                action_name: row.get(5)?,
-                error_message: row.get(6)?,
-                duration_ms: row.get(7)?,
-                input_preview,
-                output_preview,
-                metadata: row.get(10)?,
-            })
-        })
+        .query_map(
+            rusqlite::params![
+                session_id,
+                ERROR_PREVIEW_CHARS,
+                PREVIEW_CHARS,
+                INTERACTION_PAGE
+            ],
+            |row| {
+                Ok(InteractionLogRecord {
+                    id: row.get(0)?,
+                    session_id: row.get(1)?,
+                    interaction_type: row.get(2)?,
+                    timestamp: row.get(3)?,
+                    actor: row.get(4)?,
+                    action_name: row.get(5)?,
+                    error_message: row.get(6)?,
+                    duration_ms: row.get(7)?,
+                    input_preview: row.get(8)?,
+                    output_preview: row.get(9)?,
+                    metadata: row.get(10)?,
+                })
+            },
+        )
         .map_err(|e| e.to_string())?
         .filter_map(Result::ok)
         .collect();
 
     Ok(records)
+}
+
+#[tauri::command]
+pub fn list_interactions(
+    session_id: String,
+    state: tauri::State<'_, crate::AppState>,
+) -> Result<Vec<InteractionLogRecord>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    query_interactions(&db, &session_id)
 }
 
 #[tauri::command]
@@ -1875,5 +1901,48 @@ mod tests {
         // Copying a session without roles leaves the target untouched.
         copy_embedded_roles(&conn, "plain", "other").unwrap();
         assert!(get_embedded_roles(&conn, "other").is_empty());
+    }
+
+    /// The Monitor must transfer a bounded preview per row, not the payload:
+    /// the previews are cut in SQL, so a huge (CJK) body can neither bloat the
+    /// query result nor be split mid-character.
+    #[test]
+    fn interaction_list_carries_only_a_bounded_preview() {
+        let conn = test_conn();
+        conn.execute(
+            "CREATE TABLE interaction_log (\
+                id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, interaction_type TEXT NOT NULL, \
+                timestamp DATETIME, actor TEXT, action_name TEXT, input_data TEXT, \
+                output_data TEXT, error_message TEXT, duration_ms INTEGER DEFAULT 0, metadata TEXT)",
+            [],
+        )
+        .unwrap();
+
+        let body = "工".repeat(10_000);
+        conn.execute(
+            "INSERT INTO interaction_log \
+             (session_id, interaction_type, timestamp, actor, action_name, input_data, \
+              output_data, error_message, duration_ms, metadata) \
+             VALUES ('s', 'tool_output', datetime('now'), 'tool', 'read_file', ?1, ?1, ?1, 12, '{}')",
+            rusqlite::params![body],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO interaction_log \
+             (session_id, interaction_type, actor, action_name, input_data, output_data) \
+             VALUES ('other', 'llm_api', 'assistant', 'chat_completion', 'x', 'y')",
+            [],
+        )
+        .unwrap();
+
+        let rows = query_interactions(&conn, "s").unwrap();
+        assert_eq!(rows.len(), 1, "only this session's rows");
+        let row = &rows[0];
+        assert_eq!(row.input_preview.chars().count(), 150);
+        assert_eq!(row.output_preview.chars().count(), 150);
+        assert_eq!(row.error_message.chars().count(), 500);
+        assert!(row.input_preview.chars().all(|c| c == '工'), "no split character");
+        assert_eq!(row.action_name, "read_file");
+        assert_eq!(row.duration_ms, 12);
     }
 }

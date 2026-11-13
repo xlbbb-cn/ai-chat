@@ -68,23 +68,6 @@
     gap: 10px;
 }
 
-.monitor-checkbox {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--c-muted);
-    font-size: 12px;
-    cursor: pointer;
-    user-select: none;
-}
-
-.monitor-checkbox input {
-    width: 14px;
-    height: 14px;
-    cursor: pointer;
-    accent-color: var(--c-accent);
-}
-
 /* Maintenance actions (clear logs / compact database) + their result text. */
 .monitor-status {
     display: inline-flex;

@@ -836,7 +836,9 @@ const zhTW: Messages = {
     monitor: {
         aria: "互動監視器",
         title: "互動監視器",
-        autoRefresh: "自動重新整理",
+        refresh: "重新整理",
+        waitForTurn: "對話進行中 —— 結束後可檢視互動記錄。",
+        loadFailed: "互動記錄載入失敗",
         clearLogs: "清除日誌",
         clearing: "清除中…",
         clearTitle: "刪除所有請求與互動日誌（保留聊天歷史）",

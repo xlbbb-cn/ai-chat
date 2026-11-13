@@ -892,7 +892,9 @@ const en = {
     monitor: {
         aria: "Interaction Monitor",
         title: "Interaction Monitor",
-        autoRefresh: "Auto Refresh",
+        refresh: "Refresh",
+        waitForTurn: "A turn is running — the interaction log is readable once it finishes.",
+        loadFailed: "Failed to load the interaction log",
         clearLogs: "Clear logs",
         clearing: "Clearing…",
         clearTitle: "Delete all request and interaction logs (chat history is kept)",
