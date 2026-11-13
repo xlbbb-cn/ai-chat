@@ -248,6 +248,37 @@ fn roster_ids(ids: &[&str]) -> Vec<String> {
     ids.iter().map(|id| id.to_string()).collect()
 }
 
+#[test]
+fn planner_model_defaults_to_the_main_model_and_wins_when_set() {
+    let mut orchestration = AgentOrchestration::default();
+    // Before the field existed every planner call ran on the main chat model.
+    assert_eq!(orchestration.planner_model_or("gpt-main"), "gpt-main");
+
+    orchestration.planner_model = Some("cheap-planner".to_string());
+    assert_eq!(orchestration.planner_model_or("gpt-main"), "cheap-planner");
+}
+
+#[test]
+fn planner_model_is_trimmed_and_blank_means_inherit() {
+    let mut config: AgentsConfig = serde_json::from_str(
+        r#"{"version":5,"orchestration":{"planner_model":"  cheap-planner  "}}"#,
+    )
+    .expect("config parses");
+    normalize_config(&mut config);
+    assert_eq!(
+        config.orchestration.planner_model.as_deref(),
+        Some("cheap-planner")
+    );
+
+    // Blank (a hand-edited file, or a form that sent "") inherits the main
+    // model instead of pinning an empty id.
+    let mut config: AgentsConfig =
+        serde_json::from_str(r#"{"version":5,"orchestration":{"planner_model":"   "}}"#)
+            .expect("config parses");
+    normalize_config(&mut config);
+    assert_eq!(config.orchestration.planner_model, None);
+}
+
 fn expect_mission(decision: PlanDecision) -> TaskPlan {
     match decision {
         PlanDecision::Mission(plan) => plan,

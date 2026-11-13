@@ -630,6 +630,10 @@ const zhCN: Messages = {
         orchestration: "编排设置",
         enableMode: "自动编排",
         autoConfigure: "智能选择 agent",
+        plannerModel: "规划器模型",
+        plannerModelInherit: "跟随主模型（{model}）",
+        plannerModelHint:
+            "用于 agent 选择、任务计划与 mbus 监督。留空则跟随主对话模型；子 agent 各自的模型不受影响。",
         mbus: "任务消息总线（mbus）",
         mbusHint: "让规划器在任务运行期间监控子 agent，并允许 agent 之间互相发消息；会增加规划器模型调用。",
         mbusPairLimit: "每对 agent 的消息上限",

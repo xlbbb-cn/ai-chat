@@ -630,6 +630,10 @@ const zhTW: Messages = {
         orchestration: "協調設定",
         enableMode: "自動協調",
         autoConfigure: "智慧選擇 agent",
+        plannerModel: "規劃器模型",
+        plannerModelInherit: "跟隨主模型（{model}）",
+        plannerModelHint:
+            "用於 agent 選擇、任務計畫與 mbus 監督。留空則跟隨主對談模型；子 agent 各自的模型不受影響。",
         mbus: "任務訊息匯流排（mbus）",
         mbusHint: "讓規劃器在任務執行期間監控子 agent，並允許 agent 之間互相傳訊息；會增加規劃器模型呼叫。",
         mbusPairLimit: "每對 agent 的訊息上限",
