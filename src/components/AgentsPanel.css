@@ -32,11 +32,15 @@
     color: var(--c-text);
 }
 
-/* The execution-mode picker is the shared dropdown primitive; it only has to
-   stop filling the row the way a stacked field would. */
-.orch-select {
+/* The execution-mode picker is the shared dropdown primitive, which asks for
+   `width: 100%` and is emitted after this sheet: the extra `.orch-row` class is
+   what makes the reset win without `!important`. 200px is the ceiling, not the
+   width — a longer mode name truncates in `.dropdown-value` instead of pushing
+   the row's `<span>` label onto a second line. */
+.orch-row .orch-select {
     flex: 0 0 auto;
     width: auto;
+    max-width: 200px;
 }
 
 .orch-number {
