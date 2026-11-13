@@ -323,6 +323,16 @@ impl Default for AgentsConfig {
 /// Normalizes a loaded config in place: agent types are canonicalized and any
 /// legacy standalone CLI agents become `cli`-type agents.
 pub fn normalize_config(config: &mut AgentsConfig) {
+    // The planner model is a model id, not free text: trim it, and treat an
+    // empty field as "inherit the main model" so the file never stores `""`
+    // (the panel's empty option saves `null`, a hand-edited field may not).
+    config.orchestration.planner_model = config
+        .orchestration
+        .planner_model
+        .take()
+        .map(|model| model.trim().to_string())
+        .filter(|model| !model.is_empty());
+
     // v3 turned the one-call agent selection (`auto_configure`) on by default.
     // Older files always carried an explicit `false` because the panel saves the
     // whole orchestration object, and the old default was off — adopt the new
@@ -428,6 +438,12 @@ pub struct AgentOrchestration {
     /// off means every enabled agent takes part in the mission.
     #[serde(default = "default_true")]
     pub auto_configure: bool,
+    /// Model the planner runs on: the one-call agent selection, the task plan
+    /// and the mbus supervisor. Empty inherits `config.model`, the main chat
+    /// model — what every mission ran on before this field existed. Sub-agents
+    /// keep their own `model`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planner_model: Option<String>,
     #[serde(default = "default_max_concurrent")]
     pub max_concurrent: usize,
     #[serde(default = "default_mode")]
@@ -459,11 +475,21 @@ impl Default for AgentOrchestration {
         Self {
             use_agents: false,
             auto_configure: true,
+            planner_model: None,
             max_concurrent: 3,
             mode: "parallel".to_string(),
             mbus_enabled: true,
             mbus_pair_limit: mbus::DEFAULT_PAIR_LIMIT,
         }
+    }
+}
+
+impl AgentOrchestration {
+    /// Model every planner call runs on: the configured pick, otherwise the
+    /// main chat model. Selection, the task plan and mbus supervision all
+    /// resolve here, so the three can never disagree.
+    pub fn planner_model_or<'a>(&'a self, main_model: &'a str) -> &'a str {
+        self.planner_model.as_deref().unwrap_or(main_model)
     }
 }
 

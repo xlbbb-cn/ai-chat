@@ -282,6 +282,7 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
   const [orchestration, setOrchestration] = useState<AgentOrchestration>({
     use_agents: false,
     auto_configure: true,
+    planner_model: null,
     max_concurrent: 3,
     mode: "parallel",
     mbus_enabled: true,
@@ -301,6 +302,16 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
   const [modelContextLengths, setModelContextLengths] = useState<Record<string, number>>({});
   /** Model inherited when an agent leaves its model field empty. */
   const [fallbackModel, setFallbackModel] = useState("");
+  /** Models the planner picker offers: the config catalogue plus the main model. */
+  const [plannerModels, setPlannerModels] = useState<string[]>([]);
+  /**
+   * Rows for the planner picker: the configured id first (it may no longer be
+   * in the catalogue after a provider change), then every known model. `""` is
+   * the inherit row, so blank entries are dropped here.
+   */
+  const plannerModelOptions = Array.from(
+    new Set([orchestration.planner_model?.trim() ?? "", ...plannerModels].filter(Boolean)),
+  );
   /** In-progress edit, scoped to the model id it was typed for. */
   const [contextEdit, setContextEdit] = useState<{ model: string; value: string } | null>(null);
 
@@ -318,6 +329,11 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
       .then((cfg) => {
         setModelContextLengths(cfg.model_context_lengths ?? {});
         setFallbackModel(cfg.model);
+        // The same list the composer offers, and the main model even when the
+        // catalogue is empty, so the picker always has something to show.
+        setPlannerModels(
+          Array.from(new Set([...(cfg.model_catalog ?? []), cfg.model].filter(Boolean))),
+        );
       })
       .catch(console.error);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1202,6 +1218,31 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
                 <span className="toggle-switch-slider" />
               </label>
             </div>
+
+            <div className="orch-row">
+              <span>{t("agents.plannerModel")}</span>
+              <Dropdown
+                className="orch-select"
+                label={t("agents.plannerModel")}
+                compact
+                value={orchestration.planner_model ?? ""}
+                onChange={(model) =>
+                  // Empty means inherit; the backend normalizes the same way,
+                  // so a blank pick and an absent field cannot disagree.
+                  handleSaveOrchestration({ ...orchestration, planner_model: model || null })
+                }
+                options={[
+                  {
+                    value: "",
+                    label: t("agents.plannerModelInherit", {
+                      model: fallbackModel.trim() || "…",
+                    }),
+                  },
+                  ...plannerModelOptions.map((model) => ({ value: model, label: model })),
+                ]}
+              />
+            </div>
+            <div className="agent-field-hint">{t("agents.plannerModelHint")}</div>
 
             <div className="orch-row">
               <span>{t("agents.mbus")}</span>

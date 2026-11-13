@@ -769,6 +769,12 @@ export interface AgentMention {
 export interface AgentOrchestration {
   use_agents: boolean;
   auto_configure: boolean;
+  /**
+   * Model the planner runs on: the agent selection, the task plan and the mbus
+   * supervisor. Missing / `null` follows the main chat model; sub-agents keep
+   * their own `model`.
+   */
+  planner_model?: string | null;
   max_concurrent: number;
   mode: "parallel" | "sequential";
   /** Mission message bus + planner supervision (default true). */

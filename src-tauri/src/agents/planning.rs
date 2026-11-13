@@ -490,8 +490,12 @@ pub async fn orchestrate(
         "{}/chat/completions",
         config.api_base_url.trim_end_matches('/')
     );
-    let model = config.model.clone();
     let orchestration = agents_config.orchestration.clone();
+    // The planner may run on its own model (usually a smaller, cheaper one). An
+    // explicit pick in the Agents panel wins; an empty field inherits the main
+    // chat model, which is what every mission used before the field existed.
+    // Selection, the task plan and the mbus supervisor all use this value.
+    let model = orchestration.planner_model_or(&config.model).to_string();
     // Same headers as the main chat: configured conversation-id header plus
     // the user's custom headers, so planning calls reach the same gateway.
     let headers = upstream_request_headers(config, session_id);

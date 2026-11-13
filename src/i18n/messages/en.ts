@@ -682,6 +682,10 @@ const en = {
         orchestration: "Orchestration settings",
         enableMode: "Automatic orchestration",
         autoConfigure: "Smart agent selection",
+        plannerModel: "Planner model",
+        plannerModelInherit: "Follow the main model ({model})",
+        plannerModelHint:
+            "Used for agent selection, the task plan and mbus supervision. Empty follows the main chat model; each sub-agent keeps its own model.",
         mbus: "Mission bus (mbus)",
         mbusHint:
             "Let the planner supervise dispatched sub-agents and let agents exchange messages. Adds planner model calls while tasks run.",
