@@ -360,6 +360,7 @@ async fn run_activation(
                 // The planner itself reports through `agent-planner-*` events,
                 // which carry the bus's session id instead.
                 session_id: None,
+                turn_id: None,
                 reasoning_event: None,
                 emit_usage: false,
                 usage_max_tokens: None,

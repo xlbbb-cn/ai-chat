@@ -229,6 +229,16 @@ pub fn tool_output_is_error(output: &str) -> bool {
     text.starts_with('⛔') || text.starts_with("Error") || text.starts_with("MCP tool error")
 }
 
+/// Does a tool result count towards the failure budget?
+///
+/// A Stop interrupts the tool that is still running, and its result then reads
+/// like an error ("cancelled by the user"). That is not the tool failing:
+/// counting it disabled a working tool for the rest of the session at exactly
+/// the moment the user asked to stop, and the next turn was left without the
+/// tools it needed to continue the plan.
+pub fn counts_as_failure(output: &str, turn_cancelled: bool) -> bool {
+    !turn_cancelled && tool_output_is_error(output)
+}
 /// Answer for a call the turn's tool-call budget refused to run.
 pub fn budget_notice(tool: &str) -> String {
     format!(
@@ -374,5 +384,24 @@ mod tests {
         assert!(!tool_output_is_error(""));
         // Ordinary prose that merely mentions an error is not a failure.
         assert!(!tool_output_is_error("Found 2 errors in the log"));
+    }
+
+    /// A Stop interrupts running tools, and their result then reads like an
+    /// error. That must never disable the tool for the rest of the session —
+    /// it did, and the next turn had no tools left to continue the plan with.
+    #[test]
+    fn cancelled_results_never_count_as_failures() {
+        let guard = ToolFailureGuard::default();
+        let cancelled = "Error: run_shell failed: cancelled by the user";
+
+        for _ in 0..5 {
+            let failed = counts_as_failure(cancelled, true);
+            assert!(!failed);
+            assert_eq!(guard.record("s1", "run_shell", failed, 3), None);
+        }
+        assert!(guard.disabled_tools("s1").is_empty());
+
+        // The very same result outside a cancelled turn is a real failure.
+        assert!(counts_as_failure(cancelled, false));
     }
 }

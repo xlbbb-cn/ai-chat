@@ -616,6 +616,7 @@ impl ContextCompressor<'_> {
                 task_id: None,
                 // The summarizer runs with every UI event off; no session needed.
                 session_id: None,
+                turn_id: None,
                 reasoning_event: None,
                 emit_usage: false,
                 emit_tokens: false,

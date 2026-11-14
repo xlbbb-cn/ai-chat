@@ -424,6 +424,45 @@ pub fn clear_completed(app: &AppHandle, session_id: &str) -> Result<TodoListSumm
     })
 }
 
+/// Put the plan back into a resumable state after the user pressed Stop.
+///
+/// Nothing is running any more, so an `in_progress` item is a lie: the next
+/// turn — and the goal loop, which resumes an unfinished list — would believe
+/// work was still underway and resume against a state nobody is working on.
+/// Every interrupted item goes back to `pending`.
+///
+/// `None` means there was no active list or nothing to settle, so the caller
+/// only publishes a change that actually happened.
+pub fn settle_interrupted(
+    app: &AppHandle,
+    session_id: &str,
+) -> Result<Option<TodoListSummary>, String> {
+    let workspace = workspace_path(app)?;
+    lock_session(session_id, || {
+        let Some(list_id) = find_active_list_id(&workspace, session_id)? else {
+            return Ok(None);
+        };
+        let mut list = load_list(&workspace, session_id, &list_id)?;
+        let now = now_iso();
+        let mut settled = false;
+        for todo in list.todos.iter_mut() {
+            if todo.status == TodoStatus::InProgress.as_str() {
+                todo.status = TodoStatus::Pending.as_str().to_string();
+                todo.updated_at = now.clone();
+                todo.completed_at = None;
+                settled = true;
+            }
+        }
+        if !settled {
+            return Ok(None);
+        }
+        list.updated_at = now;
+        let list = apply_counts(list);
+        save_list(&workspace, &list)?;
+        Ok(Some(list))
+    })
+}
+
 // Creates a fresh list and installs it as the session's active list. Must
 // be called while holding the session lock; the marker swap is the only
 // activation step, so a previous list simply stops being active.

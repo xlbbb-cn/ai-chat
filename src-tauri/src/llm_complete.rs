@@ -297,6 +297,10 @@ pub async fn chat_completion(
     model_override: Option<String>,
     use_agents: Option<bool>,
     embedded_agent_ids: Option<Vec<String>>,
+    // Id the UI minted for this turn. Echoed on every `chat-*` event so a turn
+    // that is still winding down after Stop cannot drive the turn that
+    // replaced it.
+    turn_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     // The user's own turn always wins over the background evolution
@@ -365,6 +369,14 @@ pub async fn chat_completion(
         }
     }
 
+    let turn_id = turn_id.unwrap_or_default();
+
+    // The injection window is opened here, not inside the turn, so turn-end
+    // cleanup can tell this turn apart from a newer one the user already
+    // started in the same session.
+    let injection_window = InjectionWindow::open(&app, &state, &session_id);
+    let window_turn_id = injection_window.turn_id;
+
     let result = run_chat_turn(
         app.clone(),
         messages,
@@ -372,11 +384,13 @@ pub async fn chat_completion(
         session_id.clone(),
         model_override,
         use_agents,
+        turn_id,
+        injection_window,
         state,
     )
     .await;
 
-    end_turn_cleanup(&app, &session_id).await;
+    end_turn_cleanup(&app, &session_id, window_turn_id).await;
     drop(sleep_guard);
     result
 }

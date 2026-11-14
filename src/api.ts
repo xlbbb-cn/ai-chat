@@ -545,6 +545,21 @@ export interface StreamCallbacks {
   onAgentAggregateDone?: (taskCount: number) => void;
 }
 
+/**
+ * Fresh id for one chat turn.
+ *
+ * The backend echoes it on every `chat-*` event and the frontend drops any
+ * payload carrying a different id: a turn the user stopped can keep emitting
+ * for seconds while its tools and sub-agents unwind, and without this it ended
+ * the turn that had replaced it (empty reply, dead transcript).
+ */
+function newTurnId(): string {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  if (uuid) return uuid;
+  // Uniqueness, not cryptographic strength, is what matters here.
+  return `turn-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
 export async function chatCompletion(
   messages: {
     role: Message["role"];
@@ -567,6 +582,14 @@ export async function chatCompletion(
 ): Promise<UnlistenFn> {
   const unlisteners: UnlistenFn[] = [];
 
+  // One id for this turn: the backend echoes it on every `chat-*` payload, so
+  // a turn that is still winding down after Stop (a foreground tool returning,
+  // a sub-agent tearing down) can no longer drive *this* turn's transcript.
+  const turnId = newTurnId();
+  /** Only a payload carrying our own id belongs to this turn. */
+  const mine = (payload: { turn_id?: string } | null | undefined) =>
+    payload?.turn_id === turnId;
+
   const cleanup = () => {
     unlisteners.forEach((fn) => fn());
     unlisteners.length = 0;
@@ -587,26 +610,39 @@ export async function chatCompletion(
     cleanup();
   };
 
-  const unToken = await listen<string>("chat-token", (e) =>
-    callbacks.onToken(e.payload)
-  );
-  const unReasoning = await listen<string>("chat-reasoning-token", (e) => {
-    if (callbacks.onReasoningToken) {
-      callbacks.onReasoningToken(e.payload);
-    }
-  });
-  const unRetry = await listen<{ content: string; reasoning: string }>(
-    "chat-retry",
+  const unToken = await listen<{ turn_id?: string; text: string }>(
+    "chat-token",
     (e) => {
-      callbacks.onRetry?.(e.payload);
+      if (!mine(e.payload)) return;
+      callbacks.onToken(e.payload.text);
     },
   );
-  const unDone = await listen<void>("chat-done", () => {
+  const unReasoning = await listen<{ turn_id?: string; text: string }>(
+    "chat-reasoning-token",
+    (e) => {
+      if (!mine(e.payload)) return;
+      callbacks.onReasoningToken?.(e.payload.text);
+    },
+  );
+  const unRetry = await listen<{
+    turn_id?: string;
+    content: string;
+    reasoning: string;
+  }>("chat-retry", (e) => {
+    if (!mine(e.payload)) return;
+    callbacks.onRetry?.(e.payload);
+  });
+  const unDone = await listen<{ turn_id?: string }>("chat-done", (e) => {
+    if (!mine(e.payload)) return;
     finish();
   });
-  const unError = await listen<string>("chat-error", (e) => {
-    finish(e.payload);
-  });
+  const unError = await listen<{ turn_id?: string; error: string }>(
+    "chat-error",
+    (e) => {
+      if (!mine(e.payload)) return;
+      finish(e.payload.error || "the turn failed");
+    },
+  );
   const unTaskStart = await listen<AgentTaskEvent>("agent-task-start", (e) => {
     callbacks.onAgentTaskStart?.(e.payload);
   });
@@ -637,6 +673,7 @@ export async function chatCompletion(
     modelOverride,
     useAgents: useAgents ?? false,
     embeddedAgentIds: embeddedAgentIds ?? [],
+    turnId,
   }).catch((err: string) => {
     finish(err);
   });

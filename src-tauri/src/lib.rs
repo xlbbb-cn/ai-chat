@@ -1220,6 +1220,34 @@ fn stop_chat_completion(app: AppHandle, state: State<'_, AppState>) {
                 );
             });
         }
+        // The plan is not running any more: whatever the turn had marked
+        // `in_progress` goes back to `pending`, so the next turn (and the goal
+        // loop that resumes an unfinished list) does not believe work is still
+        // underway.
+        match tools::todos::settle_interrupted(&app, &session_id) {
+            Ok(Some(summary)) => {
+                let _ = app.emit(
+                    "todo-state",
+                    serde_json::json!({
+                        "type": "todo_state",
+                        "list_id": summary.list_id,
+                        "session_id": summary.session_id,
+                        "summary": &summary,
+                    }),
+                );
+            }
+            Ok(None) => {}
+            Err(err) => {
+                let _ = state.logger.lock().map(|logger| {
+                    logger.log(
+                        "WARN",
+                        &format!(
+                            "Stop pressed: could not settle the todo list of session {session_id}: {err}"
+                        ),
+                    );
+                });
+            }
+        }
     }
 }
 

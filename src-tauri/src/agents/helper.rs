@@ -378,6 +378,7 @@ pub(crate) async fn run_main_agent_helper_inner(
                 token_event: "agent-help-token",
                 task_id: Some(&task.id),
                 session_id: Some(session_id),
+                turn_id: None,
                 reasoning_event: None,
                 emit_usage: false,
                 emit_tokens: true,
@@ -1213,6 +1214,7 @@ pub(crate) async fn run_llm_agent_body(
                 token_event: "agent-task-token",
                 task_id: Some(&task.id),
                 session_id: Some(session_id),
+                turn_id: None,
                 // Live "thinking" line on the task row. The reasoning text is
                 // never persisted in the mission report; only the UI shows it.
                 reasoning_event: Some("agent-task-reasoning"),

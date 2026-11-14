@@ -501,6 +501,29 @@ fn wait_evt_marker_is_parsed_and_stripped() {
     );
 }
 
+/// A reply that carried only control markers is an empty answer: the turn must
+/// fail loudly instead of closing on a blank bubble the user reads as "the
+/// model never answered" (the model declaring `[goal:DONE]` alone did exactly
+/// that).
+#[test]
+fn marker_only_answers_are_empty_after_stripping() {
+    assert!(strip_control_markers(GOAL_DONE_MARKER)
+        .trim()
+        .is_empty());
+    assert!(strip_control_markers("[WAIT_EVT: the CI run]")
+        .trim()
+        .is_empty());
+    assert!(strip_control_markers(&format!("  {GOAL_DONE_MARKER}\n\n"))
+        .trim()
+        .is_empty());
+
+    // A real answer keeps its text.
+    assert_eq!(
+        strip_control_markers(&format!("Done.\n\n{GOAL_DONE_MARKER}")),
+        "Done."
+    );
+}
+
 #[test]
 fn clean_split_boundaries_exclude_tool_rounds() {
     assert!(is_clean_split_boundary(

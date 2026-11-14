@@ -33,6 +33,29 @@ impl Drop for InjectionWindow {
     }
 }
 
+/// Emit a `chat-token` notice for one turn.
+///
+/// Every payload carries the turn id the UI minted: a turn the user already
+/// stopped can still be unwinding (a foreground tool returning, a sub-agent
+/// tearing down, a background hold expiring) and must not append its notices
+/// to the transcript of the turn that replaced it.
+fn emit_turn_token(app: &AppHandle, turn_id: &str, text: String) {
+    let _ = app.emit("chat-token", json!({ "turn_id": turn_id, "text": text }));
+}
+
+/// Emit `chat-done` for one turn. See [`emit_turn_token`].
+fn emit_turn_done(app: &AppHandle, turn_id: &str) {
+    let _ = app.emit("chat-done", json!({ "turn_id": turn_id }));
+}
+
+/// Emit `chat-error` for one turn. See [`emit_turn_token`].
+fn emit_turn_error(app: &AppHandle, turn_id: &str, error: &str) {
+    let _ = app.emit(
+        "chat-error",
+        json!({ "turn_id": turn_id, "error": error }),
+    );
+}
+
 /// Assemble the complete tool payload for one request of a chat turn.
 ///
 /// Re-entrant on purpose: the `mcp_self` tool can create and enable an MCP
@@ -214,6 +237,12 @@ pub(crate) async fn run_chat_turn(
     session_id: String,
     model_override: Option<String>,
     use_agents: Option<bool>,
+    // Id the UI minted for this turn. Every `chat-*` event carries it back, so
+    // the frontend can drop anything a superseded turn still emits.
+    turn_id: String,
+    // Opened by the caller, so turn-end cleanup can tell this turn apart from
+    // a newer one that already took the session over.
+    injection_window: InjectionWindow,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     // A fresh cancel flag belongs to this turn. Any previous turn that is still
@@ -232,8 +261,8 @@ pub(crate) async fn run_chat_turn(
 
     // From here on the user may push new information into this turn; the
     // window is closed (and all undelivered items dropped for the UI to
-    // re-send) by the guard's `Drop`, whatever path the turn takes.
-    let injection_window = InjectionWindow::open(&app, &state, &session_id);
+    // re-send) by the guard's `Drop`, whatever path the turn takes. It was
+    // opened by the caller (see `chat_completion`).
 
     let config = state.config.lock().unwrap().clone();
     let multi_agent_enabled = use_agents.unwrap_or(false);
@@ -293,7 +322,7 @@ pub(crate) async fn run_chat_turn(
                 // Close the injection window before announcing the end of the
                 // turn, so nothing accepted after this point can be stranded.
                 drop(injection_window);
-                let _ = app.emit("chat-done", ());
+                emit_turn_done(&app, &turn_id);
                 return Ok(());
             }
             log_event(
@@ -1262,6 +1291,7 @@ still missing."
             config.ds_format_for(&active_model),
             &request_headers,
             Some(&session_id),
+            Some(&turn_id),
         )
         .await;
 
@@ -1473,9 +1503,11 @@ still missing."
                         session_id, total_tokens, effective_max_tokens, ratio, outcome.covered_messages
                     ),
                 );
-                let _ = app.emit(
-                    "chat-token",
-                    "\n\n[System] Context compressed (older messages summarized) and persisted for next turns.\n\n",
+                emit_turn_token(
+                    &app,
+                    &turn_id,
+                    "\n\n[System] Context compressed (older messages summarized) and persisted for next turns.\n\n"
+                        .to_string(),
                 );
                 compressed_this_turn = true;
             }
@@ -1517,10 +1549,11 @@ still missing."
         // turn. Never hold the turn open again for background results here —
         // that is what `background_hold_rounds` would otherwise do.
         if wrap_up {
-            final_answer = Some(if sr.content.trim().is_empty() {
+            let text = strip_control_markers(&sr.content);
+            final_answer = Some(if text.trim().is_empty() {
                 BUDGET_FALLBACK_ANSWER.to_string()
             } else {
-                sr.content.clone()
+                text
             });
             break;
         }
@@ -1561,8 +1594,9 @@ still missing."
                         }
                     ),
                 }));
-                let _ = app.emit(
-                    "chat-token",
+                emit_turn_token(
+                    &app,
+                    &turn_id,
                     format!(
                         "\n\n[System] Output hit the token limit (continuation {length_continues}/{MAX_LENGTH_CONTINUES}) — continuing.\n\n"
                     ),
@@ -1578,9 +1612,11 @@ still missing."
                 );
                 continue;
             }
-            let _ = app.emit(
-                "chat-token",
-                "\n\n[System] Output hit the token limit again — ending the turn with the truncated answer.\n\n",
+            emit_turn_token(
+                &app,
+                &turn_id,
+                "\n\n[System] Output hit the token limit again — ending the turn with the truncated answer.\n\n"
+                    .to_string(),
             );
             log_event(
                 &state,
@@ -1751,7 +1787,7 @@ The plan resumes on the next turn."
                     };
 
                     if let Some(notice) = suspension {
-                        let _ = app.emit("chat-token", format!("\n\n{notice}\n\n"));
+                        emit_turn_token(&app, &turn_id, format!("\n\n{notice}\n\n"));
                         log_event(
                             &state,
                             "INFO",
@@ -1801,8 +1837,9 @@ and update the list (pending → in_progress → completed) as you go. End your 
 only when every item is done, or when you are blocked and need the user.\n\n{wait_hint}"
                             ),
                         }));
-                        let _ = app.emit(
-                            "chat-token",
+                        emit_turn_token(
+                            &app,
+                            &turn_id,
                             format!(
                                 "\n\n[System] Todo list still has unfinished items (continuation {goal_nudges}/{GOAL_LOOP_MAX_NUDGES}) — continuing.\n\n"
                             ),
@@ -1820,25 +1857,35 @@ only when every item is done, or when you are blocked and need the user.\n\n{wai
                 }
             }
 
+            // Control markers are signals, not answer text. A reply that held
+            // nothing but `[goal:DONE]` — the model declaring itself finished —
+            // stripped down to nothing and closed the turn on an empty bubble:
+            // the transcript looked like the model never answered at all.
+            // Judge emptiness on what the user would actually see.
+            let final_text = strip_control_markers(&sr.content);
+
             // Defensive: `stream_chat_request` already rejects an empty
             // completion, so this is only reachable if that check is ever lost
             // again. Never close the transcript on nothing — the user would be
             // left with the previous partial text and a task that stopped
             // mid-way. Surface it as a failure the retry button can act on.
-            if sr.content.trim().is_empty() {
+            if final_text.trim().is_empty() {
                 let err =
                     "the model returned an empty reply, so the turn stopped before producing an answer"
                         .to_string();
                 log_event(
                     &state,
                     "WARN",
-                    format!("empty final answer, ending the turn: session_id={session_id}"),
+                    format!(
+                        "empty final answer, ending the turn: session_id={session_id}, content_chars={}",
+                        sr.content.chars().count()
+                    ),
                 );
-                let _ = app.emit("chat-error", err.clone());
+                emit_turn_error(&app, &turn_id, &err);
                 return Err(err);
             }
 
-            final_answer = Some(sr.content.clone());
+            final_answer = Some(final_text);
             break;
         }
 
@@ -2284,12 +2331,14 @@ only when every item is done, or when you are blocked and need the user.\n\n{wai
             // budget, and the failure that crosses the limit is announced to
             // the model (appended to the very same result) and to the user.
             if ran {
-                if let Some(trip) = guard.record(
-                    &session_id,
-                    name,
-                    turn_guard::tool_output_is_error(&result),
-                    failure_limit,
-                ) {
+                // A cancelled turn's tool results read like failures
+                // ("cancelled by the user"), but the tool did nothing wrong:
+                // see `turn_guard::counts_as_failure`.
+                let failed = turn_guard::counts_as_failure(
+                    &result,
+                    turn_cancelled.load(Ordering::SeqCst),
+                );
+                if let Some(trip) = guard.record(&session_id, name, failed, failure_limit) {
                     result.push_str("\n\n");
                     result.push_str(&turn_guard::disabled_notice(
                         name,
@@ -2362,7 +2411,7 @@ only when every item is done, or when you are blocked and need the user.\n\n{wai
     // Close the injection window before announcing the end of the turn. The
     // guard also runs on the error path, where `chat-done` is never emitted.
     drop(injection_window);
-    let _ = app.emit("chat-done", ());
+    emit_turn_done(&app, &turn_id);
     Ok(())
 }
 
@@ -2370,7 +2419,34 @@ only when every item is done, or when you are blocked and need the user.\n\n{wai
 /// trees are actually gone. Runs in a blocking thread — verification polls
 /// for up to a few seconds in the pathological case, which must not stall the
 /// async runtime. Silent when no serve process ever existed.
-pub(crate) async fn end_turn_cleanup(app: &AppHandle, session_id: &str) {
+pub(crate) async fn end_turn_cleanup(app: &AppHandle, session_id: &str, turn_id: u64) {
+    // The user may press Stop and send the next message before this turn has
+    // finished unwinding. That newer turn owns the session by then, and its
+    // background tasks and waiting chip belong to it — tearing them down here
+    // killed exactly the work the user had just asked for. The newer turn runs
+    // this cleanup of its own when it ends.
+    let superseded = app
+        .state::<AppState>()
+        .active_turn
+        .lock()
+        .ok()
+        .and_then(|active| {
+            active
+                .as_ref()
+                .map(|(id, session)| *id > turn_id && session == session_id)
+        })
+        .unwrap_or(false);
+    if superseded {
+        log_event(
+            &app.state::<AppState>(),
+            "INFO",
+            format!(
+                "turn ended (session {session_id}): a newer turn owns it now, leaving its state alone"
+            ),
+        );
+        return;
+    }
+
     // Background tool tasks are turn-scoped, exactly like serve processes: a
     // turn that ends (final answer, error or Stop) must not leave a runner
     // alive. `shutdown_session` sets every cancel flag — each runner then kills

@@ -523,6 +523,7 @@ async fn run_inner(
                 // The maintenance pass is silent: it emits its own
                 // `evolution-maintenance-*` events, never chat events.
                 session_id: None,
+                turn_id: None,
                 reasoning_event: None,
                 emit_usage: false,
                 emit_tokens: false,

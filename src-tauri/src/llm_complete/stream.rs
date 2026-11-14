@@ -90,6 +90,11 @@ pub struct StreamOptions<'a> {
     /// switched to another conversation. `None` for callers without a chat
     /// session (planner supervisor, evolution maintenance).
     pub session_id: Option<&'a str>,
+    /// Id of the chat turn this request belongs to, echoed on every
+    /// `chat-token` / `chat-reasoning-token` / `chat-retry` / `chat-error`
+    /// payload so the UI can drop what a superseded turn still emits. `None`
+    /// for callers that are not a user chat turn (planner, maintenance).
+    pub turn_id: Option<&'a str>,
     /// Event name for reasoning deltas, or `None` to keep them off the wire.
     ///
     /// The main chat uses `chat-reasoning-token`; a sub-agent mission uses its
@@ -512,7 +517,10 @@ pub(crate) fn process_stream_chunk(
                     }),
                 );
             } else {
-                let _ = app.emit(event, reasoning.to_string());
+                let _ = app.emit(
+                    event,
+                    json!({ "turn_id": opts.turn_id, "text": reasoning }),
+                );
             }
         }
     }
@@ -559,7 +567,10 @@ pub(crate) fn process_stream_chunk(
                     }),
                 );
             } else {
-                let _ = app.emit(opts.token_event, token.to_string());
+                let _ = app.emit(
+                    opts.token_event,
+                    json!({ "turn_id": opts.turn_id, "text": token }),
+                );
             }
         }
     }
@@ -705,7 +716,11 @@ pub(crate) fn announce_stream_retry(
     if opts.task_id.is_none() && opts.emit_tokens {
         let _ = app.emit(
             CHAT_RETRY_EVENT,
-            json!({ "content": content, "reasoning": reasoning }),
+            json!({
+                "turn_id": opts.turn_id,
+                "content": content,
+                "reasoning": reasoning,
+            }),
         );
     }
 }
@@ -768,7 +783,10 @@ pub async fn stream_llm_request(
                 continue;
             }
             if opts.emit_errors {
-                let _ = app.emit("chat-error", err.clone());
+                let _ = app.emit(
+                    "chat-error",
+                    json!({ "turn_id": opts.turn_id, "error": err.clone() }),
+                );
             }
             return Err(err);
         }
@@ -935,7 +953,10 @@ pub async fn stream_llm_request(
                 continue;
             }
             if opts.emit_errors {
-                let _ = app.emit("chat-error", err.clone());
+                let _ = app.emit(
+                    "chat-error",
+                    json!({ "turn_id": opts.turn_id, "error": err.clone() }),
+                );
             }
             return Err(err);
         }
@@ -963,7 +984,10 @@ pub async fn stream_llm_request(
                 continue;
             }
             if opts.emit_errors {
-                let _ = app.emit("chat-error", err.clone());
+                let _ = app.emit(
+                    "chat-error",
+                    json!({ "turn_id": opts.turn_id, "error": err.clone() }),
+                );
             }
             return Err(err);
         }
@@ -1004,6 +1028,7 @@ pub(crate) async fn stream_request(
     ds_format: bool,
     headers: &[(String, String)],
     session_id: Option<&str>,
+    turn_id: Option<&str>,
 ) -> Result<StreamResult, String> {
     stream_llm_request(
         app,
@@ -1016,6 +1041,7 @@ pub(crate) async fn stream_request(
             token_event: "chat-token",
             task_id: None,
             session_id,
+            turn_id,
             reasoning_event: Some("chat-reasoning-token"),
             emit_usage: true,
             emit_tokens: true,
