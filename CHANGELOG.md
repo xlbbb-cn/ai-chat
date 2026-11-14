@@ -9,6 +9,22 @@ npm run changelog -- --from <上一个 tag> --to <本次 tag> --details --write
 条目按 Conventional Commits 的类型分组，作用域加粗；工作区里提交标题是英文、正文是中文，
 所以带 `--details` 时是中英对照。
 
+## [v3.3.2](https://github.com/xlbbb-cn/ai-chat/releases/tag/v3.3.2) — 2026-11-14
+
+### 新增
+
+- **chat**: show turn cost and suspend open todos while waiting ([`58c910e`](https://github.com/xlbbb-cn/ai-chat/commit/58c910e4a0ddafa855294268fe5180694dea32de))
+- **deliverables**: keep session deliverables and reveal them in the mission panel ([`d167e8c`](https://github.com/xlbbb-cn/ai-chat/commit/d167e8c95c392d3de6d6409b6063a1a83e039604))
+
+### 修复
+
+- **chat**: route turn events to the session that emitted them ([`8fd5ed6`](https://github.com/xlbbb-cn/ai-chat/commit/8fd5ed6b6a687cdf7050de5b782e2dc6550f8b18))
+  - Stop now ends the main tool loop before the request-boundary drains, so a cancelled turn never announces chat-injected / background results the model will not see; the UI re-sends undelivered items as the next turn instead.
+  - Every turn-scoped event carries the publishing turn's session_id and the frontend drops a mismatched payload (a missing/null id passes — planner supervisor and evolution maintenance have no transcript to leak into): chat-injected, chat-usage (StreamOptions.session_id), chat-notice, tool-call, skill-loaded, agent-task-start/done/error/skipped, agent-task-token/reasoning/tool, agent-help-*, agent-selection, agent-plan-start, agent-aggregate-done. tool-call and skill-loaded payloads are now {session_id, text} / {session_id, skill_name} objects; emit_tool_progress takes the id as impl Into<Option<&str>> so handlers that already unwrapped it can pass a bare &str.
+- **workspace**: land the switch on a fresh conversation ([`8342775`](https://github.com/xlbbb-cn/ai-chat/commit/83427756adb13aa903ff8204ae89c25efc3fe10c))
+
+**完整对比**：[v3.3.1...v3.3.2](https://github.com/xlbbb-cn/ai-chat/compare/v3.3.1...v3.3.2)
+
 ## [v3.3.1](https://github.com/xlbbb-cn/ai-chat/releases/tag/v3.3.1) — 2026-11-13
 
 ### 修复

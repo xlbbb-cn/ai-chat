@@ -925,7 +925,7 @@ def build_html(d1, d2, d3):
   </header>
 
   <section class="hero" aria-labelledby="archTitle">
-    <p class="eyebrow">architecture map · v3.3.1</p>
+    <p class="eyebrow">architecture map · v3.3.2</p>
     <h1 id="archTitle">Rabbit Chat Studio</h1>
     <p class="lede">Tauri 2 桌面客户端：React 19 前端 + Rust 后端，把任意 OpenAI 兼容 API 变成带技能、
       工具与子智能体的工作台。下图自上而下是一条调用链——界面只通过 invoke 与事件和 Rust 通信，
@@ -1072,7 +1072,7 @@ def build_html(d1, d2, d3):
   </section>
 
   <footer>
-    <span>依据 v3.3.1 源码实测：90 命令 · 45 事件 · 8 表 · 78 个 Rust 文件</span>
+    <span>依据 v3.3.2 源码实测：90 命令 · 45 事件 · 8 表 · 78 个 Rust 文件</span>
     <span>配色与版式取自 <a href="./index.html">Rabbit Chat Studio</a> · <a href="https://github.com/xlbbb-cn/ai-chat" target="_blank" rel="noopener noreferrer">GitHub</a> · MIT</span>
   </footer>
 
