@@ -24,6 +24,9 @@ pub(super) async fn handle_file_actions(
     // Current autonomous mission id, so progress lines reach the task row
     // instead of the main chat's `tool-call` transcript.
     mission_id: Option<&str>,
+    // Chat session of the caller, routed onto the progress payloads so a
+    // winding-down turn cannot paint rows into another conversation.
+    session_id: Option<&str>,
     // Background-task cancel flag. Only `search` observes it; every other
     // action is short enough to run to completion.
     cancel: Option<&std::sync::Arc<std::sync::atomic::AtomicBool>>,
@@ -39,7 +42,7 @@ pub(super) async fn handle_file_actions(
     let backup_root = Some(skills_root.as_path());
     match action {
         "read" => {
-            let _ = emit_tool_progress(app, mission_id, format!("📄 *Reading {}*\n\n", path_str));
+            let _ = emit_tool_progress(app, mission_id, session_id, format!("📄 *Reading {}*\n\n", path_str));
             let start_line = args["start_line"].as_i64();
             let end_line = args["end_line"].as_i64();
             match resolve_file_action_path(path_str, &root_dir, true) {
@@ -104,7 +107,7 @@ pub(super) async fn handle_file_actions(
         }
         "write" => {
             let content_str = args["content"].as_str().unwrap_or("");
-            let _ = emit_tool_progress(app, mission_id, format!("💾 *Writing {}*\n\n", path_str));
+            let _ = emit_tool_progress(app, mission_id, session_id, format!("💾 *Writing {}*\n\n", path_str));
             match resolve_file_action_path(path_str, &root_dir, false) {
                 Ok(p) => {
                     if let Err(e) = ensure_mutation_target_allowed(
@@ -147,7 +150,7 @@ pub(super) async fn handle_file_actions(
             }
         }
         "list" => {
-            let _ = emit_tool_progress(app, mission_id, format!("📂 *Listing {}*\n\n", path_str));
+            let _ = emit_tool_progress(app, mission_id, session_id, format!("📂 *Listing {}*\n\n", path_str));
             match resolve_file_action_path(path_str, &root_dir, true) {
                 Ok(p) => {
                     match fs::metadata(&p) {
@@ -227,6 +230,7 @@ pub(super) async fn handle_file_actions(
             let _ = emit_tool_progress(
                 app,
                 mission_id,
+                session_id,
                 format!(
                     "🔎 *Searching {} for {}*\n\n",
                     path_str,
@@ -259,6 +263,7 @@ pub(super) async fn handle_file_actions(
             let _ = emit_tool_progress(
                 app,
                 mission_id,
+                session_id,
                 format!("🔁 *Moving {} -> {}*\n\n", path_str, new_path),
             );
             if new_path.is_empty() {
@@ -345,7 +350,7 @@ pub(super) async fn handle_file_actions(
                     })
                     .unwrap_or_default(),
             };
-            let _ = emit_tool_progress(app, mission_id, format!("🩹 *Patching {}*\n\n", path_str));
+            let _ = emit_tool_progress(app, mission_id, session_id, format!("🩹 *Patching {}*\n\n", path_str));
             match resolve_file_action_path(path_str, &root_dir, true) {
                 Ok(p) => {
                     if let Err(e) = ensure_mutation_target_allowed(
@@ -414,6 +419,7 @@ pub(super) async fn handle_file_actions(
             let _ = emit_tool_progress(
                 app,
                 mission_id,
+                session_id,
                 format!("🔀 *Comparing {} → {}*\n\n", path_str, new_path),
             );
 
@@ -458,6 +464,7 @@ pub(super) async fn handle_file_actions(
             let _ = emit_tool_progress(
                 app,
                 mission_id,
+                session_id,
                 format!("📁 *Creating directory {}*\n\n", path_str),
             );
             match resolve_file_action_path(path_str, &root_dir, false) {
@@ -482,7 +489,7 @@ pub(super) async fn handle_file_actions(
             }
         }
         "delete" => {
-            let _ = emit_tool_progress(app, mission_id, format!("🗑️ *Deleting {}*\n\n", path_str));
+            let _ = emit_tool_progress(app, mission_id, session_id, format!("🗑️ *Deleting {}*\n\n", path_str));
             match resolve_file_action_path(path_str, &root_dir, true) {
                 Ok(p) => {
                     if let Err(e) = ensure_mutation_target_allowed(

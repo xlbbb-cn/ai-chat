@@ -374,6 +374,15 @@ interface MarkdownEditPayload {
   content: string;
 }
 
+/** One auto-send prompt queued at a turn boundary: a fired timer's resume
+ *  text or a mid-turn injection that never reached a request. `session_id` is
+ *  the chat it belongs to — the auto-send consumes a prompt only while that
+ *  chat is the active one. */
+interface PendingAutoPrompt {
+  text: string;
+  session_id: string;
+}
+
 /**
  * Sidebar entrance/exit spring — the one animation in the app that is not
  * `--t-dur` + `--t-ease`, because a 400px frosted panel has to settle with mass
@@ -514,7 +523,22 @@ export default function App() {
     setPendingRetryMessageId(null);
     setDreamResult(null);
     resetEmbeddedAgents();
-    setSessionId(crypto.randomUUID());
+    // Turn-scoped leftovers belong to the conversation being left: the backend
+    // drops queued injections when the turn's window closes, and an auto
+    // prompt must never fire inside the fresh session. (With `pendingAutoPrompts`
+    // tagged by session this is belt and braces — a cleared list cannot wait
+    // for a chat the user will never reopen.)
+    pendingInjectionsRef.current = [];
+    setPendingInjections([]);
+    currentInjectionsRef.current = [];
+    setPendingAutoPrompts([]);
+    // Mint and publish the id in one step. The once-registered event listeners
+    // read the active session from `sessionIdRef`, which otherwise only syncs
+    // in an effect after the commit — an event landing in that window would
+    // pass the session guard against the OLD id.
+    const nextSessionId = crypto.randomUUID();
+    sessionIdRef.current = nextSessionId;
+    setSessionId(nextSessionId);
   }, [resetEmbeddedAgents]);
   const [sidebar, setSidebar] = useState<Sidebar>(null);
   /** Geometry of the toolbar's sliding selection fill (measured from the active button). */
@@ -723,8 +747,10 @@ export default function App() {
   >(new Map());
   /** Resume prompts from fired timers, plus mid-turn injections that arrived
    *  after the turn's last request. Sent one at a time once the chat is idle,
-   *  so the turn order stays intact. */
-  const [pendingAutoPrompts, setPendingAutoPrompts] = useState<string[]>([]);
+   *  so the turn order stays intact. Each prompt carries the session it was
+   *  made in: the auto-send only fires inside that chat, so a prompt queued
+   *  before a session switch can never be posted into another conversation. */
+  const [pendingAutoPrompts, setPendingAutoPrompts] = useState<PendingAutoPrompt[]>([]);
   /** Injections accepted by the running turn that have not reached a request
    *  yet, shown as queued chips above the input. */
   const [pendingInjections, setPendingInjections] = useState<ChatInjection[]>([]);
@@ -1003,7 +1029,12 @@ export default function App() {
       usage_ratio?: number;
       cached_tokens?: number;
       hit_ratio?: number;
+      session_id?: string | null;
     }>("chat-usage", (e) => {
+      // A winding-down turn must not paint the usage bar of another
+      // conversation the user already switched to. No session context (null)
+      // passes — those callers have no leak surface.
+      if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
       // This request's token figures are known from here on; the usage bar
       // above the input switches from its indeterminate sweep to a real ratio.
       setUsageReady(true);
@@ -1459,6 +1490,7 @@ export default function App() {
       // running — so they surface as a warning notice, never as a failed turn.
       listen<{
         kind: "tool_disabled" | "budget_exhausted";
+        session_id?: string | null;
         tool?: string;
         failures?: number;
         limit?: number;
@@ -1467,6 +1499,9 @@ export default function App() {
       }>("chat-notice", (e) => {
         const payload = e.payload;
         if (!payload) return;
+        // Route by session: a winding-down turn's notice belongs to the chat
+        // that spent the budget, not the one now on screen.
+        if (payload.session_id && payload.session_id !== sessionIdRef.current) return;
         if (payload.kind === "tool_disabled") {
           setError(
             t("app.toolDisabledNotice", {
@@ -1487,6 +1522,7 @@ export default function App() {
       }),
       listen<AgentTaskEvent>("agent-task-start", (e) => {
         const { agent_id, agent_name, description, task_id, cwd } = e.payload;
+        if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
         setAgentStatuses((prev) => ({
           ...prev,
           [agent_id]: { status: "running", description },
@@ -1506,6 +1542,7 @@ export default function App() {
       }),
       listen<AgentTaskEvent>("agent-task-done", (e) => {
         const { agent_id, summary, task_id, status } = e.payload;
+        if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
         // Flush the last buffered chunks first: the final tokens of a task must
         // not be dropped when the row settles.
         flushAgentTokenBuffers();
@@ -1533,6 +1570,7 @@ export default function App() {
       }),
       listen<AgentTaskEvent>("agent-task-error", (e) => {
         const { agent_id, error, task_id } = e.payload;
+        if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
         setAgentStatuses((prev) => ({
           ...prev,
           [agent_id]: { status: "error", error: error ?? "" },
@@ -1554,6 +1592,7 @@ export default function App() {
       // here; otherwise the report would silently be shorter than the plan.
       listen<AgentTaskEvent>("agent-task-skipped", (e) => {
         const { agent_id, agent_name, task_id, reason } = e.payload;
+        if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
         const text = reason ?? "";
         setAgentStatuses((prev) => ({
           ...prev,
@@ -1585,6 +1624,7 @@ export default function App() {
       // shows the question and, once it returns, the size of the material.
       listen<AgentHelpEvent>("agent-help-start", (e) => {
         const { task_id, request } = e.payload;
+        if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
         if (!task_id || !request) return;
         currentToolCallsRef.current = currentToolCallsRef.current.map((entry) =>
           entry.task_id === task_id
@@ -1595,6 +1635,7 @@ export default function App() {
       }),
       listen<AgentHelpEvent>("agent-help-done", (e) => {
         const { task_id, answer_chars } = e.payload;
+        if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
         currentToolCallsRef.current = currentToolCallsRef.current.map((entry) =>
           entry.task_id === task_id && entry.help
             ? {
@@ -1611,6 +1652,7 @@ export default function App() {
       }),
       listen<AgentHelpEvent>("agent-help-error", (e) => {
         const { task_id, error } = e.payload;
+        if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
         currentToolCallsRef.current = currentToolCallsRef.current.map((entry) =>
           entry.task_id === task_id && entry.help
             ? {
@@ -1625,6 +1667,7 @@ export default function App() {
       // the main agent can still call any enabled agent).
       listen<AgentSelectionEvent>("agent-selection", (e) => {
         const { delegate, agents } = e.payload;
+        if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
         if (!delegate || !agents?.length) return;
         const entry: ToolCallEntry = {
           task_id: `selection-${Date.now()}`,
@@ -1639,9 +1682,15 @@ export default function App() {
         currentToolCallsRef.current = [...currentToolCallsRef.current, entry];
         updateActiveAssistantToolCalls(currentToolCallsRef.current);
       }),
-      listen<{ task_count: number; mbus?: boolean; bus_id?: string | null }>(
+      listen<{
+        task_count: number;
+        session_id?: string | null;
+        mbus?: boolean;
+        bus_id?: string | null;
+      }>(
         "agent-plan-start",
         (e) => {
+          if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
           if (e.payload.task_count <= 0) return;
           const mbus = e.payload.mbus === true;
           currentMbusIdRef.current = mbus ? (e.payload.bus_id ?? null) : null;
@@ -1794,10 +1843,11 @@ export default function App() {
         });
         updateActiveAssistantToolCalls(currentToolCallsRef.current);
       }),
-      listen<{ task_count: number }>("agent-aggregate-done", (e) => {
+      listen<{ task_count: number; session_id?: string | null }>("agent-aggregate-done", (e) => {
         // The backend emits this *after* the mission report is assembled, so
         // the step is complete the moment it arrives — rendering it as
         // "running" would spin until the whole final answer is streamed.
+        if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
         currentToolCallsRef.current = currentToolCallsRef.current.map((entry) =>
           entry.task_id === "planner" && entry.status === "running"
             ? { ...entry, status: "done" as const }
@@ -1813,8 +1863,12 @@ export default function App() {
         currentToolCallsRef.current = [...currentToolCallsRef.current, entry];
         updateActiveAssistantToolCalls(currentToolCallsRef.current);
       }),
-      listen<string>("tool-call", (e) => {
-        const text = e.payload;
+      listen<{ session_id?: string | null; text: string }>("tool-call", (e) => {
+        // Route by session: a winding-down turn's tool step must not settle
+        // rows or appear inside the chat the user already switched to. No
+        // session context (null) passes — those callers have no leak surface.
+        if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
+        const text = e.payload.text;
         // Parse label from *italics* and optional code block detail
         const firstLine = text.split('\n')[0];
         // Capture emoji before asterisks and the label inside asterisks
@@ -1860,6 +1914,7 @@ export default function App() {
         // not re-render the whole transcript per token. The first chunk of a
         // task is applied immediately: it is the row's first visible text.
         const { task_id, token } = e.payload;
+        if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
         if (!task_id || !token) return;
         appendAgentBuffer(task_id, { text: token });
       }),
@@ -1868,6 +1923,7 @@ export default function App() {
         // very first thing the model produces, so it makes a blank row show
         // "thinking" within a second instead of waiting for the answer.
         const { task_id, token } = e.payload;
+        if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
         if (!task_id || !token) return;
         appendAgentBuffer(task_id, { reasoning: token.length });
       }),
@@ -1876,6 +1932,7 @@ export default function App() {
         // line — never the row status (the task's own `agent-task-done` /
         // `agent-task-error` owns that).
         const { task_id, phase, tool, detail, text, duration_ms, ok } = e.payload;
+        if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
         if (!task_id) return;
         currentToolCallsRef.current = currentToolCallsRef.current.map((entry) => {
           if (entry.task_id !== task_id || entry.kind !== "agent") return entry;
@@ -1903,10 +1960,12 @@ export default function App() {
         });
         updateActiveAssistantToolCalls(currentToolCallsRef.current);
       }),
-      listen<string>("skill-loaded", (e) => {
+      listen<{ session_id?: string | null; skill_name: string }>("skill-loaded", (e) => {
         // Structured skill-load event. The entry carries `skill_name`, which
-        // is what later turns send back as `loaded_skills`.
-        const skillName = e.payload;
+        // is what later turns send back as `loaded_skills`. Session-routed: a
+        // winding-down turn must not record its skill in another chat.
+        if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
+        const skillName = e.payload.skill_name;
         if (!skillName) return;
         const entry: ToolCallEntry = {
           task_id: crypto.randomUUID(),
@@ -1927,10 +1986,16 @@ export default function App() {
         updateActiveAssistantToolCalls(currentToolCallsRef.current);
         hasRunningToolCallRef.current = true;
       }),
-      listen<{ items: ChatInjection[] }>("chat-injected", (e) => {
+      listen<{ items: ChatInjection[]; session_id?: string }>("chat-injected", (e) => {
         // The backend drained these into the next request, so the model has
         // seen them. Anything still queued stays a chip until it either lands
         // here or the turn ends (see `onDone`, which re-sends the leftovers).
+        //
+        // The payload carries the turn's session: a turn that is still winding
+        // down (a foreground tool finishing after Stop, a confirmation timing
+        // out) must not announce its deliveries inside another chat. Same rule
+        // the `background-task-state` / `background-waiting` listeners apply.
+        if (e.payload?.session_id && e.payload.session_id !== sessionIdRef.current) return;
         const items = e.payload?.items ?? [];
         if (items.length === 0) return;
         const delivered = new Set(items.map((item) => item.id));
@@ -2078,8 +2143,13 @@ export default function App() {
         }
         // Queue the resume prompt; the effect below sends it once the chat is
         // idle. Queuing (instead of sending directly) means a timer that fires
-        // mid-reply still continues the task when the reply finishes.
-        setPendingAutoPrompts((prev) => [...prev, timerPromptText(timer)]);
+        // mid-reply still continues the task when the reply finishes. The
+        // prompt keeps the timer's session: switching chats must not make it
+        // fire there.
+        setPendingAutoPrompts((prev) => [
+          ...prev,
+          { text: timerPromptText(timer), session_id: timer.session_id || sessionIdRef.current },
+        ]);
       }),
     );
     return () => {
@@ -2175,20 +2245,24 @@ export default function App() {
       (pending) => pending.id !== item.id
     );
     setPendingInjections(pendingInjectionsRef.current);
-    setPendingAutoPrompts((prev) => [...prev, text]);
+    setPendingAutoPrompts((prev) => [...prev, { text, session_id: sessionId }]);
   }, [input, streaming, sessionId, backupExporting]);
 
   /**
    * Turn-end flush: an injection still queued when the turn ended never
    * reached a request (the model never saw it), so queue its text as the next
-   * user turn instead of letting it disappear with the window.
+   * user turn instead of letting it disappear with the window. The session is
+   * the turn's own — the prompt may only fire inside that chat.
    */
-  const flushUndeliveredInjections = useCallback(() => {
+  const flushUndeliveredInjections = useCallback((sessionId: string) => {
     const undelivered = pendingInjectionsRef.current;
     if (undelivered.length === 0) return;
     pendingInjectionsRef.current = [];
     setPendingInjections([]);
-    setPendingAutoPrompts((prev) => [...prev, ...undelivered.map((item) => item.text)]);
+    setPendingAutoPrompts((prev) => [
+      ...prev,
+      ...undelivered.map((item) => ({ text: item.text, session_id: sessionId })),
+    ]);
   }, []);
 
   const sendMessage = useCallback(async (overrideText?: string) => {
@@ -2458,7 +2532,7 @@ export default function App() {
         setAgentStatuses({});
         hasRunningToolCallRef.current = false;
         // Whatever never reached a request is sent as the next user turn.
-        flushUndeliveredInjections();
+        flushUndeliveredInjections(sessionId);
         currentAssistantMessageIdRef.current = null;
         currentToolCallsRef.current = [];
         pendingAgentTokensRef.current.clear();
@@ -2540,7 +2614,7 @@ export default function App() {
         setAgentStatuses({});
         hasRunningToolCallRef.current = false;
         // Whatever never reached a request is sent as the next user turn.
-        flushUndeliveredInjections();
+        flushUndeliveredInjections(sessionId);
         currentAssistantMessageIdRef.current = null;
         currentToolCallsRef.current = [];
         pendingAgentTokensRef.current.clear();
@@ -2652,10 +2726,20 @@ export default function App() {
   // several prompts queue together.
   useEffect(() => {
     if (streaming || backupExporting || pendingAutoPrompts.length === 0) return;
-    const [next, ...rest] = pendingAutoPrompts;
-    setPendingAutoPrompts(rest);
-    void sendMessage(next);
-  }, [pendingAutoPrompts, streaming, backupExporting, sendMessage]);
+    // A prompt belongs to the chat it was made in (a timer resume or a
+    // mid-turn injection the model never saw). Sending it inside another
+    // session the user switched to would read as if the user had typed it
+    // there, so only the first prompt of the ACTIVE chat is consumed; the
+    // rest keep their place in the queue and fire when their session is
+    // active again.
+    const index = pendingAutoPrompts.findIndex(
+      (prompt) => prompt.session_id === sessionId
+    );
+    if (index < 0) return;
+    const next = pendingAutoPrompts[index];
+    setPendingAutoPrompts((prev) => prev.filter((_, i) => i !== index));
+    void sendMessage(next.text);
+  }, [pendingAutoPrompts, streaming, backupExporting, sendMessage, sessionId]);
 
   const retryPendingUserMessage = useCallback(async () => {
     if (streaming || !pendingRetryMessageId || retryingRef.current) return;
@@ -2864,7 +2948,7 @@ export default function App() {
         setPendingRetryMessageId(null);
         setAgentStatuses({});
         // Whatever never reached a request is sent as the next user turn.
-        flushUndeliveredInjections();
+        flushUndeliveredInjections(sessionId);
         currentAssistantMessageIdRef.current = null;
         currentToolCallsRef.current = [];
         pendingAgentTokensRef.current.clear();
@@ -2943,7 +3027,7 @@ export default function App() {
         setAgentStatuses({});
         hasRunningToolCallRef.current = false;
         // Whatever never reached a request is sent as the next user turn.
-        flushUndeliveredInjections();
+        flushUndeliveredInjections(sessionId);
         currentAssistantMessageIdRef.current = null;
         currentToolCallsRef.current = [];
         pendingAgentTokensRef.current.clear();
@@ -3384,6 +3468,13 @@ export default function App() {
           .catch(console.error);
       }
     }
+    // The stop ends the turn: the deliveries recorded so far are saved above,
+    // so the ref must not leak them into a later turn, and whatever never
+    // reached a request is re-sent as the next user turn — the same rule
+    // `onDone` / `onError` apply. (The backend dropped its own copy when the
+    // turn's injection window closed.)
+    currentInjectionsRef.current = [];
+    flushUndeliveredInjections(sessionId);
     setStreaming(false);
   }
 
@@ -4193,6 +4284,14 @@ export default function App() {
                   }
                   if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null; }
                   setStreaming(false);
+                  // The loaded transcript is another conversation: turn-scoped
+                  // leftovers (queued injection chips above the input) must not
+                  // surface over it, and the session guard reads `sessionIdRef`,
+                  // so sync it in the same step as the id swap.
+                  pendingInjectionsRef.current = [];
+                  setPendingInjections([]);
+                  currentInjectionsRef.current = [];
+                  sessionIdRef.current = sid;
                   // A loaded transcript starts pinned to its newest turn.
                   followBottomRef.current = true;
                   setMessages(msgs);

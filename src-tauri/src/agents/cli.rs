@@ -472,6 +472,7 @@ struct PumpOutput {
 fn emit_chunk(
     app: &AppHandle,
     task_id: &str,
+    session_id: &str,
     pending: &mut String,
     last_emit: &mut tokio::time::Instant,
     force: bool,
@@ -490,8 +491,13 @@ fn emit_chunk(
         let take = pending.chars().count().min(EMIT_CHUNK_CHARS);
         let cut = byte_index_for_chars(pending, take);
         let chunk: String = pending.drain(..cut).collect();
-        // Same shape as the LLM runner: { task_id, token } on `agent-task-token`.
-        let _ = app.emit("agent-task-token", json!({ "task_id": task_id, "token": chunk }));
+        // Same shape as the LLM runner: { task_id, session_id, token } on
+        // `agent-task-token`. The session routes the token into the chat that
+        // owns the turn.
+        let _ = app.emit(
+            "agent-task-token",
+            json!({ "task_id": task_id, "session_id": session_id, "token": chunk }),
+        );
     }
     *last_emit = tokio::time::Instant::now();
 }
@@ -499,6 +505,7 @@ fn emit_chunk(
 async fn pump<R: AsyncRead + Unpin>(
     app: AppHandle,
     task_id: String,
+    session_id: String,
     reader: R,
     decode_hint: OutputDecodeHint,
 ) -> PumpOutput {
@@ -521,13 +528,13 @@ async fn pump<R: AsyncRead + Unpin>(
                 capture.push_line(line);
                 pending.push_str(line);
                 pending.push('\n');
-                emit_chunk(&app, &task_id, &mut pending, &mut last_emit, false);
+                emit_chunk(&app, &task_id, &session_id, &mut pending, &mut last_emit, false);
             }
             Err(_) => break,
         }
     }
 
-    emit_chunk(&app, &task_id, &mut pending, &mut last_emit, true);
+    emit_chunk(&app, &task_id, &session_id, &mut pending, &mut last_emit, true);
     PumpOutput {
         text: capture.finish(),
     }
@@ -865,6 +872,7 @@ pub async fn run(
     task_id: &str,
     prompt: &str,
     cwd: PathBuf,
+    session_id: &str,
     cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<CliRunOutcome, String> {
     let settings = &agent.cli;
@@ -901,10 +909,22 @@ pub async fn run(
     let _tracked = track_child(&child, format!("cli-agent '{}'", agent.name));
 
     let stdout_task = child.stdout.take().map(|reader| {
-        tokio::spawn(pump(app.clone(), task_id.to_string(), reader, decode_hint))
+        tokio::spawn(pump(
+            app.clone(),
+            task_id.to_string(),
+            session_id.to_string(),
+            reader,
+            decode_hint,
+        ))
     });
     let stderr_task = child.stderr.take().map(|reader| {
-        tokio::spawn(pump(app.clone(), task_id.to_string(), reader, decode_hint))
+        tokio::spawn(pump(
+            app.clone(),
+            task_id.to_string(),
+            session_id.to_string(),
+            reader,
+            decode_hint,
+        ))
     });
 
     if use_stdin {

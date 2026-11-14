@@ -520,6 +520,9 @@ async fn run_inner(
                 // mandatory for every request built by this helper.
                 token_event: "evolution-maintenance-token",
                 task_id: None,
+                // The maintenance pass is silent: it emits its own
+                // `evolution-maintenance-*` events, never chat events.
+                session_id: None,
                 reasoning_event: None,
                 emit_usage: false,
                 emit_tokens: false,

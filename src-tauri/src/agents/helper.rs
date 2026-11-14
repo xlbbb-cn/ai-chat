@@ -377,6 +377,7 @@ pub(crate) async fn run_main_agent_helper_inner(
             StreamOptions {
                 token_event: "agent-help-token",
                 task_id: Some(&task.id),
+                session_id: Some(session_id),
                 reasoning_event: None,
                 emit_usage: false,
                 emit_tokens: true,
@@ -451,6 +452,7 @@ pub(crate) async fn run_main_agent_helper_inner(
             let tool_started = std::time::Instant::now();
             emit_agent_tool_state(
                 app,
+                session_id,
                 &task.id,
                 "start",
                 name,
@@ -566,6 +568,7 @@ pub(crate) async fn run_main_agent_helper_inner(
                         "chat-notice",
                         json!({
                             "kind": "tool_disabled",
+                            "session_id": session_id,
                             "tool": name,
                             "failures": trip.failures,
                             "limit": failure_limit,
@@ -575,6 +578,7 @@ pub(crate) async fn run_main_agent_helper_inner(
             }
             emit_agent_tool_state(
                 app,
+                session_id,
                 &task.id,
                 "done",
                 name,
@@ -644,6 +648,7 @@ pub(crate) async fn run_llm_agent_body(
         "agent-task-start",
         json!({
             "task_id": task.id,
+            "session_id": session_id,
             "agent_id": agent.id,
             "agent_name": agent.name,
             "description": task.description,
@@ -750,7 +755,12 @@ pub(crate) async fn run_llm_agent_body(
                 let error = format!("Failed to lock database for mission initialization: {err}");
                 let _ = app.emit(
                     "agent-task-error",
-                    json!({ "task_id": task.id, "agent_id": agent.id, "error": error }),
+                    json!({
+                        "task_id": task.id,
+                        "session_id": session_id,
+                        "agent_id": agent.id,
+                        "error": error
+                    }),
                 );
                 return TaskResult {
                     task_id: task.id.clone(),
@@ -769,7 +779,12 @@ pub(crate) async fn run_llm_agent_body(
         {
             let _ = app.emit(
                 "agent-task-error",
-                json!({ "task_id": task.id, "agent_id": agent.id, "error": err }),
+                json!({
+                    "task_id": task.id,
+                    "session_id": session_id,
+                    "agent_id": agent.id,
+                    "error": err
+                }),
             );
             return TaskResult {
                 task_id: task.id.clone(),
@@ -918,6 +933,7 @@ pub(crate) async fn run_llm_agent_body(
                     .unwrap_or_else(|| format!("Ended by the planner: {}", note));
                 return finalize_mission_task(
                     app,
+                    session_id,
                     &mission_id,
                     task,
                     agent,
@@ -948,6 +964,7 @@ pub(crate) async fn run_llm_agent_body(
             };
             return finalize_mission_task(
                 app,
+                session_id,
                 &mission_id,
                 task,
                 agent,
@@ -976,7 +993,12 @@ pub(crate) async fn run_llm_agent_body(
                         format!("Failed to lock database while loading mission state: {err}");
                     let _ = app.emit(
                         "agent-task-error",
-                        json!({ "task_id": task.id, "agent_id": agent.id, "error": error }),
+                        json!({
+                            "task_id": task.id,
+                            "session_id": session_id,
+                            "agent_id": agent.id,
+                            "error": error
+                        }),
                     );
                     return TaskResult {
                         task_id: task.id.clone(),
@@ -995,7 +1017,12 @@ pub(crate) async fn run_llm_agent_body(
                 Err(err) => {
                     let _ = app.emit(
                         "agent-task-error",
-                        json!({ "task_id": task.id, "agent_id": agent.id, "error": err }),
+                        json!({
+                            "task_id": task.id,
+                            "session_id": session_id,
+                            "agent_id": agent.id,
+                            "error": err
+                        }),
                     );
                     return TaskResult {
                         task_id: task.id.clone(),
@@ -1041,7 +1068,12 @@ pub(crate) async fn run_llm_agent_body(
             Err(err) => {
                 let _ = app.emit(
                     "agent-task-error",
-                    json!({ "task_id": task.id, "agent_id": agent.id, "error": err }),
+                    json!({
+                        "task_id": task.id,
+                        "session_id": session_id,
+                        "agent_id": agent.id,
+                        "error": err
+                    }),
                 );
                 return TaskResult {
                     task_id: task.id.clone(),
@@ -1180,6 +1212,7 @@ pub(crate) async fn run_llm_agent_body(
             StreamOptions {
                 token_event: "agent-task-token",
                 task_id: Some(&task.id),
+                session_id: Some(session_id),
                 // Live "thinking" line on the task row. The reasoning text is
                 // never persisted in the mission report; only the UI shows it.
                 reasoning_event: Some("agent-task-reasoning"),
@@ -1230,7 +1263,12 @@ pub(crate) async fn run_llm_agent_body(
                 );
                 let _ = app.emit(
                     "agent-task-error",
-                    json!({ "task_id": task.id, "agent_id": agent.id, "error": error.clone() }),
+                    json!({
+                        "task_id": task.id,
+                        "session_id": session_id,
+                        "agent_id": agent.id,
+                        "error": error.clone()
+                    }),
                 );
                 return TaskResult {
                     task_id: task.id.clone(),
@@ -1279,7 +1317,12 @@ pub(crate) async fn run_llm_agent_body(
                                     format!("Failed to lock database after agent turn: {err}");
                                 let _ = app.emit(
                                     "agent-task-error",
-                                    json!({ "task_id": task.id, "agent_id": agent.id, "error": error }),
+                                    json!({
+                            "task_id": task.id,
+                            "session_id": session_id,
+                            "agent_id": agent.id,
+                            "error": error
+                        }),
                                 );
                                 return TaskResult {
                                     task_id: task.id.clone(),
@@ -1298,7 +1341,12 @@ pub(crate) async fn run_llm_agent_body(
                             Err(err) => {
                                 let _ = app.emit(
                                     "agent-task-error",
-                                    json!({ "task_id": task.id, "agent_id": agent.id, "error": err }),
+                                    json!({
+                                        "task_id": task.id,
+                                        "session_id": session_id,
+                                        "agent_id": agent.id,
+                                        "error": err
+                                    }),
                                 );
                                 return TaskResult {
                                     task_id: task.id.clone(),
@@ -1332,6 +1380,7 @@ pub(crate) async fn run_llm_agent_body(
                             "agent-task-done",
                             json!({
                                 "task_id": task.id,
+                                "session_id": session_id,
                                 "agent_id": agent.id,
                                 "agent_name": agent.name,
                                 "summary": summary,
@@ -1410,6 +1459,7 @@ pub(crate) async fn run_llm_agent_body(
                     let tool_started = std::time::Instant::now();
                     emit_agent_tool_state(
                         app,
+                        session_id,
                         &task.id,
                         "start",
                         name,
@@ -1458,6 +1508,7 @@ pub(crate) async fn run_llm_agent_body(
                                     "agent-help-start",
                                     json!({
                                         "task_id": task.id,
+                                        "session_id": session_id,
                                         "mission_id": mission_id,
                                         "agent_id": agent.id,
                                         "agent_name": agent.name,
@@ -1502,6 +1553,7 @@ pub(crate) async fn run_llm_agent_body(
                                             "agent-help-done",
                                             json!({
                                                 "task_id": task.id,
+                                                "session_id": session_id,
                                                 "mission_id": mission_id,
                                                 "agent_id": agent.id,
                                                 "answer_chars": answer_chars,
@@ -1525,6 +1577,7 @@ pub(crate) async fn run_llm_agent_body(
                                             "agent-help-error",
                                             json!({
                                                 "task_id": task.id,
+                                                "session_id": session_id,
                                                 "mission_id": mission_id,
                                                 "agent_id": agent.id,
                                                 "error": err,
@@ -1594,6 +1647,7 @@ pub(crate) async fn run_llm_agent_body(
                                 "chat-notice",
                                 json!({
                                     "kind": "tool_disabled",
+                                    "session_id": session_id,
                                     "tool": name,
                                     "failures": trip.failures,
                                     "limit": failure_limit,
@@ -1603,6 +1657,7 @@ pub(crate) async fn run_llm_agent_body(
                     }
                     emit_agent_tool_state(
                         app,
+                        session_id,
                         &task.id,
                         "done",
                         name,
@@ -1679,6 +1734,7 @@ pub(crate) async fn run_llm_agent_body(
         "agent-task-done",
         json!({
             "task_id": task.id,
+            "session_id": session_id,
             "agent_id": agent.id,
             "agent_name": agent.name,
             "summary": if max_iterations.is_some() { "Max iterations reached" } else { "Loop stopped" },
@@ -1721,6 +1777,7 @@ pub(crate) fn last_assistant_content(working_memory: &[Value]) -> Option<String>
 /// task through `mbus` `end_task`.
 pub(crate) fn finalize_mission_task(
     app: &AppHandle,
+    session_id: &str,
     mission_id: &str,
     task: &Task,
     agent: &SubAgent,
@@ -1738,6 +1795,7 @@ pub(crate) fn finalize_mission_task(
         "agent-task-done",
         json!({
             "task_id": task.id,
+            "session_id": session_id,
             "agent_id": agent.id,
             "agent_name": agent.name,
             "summary": summary,

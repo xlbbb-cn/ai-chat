@@ -84,6 +84,12 @@ pub struct StreamOptions<'a> {
     pub token_event: &'a str,
     /// If set, include `{"task_id": ..., "token": ...}` payload instead of a plain string.
     pub task_id: Option<&'a str>,
+    /// Chat session the request belongs to. Attached to every structured
+    /// payload (`token_event` / `reasoning_event` with a task, `chat-usage`)
+    /// so the UI can drop a winding-down turn's events after the user
+    /// switched to another conversation. `None` for callers without a chat
+    /// session (planner supervisor, evolution maintenance).
+    pub session_id: Option<&'a str>,
     /// Event name for reasoning deltas, or `None` to keep them off the wire.
     ///
     /// The main chat uses `chat-reasoning-token`; a sub-agent mission uses its
@@ -450,7 +456,8 @@ pub(crate) fn process_stream_chunk(
                 "completion_tokens": *completion_tokens,
                 "total_tokens": total_tokens,
                 "max_tokens": opts.usage_max_tokens,
-                "usage_ratio": usage_ratio
+                "usage_ratio": usage_ratio,
+                "session_id": opts.session_id,
             });
             // Only reported when the provider exposes a cache dialect at all:
             // without it a hard-coded `0%` would look like real data.
@@ -496,7 +503,14 @@ pub(crate) fn process_stream_chunk(
         reasoning_content.push_str(reasoning);
         if let Some(event) = opts.reasoning_event {
             if let Some(task_id) = opts.task_id {
-                let _ = app.emit(event, json!({ "task_id": task_id, "token": reasoning }));
+                let _ = app.emit(
+                    event,
+                    json!({
+                        "task_id": task_id,
+                        "token": reasoning,
+                        "session_id": opts.session_id,
+                    }),
+                );
             } else {
                 let _ = app.emit(event, reasoning.to_string());
             }
@@ -538,7 +552,11 @@ pub(crate) fn process_stream_chunk(
             if let Some(task_id) = opts.task_id {
                 let _ = app.emit(
                     opts.token_event,
-                    json!({ "task_id": task_id, "token": token }),
+                    json!({
+                        "task_id": task_id,
+                        "token": token,
+                        "session_id": opts.session_id,
+                    }),
                 );
             } else {
                 let _ = app.emit(opts.token_event, token.to_string());
@@ -985,6 +1003,7 @@ pub(crate) async fn stream_request(
     usage_max_tokens: Option<u32>,
     ds_format: bool,
     headers: &[(String, String)],
+    session_id: Option<&str>,
 ) -> Result<StreamResult, String> {
     stream_llm_request(
         app,
@@ -996,6 +1015,7 @@ pub(crate) async fn stream_request(
         StreamOptions {
             token_event: "chat-token",
             task_id: None,
+            session_id,
             reasoning_event: Some("chat-reasoning-token"),
             emit_usage: true,
             emit_tokens: true,

@@ -861,6 +861,8 @@ export interface CloudProbe {
 /** `agent-task-token` payload: one streamed chunk of agent output. */
 export interface AgentTaskTokenEvent {
   task_id: string;
+  /** Chat session the task belongs to; the listener drops other sessions. */
+  session_id?: string | null;
   token: string;
 }
 
@@ -873,6 +875,8 @@ export interface AgentTaskTokenEvent {
  */
 export interface AgentTaskToolEvent {
   task_id: string;
+  /** Chat session the task belongs to; the listener drops other sessions. */
+  session_id?: string | null;
   phase: "start" | "progress" | "done";
   tool?: string;
   detail?: string;
@@ -884,11 +888,15 @@ export interface AgentTaskToolEvent {
 /** `agent-task-reasoning` payload: one streamed reasoning delta. */
 export interface AgentTaskReasoningEvent {
   task_id: string;
+  /** Chat session the task belongs to; the listener drops other sessions. */
+  session_id?: string | null;
   token: string;
 }
 
 export interface AgentTaskEvent {
   task_id: string;
+  /** Chat session the task belongs to; the listener drops other sessions. */
+  session_id?: string | null;
   agent_id: string;
   agent_name: string;
   description?: string;
@@ -908,6 +916,8 @@ export interface AgentTaskEvent {
 /** `agent-help-start` / `agent-help-done` / `agent-help-error` payload. */
 export interface AgentHelpEvent {
   task_id: string;
+  /** Chat session the task belongs to; the listener drops other sessions. */
+  session_id?: string | null;
   mission_id?: string;
   agent_id: string;
   agent_name?: string;
@@ -981,6 +991,8 @@ export interface AgentBusMessage {
  * means the request is answered without sub-agents.
  */
 export interface AgentSelectionEvent {
+  /** Chat session the decision belongs to; the listener drops other sessions. */
+  session_id?: string | null;
   delegate: boolean;
   confidence: number;
   agents: Array<{ id: string; name: string; role: string; why: string }>;

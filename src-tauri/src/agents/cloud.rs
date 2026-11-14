@@ -97,8 +97,11 @@ fn extract_text(value: &Value, path: &str) -> Result<String, String> {
         .ok_or_else(|| format!("the response has no '{}' field", path.trim()))
 }
 
-fn emit_progress(app: &AppHandle, task_id: &str, text: String) {
-    let _ = app.emit("agent-task-token", json!({ "task_id": task_id, "token": text }));
+fn emit_progress(app: &AppHandle, task_id: &str, session_id: &str, text: String) {
+    let _ = app.emit(
+        "agent-task-token",
+        json!({ "task_id": task_id, "session_id": session_id, "token": text }),
+    );
 }
 
 fn apply_headers(
@@ -182,6 +185,7 @@ pub async fn run(
     task_id: &str,
     prompt: &str,
     cwd: &Path,
+    session_id: &str,
     cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<CloudRunOutcome, String> {
     let settings = &agent.cloud;
@@ -207,7 +211,7 @@ pub async fn run(
     let body: Value = serde_json::from_str(&body_text)
         .map_err(|e| format!("the request body template is not valid JSON: {e}"))?;
 
-    emit_progress(app, task_id, format!("POST {endpoint}\n"));
+    emit_progress(app, task_id, session_id, format!("POST {endpoint}\n"));
     let request = apply_headers(client.post(endpoint), &settings.token, &settings.headers)
         .header("Content-Type", "application/json")
         .json(&body);
@@ -229,7 +233,12 @@ pub async fn run(
     // ── Single-shot mode ────────────────────────────────────────────────────
     if settings.poll_url.trim().is_empty() {
         let result = extract_text(&payload, &settings.result_path)?;
-        emit_progress(app, task_id, format!("HTTP {status} (no polling configured)\n"));
+        emit_progress(
+            app,
+            task_id,
+            session_id,
+            format!("HTTP {status} (no polling configured)\n"),
+        );
         return Ok(CloudRunOutcome {
             result,
             duration_ms: started.elapsed().as_millis() as u64,
@@ -252,6 +261,7 @@ pub async fn run(
     emit_progress(
         app,
         task_id,
+        session_id,
         format!("HTTP {status} accepted, job {}\nPolling {poll_url}\n", job_id.trim()),
     );
 
@@ -299,6 +309,7 @@ pub async fn run(
         emit_progress(
             app,
             task_id,
+            session_id,
             format!("poll #{attempt}: status={}\n", job_status.trim()),
         );
 

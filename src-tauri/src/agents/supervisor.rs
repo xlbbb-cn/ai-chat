@@ -357,6 +357,9 @@ async fn run_activation(
                 // only its status events and bus messages reach the UI.
                 token_event: "agent-planner-token",
                 task_id: None,
+                // The planner itself reports through `agent-planner-*` events,
+                // which carry the bus's session id instead.
+                session_id: None,
                 reasoning_event: None,
                 emit_usage: false,
                 usage_max_tokens: None,

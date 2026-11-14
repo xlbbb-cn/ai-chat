@@ -945,6 +945,20 @@ pub(crate) async fn run_chat_turn(
     drop_disabled_tools(&mut tools_list);
 
     loop {
+        // ── Stop pressed while the last round was winding down? ──────────────
+        // The cancel flag is only polled inside the tool loop and by the
+        // stream, so a turn that was executing a foreground tool (or sat in a
+        // confirmation wait) can reach this boundary seconds after the user
+        // pressed Stop. Ending here, BEFORE the request-boundary drains below,
+        // is what keeps a dead turn from announcing deliveries the model will
+        // never see: the drains emit `chat-injected`, which is heard by
+        // whatever conversation the user has opened in the meantime. The
+        // queued injections are dropped with the window (`InjectionWindow`)
+        // and the UI re-sends them as a normal next-turn message.
+        if turn_cancelled.load(Ordering::SeqCst) {
+            break;
+        }
+
         // ── MCP registry changed during this turn? ───────────────────────────
         // `mcp_self` can create and enable a server while the turn is running.
         // Rebuilding the payload before the next request is what makes the new
@@ -1014,9 +1028,15 @@ pub(crate) async fn run_chat_turn(
             // showing an item as "queued" until this event lands, so anything
             // that never reached a request is re-sent as a normal turn instead
             // of vanishing.
+            //
+            // `session_id` lets the UI route the event: a turn that outlives
+            // the conversation it started in (a foreground tool still running
+            // after Stop, a confirmation timeout) must not announce its
+            // deliveries inside another chat.
             let _ = app.emit(
                 "chat-injected",
                 json!({
+                    "session_id": session_id,
                     "items": injections
                         .iter()
                         .map(|item| json!({
@@ -1064,7 +1084,10 @@ pub(crate) async fn run_chat_turn(
                     background_results.len()
                 ),
             );
-            let _ = app.emit("chat-injected", json!({ "items": items }));
+            let _ = app.emit(
+                "chat-injected",
+                json!({ "session_id": session_id, "items": items }),
+            );
         }
 
         // ── Turn budget ──────────────────────────────────────────────────────
@@ -1099,6 +1122,7 @@ pub(crate) async fn run_chat_turn(
                     "chat-notice",
                     json!({
                         "kind": "budget_exhausted",
+                        "session_id": session_id,
                         "reason": stop.as_str(),
                         "rounds": rounds,
                         "tool_calls": tool_calls,
@@ -1221,6 +1245,7 @@ still missing."
             Some(effective_max_tokens),
             config.ds_format_for(&active_model),
             &request_headers,
+            Some(&session_id),
         )
         .await;
 
@@ -1800,7 +1825,13 @@ only when every item is done, or when you are blocked and need the user."
                 } else {
                     "turn tool budget spent"
                 };
-                let _ = app.emit("tool-call", format!("🚫 *{name}* — not executed ({reason})"));
+                let _ = app.emit(
+                    "tool-call",
+                    json!({
+                        "session_id": session_id,
+                        "text": format!("🚫 *{name}* — not executed ({reason})"),
+                    }),
+                );
                 log_event(
                     &state,
                     "WARN",
@@ -1928,8 +1959,13 @@ only when every item is done, or when you are blocked and need the user."
                         // Structured state event: the UI records this on the
                         // assistant message and sends it back as
                         // `loaded_skills` on the next turn, so a skill is
-                        // loaded at most once per session.
-                        let _ = app.emit("skill-loaded", skill.name.clone());
+                        // loaded at most once per session. `session_id` routes
+                        // the event: a winding-down turn must not record its
+                        // skill inside another chat.
+                        let _ = app.emit(
+                            "skill-loaded",
+                            json!({ "session_id": session_id, "skill_name": skill.name }),
+                        );
                         format!(
                             "Skill '{}' loaded. Follow its instructions to fulfill the request.",
                             skill_name
@@ -2199,6 +2235,7 @@ only when every item is done, or when you are blocked and need the user."
                         "chat-notice",
                         json!({
                             "kind": "tool_disabled",
+                            "session_id": session_id,
                             "tool": name,
                             "failures": trip.failures,
                             "limit": failure_limit,

@@ -324,6 +324,7 @@ pub async fn execute_tool(
                 Ok(task) => {
                     let payload = json!({
                         "mission_id": mission_id,
+                        "session_id": session_id,
                         "task": task,
                     });
                     let _ = app.emit("agent-task-state", payload.clone());
@@ -347,6 +348,7 @@ pub async fn execute_tool(
                 Ok(task) => {
                     let payload = json!({
                         "mission_id": mission_id,
+                        "session_id": session_id,
                         "task": task,
                     });
                     let _ = app.emit("agent-task-state", payload.clone());
@@ -387,6 +389,7 @@ pub async fn execute_tool(
                 Ok(()) => {
                     let payload = json!({
                         "mission_id": mission_id,
+                        "session_id": session_id,
                         "status": "completed",
                         "final_report": final_report.unwrap_or(""),
                     });
@@ -419,6 +422,7 @@ pub async fn execute_tool(
                     let _ = emit_tool_progress(
                         app,
                         mission_id,
+                        session_id,
                         format!(
                             "⏱️ *Timer set: {}*\n\n```\n{}\n```\n",
                             crate::timer::format_delay(delay_seconds),
@@ -474,6 +478,7 @@ pub async fn execute_tool(
                     let _ = emit_tool_progress(
                         app,
                         mission_id,
+                        session_id,
                         format!("⏱️ *Timer cancelled: {}*\n", entry.label),
                     );
                     format!(
@@ -572,6 +577,7 @@ pub async fn execute_tool(
                     let _ = emit_tool_progress(
                         app,
                         mission_id,
+                        session_id,
                         format!("📄 *Reading skill file {}/{}*\n\n", skill_name, rel_path),
                     );
 
@@ -635,6 +641,7 @@ pub async fn execute_tool(
                     let _ = emit_tool_progress(
                         app,
                         mission_id,
+                        session_id,
                         format!("📂 *Listing skill directory {}/{}*\n\n", skill_name, rel_path),
                     );
 
@@ -712,6 +719,7 @@ pub async fn execute_tool(
                     let _ = emit_tool_progress(
                         app,
                         mission_id,
+                        session_id,
                         format!(
                             "🔎 *Searching skill {} for {}*\n\n",
                             skill_name,
@@ -958,6 +966,7 @@ pub async fn execute_tool(
                 let _ = emit_tool_progress(
                     app,
                     mission_id,
+                    session_id,
                     format!(
                         "✅ *Risk assessment passed: {} (score: {}) - running directly*\n\n```\n{}\n```\n\n",
                         report.risk_level, report.risk_score, command
@@ -1068,6 +1077,7 @@ pub async fn execute_tool(
             let _ = emit_tool_progress(
                 app,
                 mission_id,
+                session_id,
                 if needs_risk_confirmation {
                     format!(
                         "⚠️ *User confirmed execution: {} (score: {})*\n\n```\n{}\n```\n\n",
@@ -1245,6 +1255,7 @@ pub async fn execute_tool(
                 let _ = emit_tool_progress(
                     app,
                     mission_id,
+                    session_id,
                     format!(
                         "✅ *Risk assessment passed: {} (score: {}) - running directly*\n\n```{}\n{}\n```\n\n",
                         report.risk_level, report.risk_score, shell_type, code
@@ -1314,6 +1325,7 @@ pub async fn execute_tool(
             let _ = emit_tool_progress(
                 app,
                 mission_id,
+                session_id,
                 format!(
                     "⚠️ *User confirmed execution: {} (score: {})*\n\n```{}\n{}\n```\n\n",
                     report.risk_level, report.risk_score, shell_type, code
@@ -1346,6 +1358,7 @@ pub async fn execute_tool(
                 &workspace_dir,
                 protected_skill_root,
                 mission_id,
+                session_id,
                 cancel,
             )
             .await
@@ -1359,7 +1372,14 @@ pub async fn execute_tool(
                 "Error: skill_merge is only available to the evolution maintenance turn."
                     .to_string()
             } else {
-                skill_admin::handle_skill_merge(app, &args, &workspace_dir, config, mission_id)
+                skill_admin::handle_skill_merge(
+                    app,
+                    &args,
+                    &workspace_dir,
+                    config,
+                    mission_id,
+                    session_id,
+                )
             }
         }
         _ => format!("Unknown tool: {}", name),

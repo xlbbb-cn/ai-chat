@@ -76,6 +76,7 @@ pub(crate) fn log_agent_event(app: &AppHandle, level: &str, message: String) {
 /// content at all (`text_chars=0`, tool_calls only).
 pub(crate) fn emit_agent_tool_state(
     app: &AppHandle,
+    session_id: &str,
     task_id: &str,
     phase: &str,
     tool: &str,
@@ -85,6 +86,7 @@ pub(crate) fn emit_agent_tool_state(
 ) {
     let mut payload = json!({
         "task_id": task_id,
+        "session_id": session_id,
         "phase": phase,
         "tool": tool,
     });
@@ -445,10 +447,11 @@ pub(crate) fn parse_task_plan(raw: &str, roster: &[String]) -> Result<(PlanDecis
 }
 
 /// Announces the selector's decision to the UI (chip above the answer).
-pub(crate) fn emit_agent_selection(app: &AppHandle, selection: &AgentSelection) {
+pub(crate) fn emit_agent_selection(app: &AppHandle, session_id: &str, selection: &AgentSelection) {
     let _ = app.emit(
         "agent-selection",
         json!({
+            "session_id": session_id,
             "delegate": selection.delegate,
             "confidence": selection.confidence,
             "agents": &selection.choices,
@@ -543,7 +546,10 @@ pub async fn orchestrate(
 
     // Step 2: Plan. Stop pressed between steps aborts the mission here, before
     // any sub-agent is launched.
-    let _ = app.emit("agent-plan-start", json!({ "task_count": 0 }));
+    let _ = app.emit(
+        "agent-plan-start",
+        json!({ "task_count": 0, "session_id": session_id }),
+    );
     if cancelled.load(Ordering::SeqCst) {
         return Err("stopped by the user".to_string());
     }
@@ -591,7 +597,7 @@ pub async fn orchestrate(
                 choices: Vec::new(),
             };
             if enabled.len() > 1 {
-                emit_agent_selection(app, &declined);
+                emit_agent_selection(app, session_id, &declined);
             }
             return Ok(OrchestrationOutcome {
                 report: None,
@@ -605,7 +611,7 @@ pub async fn orchestrate(
     // declined plan never leaves a stale "agents selected" row in the UI.
     if let Some(selection) = &selection {
         if enabled.len() > 1 {
-            emit_agent_selection(app, selection);
+            emit_agent_selection(app, session_id, selection);
         }
     }
 
@@ -648,6 +654,7 @@ pub async fn orchestrate(
         "agent-plan-start",
         json!({
             "task_count": plan.tasks.len(),
+            "session_id": session_id,
             "mbus": mission_bus.is_some(),
             "bus_id": mission_bus.as_ref().map(|bus| bus.bus_id()),
         }),
@@ -749,7 +756,7 @@ pub async fn orchestrate(
     // would leave the UI spinning until the whole final answer is streamed.
     let _ = app.emit(
         "agent-aggregate-done",
-        json!({ "task_count": results.len() }),
+        json!({ "task_count": results.len(), "session_id": session_id }),
     );
     Ok(OrchestrationOutcome {
         report: Some(build_mission_results_block(

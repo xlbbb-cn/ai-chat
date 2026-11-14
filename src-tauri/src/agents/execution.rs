@@ -60,7 +60,12 @@ pub(crate) async fn execute_tasks(
 /// Reports a task that never ran. The mission row (if any) is closed so the
 /// monitor cannot keep showing it as running, and the UI gets a neutral event
 /// instead of a silent gap.
-pub(crate) fn finish_skipped(app: &AppHandle, mbus: Option<&mbus::MissionBus>, result: &TaskResult) {
+pub(crate) fn finish_skipped(
+    app: &AppHandle,
+    session_id: &str,
+    mbus: Option<&mbus::MissionBus>,
+    result: &TaskResult,
+) {
     close_mission(app, &result.task_id, "stopped");
     if let Some(bus) = mbus {
         bus.mark_skipped(result);
@@ -69,6 +74,7 @@ pub(crate) fn finish_skipped(app: &AppHandle, mbus: Option<&mbus::MissionBus>, r
         "agent-task-skipped",
         json!({
             "task_id": &result.task_id,
+            "session_id": session_id,
             "agent_id": &result.agent_id,
             "agent_name": &result.agent_name,
             "reason": &result.content,
@@ -113,7 +119,7 @@ pub(crate) async fn execute_parallel(
                 &task.agent_id,
                 format!("agent '{}' is not available", task.agent_id),
             );
-            finish_skipped(app, mbus.as_deref(), &result);
+            finish_skipped(app, session_id, mbus.as_deref(), &result);
             blocked.insert(result.task_id.clone());
             results.push(result);
         }
@@ -147,7 +153,7 @@ pub(crate) async fn execute_parallel(
                     &task.agent_id,
                     format!("skipped because {} did not run", missing.join(", ")),
                 );
-                finish_skipped(app, mbus.as_deref(), &result);
+                finish_skipped(app, session_id, mbus.as_deref(), &result);
                 blocked.insert(result.task_id.clone());
                 results.push(result);
                 pending.retain(|candidate| candidate.id != task.id);
@@ -179,7 +185,7 @@ pub(crate) async fn execute_parallel(
                     )
                 };
                 let result = TaskResult::skipped(&task, &task.agent_id, reason);
-                finish_skipped(app, mbus.as_deref(), &result);
+                finish_skipped(app, session_id, mbus.as_deref(), &result);
                 results.push(result);
             }
             break;
@@ -265,7 +271,7 @@ pub(crate) async fn execute_parallel(
                             // going through `run_sub_agent`, so it still needs its
                             // UI event.
                             if res.status == "skipped" {
-                                finish_skipped(app, mbus.as_deref(), &res);
+                                finish_skipped(app, session_id, mbus.as_deref(), &res);
                             }
                             blocked.insert(res.task_id.clone());
                         }
@@ -307,6 +313,7 @@ pub(crate) async fn execute_parallel(
                             "agent-task-error",
                             json!({
                                 "task_id": &result.task_id,
+                                "session_id": session_id,
                                 "agent_id": &result.agent_id,
                                 "error": &result.content,
                             }),
@@ -327,7 +334,7 @@ pub(crate) async fn execute_parallel(
     if cancelled.load(Ordering::SeqCst) {
         for task in pending {
             let result = TaskResult::skipped(&task, &task.agent_id, "cancelled by user");
-            finish_skipped(app, mbus.as_deref(), &result);
+            finish_skipped(app, session_id, mbus.as_deref(), &result);
             results.push(result);
         }
     }
@@ -359,7 +366,7 @@ pub(crate) async fn execute_sequential(
     for task in tasks {
         if cancelled.load(Ordering::SeqCst) {
             let result = TaskResult::skipped(&task, &task.agent_id, "cancelled by user");
-            finish_skipped(app, mbus.as_deref(), &result);
+            finish_skipped(app, session_id, mbus.as_deref(), &result);
             results.push(result);
             continue;
         }
@@ -376,7 +383,7 @@ pub(crate) async fn execute_sequential(
                 &task.agent_id,
                 format!("skipped because {} did not run", missing.join(", ")),
             );
-            finish_skipped(app, mbus.as_deref(), &result);
+            finish_skipped(app, session_id, mbus.as_deref(), &result);
             blocked.insert(task.id.clone());
             results.push(result);
             continue;
@@ -390,7 +397,7 @@ pub(crate) async fn execute_sequential(
                     &task.agent_id,
                     format!("agent '{}' is not available", task.agent_id),
                 );
-                finish_skipped(app, mbus.as_deref(), &result);
+                finish_skipped(app, session_id, mbus.as_deref(), &result);
                 blocked.insert(task.id.clone());
                 results.push(result);
                 continue;
@@ -460,6 +467,7 @@ pub async fn run_sub_agent(
                 "agent-task-start",
                 json!({
                     "task_id": task.id,
+                    "session_id": session_id,
                     "agent_id": agent.id,
                     "agent_name": agent.name,
                     "description": task.description,
@@ -468,7 +476,12 @@ pub async fn run_sub_agent(
             );
             let _ = app.emit(
                 "agent-task-error",
-                json!({ "task_id": task.id, "agent_id": agent.id, "error": err }),
+                json!({
+                    "task_id": task.id,
+                    "session_id": session_id,
+                    "agent_id": agent.id,
+                    "error": err
+                }),
             );
             let result = TaskResult {
                 task_id: task.id.clone(),
@@ -619,6 +632,7 @@ pub(crate) async fn run_external_agent(
         "agent-task-start",
         json!({
             "task_id": task.id,
+            "session_id": session_id,
             "agent_id": agent.id,
             "agent_name": agent.name,
             "description": task.description,
@@ -634,7 +648,12 @@ pub(crate) async fn run_external_agent(
                 let error = format!("Failed to lock database for mission initialization: {err}");
                 let _ = app.emit(
                     "agent-task-error",
-                    json!({ "task_id": task.id, "agent_id": agent.id, "error": error }),
+                    json!({
+                        "task_id": task.id,
+                        "session_id": session_id,
+                        "agent_id": agent.id,
+                        "error": error
+                    }),
                 );
                 return TaskResult {
                     task_id: task.id.clone(),
@@ -653,7 +672,12 @@ pub(crate) async fn run_external_agent(
         {
             let _ = app.emit(
                 "agent-task-error",
-                json!({ "task_id": task.id, "agent_id": agent.id, "error": err }),
+                json!({
+                    "task_id": task.id,
+                    "session_id": session_id,
+                    "agent_id": agent.id,
+                    "error": err
+                }),
             );
             return TaskResult {
                 task_id: task.id.clone(),
@@ -709,7 +733,12 @@ pub(crate) async fn run_external_agent(
         {
             let _ = app.emit(
                 "agent-task-error",
-                json!({ "task_id": task.id, "agent_id": agent.id, "error": rejection.clone() }),
+                json!({
+                    "task_id": task.id,
+                    "session_id": session_id,
+                    "agent_id": agent.id,
+                    "error": rejection.clone()
+                }),
             );
             return TaskResult {
                 task_id: task.id.clone(),
@@ -732,6 +761,7 @@ pub(crate) async fn run_external_agent(
                 &task.id,
                 &prompt,
                 cli_run.cwd.clone(),
+                session_id,
                 cancelled,
             )
             .await
@@ -740,10 +770,12 @@ pub(crate) async fn run_external_agent(
             .map(|run| (run.status, run.output, run.summary))
             .map_err(|err| format!("CLI agent \"{}\" failed: {err}", agent.name))
         }
-        ExternalBackend::Cloud => cloud::run(app, agent, &task.id, &prompt, &task_cwd, cancelled)
-            .await
-            .map(|run| ("success", run.result, run.summary))
-            .map_err(|err| format!("Cloud agent \"{}\" failed: {err}", agent.name)),
+        ExternalBackend::Cloud => {
+            cloud::run(app, agent, &task.id, &prompt, &task_cwd, session_id, cancelled)
+                .await
+                .map(|run| ("success", run.result, run.summary))
+                .map_err(|err| format!("Cloud agent \"{}\" failed: {err}", agent.name))
+        }
     };
 
     match outcome {
@@ -768,6 +800,7 @@ pub(crate) async fn run_external_agent(
                     "agent-task-error",
                     json!({
                         "task_id": task.id,
+                        "session_id": session_id,
                         "agent_id": agent.id,
                         "error": summary.chars().take(200).collect::<String>(),
                     }),
@@ -777,6 +810,7 @@ pub(crate) async fn run_external_agent(
                     "agent-task-done",
                     json!({
                         "task_id": task.id,
+                        "session_id": session_id,
                         "agent_id": agent.id,
                         "agent_name": agent.name,
                         "summary": summary.chars().take(200).collect::<String>(),
@@ -806,7 +840,12 @@ pub(crate) async fn run_external_agent(
             };
             let _ = app.emit(
                 "agent-task-error",
-                json!({ "task_id": task.id, "agent_id": agent.id, "error": err }),
+                json!({
+                    "task_id": task.id,
+                    "session_id": session_id,
+                    "agent_id": agent.id,
+                    "error": err
+                }),
             );
             TaskResult {
                 task_id: task.id.clone(),

@@ -52,20 +52,38 @@ use self::{
 /// working and add a stray main-chat row. Mission progress goes out as
 /// `agent-task-tool`, which the UI applies to the task row without touching its
 /// status.
-pub(crate) fn emit_tool_progress(
+///
+/// `session_id` routes both payloads: a winding-down turn must not settle rows
+/// inside a chat the user already switched to. `impl Into<Option<&str>>` lets
+/// every caller pass what it has — `Option<&str>` at the dispatch layer, a bare
+/// `&str` inside handlers that already unwrapped it — without per-callsite
+/// wrapping.
+pub(crate) fn emit_tool_progress<'a>(
     app: &AppHandle,
     mission_id: Option<&str>,
+    session_id: impl Into<Option<&'a str>>,
     text: impl Into<String>,
 ) {
+    let session_id = session_id.into();
     match mission_id {
         Some(task_id) => {
             let _ = app.emit(
                 "agent-task-tool",
-                json!({ "task_id": task_id, "phase": "progress", "text": text.into() }),
+                json!({
+                    "task_id": task_id,
+                    "phase": "progress",
+                    "session_id": session_id,
+                    "text": text.into()
+                }),
             );
         }
         None => {
-            let _ = app.emit("tool-call", text.into());
+            // Structured so the main-chat listener can drop another
+            // conversation's steps (a plain string carries no session).
+            let _ = app.emit(
+                "tool-call",
+                json!({ "session_id": session_id, "text": text.into() }),
+            );
         }
     }
 }

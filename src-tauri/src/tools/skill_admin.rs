@@ -124,6 +124,7 @@ pub(crate) fn handle_skill_merge(
     workspace_dir: &Path,
     config: &AppConfig,
     mission_id: Option<&str>,
+    session_id: Option<&str>,
 ) -> String {
     if !config.self_evolution_mode {
         return "Error: skill_merge is only available while self-evolution mode is on.".to_string();
@@ -133,6 +134,7 @@ pub(crate) fn handle_skill_merge(
     let _ = emit_tool_progress(
         app,
         mission_id,
+        session_id,
         format!("🧩 *Merging skills into {}*\n\n", target),
     );
 
