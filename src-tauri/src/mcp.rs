@@ -598,20 +598,57 @@ pub fn migrate_self_built_servers(state: &AppState) -> Result<usize, String> {
 
     let workspace_dir = state.workspace_dir.lock().unwrap().clone();
     let mut roster = load_workspace_servers(&workspace_dir);
+    let mut changed = false;
+    // The workspace side can hold the same legacy spelling (an absolute or
+    // `\`-separated script path), so it is repaired here too.
+    for server in roster.iter_mut() {
+        changed |= normalize_self_built_paths(&workspace_dir, server);
+    }
     let mut moved = 0usize;
-    for server in self_built {
+    for mut server in self_built {
         if roster.iter().any(|existing| existing.id == server.id) {
             continue;
         }
+        changed |= normalize_self_built_paths(&workspace_dir, &mut server);
         roster.push(server);
         moved += 1;
     }
     // Write the workspace side first: if that fails the app-data entries stay
     // where they are and the merged view still serves them.
-    save_workspace_servers(&workspace_dir, &roster)?;
+    if moved > 0 || changed {
+        save_workspace_servers(&workspace_dir, &roster)?;
+    }
     save_servers(&state.mcp_servers_path, &panel)?;
     state.bump_mcp_revision();
     Ok(moved)
+}
+
+/// Rewrite a self-built entry's stored script path into workspace-relative
+/// form. Returns `true` when something changed.
+///
+/// The first cut of the feature stored the absolute script path. Every stdio
+/// child already starts in the workspace root, so the argument must stay
+/// relative: an absolute path stops resolving after a backup restore on another
+/// machine, and `mcp_self` can no longer tell whether a folder is its own.
+/// Entries that do not resolve inside the workspace are left untouched — they
+/// still show up in the panel, and the spawn error explains the failure.
+pub(crate) fn normalize_self_built_paths(workspace_dir: &Path, server: &mut McpServer) -> bool {
+    let Ok((_, relative)) =
+        crate::tools::paths::resolve_input_path(workspace_dir, &server.definition_path)
+    else {
+        return false;
+    };
+    if relative == server.definition_path {
+        return false;
+    }
+    let previous = crate::tools::paths::normalize_input_path(&server.definition_path);
+    for arg in server.args.iter_mut() {
+        if crate::tools::paths::normalize_input_path(arg) == previous {
+            *arg = relative.clone();
+        }
+    }
+    server.definition_path = relative;
+    true
 }
 
 /// Canonical lowercase name for a transport (used in logs and errors).

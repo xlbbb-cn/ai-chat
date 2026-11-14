@@ -10,7 +10,7 @@ use tauri::AppHandle;
 
 use super::emit_tool_progress;
 use super::patch::apply_unified_patch;
-use super::paths::{ensure_mutation_target_allowed, resolve_safe_path, with_root_header};
+use super::paths::{ensure_mutation_target_allowed, resolve_input_path, with_root_header};
 use super::search::{
     is_probably_binary, run_integrated_search, SearchOptions, SEARCH_MAX_MATCHES,
 };
@@ -545,11 +545,16 @@ fn resolve_file_action_path(
     workspace_dir: &Path,
     require_exists: bool,
 ) -> Result<PathBuf, String> {
-    let path = resolve_safe_path(workspace_dir, input).map_err(|_| {
+    // The cause is kept: "outside the workspace" and "this path cannot be
+    // resolved" are different problems, and reporting both as an escape sent
+    // the model rewriting a path that was already correct (an absolute path to
+    // a file that does not exist yet used to land here).
+    let (path, _relative) = resolve_input_path(workspace_dir, input).map_err(|e| {
         format!(
-            "Path '{}' is outside the workspace root '{}'. file_actions can only operate on workspace files.",
+            "Path '{}' cannot be used under the workspace root '{}': {}",
             input,
-            workspace_dir.display()
+            workspace_dir.display(),
+            e
         )
     })?;
     if require_exists && !path.exists() {

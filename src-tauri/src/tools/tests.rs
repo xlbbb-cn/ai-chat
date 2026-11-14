@@ -1352,6 +1352,125 @@ fn resolve_safe_path_allows_new_file_inside_workspace() {
     let _ = fs::remove_dir_all(&workspace_root);
 }
 
+/// An absolute path to a workspace file that does not exist yet must resolve.
+///
+/// It used to fail: `canonicalize` errors on a missing path, the raw spelling
+/// was compared against the canonical (`\\?\`-prefixed, symlink-resolved) root,
+/// and the call was rejected as "outside the workspace root" — while the very
+/// same file written as `./sub/newfile.txt` resolved fine. A pure spelling
+/// difference decided whether a path "hit".
+#[test]
+fn resolve_safe_path_accepts_an_absolute_new_file_inside_the_workspace() {
+    let workspace_root = make_temp_dir("resolve-safe-abs-new");
+    let subdir = workspace_root.join("sub");
+    fs::create_dir_all(&subdir).unwrap();
+    let canonical_root = workspace_root.canonicalize().unwrap();
+
+    let target = subdir.join("newfile.txt");
+    let resolved = super::resolve_safe_path(&workspace_root, &target.display().to_string())
+        .expect("an absolute path to a new workspace file resolves");
+    assert!(resolved.starts_with(&canonical_root));
+    assert_eq!(resolved.file_name().unwrap(), "newfile.txt");
+
+    // Same for an output path whose whole subdirectory is still missing.
+    let deeper = workspace_root.join("out/2025/report.md");
+    let resolved = super::resolve_safe_path(&workspace_root, &deeper.display().to_string())
+        .expect("a missing subdirectory still resolves");
+    assert!(resolved.starts_with(&canonical_root));
+
+    let _ = fs::remove_dir_all(&workspace_root);
+}
+
+/// Windows spellings of the same absolute path: `/` separators, a different
+/// case for an existing directory, and the `\\?\` verbatim prefix.
+#[cfg(windows)]
+#[test]
+fn resolve_safe_path_accepts_absolute_spelling_variants() {
+    let workspace_root = make_temp_dir("resolve-safe-variants");
+    let subdir = workspace_root.join("Sub");
+    fs::create_dir_all(&subdir).unwrap();
+    let canonical_root = workspace_root.canonicalize().unwrap();
+
+    let target = subdir.join("newfile.txt");
+    let plain = target.display().to_string();
+    let spellings = [
+        plain.clone(),
+        plain.replace('\\', "/"),
+        // `Sub` asked for as `sub`: the existing parent decides the real case.
+        workspace_root
+            .join("sub")
+            .join("newfile.txt")
+            .display()
+            .to_string(),
+        format!("\\\\?\\{plain}"),
+    ];
+    for spelling in spellings {
+        let resolved = super::resolve_safe_path(&workspace_root, &spelling)
+            .unwrap_or_else(|e| panic!("{spelling} must resolve: {e}"));
+        assert!(resolved.starts_with(&canonical_root), "{spelling}");
+    }
+
+    let _ = fs::remove_dir_all(&workspace_root);
+}
+
+/// The model spells one file several ways; the judgement lives in the Rust
+/// resolver, not in the tool description.
+#[test]
+fn resolve_input_path_normalizes_the_way_models_spell_paths() {
+    let workspace_root = make_temp_dir("resolve-input-normalize");
+    let subdir = workspace_root.join("src");
+    fs::create_dir_all(&subdir).unwrap();
+    fs::write(subdir.join("App.tsx"), "x").unwrap();
+    let canonical_root = workspace_root.canonicalize().unwrap();
+
+    let mut spellings = vec!["src/App.tsx", "  ./src/App.tsx  "];
+    #[cfg(windows)]
+    spellings.extend([
+        "src\\App.tsx",
+        ".\\src\\App.tsx",
+        // A leading `/` is not a Windows filesystem root: it means the
+        // workspace root, which is how models write `/src/App.tsx`.
+        "/src/App.tsx",
+    ]);
+
+    for spelling in spellings {
+        let (absolute, relative) = super::paths::resolve_input_path(&workspace_root, spelling)
+            .unwrap_or_else(|e| panic!("{spelling:?} must resolve: {e}"));
+        assert_eq!(relative, "src/App.tsx", "{spelling:?}");
+        assert!(absolute.starts_with(&canonical_root), "{spelling:?}");
+        assert!(absolute.is_file(), "{spelling:?}");
+    }
+
+    // A drive-rooted path outside the workspace stays an error — normalization
+    // must never remap it to `<workspace>/…`.
+    #[cfg(windows)]
+    {
+        let err = super::paths::resolve_input_path(&workspace_root, "E:/nowhere/src/App.tsx")
+            .unwrap_err();
+        assert!(err.contains("outside the workspace root"), "{err}");
+    }
+
+    // The workspace root itself is `.`, never an empty string.
+    let (_, relative) = super::paths::resolve_input_path(&workspace_root, ".").unwrap();
+    assert_eq!(relative, ".");
+
+    let _ = fs::remove_dir_all(&workspace_root);
+}
+
+/// Escapes and empty paths are still refused after normalization.
+#[test]
+fn resolve_input_path_rejects_escapes_and_empty_paths() {
+    let workspace_root = make_temp_dir("resolve-input-escape");
+
+    let err = super::paths::resolve_input_path(&workspace_root, "../outside.txt").unwrap_err();
+    assert!(err.contains("escapes workspace"), "{err}");
+
+    let err = super::paths::resolve_input_path(&workspace_root, "   ").unwrap_err();
+    assert!(err.contains("empty"), "{err}");
+
+    let _ = fs::remove_dir_all(&workspace_root);
+}
+
 /// Regression for the two traps the throwaway benchmark walked into:
 /// a match that starts mid-line must still be reported as a
 /// `path:line:text` row, and the parallel walker must return every

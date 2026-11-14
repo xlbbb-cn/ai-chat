@@ -8,17 +8,25 @@ pub(crate) fn resolve_safe_path(root_dir: &Path, rel_path: &str) -> Result<PathB
     // so the AI can pass either relative or absolute paths within the workspace.
     let stripped;
     let rel_path_str = if Path::new(rel_path).is_absolute() {
-        let canonical_root = root_dir
-            .canonicalize()
-            .unwrap_or_else(|_| root_dir.to_path_buf());
         let abs = Path::new(rel_path);
-        let abs_canonical = abs.canonicalize().unwrap_or_else(|_| abs.to_path_buf());
+        let canonical_root =
+            canonicalize_lenient(root_dir).unwrap_or_else(|| root_dir.to_path_buf());
+        // `canonicalize` fails for a path that does not exist yet, so an
+        // absolute path to a *new* file (`<ws>/new.txt` for a `write`) fell
+        // back to its raw spelling and then failed the comparison against the
+        // canonical root, which is the `\\?\`-prefixed (or symlink-resolved)
+        // form on Windows. The same path written relatively resolved fine —
+        // a pure spelling difference deciding whether a path "hits". Resolve
+        // leniently instead: the deepest existing ancestor is canonicalized
+        // (still following a symlinked parent, so an escape is still caught)
+        // and the remaining components are re-appended.
+        let abs_canonical = canonicalize_lenient(abs).unwrap_or_else(|| abs.to_path_buf());
         if let Ok(suffix) = abs_canonical.strip_prefix(&canonical_root) {
             stripped = suffix.to_string_lossy().into_owned();
             &stripped as &str
         } else {
             return Err(format!(
-                "Absolute path '{}' is outside the workspace root '{}'",
+                "Absolute path '{}' is outside the workspace root '{}' (path escapes workspace directory)",
                 rel_path,
                 root_dir.display()
             ));
@@ -94,6 +102,79 @@ pub(crate) fn resolve_safe_path(root_dir: &Path, rel_path: &str) -> Result<PathB
             }
             Ok(resolved)
         }
+    }
+}
+
+/// Normalize a model-supplied path into the spelling the sandbox expects.
+///
+/// Models name the same workspace file in many ways — `E:\ws\a.txt`,
+/// `E:/ws/a.txt`, `\\?\E:\ws\a.txt`, `/a.txt`, `./a.txt`, `"  a.txt  "`. The
+/// decision of what those mean lives here, in one Rust function, instead of in
+/// each caller or in the prompt. Everything below is *lexical*: containment is
+/// still decided by [`resolve_safe_path`] afterwards, so this cannot widen the
+/// sandbox.
+pub(crate) fn normalize_input_path(input: &str) -> String {
+    let mut value = input.trim().to_string();
+
+    // Verbatim prefixes (`\\?\E:\ws\a`, `\\.\pipe`, and their `/` spellings)
+    // exist to lift path-length limits, not to name a different location.
+    for prefix in [r"\\?\", r"\\.\", "//?/", "//./"] {
+        if let Some(rest) = value.strip_prefix(prefix) {
+            value = rest.to_string();
+            break;
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        // Windows accepts both separators; the workspace-relative form this
+        // toolchain stores and echoes uses `/` only.
+        value = value.replace('\\', "/");
+        // No Windows path is rooted at `/` alone (`C:/…` carries a prefix), so
+        // a leading slash can only mean "relative to the workspace root":
+        // models write `/src/App.tsx` when they mean `src/App.tsx`.
+        while value.starts_with('/') {
+            value.remove(0);
+        }
+    }
+
+    value
+}
+
+/// Resolve a model-supplied path to `(absolute, workspace-relative)`.
+///
+/// The relative form is what callers store (MCP roster, log lines) or echo
+/// back: it always uses `/` and never carries a `\\?\` prefix, so the same
+/// string keeps working after a backup restore on another machine.
+pub(crate) fn resolve_input_path(
+    root_dir: &Path,
+    input: &str,
+) -> Result<(PathBuf, String), String> {
+    let normalized = normalize_input_path(input);
+    if normalized.is_empty() {
+        return Err(format!("Path '{}' is empty", input));
+    }
+    let absolute = resolve_safe_path(root_dir, &normalized)?;
+    let relative = workspace_relative_display(root_dir, &absolute);
+    Ok((absolute, relative))
+}
+
+/// Workspace-relative display form of an already-resolved path (`/`
+/// separators; `.` for the workspace root itself).
+pub(crate) fn workspace_relative_display(root_dir: &Path, path: &Path) -> String {
+    let canonical_root =
+        canonicalize_lenient(root_dir).unwrap_or_else(|| root_dir.to_path_buf());
+    let relative = path
+        .strip_prefix(&canonical_root)
+        .or_else(|_| path.strip_prefix(root_dir))
+        .unwrap_or(path);
+    let text = relative.to_string_lossy();
+    #[cfg(windows)]
+    let text = text.replace('\\', "/");
+    if text.is_empty() {
+        ".".to_string()
+    } else {
+        text.to_string()
     }
 }
 

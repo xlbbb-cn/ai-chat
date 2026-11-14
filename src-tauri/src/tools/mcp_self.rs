@@ -43,7 +43,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 
-use super::paths::resolve_safe_path;
+use super::paths::{resolve_input_path, resolve_safe_path};
 use super::request_tool_confirmation;
 use crate::mcp::SOURCE_SELF_EVOLUTION;
 use crate::{mcp, AppState};
@@ -67,11 +67,19 @@ const PREVIEW_CHARS: usize = 1_500;
 const LOG_TAIL_LINES: usize = 30;
 
 /// The tool owns exactly this workspace-relative directory.
-const SELF_MCP_REL_DIR: &str = ".data/mcp";
+///
+/// Derived from the single data-layout constant (`workspace::DATA_DIR`) instead
+/// of repeating the literal: the script folder, the roster and
+/// `workspace::mcp_root` must never drift apart.
+fn self_mcp_rel_dir() -> String {
+    format!("{}/mcp", crate::workspace::DATA_DIR)
+}
 
 /// The roster file the tool writes (next to the scripts it describes). Merged
 /// with the app-data `mcp_servers.json` into the effective server list.
-const ROSTER_REL_PATH: &str = ".data/mcp.conf";
+fn roster_rel_path() -> String {
+    format!("{}/mcp.conf", crate::workspace::DATA_DIR)
+}
 
 // ─── Schema ──────────────────────────────────────────────────────────────────
 
@@ -182,9 +190,7 @@ fn list(app: &AppHandle) -> Result<Value, String> {
     let servers: Vec<Value> = mcp::load_workspace_servers(&workspace_dir)
         .into_iter()
         .map(|server| {
-            let script = resolve_safe_path(&workspace_dir, &server.definition_path)
-                .ok()
-                .filter(|path| path.is_file());
+            let script = script_of(&workspace_dir, &server);
             json!({
                 "id": server.id,
                 "name": server.name,
@@ -202,8 +208,8 @@ fn list(app: &AppHandle) -> Result<Value, String> {
         .collect();
 
     Ok(json!({
-        "root": SELF_MCP_REL_DIR,
-        "roster": ROSTER_REL_PATH,
+        "root": self_mcp_rel_dir(),
+        "roster": roster_rel_path(),
         "count": servers.len(),
         "servers": servers,
         "hint": if servers.is_empty() {
@@ -266,13 +272,15 @@ async fn write(
     let existing = find_self_built(&state, args["id"].as_str(), Some(&name));
     // Reuse the existing folder when updating in place, so an edited server
     // keeps its id, its enabled state and its path — only the bytes change.
-    let rel_dir = match &existing {
-        Some(server) if !server.definition_path.is_empty() => parent_dir(&server.definition_path)
-            .unwrap_or_else(|| unique_rel_dir(workspace_dir, &name)),
-        _ => unique_rel_dir(workspace_dir, &name),
-    };
+    // The folder is always re-derived as a workspace-*relative* string, so a
+    // legacy entry that stored an absolute or `\`-separated `definition_path`
+    // is repaired here instead of being written back into the roster.
+    let rel_dir = existing
+        .as_ref()
+        .and_then(|server| existing_rel_dir(workspace_dir, &server.definition_path))
+        .unwrap_or_else(|| unique_rel_dir(workspace_dir, &name));
     let rel_script = format!("{rel_dir}/server.{}", spec.ext);
-    let script_path = resolve_safe_path(workspace_dir, &rel_script)?;
+    let (script_path, rel_script) = resolve_input_path(workspace_dir, &rel_script)?;
 
     if let Some(server) = &existing {
         let same = write_script(&script_path, &code)?;
@@ -476,12 +484,12 @@ async fn remove(
     // Only ever delete inside the tool-owned directory — a hand-edited
     // `definition_path` must not turn into an arbitrary workspace delete.
     let mut removed_dir = false;
-    if let Some(dir) = parent_dir(&server.definition_path) {
-        if dir == SELF_MCP_REL_DIR || dir.starts_with(&format!("{SELF_MCP_REL_DIR}/")) {
-            if let Ok(path) = resolve_safe_path(workspace_dir, &dir) {
-                if path.is_dir() {
-                    removed_dir = std::fs::remove_dir_all(&path).is_ok();
-                }
+    // `existing_rel_dir` is the guard: it normalizes the stored spelling and
+    // returns `None` unless it still points inside the tool-owned directory.
+    if let Some(dir) = existing_rel_dir(workspace_dir, &server.definition_path) {
+        if let Ok((path, _)) = resolve_input_path(workspace_dir, &dir) {
+            if path.is_dir() {
+                removed_dir = std::fs::remove_dir_all(&path).is_ok();
             }
         }
     }
@@ -541,9 +549,7 @@ async fn start_server(
 /// The JSON description of one server returned to the model.
 fn server_report(state: &AppState, server: &mcp::McpServer, tools: &[Value]) -> Value {
     let workspace_dir = state.workspace_dir.lock().unwrap().clone();
-    let script = resolve_safe_path(&workspace_dir, &server.definition_path)
-        .ok()
-        .filter(|path| path.is_file());
+    let script = script_of(&workspace_dir, &server);
 
     let advertised: Vec<Value> = tools
         .iter()
@@ -696,14 +702,18 @@ fn slugify(name: &str) -> String {
 
 /// `<workspace>/.data/mcp/<slug>`, suffixed until the folder is unused.
 fn unique_rel_dir(workspace_dir: &Path, name: &str) -> String {
+    let root = self_mcp_rel_dir();
     let slug = slugify(name);
-    let mut candidate = format!("{SELF_MCP_REL_DIR}/{slug}");
+    let mut candidate = format!("{root}/{slug}");
     let mut suffix = 2;
-    while resolve_safe_path(workspace_dir, &candidate)
-        .map(|path| path.exists())
-        .unwrap_or(false)
-    {
-        candidate = format!("{SELF_MCP_REL_DIR}/{slug}-{suffix}");
+    // A candidate that cannot be resolved at all ends the loop as-is: the
+    // caller resolves it again and reports the real error, rather than this
+    // loop inventing a `-99` folder for a structural problem.
+    while let Ok(path) = resolve_safe_path(workspace_dir, &candidate) {
+        if !path.exists() {
+            break;
+        }
+        candidate = format!("{root}/{slug}-{suffix}");
         suffix += 1;
         if suffix > 99 {
             break;
@@ -712,16 +722,48 @@ fn unique_rel_dir(workspace_dir: &Path, name: &str) -> String {
     candidate
 }
 
-/// `.data/mcp/x/server.py` → `.data/mcp/x` (forward slashes only).
-fn parent_dir(rel_path: &str) -> Option<String> {
-    let trimmed = rel_path.trim();
-    let slash = trimmed.rfind('/')?;
-    let dir = trimmed[..slash].trim_end_matches('/');
+/// `.data/mcp/x/server.py` → `.data/mcp/x`, whatever the caller spelled.
+///
+/// Both separators are accepted: a legacy roster entry may hold
+/// `C:\\ws\\.data\\mcp\\x\\server.py`, which used to yield `None` here — a
+/// second `write` then created a second folder and `remove` left the first one
+/// behind.
+fn parent_dir(definition_path: &str) -> Option<String> {
+    let normalized = super::paths::normalize_input_path(definition_path);
+    let slash = normalized.rfind('/')?;
+    let dir = normalized[..slash].trim_end_matches('/');
     if dir.is_empty() {
         None
     } else {
         Some(dir.to_string())
     }
+}
+
+/// True for the tool-owned root itself and any folder inside it.
+fn is_inside_self_root(dir: &str) -> bool {
+    let root = self_mcp_rel_dir();
+    dir == root || dir.starts_with(&format!("{root}/"))
+}
+
+/// Workspace-relative folder of an existing server, but only while it still
+/// points inside the tool-owned directory.
+///
+/// Absolute and `\`-separated legacy spellings are mapped back to
+/// `.data/mcp/<slug>` (the resolver canonicalizes them first), so an in-place
+/// update keeps the folder that already exists instead of forking a new one.
+fn existing_rel_dir(workspace_dir: &Path, definition_path: &str) -> Option<String> {
+    let (_, relative) = resolve_input_path(workspace_dir, definition_path).ok()?;
+    let dir = parent_dir(&relative)?;
+    is_inside_self_root(&dir).then_some(dir)
+}
+
+/// The script of a server, when it is a file that resolves inside the
+/// workspace (`list` / `server_report`).
+fn script_of(workspace_dir: &Path, server: &mcp::McpServer) -> Option<PathBuf> {
+    resolve_input_path(workspace_dir, &server.definition_path)
+        .ok()
+        .map(|(path, _)| path)
+        .filter(|path| path.is_file())
 }
 
 /// Write the script, keeping one `.bak.<n>` copy of the previous version.
@@ -904,6 +946,48 @@ mod tests {
         );
         assert_eq!(parent_dir("server.py"), None);
         assert_eq!(parent_dir(""), None);
+    }
+
+    /// A first-cut or hand-edited roster entry used `\` separators. Splitting
+    /// on `/` alone returned `None`, so the next `write` forked a second folder
+    /// and `remove` left the original one behind.
+    #[test]
+    fn parent_dir_normalizes_legacy_separators() {
+        assert_eq!(
+            parent_dir(".data\\mcp\\weather\\server.py").as_deref(),
+            Some(".data/mcp/weather")
+        );
+        assert_eq!(
+            parent_dir("  .data/mcp/weather/server.py  ").as_deref(),
+            Some(".data/mcp/weather")
+        );
+    }
+
+    /// An absolute legacy `definition_path` maps back to the workspace-relative
+    /// folder that already exists, so an in-place update never forks a copy.
+    #[test]
+    fn existing_rel_dir_maps_an_absolute_legacy_path_back_into_the_root() {
+        let dir = std::env::temp_dir().join(format!("mcp-self-rel-{}", std::process::id()));
+        let folder = dir.join(".data/mcp/weather");
+        std::fs::create_dir_all(&folder).expect("create folder");
+        let script = folder.join("server.py");
+        std::fs::write(&script, "print('hi')\n").expect("write script");
+
+        let absolute = script.display().to_string();
+        assert_eq!(
+            existing_rel_dir(&dir, &absolute).as_deref(),
+            Some(".data/mcp/weather")
+        );
+        // Relative spellings work the same way.
+        assert_eq!(
+            existing_rel_dir(&dir, ".data/mcp/weather/server.py").as_deref(),
+            Some(".data/mcp/weather")
+        );
+        // Anything outside the tool-owned directory is never a reuse target.
+        assert_eq!(existing_rel_dir(&dir, "src/main.py"), None);
+        assert_eq!(existing_rel_dir(&dir, ""), None);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
