@@ -1,10 +1,10 @@
 //! Deliverable exchange area for sub-agent missions.
 //!
 //! Every planner-dispatched mission (and every direct `call_subagent` call)
-//! gets one batch directory under `<workspace>/.data/tmp`:
+//! gets one batch directory under `<workspace>/.data/deliver/<session-id>`:
 //!
 //! ```text
-//! <workspace>/.data/tmp/<batch-id>/
+//! <workspace>/.data/deliver/<session-id>/<batch-id>/
 //!   shared/          # files every task may read and write
 //!   t1/              # deliverables produced by task t1
 //!   t2/
@@ -12,27 +12,31 @@
 //!
 //! The directory is intentionally *outside* the task's working directory so a
 //! producer and its consumers can exchange large artifacts without pasting
-//! them into prompts. It is permanent (the user cleans it manually) and is not
-//! part of the backup archive.
+//! them into prompts. Nothing prunes it automatically: the directories are part
+//! of the session (deleted with it through `delete_history`), of the backup
+//! archive, and otherwise stay until the user removes them.
 //!
-//! The top level of `.data/tmp` is shared with `pdf/` (the PDF mention cache) and
-//! with composer pastes, which land there as plain files under the file's own
-//! name (`@@<name>` in a message). The paste sweep only deletes *files* that sit
-//! directly in the folder and are older than a day, so a batch id — always a
-//! directory, `<stamp>-<8hex>` — can neither collide with those names nor be
-//! swept as an expired paste.
+//! The session directory also keeps deliverables reachable from the UI: the
+//! Agent Mission panel lists this area and reveals/opens individual files
+//! (`list_deliverables`). Batches are named `<stamp>-<8hex>`, so a plain
+//! directory listing is already newest-first after a reverse sort.
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use serde::Serialize;
 use uuid::Uuid;
 
 /// Files listed per task in a mission report / tool result. The cap keeps a
 /// runaway build directory from turning the report into a file tree.
 const MAX_LISTED_FILES: usize = 50;
+/// Files listed per batch in the Agent Mission panel. Higher than the prompt
+/// cap because the UI is where the user actually finds a deliverable.
+const MAX_UI_LISTED_FILES: usize = 200;
 /// Directory levels walked when listing deliverables.
 const MAX_LIST_DEPTH: usize = 3;
+
 /// Directory names that are never descended into when listing deliverables.
 const SKIPPED_DIRS: [&str; 8] = [
     ".git",
@@ -53,6 +57,84 @@ pub struct ExchangeFile {
     pub size: u64,
 }
 
+/// One deliverable file as listed for the Agent Mission panel.
+#[derive(Debug, Clone, Serialize)]
+pub struct DeliverableFile {
+    /// Path relative to the batch directory, always with `/` separators.
+    pub relative: String,
+    /// Absolute path, ready for "reveal in folder".
+    pub path: String,
+    pub size: u64,
+}
+
+/// One batch of deliverables inside a session's exchange area.
+#[derive(Debug, Clone, Serialize)]
+pub struct DeliverableBatch {
+    /// Batch directory name (`<stamp>-<8hex>`).
+    pub batch: String,
+    /// Absolute batch directory path.
+    pub path: String,
+    pub files: Vec<DeliverableFile>,
+}
+
+/// Every non-empty batch of one session's deliverable area, newest first.
+///
+/// The session id is validated through [`crate::workspace::session_deliver_root`],
+/// so the walk can never leave the workspace. A missing directory is an empty
+/// list, not an error: most sessions never delegate a task.
+pub fn list_session_deliverables(
+    workspace_dir: &Path,
+    session_id: &str,
+) -> Result<Vec<DeliverableBatch>, String> {
+    let root = crate::workspace::session_deliver_root(workspace_dir, session_id)?;
+    if !root.is_dir() {
+        return Ok(Vec::new());
+    }
+    let Ok(entries) = fs::read_dir(&root) else {
+        return Ok(Vec::new());
+    };
+    // Batch names start with `YYYYMMDD-HHMMSS`, so a reverse sort is
+    // newest-first without reading any metadata.
+    let mut batches: Vec<PathBuf> = entries
+        .flatten()
+        .filter(|entry| entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false))
+        .map(|entry| entry.path())
+        .collect();
+    batches.sort();
+    batches.reverse();
+
+    let mut out = Vec::new();
+    for dir in batches {
+        let mut files = Vec::new();
+        walk_files(&dir, &dir, 0, MAX_UI_LISTED_FILES, &mut files);
+        if files.is_empty() {
+            continue;
+        }
+        files.sort_by(|a, b| a.relative.cmp(&b.relative));
+        out.push(DeliverableBatch {
+            batch: dir
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_default(),
+            path: dir.to_string_lossy().to_string(),
+            files: files
+                .into_iter()
+                .map(|file| DeliverableFile {
+                    // The listing is relative with `/`; the reveal action needs
+                    // a native path.
+                    path: dir
+                        .join(file.relative.replace('/', std::path::MAIN_SEPARATOR_STR))
+                        .to_string_lossy()
+                        .to_string(),
+                    relative: file.relative,
+                    size: file.size,
+                })
+                .collect(),
+        });
+    }
+    Ok(out)
+}
+
 /// One mission's deliverable exchange area.
 #[derive(Debug, Clone)]
 pub struct ExchangeArea {
@@ -62,18 +144,27 @@ pub struct ExchangeArea {
 }
 
 impl ExchangeArea {
-    /// A fresh, unique batch root under `<workspace>/.data/tmp`. The directory
-    /// is not created until `create_at` runs, so a declined plan leaves no
-    /// empty folder behind.
-    pub fn new_batch_root(workspace_dir: &Path) -> PathBuf {
+    /// A fresh, unique batch root under
+    /// `<workspace>/.data/deliver/<session-id>`. The directory is not created
+    /// until `create_at` runs, so a declined plan leaves no empty folder behind.
+    pub fn new_batch_root(workspace_dir: &Path, session_id: &str) -> Result<PathBuf, String> {
+        let session_root = crate::workspace::session_deliver_root(workspace_dir, session_id)?;
         let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
         let short = Uuid::new_v4().simple().to_string();
-        crate::workspace::tmp_root(workspace_dir).join(format!("{stamp}-{}", &short[..8]))
+        Ok(session_root.join(format!("{stamp}-{}", &short[..8])))
     }
 
     /// Creates a batch area for `task_ids` with a generated root.
-    pub fn create(workspace_dir: &Path, task_ids: &[String]) -> Result<Self, String> {
-        Self::create_at(Self::new_batch_root(workspace_dir), workspace_dir, task_ids)
+    pub fn create(
+        workspace_dir: &Path,
+        session_id: &str,
+        task_ids: &[String],
+    ) -> Result<Self, String> {
+        Self::create_at(
+            Self::new_batch_root(workspace_dir, session_id)?,
+            workspace_dir,
+            task_ids,
+        )
     }
 
     /// Creates the shared directory and one directory per task. Task ids are
@@ -131,8 +222,9 @@ impl ExchangeArea {
         self.task_dirs.get(task_id).map(PathBuf::as_path)
     }
 
-    /// Workspace-relative form of the batch root (`.data/tmp/<batch-id>`),
-    /// which is what `file_actions` paths use.
+    /// Workspace-relative form of the batch root
+    /// (`.data/deliver/<session-id>/<batch-id>`), which is what `file_actions`
+    /// paths use.
     pub fn relative_root(&self) -> String {
         self.root
             .strip_prefix(&self.workspace_dir)
@@ -205,14 +297,20 @@ impl ExchangeArea {
             return Vec::new();
         };
         let mut files = Vec::new();
-        walk_files(dir, dir, 0, &mut files);
+        walk_files(dir, dir, 0, MAX_LISTED_FILES, &mut files);
         files.sort_by(|a, b| a.relative.cmp(&b.relative));
         files
     }
 }
 
-fn walk_files(dir: &Path, base: &Path, depth: usize, out: &mut Vec<ExchangeFile>) {
-    if out.len() >= MAX_LISTED_FILES {
+fn walk_files(
+    dir: &Path,
+    base: &Path,
+    depth: usize,
+    limit: usize,
+    out: &mut Vec<ExchangeFile>,
+) {
+    if out.len() >= limit {
         return;
     }
     let Ok(entries) = fs::read_dir(dir) else {
@@ -222,7 +320,7 @@ fn walk_files(dir: &Path, base: &Path, depth: usize, out: &mut Vec<ExchangeFile>
     entries.sort_by_key(|entry| entry.file_name());
 
     for entry in entries {
-        if out.len() >= MAX_LISTED_FILES {
+        if out.len() >= limit {
             break;
         }
         let path = entry.path();
@@ -242,7 +340,7 @@ fn walk_files(dir: &Path, base: &Path, depth: usize, out: &mut Vec<ExchangeFile>
             if SKIPPED_DIRS.iter().any(|skip| *skip == name) {
                 continue;
             }
-            walk_files(&path, base, depth + 1, out);
+            walk_files(&path, base, depth + 1, limit, out);
         } else if meta.is_file() {
             let relative = path
                 .strip_prefix(base)
@@ -326,17 +424,31 @@ mod tests {
     }
 
     #[test]
-    fn creates_shared_and_per_task_directories_under_tmp() {
+    fn creates_shared_and_per_task_directories_under_deliver() {
         let workspace = temp_workspace("layout");
-        let area = ExchangeArea::create(&workspace, &["t1".to_string(), "t2".to_string()]).unwrap();
+        let area =
+            ExchangeArea::create(&workspace, "session-a", &["t1".to_string(), "t2".to_string()])
+                .unwrap();
 
         assert!(area
             .root()
-            .starts_with(crate::workspace::tmp_root(&workspace)));
+            .starts_with(crate::workspace::deliver_root(&workspace)));
+        assert!(area
+            .root()
+            .starts_with(crate::workspace::deliver_root(&workspace).join("session-a")));
         assert!(area.shared_dir().is_dir());
         assert!(area.task_dir("t1").unwrap().is_dir());
         assert!(area.task_dir("t2").unwrap().is_dir());
-        assert!(area.relative_root().starts_with(".data/tmp/"));
+        assert!(area.relative_root().starts_with(".data/deliver/session-a/"));
+
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    #[test]
+    fn an_invalid_session_id_is_refused() {
+        let workspace = temp_workspace("bad-session");
+        let result = ExchangeArea::create(&workspace, "../escape", &["t1".to_string()]);
+        assert!(result.is_err());
 
         fs::remove_dir_all(&workspace).ok();
     }
@@ -346,6 +458,7 @@ mod tests {
         let workspace = temp_workspace("safe");
         let area = ExchangeArea::create(
             &workspace,
+            "session-safe",
             &[
                 "../evil".to_string(),
                 "..\\evil".to_string(),
@@ -372,7 +485,7 @@ mod tests {
     #[test]
     fn lists_files_and_skips_heavy_directories() {
         let workspace = temp_workspace("list");
-        let area = ExchangeArea::create(&workspace, &["t1".to_string()]).unwrap();
+        let area = ExchangeArea::create(&workspace, "session-list", &["t1".to_string()]).unwrap();
         let task_dir = area.task_dir("t1").unwrap();
         fs::write(task_dir.join("report.md"), b"hello").unwrap();
         fs::create_dir_all(task_dir.join("node_modules/pkg")).unwrap();
@@ -392,12 +505,71 @@ mod tests {
     #[test]
     fn prompt_block_contains_paths_and_sibling_directories() {
         let workspace = temp_workspace("prompt");
-        let area = ExchangeArea::create(&workspace, &["t1".to_string(), "t2".to_string()]).unwrap();
+        let area = ExchangeArea::create(
+            &workspace,
+            "session-prompt",
+            &["t1".to_string(), "t2".to_string()],
+        )
+        .unwrap();
         let block = area.prompt_block("t1", true);
         assert!(block.contains("DELIVERABLE EXCHANGE AREA"));
         assert!(block.contains(&area.relative_root()));
         assert!(block.contains("t2/"));
         assert!(block.contains("Shared directory"));
+
+        fs::remove_dir_all(&workspace).ok();
+    }
+
+    #[test]
+    fn session_listing_groups_batches_newest_first_and_skips_empty_ones() {
+        let workspace = temp_workspace("session-list");
+        let first = ExchangeArea::create(&workspace, "session-x", &["t1".to_string()]).unwrap();
+        fs::write(first.task_dir("t1").unwrap().join("report.md"), b"hello").unwrap();
+        fs::create_dir_all(first.shared_dir()).unwrap();
+        fs::write(first.shared_dir().join("data.csv"), b"a,b").unwrap();
+
+        let second = ExchangeArea::create(&workspace, "session-x", &["t1".to_string()]).unwrap();
+        fs::write(second.task_dir("t1").unwrap().join("final.md"), b"done").unwrap();
+        // A batch with no files at all must not render an empty group.
+        let empty = ExchangeArea::create(&workspace, "session-x", &["t1".to_string()]).unwrap();
+        assert!(empty.list_files("t1").is_empty());
+        // Batch names are timestamp-prefixed; force a distinct ordering when the
+        // two creations land in the same second.
+        fs::rename(
+            second.root(),
+            second
+                .root()
+                .parent()
+                .unwrap()
+                .join("99999999-999999-ffffffff"),
+        )
+        .unwrap();
+
+        let batches =
+            list_session_deliverables(&workspace, "session-x").expect("session listing works");
+        assert_eq!(batches.len(), 2, "the empty batch is skipped");
+        assert_eq!(batches[0].batch, "99999999-999999-ffffffff");
+        assert!(batches[0].files.iter().any(|file| file.relative == "t1/final.md"));
+        assert!(batches[1]
+            .files
+            .iter()
+            .any(|file| file.relative == "t1/report.md"));
+        let report = batches[1]
+            .files
+            .iter()
+            .find(|file| file.relative == "t1/report.md")
+            .unwrap();
+        assert!(Path::new(&report.path).is_file());
+        assert_eq!(report.size, 5);
+        assert!(batches[1]
+            .files
+            .iter()
+            .any(|file| file.relative == "shared/data.csv"));
+
+        assert!(list_session_deliverables(&workspace, "other-session")
+            .unwrap()
+            .is_empty());
+        assert!(list_session_deliverables(&workspace, "../escape").is_err());
 
         fs::remove_dir_all(&workspace).ok();
     }

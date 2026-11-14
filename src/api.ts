@@ -19,6 +19,7 @@ import type {
   AgentTaskEvent,
   AgentMissionSnapshot,
   AgentBusMessage,
+  DeliverableBatch,
   CliProbe,
   CloudProbe,
   KeyValue,
@@ -922,6 +923,14 @@ export async function listAgentMissions(sessionId: string): Promise<AgentMission
   return invoke("list_agent_missions", { sessionId });
 }
 
+/**
+ * Deliverable files produced in this chat session
+ * (`.data/deliver/<session-id>/<batch>/…`), newest batch first.
+ */
+export async function listDeliverables(sessionId: string): Promise<DeliverableBatch[]> {
+  return invoke("list_deliverables", { sessionId });
+}
+
 export async function listMissionBusMessages(
   missionId: string,
   limit = 200,
@@ -1075,9 +1084,19 @@ export async function openWorkspaceDir(): Promise<void> {
   return invoke("app_open_workspace_dir");
 }
 
-/** Open `<workspace>/.data/tmp` — the sub-agent deliverable exchange area. */
+/** Open `<workspace>/.data/tmp` — the composer/PDF scratch area. */
 export async function openWorkspaceTmpDir(): Promise<void> {
   return invoke("app_open_workspace_tmp_dir");
+}
+
+/** Open `<workspace>/.data/deliver` — the root of all session deliverables. */
+export async function openDeliverablesDir(): Promise<void> {
+  return invoke("app_open_deliverables_dir");
+}
+
+/** Open `<workspace>/.data/deliver/<session-id>` — this chat's deliverables. */
+export async function openSessionDeliverDir(sessionId: string): Promise<void> {
+  return invoke("app_open_session_deliver_dir", { sessionId });
 }
 
 /** Open `<app_data>/agents` (the `llm` agent definition folder). */

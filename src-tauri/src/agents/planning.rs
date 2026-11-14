@@ -559,7 +559,7 @@ pub async fn orchestrate(
     // The batch root is reserved before planning so the planner can reference
     // the deliverable exchange area in task context. The directory itself is
     // created only when the planner actually delegates.
-    let exchange_root = exchange::ExchangeArea::new_batch_root(&workspace_dir);
+    let exchange_root = exchange::ExchangeArea::new_batch_root(&workspace_dir, session_id)?;
     let decision = plan_tasks(
         app,
         &client,

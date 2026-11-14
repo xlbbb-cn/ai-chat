@@ -183,9 +183,8 @@ fn app_open_workspace_dir(app: AppHandle) -> Result<(), String> {
 
 /// Open `<workspace>/.data/tmp` — the workspace scratch root.
 ///
-/// It holds the sub-agent deliverable exchange (permanent), the PDF conversion
-/// cache (expires on its own) and the composer pastes (24 h), so this is the
-/// manual cleanup entry point for the batches.
+/// It holds the PDF conversion cache (expires on its own) and the composer
+/// pastes (24 h). Sub-agent deliverables live in `.data/deliver` instead.
 #[tauri::command]
 fn app_open_workspace_tmp_dir(app: AppHandle) -> Result<(), String> {
     let workspace = app
@@ -195,6 +194,41 @@ fn app_open_workspace_tmp_dir(app: AppHandle) -> Result<(), String> {
         .unwrap()
         .clone();
     let dir = workspace::tmp_root(&workspace);
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    app.opener()
+        .open_path(dir.to_string_lossy().into_owned(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+/// Open `<workspace>/.data/deliver` — the root of every session's deliverables.
+#[tauri::command]
+fn app_open_deliverables_dir(app: AppHandle) -> Result<(), String> {
+    let workspace = app
+        .state::<AppState>()
+        .workspace_dir
+        .lock()
+        .unwrap()
+        .clone();
+    let dir = workspace::deliver_root(&workspace);
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    app.opener()
+        .open_path(dir.to_string_lossy().into_owned(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+/// Open `<workspace>/.data/deliver/<session-id>` — one chat's deliverables.
+///
+/// The session id is validated by `workspace::session_deliver_root`, so the
+/// command cannot be pointed at an arbitrary directory.
+#[tauri::command]
+fn app_open_session_deliver_dir(app: AppHandle, session_id: String) -> Result<(), String> {
+    let workspace = app
+        .state::<AppState>()
+        .workspace_dir
+        .lock()
+        .unwrap()
+        .clone();
+    let dir = workspace::session_deliver_root(&workspace, &session_id)?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     app.opener()
         .open_path(dir.to_string_lossy().into_owned(), None::<&str>)
@@ -2097,6 +2131,8 @@ pub fn run() {
             app_open_data_dir,
             app_open_workspace_dir,
             app_open_workspace_tmp_dir,
+            app_open_deliverables_dir,
+            app_open_session_deliver_dir,
             app_open_issue_page,
             app_open_markdown,
             app_export_backup,
@@ -2141,6 +2177,7 @@ pub fn run() {
             agents::get_agent_orchestration,
             agents::save_agent_orchestration,
             agents::list_agent_missions,
+            agents::list_deliverables,
             agents::mbus::list_mission_bus_messages,
             agents::probe_agent_cli,
             agents::probe_agent_cloud,

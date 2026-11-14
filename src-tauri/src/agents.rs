@@ -557,6 +557,15 @@ pub async fn probe_agent_cloud(
 }
 
 #[tauri::command]
+pub fn list_deliverables(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<Vec<exchange::DeliverableBatch>, String> {
+    let workspace_dir = state.workspace_dir.lock().unwrap().clone();
+    exchange::list_session_deliverables(&workspace_dir, &session_id)
+}
+
+#[tauri::command]
 pub fn list_agent_missions(
     state: State<'_, AppState>,
     session_id: String,

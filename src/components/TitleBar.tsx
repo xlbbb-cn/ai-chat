@@ -23,10 +23,10 @@ import {
     getWorkspaceHistory,
     importBackupFrom,
     openAppDataDir,
+    openDeliverablesDir,
     openIssuePage,
     openMarkdownFile,
     openWorkspaceDir,
-    openWorkspaceTmpDir,
     setWorkspaceDir,
 } from "../api";
 import { useI18n } from "../i18n";
@@ -280,8 +280,8 @@ export function TitleBar({
 
     const handleOpenWorkspaceDir = () => run(openWorkspaceDir);
 
-    /** `<workspace>/.data/tmp` — the sub-agent deliverable exchange area. */
-    const handleOpenDeliverablesDir = () => run(openWorkspaceTmpDir);
+    /** `<workspace>/.data/deliver` — the root of every session's deliverables. */
+    const handleOpenDeliverablesDir = () => run(openDeliverablesDir);
 
     const handleSaveBackup = () =>
         run(async () => {

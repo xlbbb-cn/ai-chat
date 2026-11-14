@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { listAgentMissions, listMissionBusMessages, openWorkspaceTmpDir } from "../api";
-import type { AgentBusMessage, AgentMissionSnapshot } from "../types";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import {
+    listAgentMissions,
+    listDeliverables,
+    listMissionBusMessages,
+    openSessionDeliverDir,
+} from "../api";
+import type { AgentBusMessage, AgentMissionSnapshot, DeliverableBatch, DeliverableFile } from "../types";
 import { useI18n, type Locale, type MessageKey, type TranslateVars } from "../i18n";
 import { FontAwesomeIcon, faSpinner, faXmark } from "../icons";
 import "./AgentMissionPanel.css";
@@ -18,6 +24,22 @@ function formatTimestamp(value: string, locale: Locale): string {
         return value;
     }
     return date.toLocaleString(locale);
+}
+
+/** `20261114-093015-ab12cd34` → `2026-11-14 09:30:15`; anything else as-is. */
+function formatBatchLabel(batch: string): string {
+    const match = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/.exec(batch);
+    if (!match) return batch;
+    const [, year, month, day, hour, minute, second] = match;
+    return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+}
+
+function formatFileSize(bytes: number): string {
+    const KB = 1024;
+    const MB = KB * 1024;
+    if (bytes >= MB) return `${(bytes / MB).toFixed(1)} MB`;
+    if (bytes >= KB) return `${(bytes / KB).toFixed(1)} KB`;
+    return `${bytes} B`;
 }
 
 /**
@@ -42,6 +64,7 @@ export function AgentMissionPanel({ sessionId, onClose }: Props) {
     const { t, locale } = useI18n();
     const [missions, setMissions] = useState<AgentMissionSnapshot[]>([]);
     const [busMessages, setBusMessages] = useState<AgentBusMessage[]>([]);
+    const [deliverables, setDeliverables] = useState<DeliverableBatch[]>([]);
     const [selectedMissionId, setSelectedMissionId] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [autoRefresh, setAutoRefresh] = useState(true);
@@ -64,6 +87,15 @@ export function AgentMissionPanel({ sessionId, onClose }: Props) {
         }
     }, [sessionId]);
 
+    const loadDeliverables = useCallback(async () => {
+        try {
+            setDeliverables(await listDeliverables(sessionId));
+        } catch (err) {
+            console.error("Failed to load deliverables:", err);
+            setDeliverables([]);
+        }
+    }, [sessionId]);
+
     const loadBusMessages = useCallback(async (missionId: string | null) => {
         if (!missionId) {
             setBusMessages([]);
@@ -79,7 +111,8 @@ export function AgentMissionPanel({ sessionId, onClose }: Props) {
 
     useEffect(() => {
         loadMissions();
-    }, [loadMissions]);
+        void loadDeliverables();
+    }, [loadMissions, loadDeliverables]);
 
     useEffect(() => {
         void loadBusMessages(selectedMissionId);
@@ -90,16 +123,18 @@ export function AgentMissionPanel({ sessionId, onClose }: Props) {
 
         const interval = window.setInterval(() => {
             loadMissions();
+            void loadDeliverables();
             void loadBusMessages(selectedMissionId);
         }, 2000);
 
         return () => window.clearInterval(interval);
-    }, [autoRefresh, loadMissions, loadBusMessages, selectedMissionId]);
+    }, [autoRefresh, loadMissions, loadDeliverables, loadBusMessages, selectedMissionId]);
 
     useEffect(() => {
         const unlisteners: Promise<() => void>[] = [];
         const refresh = () => {
             void loadMissions();
+            void loadDeliverables();
             void loadBusMessages(selectedMissionId);
         };
 
@@ -119,12 +154,20 @@ export function AgentMissionPanel({ sessionId, onClose }: Props) {
         return () => {
             unlisteners.forEach((promise) => promise.then((fn) => fn()));
         };
-    }, [loadMissions, loadBusMessages, selectedMissionId]);
+    }, [loadMissions, loadDeliverables, loadBusMessages, selectedMissionId]);
 
     const selectedMission = useMemo(
         () => missions.find((mission) => mission.mission_id === selectedMissionId) ?? null,
         [missions, selectedMissionId]
     );
+
+    const revealDeliverable = useCallback(async (file: DeliverableFile) => {
+        try {
+            await revealItemInDir(file.path);
+        } catch (err) {
+            console.error("Failed to reveal deliverable:", err);
+        }
+    }, []);
 
     return (
         <div className="mission-monitor-shell">
@@ -148,10 +191,10 @@ export function AgentMissionPanel({ sessionId, onClose }: Props) {
                     <button
                         type="button"
                         className="mission-monitor-refresh"
-                        onClick={() => void openWorkspaceTmpDir()}
-                        title={t("mission.openExchangeFolderHint")}
+                        onClick={() => void openSessionDeliverDir(sessionId)}
+                        title={t("mission.openDeliverablesFolderHint")}
                     >
-                        {t("mission.openExchangeFolder")}
+                        {t("mission.openDeliverablesFolder")}
                     </button>
                     <button type="button" className="close-btn" onClick={onClose} aria-label={t("common.close")}>
                         <FontAwesomeIcon icon={faXmark} />
@@ -198,115 +241,159 @@ export function AgentMissionPanel({ sessionId, onClose }: Props) {
                 </div>
 
                 <div className="mission-monitor-detail-panel">
-                    {selectedMission ? (
-                        <div className="mission-monitor-detail-content">
-                            <div className="mission-monitor-section">
-                                <label>{t("mission.mission")}</label>
-                                <div className="mission-monitor-value">{selectedMission.root_task_description}</div>
-                            </div>
-
-                            <div className="mission-monitor-section two-column">
-                                <div>
-                                    <label>{t("mission.agent")}</label>
-                                    <div className="mission-monitor-value">{selectedMission.agent_name}</div>
-                                </div>
-                                <div>
-                                    <label>{t("mission.status")}</label>
-                                    <div className="mission-monitor-value">{statusLabel(selectedMission, t)}</div>
-                                </div>
-                            </div>
-
-                            <div className="mission-monitor-section two-column">
-                                <div>
-                                    <label>{t("mission.created")}</label>
-                                    <div className="mission-monitor-value">{formatTimestamp(selectedMission.created_at, locale)}</div>
-                                </div>
-                                <div>
-                                    <label>{t("mission.updated")}</label>
-                                    <div className="mission-monitor-value">{formatTimestamp(selectedMission.updated_at, locale)}</div>
-                                </div>
-                            </div>
-
-                            <div className="mission-monitor-section">
-                                <label>{t("mission.context")}</label>
-                                <pre className="mission-monitor-code">{selectedMission.root_task_context || t("common.empty")}</pre>
-                            </div>
-
-                            <div className="mission-monitor-section">
-                                <label>{t("mission.activeTasksLabel")}</label>
-                                {selectedMission.active_tasks.length === 0 ? (
-                                    <div className="mission-monitor-value">{t("mission.noActiveTasks")}</div>
-                                ) : (
-                                    <div className="mission-task-list">
-                                        {selectedMission.active_tasks.map((task) => (
-                                            <div key={task.task_id} className="mission-task-item">
-                                                <div className="mission-task-header">
-                                                    <span className={`mission-monitor-status mission-${task.status}`}>{task.status}</span>
-                                                    <span className="mission-task-name">{task.name}</span>
-                                                </div>
-                                                <div className="mission-task-description">{task.description}</div>
-                                                <div className="mission-task-id">{task.task_id}</div>
+                    <div className="mission-monitor-detail-content">
+                        <div className="mission-monitor-section">
+                            <label>{t("mission.deliverables")}</label>
+                            {deliverables.length === 0 ? (
+                                <div className="mission-monitor-value">{t("mission.deliverablesEmpty")}</div>
+                            ) : (
+                                <div className="mission-deliverable-list">
+                                    {deliverables.map((batch) => (
+                                        <div className="mission-deliverable-batch" key={batch.batch}>
+                                            <div className="mission-deliverable-batch-head">
+                                                <span className="mission-deliverable-batch-name">
+                                                    {formatBatchLabel(batch.batch)}
+                                                </span>
+                                                <span className="mission-deliverable-batch-count">
+                                                    {t("mission.deliverablesFiles", { count: batch.files.length })}
+                                                </span>
                                             </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-
-                            {selectedMission.help_notes && (
-                                <div className="mission-monitor-section">
-                                    <label>{t("mission.mainAgentHelp")}</label>
-                                    <pre className="mission-monitor-code">{selectedMission.help_notes}</pre>
+                                            <div className="mission-deliverable-files">
+                                                {batch.files.map((file) => (
+                                                    <div className="mission-deliverable-file" key={file.path}>
+                                                        <span className="mission-deliverable-name" title={file.relative}>
+                                                            {file.relative}
+                                                        </span>
+                                                        <span className="mission-deliverable-size">
+                                                            {formatFileSize(file.size)}
+                                                        </span>
+                                                        <button
+                                                            type="button"
+                                                            className="mission-deliverable-reveal"
+                                                            onClick={() => void revealDeliverable(file)}
+                                                            title={t("mission.revealInFolderHint")}
+                                                        >
+                                                            {t("mission.revealInFolder")}
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
                                 </div>
                             )}
+                        </div>
 
-                            {selectedMission.bus_id && (
+                        {selectedMission ? (
+                            <>
                                 <div className="mission-monitor-section">
-                                    <label>{t("mission.messageBus")}</label>
-                                    {busMessages.length === 0 ? (
-                                        <div className="mission-monitor-value">{t("mission.noBusMessages")}</div>
+                                    <label>{t("mission.mission")}</label>
+                                    <div className="mission-monitor-value">{selectedMission.root_task_description}</div>
+                                </div>
+
+                                <div className="mission-monitor-section two-column">
+                                    <div>
+                                        <label>{t("mission.agent")}</label>
+                                        <div className="mission-monitor-value">{selectedMission.agent_name}</div>
+                                    </div>
+                                    <div>
+                                        <label>{t("mission.status")}</label>
+                                        <div className="mission-monitor-value">{statusLabel(selectedMission, t)}</div>
+                                    </div>
+                                </div>
+
+                                <div className="mission-monitor-section two-column">
+                                    <div>
+                                        <label>{t("mission.created")}</label>
+                                        <div className="mission-monitor-value">{formatTimestamp(selectedMission.created_at, locale)}</div>
+                                    </div>
+                                    <div>
+                                        <label>{t("mission.updated")}</label>
+                                        <div className="mission-monitor-value">{formatTimestamp(selectedMission.updated_at, locale)}</div>
+                                    </div>
+                                </div>
+
+                                <div className="mission-monitor-section">
+                                    <label>{t("mission.context")}</label>
+                                    <pre className="mission-monitor-code">{selectedMission.root_task_context || t("common.empty")}</pre>
+                                </div>
+
+                                <div className="mission-monitor-section">
+                                    <label>{t("mission.activeTasksLabel")}</label>
+                                    {selectedMission.active_tasks.length === 0 ? (
+                                        <div className="mission-monitor-value">{t("mission.noActiveTasks")}</div>
                                     ) : (
-                                        <div className="mission-bus-log">
-                                            {busMessages.map((message) => (
-                                                <div className="mission-bus-item" key={message.id}>
-                                                    <div className="mission-bus-head">
-                                                        <span className="mission-bus-from">
-                                                            {message.from_id === "planner"
-                                                                ? t("app.agents.planner")
-                                                                : message.from_name}
-                                                        </span>
-                                                        <span className="mission-bus-arrow">→</span>
-                                                        <span className="mission-bus-to">
-                                                            {message.target_kind === "topic"
-                                                                ? `#${message.topic}`
-                                                                : message.target_id === "planner"
-                                                                  ? t("app.agents.planner")
-                                                                  : message.to_name || message.target_id}
-                                                        </span>
-                                                        <span className="mission-bus-time">
-                                                            {formatTimestamp(message.created_at, locale)}
-                                                        </span>
+                                        <div className="mission-task-list">
+                                            {selectedMission.active_tasks.map((task) => (
+                                                <div key={task.task_id} className="mission-task-item">
+                                                    <div className="mission-task-header">
+                                                        <span className={`mission-monitor-status mission-${task.status}`}>{task.status}</span>
+                                                        <span className="mission-task-name">{task.name}</span>
                                                     </div>
-                                                    <div className="mission-bus-body">{message.body}</div>
+                                                    <div className="mission-task-description">{task.description}</div>
+                                                    <div className="mission-task-id">{task.task_id}</div>
                                                 </div>
                                             ))}
                                         </div>
                                     )}
                                 </div>
-                            )}
 
-                            <div className="mission-monitor-section">
-                                <label>{t("mission.episodicSummary")}</label>
-                                <pre className="mission-monitor-code">{selectedMission.episodic_summary || t("common.empty")}</pre>
-                            </div>
+                                {selectedMission.help_notes && (
+                                    <div className="mission-monitor-section">
+                                        <label>{t("mission.mainAgentHelp")}</label>
+                                        <pre className="mission-monitor-code">{selectedMission.help_notes}</pre>
+                                    </div>
+                                )}
 
-                            <div className="mission-monitor-section">
-                                <label>{t("mission.finalReport")}</label>
-                                <pre className="mission-monitor-code">{selectedMission.final_report || t("common.empty")}</pre>
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="mission-monitor-empty detail">{t("mission.selectPrompt")}</div>
-                    )}
+                                {selectedMission.bus_id && (
+                                    <div className="mission-monitor-section">
+                                        <label>{t("mission.messageBus")}</label>
+                                        {busMessages.length === 0 ? (
+                                            <div className="mission-monitor-value">{t("mission.noBusMessages")}</div>
+                                        ) : (
+                                            <div className="mission-bus-log">
+                                                {busMessages.map((message) => (
+                                                    <div className="mission-bus-item" key={message.id}>
+                                                        <div className="mission-bus-head">
+                                                            <span className="mission-bus-from">
+                                                                {message.from_id === "planner"
+                                                                    ? t("app.agents.planner")
+                                                                    : message.from_name}
+                                                            </span>
+                                                            <span className="mission-bus-arrow">→</span>
+                                                            <span className="mission-bus-to">
+                                                                {message.target_kind === "topic"
+                                                                    ? `#${message.topic}`
+                                                                    : message.target_id === "planner"
+                                                                      ? t("app.agents.planner")
+                                                                      : message.to_name || message.target_id}
+                                                            </span>
+                                                            <span className="mission-bus-time">
+                                                                {formatTimestamp(message.created_at, locale)}
+                                                            </span>
+                                                        </div>
+                                                        <div className="mission-bus-body">{message.body}</div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                <div className="mission-monitor-section">
+                                    <label>{t("mission.episodicSummary")}</label>
+                                    <pre className="mission-monitor-code">{selectedMission.episodic_summary || t("common.empty")}</pre>
+                                </div>
+
+                                <div className="mission-monitor-section">
+                                    <label>{t("mission.finalReport")}</label>
+                                    <pre className="mission-monitor-code">{selectedMission.final_report || t("common.empty")}</pre>
+                                </div>
+                            </>
+                        ) : (
+                            <div className="mission-monitor-empty detail">{t("mission.selectPrompt")}</div>
+                        )}
+                    </div>
                 </div>
             </div>
         </div>

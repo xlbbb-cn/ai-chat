@@ -12,6 +12,7 @@
 //! workspace/skills/...    workspace skills (the one skills root)
 //! workspace/scripts/...   run_cmd script library (+ .index.json)
 //! workspace/mcp/...       self-built MCP servers (evolution mode)
+//! workspace/deliver/...   sub-agent deliverables, one dir per chat session
 //! workspace/mcp.conf      roster of those servers (merged with mcp_servers.json)
 //! workspace/skills.status workspace skill enablement + metadata
 //! chat.db                 SQLite snapshot (VACUUM INTO)
@@ -42,13 +43,14 @@ pub(crate) const BACKUP_RESTORED_EVENT: &str = "backup-restored";
 
 /// Workspace-scoped state directories that are part of a backup, as
 /// `(zip name, path under <workspace>/.data)`.
-fn workspace_backup_dirs(workspace_dir: &Path) -> [(&'static str, PathBuf); 5] {
+fn workspace_backup_dirs(workspace_dir: &Path) -> [(&'static str, PathBuf); 6] {
     [
         ("memory", crate::workspace::memory_root(workspace_dir)),
         ("todos", crate::workspace::todos_root(workspace_dir)),
         ("skills", crate::workspace::skills_root(workspace_dir)),
         ("scripts", crate::workspace::scripts_root(workspace_dir)),
         ("mcp", crate::workspace::mcp_root(workspace_dir)),
+        ("deliver", crate::workspace::deliver_root(workspace_dir)),
     ]
 }
 
@@ -295,8 +297,8 @@ pub(crate) fn spawn_backup_export(app: AppHandle, backup_path: PathBuf) {
 // ─── Import ──────────────────────────────────────────────────────────────────
 
 /// Restore the workspace-scoped folders (`memory`, `todos`, `skills`,
-/// `scripts`) and the skill status file from the archive into
-/// `<workspace>/.data`.
+/// `scripts`, `mcp`, `deliver`) and the skill status file from the archive
+/// into `<workspace>/.data`.
 ///
 /// Folders present in the archive replace their on-disk counterpart; folders
 /// that are absent from the archive are left untouched. Entry paths are

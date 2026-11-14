@@ -1994,9 +1994,10 @@ only when every item is done, or when you are blocked and need the user."
                         dependencies: vec![],
                     };
                     let workspace_dir = state.workspace_dir.lock().unwrap().clone();
-                    // Deliverables are exchanged through `<workspace>/.data/tmp`.
-                    // A cloud agent cannot reach the local workspace, so it gets
-                    // no exchange directory.
+                    // Deliverables are exchanged through
+                    // `<workspace>/.data/deliver/<session-id>`. A cloud agent
+                    // cannot reach the local workspace, so it gets no exchange
+                    // directory.
                     let agent_type = agents::normalize_agent_type(&agent.agent_type);
                     let exchange = if matches!(
                         agent_type.as_str(),
@@ -2004,6 +2005,7 @@ only when every item is done, or when you are blocked and need the user."
                     ) {
                         match agents::exchange::ExchangeArea::create(
                             &workspace_dir,
+                            &session_id,
                             std::slice::from_ref(&task.id),
                         ) {
                             Ok(area) => Some(area),

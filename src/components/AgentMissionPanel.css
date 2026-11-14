@@ -412,6 +412,105 @@
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
+/* Session deliverables (`.data/deliver/<session-id>`): one group per mission
+   batch, one 34px row per file with a reveal action. */
+.mission-deliverable-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 320px;
+    overflow-y: auto;
+    padding: 10px 12px;
+    border: 0.5px solid var(--c-border-i);
+    border-radius: var(--r-md);
+    background: var(--c-surface);
+}
+
+.mission-deliverable-batch {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--c-border);
+}
+
+.mission-deliverable-batch:last-child {
+    padding-bottom: 0;
+    border-bottom: none;
+}
+
+.mission-deliverable-batch-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    color: var(--c-muted);
+    font-size: 11px;
+}
+
+.mission-deliverable-batch-name {
+    color: var(--c-text);
+    font-weight: 500;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+.mission-deliverable-files {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.mission-deliverable-file {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    min-height: 34px;
+}
+
+.mission-deliverable-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--c-text);
+    font-size: 12px;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mission-deliverable-size {
+    flex: 0 0 auto;
+    color: var(--c-muted);
+    font-size: 11px;
+}
+
+.mission-deliverable-reveal {
+    flex: 0 0 auto;
+    min-height: 24px;
+    padding: 0 8px;
+    border: 0.5px solid var(--c-border-i);
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--c-text);
+    font-size: 11px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background-color var(--t-dur) var(--t-ease),
+        border-color var(--t-dur) var(--t-ease);
+}
+
+.mission-deliverable-reveal:hover {
+    background: var(--c-hover);
+    border-color: var(--c-border);
+}
+
+.mission-deliverable-reveal:focus-visible {
+    outline: none;
+    border-color: var(--c-accent-text);
+}
+
 .mission-monitor-empty {
     padding: 28px 20px;
     color: var(--c-muted);

@@ -441,19 +441,39 @@ pub fn delete_history(
     session_id: String,
     state: tauri::State<'_, crate::AppState>,
 ) -> Result<(), String> {
-    let db = state.db.lock().unwrap();
-    db.execute(
-        "DELETE FROM history WHERE session_id = ?1",
-        rusqlite::params![session_id],
-    )
-    .map_err(|e| e.to_string())?;
-    delete_session_summary(&db, &session_id)?;
-    // Also drop the session's title/favorite/archived meta row.
-    db.execute(
-        "DELETE FROM session_meta WHERE session_id = ?1",
-        rusqlite::params![session_id],
-    )
-    .map_err(|e| e.to_string())?;
+    {
+        let db = state.db.lock().unwrap();
+        db.execute(
+            "DELETE FROM history WHERE session_id = ?1",
+            rusqlite::params![session_id],
+        )
+        .map_err(|e| e.to_string())?;
+        delete_session_summary(&db, &session_id)?;
+        // Also drop the session's title/favorite/archived meta row.
+        db.execute(
+            "DELETE FROM session_meta WHERE session_id = ?1",
+            rusqlite::params![session_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    // Deliverables belong to the session that produced them. The directory is
+    // workspace state, not a cache, so it goes with the chat row; a failure to
+    // remove it is logged and never blocks deleting the conversation.
+    let workspace_dir = state.workspace_dir.lock().unwrap().clone();
+    if let Ok(dir) = crate::workspace::session_deliver_root(&workspace_dir, &session_id) {
+        if let Err(err) = std::fs::remove_dir_all(&dir) {
+            if err.kind() != std::io::ErrorKind::NotFound {
+                state.logger.lock().unwrap().log(
+                    "WARN",
+                    &format!(
+                        "Could not delete session deliverables '{}': {err}",
+                        dir.display()
+                    ),
+                );
+            }
+        }
+    }
     Ok(())
 }
 

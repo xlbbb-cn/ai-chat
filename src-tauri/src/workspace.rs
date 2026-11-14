@@ -13,7 +13,8 @@
 //!     todos/<session>/...      todos tool
 //!     skills/<name>/skill.md   workspace skills (the only skills root)
 //!     scripts/                 run_cmd script library (on the child PATH)
-//!     tmp/<batch-id>/...       sub-agent deliverable exchange area
+//!     deliver/<session-id>/<batch-id>/...  sub-agent deliverable exchange area
+//!     tmp/                     scratch: composer pastes + PDF mention cache
 //!     mcp/<slug>/server.*      self-built MCP servers (evolution mode)
 //!     mcp.conf                 self-built server roster (merged with the
 //!                              app-data mcp_servers.json)
@@ -71,18 +72,50 @@ pub fn scripts_root(workspace_dir: &Path) -> PathBuf {
 
 /// The workspace scratch root (`<workspace>/.data/tmp`).
 ///
-/// Three writers share it, and its top level is the only namespace they have in
-/// common: every mission (or direct `call_subagent` call) gets one batch
-/// directory here (`<stamp>-<8hex>/`, see `agents::exchange`), a PDF mention
-/// caches its Markdown under `pdf/` (`pdf_mentions`), and a file pasted or
-/// dropped into the composer lands as `<name>` and is addressed as `@@<name>`
-/// (`workspace_files`). Each of the three owns its own lifetime: a composer paste
-/// is a plain file in this folder and expires after 24 h (swept on the way into
-/// the next paste), the PDF cache drops entries older than a week when the next
-/// conversion is written, and batch directories are permanent — the user cleans
-/// those manually through "open the exchange folder".
+/// Two writers share it: a PDF mention caches its Markdown under `pdf/`
+/// (`pdf_mentions`), and a file pasted or dropped into the composer lands as
+/// `<name>` and is addressed as `@@<name>` (`workspace_files`). Each owns its
+/// own lifetime: a composer paste is a plain file in this folder and expires
+/// after 24 h (swept on the way into the next paste), the PDF cache drops
+/// entries older than a week when the next conversion is written. Sub-agent
+/// deliverables live in [`deliver_root`] instead.
 pub fn tmp_root(workspace_dir: &Path) -> PathBuf {
     data_root(workspace_dir).join("tmp")
+}
+
+/// Root of the sub-agent deliverable exchange areas
+/// (`<workspace>/.data/deliver`).
+///
+/// One sub-directory per chat session (`<session-id>/`), and one batch directory
+/// per mission / direct `call_subagent` call inside it. Deliverables are user
+/// output, so nothing prunes them automatically: a session's directory is
+/// deleted together with the session, and the rest stays until the user removes
+/// it. Unlike `tmp/` this is part of a backup archive.
+pub fn deliver_root(workspace_dir: &Path) -> PathBuf {
+    data_root(workspace_dir).join("deliver")
+}
+
+/// Deliverable exchange area of one chat session
+/// (`<workspace>/.data/deliver/<session-id>`).
+///
+/// The session id becomes a path component, so it is validated instead of
+/// sanitized: a value that could navigate (separator, `..`, empty) is refused.
+/// Chat sessions use UUIDs, so a valid id always passes.
+pub fn session_deliver_root(workspace_dir: &Path, session_id: &str) -> Result<PathBuf, String> {
+    let trimmed = session_id.trim();
+    let valid = !trimmed.is_empty()
+        && trimmed.len() <= 128
+        && trimmed != "."
+        && trimmed != ".."
+        && trimmed
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    if !valid {
+        return Err(format!(
+            "invalid session id for the deliverable directory: '{session_id}'"
+        ));
+    }
+    Ok(deliver_root(workspace_dir).join(trimmed))
 }
 
 /// Root of the self-built MCP servers (`<workspace>/.data/mcp`).
@@ -128,8 +161,9 @@ pub fn timers_path(workspace_dir: &Path) -> PathBuf {
 /// sub-directories (`memory`, `todos`, `skills`) are still created on demand
 /// by the feature that owns them, except `memory`, which the memory tool and
 /// the automatic conclusion recorder create before writing, and `scripts` /
-/// `tmp`, which are created here so the script library and the deliverable
-/// exchange root exist from the first launch.
+/// `tmp`, which are created here so the script library and the composer scratch
+/// area exist from the first launch. `deliver` is created here too, so the
+/// deliverables folder can always be opened even before the first mission.
 pub fn ensure_data_layout(workspace_dir: &Path) -> std::io::Result<()> {
     let root = data_root(workspace_dir);
     std::fs::create_dir_all(&root)?;
@@ -137,6 +171,7 @@ pub fn ensure_data_layout(workspace_dir: &Path) -> std::io::Result<()> {
     // The exchange root exists from the first launch so the main agent can
     // always open/inspect it; batch directories are created on demand.
     std::fs::create_dir_all(tmp_root(workspace_dir))?;
+    std::fs::create_dir_all(deliver_root(workspace_dir))?;
     mark_hidden(&root);
     Ok(())
 }
@@ -312,6 +347,7 @@ mod tests {
         assert_eq!(skills_root(workspace), data.join("skills"));
         assert_eq!(scripts_root(workspace), data.join("scripts"));
         assert_eq!(tmp_root(workspace), data.join("tmp"));
+        assert_eq!(deliver_root(workspace), data.join("deliver"));
         assert_eq!(mcp_root(workspace), data.join("mcp"));
         assert_eq!(skills_status_path(workspace), data.join("skills.status"));
         assert_eq!(timers_path(workspace), data.join("timers.json"));
@@ -383,6 +419,22 @@ mod tests {
         assert_eq!(resolved.path, default);
         assert!(resolved.fallback.unwrap().contains("not a directory"));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn session_deliver_root_validates_the_path_component() {
+        let workspace = Path::new("/workspace");
+        let session = "6f1c2a9e-0b7d-4c4e-8f1a-3d2b1c0d9e8f";
+        assert_eq!(
+            session_deliver_root(workspace, session).unwrap(),
+            workspace.join(".data").join("deliver").join(session)
+        );
+        for bad in ["", "  ", ".", "..", "../escape", "a/b", "a\\b"] {
+            assert!(
+                session_deliver_root(workspace, bad).is_err(),
+                "'{bad}' must be refused"
+            );
+        }
     }
 
     #[test]

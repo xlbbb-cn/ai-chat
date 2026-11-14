@@ -1026,6 +1026,24 @@ export interface AgentMissionSnapshot {
   updated_at: string;
 }
 
+/** One file in a session's deliverable exchange area (`.data/deliver/<session>/`). */
+export interface DeliverableFile {
+  /** Path relative to the batch directory, `/`-separated. */
+  relative: string;
+  /** Absolute path on disk, used for "reveal in folder". */
+  path: string;
+  size: number;
+}
+
+/** One mission batch of deliverables inside a chat session. */
+export interface DeliverableBatch {
+  /** Batch directory name (`<stamp>-<8hex>`). */
+  batch: string;
+  /** Absolute batch directory path. */
+  path: string;
+  files: DeliverableFile[];
+}
+
 /**
  * Per-skill status metadata, stored per workspace in
  * `<workspace>/.data/skills.status`. Only `enabled` drives the chat request —
