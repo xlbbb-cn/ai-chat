@@ -792,6 +792,19 @@
   background: var(--ts-cloud);
 }
 
+/* One turn's cost, right of the action buttons: duration · tokens · cache hit.
+   A figure, not a state — muted meta text with tabular digits, no fill, no
+   border, no badge. A turn whose endpoint reported no usage shows nothing. */
+.message-usage-meta {
+  align-self: center;
+  margin-left: 4px;
+  color: var(--c-muted);
+  font-size: 12px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 [data-theme="dark"] .message-content .hljs,
 [data-theme="dark"] .message-reasoning-content .hljs,
 [data-theme="dark"] .message-content pre code.hljs,

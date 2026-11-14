@@ -776,8 +776,9 @@ impl TimerRegistry {
         list
     }
 
-    /// Number of pending timers belonging to one chat session.
-    #[allow(dead_code)]
+    /// Number of pending timers belonging to one chat session. The goal loop
+    /// reads this: a session that armed a timer is waiting for that
+    /// notification, so unfinished todos must not force another round.
     pub fn count_for_session(&self, session_id: &str) -> usize {
         self.timers
             .lock()

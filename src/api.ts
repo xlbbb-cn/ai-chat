@@ -32,6 +32,7 @@ import type {
   EvolutionMaintenanceState,
   GlassEffect,
   TodoListSummary,
+  TurnUsageMeta,
   UpdateInfo,
   UpdateDownloadProgress,
   WorkspaceFileEntry,
@@ -661,6 +662,8 @@ export async function saveHistory(
   error?: string,
   /** `done` / `error` / `stopped`; omitted for a normal completed turn. */
   status?: string,
+  /** Turn duration / token totals / cache hit, stored as JSON. */
+  usageMeta?: TurnUsageMeta,
 ): Promise<number> {
   // Serialise the attachments array as JSON so it can be stored in a
   // single TEXT column. Pass `null` (not `undefined`) when absent so the
@@ -684,6 +687,7 @@ export async function saveHistory(
     injections: injections ?? null,
     error: error ?? null,
     status: status ?? null,
+    usageMeta: usageMeta ? JSON.stringify(usageMeta) : null,
   });
 }
 
@@ -718,6 +722,8 @@ export interface HistoryRecord {
   error?: string;
   /** `done` / `error` / `stopped` for partial assistant turns. */
   status?: string;
+  /** JSON with the turn's duration / token totals / cache hit. */
+  usage_meta?: string;
 }
 
 /** One row of the history sidebar — no message bodies. */

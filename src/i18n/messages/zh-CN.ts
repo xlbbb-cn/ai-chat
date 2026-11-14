@@ -254,6 +254,12 @@ const zhCN: Messages = {
         foldMore: "展开",
         foldLess: "收起",
         continue: "继续",
+        // 本轮花费，显示在回复下方的操作按钮右侧。
+        turnMeta: "{duration} · {tokens}",
+        turnMetaWithCache: "{duration} · {tokens} · 命中 {percent}%",
+        turnDurationSeconds: "{seconds} 秒",
+        turnDurationMinutes: "{minutes} 分 {seconds} 秒",
+        turnTokens: "{count} tokens",
     },
 
     figure: {

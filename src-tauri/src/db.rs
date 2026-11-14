@@ -29,6 +29,11 @@ pub fn open_db(path: &Path) -> rusqlite::Result<Connection> {
     // an errored/stopped one whose visible output can still be continued.
     let _ = db.execute("ALTER TABLE history ADD COLUMN error TEXT", []);
     let _ = db.execute("ALTER TABLE history ADD COLUMN status TEXT", []);
+    // Turn statistics: JSON with the wall-clock duration and the summed token
+    // counts / cache hit of the turn that produced this assistant row. Kept on
+    // the row (not recomputed from `api_requests`) so the transcript can show
+    // it after a reload, including turns whose requests were pruned.
+    let _ = db.execute("ALTER TABLE history ADD COLUMN usage_meta TEXT", []);
     // The sidebar lists sessions and loads one session at a time, both
     // filtered by `session_id`.
     db.execute(
@@ -235,8 +240,12 @@ pub struct HistoryRecord {
     pub error: Option<String>,
     /// `done` / `error` / `stopped`; `None` means a normal completed turn.
     pub status: Option<String>,
+    /// JSON with the turn's duration / token totals / cache hit (see
+    /// `TurnUsageMeta` in `src/types.ts`). `None` on legacy rows.
+    pub usage_meta: Option<String>,
 }
 
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub fn save_history(
     session_id: String,
@@ -248,12 +257,13 @@ pub fn save_history(
     injections: Option<String>,
     error: Option<String>,
     status: Option<String>,
+    usage_meta: Option<String>,
     state: tauri::State<'_, crate::AppState>,
 ) -> Result<i64, String> {
     let db = state.db.lock().unwrap();
     db.execute(
-        "INSERT INTO history (session_id, role, content, tool_calls, reasoning_content, attachments, injections, error, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        rusqlite::params![session_id, role, content, tool_calls, reasoning_content, attachments, injections, error, status],
+        "INSERT INTO history (session_id, role, content, tool_calls, reasoning_content, attachments, injections, error, status, usage_meta) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        rusqlite::params![session_id, role, content, tool_calls, reasoning_content, attachments, injections, error, status, usage_meta],
     )
     .map_err(|e| e.to_string())?;
     let id = db.last_insert_rowid();
@@ -363,7 +373,7 @@ pub(crate) fn query_session_messages(
     session_id: &str,
 ) -> rusqlite::Result<Vec<HistoryRecord>> {
     let mut stmt = conn.prepare(
-        "SELECT id, session_id, role, content, COALESCE(timestamp, ''), tool_calls, reasoning_content, attachments, injections, error, status \
+        "SELECT id, session_id, role, content, COALESCE(timestamp, ''), tool_calls, reasoning_content, attachments, injections, error, status, usage_meta \
          FROM history WHERE session_id = ?1 ORDER BY id ASC",
     )?;
 
@@ -384,7 +394,7 @@ pub(crate) fn query_recent_session_messages(
     limit: usize,
 ) -> rusqlite::Result<Vec<HistoryRecord>> {
     let mut stmt = conn.prepare(
-        "SELECT id, session_id, role, content, COALESCE(timestamp, ''), tool_calls, reasoning_content, attachments, injections, error, status \
+        "SELECT id, session_id, role, content, COALESCE(timestamp, ''), tool_calls, reasoning_content, attachments, injections, error, status, usage_meta \
          FROM history WHERE session_id = ?1 ORDER BY id DESC LIMIT ?2",
     )?;
 
@@ -412,6 +422,7 @@ fn history_record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryR
         injections: row.get(8)?,
         error: row.get(9)?,
         status: row.get(10)?,
+        usage_meta: row.get(11)?,
     })
 }
 
@@ -545,7 +556,7 @@ pub fn fork_session(
     // Copy all messages from the source session up to and including the cutoff
     let mut stmt = db
         .prepare(
-            "SELECT role, content, tool_calls, reasoning_content, attachments, injections, error, status FROM history \
+            "SELECT role, content, tool_calls, reasoning_content, attachments, injections, error, status, usage_meta FROM history \
              WHERE session_id = ?1 AND id <= ?2 ORDER BY id ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -553,6 +564,7 @@ pub fn fork_session(
     let messages: Vec<(
         String,
         String,
+        Option<String>,
         Option<String>,
         Option<String>,
         Option<String>,
@@ -570,6 +582,7 @@ pub fn fork_session(
                 row.get(5)?,
                 row.get(6)?,
                 row.get(7)?,
+                row.get(8)?,
             ))
         })
         .map_err(|e| e.to_string())?
@@ -577,10 +590,10 @@ pub fn fork_session(
         .collect();
 
     let count = messages.len() as i64;
-    for (role, content, tool_calls, reasoning_content, attachments, injections, error, status) in messages {
+    for (role, content, tool_calls, reasoning_content, attachments, injections, error, status, usage_meta) in messages {
         db.execute(
-            "INSERT INTO history (session_id, role, content, tool_calls, reasoning_content, attachments, injections, error, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            rusqlite::params![new_session_id, role, content, tool_calls, reasoning_content, attachments, injections, error, status],
+            "INSERT INTO history (session_id, role, content, tool_calls, reasoning_content, attachments, injections, error, status, usage_meta) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            rusqlite::params![new_session_id, role, content, tool_calls, reasoning_content, attachments, injections, error, status, usage_meta],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -1450,7 +1463,8 @@ mod tests {
                 attachments TEXT, \
                 injections TEXT, \
                 error TEXT, \
-                status TEXT\
+                status TEXT, \
+                usage_meta TEXT\
             )",
             [],
         )

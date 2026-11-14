@@ -636,7 +636,7 @@ pub(crate) async fn run_chat_turn(
         .iter()
         .any(|t| t == "todo_list" || t == "todo")
     {
-        let todo_guidance = "\
+        let mut todo_guidance = "\
         TODOS: the `todos` tool holds this session's plan. Before planning or starting \
         non-trivial work, `list` it — the active list is also injected as internal context \
         while it has unfinished items. Continue from an existing list and move items \
@@ -647,11 +647,25 @@ pub(crate) async fn run_chat_turn(
         turn — it is continued automatically so you keep working; do not write a final \
         summary with goals open. End the turn explicitly by writing [goal:DONE] in your \
         final answer, either when the goal is fully reached or when you are blocked and \
-        need the user (state plainly what is blocking you).";
+        need the user (state plainly what is blocking you). \
+        WAITING: when the unfinished items are waiting on an external event rather than \
+        on your own work, do not force them."
+            .to_string();
+        if config.selected_tools.iter().any(|t| t == "timer") {
+            todo_guidance.push_str(
+                " Arm a delay with the `timer` tool for a time-based wait — while a timer \
+                 is pending, the goal loop stays suspended and the timer's message resumes \
+                 the plan.",
+            );
+        }
+        todo_guidance.push_str(
+            " Otherwise write [WAIT_EVT: what you are waiting for] in your final answer — \
+             the turn ends and the plan resumes on the next turn.",
+        );
         if !system_content.is_empty() {
             system_content.push_str("\n\n");
         }
-        system_content.push_str(todo_guidance);
+        system_content.push_str(&todo_guidance);
     }
 
     // ── Embedded sub-agent roles (`+agent` in the composer) ─────────────────
@@ -901,6 +915,8 @@ pub(crate) async fn run_chat_turn(
         .selected_tools
         .iter()
         .any(|t| t == "todo_list" || t == "todo");
+    // Only advertise the timer-based wait path when the tool can be called.
+    let timer_tool_enabled = config.selected_tools.iter().any(|t| t == "timer");
 
     // ── Turn budget & tool failure guard ────────────────────────────────────
     // The loop below is model-driven: it repeats for as long as the reply
@@ -1701,50 +1717,106 @@ still missing."
                     .map(|list| list.pending + list.in_progress > 0)
                     .unwrap_or(false);
                 if unfinished {
-                    goal_nudges += 1;
-                    if !sr.content.is_empty() {
-                        let mut assistant_msg = json!({
-                            "role": "assistant",
-                            "content": sr.content,
-                        });
-                        if !sr.reasoning_content.is_empty() {
-                            assistant_msg["reasoning_content"] = json!(sr.reasoning_content);
+                    // ── Suspensions ──────────────────────────────────────────
+                    // Two situations must NOT be turned into a nudge:
+                    // * a pending delay timer — the model is waiting for the
+                    //   notification that timer will inject, so the remaining
+                    //   items are intentionally on hold;
+                    // * an explicit `[WAIT_EVT: …]` declaration — the same
+                    //   wait, but for a signal the app cannot schedule.
+                    // Both end the turn here. The todo block is re-injected
+                    // with the next turn, so the plan resumes by itself.
+                    let pending_timers = app
+                        .state::<crate::tools::timer::TimerRegistry>()
+                        .count_for_session(&session_id);
+                    let wait_reason = wait_evt_reason(&sr.content);
+                    let suspension = if pending_timers > 0 {
+                        Some(match wait_reason.as_deref() {
+                            Some(reason) => format!(
+                                "[System] Todo goal suspended: {pending_timers} timer(s) pending \
+and WAIT_EVT ({reason}) — the turn resumes when a timer fires or the user replies."
+                            ),
+                            None => format!(
+                                "[System] Todo goal suspended: {pending_timers} timer(s) pending \
+— the turn resumes when a timer fires."
+                            ),
+                        })
+                    } else if let Some(reason) = wait_reason.as_deref() {
+                        Some(format!(
+                            "[System] Todo goal suspended (WAIT_EVT): waiting for {reason}. \
+The plan resumes on the next turn."
+                        ))
+                    } else {
+                        None
+                    };
+
+                    if let Some(notice) = suspension {
+                        let _ = app.emit("chat-token", format!("\n\n{notice}\n\n"));
+                        log_event(
+                            &state,
+                            "INFO",
+                            format!(
+                                "goal loop suspended: session_id={session_id}, \
+pending_timers={pending_timers}, wait_evt={}",
+                                wait_reason.as_deref().unwrap_or("none")
+                            ),
+                        );
+                    } else {
+                        goal_nudges += 1;
+                        if !sr.content.is_empty() {
+                            let mut assistant_msg = json!({
+                                "role": "assistant",
+                                "content": sr.content,
+                            });
+                            if !sr.reasoning_content.is_empty() {
+                                assistant_msg["reasoning_content"] = json!(sr.reasoning_content);
+                            }
+                            all_messages.push(assistant_msg);
                         }
-                        all_messages.push(assistant_msg);
-                    }
-                    // Re-render from the FRESH snapshot: the model may have
-                    // just completed items through the todos tool, so the
-                    // block injected at turn start is stale.
-                    let list_block = fresh_list
-                        .as_ref()
-                        .and_then(|list| todos::render_list_block(list))
-                        .unwrap_or_else(|| {
-                            "The active todo list still has unfinished items.".to_string()
-                        });
-                    all_messages.push(json!({
-                        "role": "user",
-                        "content": format!(
-                            "{CONTEXT_GOAL_MARKER}\nYour final answer did not end the turn: the todo \
+                        // Re-render from the FRESH snapshot: the model may have
+                        // just completed items through the todos tool, so the
+                        // block injected at turn start is stale.
+                        let list_block = fresh_list
+                            .as_ref()
+                            .and_then(|list| todos::render_list_block(list))
+                            .unwrap_or_else(|| {
+                                "The active todo list still has unfinished items.".to_string()
+                            });
+                        let wait_hint = if timer_tool_enabled {
+                            "If the remaining items are waiting on an external event instead, \
+arm a delay with the `timer` tool (a pending timer suspends this loop) — or write \
+[WAIT_EVT: what you are waiting for] when the wait cannot be scheduled. Either one ends \
+the turn; the plan resumes on the next turn."
+                        } else {
+                            "If the remaining items are waiting on an external event instead of \
+on your own work, write [WAIT_EVT: what you are waiting for] — that ends the turn \
+without forcing the goal, and the plan resumes on the next turn."
+                        };
+                        all_messages.push(json!({
+                            "role": "user",
+                            "content": format!(
+                                "{CONTEXT_GOAL_MARKER}\nYour final answer did not end the turn: the todo \
 list still has unfinished items.\n\n{list_block}\n\nContinue working on them now — use your tools, \
 and update the list (pending → in_progress → completed) as you go. End your reply with [goal:DONE] \
-only when every item is done, or when you are blocked and need the user."
-                        ),
-                    }));
-                    let _ = app.emit(
-                        "chat-token",
-                        format!(
-                            "\n\n[System] Todo list still has unfinished items (continuation {goal_nudges}/{GOAL_LOOP_MAX_NUDGES}) — continuing.\n\n"
-                        ),
-                    );
-                    log_event(
-                        &state,
-                        "INFO",
-                        format!(
-                            "goal loop: todo list unfinished, continuing: session_id={}, nudge={goal_nudges}",
-                            session_id
-                        ),
-                    );
-                    continue;
+only when every item is done, or when you are blocked and need the user.\n\n{wait_hint}"
+                            ),
+                        }));
+                        let _ = app.emit(
+                            "chat-token",
+                            format!(
+                                "\n\n[System] Todo list still has unfinished items (continuation {goal_nudges}/{GOAL_LOOP_MAX_NUDGES}) — continuing.\n\n"
+                            ),
+                        );
+                        log_event(
+                            &state,
+                            "INFO",
+                            format!(
+                                "goal loop: todo list unfinished, continuing: session_id={}, nudge={goal_nudges}",
+                                session_id
+                            ),
+                        );
+                        continue;
+                    }
                 }
             }
 
@@ -2262,10 +2334,10 @@ only when every item is done, or when you are blocked and need the user."
     // tool, record it so it survives across sessions. Self-evolution mode
     // routes it into the dedicated evolution area instead of `repo`.
     if let Some(answer) = final_answer {
-        // The goal-loop marker is a control signal, not answer text — it must
-        // not leak into the memory entry the answer produces.
-        let answer = answer.split(GOAL_DONE_MARKER).collect::<Vec<_>>().join("");
-        let answer = answer.trim_end();
+        // Answer-level control markers (goal loop + WAIT_EVT) are signals, not
+        // answer text — they must not leak into the memory entry the answer
+        // produces.
+        let answer = strip_control_markers(&answer);
         let memory_enabled = config.effective_tools().iter().any(|t| t == "memory");
         if memory_enabled
             && !memory_tool_called

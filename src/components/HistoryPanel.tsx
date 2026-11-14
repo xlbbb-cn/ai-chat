@@ -153,12 +153,28 @@ function recordsToMessages(sessionRecords: HistoryRecord[]): Message[] {
         if (Array.isArray(parsed) && parsed.length > 0) injections = parsed;
       } catch { /* ignore malformed */ }
     }
+    let usageMeta: Message["usage_meta"];
+    if (r.usage_meta) {
+      try {
+        const parsed = JSON.parse(r.usage_meta) as Message["usage_meta"];
+        // Malformed JSON must never break a transcript; a partial object is
+        // only usable when the duration and token counts exist.
+        if (
+          parsed &&
+          typeof parsed.duration_ms === "number" &&
+          typeof parsed.total_tokens === "number"
+        ) {
+          usageMeta = parsed;
+        }
+      } catch { /* ignore malformed */ }
+    }
     messages.push({
       id: crypto.randomUUID(),
       role: r.role as "user" | "assistant",
       content: parseStoredContent(r.content),
       ...(attachments ? { attachments } : {}),
       ...(injections ? { injections } : {}),
+      ...(usageMeta ? { usage_meta: usageMeta } : {}),
       tool_calls: toolCalls,
       ...(r.reasoning_content ? { reasoning_content: r.reasoning_content } : {}),
       ...(r.error ? { error: r.error } : {}),

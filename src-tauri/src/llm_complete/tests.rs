@@ -469,6 +469,39 @@ fn frontend_user_messages_exclude_backend_notices() {
 }
 
 #[test]
+fn wait_evt_marker_is_parsed_and_stripped() {
+    // A marker with a reason yields the reason, trimmed.
+    assert_eq!(
+        wait_evt_reason("waiting for the CI notification [WAIT_EVT: the CI run]").as_deref(),
+        Some("the CI run")
+    );
+    // An empty body still produces a usable phrase for the notice.
+    assert_eq!(
+        wait_evt_reason("blocked [WAIT_EVT:]"),
+        Some("an external event".to_string())
+    );
+    // A marker that never closed is not a marker yet.
+    assert_eq!(wait_evt_reason("[WAIT_EVT: still typing"), None);
+    assert_eq!(wait_evt_reason("plain answer"), None);
+
+    // Both answer-level control markers are removed.
+    assert_eq!(strip_control_markers("done [goal:DONE]"), "done");
+    assert_eq!(
+        strip_control_markers("waiting for the build [WAIT_EVT: the build]"),
+        "waiting for the build"
+    );
+    assert_eq!(
+        strip_control_markers("a [goal:DONE] b [WAIT_EVT: x] c [WAIT_EVT: y]"),
+        "a  b  c"
+    );
+    // An unterminated marker stays in the text.
+    assert_eq!(
+        strip_control_markers("tail [WAIT_EVT: unterminated"),
+        "tail [WAIT_EVT: unterminated"
+    );
+}
+
+#[test]
 fn clean_split_boundaries_exclude_tool_rounds() {
     assert!(is_clean_split_boundary(
         &json!({ "role": "user", "content": "hi" })

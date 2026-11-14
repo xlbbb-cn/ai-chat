@@ -258,6 +258,32 @@ export interface Message {
   status?: "done" | "error" | "stopped";
   /** Database row id from history table (only for persisted messages). */
   dbId?: number;
+  /**
+   * Statistics of the turn that produced this assistant row, stamped when the
+   * turn ends and restored from `history.usage_meta`. Absent on legacy rows.
+   */
+  usage_meta?: TurnUsageMeta;
+}
+
+/**
+ * Turn statistics shown next to a reply's action buttons: the wall-clock
+ * duration of the whole turn and the token counts summed over every request
+ * it made (tool rounds and the budget wrap-up included).
+ */
+export interface TurnUsageMeta {
+  /** Wall-clock milliseconds from send to the turn's terminal event. */
+  duration_ms: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  /**
+   * Prompt tokens served from the provider cache. Only present when at least
+   * one request of the turn reported a cache dialect — a `0` is a real
+   * zero-hit figure, an absent field means "no cache feedback".
+   */
+  cached_tokens?: number;
+  /** `cached_tokens / prompt_tokens` for the whole turn (0…1). */
+  hit_ratio?: number;
 }
 
 /** One mid-turn message the user added while the assistant was working. */

@@ -282,6 +282,12 @@ const en = {
         foldMore: "Show more",
         foldLess: "Show less",
         continue: "Continue",
+        // One turn's cost, shown next to a finished reply's action buttons.
+        turnMeta: "{duration} · {tokens}",
+        turnMetaWithCache: "{duration} · {tokens} · cache hit {percent}%",
+        turnDurationSeconds: "{seconds}s",
+        turnDurationMinutes: "{minutes}m {seconds}s",
+        turnTokens: "{count} tokens",
     },
 
     figure: {

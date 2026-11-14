@@ -52,6 +52,7 @@ import type {
   ThemeMode,
   TimerEntry,
   BackgroundTaskState,
+  TurnUsageMeta,
   EvolutionMaintenancePhase,
   UpdateInfo,
   WorkspaceFileEntry,
@@ -396,17 +397,56 @@ const SIDEBAR_SHOWN = { opacity: 1, x: 0, pointerEvents: "auto" as const };
 const SIDEBAR_HIDDEN = { opacity: 0, x: -20, pointerEvents: "none" as const };
 
 /**
- * The goal-loop end marker (`[goal:DONE]`) is a backend control signal: the
- * main loop reads it from the streamed answer to decide whether the turn may
- * end, but it must never reach the transcript bubble or the persisted row.
- * Keep in sync with `GOAL_DONE_MARKER` in `src-tauri/src/llm_complete.rs`.
+ * The goal-loop end marker (`[goal:DONE]`) and the "waiting for an external
+ * event" marker (`[WAIT_EVT: reason]`) are backend control signals: the main
+ * loop reads them from the streamed answer to decide whether the turn may end,
+ * but they must never reach the transcript bubble or the persisted row.
+ * Keep in sync with `GOAL_DONE_MARKER` / `WAIT_EVT_PREFIX` in
+ * `src-tauri/src/llm_complete.rs`.
  */
 const GOAL_DONE_MARKER = "[goal:DONE]";
+const WAIT_EVT_MARKER = "[WAIT_EVT:";
 
-/** Remove every goal-loop marker and the blank tail it leaves behind. */
-function stripGoalDoneMarker(text: string): string {
-  if (!text.includes(GOAL_DONE_MARKER)) return text;
-  return text.split(GOAL_DONE_MARKER).join("").trimEnd();
+/**
+ * Remove every control marker and the blank tail it leaves behind.
+ * `[WAIT_EVT: …]` is variable length, so each complete occurrence is cut up to
+ * its closing bracket; an unterminated one (still streaming) stays in place.
+ */
+function stripControlMarkers(text: string): string {
+  let next = text.includes(GOAL_DONE_MARKER)
+    ? text.split(GOAL_DONE_MARKER).join("")
+    : text;
+  let start = next.indexOf(WAIT_EVT_MARKER);
+  while (start !== -1) {
+    const close = next.indexOf("]", start + WAIT_EVT_MARKER.length);
+    if (close === -1) break;
+    next = next.slice(0, start) + next.slice(close + 1);
+    start = next.indexOf(WAIT_EVT_MARKER);
+  }
+  return next.trimEnd();
+}
+
+/**
+ * Live-stream variant of {@link stripControlMarkers}: both markers are written
+ * as the last thing in the answer, so only one that just completed at the tail
+ * is trimmed. That keeps the per-token cost flat instead of rescanning the
+ * whole accumulator on every token.
+ */
+function stripTrailingControlMarkers(text: string): string {
+  let next = text;
+  if (next.endsWith(GOAL_DONE_MARKER)) {
+    next = next.slice(0, -GOAL_DONE_MARKER.length);
+  }
+  if (next.endsWith("]")) {
+    const start = next.lastIndexOf(WAIT_EVT_MARKER);
+    if (
+      start !== -1 &&
+      next.indexOf("]", start + WAIT_EVT_MARKER.length) === next.length - 1
+    ) {
+      next = next.slice(0, start).trimEnd();
+    }
+  }
+  return next;
 }
 
 export default function App() {
@@ -520,6 +560,8 @@ export default function App() {
     setError(null);
     setUsage(null);
     setUsageReady(false);
+    // Turn statistics belong to the conversation being left as well.
+    turnStatsRef.current = null;
     setPendingRetryMessageId(null);
     setDreamResult(null);
     resetEmbeddedAgents();
@@ -602,6 +644,54 @@ export default function App() {
   } | null>(null);
   /** True once `chat-usage` arrived for the request currently streaming. */
   const [usageReady, setUsageReady] = useState(false);
+  /**
+   * Turn-scoped token statistics for the reply footer. `usage` above is the
+   * session-wide accumulator that feeds the context gauge, so this turn's
+   * figures need their own slot: `beginTurnStats` resets it when a turn
+   * starts and `settleTurnStats` hands the record to the assistant row when
+   * the turn ends.
+   */
+  const turnStatsRef = useRef<{
+    started_at: number;
+    prompt: number;
+    completion: number;
+    total: number;
+    cached: number;
+    cache_reported: boolean;
+  } | null>(null);
+  const beginTurnStats = useCallback(() => {
+    turnStatsRef.current = {
+      started_at: Date.now(),
+      prompt: 0,
+      completion: 0,
+      total: 0,
+      cached: 0,
+      cache_reported: false,
+    };
+  }, []);
+  /**
+   * Close the turn's statistics. `undefined` when the provider never reported
+   * usage: a turn must not invent "0 tokens" for an endpoint without usage
+   * feedback, and the footer stays hidden instead.
+   */
+  const settleTurnStats = useCallback((): TurnUsageMeta | undefined => {
+    const stats = turnStatsRef.current;
+    turnStatsRef.current = null;
+    if (!stats || stats.prompt + stats.completion <= 0) return undefined;
+    const meta: TurnUsageMeta = {
+      duration_ms: Math.max(0, Date.now() - stats.started_at),
+      prompt_tokens: stats.prompt,
+      completion_tokens: stats.completion,
+      total_tokens: stats.total,
+    };
+    // Cache figures only exist when at least one request of the turn
+    // reported a cache dialect; a reported zero stays a real zero.
+    if (stats.cache_reported && stats.prompt > 0) {
+      meta.cached_tokens = stats.cached;
+      meta.hit_ratio = Math.min(1, Math.max(0, stats.cached / stats.prompt));
+    }
+    return meta;
+  }, []);
   /**
    * PDF mention conversion in flight: `sendMessage` resolves mentions before the
    * turn starts, and a long document would otherwise be a silent pause. Drives
@@ -1035,6 +1125,19 @@ export default function App() {
       // conversation the user already switched to. No session context (null)
       // passes — those callers have no leak surface.
       if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
+      // The reply footer's per-turn totals: only an active turn has a record
+      // to add to (a late chunk of a winding-down turn is dropped with it).
+      const turnStats = turnStatsRef.current;
+      if (turnStats) {
+        turnStats.prompt += e.payload.prompt_tokens;
+        turnStats.completion += e.payload.completion_tokens;
+        turnStats.total +=
+          e.payload.total_tokens ?? e.payload.prompt_tokens + e.payload.completion_tokens;
+        if (e.payload.cached_tokens !== undefined) {
+          turnStats.cached += e.payload.cached_tokens;
+          turnStats.cache_reported = true;
+        }
+      }
       // This request's token figures are known from here on; the usage bar
       // above the input switches from its indeterminate sweep to a real ratio.
       setUsageReady(true);
@@ -2370,6 +2473,9 @@ export default function App() {
     // A new request starts with no token figures yet — the usage bar above the
     // input must sweep until this request's `chat-usage` arrives.
     setUsageReady(false);
+    // Open this turn's statistics record; the footer under the finished reply
+    // reads it back.
+    beginTurnStats();
 
     const history = [...messages, userMsg]
       .filter((m) => !m.streaming && !m.id.startsWith("agent-progress-") && m.role !== "tool_group" && hasContextContent(m))
@@ -2415,12 +2521,10 @@ export default function App() {
     const cleanup = await chatCompletion(history, activeSkillIds, sessionId, selectedModel, {
       onToken(token) {
         accumulatedContent += token;
-        // Never surface the goal-loop marker: it is the last thing the model
-        // writes, so trimming it the moment it completes keeps the live
+        // Never surface a control marker: both are the last thing the model
+        // writes, so trimming one the moment it completes keeps the live
         // bubble identical to the settled one.
-        if (accumulatedContent.endsWith(GOAL_DONE_MARKER)) {
-          accumulatedContent = accumulatedContent.slice(0, -GOAL_DONE_MARKER.length);
-        }
+        accumulatedContent = stripTrailingControlMarkers(accumulatedContent);
         const shouldMarkDone = hasRunningToolCallRef.current;
         if (shouldMarkDone) hasRunningToolCallRef.current = false;
         setBackgroundWaiting(0);
@@ -2462,9 +2566,9 @@ export default function App() {
         // exact tail restores the accumulator to the pre-request state; the
         // retry then re-streams the whole response. A tail that does not
         // match (should not happen) is left in place rather than guessed at.
-        // The backend's attempt text still carries the goal-loop marker the
+        // The backend's attempt text still carries the control markers the
         // live accumulator already dropped — compare against the same form.
-        const tail = stripGoalDoneMarker(content);
+        const tail = stripControlMarkers(content);
         if (tail && accumulatedContent.endsWith(tail)) {
           accumulatedContent = accumulatedContent.slice(
             0,
@@ -2487,6 +2591,9 @@ export default function App() {
       },
       onDone() {
         setBackgroundWaiting(0);
+        // Close the turn's statistics before persisting: the footer under the
+        // finished reply and the stored row must show the same figures.
+        const turnUsage = settleTurnStats();
         // Settle the still-running steps before persisting: the transcript
         // must never carry a "running" entry into the history (it would spin
         // forever once the chat is reloaded). A sub-agent row that was still
@@ -2499,10 +2606,9 @@ export default function App() {
           }
           return { ...e, status: "done" as const };
         });
-        // The goal-loop marker is a control signal; it never reaches the
-        // transcript or the persisted row (belt and braces — `onToken` already
-        // drops the trailing form).
-        accumulatedContent = stripGoalDoneMarker(accumulatedContent);
+        // Control markers never reach the transcript or the persisted row
+        // (belt and braces — `onToken` already drops the trailing form).
+        accumulatedContent = stripControlMarkers(accumulatedContent);
         // Deliveries are stored on the assistant row: one turn is one row, and
         // the reply was generated after the model saw them.
         const deliveredInjections = currentInjectionsRef.current;
@@ -2514,6 +2620,9 @@ export default function App() {
           accumulatedReasoning || undefined,
           undefined,
           deliveredInjections.length > 0 ? JSON.stringify(deliveredInjections) : undefined,
+          undefined,
+          undefined,
+          turnUsage,
         )
           .then((dbId) => {
             setMessages((prev) =>
@@ -2525,7 +2634,7 @@ export default function App() {
           return prev
             .filter((m) => !m.id.startsWith("agent-progress-"))
             .map((m) => {
-              if (m.id === assistantId) return { ...m, content: accumulatedContent, streaming: false, ...(finalToolCalls?.length ? { tool_calls: finalToolCalls } : {}) };
+              if (m.id === assistantId) return { ...m, content: accumulatedContent, streaming: false, ...(finalToolCalls?.length ? { tool_calls: finalToolCalls } : {}), ...(turnUsage ? { usage_meta: turnUsage } : {}) };
               return m;
             });
         });
@@ -2540,6 +2649,9 @@ export default function App() {
         cleanupRef.current = null;
       },
       onError(err) {
+        // A failed turn still ran for some time and spent tokens; keep the
+        // figures on the row instead of dropping them.
+        const turnUsage = settleTurnStats();
         // A step that was still running when the turn failed never completed:
         // settle it so the group does not keep a spinner spinning forever.
         const settledToolCalls = currentToolCallsRef.current.map((e) => {
@@ -2557,9 +2669,9 @@ export default function App() {
         });
         // The transcript holds no failure row any more, so a turn that can
         // still be pushed forward offers "continue" from the notice.
-        // The goal-loop marker is a control signal; never persist it or seed
-        // the "continue" action with it.
-        accumulatedContent = stripGoalDoneMarker(accumulatedContent);
+        // Control markers are signals; never persist them or seed the
+        // "continue" action with them.
+        accumulatedContent = stripControlMarkers(accumulatedContent);
         setError(
           err,
           "error",
@@ -2583,6 +2695,7 @@ export default function App() {
                     status: "error" as const,
                     streaming: false,
                     ...(settledToolCalls.length ? { tool_calls: settledToolCalls } : {}),
+                    ...(turnUsage ? { usage_meta: turnUsage } : {}),
                   }
                 : m
             )
@@ -2602,6 +2715,7 @@ export default function App() {
             deliveredInjections.length > 0 ? JSON.stringify(deliveredInjections) : undefined,
             err,
             "error",
+            turnUsage,
           )
             .then((dbId) => {
               setMessages((prev) =>
@@ -2624,7 +2738,7 @@ export default function App() {
     }, useAgentsEnabled, embeddedAgentIds);
 
     cleanupRef.current = cleanup;
-  }, [input, messages, streaming, backupExporting, activeSkillIds, sessionId, selectedModel, selectedMetadata, useAgentsEnabled, embeddedAgents, t, flushUndeliveredInjections]);
+  }, [input, messages, streaming, backupExporting, activeSkillIds, sessionId, selectedModel, selectedMetadata, useAgentsEnabled, embeddedAgents, t, flushUndeliveredInjections, beginTurnStats, settleTurnStats]);
 
   /**
    * Start the silent evolution-maintenance pass from the empty-state face.
@@ -2808,6 +2922,8 @@ export default function App() {
     // A new request starts with no token figures yet — the usage bar above the
     // input must sweep until this request's `chat-usage` arrives.
     setUsageReady(false);
+    // A retry is a new turn: its own duration and token totals.
+    beginTurnStats();
 
     const history = retryBase
       .filter((m) => !m.streaming && m.role !== "tool_group" && hasContextContent(m))
@@ -2836,12 +2952,10 @@ export default function App() {
     const cleanup = await chatCompletion(history, activeSkillIds, sessionId, selectedModel, {
       onToken(token) {
         accumulatedContent += token;
-        // Never surface the goal-loop marker: it is the last thing the model
-        // writes, so trimming it the moment it completes keeps the live
+        // Never surface a control marker: both are the last thing the model
+        // writes, so trimming one the moment it completes keeps the live
         // bubble identical to the settled one.
-        if (accumulatedContent.endsWith(GOAL_DONE_MARKER)) {
-          accumulatedContent = accumulatedContent.slice(0, -GOAL_DONE_MARKER.length);
-        }
+        accumulatedContent = stripTrailingControlMarkers(accumulatedContent);
         const shouldMarkDone = hasRunningToolCallRef.current;
         if (shouldMarkDone) hasRunningToolCallRef.current = false;
         setBackgroundWaiting(0);
@@ -2883,9 +2997,9 @@ export default function App() {
         // exact tail restores the accumulator to the pre-request state; the
         // retry then re-streams the whole response. A tail that does not
         // match (should not happen) is left in place rather than guessed at.
-        // The backend's attempt text still carries the goal-loop marker the
+        // The backend's attempt text still carries the control markers the
         // live accumulator already dropped — compare against the same form.
-        const tail = stripGoalDoneMarker(content);
+        const tail = stripControlMarkers(content);
         if (tail && accumulatedContent.endsWith(tail)) {
           accumulatedContent = accumulatedContent.slice(
             0,
@@ -2908,6 +3022,9 @@ export default function App() {
       },
       onDone() {
         setBackgroundWaiting(0);
+        // Close the turn's statistics before persisting: the footer under the
+        // finished reply and the stored row must show the same figures.
+        const turnUsage = settleTurnStats();
         const finalToolCalls = currentToolCallsRef.current.map((e) => {
           if (e.status !== "running") return e;
           if (e.kind === "agent") {
@@ -2915,10 +3032,9 @@ export default function App() {
           }
           return { ...e, status: "done" as const };
         });
-        // The goal-loop marker is a control signal; it never reaches the
-        // transcript or the persisted row (belt and braces — `onToken` already
-        // drops the trailing form).
-        accumulatedContent = stripGoalDoneMarker(accumulatedContent);
+        // Control markers never reach the transcript or the persisted row
+        // (belt and braces — `onToken` already drops the trailing form).
+        accumulatedContent = stripControlMarkers(accumulatedContent);
         // Deliveries are stored on the assistant row: one turn is one row, and
         // the reply was generated after the model saw them.
         const deliveredInjections = currentInjectionsRef.current;
@@ -2930,6 +3046,9 @@ export default function App() {
           accumulatedReasoning || undefined,
           undefined,
           deliveredInjections.length > 0 ? JSON.stringify(deliveredInjections) : undefined,
+          undefined,
+          undefined,
+          turnUsage,
         )
           .then((dbId) => {
             setMessages((prev) =>
@@ -2941,7 +3060,7 @@ export default function App() {
           return prev
             .filter((m) => !m.id.startsWith("agent-progress-"))
             .map((m) => {
-              if (m.id === assistantId) return { ...m, content: accumulatedContent, streaming: false, ...(finalToolCalls?.length ? { tool_calls: finalToolCalls } : {}) };
+              if (m.id === assistantId) return { ...m, content: accumulatedContent, streaming: false, ...(finalToolCalls?.length ? { tool_calls: finalToolCalls } : {}), ...(turnUsage ? { usage_meta: turnUsage } : {}) };
               return m;
             });
         });
@@ -2956,6 +3075,9 @@ export default function App() {
         cleanupRef.current = null;
       },
       onError(err) {
+        // A failed turn still ran for some time and spent tokens; keep the
+        // figures on the row instead of dropping them.
+        const turnUsage = settleTurnStats();
         const settledToolCalls = currentToolCallsRef.current.map((e) => {
           if (e.status !== "running") return e;
           // A task killed by a failing turn is not itself a failed task.
@@ -2972,9 +3094,9 @@ export default function App() {
         // Same as the first-turn handler: the failure is reported through the
         // notice, and the notice carries the resume action when there is
         // anything left to resume.
-        // The goal-loop marker is a control signal; never persist it or seed
-        // the "continue" action with it.
-        accumulatedContent = stripGoalDoneMarker(accumulatedContent);
+        // Control markers are signals; never persist them or seed the
+        // "continue" action with them.
+        accumulatedContent = stripControlMarkers(accumulatedContent);
         setError(
           err,
           "error",
@@ -2998,6 +3120,7 @@ export default function App() {
                     status: "error" as const,
                     streaming: false,
                     ...(settledToolCalls.length ? { tool_calls: settledToolCalls } : {}),
+                    ...(turnUsage ? { usage_meta: turnUsage } : {}),
                   }
                 : m
             )
@@ -3016,6 +3139,7 @@ export default function App() {
             deliveredInjections.length > 0 ? JSON.stringify(deliveredInjections) : undefined,
             err,
             "error",
+            turnUsage,
           )
             .then((dbId) => {
               setMessages((prev) =>
@@ -3037,7 +3161,7 @@ export default function App() {
     }, useAgentsEnabled);
 
     cleanupRef.current = cleanup;
-  }, [messages, streaming, pendingRetryMessageId, activeSkillIds, sessionId, selectedModel, useAgentsEnabled, t, flushUndeliveredInjections]);
+  }, [messages, streaming, pendingRetryMessageId, activeSkillIds, sessionId, selectedModel, useAgentsEnabled, t, flushUndeliveredInjections, beginTurnStats, settleTurnStats]);
 
   const handleDeleteMessage = useCallback(async (messageId: string) => {
     const msg = messagesDataRef.current.find((m) => m.id === messageId);
@@ -3376,6 +3500,10 @@ export default function App() {
       cleanupRef.current = null;
     }
 
+    // Stop is a terminal event for the turn: close its statistics so the
+    // partial row still shows how long it ran and what it spent.
+    const turnUsage = settleTurnStats();
+
     // A step that was still running when the user hit Stop never completed:
     // settle it so the group does not keep a spinner spinning forever.
     const assistantId = currentAssistantMessageIdRef.current;
@@ -3421,7 +3549,12 @@ export default function App() {
             return {
               ...m,
               streaming: false,
-              ...(m.id === assistantId ? { status: "stopped" as const } : {}),
+              ...(m.id === assistantId
+                ? {
+                    status: "stopped" as const,
+                    ...(turnUsage ? { usage_meta: turnUsage } : {}),
+                  }
+                : {}),
             };
           }
           const content = isGenerationStopped(m.content)
@@ -3435,6 +3568,7 @@ export default function App() {
               ? {
                   status: "stopped" as const,
                   ...(settledToolCalls.length ? { tool_calls: settledToolCalls } : {}),
+                  ...(turnUsage ? { usage_meta: turnUsage } : {}),
                 }
               : {}),
           };
@@ -3459,6 +3593,7 @@ export default function App() {
           deliveredInjections.length > 0 ? JSON.stringify(deliveredInjections) : undefined,
           undefined,
           "stopped",
+          turnUsage,
         )
           .then((dbId) => {
             setMessages((prev) =>

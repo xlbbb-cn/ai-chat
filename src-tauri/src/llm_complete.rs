@@ -127,6 +127,39 @@ fn last_user_text(messages: &[ChatMessage]) -> String {
         .unwrap_or_default()
 }
 
+/// The reason carried by a `[WAIT_EVT: …]` marker, when the model declared
+/// that the unfinished goals are waiting on an external event instead of being
+/// blocked. An empty body degrades to a generic phrase, so the suspension
+/// notice never prints a dangling colon.
+fn wait_evt_reason(content: &str) -> Option<String> {
+    let start = content.find(WAIT_EVT_PREFIX)?;
+    let body_start = start + WAIT_EVT_PREFIX.len();
+    let close = content[body_start..].find(']')?;
+    let reason = content[body_start..body_start + close].trim();
+    Some(if reason.is_empty() {
+        "an external event".to_string()
+    } else {
+        reason.to_string()
+    })
+}
+
+/// Remove every answer-level control marker (goal loop + WAIT_EVT) from a
+/// finished reply. `[WAIT_EVT: …]` is variable length, hence the scan for its
+/// closing bracket; an unterminated occurrence is left alone (a marker that
+/// never closed is not a marker).
+fn strip_control_markers(text: &str) -> String {
+    let mut next = text.replace(GOAL_DONE_MARKER, "");
+    while let Some(start) = next.find(WAIT_EVT_PREFIX) {
+        let body_start = start + WAIT_EVT_PREFIX.len();
+        let Some(close) = next[body_start..].find(']') else {
+            break;
+        };
+        let end = body_start + close + 1;
+        next.replace_range(start..end, "");
+    }
+    next.trim_end().to_string()
+}
+
 #[cfg(test)]
 mod tests;
 
@@ -181,6 +214,13 @@ const CONTEXT_LENGTH_MARKER: &str = "INTERNAL CONTEXT - OUTPUT TRUNCATED";
 /// conclude a goal loop (or stop while items are still open, e.g. blocked).
 /// Keep in sync with the goal-loop prompt wording below.
 const GOAL_DONE_MARKER: &str = "[goal:DONE]";
+/// Inline marker through which the model declares that the unfinished todo
+/// items are waiting on an external event the app cannot schedule. The turn
+/// ends and the goal loop stays suspended until the next turn (timer fire or
+/// user message). Variable length: `[WAIT_EVT: what is being waited on]` —
+/// stripping scans for the closing bracket. Keep in sync with
+/// `WAIT_EVT_MARKER` in `src/App.tsx`.
+const WAIT_EVT_PREFIX: &str = "[WAIT_EVT:";
 /// Upper bound of goal-loop continuations per turn. Each one spends a round
 /// anyway, but a model that keeps answering without working must not loop
 /// forever even with an unlimited round budget.

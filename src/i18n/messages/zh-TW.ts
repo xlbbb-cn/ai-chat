@@ -254,6 +254,12 @@ const zhTW: Messages = {
         foldMore: "展開",
         foldLess: "收合",
         continue: "繼續",
+        // 本輪花費，顯示在回覆下方的操作按鈕右側。
+        turnMeta: "{duration} · {tokens}",
+        turnMetaWithCache: "{duration} · {tokens} · 命中 {percent}%",
+        turnDurationSeconds: "{seconds} 秒",
+        turnDurationMinutes: "{minutes} 分 {seconds} 秒",
+        turnTokens: "{count} tokens",
     },
 
     figure: {

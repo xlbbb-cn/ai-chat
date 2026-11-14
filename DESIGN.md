@@ -828,6 +828,12 @@ This is the one place with a deliberate asymmetry:
   `.inline-edit-btn` primitive at message density (24px). The fold is *measured*
   after paint (`scrollHeight > clientHeight`), so a note that fits never shows a
   dead toggle.
+- **Turn cost sits to the right of the reply's action buttons.** A settled turn
+  shows one muted line (`.message-usage-meta`): duration, total tokens, and —
+  only when the provider reported prompt caching — the turn's hit rate,
+  separated by ` · `. 12px `--c-muted`, tabular numerals, no fill, no border,
+  no badge: it is a figure, not a state. A turn whose endpoint reported no
+  usage shows nothing at all rather than inventing a zero.
 - Streaming states may animate a gradient sweep across a label, but must respect
   `prefers-reduced-motion`.
 

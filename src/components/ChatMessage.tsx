@@ -1,4 +1,4 @@
-import type { BackgroundTaskState, ChatInjection, Message, MessageContent } from "../types";
+import type { BackgroundTaskState, ChatInjection, Message, MessageContent, TurnUsageMeta } from "../types";
 import {
   Component,
   memo,
@@ -31,6 +31,7 @@ import { mentionDisplayName } from "../composerFiles";
 // `t` (module-level) is used by the markdown-it renderer rules, which run
 // outside the React tree; the hook keeps the component re-rendering on change.
 import { t as text, useI18n } from "../i18n";
+import type { Locale, MessageKey, TranslateVars } from "../i18n";
 import type { ChatNoticeTone } from "./ChatNotice";
 import {
   FontAwesomeIcon,
@@ -523,6 +524,45 @@ function formatInjectionTime(createdAtMs: number): string {
 }
 
 /**
+ * One turn's cost as the muted footer next to a finished reply's action
+ * buttons: duration, total tokens, and — only when the provider reported
+ * prompt caching — the turn's cache hit. A turn without usage feedback never
+ * reaches this function (`usage_meta` is simply absent), so a missing figure
+ * is never rendered as a zero.
+ */
+function formatTurnMeta(
+  meta: TurnUsageMeta,
+  t: (key: MessageKey, vars?: TranslateVars) => string,
+  locale: Locale,
+): string {
+  // Below a minute the tenth of a second is still meaningful (most turns sit
+  // there); past it, whole seconds keep the line short and stable.
+  const duration =
+    meta.duration_ms < 59_950
+      ? t("chat.turnDurationSeconds", {
+          seconds: (Math.max(0, meta.duration_ms) / 1000).toFixed(1),
+        })
+      : (() => {
+          const totalSeconds = Math.round(meta.duration_ms / 1000);
+          return t("chat.turnDurationMinutes", {
+            minutes: Math.floor(totalSeconds / 60),
+            seconds: totalSeconds % 60,
+          });
+        })();
+  const tokens = t("chat.turnTokens", {
+    count: Math.round(meta.total_tokens).toLocaleString(locale),
+  });
+  if (meta.hit_ratio === undefined) {
+    return t("chat.turnMeta", { duration, tokens });
+  }
+  return t("chat.turnMetaWithCache", {
+    duration,
+    tokens,
+    percent: Math.round(meta.hit_ratio * 100),
+  });
+}
+
+/**
  * One mid-turn injection as it reads in the transcript.
  *
  * A note longer than three lines folds: a pasted paragraph otherwise pushes the
@@ -703,7 +743,7 @@ function writingTailHost(content: HTMLElement): HTMLElement {
 }
 
 function ChatMessageRow({ message, showRetry = false, onRetry, onNotice, onDelete, onFork, dbId, onConfirm, onCancelBackground, backgroundTasks, backgroundWaiting, skillNames, agentTokens, sessionId, todoActive }: Props) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
   const [showActions, setShowActions] = useState(true);
@@ -1287,6 +1327,11 @@ function ChatMessageRow({ message, showRetry = false, onRetry, onNotice, onDelet
             >
               <FontAwesomeIcon icon={faCodeBranch} />
             </button>
+          )}
+          {message.usage_meta && (
+            <span className="message-usage-meta">
+              {formatTurnMeta(message.usage_meta, t, locale)}
+            </span>
           )}
         </div>
       )}

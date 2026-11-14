@@ -542,6 +542,7 @@ fn main_helper_history_is_budgeted_and_keeps_the_newest_entries() {
             injections: None,
             error: None,
             status: None,
+            usage_meta: None,
         })
         .collect();
 
@@ -575,6 +576,7 @@ fn main_helper_history_respects_the_byte_budget() {
             injections: None,
             error: None,
             status: None,
+            usage_meta: None,
         })
         .collect();
 
