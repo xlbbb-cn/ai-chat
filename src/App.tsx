@@ -499,6 +499,23 @@ export default function App() {
    */
   const lastDreamClickRef = useRef(0);
   const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
+  /**
+   * Start a fresh conversation: drop the transcript, the turn-scoped bars and
+   * the `+agent` roles, and mint a new session id. Shared by the "新会话"
+   * button and the workspace switch — both must land on the empty state. The
+   * workspace switch additionally clears the draft and the pending timer
+   * prompts, which reference the workspace being left.
+   */
+  const resetConversation = useCallback(() => {
+    setMessages([]);
+    setError(null);
+    setUsage(null);
+    setUsageReady(false);
+    setPendingRetryMessageId(null);
+    setDreamResult(null);
+    resetEmbeddedAgents();
+    setSessionId(crypto.randomUUID());
+  }, [resetEmbeddedAgents]);
   const [sidebar, setSidebar] = useState<Sidebar>(null);
   /** Geometry of the toolbar's sliding selection fill (measured from the active button). */
   const [toolbarIndicator, setToolbarIndicator] = useState<{ left: number; width: number } | null>(null);
@@ -1118,10 +1135,24 @@ export default function App() {
 
   // A workspace switch swaps the whole workspace-scoped state: config reload,
   // skill status (the previous workspace's selection must not leak into the
-  // new one), and the database that backs the history sidebar.
+  // new one), and the database that backs the history sidebar. The transcript
+  // belongs to the workspace it was written in, so the switch also lands on a
+  // fresh session: the old session id lives in the other workspace's database,
+  // and reusing it would save the next message there under a foreign id while
+  // the request still carried the stale transcript as context.
   useEffect(() => {
     const unlisten = listen<string>("workspace-changed", async () => {
       try {
+        resetConversation();
+        // The draft can carry `@file` mentions that resolve in the workspace
+        // being left — always clear it, and close the popups it opened, the
+        // same way sending does. The pending timer hand-off notices point at
+        // the old workspace's session too.
+        setInput("");
+        setMentionState({ open: false, query: "", start: 0 });
+        setSlashState({ open: false, query: "", start: 0 });
+        setTimerNotice(null);
+        setPendingAutoPrompts([]);
         await applyConfigToUi();
         await loadSkillStatus();
         setHistoryRefreshKey((key) => key + 1);
@@ -1132,7 +1163,7 @@ export default function App() {
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [applyConfigToUi, loadSkillStatus]);
+  }, [applyConfigToUi, loadSkillStatus, resetConversation]);
 
   // The silent maintenance turn (the empty-state nap face) has its own event
   // stream — never `chat-*` — so a maintenance finish cannot settle a real chat
@@ -3098,14 +3129,7 @@ export default function App() {
     if (streaming) {
       await stopStreaming();
     }
-    setMessages([]);
-    setError(null);
-    setUsage(null);
-    setUsageReady(false);
-    setPendingRetryMessageId(null);
-    setDreamResult(null);
-    resetEmbeddedAgents();
-    setSessionId(crypto.randomUUID());
+    resetConversation();
   }
 
   const renderConfirmDialog = () => {
