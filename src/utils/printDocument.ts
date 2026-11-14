@@ -17,6 +17,34 @@
 import katexCssUrl from "katex/dist/katex.min.css?url";
 import katexCssText from "katex/dist/katex.min.css?raw";
 import razerF5FontUrl from "../assets/Web Fonts/9b77a61b70b873a0f298ad6fbc801666.woff2?url";
+// KaTeX's stylesheet points at its own font files, and a standalone document has
+// to carry them. Imported one by one instead of through `import.meta.glob`: a
+// glob over `node_modules` is an absolute pattern, so the build has to compute a
+// relative specifier from this module to every matched file — and when the
+// project root is spelled with a lowercase drive letter, the importer keeps
+// `E:/…` while the glob returns `e:/…`, so the computed path comes out as
+// `../../../../e:/ai-chat/node_modules/…`, which nothing can resolve. Explicit
+// imports go through node resolution and never do that arithmetic.
+import katexAms from "katex/dist/fonts/KaTeX_AMS-Regular.woff2?url";
+import katexCaligraphicBold from "katex/dist/fonts/KaTeX_Caligraphic-Bold.woff2?url";
+import katexCaligraphicRegular from "katex/dist/fonts/KaTeX_Caligraphic-Regular.woff2?url";
+import katexFrakturBold from "katex/dist/fonts/KaTeX_Fraktur-Bold.woff2?url";
+import katexFrakturRegular from "katex/dist/fonts/KaTeX_Fraktur-Regular.woff2?url";
+import katexMainBold from "katex/dist/fonts/KaTeX_Main-Bold.woff2?url";
+import katexMainBoldItalic from "katex/dist/fonts/KaTeX_Main-BoldItalic.woff2?url";
+import katexMainItalic from "katex/dist/fonts/KaTeX_Main-Italic.woff2?url";
+import katexMainRegular from "katex/dist/fonts/KaTeX_Main-Regular.woff2?url";
+import katexMathBoldItalic from "katex/dist/fonts/KaTeX_Math-BoldItalic.woff2?url";
+import katexMathItalic from "katex/dist/fonts/KaTeX_Math-Italic.woff2?url";
+import katexSansSerifBold from "katex/dist/fonts/KaTeX_SansSerif-Bold.woff2?url";
+import katexSansSerifItalic from "katex/dist/fonts/KaTeX_SansSerif-Italic.woff2?url";
+import katexSansSerifRegular from "katex/dist/fonts/KaTeX_SansSerif-Regular.woff2?url";
+import katexScriptRegular from "katex/dist/fonts/KaTeX_Script-Regular.woff2?url";
+import katexSize1 from "katex/dist/fonts/KaTeX_Size1-Regular.woff2?url";
+import katexSize2 from "katex/dist/fonts/KaTeX_Size2-Regular.woff2?url";
+import katexSize3 from "katex/dist/fonts/KaTeX_Size3-Regular.woff2?url";
+import katexSize4 from "katex/dist/fonts/KaTeX_Size4-Regular.woff2?url";
+import katexTypewriter from "katex/dist/fonts/KaTeX_Typewriter-Regular.woff2?url";
 import { escapeHtml } from "./format";
 
 /** Font stack of a standalone document: system faces, nothing downloaded. */
@@ -33,11 +61,28 @@ const CODE_FONT_STACK = '"Cascadia Code", "Consolas", "Microsoft YaHei", monospa
  * and fetched on demand. Vite emits them as separate files, so the bundle only
  * grows by the URLs, not by the fonts.
  */
-const katexFontUrls = import.meta.glob<string>("/node_modules/katex/dist/fonts/*.woff2", {
-  eager: true,
-  query: "?url",
-  import: "default",
-});
+const katexFontUrls: Record<string, string> = {
+  "KaTeX_AMS-Regular.woff2": katexAms,
+  "KaTeX_Caligraphic-Bold.woff2": katexCaligraphicBold,
+  "KaTeX_Caligraphic-Regular.woff2": katexCaligraphicRegular,
+  "KaTeX_Fraktur-Bold.woff2": katexFrakturBold,
+  "KaTeX_Fraktur-Regular.woff2": katexFrakturRegular,
+  "KaTeX_Main-Bold.woff2": katexMainBold,
+  "KaTeX_Main-BoldItalic.woff2": katexMainBoldItalic,
+  "KaTeX_Main-Italic.woff2": katexMainItalic,
+  "KaTeX_Main-Regular.woff2": katexMainRegular,
+  "KaTeX_Math-BoldItalic.woff2": katexMathBoldItalic,
+  "KaTeX_Math-Italic.woff2": katexMathItalic,
+  "KaTeX_SansSerif-Bold.woff2": katexSansSerifBold,
+  "KaTeX_SansSerif-Italic.woff2": katexSansSerifItalic,
+  "KaTeX_SansSerif-Regular.woff2": katexSansSerifRegular,
+  "KaTeX_Script-Regular.woff2": katexScriptRegular,
+  "KaTeX_Size1-Regular.woff2": katexSize1,
+  "KaTeX_Size2-Regular.woff2": katexSize2,
+  "KaTeX_Size3-Regular.woff2": katexSize3,
+  "KaTeX_Size4-Regular.woff2": katexSize4,
+  "KaTeX_Typewriter-Regular.woff2": katexTypewriter,
+};
 
 function toBase64(bytes: Uint8Array): string {
   let binary = "";
@@ -56,8 +101,7 @@ function inlineKatexCss(): Promise<string> {
   katexInlineCss ??= (async () => {
     const encoded = new Map<string, string>();
     await Promise.all(
-      Object.entries(katexFontUrls).map(async ([path, url]) => {
-        const name = path.slice(path.lastIndexOf("/") + 1);
+      Object.entries(katexFontUrls).map(async ([name, url]) => {
         try {
           const response = await fetch(url);
           encoded.set(name, toBase64(new Uint8Array(await response.arrayBuffer())));
