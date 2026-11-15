@@ -381,6 +381,11 @@ pub(crate) fn parse_task_plan(raw: &str, roster: &[String]) -> Result<(PlanDecis
         task.context = task.context.trim().to_string();
         // The planner may write "", "." or "./" for "the workspace root".
         task.cwd = normalize_task_cwd(task.cwd.as_deref());
+        task.images = sanitize_task_images(&task.images);
+        task.params = sanitize_task_params(&task.params)
+            .into_iter()
+            .map(|(key, value)| (key, serde_json::Value::String(value)))
+            .collect();
         tasks.push(task);
     }
 
@@ -1075,11 +1080,16 @@ pub(crate) async fn plan_tasks(
         A task may name one working directory with `cwd` (workspace-relative, e.g. \"apps/web\") — use \
         it whenever the request names or targets a specific project/folder, omit it (or \".\") for the \
         workspace root, and never invent a directory the conversation does not mention.\n\n\
+        A task may also carry `images` (workspace-relative input file paths the conversation names, \
+        e.g. [\"figures/src.png\"] — for image-to-image / image-to-video agents) and `params` (a JSON \
+        object of request-template variables a cloud agent accepts, e.g. {{\"size\":\"2048x1152\",\
+        \"quality\":\"high\",\"duration\":5}}); omit both when they do not apply.\n\n\
         Return ONLY valid JSON — no markdown, no extra text:\n\
         {{\"delegate\":false,\"why\":\"...\"}}\n\
         or\n\
         {{\"delegate\":true,\"tasks\":[{{\"id\":\"t1\",\"agent_id\":\"<id>\",\"description\":\"...\",\
-          \"context\":\"...\",\"cwd\":\"<workspace-relative dir, omit for root>\",\"dependencies\":[]}}],\
+          \"context\":\"...\",\"cwd\":\"<workspace-relative dir, omit for root>\",\
+          \"images\":[],\"params\":{{}},\"dependencies\":[]}}],\
           \"execution_mode\":\"parallel\"}}\n\
         Rules:\n\
         - execution_mode: \"parallel\" for independent tasks, \"sequential\" when order matters; \

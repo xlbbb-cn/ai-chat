@@ -167,6 +167,15 @@ pub(crate) async fn build_turn_tools(
                         "cwd": {
                             "type": "string",
                             "description": "Working directory for the task: workspace-relative (e.g. \"./apps/web\") or absolute inside the workspace. The agent starts there — pass it whenever the work targets a specific project or subfolder; omit for the workspace root."
+                        },
+                        "images": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Workspace-relative input files for image-to-image / image-to-video agents (e.g. [\"figures/src.png\"]). A cloud agent injects them into its request body via the template's image placeholders; a CLI agent reads them at these paths. Max 16."
+                        },
+                        "params": {
+                            "type": "object",
+                            "description": "Request-template variables for a cloud agent, e.g. {\"size\":\"2048x1152\",\"quality\":\"high\",\"duration\":5}. Each value replaces the matching {key} placeholder in the agent's body template; keys may use letters, digits, '-' and '_'."
                         }
                     },
                     "required": ["agent_id", "task_description"]
@@ -567,7 +576,7 @@ pub(crate) async fn run_chat_turn(
             ));
         }
         let mut agents_sys_msg = format!(
-        "Agents you can reach with `call_subagent` (exact `agent_id`, self-contained `task_description` — they never see this conversation). Types: `llm` runs an autonomous tool loop inside the app; `cli` is a headless coding CLI on this machine that edits workspace files directly; `cloud` runs the task on a remote endpoint. Prefer `llm` for reasoning/reporting, `cli`/`cloud` for large end-to-end coding; a first `cli`/`cloud` run may need the user's approval.\n\
+        "Agents you can reach with `call_subagent` (exact `agent_id`, self-contained `task_description` — they never see this conversation). Types: `llm` runs an autonomous tool loop inside the app; `cli` is a headless coding CLI on this machine that edits workspace files directly; `cloud` runs the task on a remote endpoint (its generated images/videos are saved into the workspace and reported as file paths). Pass `images` (workspace-relative input files) for image-to-image / image-to-video agents and `params` (template variables like size/quality/duration) when the agent accepts them. Prefer `llm` for reasoning/reporting, `cli`/`cloud` for large end-to-end coding; a first `cli`/`cloud` run may need the user's approval.\n\
         Workspace root: {} — pass a workspace-relative `cwd` (e.g. \"./apps/web\") when the task targets a subfolder, omit it for the root.\n\n\
         Available agents:\n{}",
         workspace_dir_for_roots.display(),
@@ -2118,35 +2127,42 @@ only when every item is done, or when you are blocked and need the user.\n\n{wai
                         description: task_desc.to_string(),
                         context: task_context.to_string(),
                         cwd: agents::normalize_task_cwd(args_json["cwd"].as_str()),
+                        images: agents::sanitize_task_images(
+                            &args_json["images"]
+                                .as_array()
+                                .map(|items| {
+                                    items
+                                        .iter()
+                                        .filter_map(|value| value.as_str())
+                                        .map(str::to_string)
+                                        .collect::<Vec<_>>()
+                                })
+                                .unwrap_or_default(),
+                        ),
+                        params: args_json["params"].as_object().cloned().unwrap_or_default(),
                         dependencies: vec![],
                     };
                     let workspace_dir = state.workspace_dir.lock().unwrap().clone();
                     // Deliverables are exchanged through
                     // `<workspace>/.data/deliver/<session-id>`. A cloud agent
-                    // cannot reach the local workspace, so it gets no exchange
-                    // directory.
-                    let agent_type = agents::normalize_agent_type(&agent.agent_type);
-                    let exchange = if matches!(
-                        agent_type.as_str(),
-                        agents::AGENT_TYPE_LLM | agents::AGENT_TYPE_CLI
+                    // cannot write the workspace itself, but the app stores
+                    // the media it generates (image/video) in its task
+                    // directory and reports the saved paths, so it gets a
+                    // directory like `llm` / `cli` agents do.
+                    let exchange = match agents::exchange::ExchangeArea::create(
+                        &workspace_dir,
+                        &session_id,
+                        std::slice::from_ref(&task.id),
                     ) {
-                        match agents::exchange::ExchangeArea::create(
-                            &workspace_dir,
-                            &session_id,
-                            std::slice::from_ref(&task.id),
-                        ) {
-                            Ok(area) => Some(area),
-                            Err(err) => {
-                                log_event(
-                                    &state,
-                                    "WARN",
-                                    format!("deliverable exchange area unavailable: {err}"),
-                                );
-                                None
-                            }
+                        Ok(area) => Some(area),
+                        Err(err) => {
+                            log_event(
+                                &state,
+                                "WARN",
+                                format!("deliverable exchange area unavailable: {err}"),
+                            );
+                            None
                         }
-                    } else {
-                        None
                     };
                     let url = format!(
                         "{}/chat/completions",

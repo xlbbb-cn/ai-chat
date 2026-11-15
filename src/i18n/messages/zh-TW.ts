@@ -765,7 +765,7 @@ const zhTW: Messages = {
         cloudHeaders: "附加標頭 —— 每行一個 KEY=VALUE",
         cloudBodyTemplate: "請求主體範本（JSON）",
         cloudBodyTemplateHint:
-            "作為 POST 主體送出的 JSON。{prompt}、{agent_name}、{cwd} 會被取代並以 JSON 轉義。",
+            "作為 POST 主體送出的 JSON。{prompt}、{agent_name}、{cwd} 會被取代並以 JSON 轉義；{image_b64}、{image_data_url}、{images_data_urls} 注入呼叫方傳入的輸入圖片；其餘 {key} 來自 params。",
         cloudResultPath: "結果路徑",
         cloudResultPathHint:
             "從回應中取出文字的路徑，例如 `choices.0.message.content` 或 `result.output`。",
@@ -775,11 +775,16 @@ const zhTW: Messages = {
         cloudPollIdPath: "工作 id 路徑",
         cloudPollStatusPath: "狀態路徑",
         cloudPollInterval: "輪詢間隔（秒）",
+        cloudPollFirstDelay: "首次輪詢延遲（秒）",
+        cloudPollMethod: "查詢方法",
         cloudPollDoneValues: "完成狀態值 —— 每行一個",
         cloudPollFailedValues: "失敗狀態值 —— 每行一個",
         cloudUnreachable: "無法連線",
         cloudTimeoutHint:
-            "0 = 不限制總逾時：輪詢會持續到工作完成或手動停止。單次 HTTP 請求仍受 300 秒限制，正數上限 7200 秒；留空維持預設值 1800。",
+            "0 = 不限制總逾時：輪詢會持續到工作完成或手動停止；留空維持預設值 1800。",
+        cloudRequestTimeout: "單次請求逾時（秒）",
+        cloudRequestTimeoutHint:
+            "每次 HTTP 請求（提交、輪詢、媒體下載）的逾時上限。0 = 內建 600 秒——同步生圖介面在高畫質 / 4K 下可能需要 3–5 分鐘，建議不低於 360。",
 
         // ── 共用 ──
         requireApproval: "執行前需確認",

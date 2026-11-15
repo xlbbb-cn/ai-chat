@@ -765,7 +765,7 @@ const zhCN: Messages = {
         cloudHeaders: "附加请求头 —— 每行一个 KEY=VALUE",
         cloudBodyTemplate: "请求体模板（JSON）",
         cloudBodyTemplateHint:
-            "作为 POST 请求体发送的 JSON。{prompt}、{agent_name}、{cwd} 会被替换并按 JSON 转义。",
+            "作为 POST 请求体发送的 JSON。{prompt}、{agent_name}、{cwd} 会被替换并按 JSON 转义；{image_b64}、{image_data_url}、{images_data_urls} 注入调用方传入的输入图片；其余 {key} 来自 params。",
         cloudResultPath: "结果路径",
         cloudResultPathHint:
             "从响应中提取文本的点号路径，例如 `choices.0.message.content` 或 `result.output`。",
@@ -775,11 +775,16 @@ const zhCN: Messages = {
         cloudPollIdPath: "任务 id 路径",
         cloudPollStatusPath: "状态路径",
         cloudPollInterval: "轮询间隔（秒）",
+        cloudPollFirstDelay: "首次轮询延迟（秒）",
+        cloudPollMethod: "查询方法",
         cloudPollDoneValues: "完成状态值 —— 每行一个",
         cloudPollFailedValues: "失败状态值 —— 每行一个",
         cloudUnreachable: "无法连接",
         cloudTimeoutHint:
-            "0 = 不限制总超时：轮询会持续到任务完成或手动停止。单次 HTTP 请求仍受 300 秒限制，正数上限 7200 秒；留空保持默认值 1800。",
+            "0 = 不限制总超时：轮询会持续到任务完成或手动停止；留空保持默认值 1800。",
+        cloudRequestTimeout: "单次请求超时（秒）",
+        cloudRequestTimeoutHint:
+            "每次 HTTP 请求（提交、轮询、媒体下载）的超时上限。0 = 内置 600 秒——同步生图接口在高画质 / 4K 下可能需要 3–5 分钟，建议不低于 360。",
 
         // ── 通用 ──
         requireApproval: "运行前需确认",

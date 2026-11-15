@@ -192,6 +192,35 @@ fn v2_config_adopts_smart_selection_once() {
 }
 
 #[test]
+fn auto_plan_is_its_own_switch_and_defaults_on() {
+    // A file written before the switch existed keeps planning on, so splitting
+    // `use_agents` changed nothing for existing installs.
+    let config: AgentsConfig = serde_json::from_str(
+        r#"{"version":5,"agents":[],"orchestration":{"use_agents":true,"auto_configure":false}}"#,
+    )
+    .expect("config parses");
+    assert!(config.orchestration.auto_plan);
+
+    // Sub-agents available, planning off: the manual-delegation combination.
+    let config: AgentsConfig = serde_json::from_str(
+        r#"{"version":5,"agents":[],"orchestration":{"use_agents":true,"auto_plan":false,"auto_configure":false}}"#,
+    )
+    .expect("config parses");
+    assert!(config.orchestration.use_agents);
+    assert!(!config.orchestration.auto_plan);
+    assert!(!config.orchestration.auto_configure);
+
+    // Round trip keeps the three apart.
+    let json = serde_json::to_string(&config.orchestration).expect("serializes");
+    let back: AgentOrchestration = serde_json::from_str(&json).expect("parses back");
+    assert!(back.use_agents);
+    assert!(!back.auto_plan);
+    assert!(!back.auto_configure);
+
+    assert!(AgentOrchestration::default().auto_plan);
+}
+
+#[test]
 fn v3_config_migrates_the_old_iteration_default_once() {
     // The old panel always serialized `10`, so that is the old default, not
     // a deliberate cap. Any other value is the user's choice and survives.
@@ -489,6 +518,8 @@ fn task_result_skipped_carries_reason() {
         description: "x".to_string(),
         context: String::new(),
         cwd: None,
+        images: Vec::new(),
+        params: serde_json::Map::new(),
         dependencies: Vec::new(),
     };
     let result = TaskResult::skipped(&task, "agent a", "agent 'a' is not available");

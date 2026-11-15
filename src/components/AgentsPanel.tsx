@@ -122,6 +122,9 @@ function emptyCloudSettings(): CloudAgentSettings {
     body_template: '{"messages":[{"role":"user","content":"{prompt}"}]}',
     result_path: "choices.0.message.content",
     timeout_seconds: DEFAULT_CLOUD_TIMEOUT_SECONDS,
+    request_timeout_seconds: 0,
+    poll_first_delay_seconds: 0,
+    poll_method: "get",
     poll_url: "",
     poll_id_path: "id",
     poll_status_path: "status",
@@ -759,6 +762,32 @@ export function AgentsPanel({
                   />
                 </label>
               </div>
+              <div className="agent-editor-row">
+                <label style={{ flex: 1 }}>
+                  {t("agents.cloudPollFirstDelay")}
+                  <input
+                    type="number"
+                    min={0}
+                    max={600}
+                    value={agent.cloud.poll_first_delay_seconds ?? 0}
+                    onChange={(e) =>
+                      updateCloud({
+                        poll_first_delay_seconds: Math.max(0, Number(e.target.value) || 0),
+                      })
+                    }
+                  />
+                </label>
+                <label style={{ flex: 1 }}>
+                  {t("agents.cloudPollMethod")}
+                  <select
+                    value={agent.cloud.poll_method || "get"}
+                    onChange={(e) => updateCloud({ poll_method: e.target.value })}
+                  >
+                    <option value="get">GET</option>
+                    <option value="post">POST</option>
+                  </select>
+                </label>
+              </div>
               <label>
                 {t("agents.cloudPollDoneValues")}
                 <textarea
@@ -796,6 +825,21 @@ export function AgentsPanel({
               }
             />
             <small className="agent-field-hint">{t("agents.cloudTimeoutHint")}</small>
+          </label>
+          <label>
+            {t("agents.cloudRequestTimeout")}
+            <input
+              type="number"
+              min={0}
+              max={7200}
+              value={agent.cloud.request_timeout_seconds ?? 0}
+              onChange={(e) =>
+                updateCloud({
+                  request_timeout_seconds: Math.max(0, Number(e.target.value) || 0),
+                })
+              }
+            />
+            <small className="agent-field-hint">{t("agents.cloudRequestTimeoutHint")}</small>
           </label>
         </>
       );

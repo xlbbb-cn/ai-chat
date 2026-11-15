@@ -125,8 +125,78 @@ pub struct Task {
     /// agent definition, so one agent can work on different projects.
     #[serde(default)]
     pub cwd: Option<String>,
+    /// Workspace-relative input files the task consumes (image-to-image,
+    /// image-to-video). Supplied per delegation like `cwd`. A `cloud` agent's
+    /// request template injects them through the `{image_b64}` /
+    /// `{image_data_url}` / `{images_data_urls}` placeholders; a `cli` agent
+    /// sees the paths in its prompt and reads the files itself.
+    #[serde(default)]
+    pub images: Vec<String>,
+    /// Per-task template variables for a `cloud` agent (`size`, `duration`,
+    /// …) — raw values, normalized by [`sanitize_task_params`] before they
+    /// replace `{key}` placeholders in the request body template.
+    #[serde(default)]
+    pub params: serde_json::Map<String, serde_json::Value>,
     #[serde(default)]
     pub dependencies: Vec<String>,
+}
+
+/// Placeholder names the request-body template owns; a `params` entry must
+/// never override one of them.
+pub const RESERVED_TEMPLATE_KEYS: [&str; 6] = [
+    "prompt",
+    "agent_name",
+    "cwd",
+    "image_b64",
+    "image_data_url",
+    "images_data_urls",
+];
+
+/// Normalizes planner/model-supplied template variables: values are
+/// stringified (numbers and booleans accepted, containers dropped), keys are
+/// limited to `[A-Za-z0-9_-]`, built-in placeholders are reserved and the
+/// map is capped at 16 entries.
+pub fn sanitize_task_params(
+    raw: &serde_json::Map<String, serde_json::Value>,
+) -> std::collections::BTreeMap<String, String> {
+    let mut out = std::collections::BTreeMap::new();
+    for (key, value) in raw {
+        if !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+            || key.len() > 32
+            || RESERVED_TEMPLATE_KEYS.contains(&key.as_str())
+        {
+            continue;
+        }
+        let text = match value {
+            serde_json::Value::String(text) => text.clone(),
+            serde_json::Value::Number(number) => number.to_string(),
+            serde_json::Value::Bool(flag) => flag.to_string(),
+            _ => continue,
+        };
+        if out.len() >= 16 {
+            break;
+        }
+        out.insert(key.clone(), text);
+    }
+    out
+}
+
+/// Normalizes workspace-relative input file paths: trimmed, empties dropped,
+/// deduplicated and capped at 16 (the reference-image limit most edit APIs
+/// enforce). Path validation itself happens when the file is read.
+pub fn sanitize_task_images(raw: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for path in raw {
+        let trimmed = path.trim();
+        if trimmed.is_empty() || out.iter().any(|known| known == trimmed) {
+            continue;
+        }
+        if out.len() >= 16 {
+            break;
+        }
+        out.push(trimmed.to_string());
+    }
+    out
 }
 
 #[derive(Debug, Clone, Deserialize)]

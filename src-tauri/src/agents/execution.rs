@@ -507,6 +507,7 @@ pub async fn run_sub_agent(
                 task,
                 session_id,
                 task_cwd,
+                &workspace_dir,
                 exchange,
                 ExternalBackend::Cli,
                 cancelled,
@@ -521,6 +522,7 @@ pub async fn run_sub_agent(
                 task,
                 session_id,
                 task_cwd,
+                &workspace_dir,
                 exchange,
                 ExternalBackend::Cloud,
                 cancelled,
@@ -622,6 +624,7 @@ pub(crate) async fn run_external_agent(
     task: &Task,
     session_id: &str,
     task_cwd: PathBuf,
+    workspace_dir: &Path,
     exchange: Option<&exchange::ExchangeArea>,
     backend: ExternalBackend,
     cancelled: Arc<AtomicBool>,
@@ -771,10 +774,27 @@ pub(crate) async fn run_external_agent(
             .map_err(|err| format!("CLI agent \"{}\" failed: {err}", agent.name))
         }
         ExternalBackend::Cloud => {
-            cloud::run(app, agent, &task.id, &prompt, &task_cwd, session_id, cancelled)
-                .await
-                .map(|run| ("success", run.result, run.summary))
-                .map_err(|err| format!("Cloud agent \"{}\" failed: {err}", agent.name))
+            // The runtime saves the media the endpoint returns (a base64
+            // payload or a URL) into the task's deliverable directory and
+            // reports the saved paths, so the main agent can read the files.
+            let deliver = exchange.and_then(|area| area.deliver_target(&task.id));
+            let params = sanitize_task_params(&task.params);
+            cloud::run(
+                app,
+                agent,
+                &task.id,
+                &prompt,
+                &task_cwd,
+                session_id,
+                workspace_dir,
+                &task.images,
+                &params,
+                deliver.as_ref(),
+                cancelled,
+            )
+            .await
+            .map(|run| ("success", run.result, run.summary))
+            .map_err(|err| format!("Cloud agent \"{}\" failed: {err}", agent.name))
         }
     };
 
@@ -878,14 +898,38 @@ pub(crate) fn build_external_prompt(
         prompt.push_str("\n\nContext:\n");
         prompt.push_str(task.context.trim());
     }
+    if !task.images.is_empty() {
+        if local_files {
+            // A CLI agent can read the files itself at these paths.
+            prompt.push_str("\n\nINPUT FILES (workspace-relative; read them with your tools):\n");
+            for image in &task.images {
+                prompt.push_str(&format!("- {image}\n"));
+            }
+        } else {
+            // A cloud agent receives them inside the HTTP request body via
+            // the template's image placeholders.
+            prompt.push_str(&format!(
+                "\n\nINPUT FILES: {} input image(s) are attached to the request body through the \
+                 endpoint template's image placeholders — do not ask for their contents.\n",
+                task.images.len()
+            ));
+        }
+    }
     if let Some(area) = exchange {
         if local_files {
             prompt.push_str(&area.prompt_block(&task.id, true));
         } else {
-            prompt.push_str(
-                "\n\nDELIVERABLE EXCHANGE AREA: not available — a cloud agent cannot access the \
-                 local workspace. Return the deliverable inline in your answer.",
-            );
+            // The cloud agent cannot write the workspace itself, but the app
+            // stores the media its endpoint returns (a base64 payload or a
+            // URL) in the task's directory and reports the paths back.
+            prompt.push_str(&format!(
+                "\n\nDELIVERABLE EXCHANGE AREA (workspace-relative root: {}): the app saves any \
+                 image / video / audio the endpoint returns (a base64 payload or a URL) into \
+                 this task's directory there and reports the saved paths back to the caller. \
+                 Answer with a short text description — never paste binary data or a long \
+                 base64 payload into the answer.",
+                area.relative_root()
+            ));
         }
     }
     prompt

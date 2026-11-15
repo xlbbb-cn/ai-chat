@@ -820,7 +820,7 @@ const en = {
         cloudHeaders: "Extra headers — KEY=VALUE per line",
         cloudBodyTemplate: "Request body template (JSON)",
         cloudBodyTemplateHint:
-            "JSON sent as the POST body. Placeholders {prompt}, {agent_name} and {cwd} are inserted already JSON-escaped.",
+            "JSON sent as the POST body. {prompt}, {agent_name} and {cwd} are inserted already JSON-escaped; {image_b64} / {image_data_url} / {images_data_urls} inject the delegating call's input images; any other {key} comes from its params.",
         cloudResultPath: "Result path",
         cloudResultPathHint:
             "Dot path into the response holding the agent's text, e.g. `choices.0.message.content` or `result.output`.",
@@ -830,11 +830,16 @@ const en = {
         cloudPollIdPath: "Job id path",
         cloudPollStatusPath: "Status path",
         cloudPollInterval: "Poll interval (s)",
+        cloudPollFirstDelay: "First poll delay (s)",
+        cloudPollMethod: "Query method",
         cloudPollDoneValues: "Done status values — one per line",
         cloudPollFailedValues: "Failed status values — one per line",
         cloudUnreachable: "unreachable",
         cloudTimeoutHint:
-            "0 = no overall timeout: polling continues until the job finishes or the turn is stopped. Each HTTP request is still capped at 300 seconds, positive values at 7200. Leaving the field empty keeps the default (1800).",
+            "0 = no overall timeout: polling continues until the job finishes or the turn is stopped. Leaving the field empty keeps the default (1800).",
+        cloudRequestTimeout: "Request timeout (s)",
+        cloudRequestTimeoutHint:
+            "Cap for each HTTP request (the POST, poll queries and media downloads). 0 = the built-in 600 s — synchronous image APIs at high quality / 4K can take 3–5 minutes, so keep this at or above 360.",
 
         // ── shared ──
         requireApproval: "Ask before running",

@@ -183,8 +183,11 @@ pub struct CloudAgentSettings {
     /// Extra request headers.
     #[serde(default)]
     pub headers: Vec<KeyValue>,
-    /// JSON request body template; `{prompt}`, `{agent_name}` and `{cwd}` are
-    /// substituted (JSON-escaped where they appear inside string literals).
+    /// JSON request body template. Placeholders: `{prompt}`, `{agent_name}`
+    /// and `{cwd}` (JSON-escaped where they appear inside string literals);
+    /// `{image_b64}` / `{image_data_url}` / `{images_data_urls}` inject the
+    /// task's input images (image-to-image / image-to-video); any other
+    /// `{key}` is replaced from the delegating call's `params`.
     #[serde(default = "default_cloud_body_template")]
     pub body_template: String,
     /// Dot path into the JSON response that holds the agent's text
@@ -194,6 +197,18 @@ pub struct CloudAgentSettings {
     /// Overall timeout in seconds, covering polling. `0` means no timeout.
     #[serde(default = "default_cloud_timeout_seconds")]
     pub timeout_seconds: u32,
+    /// Per-request HTTP timeout in seconds (the initial POST, poll GETs and
+    /// deliverable downloads). Synchronous image APIs need ≥360 s at high
+    /// quality / 4K. `0` = the built-in 600 s.
+    #[serde(default)]
+    pub request_timeout_seconds: u32,
+    /// Seconds to wait before the FIRST poll (e.g. 20–30 s for video tasks —
+    /// an earlier query is always still queued and only wastes a request).
+    #[serde(default)]
+    pub poll_first_delay_seconds: u32,
+    /// HTTP method of the status query: `get` (default) or `post`.
+    #[serde(default = "default_poll_method")]
+    pub poll_method: String,
     /// Async mode: poll this URL (supports the `{id}` placeholder) until the
     /// status matches one of the done/failed values. Empty = single response.
     #[serde(default)]
@@ -223,6 +238,9 @@ impl Default for CloudAgentSettings {
             body_template: default_cloud_body_template(),
             result_path: default_cloud_result_path(),
             timeout_seconds: default_cloud_timeout_seconds(),
+            request_timeout_seconds: 0,
+            poll_first_delay_seconds: 0,
+            poll_method: default_poll_method(),
             poll_url: String::new(),
             poll_id_path: default_poll_id_path(),
             poll_status_path: default_poll_status_path(),
@@ -231,6 +249,10 @@ impl Default for CloudAgentSettings {
             poll_interval_seconds: default_poll_interval_seconds(),
         }
     }
+}
+
+pub(crate) fn default_poll_method() -> String {
+    "get".to_string()
 }
 
 pub(crate) fn default_cloud_body_template() -> String {

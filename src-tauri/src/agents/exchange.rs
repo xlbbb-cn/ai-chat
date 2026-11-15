@@ -135,6 +135,19 @@ pub fn list_session_deliverables(
     Ok(out)
 }
 
+/// Where the runtime stores binary deliverables for one task. A `cloud` agent
+/// cannot write the workspace itself, but the app saves the media its endpoint
+/// returns (a base64 payload or a URL) into this directory and reports the
+/// workspace-relative paths back to the caller.
+#[derive(Debug, Clone)]
+pub struct DeliverTarget {
+    /// Absolute task directory.
+    pub dir: PathBuf,
+    /// Workspace-relative directory, always with `/` separators — the form
+    /// `file_actions` paths use.
+    pub relative: String,
+}
+
 /// One mission's deliverable exchange area.
 #[derive(Debug, Clone)]
 pub struct ExchangeArea {
@@ -220,6 +233,18 @@ impl ExchangeArea {
 
     pub fn task_dir(&self, task_id: &str) -> Option<&Path> {
         self.task_dirs.get(task_id).map(PathBuf::as_path)
+    }
+
+    /// The deliverable target for one task: absolute directory plus the
+    /// workspace-relative form. `None` when the task has no directory.
+    pub fn deliver_target(&self, task_id: &str) -> Option<DeliverTarget> {
+        let dir = self.task_dir(task_id)?.to_path_buf();
+        let relative = dir
+            .strip_prefix(&self.workspace_dir)
+            .unwrap_or(&dir)
+            .to_string_lossy()
+            .replace('\\', "/");
+        Some(DeliverTarget { dir, relative })
     }
 
     /// Workspace-relative form of the batch root
@@ -397,7 +422,9 @@ pub fn render_files(files: &[ExchangeFile]) -> String {
     text
 }
 
-fn format_size(bytes: u64) -> String {
+/// Human-readable file size, shared by the listings and the cloud agent's
+/// deliverable report.
+pub fn format_size(bytes: u64) -> String {
     const KB: f64 = 1024.0;
     const MB: f64 = KB * 1024.0;
     let value = bytes as f64;

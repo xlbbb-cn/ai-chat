@@ -859,12 +859,18 @@ export interface CloudAgentSettings {
   endpoint: string;
   token: string;
   headers: KeyValue[];
-  /** JSON body template with `{prompt}` / `{agent_name}` / `{cwd}` placeholders. */
+  /** JSON body template. `{prompt}` / `{agent_name}` / `{cwd}` are escaped; `{image_b64}` / `{image_data_url}` / `{images_data_urls}` (a full JSON array value) inject the task's input images; any other `{key}` comes from the delegating call's `params`. */
   body_template: string;
   /** Dot path into the response holding the text (e.g. `choices.0.message.content`). */
   result_path: string;
   /** Overall timeout in seconds covering polling; 0 = no timeout. */
   timeout_seconds: number;
+  /** Per-request HTTP timeout in seconds; 0 = the built-in 600 s. */
+  request_timeout_seconds?: number;
+  /** Seconds to wait before the first poll (video APIs spend their first ~20-30 s queueing). */
+  poll_first_delay_seconds?: number;
+  /** Status-query HTTP method: "get" (default) or "post". */
+  poll_method?: string;
   /** Async mode: poll this URL (`{id}` placeholder). Empty = single response. */
   poll_url: string;
   poll_id_path: string;
