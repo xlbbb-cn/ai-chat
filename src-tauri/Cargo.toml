@@ -53,6 +53,13 @@ windows-sys = { version = "0.59", features = ["Win32_Globalization", "Win32_Stor
 # Windows 11, so `apply_window_backdrop` in lib.rs falls back to Acrylic.
 window-vibrancy = "0.8"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# Real vibrancy view behind the notification card (`notify.rs`): the main
+# frame keeps `apply_window_backdrop`'s opaque answer on macOS, but the toast
+# card is a transient surface the material is made for. The crate compiles on
+# macOS only here — Linux is unsupported and must not pull it in.
+window-vibrancy = "0.8"
+
 [target.'cfg(unix)'.dependencies]
 # Whole-process-group kill for cancelled/timed-out CLI agents (`process_group`).
 libc = "0.2"

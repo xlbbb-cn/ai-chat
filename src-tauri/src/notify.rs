@@ -192,8 +192,13 @@ pub fn apply_notify_backdrop(app: &AppHandle) -> Option<String> {
     let mut kind = crate::apply_window_backdrop(&window, &level, dark);
     #[cfg(target_os = "macos")]
     {
-        use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState};
+        use window_vibrancy::{
+            apply_vibrancy, clear_vibrancy, NSVisualEffectMaterial, NSVisualEffectState,
+        };
         if level == "off" {
+            // Same intent as the Windows branch of `apply_window_backdrop`:
+            // "off" leaves no previously applied backdrop behind.
+            let _ = clear_vibrancy(&window);
             kind = None;
         } else if apply_vibrancy(
             &window,
