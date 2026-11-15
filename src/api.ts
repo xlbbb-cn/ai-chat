@@ -574,6 +574,12 @@ export async function chatCompletion(
   callbacks: StreamCallbacks,
   useAgents?: boolean,
   /**
+   * Automatic planning pass (selection + task plan) before the answer. Separate
+   * from `useAgents`: off means the main agent delegates with `call_subagent`
+   * on its own instead of every turn running a mission first.
+   */
+  autoPlan?: boolean,
+  /**
    * Composer `+agent` selections for a session's FIRST turn. The backend
    * snapshots their system prompts into `session_meta.embedded_roles`; later
    * turns pass nothing and read the snapshot instead.
@@ -672,6 +678,7 @@ export async function chatCompletion(
     sessionId,
     modelOverride,
     useAgents: useAgents ?? false,
+    autoPlan: autoPlan ?? true,
     embeddedAgentIds: embeddedAgentIds ?? [],
     turnId,
   }).catch((err: string) => {

@@ -90,6 +90,12 @@ interface Props {
   onAgentsChange: (enabledCount: number) => void;
   useAgentsEnabled: boolean;
   onToggleUseAgents: (enabled: boolean) => void;
+  /**
+   * Automatic planning, mirrored up to `App` because the turn reads it per
+   * request — same contract as `useAgentsEnabled`.
+   */
+  autoPlanEnabled: boolean;
+  onToggleAutoPlan: (enabled: boolean) => void;
   agentStatuses: Record<string, AgentStatus>;
 }
 
@@ -278,11 +284,20 @@ const STATUS_FILTER_LABEL_KEYS: Record<StatusFilter, MessageKey> = {
   disabled: "agents.filterDisabled",
 };
 
-export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggleUseAgents, agentStatuses }: Props) {
+export function AgentsPanel({
+  onClose,
+  onAgentsChange,
+  useAgentsEnabled,
+  onToggleUseAgents,
+  autoPlanEnabled,
+  onToggleAutoPlan,
+  agentStatuses,
+}: Props) {
   const { t } = useI18n();
   const [agents, setAgents] = useState<SubAgent[]>([]);
   const [orchestration, setOrchestration] = useState<AgentOrchestration>({
     use_agents: false,
+    auto_plan: true,
     auto_configure: true,
     planner_model: null,
     max_concurrent: 3,
@@ -1224,12 +1239,35 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
 
             {orchestrationExpanded && (
               <div className="orch-body">
+                {/* Planning and selection are their own switches inside the
+                    disclosure: with planning off `call_subagent` stays and the
+                    main agent delegates by hand instead of every turn running
+                    a mission. Both are inert while the master switch is off. */}
+                <div className="orch-row">
+                  <span>{t("agents.autoPlan")}</span>
+                  <label className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={autoPlanEnabled}
+                      disabled={!useAgentsEnabled}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        onToggleAutoPlan(checked);
+                        handleSaveOrchestration({ ...orchestration, auto_plan: checked });
+                      }}
+                    />
+                    <span className="toggle-switch-slider" />
+                  </label>
+                </div>
+                <div className="agent-field-hint">{t("agents.autoPlanHint")}</div>
+
                 <div className="orch-row">
                   <span>{t("agents.autoConfigure")}</span>
                   <label className="toggle-switch">
                     <input
                       type="checkbox"
                       checked={orchestration.auto_configure}
+                      disabled={!useAgentsEnabled || !autoPlanEnabled}
                       onChange={(e) =>
                         handleSaveOrchestration({ ...orchestration, auto_configure: e.target.checked })
                       }
@@ -1237,6 +1275,7 @@ export function AgentsPanel({ onClose, onAgentsChange, useAgentsEnabled, onToggl
                     <span className="toggle-switch-slider" />
                   </label>
                 </div>
+                <div className="agent-field-hint">{t("agents.autoConfigureHint")}</div>
 
                 <div className="orch-row">
                   <span>{t("agents.plannerModel")}</span>

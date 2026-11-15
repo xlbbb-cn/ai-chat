@@ -237,6 +237,9 @@ pub(crate) async fn run_chat_turn(
     session_id: String,
     model_override: Option<String>,
     use_agents: Option<bool>,
+    // Automatic planning switch, independent of `use_agents`: with it off the
+    // main agent answers directly but `call_subagent` stays available.
+    auto_plan: Option<bool>,
     // Id the UI minted for this turn. Every `chat-*` event carries it back, so
     // the frontend can drop anything a superseded turn still emits.
     turn_id: String,
@@ -265,7 +268,11 @@ pub(crate) async fn run_chat_turn(
     // opened by the caller (see `chat_completion`).
 
     let config = state.config.lock().unwrap().clone();
-    let multi_agent_enabled = use_agents.unwrap_or(false);
+    let subagents_enabled = use_agents.unwrap_or(false);
+    // Two separate switches: the sub-agent system gates `call_subagent`, the
+    // planning switch gates the automatic selection + task plan that runs
+    // before every answer. Planning needs agents to exist, so it is ANDed.
+    let planning_enabled = subagents_enabled && auto_plan.unwrap_or(true);
     log_event(
         &state,
         "INFO",
@@ -283,7 +290,7 @@ pub(crate) async fn run_chat_turn(
     // advertises the agents picked for this turn (soft narrowing: every enabled
     // agent stays callable through `call_subagent`).
     let mut orchestration: Option<agents::OrchestrationOutcome> = None;
-    if multi_agent_enabled {
+    if planning_enabled {
         let agents_cfg = agents::load_configured_agents(&state.agents_config_path);
         let has_enabled = agents_cfg.agents.iter().any(|a| a.enabled);
         if has_enabled {
@@ -492,11 +499,12 @@ pub(crate) async fn run_chat_turn(
         system_content.push_str(&figures_context);
     }
 
-    // Sub-agents (`llm`, `cli`, `cloud`) are only reachable when automatic
-    // orchestration is enabled (`use_agents`). With orchestration off the main
-    // agent answers directly: `call_subagent` is neither advertised in the
-    // system prompt nor exposed in the tool list.
-    let enabled_agents: Vec<agents::SubAgent> = if multi_agent_enabled {
+    // Sub-agents (`llm`, `cli`, `cloud`) are only reachable when the sub-agent
+    // system is enabled (`use_agents`). With it off the main agent answers
+    // directly: `call_subagent` is neither advertised in the system prompt nor
+    // exposed in the tool list. Automatic planning (`auto_plan`) does not
+    // affect this — with planning off the agent delegates manually.
+    let enabled_agents: Vec<agents::SubAgent> = if subagents_enabled {
         agents::load_configured_agents(&state.agents_config_path)
             .agents
             .into_iter()
@@ -2101,8 +2109,8 @@ only when every item is done, or when you are blocked and need the user.\n\n{wai
                 let task_desc = args_json["task_description"].as_str().unwrap_or("");
                 let task_context = args_json["context"].as_str().unwrap_or("");
 
-                if !multi_agent_enabled {
-                    "Error: sub-agent delegation is disabled. Enable automatic orchestration (`use_agents`) in the Agents panel to use `call_subagent`.".to_string()
+                if !subagents_enabled {
+                    "Error: sub-agent delegation is disabled. Enable the sub-agent system (`use_agents`) in the Agents panel to use `call_subagent`.".to_string()
                 } else if let Some(agent) = enabled_agents.iter().find(|a| a.id == agent_id) {
                     let task = agents::Task {
                         id: uuid::Uuid::new_v4().to_string(),

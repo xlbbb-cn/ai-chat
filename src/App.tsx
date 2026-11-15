@@ -715,6 +715,11 @@ export default function App() {
   const [activeMcpCount, setActiveMcpCount] = useState(0);
   const [activeAgentCount, setActiveAgentCount] = useState(0);
   const [useAgentsEnabled, setUseAgentsEnabled] = useState(false);
+  /**
+   * Automatic planning pass, read from the same orchestration config. Kept as
+   * its own flag so a turn can run with sub-agents available but planning off.
+   */
+  const [autoPlanEnabled, setAutoPlanEnabled] = useState(true);
   const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
   const [confirmDialog, setConfirmDialog] = useState<{
     request_id: string;
@@ -1503,7 +1508,10 @@ export default function App() {
           .catch(console.error);
       });
     getAgentOrchestration()
-      .then((orch) => setUseAgentsEnabled(orch.use_agents))
+      .then((orch) => {
+        setUseAgentsEnabled(orch.use_agents);
+        setAutoPlanEnabled(orch.auto_plan);
+      })
       .catch(console.error);
   }, []);
 
@@ -2735,10 +2743,10 @@ export default function App() {
         setStreaming(false);
         cleanupRef.current = null;
       },
-    }, useAgentsEnabled, embeddedAgentIds);
+    }, useAgentsEnabled, autoPlanEnabled, embeddedAgentIds);
 
     cleanupRef.current = cleanup;
-  }, [input, messages, streaming, backupExporting, activeSkillIds, sessionId, selectedModel, selectedMetadata, useAgentsEnabled, embeddedAgents, t, flushUndeliveredInjections, beginTurnStats, settleTurnStats]);
+  }, [input, messages, streaming, backupExporting, activeSkillIds, sessionId, selectedModel, selectedMetadata, useAgentsEnabled, autoPlanEnabled, embeddedAgents, t, flushUndeliveredInjections, beginTurnStats, settleTurnStats]);
 
   /**
    * Start the silent evolution-maintenance pass from the empty-state face.
@@ -3158,10 +3166,10 @@ export default function App() {
         setStreaming(false);
         cleanupRef.current = null;
       },
-    }, useAgentsEnabled);
+    }, useAgentsEnabled, autoPlanEnabled);
 
     cleanupRef.current = cleanup;
-  }, [messages, streaming, pendingRetryMessageId, activeSkillIds, sessionId, selectedModel, useAgentsEnabled, t, flushUndeliveredInjections, beginTurnStats, settleTurnStats]);
+  }, [messages, streaming, pendingRetryMessageId, activeSkillIds, sessionId, selectedModel, useAgentsEnabled, autoPlanEnabled, t, flushUndeliveredInjections, beginTurnStats, settleTurnStats]);
 
   const handleDeleteMessage = useCallback(async (messageId: string) => {
     const msg = messagesDataRef.current.find((m) => m.id === messageId);
@@ -4449,6 +4457,8 @@ export default function App() {
                 onAgentsChange={(count) => setActiveAgentCount(count)}
                 useAgentsEnabled={useAgentsEnabled}
                 onToggleUseAgents={setUseAgentsEnabled}
+                autoPlanEnabled={autoPlanEnabled}
+                onToggleAutoPlan={setAutoPlanEnabled}
                 agentStatuses={agentStatuses}
               />
             )}

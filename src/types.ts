@@ -796,7 +796,13 @@ export interface AgentMention {
 }
 
 export interface AgentOrchestration {
+  /** Sub-agent system: advertises and allows `call_subagent`. */
   use_agents: boolean;
+  /**
+   * Automatic planning pass (agent selection + task plan) before every answer.
+   * Off keeps `call_subagent`, so the main agent delegates manually.
+   */
+  auto_plan: boolean;
   auto_configure: boolean;
   /**
    * Model the planner runs on: the agent selection, the task plan and the mbus

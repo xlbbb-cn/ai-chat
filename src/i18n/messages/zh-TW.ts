@@ -637,8 +637,13 @@ const zhTW: Messages = {
     agents: {
         title: "子代理",
         orchestration: "協調設定",
-        enableMode: "自動協調",
+        enableMode: "子代理系統",
+        autoPlan: "自動規劃",
+        autoPlanHint:
+            "每則訊息先由規劃器選出 agent 並拆分任務，再結合執行結果作答。關閉後主代理直接回答，仍可主動呼叫 call_subagent 手動委派。",
         autoConfigure: "智慧選擇 agent",
+        autoConfigureHint:
+            "規劃前先用一次模型呼叫挑選本輪參與的 agent；關閉則所有已啟用 agent 全部參與，由規劃器自行取捨。",
         plannerModel: "規劃器模型",
         plannerModelInherit: "跟隨主模型（{model}）",
         plannerModelHint:

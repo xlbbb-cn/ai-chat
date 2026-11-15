@@ -432,8 +432,15 @@ pub fn normalize_config(config: &mut AgentsConfig) {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentOrchestration {
+    /// Sub-agent system master switch: advertises `call_subagent` and lets a
+    /// turn dispatch work to agents. Off means no sub-agents at all.
     #[serde(default)]
     pub use_agents: bool,
+    /// Run the automatic planning pass (selection + task plan) before a turn
+    /// answers (default on). Off keeps `call_subagent`, so the main agent can
+    /// still delegate manually — one explicit call at a time.
+    #[serde(default = "default_true")]
+    pub auto_plan: bool,
     /// Run the one-call selection step before planning (default on). Turning it
     /// off means every enabled agent takes part in the mission.
     #[serde(default = "default_true")]
@@ -474,6 +481,7 @@ impl Default for AgentOrchestration {
     fn default() -> Self {
         Self {
             use_agents: false,
+            auto_plan: true,
             auto_configure: true,
             planner_model: None,
             max_concurrent: 3,

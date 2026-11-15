@@ -637,8 +637,13 @@ const zhCN: Messages = {
     agents: {
         title: "子智能体",
         orchestration: "编排设置",
-        enableMode: "自动编排",
+        enableMode: "子智能体系统",
+        autoPlan: "自动规划",
+        autoPlanHint:
+            "每条消息先由规划器选出 agent 并拆分任务，再结合执行结果作答。关闭后主智能体直接回答，仍可主动调用 call_subagent 手动委派。",
         autoConfigure: "智能选择 agent",
+        autoConfigureHint:
+            "规划前先用一次模型调用挑选本轮参与的 agent；关闭则所有已启用 agent 全部参与，由规划器自行取舍。",
         plannerModel: "规划器模型",
         plannerModelInherit: "跟随主模型（{model}）",
         plannerModelHint:

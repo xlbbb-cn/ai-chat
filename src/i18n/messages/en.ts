@@ -688,8 +688,13 @@ const en = {
     agents: {
         title: "Sub Agents",
         orchestration: "Orchestration settings",
-        enableMode: "Automatic orchestration",
+        enableMode: "Sub-agent system",
+        autoPlan: "Automatic planning",
+        autoPlanHint:
+            "Start every message with a planner pass (agent selection + task plan) and answer with the results. Off answers directly, and the main agent can still delegate by hand with call_subagent.",
         autoConfigure: "Smart agent selection",
+        autoConfigureHint:
+            "One model call picks the agents for this turn before planning. Off means every enabled agent takes part and the planner decides.",
         plannerModel: "Planner model",
         plannerModelInherit: "Follow the main model ({model})",
         plannerModelHint:

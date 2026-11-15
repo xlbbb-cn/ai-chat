@@ -296,6 +296,9 @@ pub async fn chat_completion(
     session_id: String,
     model_override: Option<String>,
     use_agents: Option<bool>,
+    // Automatic planning, independent of `use_agents`. Absent means the default
+    // (on), so an old client keeps planning exactly as before.
+    auto_plan: Option<bool>,
     embedded_agent_ids: Option<Vec<String>>,
     // Id the UI minted for this turn. Echoed on every `chat-*` event so a turn
     // that is still winding down after Stop cannot drive the turn that
@@ -384,6 +387,7 @@ pub async fn chat_completion(
         session_id.clone(),
         model_override,
         use_agents,
+        auto_plan,
         turn_id,
         injection_window,
         state,
