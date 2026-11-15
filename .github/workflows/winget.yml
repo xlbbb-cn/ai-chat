@@ -8,8 +8,8 @@
 #   2. 在 xlbbb-cn 账号下 fork microsoft/winget-pkgs；
 #   3. 仓库 Secrets 配置 WINGET_TOKEN：classic PAT，勾选 public_repo + workflow。
 #
-# 触发方式：release.yml 现在是 releaseDraft: false，Release 在第一个平台构建完成时
-# 就会被创建（此时 Windows 安装包还没上传），所以这里先轮询等待 *-setup.exe 出现，
+# 触发方式：release.yml 现在以草稿创建 Release，手动 Publish（release published 事件）
+# 触发时四个平台的产物都已上传完成；这里保留对 *-setup.exe 的轮询等待作为兜底，
 # 再交给 winget-releaser 生成清单并提 PR。
 name: Publish to WinGet
 

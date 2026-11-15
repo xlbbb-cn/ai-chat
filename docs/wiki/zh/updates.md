@@ -86,7 +86,7 @@ https://api.github.com/repos/xlbbb-cn/ai-chat/releases
 
 - 应用版本来自**最新的 git tag**；`npm run build` 里的 `sync-version:git-tag` 会更新 `package.json`、`Cargo.toml` 与 `tauri.conf.json`。
 - 推送 `v*` tag 触发 `.github/workflows/release.yml`，并行构建 Windows/macOS/Linux。
-- 发布使用 `releaseDraft: false`：第一个平台完成即可见，其余安装包随后上传。
+- Release 以草稿创建（`releaseDraft: true`）：四个平台的产物上传完后由维护者在 Releases 页面手动发布。
 - macOS 构建为 ad-hoc 签名，未做公证。
 - `.github/workflows/winget.yml` 保留但未启用：只有当包被 `microsoft/winget-pkgs` 接受且存在 `WINGET_TOKEN` 时才会提交。
 

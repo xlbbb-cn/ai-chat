@@ -71,13 +71,14 @@ cargo check --manifest-path src-tauri/Cargo.toml \
 `tauri-apps/tauri-action@v1` on 4 runners — `macos-latest` ×2 (`aarch64-apple-darwin`, `x86_64-apple-darwin`),
 `ubuntu-22.04`, `windows-latest` — and uploads `.dmg` / `.AppImage` + `.deb` + `.rpm` / NSIS `.exe`
 (Windows ships the NSIS bundle only, no `.msi`)
-to a **published** (non-draft) GitHub Release for the tag (also kept as workflow artifacts).
+to a **draft** GitHub Release for the tag (also kept as workflow artifacts), published by hand
+once every platform finished.
 
 - **The tag drives the version.** `tauri build` runs `beforeBuildCommand` → `npm run build` → `sync-version:git-tag`, which reads the newest tag; a workflow step fails fast when the pushed tag is not the newest one.
 - CI runs `rm -f .cargo/config.toml` so the committed rsproxy.cn mirror is not used on GitHub runners.
 - macOS uses `APPLE_SIGNING_IDENTITY='-'` (ad-hoc) — replace with real signing/notarization secrets when available.
 - `.github/workflows/winget.yml` is **inactive for now**: the package is not in `microsoft/winget-pkgs` (the earlier PR was closed), so nothing can be submitted and winget / Homebrew / Scoop must not be documented as install options. Keep the file — once a package entry is accepted it needs the `WINGET_TOKEN` secret (classic PAT, `public_repo` + `workflow`) plus a fork under `xlbbb-cn`, and it waits for the NSIS `-setup.exe` upload first.
-- `releaseDraft: false` publishes the Release as soon as the first platform finishes; remaining assets upload afterwards, so downstream consumers (e.g. winget) must wait for the NSIS `.exe` to appear.
+- `releaseDraft: true` keeps the Release a **draft** through the whole run: the assets of all four platforms accumulate while it stays invisible (also to `releases/latest/download/…` and the update check), then a maintainer publishes it on the Releases page — a failed platform can no longer leave a partial release public, and no publish job runs automatically.
 
 ### Microsoft Store (MSIX)
 

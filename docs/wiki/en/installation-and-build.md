@@ -213,7 +213,7 @@ The workflow builds on 4 runners:
 Behavior:
 
 - **The tag drives the version**: the workflow fails fast if the pushed tag is not the newest tag.
-- **The release is published, not a draft**: `releaseDraft: false`; the Release becomes visible as soon as the first platform finishes, and remaining assets upload afterwards.
+- **The release is a draft until published by hand**: `releaseDraft: true`; assets from all four platforms upload while the Release stays invisible, then a maintainer publishes it on the Releases page.
 - **macOS is ad-hoc signed**: `APPLE_SIGNING_IDENTITY='-'`; replace with real signing/notarization secrets for distribution.
 - **The MSIX is an artifact, not a release asset**: see above.
 - **winget submission (inactive)**: `.github/workflows/winget.yml` is kept, but the package is not accepted into `microsoft/winget-pkgs` yet; it submits only after `WINGET_TOKEN` and a fork exist.

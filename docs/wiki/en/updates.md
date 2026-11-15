@@ -86,7 +86,7 @@ The `.msix` bundle itself is built by CI as a workflow artifact — it is not at
 
 - The app version comes from the **newest git tag**; `sync-version:git-tag` inside `npm run build` updates `package.json`, `Cargo.toml` and `tauri.conf.json`.
 - Pushing a `v*` tag triggers `.github/workflows/release.yml` and builds Windows/macOS/Linux in parallel.
-- Releases are published with `releaseDraft: false`: visible as soon as the first platform finishes; remaining installers upload afterwards.
+- Releases are created as drafts (`releaseDraft: true`): all four platforms upload while the Release stays invisible, then a maintainer publishes it by hand.
 - macOS builds are ad-hoc signed and not notarized.
 - `.github/workflows/winget.yml` is kept but inactive: it only submits once the package is accepted into `microsoft/winget-pkgs` and `WINGET_TOKEN` exists.
 

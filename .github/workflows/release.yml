@@ -1,5 +1,5 @@
 # 打 tag（如 v1.1.4）时，为 Linux / macOS / Windows 同时构建安装包，
-# 并把产物上传到该 tag 对应的 GitHub Release（直接发布，非草稿）。
+# 并把产物上传到该 tag 对应的 GitHub Release（默认草稿，构建完成后人工 Publish）。
 #
 # 也可手动触发（Actions → Release → Run workflow）：只构建并保留 Actions 产物，不创建 Release。
 name: Release
@@ -172,10 +172,12 @@ jobs:
 
             首次打开若被系统拦截：Windows 选「仍要运行」；macOS 在「系统设置 → 隐私与安全性」中
             选择「仍要打开」，或右键 App → 打开。
-          # 直接发布 Release（非草稿），winget 等下游才能公开下载安装包。
-          # 注意：Release 在首个平台构建完成时就创建，其余平台的 assets 会随后陆续上传，
-          # 下游消费（如 winget 提交）需等待对应的 NSIS 安装包真正上传完成。
-          releaseDraft: false
+          # Release 以草稿创建：四个平台的 assets 全部上传完成后仍是 draft，
+          # 由人工在 Releases 页面检查后手动 Publish。任何平台失败都停在草稿，
+          # 不会再出现半成品自动公开（v3.3.4 曾只带一个安装包就发布了）。
+          # 注意：draft 对 update check 与网站下载按钮不可见（GET /releases 不返回草稿），
+          # 这些下游在手动发布之后才生效。
+          releaseDraft: true
           prerelease: false
           uploadUpdaterJson: false # 未配置 updater，无需生成 latest.json
           uploadWorkflowArtifacts: true # 同时保留 Actions 运行产物，未发布也能下载

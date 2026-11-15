@@ -274,7 +274,7 @@ npm run tauri build
 ### D. 用 GitHub Actions 发布（打 Tag）
 
 推送 `v*` 标签后会触发 `.github/workflows/release.yml`，并行构建 Linux / macOS / Windows 安装包，
-并直接发布到该标签对应的 GitHub Release（非草稿，构建完成即可下载）。
+并上传到该标签对应的 GitHub Release（默认为草稿，四个平台完成后由维护者在 Releases 页面手动发布）。
 
 ```bash
 git tag v2.0.0

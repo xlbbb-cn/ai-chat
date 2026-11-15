@@ -274,7 +274,8 @@ Build artifacts are located in:
 ### D. Release via GitHub Actions (Tag)
 
 Pushing a `v*` tag triggers `.github/workflows/release.yml`, which builds the Linux / macOS / Windows
-installers in parallel and publishes them to the GitHub Release of that tag (no draft, available immediately).
+installers in parallel and uploads them to the GitHub Release of that tag (created as a draft;
+a maintainer publishes it by hand once every platform finished).
 
 ```bash
 git tag v2.0.0

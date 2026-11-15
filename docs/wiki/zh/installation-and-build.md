@@ -213,7 +213,7 @@ git push origin v2.1.1
 行为：
 
 - **tag 决定版本**：推送的 tag 不是最新 tag 时工作流立刻失败。
-- **发布的是正式版，不是草稿**：`releaseDraft: false`；第一个平台完成后 Release 就可见，其余产物随后上传。
+- **Release 默认为草稿**：`releaseDraft: true`；四个平台的产物上传完后仍是 draft，由维护者在 Releases 页面手动发布，失败的平台不会留下半成品的公开版本。
 - **macOS 为 ad-hoc 签名**：`APPLE_SIGNING_IDENTITY='-'`；正式分发请换成真实的签名/公证密钥。
 - **MSIX 只是 artifact**：见上文。
 - **winget 提交（未启用）**：`.github/workflows/winget.yml` 还留着，但包尚未被 `microsoft/winget-pkgs` 接受；要等 `WINGET_TOKEN` 和 fork 就绪后才提交。
