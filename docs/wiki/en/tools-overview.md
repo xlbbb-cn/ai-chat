@@ -67,7 +67,7 @@ These are not controlled by the Tools panel; they depend on context:
 | --- | --- |
 | `use_skill` | The session has enabled skills — or self-evolution mode is on |
 | `skill_read` | An enabled/loaded skill directory is accessible |
-| `call_subagent` | **Agents → Automatic orchestration** is on and at least one sub-agent is enabled |
+| `call_subagent` | **Agents → Sub-agent system** is on and at least one sub-agent is enabled (automatic planning is a separate switch) |
 | MCP tools | At least one MCP server is enabled under **MCP**; names come from the server |
 | `mcp_self` | Self-evolution mode is on — build/register/start the assistant's own MCP servers |
 | `todos` | The Todos tool is enabled |

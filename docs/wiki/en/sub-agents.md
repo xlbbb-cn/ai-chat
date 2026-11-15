@@ -29,11 +29,18 @@ An `llm` agent's identity and prompt live in a Markdown file, not in `sub_agents
 
 ## Panel and orchestration
 
-Click **Agents** in the top toolbar. The orchestration settings (auto-configure, execution mode, concurrency, messages per pair) are folded behind the panel's section toggle, so the agent list owns the space by default.
+Click **Agents** in the top toolbar. The orchestration settings (automatic planning, agent selection, execution mode, concurrency, messages per pair) are folded behind the panel's section toggle, so the agent list owns the space by default: only the **Sub-agent system** master switch stays visible when collapsed.
 
-### Automatic orchestration (`use_agents`)
+### Sub-agent system (`use_agents`)
 
-- **Off**: the main agent answers directly; `call_subagent` is not advertised or callable, and no automatic planning happens.
+The master switch: it decides whether the system exists at all.
+
+- **Off**: the main agent answers directly; `call_subagent` is neither advertised nor callable.
+- **On**: `call_subagent` is advertised, so the main agent can delegate by hand at any point; whether it plans *automatically* is the next switch.
+
+### Automatic planning (`auto_plan`, on by default)
+
+- **Off**: no planning pass; the main agent answers directly. `call_subagent` stays available for the model to delegate on its own initiative.
 - **On**: as long as at least one sub-agent is enabled, **every user message** first goes through orchestration:
   1. the planner uses the main model to split the request into tasks;
   2. each task is assigned to a sub-agent;
@@ -49,11 +56,11 @@ Click **Agents** in the top toolbar. The orchestration settings (auto-configure,
 
   **Live task rows.** Every task row owns its status: while running it shows a live thinking counter and a tool-activity line, a *stopped* task renders neutral instead of completed, and a provider error surfaces on the task row only — never as a chat error that would close your turn.
 
-> With orchestration on, every message pays planning overhead. Turn it off for simple Q&A, or keep only one lightweight agent.
+> With automatic planning on, every message pays planning overhead. Turn it off for simple Q&A (manual delegation still works), or keep only one lightweight agent.
 
-### Auto-configure mode (`auto_configure`)
+### Agent selection (`auto_configure`)
 
-When on, the model first generates/adjusts temporary agent configurations (role, system prompt, allowed tools) for the task, then executes. Useful when task types vary widely; it adds one LLM call.
+When on, one model call picks the sub-agents that take part in this turn before the planner runs. Useful when task types vary widely; it costs one extra LLM call. When off, every enabled sub-agent takes part and the planner decides. The switch only applies while **automatic planning** is on.
 
 ### Execution mode
 
