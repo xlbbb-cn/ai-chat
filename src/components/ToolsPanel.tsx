@@ -127,6 +127,9 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
     const [config, setConfig] = useState<AppConfig | null>(null);
     const [expandedTool, setExpandedTool] = useState<string | null>(null);
     const [autoAcceptExpanded, setAutoAcceptExpanded] = useState(true);
+    // Raw text of the parallel-count field while it is being edited: clamping
+    // on every keystroke would turn "delete, type 6" into 4 → 46 → 8.
+    const [parallelCountDraft, setParallelCountDraft] = useState<string | null>(null);
 
     useEffect(() => {
         getConfig()
@@ -164,6 +167,26 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
         const newConfig = { ...config, auto_accept_confirm_kinds: kinds };
         setConfig(newConfig);
         await saveConfig(newConfig);
+    }
+
+    /** Persist one footer setting (parallel tool calls) without touching the rest. */
+    async function persistConfig(patch: Partial<AppConfig>) {
+        if (!config) return;
+        const newConfig = { ...config, ...patch };
+        setConfig(newConfig);
+        await saveConfig(newConfig);
+    }
+
+    /** Commit the count field: one write, clamped to 1–8. */
+    async function commitParallelCount() {
+        const raw = parallelCountDraft;
+        setParallelCountDraft(null);
+        if (raw === null) return;
+        const parsed = parseInt(raw, 10);
+        if (Number.isNaN(parsed)) return;
+        const next = Math.min(8, Math.max(1, parsed));
+        if (next === (config?.max_parallel_tools ?? 4)) return;
+        await persistConfig({ max_parallel_tools: next });
     }
 
     async function toggleAutoAccept(kind: ConfirmKind) {
@@ -332,6 +355,42 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                             );
                         })}
                     </div>
+                )}
+            </div>
+
+            {/* Parallel tool calls live with the tools themselves: the switch is
+                a property of how the tool layer runs, not of the app runtime. */}
+            <div className="tools-footer-section tools-parallel-section">
+                <label
+                    className="tools-parallel-toggle"
+                    title={t("tools.parallelToolsHint")}
+                >
+                    <input
+                        className="auto-accept-checkbox"
+                        type="checkbox"
+                        checked={config.parallel_tools ?? true}
+                        onChange={(e) =>
+                            void persistConfig({ parallel_tools: e.target.checked })
+                        }
+                    />
+                    <span className="tools-parallel-label">{t("tools.parallelTools")}</span>
+                </label>
+                {(config.parallel_tools ?? true) && (
+                    <label className="tools-parallel-count" title={t("tools.parallelCountHint")}>
+                        <span>{t("tools.parallelCount")}</span>
+                        <input
+                            type="number"
+                            min={1}
+                            max={8}
+                            step={1}
+                            value={parallelCountDraft ?? String(config.max_parallel_tools ?? 4)}
+                            onChange={(e) => setParallelCountDraft(e.target.value)}
+                            onBlur={() => void commitParallelCount()}
+                            onKeyDown={(e) => {
+                                if (e.key === "Enter") e.currentTarget.blur();
+                            }}
+                        />
+                    </label>
                 )}
             </div>
         </div>

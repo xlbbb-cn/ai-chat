@@ -439,12 +439,6 @@ const zhCN: Messages = {
             backgroundTools: "后台执行",
             backgroundToolsHint:
                 "允许助手把耗时工具放到后台运行（`run_in_background: true`）：`run_cmd`、`run_shell`、`file_actions` 搜索、所有 MCP 工具和 `call_subagent`。结果会在下一个请求前自动送达，本轮保持开启直到结果到齐；子代理不会收到该参数。",
-            parallelTools: "并行工具调用",
-            parallelToolsHint:
-                "让同一轮回复中的独立工具调用同时执行：读文件、搜索、`run_cmd`/`run_shell`、MCP 工具和子代理委派。写文件、读写记忆/待办/定时器、加载技能等调用仍按顺序单独执行，并把这一轮切成若干段；失败计数与工具结果始终按模型给出的顺序排列。关闭后每一轮严格逐个执行。",
-            maxParallelTools: "单轮并发数",
-            maxParallelToolsHint:
-                "同一轮里最多同时执行几个独立调用（1–8）。设为 1 等于关闭上方的开关。",
             allowNotifications: "允许通知",
             allowNotificationsHint:
                 "回合结束时播放提示音：失败为信息音，成功为会话结束音；窗口最小化或焦点在其他应用时，同时弹出桌面通知卡片，显示回复首行（或错误信息）。用户主动停止的回合不会通知。",
@@ -558,6 +552,10 @@ const zhCN: Messages = {
         title: "工具",
         builtIn: "内置工具集",
         autoAccept: "自动确认模式",
+        parallelTools: "并行工具调用",
+        parallelToolsHint: "同一轮的独立调用同时执行；写文件、记忆、待办和定时器仍按顺序。",
+        parallelCount: "单轮并发数",
+        parallelCountHint: "最多同时执行几个独立调用（1–8）。设为 1 即严格逐个执行。",
         lockedBadge: "必需",
         lockedBySelfEvolution: "自进化模式需要，无法关闭。",
         items: {

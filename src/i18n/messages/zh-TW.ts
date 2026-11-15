@@ -439,12 +439,6 @@ const zhTW: Messages = {
             backgroundTools: "背景執行",
             backgroundToolsHint:
                 "允許助手把耗時工具放到背景執行（`run_in_background: true`）：`run_cmd`、`run_shell`、`file_actions` 搜尋、所有 MCP 工具和 `call_subagent`。結果會在下一個請求前自動送達，本輪保持開啟直到結果到齊；子代理不會收到該參數。",
-            parallelTools: "平行工具呼叫",
-            parallelToolsHint:
-                "讓同一輪回覆中的獨立工具呼叫同時執行：讀檔案、搜尋、`run_cmd`/`run_shell`、MCP 工具與子代理委派。寫檔案、讀寫記憶/待辦/計時器、載入技能等呼叫仍依序單獨執行，並把這一輪切成數段；失敗計數與工具結果一律依模型給出的順序排列。關閉後每一輪嚴格逐個執行。",
-            maxParallelTools: "單輪並行數",
-            maxParallelToolsHint:
-                "同一輪最多同時執行幾個獨立呼叫（1–8）。設為 1 等於關閉上方的開關。",
             allowNotifications: "允許通知",
             allowNotificationsHint:
                 "回合結束時播放提示音：失敗為訊息音，成功為會話結束音；視窗最小化或焦點在其他應用時，同時彈出桌面通知卡片，顯示回覆首行（或錯誤訊息）。使用者主動停止的回合不會通知。",
@@ -558,6 +552,10 @@ const zhTW: Messages = {
         title: "工具",
         builtIn: "內建工具集",
         autoAccept: "自動確認模式",
+        parallelTools: "平行工具呼叫",
+        parallelToolsHint: "同一輪的獨立呼叫同時執行；寫檔案、記憶、待辦與計時器仍依序。",
+        parallelCount: "單輪並行數",
+        parallelCountHint: "最多同時執行幾個獨立呼叫（1–8）。設為 1 即嚴格逐個執行。",
         lockedBadge: "必需",
         lockedBySelfEvolution: "自我演化模式需要，無法關閉。",
         items: {

@@ -50,7 +50,7 @@
 
 ## 并行工具调用
 
-一轮回复里模型可以给出多个工具调用。**设置 → 运行时与调试 → 并行工具调用**（`config.parallel_tools`，默认开启）决定它们是否同时执行：
+一轮回复里模型可以给出多个工具调用。**工具侧边栏底部的“并行工具调用”**（`config.parallel_tools`，默认开启）决定它们是否同时执行：
 
 - **同时执行**：`file_actions` 的 `read` / `list` / `search` / `diff`、`run_cmd`、`run_shell`、`skill_read`、`call_subagent`，以及所有 MCP 工具。它们的执行时间从"逐个相加"变成"取最慢的那个"。
 - **独占执行**（按模型给出的顺序，并把这一轮切成若干段）：`use_skill`（会改变本轮后续调用看到的允许命令与技能目录）、`memory` / `todos` / `timer_*`（会话文件的读改写）、写/改/删/重命名类的 `file_actions`、`background_task`、`mcp_self`、`skill_merge`、`experience`、任务板工具，以及任何本应用不认识的工具。

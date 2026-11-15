@@ -50,7 +50,7 @@ Background tasks keep every normal check: risk assessment and confirmation still
 
 ## Parallel tool calls
 
-One assistant round can carry several tool calls. **Settings → Runtime & Debug → Parallel tool calls** (`config.parallel_tools`, on by default) decides whether they run at the same time:
+One assistant round can carry several tool calls. **Tools sidebar → Parallel tool calls** (`config.parallel_tools`, at the bottom of the panel, on by default) decides whether they run at the same time:
 
 - **Concurrent**: `file_actions` `read` / `list` / `search` / `diff`, `run_cmd`, `run_shell`, `skill_read`, `call_subagent` and every MCP tool. A batch costs the slowest call instead of the sum.
 - **Alone, in order** (and they split the round into segments): `use_skill` (it changes the allowed commands and skill directories the rest of the round sees), `memory` / `todos` / `timer_*` (read-modify-write on a session file), mutating `file_actions` actions (write / patch / rename / move / mkdir / delete), `background_task`, `mcp_self`, `skill_merge`, `experience`, the mission-board tools, and any tool the app does not know.

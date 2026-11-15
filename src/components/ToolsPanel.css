@@ -198,3 +198,63 @@
     color: var(--c-text);
     letter-spacing: normal;
 }
+
+/* ---- Parallel tool calls ----
+   The last footer block, next to the tools it applies to. Rows reuse the
+   auto-accept row geometry (compact 34px controls, 13px text) and the shared
+   hairline above; the count only exists while the switch is on. */
+
+.tools-parallel-section {
+    gap: 2px;
+}
+
+.tools-parallel-toggle,
+.tools-parallel-count {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 34px;
+    padding: 0 8px;
+    border-radius: var(--r-sm);
+    font-size: 13px;
+    color: var(--c-text);
+    cursor: pointer;
+    transition: background-color var(--t-dur) var(--t-ease);
+}
+
+.tools-parallel-toggle:hover,
+.tools-parallel-toggle:focus-within,
+.tools-parallel-count:hover,
+.tools-parallel-count:focus-within {
+    background: var(--c-hover);
+}
+
+.tools-parallel-label {
+    font-weight: 500;
+    letter-spacing: normal;
+}
+
+.tools-parallel-count {
+    justify-content: space-between;
+    color: var(--c-body);
+}
+
+.tools-parallel-count input {
+    width: 64px;
+    height: 34px;
+    box-sizing: border-box;
+    padding: 0 8px;
+    background: var(--c-field);
+    border: 1px solid var(--c-border-i);
+    border-radius: var(--r-sm);
+    color: var(--c-text);
+    font-family: inherit;
+    font-size: 13px;
+    text-align: right;
+    outline: none;
+    transition: border-color var(--t-dur) var(--t-ease);
+}
+
+.tools-parallel-count input:focus {
+    border-color: var(--c-accent-text);
+}

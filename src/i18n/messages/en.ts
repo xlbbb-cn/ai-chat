@@ -477,12 +477,6 @@ const en = {
             backgroundTools: "Background execution",
             backgroundToolsHint:
                 "Let the assistant run slow tools as background tasks (`run_in_background: true`): `run_cmd`, `run_shell`, `file_actions` search, every MCP tool and `call_subagent`. The result is delivered automatically before the next request and the turn stays open until it arrives. Sub-agents never receive the flag.",
-            parallelTools: "Parallel tool calls",
-            parallelToolsHint:
-                "Run the independent tool calls of one assistant round at the same time: file reads, searches, `run_cmd`/`run_shell`, MCP tools and sub-agent delegations. A call that writes files, touches memory/todos/timers or loads a skill stays sequential and splits the round. Failure counting and the tool results keep the model's order. Off runs every round strictly one call at a time.",
-            maxParallelTools: "Calls per round",
-            maxParallelToolsHint:
-                "How many independent calls of one round may run at once (1–8). 1 behaves like the switch above being off.",
             allowNotifications: "Allow notifications",
             allowNotificationsHint:
                 "Play a sound cue when a turn settles — the message sound for a failure, the session-finished sound for a success — and, while the window is minimized or another application holds the focus, show the desktop notification card with the reply's first line (or the error text). A turn the user stopped never notifies.",
@@ -600,6 +594,11 @@ const en = {
         title: "Tools",
         builtIn: "Built-In Tool Set",
         autoAccept: "AutoAccept Mode",
+        parallelTools: "Parallel tool calls",
+        parallelToolsHint:
+            "Independent calls of one round run at the same time. Writes, memory, todos and timers stay sequential.",
+        parallelCount: "Calls at once",
+        parallelCountHint: "How many independent calls of one round may run at once (1–8). 1 is strictly sequential.",
         lockedBadge: "Required",
         lockedBySelfEvolution:
             "Required by self-evolution mode — it cannot be switched off.",
