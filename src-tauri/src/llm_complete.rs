@@ -167,12 +167,14 @@ mod background;
 mod conclusion;
 mod context;
 mod stream;
+mod tool_call;
 mod turn;
 
 pub(crate) use self::background::*;
 pub(crate) use self::conclusion::*;
 pub(crate) use self::context::*;
 pub(crate) use self::stream::*;
+pub(crate) use self::tool_call::*;
 pub(crate) use self::turn::*;
 
 

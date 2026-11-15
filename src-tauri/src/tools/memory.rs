@@ -1763,6 +1763,8 @@ pub(super) async fn handle_memory_tool(
     protected_skill_root: Option<&Path>,
     mission_id: Option<&str>,
     active_skill_dirs: &[(String, PathBuf)],
+    // `tool_call.id` of the call being executed (see `emit_tool_progress`).
+    call_id: Option<&str>,
 ) -> String {
     let action = args["action"].as_str().unwrap_or("");
     let scope = args["scope"].as_str().unwrap_or("session");
@@ -1826,6 +1828,7 @@ pub(super) async fn handle_memory_tool(
             app,
             mission_id,
             session_id,
+            call_id,
             format!("🧠 *Memory {} across all scopes*\n", action),
         );
 
@@ -1844,6 +1847,7 @@ pub(super) async fn handle_memory_tool(
                 protected_skill_root,
                 mission_id,
                 session_id,
+                call_id,
                 active_skill_dirs,
                 None,
                 None,
@@ -1883,6 +1887,7 @@ pub(super) async fn handle_memory_tool(
                     app,
                     mission_id,
                     session_id,
+                    call_id,
                     format!("🧠 *Session memory stored: {}*\n", key),
                 );
                 serde_json::to_string_pretty(&entry).unwrap_or_else(|_| entry.to_string())
@@ -1897,6 +1902,7 @@ pub(super) async fn handle_memory_tool(
                             app,
                             mission_id,
                             session_id,
+                            call_id,
                             format!("🧠 *Session memory retrieved: {}*\n", key),
                         );
                         serde_json::to_string_pretty(entry).unwrap_or_else(|_| entry.to_string())
@@ -1913,6 +1919,7 @@ pub(super) async fn handle_memory_tool(
                     app,
                     mission_id,
                     session_id,
+                    call_id,
                     format!("🧠 *Listing {} session memories*\n", keys.len()),
                 );
                 serde_json::to_string_pretty(&json!({
@@ -1956,6 +1963,7 @@ pub(super) async fn handle_memory_tool(
                     app,
                     mission_id,
                     session_id,
+                    call_id,
                     format!("🧠 *Searching session memories for '{}'*\n", query),
                 );
 
@@ -2004,6 +2012,7 @@ pub(super) async fn handle_memory_tool(
                             app,
                             mission_id,
                             session_id,
+                            call_id,
                             format!("🧠 *Session memory deleted: {}*\n", key),
                         );
                         format!("Session memory '{}' deleted.", key)
@@ -2029,6 +2038,7 @@ pub(super) async fn handle_memory_tool(
             workspace_dir,
             mission_id,
             session_id,
+            call_id,
         )
     // ── User / Repo scoped (file-backed) ─────────────────────────────
     } else if scope == "user" || scope == "repo" {
@@ -2058,6 +2068,7 @@ pub(super) async fn handle_memory_tool(
                             app,
                             mission_id,
                             session_id,
+                            call_id,
                             format!("🧠 *{} memory stored: {}*\n", scope, key),
                         );
                         let entry = json!({
@@ -2085,6 +2096,7 @@ pub(super) async fn handle_memory_tool(
                             app,
                             mission_id,
                             session_id,
+                            call_id,
                             format!("🧠 *{} memory retrieved: {}*\n", scope, key),
                         );
                         content
@@ -2111,6 +2123,7 @@ pub(super) async fn handle_memory_tool(
                         app,
                         mission_id,
                         session_id,
+                        call_id,
                         format!("🧠 *Listing {} {} memories*\n", items.len(), scope),
                     );
                     if items.is_empty() {
@@ -2134,6 +2147,7 @@ pub(super) async fn handle_memory_tool(
                     app,
                     mission_id,
                     session_id,
+                    call_id,
                     format!("🧠 *Searching {} memories for '{}'*\n", scope, query),
                 );
                 match run_integrated_search(
@@ -2169,6 +2183,7 @@ pub(super) async fn handle_memory_tool(
                             app,
                             mission_id,
                             session_id,
+                            call_id,
                             format!("🧠 *{} memory deleted: {}*\n", scope, key),
                         );
                         format!("{} memory '{}' deleted.", scope, key)
@@ -2206,6 +2221,7 @@ fn handle_evolution_scope(
     workspace_dir: &Path,
     mission_id: Option<&str>,
     session_id: Option<&str>,
+    call_id: Option<&str>,
 ) -> String {
     let dir = evolution_dir(workspace_dir);
     let _ = fs::create_dir_all(&dir);
@@ -2243,6 +2259,7 @@ fn handle_evolution_scope(
                         app,
                         mission_id,
                         session_id,
+                        call_id,
                         format!(
                             "🧠 *Evolution memory {}: {}*\n",
                             if outcome.created { "stored" } else { "updated" },
@@ -2283,6 +2300,7 @@ fn handle_evolution_scope(
                     app,
                     mission_id,
                     session_id,
+                    call_id,
                     format!("🧠 *Evolution memory retrieved: {}*\n", entry.meta.key),
                 );
                 return evolution_entry_to_md(entry);
@@ -2302,6 +2320,7 @@ fn handle_evolution_scope(
                 app,
                 mission_id,
                 session_id,
+                call_id,
                 format!("🧠 *Listing {} evolution memories*\n", ranked.len()),
             );
             if ranked.is_empty() {
@@ -2343,6 +2362,7 @@ fn handle_evolution_scope(
                 app,
                 mission_id,
                 session_id,
+                call_id,
                 format!("🧠 *Searching evolution memories for '{}'*\n", query),
             );
             let needle = normalize_text(query);
@@ -2396,6 +2416,7 @@ fn handle_evolution_scope(
                         app,
                         mission_id,
                         session_id,
+                        call_id,
                         format!("🧠 *Evolution memory deleted: {}*\n", key),
                     );
                     format!("Evolution memory '{key}' deleted.")
@@ -2418,6 +2439,7 @@ fn handle_evolution_scope(
                 app,
                 mission_id,
                 session_id,
+                call_id,
                 "🧠 *Consolidating evolution memory*\n".to_string(),
             );
             report

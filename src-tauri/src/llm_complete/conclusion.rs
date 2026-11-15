@@ -99,7 +99,10 @@ pub(crate) fn record_conclusion_to_memory(
                 );
                 let _ = app.emit(
                     "tool-call",
-                    format!("🧠 *Conclusion distilled into evolution memory: {}*\n", key),
+                    json!({
+                        "session_id": session_id,
+                        "text": format!("🧠 *Conclusion distilled into evolution memory: {}*\n", key),
+                    }),
                 );
             }
             None => {}
@@ -139,7 +142,10 @@ pub(crate) fn record_conclusion_to_memory(
             );
             let _ = app.emit(
                 "tool-call",
-                format!("🧠 *Conclusion recorded to {scope} memory: {}*\n", key),
+                json!({
+                    "session_id": session_id,
+                    "text": format!("🧠 *Conclusion recorded to {scope} memory: {}*\n", key),
+                }),
             );
         }
         Err(e) => {

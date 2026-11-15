@@ -89,6 +89,20 @@ pub const SELF_EVOLUTION_REQUIRED_TOOLS: [&str; 2] = ["file_actions", "memory"];
 /// nobody scans.
 pub const WORKSPACE_HISTORY_LIMIT: usize = 10;
 
+/// Default number of tool calls of one round that run at the same time.
+///
+/// Four is enough to overlap the common batch (a handful of file reads, one
+/// search, one build or MCP round trip) without turning a round into a fan-out
+/// that saturates the machine or the provider's rate limit.
+pub const DEFAULT_MAX_PARALLEL_TOOLS: u32 = 4;
+
+/// Hard ceiling for `AppConfig::max_parallel_tools`.
+pub const MAX_PARALLEL_TOOLS: u32 = 8;
+
+fn default_max_parallel_tools() -> u32 {
+    DEFAULT_MAX_PARALLEL_TOOLS
+}
+
 #[derive(Debug, Clone, Serialize)]
 struct MarkdownEditPayload {
     path: String,
@@ -599,6 +613,17 @@ pub struct AppConfig {
     /// failures (`0` = never disable). A successful call resets the count.
     #[serde(default = "turn_guard::default_tool_failure_limit")]
     pub tool_failure_limit: u32,
+    /// Run independent tool calls of one assistant round at the same time
+    /// (Settings → Runtime & Debug, on by default). Off means every round
+    /// executes strictly in `tool_calls` order, exactly as before batching
+    /// existed.
+    #[serde(default = "update::default_true")]
+    pub parallel_tools: bool,
+    /// How many calls of one round may run at once (`parallel_tools` only).
+    /// `1` is the same as turning the switch off; the value is clamped to
+    /// `MAX_PARALLEL_TOOLS`.
+    #[serde(default = "default_max_parallel_tools")]
+    pub max_parallel_tools: u32,
     #[serde(default)]
     pub workspace_dir: Option<String>,
     /// Workspaces that were actually activated, newest first (capped at
@@ -680,6 +705,8 @@ impl Default for AppConfig {
             main_agent_max_rounds: turn_guard::DEFAULT_MAIN_AGENT_MAX_ROUNDS,
             main_agent_max_tool_calls: turn_guard::DEFAULT_MAIN_AGENT_MAX_TOOL_CALLS,
             tool_failure_limit: turn_guard::DEFAULT_TOOL_FAILURE_LIMIT,
+            parallel_tools: true,
+            max_parallel_tools: DEFAULT_MAX_PARALLEL_TOOLS,
             workspace_dir: None,
             workspace_history: vec![],
             logger_output: LoggerOutput::default(),
@@ -736,6 +763,7 @@ impl AppConfig {
             .main_agent_max_tool_calls
             .min(turn_guard::MAX_MAIN_AGENT_TOOL_CALLS);
         self.tool_failure_limit = self.tool_failure_limit.min(turn_guard::MAX_TOOL_FAILURE_LIMIT);
+        self.max_parallel_tools = self.max_parallel_tools.clamp(1, MAX_PARALLEL_TOOLS);
     }
 
     /// Record `path` as the most recent workspace.

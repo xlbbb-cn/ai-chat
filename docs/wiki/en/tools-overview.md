@@ -48,6 +48,17 @@ How it behaves:
 
 Background tasks keep every normal check: risk assessment and confirmation still happen before the task starts, and a cancelled task stops waiting for a confirmation dialog. Sub-agents never receive the flag.
 
+## Parallel tool calls
+
+One assistant round can carry several tool calls. **Settings → Runtime & Debug → Parallel tool calls** (`config.parallel_tools`, on by default) decides whether they run at the same time:
+
+- **Concurrent**: `file_actions` `read` / `list` / `search` / `diff`, `run_cmd`, `run_shell`, `skill_read`, `call_subagent` and every MCP tool. A batch costs the slowest call instead of the sum.
+- **Alone, in order** (and they split the round into segments): `use_skill` (it changes the allowed commands and skill directories the rest of the round sees), `memory` / `todos` / `timer_*` (read-modify-write on a session file), mutating `file_actions` actions (write / patch / rename / move / mkdir / delete), `background_task`, `mcp_self`, `skill_merge`, `experience`, the mission-board tools, and any tool the app does not know.
+- **Calls per round** (`config.max_parallel_tools`, default 4, range 1–8): how many independent calls may run at once. `1` behaves like the switch being off — strictly one call at a time.
+- **Sub-agents** follow the same rules, with `mbus`, `ask_main_agent` and every MCP call as extra barriers (an MCP call owns that task's `AgentMcpSession`).
+- **Order never changes**: tool results, failure counting and the transcript rows always follow the model's order, whatever order the calls finished in. Stop still exits after the current batch returns.
+- One behaviour change: when a call trips the failure limit, the calls beside it are already in flight and are not cancelled — the verdict applies to the next round.
+
 ## Self-evolution mode forces two tools on
 
 **Settings → Workspace & Profiles → Enable Self-evolution Mode** does not only unlock the skill folder — it also **forces `file_actions` and `memory` on**:

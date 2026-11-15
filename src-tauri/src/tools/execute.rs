@@ -62,6 +62,10 @@ pub(crate) async fn request_tool_confirmation(
     // Cancel flag of the background task this call belongs to. A cancelled
     // task must not keep holding the (serialized) confirmation slot.
     cancel: Option<&std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    // `tool_call.id` of the call that is asking, so the inline allow/deny row
+    // is created with the same id its progress events carry — otherwise the
+    // parallel-round rework would leave a second, never settled row behind.
+    call_id: Option<&str>,
 ) -> crate::ToolConfirmation {
     use std::sync::atomic::Ordering;
 
@@ -123,6 +127,7 @@ pub(crate) async fn request_tool_confirmation(
         "confirm-required",
         serde_json::json!({
             "request_id": request_id,
+            "call_id": call_id,
             "reason": reason,
             "cmd_type": cmd_type,
             "code": code,
@@ -296,6 +301,10 @@ pub async fn execute_tool(
     mission_id: Option<&str>,
     // Current chat session id (used by session-scoped helpers like the `todos` tool).
     session_id: Option<&str>,
+    // `tool_call.id` of the call being executed. Progress events carry it so
+    // the UI can apply them to that call's row when several run in parallel;
+    // `None` keeps the legacy "newest running row" behaviour.
+    call_id: Option<&str>,
     // Active skill directories accessible via skill_read tool (empty = tool not available).
     active_skill_dirs: &[(String, PathBuf)],
     // Cancel flag of the background task this call belongs to (`None` for a
@@ -423,6 +432,7 @@ pub async fn execute_tool(
                         app,
                         mission_id,
                         session_id,
+                        call_id,
                         format!(
                             "⏱️ *Timer set: {}*\n\n```\n{}\n```\n",
                             crate::timer::format_delay(delay_seconds),
@@ -479,6 +489,7 @@ pub async fn execute_tool(
                         app,
                         mission_id,
                         session_id,
+                        call_id,
                         format!("⏱️ *Timer cancelled: {}*\n", entry.label),
                     );
                     format!(
@@ -511,6 +522,7 @@ pub async fn execute_tool(
                 protected_skill_root,
                 mission_id,
                 active_skill_dirs,
+                call_id,
             )
             .await
         }
@@ -518,7 +530,9 @@ pub async fn execute_tool(
         // `file_actions`). Legacy per-action names are routed to the same
         // handler so chats continued from older sessions keep working.
         "todos" | "todo_add" | "todo_update_status" | "todo_list" | "todo_clear_completed"
-        | "todo_archive" => todos::handle_todos_tool(app, name, &args, session_id, mission_id),
+        | "todo_archive" => {
+            todos::handle_todos_tool(app, name, &args, session_id, mission_id, call_id)
+        }
         "skill_read" => {
             let action = args["action"].as_str().unwrap_or("");
             let skill_name = args["skill_name"].as_str().unwrap_or("");
@@ -578,6 +592,7 @@ pub async fn execute_tool(
                         app,
                         mission_id,
                         session_id,
+                        call_id,
                         format!("📄 *Reading skill file {}/{}*\n\n", skill_name, rel_path),
                     );
 
@@ -642,6 +657,7 @@ pub async fn execute_tool(
                         app,
                         mission_id,
                         session_id,
+                        call_id,
                         format!("📂 *Listing skill directory {}/{}*\n\n", skill_name, rel_path),
                     );
 
@@ -720,6 +736,7 @@ pub async fn execute_tool(
                         app,
                         mission_id,
                         session_id,
+                        call_id,
                         format!(
                             "🔎 *Searching skill {} for {}*\n\n",
                             skill_name,
@@ -967,6 +984,7 @@ pub async fn execute_tool(
                     app,
                     mission_id,
                     session_id,
+                    call_id,
                     format!(
                         "✅ *Risk assessment passed: {} (score: {}) - running directly*\n\n```\n{}\n```\n\n",
                         report.risk_level, report.risk_score, command
@@ -1042,6 +1060,7 @@ pub async fn execute_tool(
                 confirm_kind,
                 "none",
                 cancel,
+                call_id,
             )
             .await;
 
@@ -1078,6 +1097,7 @@ pub async fn execute_tool(
                 app,
                 mission_id,
                 session_id,
+                call_id,
                 if needs_risk_confirmation {
                     format!(
                         "⚠️ *User confirmed execution: {} (score: {})*\n\n```\n{}\n```\n\n",
@@ -1256,6 +1276,7 @@ pub async fn execute_tool(
                     app,
                     mission_id,
                     session_id,
+                    call_id,
                     format!(
                         "✅ *Risk assessment passed: {} (score: {}) - running directly*\n\n```{}\n{}\n```\n\n",
                         report.risk_level, report.risk_score, shell_type, code
@@ -1304,6 +1325,7 @@ pub async fn execute_tool(
                 risk_level.confirm_kind(),
                 "none",
                 cancel,
+                call_id,
             )
             .await;
 
@@ -1326,6 +1348,7 @@ pub async fn execute_tool(
                 app,
                 mission_id,
                 session_id,
+                call_id,
                 format!(
                     "⚠️ *User confirmed execution: {} (score: {})*\n\n```{}\n{}\n```\n\n",
                     report.risk_level, report.risk_score, shell_type, code
@@ -1359,6 +1382,7 @@ pub async fn execute_tool(
                 protected_skill_root,
                 mission_id,
                 session_id,
+                call_id,
                 config.self_evolution_mode,
                 cancel,
             )
@@ -1380,6 +1404,7 @@ pub async fn execute_tool(
                     config,
                     mission_id,
                     session_id,
+                    call_id,
                 )
             }
         }

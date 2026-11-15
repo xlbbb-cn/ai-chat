@@ -1499,6 +1499,8 @@ export default function App() {
 
     const unlisten = listen<{
       request_id: string;
+      /** `tool_call.id` of the call that is asking, when it has one. */
+      call_id?: string | null;
       reason: string;
       cmd_type: string;
       code: string;
@@ -1524,7 +1526,10 @@ export default function App() {
           ["bash", "sh", "powershell", "pwsh"].includes(cmd_type);
         if (inlineShell) {
           const entry: ToolCallEntry = {
-            task_id: request_id,
+            // The call's own id when the backend sent one, so the tool's next
+            // `tool-call` event updates this exact row instead of leaving a
+            // pending confirmation behind.
+            task_id: e.payload.call_id ?? request_id,
             agent_name: "run_shell",
             description: code.split("\n")[0].slice(0, 140),
             status: "running",
@@ -2098,12 +2103,21 @@ export default function App() {
         currentToolCallsRef.current = [...currentToolCallsRef.current, entry];
         updateActiveAssistantToolCalls(currentToolCallsRef.current);
       }),
-      listen<{ session_id?: string | null; text: string }>("tool-call", (e) => {
+      listen<{
+        session_id?: string | null;
+        /** `tool_call.id` of the call this line belongs to. */
+        call_id?: string | null;
+        /** `progress` updates that call's row, `done` settles it. */
+        phase?: "progress" | "done";
+        /** Only on `done`: false marks the row as failed. */
+        ok?: boolean;
+        text: string;
+      }>("tool-call", (e) => {
         // Route by session: a winding-down turn's tool step must not settle
         // rows or appear inside the chat the user already switched to. No
         // session context (null) passes — those callers have no leak surface.
         if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
-        const text = e.payload.text;
+        const text = e.payload.text ?? "";
         // Parse label from *italics* and optional code block detail
         const firstLine = text.split('\n')[0];
         // Capture emoji before asterisks and the label inside asterisks
@@ -2119,6 +2133,65 @@ export default function App() {
         const codeMatch = text.match(/```(?:\w+)?\n([\s\S]+?)\n```/);
         const detail = codeMatch ? codeMatch[1].trim() : undefined;
 
+        const callId = e.payload.call_id ?? undefined;
+        if (callId) {
+          // A call-scoped event belongs to exactly one row. With a parallel
+          // round several rows are open at once, so "settle every running
+          // row" is wrong here — that is the whole reason the backend sends
+          // `call_id`: the row is created by the first event of the call and
+          // closed by its `done`.
+          const phase = e.payload.phase;
+          const existing = currentToolCallsRef.current.some((tc) => tc.task_id === callId);
+          if (phase === "done") {
+            const status = e.payload.ok === false ? ("error" as const) : ("done" as const);
+            currentToolCallsRef.current = existing
+              ? currentToolCallsRef.current.map((tc) =>
+                  tc.task_id === callId
+                    ? { ...tc, status, summary: tc.summary ?? detail }
+                    : tc
+                )
+              : [
+                  ...currentToolCallsRef.current,
+                  {
+                    task_id: callId,
+                    agent_name: t("app.agents.tool"),
+                    kind: "tool" as const,
+                    description: label,
+                    status,
+                    summary: detail,
+                  },
+                ];
+          } else {
+            currentToolCallsRef.current = existing
+              ? currentToolCallsRef.current.map((tc) =>
+                  tc.task_id === callId
+                    ? {
+                        ...tc,
+                        description: label || tc.description,
+                        summary: detail ?? tc.summary,
+                      }
+                    : tc
+                )
+              : [
+                  ...currentToolCallsRef.current,
+                  {
+                    task_id: callId,
+                    agent_name: t("app.agents.tool"),
+                    kind: "tool" as const,
+                    description: label,
+                    status: "running" as const,
+                    summary: detail,
+                    started_at: Date.now(),
+                  },
+                ];
+          }
+          updateActiveAssistantToolCalls(currentToolCallsRef.current);
+          hasRunningToolCallRef.current = currentToolCallsRef.current.some(
+            (tc) => tc.status === "running" && tc.kind !== "agent" && tc.kind !== "planner"
+          );
+          return;
+        }
+
         const entry: ToolCallEntry = {
           task_id: crypto.randomUUID(),
           agent_name: t("app.agents.tool"),
@@ -2133,7 +2206,8 @@ export default function App() {
             // Only the main chat's own steps settle here. A sub-agent row and
             // the planner have their own terminal events; settling them on the
             // next main tool call is what showed a green checkmark while a task
-            // was still running.
+            // was still running. Call-scoped events never reach this path, so a
+            // parallel round cannot close a sibling's row.
             tc.status === "running" && tc.kind !== "agent" && tc.kind !== "planner"
               ? { ...tc, status: "done" as const }
               : tc
@@ -2195,32 +2269,63 @@ export default function App() {
         });
         updateActiveAssistantToolCalls(currentToolCallsRef.current);
       }),
-      listen<{ session_id?: string | null; skill_name: string }>("skill-loaded", (e) => {
-        // Structured skill-load event. The entry carries `skill_name`, which
-        // is what later turns send back as `loaded_skills`. Session-routed: a
-        // winding-down turn must not record its skill in another chat.
-        if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
-        const skillName = e.payload.skill_name;
-        if (!skillName) return;
-        const entry: ToolCallEntry = {
-          task_id: crypto.randomUUID(),
-          agent_name: t("app.agents.tool"),
-          kind: "tool",
-          description: t("app.agents.loadingSkill", { name: skillName }),
-          status: "running",
-          skill_name: skillName,
-        };
-        currentToolCallsRef.current = [
-          ...currentToolCallsRef.current.map((tc) =>
-            tc.status === "running" && tc.kind !== "agent" && tc.kind !== "planner"
-              ? { ...tc, status: "done" as const }
-              : tc
-          ),
-          entry,
-        ];
-        updateActiveAssistantToolCalls(currentToolCallsRef.current);
-        hasRunningToolCallRef.current = true;
-      }),
+      listen<{ session_id?: string | null; skill_name: string; call_id?: string | null }>(
+        "skill-loaded",
+        (e) => {
+          // Structured skill-load event. The entry carries `skill_name`, which
+          // is what later turns send back as `loaded_skills`. Session-routed: a
+          // winding-down turn must not record its skill in another chat.
+          if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
+          const skillName = e.payload.skill_name;
+          if (!skillName) return;
+          const description = t("app.agents.loadingSkill", { name: skillName });
+          const callId = e.payload.call_id ?? undefined;
+          if (callId) {
+            // The `use_skill` call owns this row: `tool-call` events of the
+            // same call (`progress`/`done`) apply to it, so nothing else is
+            // settled here.
+            const existing = currentToolCallsRef.current.some((tc) => tc.task_id === callId);
+            currentToolCallsRef.current = existing
+              ? currentToolCallsRef.current.map((tc) =>
+                  tc.task_id === callId
+                    ? { ...tc, description, skill_name: skillName, status: "running" as const }
+                    : tc
+                )
+              : [
+                  ...currentToolCallsRef.current,
+                  {
+                    task_id: callId,
+                    agent_name: t("app.agents.tool"),
+                    kind: "tool" as const,
+                    description,
+                    status: "running" as const,
+                    skill_name: skillName,
+                  },
+                ];
+            updateActiveAssistantToolCalls(currentToolCallsRef.current);
+            hasRunningToolCallRef.current = true;
+            return;
+          }
+          const entry: ToolCallEntry = {
+            task_id: crypto.randomUUID(),
+            agent_name: t("app.agents.tool"),
+            kind: "tool",
+            description,
+            status: "running",
+            skill_name: skillName,
+          };
+          currentToolCallsRef.current = [
+            ...currentToolCallsRef.current.map((tc) =>
+              tc.status === "running" && tc.kind !== "agent" && tc.kind !== "planner"
+                ? { ...tc, status: "done" as const }
+                : tc
+            ),
+            entry,
+          ];
+          updateActiveAssistantToolCalls(currentToolCallsRef.current);
+          hasRunningToolCallRef.current = true;
+        }
+      ),
       listen<{ items: ChatInjection[]; session_id?: string }>("chat-injected", (e) => {
         // The backend drained these into the next request, so the model has
         // seen them. Anything still queued stays a chip until it either lands

@@ -80,6 +80,8 @@ Rules worth knowing:
 | `selected_tools` | string[] | `[]` | Enabled tool ids |
 | `self_evolution_mode` | boolean | `false` | Let the assistant evolve its own skills; forces `file_actions` + `memory` on |
 | `background_tools` | boolean | `false` | Advertise `run_in_background` on `run_cmd` / `run_shell` / `file_actions` search / MCP tools / `call_subagent` (Settings → Runtime & Debug → Background execution) |
+| `parallel_tools` | boolean | `true` | Run the independent tool calls of one round at the same time (Settings → Runtime & Debug → Parallel tool calls); `false` = strictly one call at a time |
+| `max_parallel_tools` | number | `4` | How many calls of one round may run at once, clamped to 1–8; `1` behaves like `parallel_tools: false` |
 | `workspace_dir` | string? | empty | Absolute workspace path; empty = default |
 | `workspace_history` | string[] | `[]` | Recently used workspaces (newest first, max 10); rendered as a picker in Settings → Workspace |
 | `main_agent_max_rounds` | number | `40` | Requests the main agent may spend per turn (Settings → Advanced); `0` = unlimited, clamped to ≤ 1000 |
@@ -137,6 +139,8 @@ A built-in command at risk level L0–L3 asks before it runs; auto-accepting its
   "system_message": "You are a helpful assistant.",
   "selected_tools": ["file_actions", "memory", "todo_list", "timer"],
   "background_tools": true,
+  "parallel_tools": true,
+  "max_parallel_tools": 4,
   "workspace_dir": "D:/projects/my-repo",
   "main_agent_max_rounds": 40,
   "main_agent_max_tool_calls": 120,

@@ -80,6 +80,8 @@ Rabbit Chat Studio 的配置分两层：
 | `selected_tools` | string[] | `[]` | 启用的工具 id |
 | `self_evolution_mode` | boolean | `false` | 允许助手演进自己的技能；强制开启 `file_actions` + `memory` |
 | `background_tools` | boolean | `false` | 为 `run_cmd` / `run_shell` / `file_actions` 搜索 / MCP 工具 / `call_subagent` 下发 `run_in_background`（设置 → 运行时与调试 → 后台执行） |
+| `parallel_tools` | boolean | `true` | 同一轮回复里的独立工具调用同时执行（设置 → 运行时与调试 → 并行工具调用）；`false` = 严格逐个执行 |
+| `max_parallel_tools` | number | `4` | 单轮最多同时跑几个调用，限制在 1–8；`1` 等同关闭 `parallel_tools` |
 | `workspace_dir` | string? | 空 | 工作区绝对路径；空 = 默认 |
 | `workspace_history` | string[] | `[]` | 最近用过的工作区（新的在前，最多 10 个），在 设置 → 工作区 里作为选择器 |
 | `main_agent_max_rounds` | number | `40` | 主智能体每轮可用请求数（设置 → 高级）；`0` 不限，上限 1000 |
@@ -137,6 +139,8 @@ dangerous, system_config, user_software, user_data, external_agent, *
   "system_message": "你是一个乐于助人的助手。",
   "selected_tools": ["file_actions", "memory", "todo_list", "timer"],
   "background_tools": true,
+  "parallel_tools": true,
+  "max_parallel_tools": 4,
   "workspace_dir": "D:/projects/my-repo",
   "main_agent_max_rounds": 40,
   "main_agent_max_tool_calls": 120,

@@ -442,6 +442,12 @@ const zhCN: Messages = {
             backgroundTools: "后台执行",
             backgroundToolsHint:
                 "允许助手把耗时工具放到后台运行（`run_in_background: true`）：`run_cmd`、`run_shell`、`file_actions` 搜索、所有 MCP 工具和 `call_subagent`。结果会在下一个请求前自动送达，本轮保持开启直到结果到齐；子代理不会收到该参数。",
+            parallelTools: "并行工具调用",
+            parallelToolsHint:
+                "让同一轮回复中的独立工具调用同时执行：读文件、搜索、`run_cmd`/`run_shell`、MCP 工具和子代理委派。写文件、读写记忆/待办/定时器、加载技能等调用仍按顺序单独执行，并把这一轮切成若干段；失败计数与工具结果始终按模型给出的顺序排列。关闭后每一轮严格逐个执行。",
+            maxParallelTools: "单轮并发数",
+            maxParallelToolsHint:
+                "同一轮里最多同时执行几个独立调用（1–8）。设为 1 等于关闭上方的开关。",
             subAgentMainHelp: "子代理请求主代理协助",
             subAgentMainHelpHint:
                 "允许 `llm` 子代理在运行过程中调用 `ask_main_agent`。后端会用主模型、真实会话历史、已启用技能、MCP 和主工具集起一个有上限的协助者，收集资料后交还给子代理，子代理继续自己的任务。`cli`/`cloud` 子代理无法使用。",

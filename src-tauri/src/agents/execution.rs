@@ -1030,6 +1030,7 @@ pub(crate) async fn request_external_agent_approval(
         "external_agent",
         "none",
         None,
+        None,
     )
     .await;
 

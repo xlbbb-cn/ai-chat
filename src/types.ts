@@ -477,6 +477,17 @@ export interface AppConfig {
    */
   tool_failure_limit?: number;
   /**
+   * Run independent tool calls of one assistant round at the same time.
+   * Defaults to on; while it is off every round executes strictly in
+   * `tool_calls` order (the behaviour before batching existed).
+   */
+  parallel_tools?: boolean;
+  /**
+   * How many calls of one round may run at once when `parallel_tools` is on.
+   * `1` behaves like the switch being off; the backend clamps it to 8.
+   */
+  max_parallel_tools?: number;
+  /**
    * Active workspace of *this window*. Instance-scoped: the primary persists it
    * in the shared `config.json`, a shadow window only in its temporary copy
    * (which is discarded when it closes).

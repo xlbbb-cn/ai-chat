@@ -261,6 +261,7 @@ pub(crate) fn start_background_tool_call(
                 skill_root.as_deref(),
                 None,
                 Some(&session),
+                None,
                 &dirs,
                 Some(&cancel),
                 None,
@@ -319,7 +320,7 @@ pub(crate) fn start_background_mcp_call(
 /// `background_task` control tool: list / wait / get / cancel.
 pub(crate) async fn handle_background_task_tool(
     app: &AppHandle,
-    state: &State<'_, AppState>,
+    state: &AppState,
     session_id: &str,
     args: &Value,
 ) -> String {

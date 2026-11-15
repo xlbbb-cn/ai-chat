@@ -852,6 +852,7 @@ async fn ask_confirmation(
         "user_software",
         "none",
         cancel,
+        None,
     )
     .await;
     outcome.confirmed

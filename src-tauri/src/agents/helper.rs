@@ -544,6 +544,7 @@ pub(crate) async fn run_main_agent_helper_inner(
                     skill_access_root,
                     Some(mission_id),
                     Some(session_id),
+                    None,
                     &active_skill_dirs,
                     None,
                     Some(task_cwd),
@@ -627,6 +628,141 @@ pub(crate) fn resolve_completion_limit(agent: &SubAgent) -> u32 {
         .filter(|limit| *limit > 0)
         .or_else(|| agent.max_tokens.filter(|limit| *limit > 0))
         .unwrap_or(LLM_DEFAULT_MAX_COMLETE_TOKENS)
+}
+
+/// `ask_main_agent`: material requested from the main agent's helper run.
+///
+/// A barrier in the sub-agent's tool loop — it spends the task's bounded help
+/// counter, the helper borrows the task's MCP session, and the token /
+/// tool-call totals belong to the whole round.
+#[allow(clippy::too_many_arguments)]
+async fn run_ask_main_agent(
+    app: &AppHandle,
+    client: &Client,
+    url: &str,
+    config: &AppConfig,
+    agent: &SubAgent,
+    task: &Task,
+    session_id: &str,
+    workspace_dir: &Path,
+    task_cwd: &Path,
+    skill_access_root: Option<&Path>,
+    cancelled: &AtomicBool,
+    mcp_session: &mut mcp::AgentMcpSession,
+    mission_id: &str,
+    args: &str,
+    main_help_calls: &mut u32,
+    total_tokens: &mut u32,
+    tool_calls_count: &mut u32,
+) -> String {
+    if !config.sub_agent_main_help {
+        return "Error: asking the main agent is disabled in Settings → Runtime & Debug."
+            .to_string();
+    }
+    if *main_help_calls >= MAIN_HELPER_MAX_CALLS {
+        return format!(
+            "Error: this task already used its {} main-agent help requests. Continue with the material you have.",
+            MAIN_HELPER_MAX_CALLS
+        );
+    }
+
+    let args_json: Value = serde_json::from_str(args).unwrap_or_default();
+    let request = args_json["request"]
+        .as_str()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let context = args_json["context"]
+        .as_str()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if request.is_empty() {
+        return "Error: ask_main_agent requires a non-empty 'request'.".to_string();
+    }
+
+    *main_help_calls += 1;
+    let _ = app.emit(
+        "agent-help-start",
+        json!({
+            "task_id": task.id,
+            "session_id": session_id,
+            "mission_id": mission_id,
+            "agent_id": agent.id,
+            "agent_name": agent.name,
+            "request": preview_text(&request, 300),
+            "cwd": task.cwd,
+        }),
+    );
+
+    match run_main_agent_helper(
+        app,
+        client,
+        url,
+        config,
+        agent,
+        task,
+        session_id,
+        workspace_dir,
+        task_cwd,
+        skill_access_root,
+        &request,
+        &context,
+        cancelled,
+        mcp_session,
+    )
+    .await
+    {
+        Ok(outcome) => {
+            *total_tokens = total_tokens.saturating_add(outcome.tokens);
+            *tool_calls_count = tool_calls_count.saturating_add(outcome.tool_calls);
+            let answer_chars = outcome.content.chars().count();
+            append_mission_help_note(
+                app,
+                mission_id,
+                &format!(
+                    "asked main agent: {} → {} chars",
+                    preview_text(&request, 160),
+                    answer_chars
+                ),
+            );
+            let _ = app.emit(
+                "agent-help-done",
+                json!({
+                    "task_id": task.id,
+                    "session_id": session_id,
+                    "mission_id": mission_id,
+                    "agent_id": agent.id,
+                    "answer_chars": answer_chars,
+                    "tokens": outcome.tokens,
+                    "tool_calls": outcome.tool_calls,
+                }),
+            );
+            outcome.content
+        }
+        Err(err) => {
+            append_mission_help_note(
+                app,
+                mission_id,
+                &format!(
+                    "asked main agent: {} → error: {}",
+                    preview_text(&request, 160),
+                    preview_text(&err, 200)
+                ),
+            );
+            let _ = app.emit(
+                "agent-help-error",
+                json!({
+                    "task_id": task.id,
+                    "session_id": session_id,
+                    "mission_id": mission_id,
+                    "agent_id": agent.id,
+                    "error": err,
+                }),
+            );
+            format!("Error: main-agent help failed: {err}")
+        }
+    }
 }
 
 pub(crate) async fn run_llm_agent_body(
@@ -1433,20 +1569,28 @@ pub(crate) async fn run_llm_agent_body(
                 }
                 working_memory.push(assistant_msg);
 
-                // Execute each tool call
+                // Execute this round's tool calls. Independent reads share a
+                // segment and run together (`max_parallel_tools`, default 4);
+                // everything that mutates state a sibling could observe runs
+                // alone, in `tool_calls` order. The extra barriers here are the
+                // sub-agent's own: `mbus` owns the bus subscriptions,
+                // `ask_main_agent` spends a bounded counter, and an MCP call
+                // borrows the task's `AgentMcpSession` mutably.
+                struct PlannedCall {
+                    id: String,
+                    name: String,
+                    args: String,
+                    blocked: Option<String>,
+                    concurrent: bool,
+                    started: std::time::Instant,
+                }
+
+                let mut planned: Vec<PlannedCall> = Vec::with_capacity(agent_tool_calls.len());
                 for (id, name, args) in &agent_tool_calls {
                     tool_calls_count += 1;
                     if let Some(bus) = mbus {
                         bus.mark_tool(&task.id, name);
                     }
-                    // Session-level gate: a tool disabled after repeated
-                    // failures never runs again. The call is still answered —
-                    // the protocol needs one `tool` message per `tool_call_id`.
-                    let blocked = app
-                        .state::<AppState>()
-                        .tool_guard
-                        .blocked_notice(session_id, name, failure_limit);
-                    let ran = blocked.is_none();
                     log_agent_event(
                         app,
                         "INFO",
@@ -1458,7 +1602,6 @@ pub(crate) async fn run_llm_agent_body(
                             preview_text(args, 240)
                         ),
                     );
-                    let tool_started = std::time::Instant::now();
                     emit_agent_tool_state(
                         app,
                         session_id,
@@ -1469,57 +1612,81 @@ pub(crate) async fn run_llm_agent_body(
                         None,
                         None,
                     );
-                    let mut result = if let Some(notice) = blocked {
-                        notice
-                    } else if name == "mbus" {
-                        match mbus {
-                            Some(bus) => {
-                                let parsed: Value = serde_json::from_str(args).unwrap_or_default();
-                                mbus::handle_tool(app, bus, &task.id, &parsed, false)
-                            }
-                            None => {
-                                "Error: the mission bus is not available for this task.".to_string()
-                            }
-                        }
-                    } else if name == "ask_main_agent" {
-                        if !config.sub_agent_main_help {
-                            "Error: asking the main agent is disabled in Settings → Runtime & Debug.".to_string()
-                        } else if main_help_calls >= MAIN_HELPER_MAX_CALLS {
-                            format!(
-                                "Error: this task already used its {} main-agent help requests. Continue with the material you have.",
-                                MAIN_HELPER_MAX_CALLS
-                            )
+                    let parsed: Value = serde_json::from_str(args).unwrap_or_default();
+                    // Session-level gate: a tool disabled after repeated
+                    // failures never runs again. The call is still answered —
+                    // the protocol needs one `tool` message per `tool_call_id`.
+                    let blocked = app
+                        .state::<AppState>()
+                        .tool_guard
+                        .blocked_notice(session_id, name, failure_limit);
+                    let is_mcp = mcp_tool_map.contains_key(name.as_str());
+                    let concurrent = blocked.is_none()
+                        && !is_mcp
+                        && !matches!(name.as_str(), "mbus" | "ask_main_agent")
+                        && matches!(
+                            tools::batch::call_mode(name, &parsed, false),
+                            tools::batch::CallMode::Concurrent
+                        );
+                    planned.push(PlannedCall {
+                        id: id.clone(),
+                        name: name.clone(),
+                        args: args.clone(),
+                        blocked,
+                        concurrent,
+                        started: std::time::Instant::now(),
+                    });
+                }
+
+                let mut results: Vec<Option<String>> = vec![None; planned.len()];
+                let max_parallel = if config.parallel_tools {
+                    config
+                        .max_parallel_tools
+                        .clamp(1, crate::MAX_PARALLEL_TOOLS) as usize
+                } else {
+                    1
+                };
+                let modes: Vec<tools::batch::CallMode> = planned
+                    .iter()
+                    .map(|call| {
+                        if call.concurrent {
+                            tools::batch::CallMode::Concurrent
                         } else {
-                            let args_json: Value = serde_json::from_str(args).unwrap_or_default();
-                            let request = args_json["request"]
-                                .as_str()
-                                .unwrap_or("")
-                                .trim()
-                                .to_string();
-                            let context = args_json["context"]
-                                .as_str()
-                                .unwrap_or("")
-                                .trim()
-                                .to_string();
+                            tools::batch::CallMode::Barrier
+                        }
+                    })
+                    .collect();
+                let segments = tools::batch::plan_segments(&modes);
 
-                            if request.is_empty() {
-                                "Error: ask_main_agent requires a non-empty 'request'.".to_string()
-                            } else {
-                                main_help_calls += 1;
-                                let _ = app.emit(
-                                    "agent-help-start",
-                                    json!({
-                                        "task_id": task.id,
-                                        "session_id": session_id,
-                                        "mission_id": mission_id,
-                                        "agent_id": agent.id,
-                                        "agent_name": agent.name,
-                                        "request": preview_text(&request, 300),
-                                        "cwd": task.cwd,
-                                    }),
-                                );
+                for segment in segments {
+                    if cancelled.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    let runnable: Vec<usize> = segment
+                        .clone()
+                        .filter(|&index| planned[index].blocked.is_none())
+                        .collect();
+                    if runnable.is_empty() {
+                        continue;
+                    }
 
-                                match run_main_agent_helper(
+                    // One at a time: a barrier, a single-call segment, or a user
+                    // who set the concurrency to 1.
+                    if runnable.len() == 1 || max_parallel == 1 {
+                        for &index in &runnable {
+                            let call = &planned[index];
+                            let result = if call.name == "mbus" {
+                                match mbus {
+                                    Some(bus) => {
+                                        let parsed: Value =
+                                            serde_json::from_str(&call.args).unwrap_or_default();
+                                        mbus::handle_tool(app, bus, &task.id, &parsed, false)
+                                    }
+                                    None => "Error: the mission bus is not available for this task."
+                                        .to_string(),
+                                }
+                            } else if call.name == "ask_main_agent" {
+                                run_ask_main_agent(
                                     app,
                                     client,
                                     url,
@@ -1530,117 +1697,111 @@ pub(crate) async fn run_llm_agent_body(
                                     &workspace_dir,
                                     &task_cwd,
                                     skill_access_root.as_deref(),
-                                    &request,
-                                    &context,
                                     cancelled,
                                     mcp_session,
+                                    &mission_id,
+                                    &call.args,
+                                    &mut main_help_calls,
+                                    &mut total_tokens,
+                                    &mut tool_calls_count,
+                                )
+                                .await
+                            } else if let Some((mcp_server, actual_tool_name)) =
+                                mcp_tool_map.get(call.name.as_str())
+                            {
+                                let state = app.state::<AppState>();
+                                let arguments: Value = serde_json::from_str(&call.args)
+                                    .unwrap_or_else(|_| json!({}));
+                                let owner = format!("agent:{}", agent.name);
+                                match mcp::invoke_mcp_tool_for_agent(
+                                    &state,
+                                    mcp_session,
+                                    mcp_server,
+                                    actual_tool_name,
+                                    arguments,
+                                    &owner,
                                 )
                                 .await
                                 {
-                                    Ok(outcome) => {
-                                        total_tokens = total_tokens.saturating_add(outcome.tokens);
-                                        tool_calls_count =
-                                            tool_calls_count.saturating_add(outcome.tool_calls);
-                                        let answer_chars = outcome.content.chars().count();
-                                        append_mission_help_note(
-                                            app,
-                                            &mission_id,
-                                            &format!(
-                                                "asked main agent: {} → {} chars",
-                                                preview_text(&request, 160),
-                                                answer_chars
-                                            ),
-                                        );
-                                        let _ = app.emit(
-                                            "agent-help-done",
-                                            json!({
-                                                "task_id": task.id,
-                                                "session_id": session_id,
-                                                "mission_id": mission_id,
-                                                "agent_id": agent.id,
-                                                "answer_chars": answer_chars,
-                                                "tokens": outcome.tokens,
-                                                "tool_calls": outcome.tool_calls,
-                                            }),
-                                        );
-                                        outcome.content
-                                    }
-                                    Err(err) => {
-                                        append_mission_help_note(
-                                            app,
-                                            &mission_id,
-                                            &format!(
-                                                "asked main agent: {} → error: {}",
-                                                preview_text(&request, 160),
-                                                preview_text(&err, 200)
-                                            ),
-                                        );
-                                        let _ = app.emit(
-                                            "agent-help-error",
-                                            json!({
-                                                "task_id": task.id,
-                                                "session_id": session_id,
-                                                "mission_id": mission_id,
-                                                "agent_id": agent.id,
-                                                "error": err,
-                                            }),
-                                        );
-                                        format!("Error: main-agent help failed: {err}")
-                                    }
+                                    Ok(text) => format!(
+                                        "MCP [{}] {} result:\n{}",
+                                        mcp_server.name, actual_tool_name, text
+                                    ),
+                                    Err(err) => format!("MCP tool error: {err}"),
                                 }
-                            }
+                            } else {
+                                tools::execute_tool(
+                                    app,
+                                    &call.name,
+                                    &call.args,
+                                    workspace_dir.clone(),
+                                    config,
+                                    &[],
+                                    skill_access_root.as_deref(),
+                                    Some(&mission_id),
+                                    Some(session_id),
+                                    None,
+                                    &[],  // sub-agents don't track active skill dirs for skill_read
+                                    None, // background tasks are never advertised to sub-agents
+                                    Some(task_cwd.as_path()),
+                                )
+                                .await
+                            };
+                            results[index] = Some(result);
                         }
-                    } else if let Some((mcp_server, actual_tool_name)) = mcp_tool_map.get(name) {
-                        let state = app.state::<AppState>();
-                        let arguments: Value =
-                            serde_json::from_str(args).unwrap_or_else(|_| json!({}));
-                        let owner = format!("agent:{}", agent.name);
-                        match mcp::invoke_mcp_tool_for_agent(
-                            &state,
-                            mcp_session,
-                            mcp_server,
-                            actual_tool_name,
-                            arguments,
-                            &owner,
-                        )
-                        .await
-                        {
-                            Ok(text) => format!(
-                                "MCP [{}] {} result:\n{}",
-                                mcp_server.name, actual_tool_name, text
-                            ),
-                            Err(err) => format!("MCP tool error: {err}"),
+                        continue;
+                    }
+
+                    // Every call of this segment is a plain tool call: no
+                    // shared mutable session, no round counter.
+                    for chunk in runnable.chunks(max_parallel) {
+                        let futures = chunk.iter().map(|&index| {
+                            let call = &planned[index];
+                            tools::execute_tool(
+                                app,
+                                &call.name,
+                                &call.args,
+                                workspace_dir.clone(),
+                                config,
+                                &[],
+                                skill_access_root.as_deref(),
+                                Some(&mission_id),
+                                Some(session_id),
+                                None,
+                                &[],
+                                None,
+                                Some(task_cwd.as_path()),
+                            )
+                        });
+                        let finished = futures_util::future::join_all(futures).await;
+                        for (index, result) in chunk.iter().zip(finished) {
+                            results[*index] = Some(result);
                         }
-                    } else {
-                        tools::execute_tool(
-                            app,
-                            name,
-                            args,
-                            workspace_dir.clone(),
-                            config,
-                            &[],
-                            skill_access_root.as_deref(),
-                            Some(&mission_id),
-                            Some(session_id),
-                            &[],  // sub-agents don't track active skill dirs for skill_read
-                            None, // background tasks are never advertised to sub-agents
-                            Some(task_cwd.as_path()),
-                        )
-                        .await
+                    }
+                }
+
+                // Failure accounting and the tool messages stay in
+                // `tool_calls` order, so the model sees the round exactly as it
+                // emitted it.
+                for (index, call) in planned.iter().enumerate() {
+                    // A blocked call never ran: its notice *is* the result. A
+                    // call with neither means the turn was cancelled before it
+                    // ran, and nothing more is sent.
+                    let Some(mut result) = results[index].take().or_else(|| call.blocked.clone())
+                    else {
+                        break;
                     };
-                    // Count the failure; crossing the limit tells the model and
-                    // the UI, and disables the tool for the whole session.
                     let failed = crate::turn_guard::tool_output_is_error(&result);
-                    if ran {
+                    if call.blocked.is_none() {
                         if let Some(trip) = app.state::<AppState>().tool_guard.record(
                             session_id,
-                            name,
+                            &call.name,
                             failed,
                             failure_limit,
                         ) {
                             result.push_str("\n\n");
                             result.push_str(&crate::turn_guard::disabled_notice(
-                                name,
+                                &call.name,
                                 trip.failures,
                                 failure_limit,
                                 true,
@@ -1650,7 +1811,7 @@ pub(crate) async fn run_llm_agent_body(
                                 json!({
                                     "kind": "tool_disabled",
                                     "session_id": session_id,
-                                    "tool": name,
+                                    "tool": call.name,
                                     "failures": trip.failures,
                                     "limit": failure_limit,
                                 }),
@@ -1662,29 +1823,26 @@ pub(crate) async fn run_llm_agent_body(
                         session_id,
                         &task.id,
                         "done",
-                        name,
+                        &call.name,
                         Some(preview_text(&result, 160)),
-                        Some(tool_started.elapsed().as_millis()),
+                        Some(call.started.elapsed().as_millis()),
                         Some(!failed),
                     );
                     log_agent_event(
                         app,
-                        if failed {
-                            "WARN"
-                        } else {
-                            "INFO"
-                        },
+                        if failed { "WARN" } else { "INFO" },
                         format!(
                             "agent [{}] {} tool {} -> {} chars: {}",
                             task.id,
                             agent.name,
-                            name,
+                            call.name,
                             result.chars().count(),
                             preview_text(&result, 160)
                         ),
                     );
-                    working_memory
-                        .push(json!({ "role": "tool", "tool_call_id": id, "content": result }));
+                    working_memory.push(
+                        json!({ "role": "tool", "tool_call_id": &call.id, "content": result }),
+                    );
                 }
             }
         }

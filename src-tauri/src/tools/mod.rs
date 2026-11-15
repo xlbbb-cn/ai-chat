@@ -8,6 +8,7 @@ use self::paths::{build_workspace_scoped_shell_code, with_root_header};
 use self::risk::{generate_risk_report, score_to_risk_level};
 use self::search::{run_integrated_search, SearchOptions, SEARCH_MAX_MATCHES};
 
+pub(crate) mod batch;
 mod execute;
 pub(crate) mod experience;
 mod file_actions;
@@ -47,10 +48,11 @@ use self::{
 
 /// Emits one tool-progress line, scoped to the caller.
 ///
-/// The main chat owns the `tool-call` transcript event: its listener settles
-/// the running step and appends a row. A sub-agent mission must never write
-/// there — that would settle the task's *own* row to "done" while it is still
-/// working and add a stray main-chat row. Mission progress goes out as
+/// The main chat owns the `tool-call` transcript event: its listener applies
+/// the line to the row of `call_id` (creating it on the first event) and the
+/// call's `done` event settles it. A sub-agent mission must never write there —
+/// that would settle the task's *own* row to "done" while it is still working
+/// and add a stray main-chat row. Mission progress goes out as
 /// `agent-task-tool`, which the UI applies to the task row without touching its
 /// status.
 ///
@@ -58,11 +60,14 @@ use self::{
 /// inside a chat the user already switched to. `impl Into<Option<&str>>` lets
 /// every caller pass what it has — `Option<&str>` at the dispatch layer, a bare
 /// `&str` inside handlers that already unwrapped it — without per-callsite
-/// wrapping.
+/// wrapping. `call_id` is the model's `tool_call.id`; `None` keeps the legacy
+/// "append a row and settle the previous one" behaviour for emitters that have
+/// no call of their own (background tasks).
 pub(crate) fn emit_tool_progress<'a>(
     app: &AppHandle,
     mission_id: Option<&str>,
     session_id: impl Into<Option<&'a str>>,
+    call_id: Option<&str>,
     text: impl Into<String>,
 ) {
     let session_id = session_id.into();
@@ -80,13 +85,49 @@ pub(crate) fn emit_tool_progress<'a>(
         }
         None => {
             // Structured so the main-chat listener can drop another
-            // conversation's steps (a plain string carries no session).
+            // conversation's steps (a plain string carries no session) and
+            // apply the line to the row of *this* call: with a parallel round
+            // several rows are open at once, and "the newest running row" is
+            // no longer necessarily the one that emitted this step.
             let _ = app.emit(
                 "tool-call",
-                json!({ "session_id": session_id, "text": text.into() }),
+                json!({
+                    "session_id": session_id,
+                    "call_id": call_id,
+                    "phase": "progress",
+                    "text": text.into()
+                }),
             );
         }
     }
+}
+
+/// Settles the main-chat row of one tool call.
+///
+/// `call_id` is the model's `tool_call.id` — the same value the call's progress
+/// events carried — so the frontend closes exactly that row. A tool that emits
+/// no progress at all (a plain `memory` lookup, `timer_list`, …) still gets a
+/// visible row: the frontend creates it from this event when it does not exist
+/// yet. A sub-agent mission never reaches here (its row is settled by
+/// `agent-task-done`), and neither does a blocked call: those emit their own
+/// "not executed" line.
+pub(crate) fn emit_tool_call_done(
+    app: &AppHandle,
+    session_id: Option<&str>,
+    call_id: &str,
+    name: &str,
+    ok: bool,
+) {
+    let _ = app.emit(
+        "tool-call",
+        json!({
+            "session_id": session_id,
+            "call_id": call_id,
+            "phase": "done",
+            "ok": ok,
+            "text": format!("🔧 *{name}*"),
+        }),
+    );
 }
 
 #[cfg(test)]

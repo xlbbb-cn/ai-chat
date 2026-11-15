@@ -480,6 +480,12 @@ const en = {
             backgroundTools: "Background execution",
             backgroundToolsHint:
                 "Let the assistant run slow tools as background tasks (`run_in_background: true`): `run_cmd`, `run_shell`, `file_actions` search, every MCP tool and `call_subagent`. The result is delivered automatically before the next request and the turn stays open until it arrives. Sub-agents never receive the flag.",
+            parallelTools: "Parallel tool calls",
+            parallelToolsHint:
+                "Run the independent tool calls of one assistant round at the same time: file reads, searches, `run_cmd`/`run_shell`, MCP tools and sub-agent delegations. A call that writes files, touches memory/todos/timers or loads a skill stays sequential and splits the round. Failure counting and the tool results keep the model's order. Off runs every round strictly one call at a time.",
+            maxParallelTools: "Calls per round",
+            maxParallelToolsHint:
+                "How many independent calls of one round may run at once (1–8). 1 behaves like the switch above being off.",
             subAgentMainHelp: "Sub-agent main-agent help",
             subAgentMainHelpHint:
                 "Let `llm` sub-agents call `ask_main_agent` while they run. A bounded helper run with the main model, the real conversation history, enabled skills, MCP servers and the main tool set collects the material and hands it back, then the sub-agent continues its own task. `cli`/`cloud` agents cannot use it.",

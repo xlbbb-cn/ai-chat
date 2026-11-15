@@ -376,6 +376,19 @@ pub(crate) async fn run_chat_turn(
         requests — call the tool or load the skill before answering, no confirmation needed.",
     ); //Add explicit invocation syntax to system prompt
 
+    // Batching guidance. Only advertised while the switch can actually
+    // parallelise: with `parallel_tools` off (or a concurrency of 1) the round
+    // runs one call at a time, and the hint would be a lie.
+    if config.parallel_tools && config.max_parallel_tools > 1 {
+        system_content.push_str(
+            "\n\nTool calls: independent calls can be emitted in ONE response and then run at the \
+            same time — file reads, searches, `run_cmd` / `run_shell`, MCP tools and sub-agent \
+            delegations. A call that writes files, touches memory/todos/timers or loads a skill \
+            runs alone and splits the round, so only batch calls that do not depend on each \
+            other's result.",
+        );
+    }
+
     let ws_skills_dir = crate::workspace::skills_root(&workspace_dir_for_roots);
 
     // Self-evolution mode: the assistant owns `<workspace>/.data/skills` and may
@@ -1926,24 +1939,38 @@ only when every item is done, or when you are blocked and need the user.\n\n{wai
             assistant_tcs,
         ));
 
+        // ── Plan the round ───────────────────────────────────────────────────
+        // A round can carry several calls. Every one of them is answered, but
+        // two gates can keep it from running: the tool was disabled earlier in
+        // this session (its consecutive-failure budget is spent), or the turn's
+        // tool-call budget is spent. Both are settled here — in `tool_calls`
+        // order, before anything is dispatched — so the request that follows
+        // still carries one `tool` message per `tool_call_id`.
+        //
+        // Batching changes one thing about the guard: a call that trips the
+        // limit no longer stops the calls beside it, because those are already
+        // running. The verdict applies from the next round on.
         let mut pending_skill_context_messages: Vec<Value> = vec![];
+        struct PlannedCall {
+            id: String,
+            name: String,
+            args: String,
+            parsed: Value,
+            /// `Some(notice)` when the call must not run; the notice is the
+            /// call's tool result.
+            blocked: Option<String>,
+            /// Classification only, so a blocked call never splits a segment
+            /// it would not have run in anyway.
+            concurrent: bool,
+        }
 
+        let mut planned: Vec<PlannedCall> = Vec::with_capacity(sr.tool_calls.len());
         for (id, name, args) in &sr.tool_calls {
-            if turn_cancelled.load(Ordering::SeqCst) {
-                break;
-            }
             if name == "memory" {
                 memory_tool_called = true;
             }
-            let background_args: Value = serde_json::from_str(args).unwrap_or_default();
+            let parsed: Value = serde_json::from_str(args).unwrap_or_default();
 
-            // ── Failure guard / tool budget ──────────────────────────────────
-            // Two independent gates can keep this call from running:
-            //   1. the tool was disabled earlier in this session (its
-            //      consecutive-failure budget is spent), or
-            //   2. the turn's tool-call budget is spent.
-            // Either way the call is still *answered*: the protocol requires a
-            // `tool` message for every `tool_call_id` the assistant produced.
             let blocked = match guard.blocked_notice(&session_id, name, failure_limit) {
                 Some(notice) => Some(notice),
                 None => match budget.record_tool_call() {
@@ -1954,17 +1981,22 @@ only when every item is done, or when you are blocked and need the user.\n\n{wai
                     None => None,
                 },
             };
-            let ran = blocked.is_none();
             if let Some(notice) = &blocked {
                 let reason = if notice.starts_with("⛔ TOOL DISABLED") {
                     "disabled for this session"
                 } else {
                     "turn tool budget spent"
                 };
+                // One event creates and settles the row: a blocked call never
+                // reports progress, and a running row left behind would sit
+                // there until the answer starts streaming.
                 let _ = app.emit(
                     "tool-call",
                     json!({
                         "session_id": session_id,
+                        "call_id": id,
+                        "phase": "done",
+                        "ok": false,
                         "text": format!("🚫 *{name}* — not executed ({reason})"),
                     }),
                 );
@@ -1978,383 +2010,155 @@ only when every item is done, or when you are blocked and need the user.\n\n{wai
                 );
             }
 
-            let mut result = if let Some(notice) = blocked {
-                notice
-            } else if name == BACKGROUND_TOOL_NAME {
-                handle_background_task_tool(&app, &state, &session_id, &background_args).await
-            } else if config.background_tools
-                && background_requested(&background_args)
-                && name != "call_subagent"
-            {
-                if let Some((mcp_server, actual_tool_name)) = mcp_tool_map.get(name) {
-                    let mut mcp_args = background_args.clone();
-                    if let Some(object) = mcp_args.as_object_mut() {
-                        object.remove("run_in_background");
-                    }
-                    let label = format!(
-                        "MCP [{}] {} · {}",
-                        mcp_server.name,
-                        actual_tool_name,
-                        serde_json::to_string(&mcp_args)
-                            .unwrap_or_default()
-                            .chars()
-                            .take(100)
-                            .collect::<String>()
-                    );
-                    match start_background_mcp_call(
-                        &app,
-                        &session_id,
-                        mcp_server.clone(),
-                        actual_tool_name.clone(),
-                        name,
-                        mcp_args,
-                        &label,
-                    ) {
-                        Ok(placeholder) => placeholder,
-                        Err(err) => format!("Error: {err}"),
-                    }
-                } else if background_supported(name, &background_args) {
-                    let mut bg_args = background_args.clone();
-                    if let Some(object) = bg_args.as_object_mut() {
-                        // The real tool must never see the routing flag.
-                        object.remove("run_in_background");
-                    }
-                    let label = background_label(name, &bg_args);
-                    let workspace_dir = state.workspace_dir.lock().unwrap().clone();
-                    match start_background_tool_call(
-                        &app,
-                        &session_id,
-                        name,
-                        bg_args,
-                        &label,
-                        workspace_dir,
-                        &config,
-                        &skill_allowed_commands,
-                        skill_evolution_root.clone(),
-                        &active_skill_dirs,
-                    ) {
-                        Ok(placeholder) => placeholder,
-                        Err(err) => format!("Error: {err}"),
-                    }
+            let concurrent = matches!(
+                tools::batch::call_mode(name, &parsed, mcp_tool_map.contains_key(name.as_str())),
+                tools::batch::CallMode::Concurrent
+            );
+            planned.push(PlannedCall {
+                id: id.clone(),
+                name: name.clone(),
+                args: args.clone(),
+                parsed,
+                blocked,
+                concurrent,
+            });
+        }
+
+        // ── Execute ──────────────────────────────────────────────────────────
+        // Neighbouring concurrent calls share one segment and run at the same
+        // time (`max_parallel_tools`, default 4). A barrier — `use_skill`, a
+        // mutating `file_actions`, `memory`, `todos`, a timer, mission state —
+        // is a one-element segment and therefore runs alone, in order, exactly
+        // like the whole round did before batching. Results are written back
+        // by index, so the `tool` messages below keep the order the model
+        // emitted whatever order the calls finished in.
+        let mut results: Vec<Option<String>> = vec![None; planned.len()];
+        let max_parallel = if config.parallel_tools {
+            config
+                .max_parallel_tools
+                .clamp(1, crate::MAX_PARALLEL_TOOLS) as usize
+        } else {
+            1
+        };
+        let modes: Vec<tools::batch::CallMode> = planned
+            .iter()
+            .map(|call| {
+                if call.concurrent {
+                    tools::batch::CallMode::Concurrent
                 } else {
-                    format!(
-                        "Error: `run_in_background` is not supported by the tool '{name}'. \
-                         Use it only with `run_cmd`, `run_shell` (run_type \"direct\"), \
-                         `file_actions` action \"search\", MCP tools and `call_subagent`."
-                    )
+                    tools::batch::CallMode::Barrier
                 }
-            } else if name == "use_skill" {
-                let args_json: Value = serde_json::from_str(args).unwrap_or_default();
-                let skill_name = args_json["skill_name"].as_str().unwrap_or("");
-                let ws_skills_dir = crate::workspace::skills_root(&workspace_dir_for_roots);
+            })
+            .collect();
+        let segments = tools::batch::plan_segments(&modes);
+        let workspace_dir = state.workspace_dir.lock().unwrap().clone();
 
-                if let Ok(resolved_skill) =
-                    skills::resolve_skill_by_name(&ws_skills_dir, skill_name)
-                {
-                    let skill = resolved_skill.skill;
-                    let dyn_marker = format!("--- Skill (Dynamically Loaded): {} ---", skill.name);
+        for segment in segments {
+            if turn_cancelled.load(Ordering::SeqCst) {
+                break;
+            }
+            let runnable: Vec<usize> = segment
+                .clone()
+                .filter(|&index| planned[index].blocked.is_none())
+                .collect();
+            if runnable.is_empty() {
+                continue;
+            }
 
-                    // Explicit "already loaded" state: recorded by earlier turns
-                    // (`loaded_skills` on the message history) or loaded earlier
-                    // in this same turn.
-                    let already_loaded = activated_skills.contains(&skill.name)
-                        || loaded_this_turn.contains(&skill.name);
-
-                    if !already_loaded {
-                        loaded_this_turn.insert(skill.name.clone());
-                        merge_allowed_commands(
+            // One call at a time: a barrier, a single-call segment, or a user
+            // who set the concurrency to 1 (fully sequential).
+            if runnable.len() == 1 || max_parallel == 1 {
+                for &index in &runnable {
+                    let call = &planned[index];
+                    let result = if call.name == "use_skill" {
+                        let (text, context) = load_skill_for_call(
+                            &app,
+                            &session_id,
+                            &workspace_dir_for_roots,
+                            &call.id,
+                            &call.parsed,
+                            &activated_skills,
+                            &mut loaded_this_turn,
                             &mut skill_allowed_commands,
-                            &skill.allowed_commands,
+                            &mut active_skill_dirs,
                         );
-                        // Track skill dir for skill_read tool injection
-                        if !active_skill_dirs.iter().any(|(n, _)| n == &skill.name) {
-                            active_skill_dirs
-                                .push((skill.name.clone(), resolved_skill.skill_dir.clone()));
+                        if let Some(context) = context {
+                            pending_skill_context_messages.push(context);
                         }
-                        let cmd_constraint = if skill.allowed_commands.is_empty() {
-                            String::new()
-                        } else {
-                            format!(
-                                "\n[Allowed commands for this skill: {}]\n",
-                                skill.allowed_commands.join(", ")
-                            )
-                        };
-                        let skill_context = format!(
-                            "INTERNAL CONTEXT - DYNAMICALLY LOADED SKILL (not a user request):\n\
-{}\n[Skill root: {}]\n[Skill file: {}]\n{}{}",
-                            dyn_marker,
-                            resolved_skill.skill_dir.display(),
-                            resolved_skill.skill_file.display(),
-                            cmd_constraint,
-                            skill.system_prompt
-                        );
-                        pending_skill_context_messages.push(json!({
-                            "role": "user",
-                            "content": skill_context
-                        }));
-                        // Structured state event: the UI records this on the
-                        // assistant message and sends it back as
-                        // `loaded_skills` on the next turn, so a skill is
-                        // loaded at most once per session. `session_id` routes
-                        // the event: a winding-down turn must not record its
-                        // skill inside another chat.
-                        let _ = app.emit(
-                            "skill-loaded",
-                            json!({ "session_id": session_id, "skill_name": skill.name }),
-                        );
-                        format!(
-                            "Skill '{}' loaded. Follow its instructions to fulfill the request.",
-                            skill_name
+                        text
+                    } else {
+                        run_tool_call(
+                            &app,
+                            state.inner(),
+                            &config,
+                            &session_id,
+                            &workspace_dir,
+                            ToolCall {
+                                id: &call.id,
+                                name: &call.name,
+                                args: &call.args,
+                                parsed: &call.parsed,
+                            },
+                            &skill_allowed_commands,
+                            skill_evolution_root.as_deref(),
+                            &active_skill_dirs,
+                            &mcp_tool_map,
+                            &enabled_agents,
+                            subagents_enabled,
+                            &turn_cancelled,
                         )
-                    } else {
-                        format!("Skill '{}' already loaded.", skill_name)
-                    }
-                } else {
-                    format!("Error: Skill '{}' not found.", skill_name)
-                }
-            } else if name == "call_subagent" {
-                let args_json: Value = serde_json::from_str(args).unwrap_or_default();
-                let agent_id = args_json["agent_id"].as_str().unwrap_or("");
-                let task_desc = args_json["task_description"].as_str().unwrap_or("");
-                let task_context = args_json["context"].as_str().unwrap_or("");
-
-                if !subagents_enabled {
-                    "Error: sub-agent delegation is disabled. Enable the sub-agent system (`use_agents`) in the Agents panel to use `call_subagent`.".to_string()
-                } else if let Some(agent) = enabled_agents.iter().find(|a| a.id == agent_id) {
-                    let task = agents::Task {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        agent_id: agent_id.to_string(),
-                        description: task_desc.to_string(),
-                        context: task_context.to_string(),
-                        cwd: agents::normalize_task_cwd(args_json["cwd"].as_str()),
-                        images: agents::sanitize_task_images(
-                            &args_json["images"]
-                                .as_array()
-                                .map(|items| {
-                                    items
-                                        .iter()
-                                        .filter_map(|value| value.as_str())
-                                        .map(str::to_string)
-                                        .collect::<Vec<_>>()
-                                })
-                                .unwrap_or_default(),
-                        ),
-                        params: args_json["params"].as_object().cloned().unwrap_or_default(),
-                        dependencies: vec![],
+                        .await
                     };
-                    let workspace_dir = state.workspace_dir.lock().unwrap().clone();
-                    // Deliverables are exchanged through
-                    // `<workspace>/.data/deliver/<session-id>`. A cloud agent
-                    // cannot write the workspace itself, but the app stores
-                    // the media it generates (image/video) in its task
-                    // directory and reports the saved paths, so it gets a
-                    // directory like `llm` / `cli` agents do.
-                    let exchange = match agents::exchange::ExchangeArea::create(
-                        &workspace_dir,
+                    results[index] = Some(result);
+                }
+                continue;
+            }
+
+            for chunk in runnable.chunks(max_parallel) {
+                let futures = chunk.iter().map(|&index| {
+                    let call = &planned[index];
+                    run_tool_call(
+                        &app,
+                        state.inner(),
+                        &config,
                         &session_id,
-                        std::slice::from_ref(&task.id),
-                    ) {
-                        Ok(area) => Some(area),
-                        Err(err) => {
-                            log_event(
-                                &state,
-                                "WARN",
-                                format!("deliverable exchange area unavailable: {err}"),
-                            );
-                            None
-                        }
-                    };
-                    let url = format!(
-                        "{}/chat/completions",
-                        config.api_base_url.trim_end_matches('/')
-                    );
-                    match build_stream_client() {
-                        Ok(client) => {
-                            if config.background_tools && background_requested(&background_args) {
-                                let agent = agent.clone();
-                                let app_for_task = app.clone();
-                                let session_for_task = session_id.clone();
-                                let config_for_task = config.clone();
-                                let skill_root_for_task = skill_evolution_root.clone();
-                                let exchange_for_task = exchange.clone();
-                                let label = format!(
-                                    "{} · {}",
-                                    agent.name,
-                                    task_desc.chars().take(100).collect::<String>()
-                                );
-                                let preview: String =
-                                    args_json.to_string().chars().take(300).collect();
-                                start_background_task(
-                                    &app,
-                                    &session_id,
-                                    "call_subagent",
-                                    &label,
-                                    &preview,
-                                    move |cancel| async move {
-                                        let res = agents::run_sub_agent(
-                                            &app_for_task,
-                                            &client,
-                                            &url,
-                                            &config_for_task,
-                                            &session_for_task,
-                                            &agent,
-                                            &task,
-                                            workspace_dir,
-                                            exchange_for_task.as_ref(),
-                                            skill_root_for_task,
-                                            cancel,
-                                            None,
-                                        )
-                                        .await;
-                                        format_subagent_delivery(&res, exchange_for_task.as_ref())
-                                    },
-                                )
-                                .unwrap_or_else(|err| format!("Error: {err}"))
-                            } else {
-                                let res = agents::run_sub_agent(
-                                    &app,
-                                    &client,
-                                    &url,
-                                    &config,
-                                    &session_id,
-                                    agent,
-                                    &task,
-                                    workspace_dir,
-                                    exchange.as_ref(),
-                                    skill_evolution_root.clone(),
-                                    turn_cancelled.clone(),
-                                    None,
-                                )
-                                .await;
-
-                                format_subagent_delivery(&res, exchange.as_ref())
-                            }
-                        }
-                        Err(err) => format!("Error: {err}"),
-                    }
-                } else {
-                    format!(
-                        "Error: Agent with ID '{}' not found or not enabled.",
-                        agent_id
+                        &workspace_dir,
+                        ToolCall {
+                            id: &call.id,
+                            name: &call.name,
+                            args: &call.args,
+                            parsed: &call.parsed,
+                        },
+                        &skill_allowed_commands,
+                        skill_evolution_root.as_deref(),
+                        &active_skill_dirs,
+                        &mcp_tool_map,
+                        &enabled_agents,
+                        subagents_enabled,
+                        &turn_cancelled,
                     )
+                });
+                let finished = futures_util::future::join_all(futures).await;
+                for (index, result) in chunk.iter().zip(finished) {
+                    results[*index] = Some(result);
                 }
-            } else if let Some((mcp_server, actual_tool_name)) = mcp_tool_map.get(name) {
-                let mut args_json: Value = serde_json::from_str(args).unwrap_or_default();
-                // The background routing flag is ours, never the server's.
-                if let Some(object) = args_json.as_object_mut() {
-                    object.remove("run_in_background");
-                }
-                // MCP tools are NOT sandboxed — path arguments are forwarded
-                // verbatim to the MCP server. The server itself decides what
-                // paths it can access.
-                log_event(
-                    &state,
-                    "INFO",
-                    format!("Args for MCP tool '{}': {}", actual_tool_name, args_json),
-                );
-                let _ = app.emit(
-                    "tool-call",
-                    format!(
-                        "🔌 *MCP [{}]: {}*\n\n{}",
-                        mcp_server.name,
-                        actual_tool_name,
-                        tool_args_block(&args_json)
-                    ),
-                );
-                let start_time = std::time::Instant::now();
-                let mcp_result =
-                    mcp::invoke_mcp_tool(&state, mcp_server, actual_tool_name, args_json.clone())
-                        .await;
-                let duration_ms = start_time.elapsed().as_millis() as i64;
-                let result = match &mcp_result {
-                    Ok(result) => {
-                        // Log successful MCP call
-                        let db = state.db.lock().unwrap();
-                        log_interaction(
-                            &db,
-                            &session_id,
-                            "mcp_response",
-                            &mcp_server.name,
-                            actual_tool_name,
-                            serde_json::to_string(&args_json).unwrap_or_default(),
-                            result.clone(),
-                            None,
-                            duration_ms,
-                            None,
-                        );
-                        result.clone()
-                    }
-                    Err(e) => {
-                        // Log MCP error
-                        let db = state.db.lock().unwrap();
-                        log_interaction(
-                            &db,
-                            &session_id,
-                            "mcp_call",
-                            &mcp_server.name,
-                            actual_tool_name,
-                            serde_json::to_string(&args_json).unwrap_or_default(),
-                            String::new(),
-                            Some(e.clone()),
-                            duration_ms,
-                            None,
-                        );
-                        format!("MCP tool error: {e}")
-                    }
-                };
-                result
-            } else {
-                let workspace_dir = state.workspace_dir.lock().unwrap().clone();
-                let start_time = std::time::Instant::now();
-                let tool_result = tools::execute_tool(
-                    &app,
-                    name,
-                    args,
-                    workspace_dir,
-                    &config,
-                    &skill_allowed_commands,
-                    skill_evolution_root.as_deref(),
-                    None,
-                    Some(&session_id),
-                    &active_skill_dirs,
-                    None,
-                    None,
-                )
-                .await;
-                let duration_ms = start_time.elapsed().as_millis() as i64;
+            }
+        }
 
-                // Log tool execution
-                let db = state.db.lock().unwrap();
-                let is_error = turn_guard::tool_output_is_error(&tool_result);
-                log_interaction(
-                    &db,
-                    &session_id,
-                    if is_error {
-                        "tool_error"
-                    } else {
-                        "tool_output"
-                    },
-                    "tool_executor",
-                    name,
-                    serde_json::to_string(&serde_json::from_str::<Value>(args).unwrap_or_default())
-                        .unwrap_or_default(),
-                    tool_result.clone(),
-                    if is_error {
-                        Some(tool_result.clone())
-                    } else {
-                        None
-                    },
-                    duration_ms,
-                    None,
-                );
-                drop(db);
-                tool_result
+        // ── Settle ───────────────────────────────────────────────────────────
+        // Failure accounting stays in `tool_calls` order and runs after the
+        // whole round finished, so the guard's verdict never depends on which
+        // of two concurrent calls happened to be polled first.
+        for (index, call) in planned.iter().enumerate() {
+            // A blocked call never ran: its notice *is* the result. A call with
+            // neither means the turn was cancelled before it ran — nothing is
+            // sent any more (the loop breaks at the top), and a fabricated
+            // `tool` message would claim work that never happened.
+            let Some(mut result) = results[index].take().or_else(|| call.blocked.clone()) else {
+                break;
             };
 
-            // The call ran: a failed result counts towards the tool's failure
-            // budget, and the failure that crosses the limit is announced to
-            // the model (appended to the very same result) and to the user.
-            if ran {
+            if call.blocked.is_none() {
                 // A cancelled turn's tool results read like failures
                 // ("cancelled by the user"), but the tool did nothing wrong:
                 // see `turn_guard::counts_as_failure`.
@@ -2362,10 +2166,10 @@ only when every item is done, or when you are blocked and need the user.\n\n{wai
                     &result,
                     turn_cancelled.load(Ordering::SeqCst),
                 );
-                if let Some(trip) = guard.record(&session_id, name, failed, failure_limit) {
+                if let Some(trip) = guard.record(&session_id, &call.name, failed, failure_limit) {
                     result.push_str("\n\n");
                     result.push_str(&turn_guard::disabled_notice(
-                        name,
+                        &call.name,
                         trip.failures,
                         failure_limit,
                         true,
@@ -2375,7 +2179,7 @@ only when every item is done, or when you are blocked and need the user.\n\n{wai
                         "WARN",
                         format!(
                             "tool disabled for this session: session_id={}, tool={}, failures={}, limit={}",
-                            session_id, name, trip.failures, failure_limit
+                            session_id, call.name, trip.failures, failure_limit
                         ),
                     );
                     let _ = app.emit(
@@ -2383,18 +2187,34 @@ only when every item is done, or when you are blocked and need the user.\n\n{wai
                         json!({
                             "kind": "tool_disabled",
                             "session_id": session_id,
-                            "tool": name,
+                            "tool": call.name,
                             "failures": trip.failures,
                             "limit": failure_limit,
                         }),
+                    );
+                }
+                // A sub-agent owns its own task row (`agent-task-*`); a generic
+                // tool row next to it would be a second, empty step. A
+                // background-routed call owns one too — the `background-task-state`
+                // row — so it must not gain a settled "🔧 tool" twin.
+                let backgrounded = config.background_tools
+                    && background_requested(&call.parsed)
+                    && call.name != "call_subagent";
+                if !backgrounded && call.name != "call_subagent" {
+                    tools::emit_tool_call_done(
+                        &app,
+                        Some(&session_id),
+                        &call.id,
+                        &call.name,
+                        !failed,
                     );
                 }
             }
 
             all_messages.push(json!({
                 "role": "tool",
-                "tool_call_id": id,
-                "content": result
+                "tool_call_id": &call.id,
+                "content": result,
             }));
         }
 
@@ -2437,6 +2257,90 @@ only when every item is done, or when you are blocked and need the user.\n\n{wai
     drop(injection_window);
     emit_turn_done(&app, &turn_id);
     Ok(())
+}
+
+/// `use_skill` of the main agent: loads one skill for this turn.
+///
+/// It is a barrier in the tool loop, not a concurrent call, because it mutates
+/// the round's own state: the merged allowed-command list, the active skill
+/// directories, the "loaded this turn" set and the skill-context message that
+/// is appended after the round's `tool` messages.
+///
+/// Returns the tool result and, when the skill was newly loaded, the context
+/// message for the model.
+#[allow(clippy::too_many_arguments)]
+fn load_skill_for_call(
+    app: &AppHandle,
+    session_id: &str,
+    workspace_root: &Path,
+    call_id: &str,
+    args: &Value,
+    activated_skills: &[String],
+    loaded_this_turn: &mut std::collections::HashSet<String>,
+    skill_allowed_commands: &mut Vec<String>,
+    active_skill_dirs: &mut Vec<(String, PathBuf)>,
+) -> (String, Option<Value>) {
+    let skill_name = args["skill_name"].as_str().unwrap_or("");
+    let ws_skills_dir = crate::workspace::skills_root(workspace_root);
+
+    let Ok(resolved_skill) = skills::resolve_skill_by_name(&ws_skills_dir, skill_name) else {
+        return (format!("Error: Skill '{}' not found.", skill_name), None);
+    };
+    let skill = resolved_skill.skill;
+    let dyn_marker = format!("--- Skill (Dynamically Loaded): {} ---", skill.name);
+
+    // Explicit "already loaded" state: recorded by earlier turns
+    // (`loaded_skills` on the message history) or loaded earlier in this same
+    // turn.
+    if activated_skills.contains(&skill.name) || loaded_this_turn.contains(&skill.name) {
+        return (format!("Skill '{}' already loaded.", skill_name), None);
+    }
+
+    loaded_this_turn.insert(skill.name.clone());
+    merge_allowed_commands(skill_allowed_commands, &skill.allowed_commands);
+    // Track skill dir for skill_read tool injection
+    if !active_skill_dirs.iter().any(|(n, _)| n == &skill.name) {
+        active_skill_dirs.push((skill.name.clone(), resolved_skill.skill_dir.clone()));
+    }
+    let cmd_constraint = if skill.allowed_commands.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n[Allowed commands for this skill: {}]\n",
+            skill.allowed_commands.join(", ")
+        )
+    };
+    let skill_context = format!(
+        "INTERNAL CONTEXT - DYNAMICALLY LOADED SKILL (not a user request):\n\
+{}\n[Skill root: {}]\n[Skill file: {}]\n{}{}",
+        dyn_marker,
+        resolved_skill.skill_dir.display(),
+        resolved_skill.skill_file.display(),
+        cmd_constraint,
+        skill.system_prompt
+    );
+    // Structured state event: the UI records this on the assistant message and
+    // sends it back as `loaded_skills` on the next turn, so a skill is loaded
+    // at most once per session. `session_id` routes the event: a
+    // winding-down turn must not record its skill inside another chat.
+    // `call_id` ties the row to this call, so a parallel round can settle it
+    // without touching the other running tools.
+    let _ = app.emit(
+        "skill-loaded",
+        json!({
+            "session_id": session_id,
+            "call_id": call_id,
+            "skill_name": skill.name,
+        }),
+    );
+
+    (
+        format!(
+            "Skill '{}' loaded. Follow its instructions to fulfill the request.",
+            skill_name
+        ),
+        Some(json!({ "role": "user", "content": skill_context })),
+    )
 }
 
 /// Turn-end cleanup: stop every serve process and verify that the killed

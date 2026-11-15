@@ -1041,6 +1041,49 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
               <label className="settings-checkbox">
                 <input
                   type="checkbox"
+                  checked={config.parallel_tools ?? true}
+                  onChange={(e) =>
+                    setConfig((prev) => ({
+                      ...prev,
+                      parallel_tools: e.target.checked,
+                    }))
+                  }
+                />
+                <div className="settings-checkbox-copy">
+                  <span>{t("settings.runtime.parallelTools")}</span>
+                  <small>{t("settings.runtime.parallelToolsHint")}</small>
+                </div>
+              </label>
+              {(config.parallel_tools ?? true) && (
+                <label className="settings-field-row settings-field-row-stacked">
+                  <span className="settings-field-label">
+                    {t("settings.runtime.maxParallelTools")}
+                  </span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={8}
+                    step={1}
+                    value={config.max_parallel_tools ?? 4}
+                    onChange={(e) => {
+                      const parsed = parseInt(e.target.value, 10);
+                      setConfig((prev) => ({
+                        ...prev,
+                        max_parallel_tools: Number.isNaN(parsed)
+                          ? 4
+                          : Math.min(8, Math.max(1, parsed)),
+                      }));
+                    }}
+                    placeholder="4"
+                  />
+                  <small className="settings-field-hint">
+                    {t("settings.runtime.maxParallelToolsHint")}
+                  </small>
+                </label>
+              )}
+              <label className="settings-checkbox">
+                <input
+                  type="checkbox"
                   checked={config.sub_agent_main_help ?? true}
                   onChange={(e) =>
                     setConfig((prev) => ({
