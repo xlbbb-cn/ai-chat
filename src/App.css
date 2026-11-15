@@ -119,15 +119,17 @@
   /* Radii — 4px on interactive elements and nothing else. `--r-pill` is
      kept as an alias so the few pill-shaped chips square off with the rest.
      `--r-toast` is the one sanctioned larger radius: the desktop notification
-     card (`notify` window) floats over the *desktop*, not over the app's own
-     4px layout, and reads as the system's own toast surface — it must not
-     share the in-app geometry. */
+     card's outer frame, and it is not chosen freely — it *is* the app's
+     window corner radius. Windows 11 rounds every app window (the main frame
+     included) at 8px through DWM; the card window opts into the same rounding
+     and macOS's vibrancy view is rounded to the same value, so the painted
+     frame, the native backdrop and the window silhouette share one corner. */
   --r-sm: 4px;
   --r-md: 4px;
   --r-lg: 4px;
   --r-xl: 4px;
   --r-pill: 4px;
-  --r-toast: 12px;
+  --r-toast: 8px;
 
   /* Motion — one timing curve for every interactive state change. 180ms sits
      inside the 120–200ms band of the interaction spec, and the curve is a
@@ -3543,9 +3545,12 @@ button.rabbit-hop-bunny:focus-visible {
 
    The tint fill is the card's body (the acrylic / vibrancy backdrop blurs
    what is behind the window; a `backdrop-filter` here would only blur the
-   card's own pixels, of which there are none). The hairline and the 4px
-   radius follow the shared rules; there is no shadow — over a glass backdrop
-   separation comes from the backdrop itself.
+   card's own pixels, of which there are none). The hairline follows the
+   shared rules; the outer radius is `--r-toast` — the app's own window
+   corner radius, which the card window also carries natively (DWM rounding
+   on Windows 11, the vibrancy view's radius on macOS), so the silhouette is
+   rounded by the system and painted with the same corner. There is no
+   shadow — over a glass backdrop separation comes from the backdrop itself.
    ════════════════════════════════════════════════════════════════════════════ */
 .notify-root {
   position: fixed;
@@ -3581,8 +3586,14 @@ button.rabbit-hop-bunny:focus-visible {
 
 /* The card artwork sits on the left. The source image is a wide banner whose
    subject (the rabbit) is left of centre, so the crop window is biased there
-   instead of dead-centre; its radius is one step off the card's, derived the
-   way `--glass-blur-panel` is. */
+   instead of dead-centre. The artwork's edges are feathered — a radial mask
+   melts the photo into the frost instead of ending it in a rectangle. The
+   fade's vertical radius is half the card's length (112px / 2 = 56px, the
+   requested feather radius, reaching past the artwork's own 44px half-height);
+   the horizontal radius is the artwork's half-width, so the sides dissolve
+   exactly at the box, and the transparent stop sits a hair inside the
+   artwork's edge (78% of 56px ≈ its 44px half-height), so no hard step
+   survives on any side. A small opaque core keeps the subject solid. */
 .notify-card-art {
   flex: 0 0 auto;
   width: 64px;
@@ -3590,6 +3601,16 @@ button.rabbit-hop-bunny:focus-visible {
   border-radius: calc(var(--r-toast) - 4px);
   object-fit: cover;
   object-position: 30% 50%;
+  -webkit-mask-image: radial-gradient(
+    ellipse 32px 56px at center,
+    #000 35%,
+    transparent 78%
+  );
+  mask-image: radial-gradient(
+    ellipse 32px 56px at center,
+    #000 35%,
+    transparent 78%
+  );
 }
 
 .notify-card-text {

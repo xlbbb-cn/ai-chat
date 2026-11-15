@@ -123,6 +123,43 @@ pub fn refresh_notify_backdrop(app: AppHandle) -> Option<String> {
     apply_notify_backdrop(&app)
 }
 
+/// Round the card window the way Windows 11 rounds every app window — the
+/// main frame included: `DWMWCP_ROUND` clips the window, and the Acrylic
+/// backdrop it carries, at the system's own corner radius (the `--r-toast`
+/// value in `src/App.css`, which the painted frame also uses). Without it the
+/// frameless card (`shadow: false`, no WS_THICKFRAME) stays square and the
+/// backdrop sheet pokes out past the painted frame's rounded corners. Older
+/// Windows refuses the attribute and changes nothing; the painted `--r-toast`
+/// corner remains.
+#[cfg(target_os = "windows")]
+fn round_window(window: &WebviewWindow) {
+    use windows_sys::Win32::Foundation::HWND;
+    use windows_sys::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+        DWM_WINDOW_CORNER_PREFERENCE,
+    };
+
+    // Tauri's `HWND` may be a different windows-sys revision's type; bridge
+    // through `usize` the same way `work_area_bottom_right` does.
+    let Some(hwnd) = window
+        .hwnd()
+        .ok()
+        .map(|h| h.0 as usize as *mut core::ffi::c_void)
+    else {
+        return;
+    };
+    let hwnd: HWND = hwnd;
+    let preference: DWM_WINDOW_CORNER_PREFERENCE = DWMWCP_ROUND;
+    unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE as u32,
+            &preference as *const DWM_WINDOW_CORNER_PREFERENCE as *const core::ffi::c_void,
+            std::mem::size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
+        );
+    }
+}
+
 /// Apply the frosted-glass backdrop to the notification window (idempotent)
 /// and write the matching attribute into its document.
 ///
@@ -131,6 +168,11 @@ pub fn refresh_notify_backdrop(app: AppHandle) -> Option<String> {
 /// on the spot.
 pub fn apply_notify_backdrop(app: &AppHandle) -> Option<String> {
     let window = app.get_webview_window(NOTIFY_WINDOW)?;
+    // Same silhouette as the main frame: the OS rounds the card window (and
+    // the backdrop sheet it carries) at the app's own window corner radius.
+    // Idempotent, so it is safe to repeat on every backdrop refresh.
+    #[cfg(target_os = "windows")]
+    round_window(&window);
     #[allow(unused_mut)]
     let (mut level, dark) = {
         let state = app.try_state::<crate::AppState>()?;
@@ -157,9 +199,10 @@ pub fn apply_notify_backdrop(app: &AppHandle) -> Option<String> {
             &window,
             NSVisualEffectMaterial::Popover,
             Some(NSVisualEffectState::FollowsWindowActiveState),
-            // Matches `--r-toast`, so the native view's rounded corner is the
-            // painted card's rounded corner.
-            Some(12.0),
+            // Matches `--r-toast` — the app's window corner radius, which the
+            // painted card uses too, so the material's corner is the painted
+            // corner.
+            Some(8.0),
         )
         .is_ok()
         {
