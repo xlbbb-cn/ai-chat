@@ -32,3 +32,8 @@ docs/store/screenshots/
 
 # 架构图由 docs/gen.py 生成到 docs/site/architecture.html（部署时 CI 现生成）；不要提交这个副本
 docs/site/architecture.html
+
+# Wiki 页面由 scripts/gen-wiki.mjs 从 docs/wiki/ 生成（部署时 CI 现生成）；不要提交产物
+docs/site/wiki/
+# 同理：仓库里的 docs/banner.png 会被复制成站点资产
+docs/site/assets/banner.png

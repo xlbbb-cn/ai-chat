@@ -1,0 +1,162 @@
+{
+  "docsVersion": "3.3.3",
+  "repo": "xlbbb-cn/ai-chat",
+  "groups": [
+    {
+      "id": "start",
+      "en": "Get started",
+      "zh": "入门",
+      "pages": ["index", "quick-start", "installation-and-build"]
+    },
+    {
+      "id": "core",
+      "en": "Core features",
+      "zh": "核心能力",
+      "pages": [
+        "interface-and-chat",
+        "sessions-and-history",
+        "workspace-and-data",
+        "skills",
+        "tools-overview",
+        "files-and-commands",
+        "memory-todos-and-timers",
+        "mcp-servers",
+        "sub-agents"
+      ]
+    },
+    {
+      "id": "ops",
+      "en": "Operations",
+      "zh": "运维与边界",
+      "pages": [
+        "prompts-and-context",
+        "configuration-and-backup",
+        "monitoring-and-logs",
+        "updates",
+        "security-and-boundaries"
+      ]
+    },
+    {
+      "id": "dev",
+      "en": "Developer",
+      "zh": "开发者",
+      "pages": ["development-and-architecture", "faq"]
+    }
+  ],
+  "pages": {
+    "index": {
+      "en": "Home",
+      "zh": "首页",
+      "wiki": "Home",
+      "aliases": ["Home", "简体中文", "English", "首页"]
+    },
+    "quick-start": {
+      "en": "Quick Start",
+      "zh": "快速开始",
+      "wiki": "Quick-Start",
+      "aliases": ["Quick-Start", "快速开始"]
+    },
+    "installation-and-build": {
+      "en": "Installation and Build",
+      "zh": "安装与构建",
+      "wiki": "Installation-and-Build",
+      "aliases": ["Installation-and-Build", "安装与构建"]
+    },
+    "interface-and-chat": {
+      "en": "Interface and Chat",
+      "zh": "界面与聊天",
+      "wiki": "Interface-and-Chat",
+      "aliases": ["Interface-and-Chat", "界面与聊天"]
+    },
+    "sessions-and-history": {
+      "en": "Sessions and History",
+      "zh": "会话与历史",
+      "wiki": "Sessions-and-History",
+      "aliases": ["Sessions-and-History", "会话与历史"]
+    },
+    "workspace-and-data": {
+      "en": "Workspace and Data",
+      "zh": "工作区与数据",
+      "wiki": "Workspace-and-Data",
+      "aliases": ["Workspace-and-Data", "工作区与本地数据", "工作区与数据"]
+    },
+    "skills": {
+      "en": "Skills",
+      "zh": "技能",
+      "wiki": "Skills",
+      "aliases": ["Skills", "技能"]
+    },
+    "tools-overview": {
+      "en": "Tools Overview",
+      "zh": "工具总览",
+      "wiki": "Tools-Overview",
+      "aliases": ["Tools-Overview", "工具总览"]
+    },
+    "files-and-commands": {
+      "en": "Files and Commands",
+      "zh": "文件与命令",
+      "wiki": "Files-and-Commands",
+      "aliases": ["Files-and-Commands", "文件与命令"]
+    },
+    "memory-todos-and-timers": {
+      "en": "Memory, Todos and Timers",
+      "zh": "记忆、待办与定时器",
+      "wiki": "Memory-Todos-and-Timers",
+      "aliases": ["Memory-Todos-and-Timers", "记忆待办与定时器", "记忆、待办与定时器"]
+    },
+    "mcp-servers": {
+      "en": "MCP Servers",
+      "zh": "MCP 服务器",
+      "wiki": "MCP-Servers",
+      "aliases": ["MCP-Servers", "MCP服务器", "MCP 服务器"]
+    },
+    "sub-agents": {
+      "en": "Sub-Agents",
+      "zh": "子智能体",
+      "wiki": "Sub-Agents",
+      "aliases": ["Sub-Agents", "子智能体", "Sub-Agent"]
+    },
+    "prompts-and-context": {
+      "en": "Prompts and Context",
+      "zh": "提示词与上下文",
+      "wiki": "Prompts-and-Context",
+      "aliases": ["Prompts-and-Context", "提示词与上下文"]
+    },
+    "configuration-and-backup": {
+      "en": "Configuration and Backup",
+      "zh": "配置与备份",
+      "wiki": "Configuration-and-Backup",
+      "aliases": ["Configuration-and-Backup", "配置与备份"]
+    },
+    "monitoring-and-logs": {
+      "en": "Monitoring and Logs",
+      "zh": "监控与日志",
+      "wiki": "Monitoring-and-Logs",
+      "aliases": ["Monitoring-and-Logs", "监控与日志"]
+    },
+    "updates": {
+      "en": "Updates",
+      "zh": "更新",
+      "wiki": "Updates",
+      "aliases": ["Updates", "更新"]
+    },
+    "security-and-boundaries": {
+      "en": "Security and Boundaries",
+      "zh": "安全与边界",
+      "wiki": "Security-and-Boundaries",
+      "aliases": ["Security-and-Boundaries", "安全与边界"]
+    },
+    "development-and-architecture": {
+      "en": "Development and Architecture",
+      "zh": "开发与架构",
+      "wiki": "Development-and-Architecture",
+      "aliases": ["Development-and-Architecture", "开发与架构"]
+    },
+    "faq": {
+      "en": "FAQ",
+      "zh": "常见问题",
+      "wiki": "FAQ",
+      "aliases": ["FAQ", "常见问题"]
+    }
+  }
+}

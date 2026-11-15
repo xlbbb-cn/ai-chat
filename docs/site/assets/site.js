@@ -126,7 +126,8 @@
 
     'docs.kicker': 'Documentation',
     'docs.title': 'From install to sub-agents, it is written down.',
-    'docs.lede': 'The Wiki carries the full bilingual guide; the architecture page, README and release notes live in the repository.',
+    'docs.lede': 'The full bilingual guide lives on this site; the architecture page, README and release notes live in the repository.',
+    'docs.wiki': 'Docs',
     'docs.wikiNote': 'Install, models, workspace, skills, tools, MCP, sub-agents and FAQ',
     'docs.arch': 'Architecture',
     'docs.archNote': 'Layers, the request pipeline inside one turn, and sub-agent orchestration',
@@ -166,6 +167,7 @@
     'footer.licenseLink': 'License',
     'footer.privacy': 'Privacy policy',
     'footer.issues': 'Issues',
+    'footer.docs': 'Docs',
     'footer.label': 'Footer',
     'footer.note': 'This page loads no third-party scripts or trackers.'
   };

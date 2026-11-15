@@ -110,7 +110,8 @@ install an unsigned package). Runbook, submission fields and policy mapping: `do
 ## Website (GitHub Pages)
 
 `docs/site/` is a dependency-free static landing page, deployed by `.github/workflows/pages.yml`
-(`push` to `main` touching `docs/site/**` or `docs/gen.py`, or `workflow_dispatch`).
+(`push` to `main` touching `docs/site/**`, `docs/wiki/**`, `docs/gen.py` or
+`scripts/gen-wiki.mjs`, or `workflow_dispatch`).
 Live URL: `https://xlbbb-cn.github.io/ai-chat/` — the repository needs Pages set to
 **Source: GitHub Actions** once (Settings → Pages). Only this one folder is published; the rest of
 `docs/` (`gen.py`, `store/…`, `banner.png`) stays repository-only.
@@ -139,15 +140,25 @@ Live URL: `https://xlbbb-cn.github.io/ai-chat/` — the repository needs Pages s
   public URL for the Privacy policy required by the Store; its source of truth is
   `docs/store/privacy-policy.md`. Edit both together.
 
-- **The wiki is a separate repo.** `git@github.com:xlbbb-cn/ai-chat.wiki.git` (HTTPS to github.com is
-  reset in some environments, SSH works; the main repo uses SSH too). Pages come in EN/zh pairs —
-  `Quick-Start.md` ↔ `快速开始.md` — plus shared `_Sidebar.md` / `_Footer.md`. Pushing to `master`
-  publishes instantly, so clone into `.data/tmp/`, review, then push.
+- **The docs live in the repo; the site renders them.** `docs/wiki/nav.json` is the page manifest
+  (19 pages, groups, en/zh titles, original Wiki page names as link aliases) and the prose sits in
+  `docs/wiki/en/<slug>.md` + `docs/wiki/zh/<slug>.md`. `node scripts/gen-wiki.mjs` renders them to
+  `docs/site/wiki/**.html` — zh at the root, en under `/en/` — rewriting Wiki-style `(Page-Name)`
+  links to site slugs and generating the sidebar, page TOC, pager and language switch. It fails
+  loudly on a missing source file, a dead link or a dead anchor, and `pages.yml` runs it before
+  `upload-pages-artifact`; the output is build product and gitignored (`docs/site/wiki/`), so never
+  edit it by hand.
+- **The GitHub Wiki is a published copy, not a source.** Change `docs/wiki/` first, then push the
+  same prose to `git@github.com:xlbbb-cn/ai-chat.wiki.git` if the Wiki should stay in sync (HTTPS to
+  github.com is reset in some environments, SSH works; the main repo uses SSH too). The old Wiki only
+  ever translated its Home page into 简体中文 — its other Chinese links were never written — so the
+  repo's `zh/` tree is the complete translation and the site is the authoritative bilingual copy.
 
 Preview locally (any static server; the folder has no build step):
 
 ```powershell
 python docs/gen.py                 # writes docs/site/architecture.html
+node scripts/gen-wiki.mjs          # writes docs/site/wiki/**.html from docs/wiki/
 node .data/tmp/serve.cjs 8765 .   # then open http://127.0.0.1:8765/docs/site/
 ```
 
@@ -384,13 +395,17 @@ src-tauri/
   Cargo.toml
 
 scripts/sync-version.cjs   # 3-way version sync (pkg / cargo / tauri.conf)
+scripts/gen-wiki.mjs       # docs/wiki/*.md → docs/site/wiki/**.html (+ link/anchor check)
 
 docs/                      # docs/ itself is not published; only docs/site/ is
   site/                    # GitHub Pages landing page — plain HTML/CSS/JS, no build step
     index.html             #   single page; zh-CN markup + EN dictionary in assets/site.js
     assets/site.css        #   tokens mirrored from src/App.css (DESIGN.md contract)
     assets/site.js         #   theme, language, OS detection, copy buttons
+    assets/wiki.css        #   doc pages: layout + prose; colours come from landing.css tokens
+    wiki/                  #   generated doc pages (gitignored): zh at root, en under /en/
     404.html               #   Pages 404 (self-contained, absolute /ai-chat/ links)
+  wiki/                    # docs source of truth: nav.json + en/<slug>.md + zh/<slug>.md
   gen.py                   # generates site/architecture.html (layers / one turn / sub-agents)
   store/                   # Microsoft Store runbook, privacy policy, certification notes
 ```

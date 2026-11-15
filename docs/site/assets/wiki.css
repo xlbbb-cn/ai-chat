@@ -1,0 +1,461 @@
+/* Rabbit Chat Studio — 文档页（/wiki/**）。
+   视觉语言继承 landing.css：颜色全部取那里的 token（--ink/--body/--blue/--line…），
+   这里只负责文档排版、侧栏、目录和上下篇；不引入任何新的字面色值。 */
+
+/* ---------- 布局 ---------- */
+
+.container.wiki-shell {
+  width: min(1340px, calc(100% - 48px));
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr) 210px;
+  gap: 44px;
+  align-items: start;
+  padding: 34px 0 72px;
+}
+
+.wiki-side {
+  position: sticky;
+  top: 86px;
+  max-height: calc(100vh - 110px);
+  overflow: auto;
+  scrollbar-width: thin;
+}
+
+.wiki-main {
+  min-width: 0;
+  max-width: 860px;
+}
+
+.wiki-toc {
+  position: sticky;
+  top: 86px;
+  max-height: calc(100vh - 110px);
+  overflow: auto;
+  padding-left: 14px;
+  border-left: 1px solid var(--line);
+}
+
+.wiki-side-box {
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: var(--shadow-sm);
+  padding: 16px 14px 18px;
+}
+
+.wiki-side-box > summary {
+  display: none;
+}
+
+/* ---------- 侧栏 ---------- */
+
+.wiki-group + .wiki-group {
+  margin-top: 18px;
+}
+
+.wiki-group-title {
+  margin: 0 0 7px;
+  padding-left: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.wiki-group ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wiki-group a {
+  display: block;
+  padding: 6px 9px;
+  border-radius: 9px;
+  border-left: 2px solid transparent;
+  color: var(--nav-text);
+  font-size: 13.5px;
+  line-height: 1.4;
+  text-decoration: none;
+  transition: background var(--t) var(--ease), color var(--t) var(--ease),
+    border-color var(--t) var(--ease);
+}
+
+.wiki-group a:hover {
+  background: var(--row-hover);
+  color: var(--blue);
+}
+
+.wiki-group a.is-active {
+  background: var(--hl-bg);
+  border-left-color: var(--blue);
+  color: var(--blue-text);
+  font-weight: 600;
+}
+
+/* ---------- 页头 ---------- */
+
+.wiki-crumb {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.wiki-crumb a {
+  color: var(--blue-text);
+  text-decoration: none;
+}
+
+.wiki-main > h1 {
+  margin: 0 0 22px;
+  font-size: clamp(26px, 3.2vw, 34px);
+  line-height: 1.2;
+  letter-spacing: -.01em;
+  color: var(--ink);
+}
+
+.wiki-notice {
+  margin: 0 0 22px;
+  padding: 11px 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--blue);
+  border-radius: 10px;
+  background: var(--hl-bg);
+  font-size: 13.5px;
+  color: var(--ink-2);
+}
+
+.wiki-notice a {
+  color: var(--blue-text);
+}
+
+/* ---------- 正文 ---------- */
+
+.prose {
+  font-size: 15px;
+  line-height: 1.78;
+  color: var(--body);
+}
+
+.prose > *:first-child {
+  margin-top: 0;
+}
+
+.prose h2 {
+  margin: 40px 0 14px;
+  padding-top: 26px;
+  border-top: 1px solid var(--line);
+  font-size: 21px;
+  line-height: 1.35;
+  color: var(--ink);
+  scroll-margin-top: 90px;
+}
+
+.prose h3 {
+  margin: 28px 0 10px;
+  font-size: 16.5px;
+  color: var(--ink-2);
+  scroll-margin-top: 90px;
+}
+
+.prose h4 {
+  margin: 22px 0 8px;
+  font-size: 14.5px;
+  color: var(--ink-2);
+}
+
+.prose h2 + h3 {
+  margin-top: 18px;
+}
+
+.prose p {
+  margin: 0 0 14px;
+}
+
+.prose a {
+  color: var(--blue-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: var(--line);
+}
+
+.prose a:hover {
+  text-decoration-color: var(--blue);
+}
+
+.prose strong {
+  color: var(--ink-2);
+}
+
+.prose ul,
+.prose ol {
+  margin: 0 0 14px;
+  padding-left: 22px;
+}
+
+.prose li {
+  margin: 5px 0;
+}
+
+.prose li > ul,
+.prose li > ol {
+  margin: 5px 0;
+}
+
+.prose code {
+  padding: 1.5px 5px;
+  border-radius: 5px;
+  background: var(--hl-bg);
+  font-family: var(--mono);
+  font-size: .88em;
+  color: var(--ink-2);
+}
+
+.prose pre {
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card-bg);
+  overflow: auto;
+  box-shadow: var(--shadow-sm);
+}
+
+.prose pre code {
+  padding: 0;
+  background: none;
+  font-size: 12.8px;
+  line-height: 1.62;
+  color: var(--ink-2);
+  white-space: pre;
+}
+
+.prose blockquote {
+  margin: 0 0 16px;
+  padding: 10px 16px;
+  border-left: 3px solid var(--blue);
+  border-radius: 0 10px 10px 0;
+  background: var(--hl-bg);
+  color: var(--ink-2);
+}
+
+.prose blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+.prose table {
+  display: block;
+  width: 100%;
+  margin: 0 0 18px;
+  border-collapse: collapse;
+  overflow-x: auto;
+  font-size: 13.5px;
+}
+
+.prose thead th {
+  background: var(--thead-bg);
+  color: var(--ink-2);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.prose th,
+.prose td {
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.prose tbody tr:nth-child(even) {
+  background: var(--table-bg);
+}
+
+.prose img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 12px;
+}
+
+.prose hr {
+  margin: 30px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.prose sub {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+/* ---------- 目录 ---------- */
+
+.wiki-toc-title {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.wiki-toc ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12.8px;
+  line-height: 1.45;
+}
+
+.wiki-toc li {
+  margin: 0 0 6px;
+}
+
+.wiki-toc li.lvl-3 {
+  padding-left: 12px;
+}
+
+.wiki-toc a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.wiki-toc a:hover {
+  color: var(--blue-text);
+}
+
+/* ---------- 上下篇与页脚 ---------- */
+
+.wiki-pager {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin: 40px 0 0;
+}
+
+.wiki-pager a {
+  display: block;
+  padding: 13px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card-bg);
+  text-decoration: none;
+  transition: border-color var(--t) var(--ease), transform var(--t) var(--ease);
+}
+
+.wiki-pager a:hover {
+  border-color: var(--line-4);
+  transform: translateY(-1px);
+}
+
+.wiki-pager span {
+  display: block;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.wiki-pager strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.wiki-next {
+  text-align: right;
+}
+
+.wiki-foot {
+  margin: 26px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.wiki-foot a {
+  color: var(--blue-text);
+}
+
+.wiki-page .lang-button {
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+/* ---------- 响应式 ---------- */
+
+@media (max-width: 1180px) {
+  .container.wiki-shell {
+    grid-template-columns: 226px minmax(0, 1fr);
+    gap: 34px;
+  }
+
+  .wiki-toc {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .container.wiki-shell {
+    display: block;
+    width: min(100% - 36px, 780px);
+    padding-top: 20px;
+  }
+
+  .wiki-side {
+    position: static;
+    max-height: none;
+    margin-bottom: 22px;
+  }
+
+  .wiki-side-box {
+    padding: 12px 14px;
+  }
+
+  .wiki-side-box > summary {
+    display: block;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink-2);
+  }
+
+  .wiki-side-box:not([open]) {
+    padding-bottom: 12px;
+  }
+
+  .wiki-side-box > summary + .wiki-group {
+    margin-top: 14px;
+  }
+
+  .wiki-main {
+    max-width: none;
+  }
+
+  .prose {
+    font-size: 14.6px;
+  }
+
+  .wiki-pager {
+    grid-template-columns: 1fr;
+  }
+
+  .wiki-next {
+    text-align: left;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wiki-group a,
+  .wiki-pager a {
+    transition: none;
+  }
+
+  .wiki-pager a:hover {
+    transform: none;
+  }
+}

@@ -13,6 +13,8 @@ on:
     paths:
       - 'docs/site/**'
       - 'docs/gen.py'
+      - 'docs/wiki/**'
+      - 'scripts/gen-wiki.mjs'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -39,6 +41,19 @@ jobs:
 
       - name: Generate architecture page
         run: python3 docs/gen.py
+
+      # 文档页由 docs/wiki/ 的 markdown 生成；CI 里只装 markdown-it
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install the wiki generator dependency
+        run: npm ci --omit=dev --ignore-scripts
+
+      - name: Generate wiki pages
+        run: node scripts/gen-wiki.mjs
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
