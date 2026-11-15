@@ -352,8 +352,9 @@ pub async fn check_update(
     state.logger.lock().unwrap().log(
         "info",
         &format!(
-            "update check: current={current_version} latest={latest_version} has_update={has_update} assets={}",
-            assets.len()
+            "update check: current={current_version} latest={latest_version} has_update={has_update} assets={} startup={}ms",
+            assets.len(),
+            crate::startup_elapsed_ms()
         ),
     );
 

@@ -2,8 +2,10 @@
 //!
 //! When a chat turn settles (done or failed) while the main window is
 //! minimized or not focused, the frontend calls [`show_notify_card`]: this
-//! module places the pre-created `notify` window at the bottom-right corner of
-//! the screen, pushes the title / body to its webview and shows it. The card
+//! module creates-or-reuses the `notify` window — prewarmed a few seconds
+//! after startup (`lib.rs`'s setup), created on demand before that — places it
+//! at the bottom-right corner of the screen, pushes the title / body to its
+//! webview and shows it. The card
 //! is the app's own UI (see `notify.html` / `src/notify.tsx` and the
 //! `.notify-*` rules in `src/App.css`), so its frosted-glass card follows the
 //! same tokens and glass levels as the main frame — an OS toast would be
@@ -24,11 +26,25 @@
 //! - its `CloseRequested` is intercepted — the window must survive app-lifetime
 
 use serde::Serialize;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
 pub const NOTIFY_WINDOW: &str = "notify";
 pub const NOTIFY_SHOW_EVENT: &str = "notify-show";
+
+/// The card webview is alive and its listeners are mounted. Flipped by the
+/// mount call of `refresh_notify_backdrop` (notify.tsx always asks for the
+/// backdrop state on mount); an on-demand card waits for it before the first
+/// show, so a freshly created webview never shows blank and never loses the
+/// `notify-show` event.
+static NOTIFY_READY: AtomicBool = AtomicBool::new(false);
+
+/// Serializes "check-then-build" across the two creators (the prewarm task and
+/// an early toast). Without it both can observe the window missing and race
+/// two same-label builds — one losing. The lock is never held across the
+/// mount wait, so it cannot deadlock.
+static NOTIFY_CREATE_LOCK: Mutex<()> = Mutex::new(());
 
 /// Logical size of the card. Must match the `.notify-card` design in
 /// `src/App.css` (fixed on purpose: a toast card does not resize).
@@ -52,20 +68,76 @@ struct NotifyPayload {
     kind: String,
 }
 
+/// Create the notification card window, or return the existing one.
+///
+/// The window used to be declared in `tauri.conf.json`, which paid a full
+/// second webview (renderer process, the 355 KB card artwork, the shared
+/// stylesheet) before the main window's first paint. It is now created by the
+/// prewarm task a few seconds after startup (`lib.rs`'s setup), and on demand
+/// here when a toast arrives earlier than that.
+///
+/// Blocking (WebView2 window creation) — call from `spawn_blocking` or a sync
+/// command thread, never directly inside an async task body.
+pub fn ensure_notify_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    // Poisoning a mutex that only guards creation is harmless — proceed.
+    let _guard = NOTIFY_CREATE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(window) = app.get_webview_window(NOTIFY_WINDOW) {
+        return Ok(window);
+    }
+    tauri::WebviewWindowBuilder::new(
+        app,
+        NOTIFY_WINDOW,
+        tauri::WebviewUrl::App("notify.html".into()),
+    )
+    // Mirrors the previous `notify` entry in `tauri.conf.json` exactly:
+    // hidden, frameless, no shadow, outside the task bar, never activated.
+    // The show path (`window.show()`) relies on this — the user's current
+    // application must keep the foreground.
+    .title("Rabbit Chat Studio")
+    .inner_size(CARD_WIDTH, CARD_HEIGHT)
+    .visible(false)
+    .decorations(false)
+    .shadow(false)
+    .transparent(true)
+    .resizable(false)
+    .maximizable(false)
+    .minimizable(false)
+    .skip_taskbar(true)
+    .focused(false)
+    .always_on_top(true)
+    .build()
+    .map_err(|e| e.to_string())
+}
+
 /// Show the notification card with `title` / `body`.
 ///
 /// `kind` is `"done"` or `"error"` — the card UI colours the title from it
 /// (semantic status only, per DESIGN.md).
 #[tauri::command]
-pub fn show_notify_card(
+pub async fn show_notify_card(
     app: AppHandle,
     title: String,
     body: String,
     kind: String,
 ) -> Result<(), String> {
-    let Some(window) = app.get_webview_window(NOTIFY_WINDOW) else {
-        return Err("notify window is not running".to_string());
-    };
+    // The card may not exist yet: the prewarm task creates it a few seconds
+    // after startup, and an earlier toast creates it here. A freshly created
+    // webview needs its page load before it can render or listen, so the
+    // first use waits for the mount signal (`NOTIFY_READY`, set by the card's
+    // mount call of `refresh_notify_backdrop`) instead of showing a blank
+    // card and losing the event. A card that never answers still shows after
+    // the deadline and is force-hidden 30 s later, as before.
+    let created = app.get_webview_window(NOTIFY_WINDOW).is_none();
+    let app_for_build = app.clone();
+    let window = tauri::async_runtime::spawn_blocking(move || ensure_notify_window(&app_for_build))
+        .await
+        .map_err(|e| format!("notify window task failed: {e}"))??;
+    if created {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !NOTIFY_READY.load(Ordering::SeqCst) && std::time::Instant::now() < deadline {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    }
     if let Err(err) = position_bottom_right(&app, &window) {
         // A stale position is better than no notification; leave the window
         // wherever it was (first run: the config's default position).
@@ -76,8 +148,8 @@ pub fn show_notify_card(
         .map_err(|e| e.to_string())?;
     // The card webview listens for `notify-show` to render; the window itself
     // is only the canvas. `show()` never activates it (tao uses
-    // SW_SHOWNOACTIVATE, and the config carries `focus: false`), so the user's
-    // current application keeps the foreground.
+    // SW_SHOWNOACTIVATE, and the builder carries `focused: false`), so the
+    // user's current application keeps the foreground.
     window.show().map_err(|e| e.to_string())?;
 
     // Insurance against a card webview that never answered (load failure, dev
@@ -120,6 +192,9 @@ pub fn focus_main_from_notify(app: AppHandle, window: WebviewWindow) {
 /// `None` means the card paints its own fallback wash.
 #[tauri::command]
 pub fn refresh_notify_backdrop(app: AppHandle) -> Option<String> {
+    // The mount call doubles as the readiness signal for an on-demand card
+    // (see `show_notify_card`): from here the webview can receive events.
+    NOTIFY_READY.store(true, Ordering::SeqCst);
     apply_notify_backdrop(&app)
 }
 

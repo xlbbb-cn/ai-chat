@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, lazy, Suspense } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -6,15 +6,9 @@ import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrches
 
 import { ChatMessage, ChatMessageBoundary } from "./components/ChatMessage";
 import { ToolCallGroup } from "./components/ToolCallGroup";
-import { SettingsPanel } from "./components/SettingsPanel";
 import { Dropdown } from "./components/Dropdown";
 import { ModelSelect } from "./components/ModelSelect";
-import { SkillsPanel } from "./components/SkillsPanel";
 import { HistoryPanel } from "./components/HistoryPanel";
-import { ToolsPanel } from "./components/ToolsPanel";
-import { McpPanel } from "./components/McpPanel";
-import { AgentsPanel } from "./components/AgentsPanel";
-import { MarkdownPreview } from "./components/MarkdownPreview";
 import { Portal } from "./components/Portal";
 import { TitleBar } from "./components/TitleBar";
 import { ChatNotice } from "./components/ChatNotice";
@@ -23,7 +17,6 @@ import type {
   ChatNoticeState,
   ChatNoticeTone,
 } from "./components/ChatNotice";
-import { UpdatePanel } from "./components/UpdatePanel";
 import { FileMentionPopup } from "./components/FileMentionPopup";
 import { SlashMentionPopup } from "./components/SlashMentionPopup";
 import { AgentMentionPopup } from "./components/AgentMentionPopup";
@@ -98,6 +91,65 @@ import {
 import "./App.css";
 
 type Sidebar = "settings" | "skills" | "history" | "tools" | "mcp" | "agents" | null;
+
+/**
+ * Startup timing: the first `applyConfigToUi` completes the boot's IPC half
+ * (JS parse/execute is the `boot:main-entry` → `boot:app-mount` delta in
+ * `main.tsx`'s mark). One `[startup]` console line reports the deltas, so a
+ * slow launch can be split into webview/JS vs IPC without a profiler.
+ * `applyConfigToUi` also runs on workspace switches and backup restores — the
+ * marks and the report are guarded to the first call only.
+ */
+let startupReported = false;
+
+/** The silent update probe waits this long after mount before it fires. */
+const STARTUP_UPDATE_PROBE_DELAY_MS = 5000;
+
+function reportStartupTiming(): void {
+  if (startupReported) return;
+  startupReported = true;
+  const entry = performance.getEntriesByName("boot:main-entry")[0];
+  const mount = performance.getEntriesByName("boot:app-mount")[0];
+  const config = performance.getEntriesByName("boot:config-loaded")[0];
+  const ms = (mark?: PerformanceEntry) =>
+    mark ? `${Math.round(mark.startTime)}ms` : "n/a";
+  console.info(
+    `[startup] module-entry ${ms(entry)}, app-mount ${ms(mount)}, config-loaded ${ms(config)}`,
+  );
+}
+
+/**
+ * The sidebar panels and the dialogs they live in are opened on demand, so
+ * their chunks load when they are first shown instead of sitting in the eager
+ * bundle the first frame waits on (`mermaid` / `three` / `elk` / `katex` are
+ * already lazy chunks — this applies the same split to the panels).
+ *
+ * `MarkdownPreview` is only the Markdown editor's preview column (titlebar
+ * `⋯` menu). The mention popups stay eager: they must open inside a
+ * keystroke. The fallback is `null` — each container paints its own shell, so
+ * no invented loading UI (DESIGN.md).
+ */
+const SettingsPanel = lazy(() =>
+  import("./components/SettingsPanel").then((m) => ({ default: m.SettingsPanel })),
+);
+const SkillsPanel = lazy(() =>
+  import("./components/SkillsPanel").then((m) => ({ default: m.SkillsPanel })),
+);
+const ToolsPanel = lazy(() =>
+  import("./components/ToolsPanel").then((m) => ({ default: m.ToolsPanel })),
+);
+const McpPanel = lazy(() =>
+  import("./components/McpPanel").then((m) => ({ default: m.McpPanel })),
+);
+const AgentsPanel = lazy(() =>
+  import("./components/AgentsPanel").then((m) => ({ default: m.AgentsPanel })),
+);
+const UpdatePanel = lazy(() =>
+  import("./components/UpdatePanel").then((m) => ({ default: m.UpdatePanel })),
+);
+const MarkdownPreview = lazy(() =>
+  import("./components/MarkdownPreview").then((m) => ({ default: m.MarkdownPreview })),
+);
 
 /**
  * Glyphs shown in the napping face's speech bubble. Kept as plain Unicode so
@@ -938,6 +990,10 @@ export default function App() {
   /** Reload persisted config into the UI, pruning skills that no longer exist. */
   const applyConfigToUi = useCallback(async (): Promise<AppConfig> => {
     const cfg = await getConfig();
+    if (!startupReported) {
+      performance.mark("boot:config-loaded");
+      reportStartupTiming();
+    }
     const catalog = Array.from(new Set([...(cfg.model_catalog ?? []), cfg.model].filter(Boolean)));
     setAvailableModels(catalog.length > 0 ? catalog : ["gpt-4o-mini"]);
     setSelectedModel(cfg.model || "gpt-4o-mini");
@@ -957,20 +1013,28 @@ export default function App() {
 
   // Silent update probe on startup: it never blocks the chat and never surfaces
   // errors — Settings has an explicit "Check for updates" action instead.
+  // Deferred a few seconds: the probe's GitHub round trip can take seconds on
+  // a slow route, and the first moments after mount should not share CPU /
+  // network with it. The timer is cleared on unmount — which in dev
+  // StrictMode also collapses the double-mounted effect into one probe per
+  // launch, so the update check no longer logs twice.
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      try {
-        const cfg = await getConfig();
-        if (cfg.check_updates_on_startup === false) return;
-        const info = await checkUpdate();
-        if (!cancelled && info.has_update) setUpdateInfo(info);
-      } catch (err) {
-        console.error("Update check failed", err);
-      }
-    })();
+    const timer = window.setTimeout(() => {
+      (async () => {
+        try {
+          const cfg = await getConfig();
+          if (cfg.check_updates_on_startup === false) return;
+          const info = await checkUpdate();
+          if (!cancelled && info.has_update) setUpdateInfo(info);
+        } catch (err) {
+          console.error("Update check failed", err);
+        }
+      })();
+    }, STARTUP_UPDATE_PROBE_DELAY_MS);
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
   }, []);
 
@@ -1513,6 +1577,14 @@ export default function App() {
     );
     updateActiveAssistantToolCalls(currentToolCallsRef.current);
   }, [updateActiveAssistantToolCalls, t]);
+
+  // Startup timing anchor: React has mounted and committed. The deltas from
+  // `main.tsx`'s `boot:main-entry` mark are the JS parse/execute + mount
+  // cost; the config mark that follows is the first IPC round trip. StrictMode
+  // re-runs this in dev — `performance.getEntriesByName` keeps the first.
+  useEffect(() => {
+    performance.mark("boot:app-mount");
+  }, []);
 
   useEffect(() => {
     applyConfigToUi()
@@ -4371,9 +4443,11 @@ export default function App() {
                 <div className="markdown-editor-column">
                   <span>{t("app.previewColumn")}</span>
                   <div className="markdown-editor-preview" ref={markdownPreviewRef}>
-                    {markdownDraft.trim()
-                      ? <MarkdownPreview content={markdownDraft} />
-                      : <p className="markdown-editor-preview-empty">{t("app.markdownPreviewEmpty")}</p>}
+                    <Suspense fallback={null}>
+                      {markdownDraft.trim()
+                        ? <MarkdownPreview content={markdownDraft} />
+                        : <p className="markdown-editor-preview-empty">{t("app.markdownPreviewEmpty")}</p>}
+                    </Suspense>
                   </div>
                 </div>
               </div>
@@ -4384,17 +4458,20 @@ export default function App() {
       {/* Update dialog — layered above the chat so a sidebar can stay open */}
       {updatePanelOpen && (
         <Portal>
-          <UpdatePanel
-            initialInfo={updateInfo}
-            onInfo={setUpdateInfo}
-            onClose={() => setUpdatePanelOpen(false)}
-          />
+          <Suspense fallback={null}>
+            <UpdatePanel
+              initialInfo={updateInfo}
+              onInfo={setUpdateInfo}
+              onClose={() => setUpdatePanelOpen(false)}
+            />
+          </Suspense>
         </Portal>
       )}
       {/* Settings — fullscreen page layered above the chat */}
       {sidebar === "settings" && (
         <Portal>
           <div className="settings-overlay">
+            <Suspense fallback={null}>
             <SettingsPanel
               sessionId={sessionId}
               turnActive={streaming}
@@ -4429,6 +4506,7 @@ export default function App() {
                 if (isLocale(cfg.language)) setLocale(cfg.language);
               }}
             />
+            </Suspense>
           </div>
         </Portal>
       )}
@@ -4444,6 +4522,7 @@ export default function App() {
           transition={reducedMotion ? { duration: 0 } : SIDEBAR_SPRING}
         >
           <div className={`sidebar-shell ${sidebar === "settings" ? "panel-settings" : ""} ${sidebar === "skills" ? "panel-skills" : ""} ${sidebar === "history" ? "panel-history" : ""} ${sidebar === "tools" ? "panel-tools" : ""} ${sidebar === "mcp" ? "panel-mcp" : ""} ${sidebar === "agents" ? "panel-agents" : ""}`} key={sidebar}>
+            <Suspense fallback={null}>
             {sidebar === "skills" && (
               <SkillsPanel
                 activeSkillIds={activeSkillIds}
@@ -4533,6 +4612,7 @@ export default function App() {
                 agentStatuses={agentStatuses}
               />
             )}
+            </Suspense>
           </div>
         </motion.aside>
       )}

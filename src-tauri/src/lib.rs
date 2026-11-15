@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::OnceLock;
+use std::time::Instant;
 #[cfg(target_os = "macos")]
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -40,6 +42,17 @@ mod workspace_files;
 
 use logger::{AppLogger, LoggerOutput};
 use tools::{timer, todos};
+
+/// When `run()` entered — the earliest point the process owns. The startup
+/// probes (`Logger initialized`, `Startup: setup finished`, the update check)
+/// report their elapsed milliseconds against it, so a slow launch can be
+/// located from `app.log` alone.
+static STARTED: OnceLock<Instant> = OnceLock::new();
+
+/// Milliseconds since `run()` started, or `0` before it ran.
+pub fn startup_elapsed_ms() -> u128 {
+    STARTED.get().map(|t| t.elapsed().as_millis()).unwrap_or(0)
+}
 
 const OPEN_APP_DATA_DIR_MENU_ID: &str = "open-app-data-dir";
 const OPEN_WORKSPACE_DIR_MENU_ID: &str = "open-workspace-dir";
@@ -1639,6 +1652,7 @@ fn set_window_vibrancy(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let _ = STARTED.set(Instant::now());
     let context = tauri::generate_context!();
 
     // Multi-instance bookkeeping (see `instance.rs`): the first process takes
@@ -1939,7 +1953,10 @@ pub fn run() {
                 config.logger_output.clone(),
                 data_dir.join("app.log"),
             );
-            app_logger.log("INFO", "Logger initialized");
+            app_logger.log(
+                "INFO",
+                &format!("Logger initialized (startup {}ms)", startup_elapsed_ms()),
+            );
             if let Some(language) = adopted_language.as_deref() {
                 app_logger.log(
                     "INFO",
@@ -2096,6 +2113,42 @@ pub fn run() {
                     });
                 }
             }
+
+            // Startup timing marker: everything synchronous in `setup` is done
+            // (state, timers, window title, backdrop). What remains before the
+            // UI is usable is the webview boot itself — measured from here by
+            // the update check's `startup=` figure and the frontend's
+            // `[startup]` console marks.
+            if let Some(state) = app.try_state::<AppState>() {
+                state.logger.lock().unwrap().log(
+                    "INFO",
+                    &format!("Startup: setup finished at {}ms", startup_elapsed_ms()),
+                );
+            }
+
+            // The notification card window is created here instead of
+            // `tauri.conf.json`, a few seconds after startup: its webview
+            // (renderer process + the 355 KB card artwork + the shared
+            // stylesheet) no longer competes with the main window's first
+            // paint. A toast that fires earlier creates it on demand
+            // (`show_notify_card`), so behaviour is unchanged — only the boot
+            // cost moves off the critical path.
+            let notify_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                let _ = tauri::async_runtime::spawn_blocking(move || {
+                    if let Err(err) = notify::ensure_notify_window(&notify_handle) {
+                        if let Some(state) = notify_handle.try_state::<AppState>() {
+                            state
+                                .logger
+                                .lock()
+                                .unwrap()
+                                .log("WARN", &format!("Notify card prewarm failed: {err}"));
+                        }
+                    }
+                })
+                .await;
+            });
 
             Ok(())
         })

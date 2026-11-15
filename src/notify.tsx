@@ -2,9 +2,10 @@
  * The desktop notification card — the `notify` window's whole UI
  * (see `src-tauri/src/notify.rs`).
  *
- * The window is created hidden at startup and shown by
- * `show_notify_card` when a chat turn settles while the user is not
- * looking at the app. This entry renders one card:
+ * The window is created a few seconds after startup (prewarm task in
+ * `lib.rs`'s setup) or on demand by `show_notify_card`, whichever comes
+ * first, and shown by the latter when a chat turn settles while the user is
+ * not looking at the app. This entry renders one card:
  *
  * - left: the card artwork (`notice1.png`), right: title + body
  * - click → `focus_main_from_notify` (main window back, card gone)
