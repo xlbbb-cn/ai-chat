@@ -2119,6 +2119,14 @@ pub fn run() {
                                     .log("WARN", &format!("Multi-instance: {warning}"));
                             }
                         }
+                        // The runtime only exits the event loop once EVERY window is
+                        // destroyed (`tauri-runtime-wry` fires `ExitRequested` on
+                        // `windows.is_empty()`), and the hidden `notify` card window
+                        // survives app-lifetime — so closing the main window alone
+                        // would leave the process running in the background. Quit
+                        // explicitly; the `RunEvent::Exit` hook below runs again and
+                        // both it and the calls above are idempotent.
+                        window.app_handle().exit(0);
                     }
                     // The card belongs to a background moment: the moment the
                     // user looks at the main window again, it is gone.
