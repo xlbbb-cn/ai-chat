@@ -2197,11 +2197,29 @@ pub fn run() {
                         // The runtime only exits the event loop once EVERY window is
                         // destroyed (`tauri-runtime-wry` fires `ExitRequested` on
                         // `windows.is_empty()`), and the hidden `notify` card window
-                        // survives app-lifetime — so closing the main window alone
-                        // would leave the process running in the background. Quit
-                        // explicitly; the `RunEvent::Exit` hook below runs again and
-                        // both it and the calls above are idempotent.
-                        window.app_handle().exit(0);
+                        // survives app-lifetime. So take the card down FIRST — it is
+                        // the only window keeping the loop alive — and let the main
+                        // window close normally: with both gone the runtime exits on
+                        // its own and the `RunEvent::Exit` hook below runs, repeating
+                        // the calls above (all idempotent).
+                        let app = window.app_handle();
+                        // A window beyond the main one and the card would keep the
+                        // loop alive after this close (there is none today, but the
+                        // cost of checking is one map scan). Only trust the natural
+                        // exit when it holds; otherwise quit explicitly.
+                        let has_other_window = app.webview_windows().keys().any(|label| {
+                            let label = label.as_str();
+                            label != "main" && label != notify::NOTIFY_WINDOW
+                        });
+                        // `destroy` bypasses the card's own `CloseRequested`
+                        // interceptor, which exists to stop a stray close from
+                        // tearing the window down mid-session.
+                        if let Some(notify) = app.get_webview_window(notify::NOTIFY_WINDOW) {
+                            let _ = notify.destroy();
+                        }
+                        if has_other_window {
+                            app.exit(0);
+                        }
                     }
                     // The card belongs to a background moment: the moment the
                     // user looks at the main window again, it is gone.

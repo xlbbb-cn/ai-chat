@@ -23,7 +23,10 @@
 //! - it is hidden again by its own 6 s timer (hover pauses it), by a click
 //!   (which also focuses the main window), or when the main window gains
 //!   focus (`Focused(true)` in `lib.rs`'s window event handler)
-//! - its `CloseRequested` is intercepted — the window must survive app-lifetime
+//! - its `CloseRequested` is intercepted, so a stray close only hides it and the
+//!   card survives app-lifetime; the single destroy path is the main window's
+//!   teardown in `lib.rs`, which removes the card first so the runtime's
+//!   `windows.is_empty()` exit can fire on its own
 
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
