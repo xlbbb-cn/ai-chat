@@ -519,6 +519,12 @@ export interface AppConfig {
   check_updates_on_startup?: boolean;
   include_prerelease_updates?: boolean;
   /**
+   * Show a desktop notification card when a chat turn settles (done or
+   * failed) while the window is minimized or not focused. The card is the
+   * app's own `notify` window (notify.rs), never an OS toast. Defaults to on.
+   */
+  notify_when_hidden?: boolean;
+  /**
    * Keep a single running instance: launching the app again focuses the
    * window that is already open instead of starting a second process.
    * Read from `config.json` at process start, so a change applies after the

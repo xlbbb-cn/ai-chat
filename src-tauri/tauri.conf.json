@@ -20,6 +20,23 @@
         "decorations": false,
         "shadow": true,
         "transparent": true
+      },
+      {
+        "label": "notify",
+        "title": "Rabbit Chat Studio",
+        "url": "notify.html",
+        "width": 348,
+        "height": 112,
+        "visible": false,
+        "decorations": false,
+        "shadow": false,
+        "transparent": true,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "skipTaskbar": true,
+        "focus": false,
+        "alwaysOnTop": true
       }
     ],
     "security": {

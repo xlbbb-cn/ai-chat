@@ -1055,6 +1055,22 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
               <label className="settings-checkbox">
                 <input
                   type="checkbox"
+                  checked={config.notify_when_hidden ?? true}
+                  onChange={(e) =>
+                    setConfig((prev) => ({
+                      ...prev,
+                      notify_when_hidden: e.target.checked,
+                    }))
+                  }
+                />
+                <div className="settings-checkbox-copy">
+                  <span>{t("settings.runtime.allowNotifications")}</span>
+                  <small>{t("settings.runtime.allowNotificationsHint")}</small>
+                </div>
+              </label>
+              <label className="settings-checkbox">
+                <input
+                  type="checkbox"
                   checked={config.single_instance ?? true}
                   onChange={(e) =>
                     setConfig((prev) => ({

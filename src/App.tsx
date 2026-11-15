@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } fr
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, listAgentMentions, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, deleteMessagesAfter, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState, setWindowVibrancy, savePastedFile, importWorkspacePaths } from "./api";
+import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, listAgentMentions, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, deleteMessagesAfter, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState, setWindowVibrancy, savePastedFile, importWorkspacePaths, showNotifyCard } from "./api";
 
 import { ChatMessage, ChatMessageBoundary } from "./components/ChatMessage";
 import { ToolCallGroup } from "./components/ToolCallGroup";
@@ -72,8 +72,9 @@ import { activeSlashQuery, scoreSkillOption, toSkillOptions } from "./slashMenti
 import type { SkillMentionOption } from "./slashMention";
 import { activeAgentQuery, hasAgentToken, scoreAgentMention } from "./agentMention";
 import type { AgentMentionOption } from "./agentMention";
-import { isGenerationStopped, isLocale, stripGenerationStopped, useI18n } from "./i18n";
+import { isGenerationStopped, isLocale, stripGenerationStopped, t, useI18n } from "./i18n";
 import { formatCountdown } from "./utils/time";
+import { playSound } from "./utils/sounds";
 import { MARKDOWN_PRINT_CSS } from "./utils/printDocument";
 import { exportHtmlAsPdf } from "./utils/pdfExport";
 import {
@@ -207,6 +208,53 @@ function applyGlassEffect(glass: GlassEffect | undefined) {
   // The desktop seen *through* the window is blurred by the compositor, not by
   // `backdrop-filter`, so the level also drives a native Mica / Acrylic call.
   applyWindowVibrancy(level, document.documentElement.getAttribute("data-theme") === "dark");
+}
+
+// ─── Desktop notification card & sound effects ──────────────────────────────
+
+/**
+ * `true` when an error text reads as "the user stopped this themselves" — a
+ * turn the user cancelled must not raise a failure card. Covers the backend's
+ * `cancelled by the user` wording and the frontend's "[Generation stopped]".
+ */
+function isCancelError(err: string): boolean {
+  return /cancel|取消|generation stopped|已停止/i.test(err);
+}
+
+/**
+ * Settle a chat turn the user may not be watching, in two channels, both
+ * gated by the single "Allow notifications" switch (Settings → Runtime &
+ * Debug):
+ *
+ * - **Foreground** (`visibilityState === "visible"` and focused): no card —
+ *   the transcript already carries the news. A failed turn cues with the
+ *   *message* sound; a finished turn stays silent.
+ * - **Background / minimized**: the desktop notification card carries the
+ *   title and body (first reply line, or the error text) — the *session
+ *   finished* sound under a success, the *message* sound under a failure.
+ *
+ * A cancelled turn notifies nothing — the user already knows they stopped it.
+ *
+ * Fire and forget: a card that fails (the card webview missing, a dead
+ * window) must never touch the turn that produced it. The callers read the
+ * Settings switch into an argument because a stream callback closes over
+ * whatever ref state existed at its creation.
+ */
+function notifyTurnSettled(ok: boolean, body: string, enabled: boolean) {
+  if (!enabled) return;
+  if (!ok && isCancelError(body)) return;
+  const hidden = document.visibilityState === "hidden" || !document.hasFocus();
+  if (hidden) {
+    playSound(ok ? "completed" : "info");
+    const text = body.replace(/\s+/g, " ").trim().slice(0, 160);
+    showNotifyCard(
+      t(ok ? "app.notify.doneTitle" : "app.notify.errorTitle"),
+      text,
+      ok ? "done" : "error"
+    ).catch(() => {});
+  } else if (!ok) {
+    playSound("info");
+  }
 }
 
 // ─── Delay timers ────────────────────────────────────────────────────────────
@@ -807,6 +855,9 @@ export default function App() {
   const cleanupRef = useRef<(() => void) | null>(null);
   const themeRef = useRef<ThemeMode>("auto");
   const paletteRef = useRef<Palette>("default");
+  /** Settings → Runtime & Debug: notify when minimized / unfocused. Read into
+   * an argument by `notifyTurnSettled` call sites, never captured live. */
+  const notifyWhenHiddenRef = useRef(true);
   const currentAssistantMessageIdRef = useRef<string | null>(null);
   const hasRunningToolCallRef = useRef(false);
   /**
@@ -1468,6 +1519,7 @@ export default function App() {
       .then((cfg) => {
         themeRef.current = cfg.theme ?? "auto";
         paletteRef.current = cfg.palette ?? "default";
+        notifyWhenHiddenRef.current = cfg.notify_when_hidden ?? true;
         applyTheme(cfg.theme, cfg.palette);
         applyGlassEffect(cfg.glass_effect);
       })
@@ -2617,6 +2669,11 @@ export default function App() {
         // Control markers never reach the transcript or the persisted row
         // (belt and braces — `onToken` already drops the trailing form).
         accumulatedContent = stripControlMarkers(accumulatedContent);
+        // The user may be elsewhere (minimized, another window): settle the
+        // turn with a desktop notification card.
+        const notifyLine =
+          accumulatedContent.split("\n").find((line) => line.trim()) ?? "";
+        notifyTurnSettled(true, notifyLine, notifyWhenHiddenRef.current);
         // Deliveries are stored on the assistant row: one turn is one row, and
         // the reply was generated after the model saw them.
         const deliveredInjections = currentInjectionsRef.current;
@@ -2657,6 +2714,10 @@ export default function App() {
         cleanupRef.current = null;
       },
       onError(err) {
+        // The user may be elsewhere (minimized, another window): report the
+        // failure with a desktop notification card. Cancelled turns are
+        // filtered inside — the user already knows they stopped it.
+        notifyTurnSettled(false, err, notifyWhenHiddenRef.current);
         // A failed turn still ran for some time and spent tokens; keep the
         // figures on the row instead of dropping them.
         const turnUsage = settleTurnStats();
@@ -3043,6 +3104,11 @@ export default function App() {
         // Control markers never reach the transcript or the persisted row
         // (belt and braces — `onToken` already drops the trailing form).
         accumulatedContent = stripControlMarkers(accumulatedContent);
+        // The user may be elsewhere (minimized, another window): settle the
+        // turn with a desktop notification card.
+        const notifyLine =
+          accumulatedContent.split("\n").find((line) => line.trim()) ?? "";
+        notifyTurnSettled(true, notifyLine, notifyWhenHiddenRef.current);
         // Deliveries are stored on the assistant row: one turn is one row, and
         // the reply was generated after the model saw them.
         const deliveredInjections = currentInjectionsRef.current;
@@ -3083,6 +3149,10 @@ export default function App() {
         cleanupRef.current = null;
       },
       onError(err) {
+        // The user may be elsewhere (minimized, another window): report the
+        // failure with a desktop notification card. Cancelled turns are
+        // filtered inside — the user already knows they stopped it.
+        notifyTurnSettled(false, err, notifyWhenHiddenRef.current);
         // A failed turn still ran for some time and spent tokens; keep the
         // figures on the row instead of dropping them.
         const turnUsage = settleTurnStats();
@@ -4353,6 +4423,7 @@ export default function App() {
                 setSelfEvolutionMode(cfg.self_evolution_mode ?? false);
                 themeRef.current = cfg.theme ?? "auto";
                 paletteRef.current = cfg.palette ?? "default";
+                notifyWhenHiddenRef.current = cfg.notify_when_hidden ?? true;
                 applyTheme(cfg.theme, cfg.palette);
                 applyGlassEffect(cfg.glass_effect);
                 if (isLocale(cfg.language)) setLocale(cfg.language);

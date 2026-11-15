@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "notify",
+  "description": "The desktop notification card window (notify.rs) — only needs core event listening; every window action runs through app commands.",
+  "windows": [
+    "notify"
+  ],
+  "permissions": [
+    "core:default"
+  ]
+}

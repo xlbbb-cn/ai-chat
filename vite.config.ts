@@ -8,6 +8,18 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react()],
 
+  // Two entry points: the app and the desktop notification card window
+  // (`notify.html` → `src/notify.tsx`, see `src-tauri/src/notify.rs`). Without
+  // the explicit input list rollup would only see `index.html`.
+  build: {
+    rollupOptions: {
+      input: {
+        main: "index.html",
+        notify: "notify.html",
+      },
+    },
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

@@ -525,6 +525,15 @@ export async function stopServeProcess(serveId: string): Promise<string> {
   return invoke("stop_serve_process", { serveId });
 }
 
+/**
+ * Raise the desktop notification card (`notify.rs`): the pre-created `notify`
+ * window shows the title / body at the screen's bottom-right. Never awaited
+ * by the turn that raised it — a notification failure must not fail the turn.
+ */
+export async function showNotifyCard(title: string, body: string, kind: string): Promise<void> {
+  await invoke("show_notify_card", { title, body, kind });
+}
+
 export interface StreamCallbacks {
   onToken: (token: string) => void;
   onReasoningToken?: (token: string) => void;

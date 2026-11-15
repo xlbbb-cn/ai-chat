@@ -117,12 +117,17 @@
   --shadow-side: 10px 0 30px var(--c-panel-shade);
 
   /* Radii — 4px on interactive elements and nothing else. `--r-pill` is
-     kept as an alias so the few pill-shaped chips square off with the rest. */
+     kept as an alias so the few pill-shaped chips square off with the rest.
+     `--r-toast` is the one sanctioned larger radius: the desktop notification
+     card (`notify` window) floats over the *desktop*, not over the app's own
+     4px layout, and reads as the system's own toast surface — it must not
+     share the in-app geometry. */
   --r-sm: 4px;
   --r-md: 4px;
   --r-lg: 4px;
   --r-xl: 4px;
   --r-pill: 4px;
+  --r-toast: 12px;
 
   /* Motion — one timing curve for every interactive state change. 180ms sits
      inside the 120–200ms band of the interaction spec, and the curve is a
@@ -3525,4 +3530,104 @@ button.rabbit-hop-bunny:focus-visible {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   Desktop notification card — the `notify` window's whole document
+   (notify.html → src/notify.tsx, shown by `show_notify_card` in
+   src-tauri/src/notify.rs). The window IS the card: a frameless 348×112
+   surface at the screen's bottom-right that only ever appears while the main
+   window is minimized or unfocused, so it borrows the same frosted-glass
+   recipe as the main frame — `data-vibrancy` / `data-glass-fallback` are
+   written for this document the same way they are for the app's.
+
+   The tint fill is the card's body (the acrylic / vibrancy backdrop blurs
+   what is behind the window; a `backdrop-filter` here would only blur the
+   card's own pixels, of which there are none). The hairline and the 4px
+   radius follow the shared rules; there is no shadow — over a glass backdrop
+   separation comes from the backdrop itself.
+   ════════════════════════════════════════════════════════════════════════════ */
+.notify-root {
+  position: fixed;
+  inset: 0;
+  display: flex;
+}
+
+.notify-card {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: var(--glass-backdrop);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-toast);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  /* Enter / leave on opacity only: the card fades in on the frame after the
+     content is set and fades out before the window hides. */
+  opacity: 0;
+  transition: opacity var(--t-dur) var(--t-ease), border-color var(--t-dur) var(--t-ease);
+}
+
+.notify-card-shown {
+  opacity: 1;
+}
+
+.notify-card:hover {
+  border-color: var(--c-border-i);
+}
+
+/* The card artwork sits on the left. The source image is a wide banner whose
+   subject (the rabbit) is left of centre, so the crop window is biased there
+   instead of dead-centre; its radius is one step off the card's, derived the
+   way `--glass-blur-panel` is. */
+.notify-card-art {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 88px;
+  border-radius: calc(var(--r-toast) - 4px);
+  object-fit: cover;
+  object-position: 30% 50%;
+}
+
+.notify-card-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Title — 500 max per the type scale; the error card takes the semantic
+   status colour, the success card stays plain text. */
+.notify-card-title {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: normal;
+  color: var(--c-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notify-card-title.kind-error {
+  color: var(--c-danger);
+}
+
+.notify-card-body {
+  font-size: 12px;
+  color: var(--c-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notify-card {
+    transition: none;
+  }
 }

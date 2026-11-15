@@ -435,6 +435,16 @@ never give a panel or popup a shadow of its own.
 `--r-pill` is a **historical name**, not a pill — it is 4px so old chip styles
 square off with everything else. New code should write `4px` or `var(--r-sm)`.
 
+**The one exception — `--r-toast: 12px`.** The desktop notification card (the
+`notify` window, see `src-tauri/src/notify.rs` and `.notify-*` in `App.css`)
+is the only surface allowed a larger radius, and it is not an in-app surface:
+it floats over the *desktop*, next to the system's own toast cards, so it does
+not share the app's 4px layout geometry. Its artwork's radius is derived
+(`calc(var(--r-toast) - 4px)`, the way `--glass-blur-panel` derives), and the
+macOS vibrancy view is rounded natively with the same 12px so the material's
+corner is the painted corner. Never propagate this radius to in-app chrome —
+inside the window, 4px stays the rule.
+
 ### Motion
 
 ```css
@@ -1401,7 +1411,7 @@ workspace: the thing that names it is the thing that changes it.
   deliberate exception, and they live in its `--c-*-image` tokens).
 - Don't use `scale()` / `translate()` on hover or press.
 - Don't use `text-transform: uppercase` or negative letter-spacing.
-- Don't use radius above 4px, and never a `border-radius: 50%` on a button.
+- Don't use radius above 4px — the desktop notification card's `--r-toast` (12px) is the one exception, and it never moves inside the app window — and never a `border-radius: 50%` on a button.
 - Don't add a second chromatic accent colour.
 - Don't paint an accent-coloured label with `--c-accent` — that is `--c-accent-text`'s
   job, and a pastel accent makes it unreadable.

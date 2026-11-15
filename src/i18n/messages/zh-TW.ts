@@ -173,6 +173,11 @@ const zhTW: Messages = {
         contextUsageWithCache: "上下文用量：{percent}% · 快取命中 {cachePercent}%",
 
         generationStopped: "[生成已停止]",
+
+        notify: {
+            doneTitle: "任務已完成",
+            errorTitle: "任務失敗",
+        },
         sessionSwitchBlocked: "正在生成回覆，請先停止後再切換歷史工作階段。",
         deleteFailed: "刪除訊息失敗：{error}",
         forkFailed: "建立分支工作階段失敗：{error}",
@@ -440,6 +445,9 @@ const zhTW: Messages = {
             subAgentMainHelp: "子代理請求主代理協助",
             subAgentMainHelpHint:
                 "允許 `llm` 子代理在執行過程中呼叫 `ask_main_agent`。後端會用主模型、真實會話歷史、已啟用技能、MCP 和主工具集啟動一個有上限的協助者，收集資料後交還給子代理，子代理繼續自己的任務。`cli`/`cloud` 子代理無法使用。",
+            allowNotifications: "允許通知",
+            allowNotificationsHint:
+                "回合結束時播放提示音：失敗為訊息音，成功為會話結束音；視窗最小化或焦點在其他應用時，同時彈出桌面通知卡片，顯示回覆首行（或錯誤訊息）。使用者主動停止的回合不會通知。",
             selfEvolution: "啟用自我演化模式",
             selfEvolutionHint: "允許助理在工作區內自行演化技能。開啟期間「檔案操作」與「記憶」工具會強制啟用並鎖定，助理還會把已驗證的關鍵事實（執行環境、正確的工具用法、常用檔案位置）記錄到專屬的自我演化記憶區。助理也可以自建 MCP 伺服器（`mcp_self`）：腳本存放在 .data/mcp，經你確認後作為本機行程啟動。",
             interactionMonitor: "互動監視器",

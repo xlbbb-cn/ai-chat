@@ -25,6 +25,7 @@ mod logger;
 // `pdf2md-rs` and `knowledge-graph`), not a module: nothing here declares it.
 pub mod mcp;
 pub mod model_metadata;
+mod notify;
 mod pdf_mentions;
 mod process_guard;
 mod skills;
@@ -633,6 +634,13 @@ pub struct AppConfig {
     /// `config.json` at process start and a change applies on the next launch.
     #[serde(default = "update::default_true")]
     pub single_instance: bool,
+    /// Show a desktop notification card when a chat turn settles (done or
+    /// failed) while the window is minimized or not focused, and play the two
+    /// bundled sound cues alongside it (Settings → Runtime & Debug, "Allow
+    /// notifications"). The card is the app's own `notify` window (see
+    /// `notify.rs`), never an OS toast, so it follows the app's glass look.
+    #[serde(default = "update::default_true")]
+    pub notify_when_hidden: bool,
 }
 
 impl Default for AppConfig {
@@ -670,6 +678,7 @@ impl Default for AppConfig {
             include_prerelease_updates: false,
             log_retention_days: db::default_log_retention_days(),
             single_instance: true,
+            notify_when_hidden: true,
         }
     }
 }
@@ -1621,6 +1630,9 @@ fn set_window_vibrancy(
     level: String,
     dark: bool,
 ) -> Option<String> {
+    // The notification card follows the same glass level / theme tint; the
+    // fire-and-forget result only feeds the card's own attribute handling.
+    notify::apply_notify_backdrop(window.app_handle());
     apply_window_backdrop(&window, &level, dark).map(str::to_string)
 }
 
@@ -2087,24 +2099,48 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
-                // The only window is closing, so the app is exiting. Tear down
+            match window.label() {
+                // The main window closing means the app is exiting: tear down
                 // every child tree (MCP servers, serve processes, CLI agents)
                 // instead of only the MCP pool.
-                process_guard::kill_all();
-                // A shadow window merges its workspace history and deletes its
-                // temporary config; the primary releases its lock. Idempotent,
-                // because the exit hook below runs again on quits that never
-                // close a window.
-                if let Some(state) = window.app_handle().try_state::<AppState>() {
-                    if let Some(warning) = state.instance.shutdown() {
-                        state
-                            .logger
-                            .lock()
-                            .unwrap()
-                            .log("WARN", &format!("Multi-instance: {warning}"));
+                "main" => {
+                    if let tauri::WindowEvent::CloseRequested { .. } = event {
+                        process_guard::kill_all();
+                        // A shadow window merges its workspace history and deletes its
+                        // temporary config; the primary releases its lock. Idempotent,
+                        // because the exit hook below runs again on quits that never
+                        // close a window.
+                        if let Some(state) = window.app_handle().try_state::<AppState>() {
+                            if let Some(warning) = state.instance.shutdown() {
+                                state
+                                    .logger
+                                    .lock()
+                                    .unwrap()
+                                    .log("WARN", &format!("Multi-instance: {warning}"));
+                            }
+                        }
+                    }
+                    // The card belongs to a background moment: the moment the
+                    // user looks at the main window again, it is gone.
+                    if let tauri::WindowEvent::Focused(true) = event {
+                        if let Some(notify) = window
+                            .app_handle()
+                            .get_webview_window(notify::NOTIFY_WINDOW)
+                        {
+                            let _ = notify.hide();
+                        }
                     }
                 }
+                // The card window must survive app-lifetime: a close (Alt+F4,
+                // a WM that cleans up hidden windows) hides it instead of
+                // destroying it.
+                notify::NOTIFY_WINDOW => {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                }
+                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -2128,6 +2164,10 @@ pub fn run() {
             workspace_history_entries,
             get_instance_info,
             set_window_vibrancy,
+            notify::show_notify_card,
+            notify::hide_notify_card,
+            notify::focus_main_from_notify,
+            notify::refresh_notify_backdrop,
             workspace_files::list_workspace_files,
             workspace_files::read_workspace_file_range,
             workspace_files::read_workspace_file_bytes,

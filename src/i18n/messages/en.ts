@@ -191,6 +191,11 @@ const en = {
         contextUsageWithCache: "Context usage: {percent}% · cache hit {cachePercent}%",
 
         generationStopped: "[Generation stopped]",
+
+        notify: {
+            doneTitle: "Task completed",
+            errorTitle: "Task failed",
+        },
         sessionSwitchBlocked:
             "A reply is currently being generated. Please stop it before switching history sessions.",
         deleteFailed: "Failed to delete message: {error}",
@@ -478,6 +483,9 @@ const en = {
             subAgentMainHelp: "Sub-agent main-agent help",
             subAgentMainHelpHint:
                 "Let `llm` sub-agents call `ask_main_agent` while they run. A bounded helper run with the main model, the real conversation history, enabled skills, MCP servers and the main tool set collects the material and hands it back, then the sub-agent continues its own task. `cli`/`cloud` agents cannot use it.",
+            allowNotifications: "Allow notifications",
+            allowNotificationsHint:
+                "Play a sound cue when a turn settles — the message sound for a failure, the session-finished sound for a success — and, while the window is minimized or another application holds the focus, show the desktop notification card with the reply's first line (or the error text). A turn the user stopped never notifies.",
             selfEvolution: "Enable Self-Evolution Mode",
             selfEvolutionHint:
                 "Let the assistant evolve its own skills inside the workspace. The file actions and memory tools stay enabled while the mode is on, and the assistant keeps verified facts (runtime environment, correct tool usage, file locations) in a dedicated evolution memory. The assistant may also build its own MCP servers (`mcp_self`) — scripts under .data/mcp, started as local processes after your confirmation.",
