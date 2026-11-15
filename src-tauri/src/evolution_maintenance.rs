@@ -377,7 +377,8 @@ async fn run_inner(
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| config.model.clone());
 
-    let inventory = build_inventory(&workspace_dir);
+    let app_data = app.path().app_data_dir().ok();
+    let inventory = build_inventory(&workspace_dir, app_data.as_deref());
     let system_prompt = build_system_prompt(&workspace_dir);
     let initial_user = format!(
         "Run the maintenance pass now.\n\nInitial inventory:\n{inventory}"
@@ -907,6 +908,9 @@ fn build_system_prompt(workspace_dir: &Path) -> String {
          RULES\n\
          - Only `memory`, `file_actions` and `skill_merge`. Never run commands, never touch \
            `.data/chat.db`, never edit files outside the workspace.\n\
+         - The inventory may list global experience packages: they live in app-data and are \
+           read-only for you. Never edit, delete, re-pack or archive one; propose a `distill` \
+           (merge) or a retire in the report and stop there.\n\
          - If the inventory contains a \"Previous maintenance progress\" note, treat it as \
            authoritative: verify what is already saved, then continue the deferred items instead \
            of starting over.\n\
@@ -926,7 +930,95 @@ fn build_system_prompt(workspace_dir: &Path) -> String {
     )
 }
 
-fn build_inventory(workspace_dir: &Path) -> String {
+/// Read-only view of the global experience store. The maintenance pass runs in a
+/// workspace and can only *propose* changes here: app-data belongs to the
+/// `experience` tool, so this section never offers an edit path.
+fn experience_inventory(app_data: Option<&Path>) -> String {
+    let Some(app_data) = app_data else {
+        return String::new();
+    };
+    let root = crate::experience::root_for(app_data);
+    let packages = crate::experience::scan(&root);
+    if packages.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::from(
+        "\nExperience packages (global, read-only; the `experience` tool owns this folder — \
+         never edit or delete these files):\n",
+    );
+    for package in packages.iter().take(MAX_SKILLS_IN_INVENTORY) {
+        // The package is a folder now: what it carries is a directory fact, not manifest metadata.
+        let mut parts: Vec<&str> = Vec::new();
+        if package.dir.join("skill").is_dir() {
+            parts.push("skill");
+        }
+        if package.dir.join("scripts").is_dir() {
+            parts.push("scripts");
+        }
+        if package.dir.join("mcp").is_dir() {
+            parts.push("mcp");
+        }
+        let state = package.manifest.state.trim();
+        let source = package.manifest.source_workspace.trim();
+        out.push_str(&format!(
+            "- slug: {} | state: {} | parts: {} | when: {} | guide: {} | source workspace: {}\n",
+            package.slug(),
+            if state.is_empty() { "?" } else { state },
+            if parts.is_empty() {
+                "(none)".to_string()
+            } else {
+                parts.join("+")
+            },
+            if package.manifest.when.is_empty() {
+                "(none)".to_string()
+            } else {
+                package.manifest.when.join(", ")
+            },
+            if package.guide_text().trim().is_empty() {
+                "missing"
+            } else {
+                "yes"
+            },
+            if source.is_empty() { "?" } else { source },
+        ));
+    }
+    if packages.len() > MAX_SKILLS_IN_INVENTORY {
+        out.push_str(&format!(
+            "- (+{} more package(s) not listed)\n",
+            packages.len() - MAX_SKILLS_IN_INVENTORY
+        ));
+    }
+
+    // Deterministic overlap hint: a matcher claimed twice means two packages
+    // answer the same input, which is exactly what `distill` is for.
+    let mut claims: Vec<(String, Vec<String>)> = Vec::new();
+    for package in &packages {
+        for matcher in &package.manifest.when {
+            match claims
+                .iter_mut()
+                .find(|(existing, _)| existing.as_str() == matcher.as_str())
+            {
+                Some((_, slugs)) => {
+                    if !slugs.iter().any(|slug| slug.as_str() == package.slug()) {
+                        slugs.push(package.slug().to_string());
+                    }
+                }
+                None => claims.push((matcher.clone(), vec![package.slug().to_string()])),
+            }
+        }
+    }
+    for (matcher, slugs) in claims.iter().filter(|(_, slugs)| slugs.len() > 1) {
+        out.push_str(&format!(
+            "- overlap: `{matcher}` is claimed by {} — propose `distill` instead of packing another one\n",
+            slugs.join(", ")
+        ));
+    }
+    out.push_str("- write nothing here: propose a merge or a retire in your report and stop.\n");
+    out
+}
+
+fn build_inventory(workspace_dir: &Path, app_data: Option<&Path>) -> String {
     let skills_root = workspace::skills_root(workspace_dir);
     let status = fs::read_to_string(workspace::skills_status_path(workspace_dir))
         .ok()
@@ -1027,6 +1119,7 @@ fn build_inventory(workspace_dir: &Path) -> String {
         out.push_str(&clip(&progress, 3_000));
         out.push('\n');
     }
+    out.push_str(&experience_inventory(app_data));
     out
 }
 
@@ -1111,7 +1204,7 @@ mod tests {
         )
         .unwrap();
 
-        let inventory = build_inventory(&workspace);
+        let inventory = build_inventory(&workspace, None);
         assert!(inventory.contains("folder: demo"));
         assert!(inventory.contains("name: demo-skill"));
         assert!(inventory.contains("source: self-evolution"));
@@ -1119,6 +1212,31 @@ mod tests {
         assert!(inventory.contains("does demo things"));
 
         fs::remove_dir_all(&workspace).ok();
+    }
+
+    #[test]
+    fn inventory_lists_global_experiences_without_offering_an_edit_path() {
+        let workspace = temp_workspace("experience-inventory");
+        let app_data = temp_workspace("experience-inventory-app");
+        let package = crate::experience::root_for(&app_data).join("docx-text");
+        fs::create_dir_all(&package).unwrap();
+        fs::write(package.join("guide.md"), "extract docx").unwrap();
+        fs::write(
+            package.join(crate::experience::MANIFEST_FILE),
+            r#"{"schema":1,"slug":"docx-text","title":"DOCX","when":["ext:docx"],"state":"verified","contract":"argv","source_workspace":"E:/ws","tools":[{"name":"extract","command":["node","bin/x.js"]}]}"#,
+        )
+        .unwrap();
+
+        let inventory = build_inventory(&workspace, Some(&app_data));
+        assert!(inventory.contains("Experience packages (global, read-only"));
+        assert!(inventory.contains("slug: docx-text"));
+        assert!(inventory.contains("when: ext:docx"));
+        assert!(inventory.contains("parts:"));
+        assert!(inventory.contains("guide: yes"));
+        assert!(inventory.contains("write nothing here"));
+
+        fs::remove_dir_all(&workspace).ok();
+        fs::remove_dir_all(&app_data).ok();
     }
 
     #[test]
@@ -1137,7 +1255,7 @@ mod tests {
             .iter()
             .any(|entry| entry.meta.key == crate::tools::memory::MAINTENANCE_PROGRESS_KEY));
 
-        let inventory = build_inventory(&workspace);
+        let inventory = build_inventory(&workspace, None);
         assert!(inventory.contains("Previous maintenance progress"));
         assert!(inventory.contains("Last action: skill_merge target=alpha"));
 

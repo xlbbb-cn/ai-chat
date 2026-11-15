@@ -57,6 +57,27 @@ export function ExperiencePanel({ onClose, refreshKey = 0 }: Props) {
     };
   }, [refreshKey, reloadKey, t]);
 
+  /** Interpreters plus recorded modules — one number for the row badge. */
+  function dependencyCount(row: ExperienceRow): number {
+    const modules = Object.values(row.requires?.packages ?? {}).reduce(
+      (total, list) => total + list.length,
+      0,
+    );
+    return (row.requires?.tools.length ?? 0) + modules;
+  }
+
+  /**
+   * A package is a folder, so "installed" is a fact about this workspace: the parts that
+   * `experience install` already copied here. No probing, no process starts.
+   */
+  function installedLabel(row: ExperienceRow): string {
+    const done: string[] = [];
+    if (row.installed?.skill) done.push(t("experiencePanel.partSkill"));
+    if (row.installed?.mcp) done.push(t("experiencePanel.partMcp"));
+    for (const name of row.installed?.scripts ?? []) done.push(name);
+    return done.length > 0 ? done.join(" · ") : t("experiencePanel.installedNone");
+  }
+
   async function archive(slug: string) {
     setBusy(slug);
     setError("");
@@ -110,7 +131,6 @@ export function ExperiencePanel({ onClose, refreshKey = 0 }: Props) {
                   <span className="experience-title">{row.title || row.slug}</span>
                   <span className="experience-meta">
                     <span className="experience-badge">{row.state || "draft"}</span>
-                    <span className="experience-badge">{row.contract || "argv"}</span>
                     {row.when.length > 0 && (
                       <span className="experience-badge">{row.when[0]}</span>
                     )}
@@ -122,6 +142,11 @@ export function ExperiencePanel({ onClose, refreshKey = 0 }: Props) {
                         ? t("experiencePanel.toolCount", { count: row.tools.length })
                         : t("experiencePanel.noTools")}
                     </span>
+                    {dependencyCount(row) > 0 && (
+                      <span className="experience-badge" title={row.requires_summary}>
+                        {t("experiencePanel.deps", { count: dependencyCount(row) })}
+                      </span>
+                    )}
                     <span className="experience-slug">{row.slug}</span>
                   </span>
                 </span>
@@ -135,12 +160,26 @@ export function ExperiencePanel({ onClose, refreshKey = 0 }: Props) {
                     <dd>{row.when.length > 0 ? row.when.join(", ") : "—"}</dd>
                     <dt>{t("experiencePanel.labelTools")}</dt>
                     <dd>{row.tools.length > 0 ? row.tools.join(", ") : "—"}</dd>
-                    <dt>{t("experiencePanel.labelTrust")}</dt>
+                    <dt>{t("experiencePanel.labelRequires")}</dt>
                     <dd>
-                      {row.trusted
-                        ? t("experiencePanel.trustOk")
-                        : t("experiencePanel.trustPending")}
+                      {row.requires_summary || t("experiencePanel.requiresNone")}
+                      {row.requires?.notes ? (
+                        <span className="experience-note">{row.requires.notes}</span>
+                      ) : null}
+                      {row.requires?.checked ? (
+                        <span className="experience-note">
+                          {t("experiencePanel.requiresFrom", { host: row.requires.checked })}
+                        </span>
+                      ) : null}
                     </dd>
+                    <dt>{t("experiencePanel.labelParts")}</dt>
+                    <dd>
+                      {row.tools.length > 0
+                        ? row.tools.join(" · ")
+                        : t("experiencePanel.partsNone")}
+                    </dd>
+                    <dt>{t("experiencePanel.labelInstalled")}</dt>
+                    <dd>{installedLabel(row)}</dd>
                     <dt>{t("experiencePanel.labelSource")}</dt>
                     <dd>{row.source_workspace || "—"}</dd>
                     <dt>{t("experiencePanel.labelDir")}</dt>

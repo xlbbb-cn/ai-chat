@@ -341,18 +341,31 @@ export async function listSkills(): Promise<Skill[]> {
  * bundles a guide plus executable tools and is only reachable through the
  * `experience` tool while self-evolution mode is on.
  */
+/** What a package needs on the machine that runs it (recorded at pack time). */
+export interface ExperienceRequires {
+  tools: string[];
+  packages: Record<string, string[]>;
+  notes: string;
+  checked: string;
+}
+
 export interface ExperienceRow {
   slug: string;
   title: string;
   state: string;
-  contract: string;
   when: string[];
   tools: string[];
   has_guide: boolean;
   fingerprint: string;
-  trusted: boolean;
   dir: string;
   source_workspace: string;
+  requires: ExperienceRequires;
+  /** Pre-rendered `tools: … | python: …` line, so the row needs no formatting logic. */
+  requires_summary: string;
+  /** Script file names the package ships in `scripts/`. */
+  scripts: string[];
+  /** Which parts `experience install` already copied into the current workspace. */
+  installed: { skill: boolean; scripts: string[]; mcp: boolean };
 }
 
 export interface ExperienceRegistry {

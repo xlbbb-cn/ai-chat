@@ -225,3 +225,18 @@
   color: var(--c-danger);
   border-color: var(--c-danger);
 }
+
+/* Requirement annotations sit under the value, quieter than the value itself. */
+.experience-note {
+  display: block;
+  margin-top: 2px;
+  color: var(--c-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* Only when the live check found something missing on this machine. The fact list
+   styles `dd` with one more selector, so this has to match that weight. */
+.experience-facts dd.experience-missing {
+  color: var(--c-danger);
+}

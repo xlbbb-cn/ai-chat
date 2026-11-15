@@ -1,42 +1,25 @@
-//! Global experience packages (`<app_data>/experiences/<slug>/`).
+//! Experience packages: the global, portable store at `<app_data>/experiences/<slug>/`.
 //!
-//! An *experience* is a self-contained capability that outlives a workspace: a
-//! `experience.json` manifest (identity, deterministic matchers, process
-//! contract, tool list), a `guide.md` the model reads on `load`, and whatever
-//! executable files the tools need (`bin/*`).
-//!
-//! Scope rules — these are the whole point of the module:
-//!
-//! * The store lives at the **app-data top level** and nowhere else: there is
-//!   no workspace copy, no shadowing, no merge with `skills` / `mcp.conf`.
-//! * It is **not** a skill. Nothing here is reachable through `use_skill`, the
-//!   workspace skills root, the `run_cmd` script library or the MCP roster. The
-//!   only entry point is the `experience` tool.
-//! * Matching is **program-side** (extension / MIME / magic bytes), not a model
-//!   judgement: [`resolve_for_path`] is a pure lookup with a fixed precedence.
-//!
-//! The module itself is Tauri-free so it can be unit-tested with plain paths.
+//! A package is **data**, not an execution engine: `experience.json` (metadata), `guide.md`
+//! (the method) and the optional payload folders `skill/`, `scripts/`, `mcp/`. The
+//! `experience` tool only searches, loads and copies parts into a workspace; the ordinary
+//! tools (`use_skill`, `run_shell`, `mcp_self`) then run them. Nothing here spawns a process.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::io::Read;
 use std::path::{Path, PathBuf};
 
-/// Manifest file inside every package folder.
 pub const MANIFEST_FILE: &str = "experience.json";
+pub const EXPERIENCES_DIR: &str = "experiences";
 
-/// Default cap on the guide text injected by `load` / auto-resolution.
-pub const DEFAULT_GUIDE_CAP: usize = 8192;
+/// Files a payload folder may carry; anything hidden or backed up is ignored everywhere.
+const MAX_WALK_DEPTH: usize = 4;
 
 fn default_schema() -> u32 {
     1
-}
-
-fn default_contract() -> String {
-    "argv".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -46,27 +29,42 @@ pub struct GuideSpec {
     pub max_bytes: Option<usize>,
 }
 
+/// What the machine that runs the package needs. Written at pack time by scanning the
+/// payload; installing those dependencies is the caller's job, never this app's.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ToolSpec {
-    pub name: String,
+pub struct Requires {
     #[serde(default)]
-    pub description: String,
-    /// Program + arguments. Relative entries resolve against the package dir.
-    /// Never a shell string: the tool layer spawns the array verbatim.
+    pub tools: Vec<String>,
     #[serde(default)]
-    pub command: Vec<String>,
-    /// `{ "<arg>": { "type": "string", "required": true } }`
+    pub packages: std::collections::BTreeMap<String, Vec<String>>,
     #[serde(default)]
-    pub args: Value,
+    pub notes: String,
+    #[serde(default)]
+    pub checked: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct VerifySpec {
-    pub tool: String,
-    #[serde(default)]
-    pub args: Value,
-    #[serde(default)]
-    pub expect: String,
+impl Requires {
+    pub fn is_empty(&self) -> bool {
+        self.tools.is_empty() && self.packages.values().all(|list| list.is_empty())
+    }
+
+    /// One line for the prompt/panel: `tools: node | python: docx | node: pdf-parse`.
+    pub fn summary(&self) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        if !self.tools.is_empty() {
+            parts.push(format!("tools: {}", self.tools.join(", ")));
+        }
+        for (ecosystem, modules) in &self.packages {
+            if !modules.is_empty() {
+                parts.push(format!("{ecosystem}: {}", modules.join(", ")));
+            }
+        }
+        let mut text = parts.join(" | ");
+        if !self.notes.trim().is_empty() {
+            text.push_str(&format!(" ({})", self.notes.trim()));
+        }
+        text
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,26 +74,20 @@ pub struct Manifest {
     pub slug: String,
     #[serde(default)]
     pub title: String,
-    /// Deterministic matchers (`ext:docx`, `mime:…`, `magic:504b0304:word/`).
     #[serde(default)]
     pub when: Vec<String>,
-    /// `draft` / `verified` / `global` / `archived`.
     #[serde(default)]
     pub state: String,
-    #[serde(default, rename = "source_workspace")]
+    #[serde(default)]
     pub source_workspace: String,
-    #[serde(default, rename = "source_hash")]
+    #[serde(default)]
     pub source_hash: String,
     #[serde(default)]
     pub distilled_from: Vec<String>,
     #[serde(default)]
     pub guide: Option<GuideSpec>,
-    #[serde(default = "default_contract")]
-    pub contract: String,
     #[serde(default)]
-    pub tools: Vec<ToolSpec>,
-    #[serde(default)]
-    pub verify: Option<VerifySpec>,
+    pub requires: Requires,
 }
 
 #[derive(Debug, Clone)]
@@ -106,16 +98,10 @@ pub struct Experience {
 
 impl Experience {
     pub fn slug(&self) -> &str {
-        &self.manifest.slug
-    }
-
-    pub fn tool(&self, name: &str) -> Option<&ToolSpec> {
-        self.manifest.tools.iter().find(|tool| tool.name == name)
+        self.manifest.slug.as_str()
     }
 
     pub fn guide_path(&self) -> Option<PathBuf> {
-        // `guide.md` is the conventional name: a hand-written package may omit
-        // the `guide` block entirely and still be readable.
         let name = self
             .manifest
             .guide
@@ -130,12 +116,12 @@ impl Experience {
         }
     }
 
-    /// Guide text, capped (char-safe) at the declared `max_bytes`.
+    /// The method, capped so a huge guide cannot flood a context.
     pub fn guide_text(&self) -> String {
         let Some(path) = self.guide_path() else {
             return String::new();
         };
-        let Ok(raw) = fs::read_to_string(path) else {
+        let Ok(text) = fs::read_to_string(&path) else {
             return String::new();
         };
         let cap = self
@@ -143,134 +129,143 @@ impl Experience {
             .guide
             .as_ref()
             .and_then(|guide| guide.max_bytes)
-            .unwrap_or(DEFAULT_GUIDE_CAP);
-        if raw.chars().count() <= cap {
-            return raw;
+            .unwrap_or(8 * 1024);
+        if text.len() <= cap {
+            return text;
         }
-        let mut capped: String = raw.chars().take(cap).collect();
-        capped.push_str("\n…[guide truncated]");
-        capped
+        text.chars().take(cap).collect()
     }
 
-    /// Content fingerprint used to bind an approval to this exact package
-    /// build (a modified package loses its trust entry). Not a security hash.
+    /// Content fingerprint used by the panel to spot a package that changed on disk.
     pub fn fingerprint(&self) -> String {
         let mut hasher = DefaultHasher::new();
-        self.manifest.slug.hash(&mut hasher);
-        // The manifest is hashed with `source_hash` cleared: `pack` writes the
-        // fingerprint back into that field, and a self-referential hash would
-        // change on every write.
-        if let Ok(raw) = fs::read_to_string(self.dir.join(MANIFEST_FILE)) {
-            if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&raw) {
-                if let Some(map) = value.as_object_mut() {
-                    map.remove("source_hash");
-                }
-                serde_json::to_string(&value)
-                    .unwrap_or(raw)
-                    .hash(&mut hasher);
-            } else {
-                raw.hash(&mut hasher);
+        let mut entries: Vec<(String, u64)> = Vec::new();
+        for path in walk_files(&self.dir) {
+            if path.file_name().map(|name| name.to_string_lossy().to_string()).as_deref()
+                == Some(MANIFEST_FILE)
+            {
+                continue;
             }
+            let size = fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0);
+            let relative = path
+                .strip_prefix(&self.dir)
+                .map(|value| value.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_default();
+            entries.push((relative, size));
         }
-        let mut entries: Vec<(String, u64)> = walk_files(&self.dir)
-            .into_iter()
-            .filter(|path| path.file_name().and_then(|name| name.to_str()) != Some(MANIFEST_FILE))
-            .filter_map(|path| {
-                let name = path
-                    .strip_prefix(&self.dir)
-                    .ok()?
-                    .to_string_lossy()
-                    .replace('\\', "/");
-                let len = fs::metadata(&path).ok()?.len();
-                Some((name, len))
-            })
-            .collect();
         entries.sort();
-        entries.hash(&mut hasher);
+        for (relative, size) in &entries {
+            relative.hash(&mut hasher);
+            size.hash(&mut hasher);
+        }
+        if let Ok(text) = fs::read_to_string(self.dir.join(MANIFEST_FILE)) {
+            let mut manifest: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+            if let Some(object) = manifest.as_object_mut() {
+                object.remove("source_hash");
+            }
+            manifest.to_string().hash(&mut hasher);
+        }
         format!("{:016x}", hasher.finish())
     }
 }
 
-fn walk_files(dir: &Path) -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    let Ok(entries) = fs::read_dir(dir) else {
-        return out;
+pub fn root_for(app_data: &Path) -> PathBuf {
+    app_data.join(EXPERIENCES_DIR)
+}
+
+pub fn validate_slug(slug: &str) -> Result<(), String> {
+    let slug = slug.trim();
+    if slug.is_empty() {
+        return Err("a package slug cannot be empty".to_string());
+    }
+    if slug.len() > 64 {
+        return Err("a package slug is limited to 64 characters".to_string());
+    }
+    if !slug
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    {
+        return Err(format!(
+            "'{slug}' is not a usable slug: letters, digits, '-' and '_' only"
+        ));
+    }
+    Ok(())
+}
+
+/// Every package in the store (the folder that holds one directory per slug).
+pub fn scan(root: &Path) -> Vec<Experience> {
+    let mut items: Vec<Experience> = Vec::new();
+    let Ok(entries) = fs::read_dir(root) else {
+        return items;
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
-            out.extend(walk_files(&path));
-        } else if path.is_file() {
-            out.push(path);
+        if !path.is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') || name.contains(".bak.") {
+            continue;
+        }
+        if let Some(item) = load_dir(&path) {
+            items.push(item);
         }
     }
-    out
+    items.sort_by(|left, right| left.slug().cmp(right.slug()));
+    items
+}
+
+pub fn load(root: &Path, slug: &str) -> Option<Experience> {
+    let slug = slug.trim();
+    if validate_slug(slug).is_err() {
+        return None;
+    }
+    load_dir(&root.join(slug))
+}
+
+fn load_dir(dir: &Path) -> Option<Experience> {
+    let text = fs::read_to_string(dir.join(MANIFEST_FILE)).ok()?;
+    let manifest: Manifest = serde_json::from_str(&text).ok()?;
+    if manifest.schema != 1 {
+        return None;
+    }
+    Some(Experience {
+        dir: dir.to_path_buf(),
+        manifest,
+    })
 }
 
 // ─── Matchers ────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Matcher {
-    /// `ext:docx`
     Ext(String),
-    /// `mime:application/pdf`
     Mime(String),
-    /// `magic:504b0304` or `magic:504b0304:word/`
     Magic { prefix: Vec<u8>, needle: Option<String> },
-    /// `name:*.pdf` / `name:invoice-*`
     Name(String),
-    /// `tag:pdf` — free-form label matched by `search`, never by a path.
     Tag(String),
-}
-
-/// Fixed precedence: magic > mime > ext > name > tag. Ties are broken by slug
-/// order and, if still tied, reported as ambiguous rather than guessed.
-pub fn matcher_specificity(matcher: &Matcher) -> u8 {
-    match matcher {
-        Matcher::Magic { .. } => 3,
-        Matcher::Mime(_) => 2,
-        Matcher::Ext(_) => 1,
-        Matcher::Name(_) => 0,
-        Matcher::Tag(_) => 0,
-    }
-}
-
-fn decode_hex(raw: &str) -> Option<Vec<u8>> {
-    let raw = raw.trim();
-    if raw.is_empty() || raw.len() % 2 != 0 {
-        return None;
-    }
-    let mut out = Vec::with_capacity(raw.len() / 2);
-    let bytes = raw.as_bytes();
-    let mut index = 0;
-    while index < bytes.len() {
-        let pair = std::str::from_utf8(&bytes[index..index + 2]).ok()?;
-        out.push(u8::from_str_radix(pair, 16).ok()?);
-        index += 2;
-    }
-    Some(out)
 }
 
 pub fn parse_matcher(raw: &str) -> Option<Matcher> {
     let raw = raw.trim();
     let (kind, rest) = raw.split_once(':')?;
-    let kind = kind.trim().to_ascii_lowercase();
     let rest = rest.trim();
     if rest.is_empty() {
         return None;
     }
-    match kind.as_str() {
+    match kind.to_ascii_lowercase().as_str() {
         "ext" => Some(Matcher::Ext(rest.trim_start_matches('.').to_ascii_lowercase())),
         "mime" => Some(Matcher::Mime(rest.to_ascii_lowercase())),
         "magic" => {
-            let (prefix_raw, needle) = match rest.split_once(':') {
-                Some((prefix, needle)) => (prefix, Some(needle.to_string())),
+            let (hex, needle) = match rest.split_once(':') {
+                Some((hex, needle)) => (hex, Some(needle.to_string())),
                 None => (rest, None),
             };
-            Some(Matcher::Magic {
-                prefix: decode_hex(prefix_raw)?,
-                needle: needle.filter(|value| !value.is_empty()),
-            })
+            let prefix = decode_hex(hex)?;
+            if prefix.is_empty() {
+                return None;
+            }
+            Some(Matcher::Magic { prefix, needle })
         }
         "name" => Some(Matcher::Name(rest.to_ascii_lowercase())),
         "tag" => Some(Matcher::Tag(rest.to_ascii_lowercase())),
@@ -278,211 +273,112 @@ pub fn parse_matcher(raw: &str) -> Option<Matcher> {
     }
 }
 
-fn read_head(path: &Path, limit: usize) -> Vec<u8> {
-    let Ok(mut file) = fs::File::open(path) else {
-        return Vec::new();
-    };
-    let mut buffer = Vec::with_capacity(limit);
-    let mut chunk = [0u8; 1024];
-    while buffer.len() < limit {
-        let take = (limit - buffer.len()).min(chunk.len());
-        match file.read(&mut chunk[..take]) {
-            Ok(0) => break,
-            Ok(read) => buffer.extend_from_slice(&chunk[..read]),
-            Err(_) => break,
-        }
+pub fn matcher_specificity(matcher: &Matcher) -> u8 {
+    match matcher {
+        Matcher::Magic { .. } => 3,
+        Matcher::Mime(_) => 2,
+        Matcher::Ext(_) => 1,
+        Matcher::Name(_) | Matcher::Tag(_) => 0,
     }
-    buffer
 }
 
-fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
-    if needle.is_empty() || haystack.len() < needle.len() {
-        return false;
+fn decode_hex(text: &str) -> Option<Vec<u8>> {
+    let text = text.trim();
+    if text.is_empty() || text.len() % 2 != 0 {
+        return None;
     }
-    haystack.windows(needle.len()).any(|window| window == needle)
+    let mut out: Vec<u8> = Vec::with_capacity(text.len() / 2);
+    let bytes = text.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        let high = (bytes[index] as char).to_digit(16)?;
+        let low = (bytes[index + 1] as char).to_digit(16)?;
+        out.push(((high << 4) | low) as u8);
+        index += 2;
+    }
+    Some(out)
 }
 
-fn name_matches(pattern: &str, name: &str) -> bool {
-    if let Some(suffix) = pattern.strip_prefix('*') {
-        return name.ends_with(suffix);
-    }
-    if let Some(prefix) = pattern.strip_suffix('*') {
-        return name.starts_with(prefix);
-    }
-    name == pattern
-}
-
-/// Path facts the matcher needs, gathered once per resolution.
-pub struct PathFacts {
-    pub extension: String,
-    pub file_name: String,
-    pub head: Vec<u8>,
+struct PathFacts {
+    extension: String,
+    head: Vec<u8>,
 }
 
 impl PathFacts {
-    pub fn read(path: &Path) -> Self {
+    fn read(path: &Path) -> Self {
+        use std::io::Read;
         let extension = path
             .extension()
-            .and_then(|value| value.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        let file_name = path
-            .file_name()
-            .and_then(|value| value.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        Self {
-            extension,
-            file_name,
-            head: read_head(path, 4096),
+            .map(|value| value.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        let mut head = vec![0u8; 64];
+        let mut filled = 0usize;
+        if let Ok(mut file) = fs::File::open(path) {
+            filled = file.read(&mut head).unwrap_or(0);
         }
+        head.truncate(filled);
+        Self { extension, head }
     }
 }
 
-/// Best specificity this package claims for the file, `None` when it does not
-/// match at all. Pure function of the manifest + the file's bytes.
-pub fn score_path(manifest: &Manifest, facts: &PathFacts) -> Option<u8> {
+fn score(manifest: &Manifest, path: &Path, facts: &PathFacts) -> Option<u8> {
+    let file_name = path
+        .file_name()
+        .map(|value| value.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
     let mut best: Option<u8> = None;
     for raw in &manifest.when {
         let Some(matcher) = parse_matcher(raw) else {
             continue;
         };
         let hit = match &matcher {
-            Matcher::Ext(ext) => !ext.is_empty() && facts.extension == *ext,
-            Matcher::Mime(mime) => !mime.is_empty() && facts.extension == *mime,
+            Matcher::Ext(extension) => facts.extension == *extension,
+            Matcher::Mime(mime) => facts.extension == *mime,
             Matcher::Magic { prefix, needle } => {
-                if facts.head.len() < prefix.len() || !facts.head.starts_with(prefix) {
-                    false
-                } else {
-                    match needle {
-                        Some(needle) => contains_bytes(&facts.head, needle.as_bytes()),
-                        None => true,
+                let prefix_ok = facts.head.len() >= prefix.len()
+                    && &facts.head[..prefix.len()] == prefix.as_slice();
+                let needle_ok = match needle {
+                    Some(text) => {
+                        let haystack = String::from_utf8_lossy(&facts.head);
+                        haystack.contains(text.as_str())
                     }
-                }
+                    None => true,
+                };
+                prefix_ok && needle_ok
             }
-            Matcher::Name(pattern) => name_matches(pattern, &facts.file_name),
+            Matcher::Name(wanted) => match wanted.strip_prefix("*.") {
+                Some(suffix) => file_name.ends_with(&format!(".{suffix}")),
+                None => file_name == *wanted,
+            },
             Matcher::Tag(_) => false,
         };
         if hit {
-            let score = matcher_specificity(&matcher);
-            best = Some(best.map_or(score, |current| current.max(score)));
+            let specificity = matcher_specificity(&matcher);
+            best = Some(best.map_or(specificity, |current| current.max(specificity)));
         }
     }
     best
 }
 
-// ─── Registry ────────────────────────────────────────────────────────────────
-
-/// `<app_data>/experiences`
-pub fn root_for(app_data: &Path) -> PathBuf {
-    app_data.join("experiences")
-}
-
-fn is_hidden_entry(name: &str) -> bool {
-    name.starts_with('.') || name.contains(".bak.")
-}
-
-pub fn validate_slug(slug: &str) -> Result<(), String> {
-    let slug = slug.trim();
-    if slug.is_empty() {
-        return Err("slug is empty".to_string());
-    }
-    if slug.len() > 64 {
-        return Err("slug is longer than 64 characters".to_string());
-    }
-    if !slug
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
-    {
-        return Err(format!(
-            "slug '{slug}' may only contain letters, digits, '-' and '_'"
-        ));
-    }
-    Ok(())
-}
-
-pub fn parse_manifest(raw: &str) -> Result<Manifest, String> {
-    let manifest: Manifest =
-        serde_json::from_str(raw).map_err(|err| format!("invalid experience.json: {err}"))?;
-    if manifest.schema != 1 {
-        return Err(format!(
-            "unsupported experience schema {} (only 1 is understood)",
-            manifest.schema
-        ));
-    }
-    validate_slug(&manifest.slug)?;
-    Ok(manifest)
-}
-
-/// Load one package folder (no scanning of siblings).
-pub fn load_dir(dir: &Path) -> Result<Experience, String> {
-    let manifest_path = dir.join(MANIFEST_FILE);
-    let raw = fs::read_to_string(&manifest_path)
-        .map_err(|err| format!("cannot read {}: {err}", manifest_path.display()))?;
-    let manifest = parse_manifest(&raw)?;
-    Ok(Experience {
-        dir: dir.to_path_buf(),
-        manifest,
-    })
-}
-
-/// Every package under the store. Invalid manifests are skipped (the panel
-/// reports them separately) so one broken package cannot blind the registry.
-pub fn scan(app_data: &Path) -> Vec<Experience> {
-    let root = root_for(app_data);
-    let Ok(entries) = fs::read_dir(&root) else {
-        return Vec::new();
-    };
-    let mut out = Vec::new();
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().to_string();
-        if is_hidden_entry(&name) {
-            continue;
-        }
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-        if let Ok(experience) = load_dir(&path) {
-            if experience.manifest.state.eq_ignore_ascii_case("archived") {
-                continue;
-            }
-            out.push(experience);
-        }
-    }
-    out.sort_by(|left, right| left.slug().cmp(right.slug()));
-    out
-}
-
-pub fn load(app_data: &Path, slug: &str) -> Option<Experience> {
-    let slug = slug.trim();
-    validate_slug(slug).ok()?;
-    load_dir(&root_for(app_data).join(slug)).ok()
-}
-
-/// One resolution result: the package plus the specificity it claimed.
 #[derive(Debug, Clone)]
 pub struct Resolved {
     pub specificity: u8,
     pub experience: Experience,
 }
 
-/// Deterministic path → packages resolution.
-///
-/// Order: specificity descending, then slug ascending. Two entries with the
-/// same specificity mean the registry itself is ambiguous — callers must show
-/// both instead of picking one.
-pub fn resolve_for_path(app_data: &Path, path: &Path) -> Vec<Resolved> {
+/// Packages whose matchers hit this path, most specific first. Ambiguity is left to the
+/// caller: two packages may legitimately claim the same input.
+pub fn resolve_for_path(root: &Path, path: &Path) -> Vec<Resolved> {
     let facts = PathFacts::read(path);
-    let mut hits: Vec<Resolved> = scan(app_data)
-        .into_iter()
-        .filter_map(|experience| {
-            score_path(&experience.manifest, &facts).map(|specificity| Resolved {
+    let mut hits: Vec<Resolved> = Vec::new();
+    for experience in scan(root) {
+        if let Some(specificity) = score(&experience.manifest, path, &facts) {
+            hits.push(Resolved {
                 specificity,
                 experience,
-            })
-        })
-        .collect();
+            });
+        }
+    }
     hits.sort_by(|left, right| {
         right
             .specificity
@@ -492,186 +388,272 @@ pub fn resolve_for_path(app_data: &Path, path: &Path) -> Vec<Resolved> {
     hits
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Serialize)]
 pub struct SearchRow {
     pub slug: String,
     pub title: String,
     pub state: String,
-    pub contract: String,
+    pub score: u8,
     pub when: Vec<String>,
-    pub tools: Vec<String>,
-    pub has_guide: bool,
+    pub guide: bool,
+    pub requires: String,
 }
 
-pub fn row_of(experience: &Experience) -> SearchRow {
-    SearchRow {
-        slug: experience.slug().to_string(),
-        title: experience.manifest.title.clone(),
-        state: experience.manifest.state.clone(),
-        contract: experience.manifest.contract.clone(),
-        when: experience.manifest.when.clone(),
-        tools: experience
-            .manifest
-            .tools
-            .iter()
-            .map(|tool| tool.name.clone())
-            .collect(),
-        has_guide: experience.guide_path().is_some(),
-    }
-}
-
-/// Lexical search over the registry. Deterministic: matcher hits rank above
-/// tag hits, which rank above title/guide substring hits; ties by slug.
-pub fn search(app_data: &Path, query: &str, ext: &str, tag: &str) -> Vec<SearchRow> {
+/// Deterministic search: matcher hits rank above name matches, which rank above guide text.
+pub fn search(root: &Path, query: &str, ext: &str, tag: &str) -> Vec<SearchRow> {
     let query = query.trim().to_ascii_lowercase();
     let ext = ext.trim().trim_start_matches('.').to_ascii_lowercase();
     let tag = tag.trim().to_ascii_lowercase();
-
     let mut scored: Vec<(u8, String, SearchRow)> = Vec::new();
-    for experience in scan(app_data) {
+    for experience in scan(root) {
         let manifest = &experience.manifest;
-        let mut score: u8 = 0;
-
-        if !ext.is_empty() {
-            let facts = PathFacts {
-                extension: ext.clone(),
-                file_name: String::new(),
-                head: Vec::new(),
+        let mut score_value: u8 = 0;
+        for raw in &manifest.when {
+            let Some(matcher) = parse_matcher(raw) else {
+                continue;
             };
-            if manifest
-                .when
-                .iter()
-                .filter_map(|raw| parse_matcher(raw))
-                .any(|matcher| matches!(&matcher, Matcher::Ext(value) if *value == ext))
-            {
-                score = score.max(3);
-            }
-            // `score_path` also covers `name:` patterns, but without bytes only
-            // extension-based matchers can hit — the explicit check above is
-            // what the model means by `ext`.
-            let _ = facts;
+            let wanted = match &matcher {
+                Matcher::Ext(value) => {
+                    if !ext.is_empty() && *value == ext {
+                        score_value = score_value.max(4);
+                    }
+                    None
+                }
+                Matcher::Tag(value) => {
+                    if !tag.is_empty() && *value == tag {
+                        score_value = score_value.max(3);
+                    }
+                    None
+                }
+                _ => Some(matcher_specificity(&matcher)),
+            };
+            let _ = wanted;
         }
-
-        if !tag.is_empty()
-            && manifest.when.iter().filter_map(|raw| parse_matcher(raw)).any(
-                |matcher| matches!(&matcher, Matcher::Tag(value) if *value == tag),
-            )
-        {
-            score = score.max(2);
-        }
-
         if !query.is_empty() {
-            let haystack_title = manifest.title.to_ascii_lowercase();
-            let haystack_slug = manifest.slug.to_ascii_lowercase();
-            if haystack_title.contains(&query) || haystack_slug.contains(&query) {
-                score = score.max(2);
-            } else if experience
-                .guide_text()
-                .to_ascii_lowercase()
-                .contains(&query)
-            {
-                score = score.max(1);
+            let title = manifest.title.to_ascii_lowercase();
+            let slug = manifest.slug.to_ascii_lowercase();
+            if title.contains(&query) || slug.contains(&query) {
+                score_value = score_value.max(2);
+            } else if experience.guide_text().to_ascii_lowercase().contains(&query) {
+                score_value = score_value.max(1);
             }
         }
-
-        if score > 0 || (query.is_empty() && ext.is_empty() && tag.is_empty()) {
-            scored.push((score, manifest.slug.clone(), row_of(&experience)));
+        if score_value > 0 || (query.is_empty() && ext.is_empty() && tag.is_empty()) {
+            let row = SearchRow {
+                slug: manifest.slug.clone(),
+                title: manifest.title.clone(),
+                state: manifest.state.clone(),
+                score: score_value,
+                when: manifest.when.clone(),
+                guide: experience.guide_path().is_some(),
+                requires: manifest.requires.summary(),
+            };
+            scored.push((score_value, manifest.slug.clone(), row));
         }
     }
-
     scored.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
     scored.into_iter().map(|(_, _, row)| row).collect()
 }
 
-// ─── Rendering ───────────────────────────────────────────────────────────────
+// ─── Payload inspection ──────────────────────────────────────────────────────
 
-fn render_tools(experience: &Experience, out: &mut String) {
-    if experience.manifest.tools.is_empty() {
-        out.push_str("\n[Tools] (none — this package carries knowledge only)\n");
-        return;
-    }
-    out.push_str("\n[Tools]\n");
-    for tool in &experience.manifest.tools {
-        out.push_str(&format!(
-            "- {} — {}\n",
-            tool.name,
-            tool.description.trim().trim_end_matches('.')
-        ));
-        if !tool.command.is_empty() {
-            out.push_str(&format!("  command: {}\n", tool.command.join(" ")));
-        }
-        if !tool.args.is_null() {
-            out.push_str(&format!(
-                "  args: {}\n",
-                serde_json::to_string(&tool.args).unwrap_or_default()
-            ));
-        }
-    }
+/// Files that make up the package payload (hidden entries and backups excluded).
+pub fn payload_files(dir: &Path) -> Vec<PathBuf> {
+    walk_files(dir)
 }
 
-/// The block injected on `load` and on automatic resolution. Deliberately
-/// different framing from `--- Skill: … ---` so the two never blur together.
-pub fn render_block(experience: &Experience) -> String {
-    let manifest = &experience.manifest;
-    let mut out = String::new();
-    out.push_str(&format!("\n--- Experience: {} ---\n", manifest.slug));
-    if !manifest.title.trim().is_empty() {
-        out.push_str(&format!("[Title] {}\n", manifest.title.trim()));
+fn walk_files(dir: &Path) -> Vec<PathBuf> {
+    fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
+        if depth > MAX_WALK_DEPTH {
+            return;
+        }
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') || name.contains(".bak.") {
+                continue;
+            }
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, depth + 1, out);
+            } else if path.is_file() {
+                out.push(path);
+            }
+        }
     }
-    out.push_str(&format!("[Experience root: {}]\n", experience.dir.display()));
-    out.push_str(&format!("[Contract: {}]\n", manifest.contract));
-    if !manifest.state.trim().is_empty() {
-        out.push_str(&format!("[State: {}]\n", manifest.state));
-    }
-    if !manifest.when.is_empty() {
-        out.push_str(&format!("[Matches] {}\n", manifest.when.join(", ")));
-    }
-    out.push_str("\n");
-    let guide = experience.guide_text();
-    if guide.trim().is_empty() {
-        out.push_str("(no guide.md)\n");
-    } else {
-        out.push_str(guide.trim_end());
-        out.push('\n');
-    }
-    render_tools(experience, &mut out);
-    out.push_str(&format!(
-        "\n[How to run] experience {{\"action\":\"invoke\",\"slug\":\"{}\",\"tool\":\"<tool>\",\"args\":{{…}}}}\n",
-        manifest.slug
-    ));
+    let mut out: Vec<PathBuf> = Vec::new();
+    walk(dir, 0, &mut out);
+    out.sort();
     out
 }
 
-/// Text handed back when a file arrives that the app cannot read as text.
-pub fn render_unsupported(path: &Path, hits: &[Resolved]) -> String {
-    let file = path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("file");
-    let mut out = format!(
-        "Unsupported file format: `{}` cannot be read as text.\n\
-         The experience registry matched {} package(s) for this input — \
-         these are program-side matches (extension/magic), not a guess.\n",
-        file,
-        hits.len()
-    );
-    for hit in hits.iter().take(2) {
-        out.push_str(&render_block(&hit.experience));
+const PYTHON_STDLIB: &[&str] = &[
+    "os", "sys", "json", "re", "pathlib", "subprocess", "argparse", "csv", "io", "time",
+    "math", "hashlib", "base64", "zipfile", "xml", "urllib", "shutil", "tempfile", "typing",
+    "dataclasses", "collections", "itertools", "functools", "textwrap", "unicodedata", "glob",
+    "struct", "html", "codecs", "random", "string", "traceback", "logging", "datetime",
+    "decimal", "enum", "abc", "copy", "queue", "threading", "unittest", "uuid", "platform",
+    "statistics", "difflib", "secrets", "importlib",
+];
+
+const NODE_BUILTINS: &[&str] = &[
+    "fs", "path", "url", "os", "child_process", "readline", "crypto", "http", "https", "stream",
+    "util", "events", "zlib", "buffer", "assert", "querystring", "net", "tls", "dns",
+    "worker_threads", "process", "timers", "string_decoder", "tty", "v8", "vm", "perf_hooks",
+    "inspector",
+];
+
+/// Record what the payload needs: the interpreters its commands name, plus the modules its
+/// sources import. Deliberately static — a dynamic `import_module(name)` is invisible here, so
+/// such a package should say so in `guide.md` or in `requires.notes`.
+pub fn scan_requirements(commands: &[Vec<String>], files: &[PathBuf]) -> Requires {
+    let mut requires = Requires::default();
+    for command in commands {
+        let Some(program) = command.first() else {
+            continue;
+        };
+        let name = interpreter_name(program);
+        if name.is_empty() {
+            continue;
+        }
+        if !requires
+            .tools
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(&name))
+        {
+            requires.tools.push(name);
+        }
     }
-    if hits.len() > 2 {
-        out.push_str(&format!(
-            "\n…{} more package(s): use experience {{\"action\":\"search\",\"ext\":\"{}\"}}.\n",
-            hits.len() - 2,
-            path.extension()
-                .and_then(|value| value.to_str())
+
+    let mut python: Vec<String> = Vec::new();
+    let mut node: Vec<String> = Vec::new();
+    for file in files {
+        let Ok(text) = fs::read_to_string(file) else {
+            continue;
+        };
+        if text.len() > 512 * 1024 {
+            continue;
+        }
+        match file
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "py" => {
+                for module in python_modules(&text) {
+                    if !python.iter().any(|existing| existing == &module) {
+                        python.push(module);
+                    }
+                }
+            }
+            "js" | "mjs" | "cjs" | "ts" => {
+                for module in node_modules(&text) {
+                    if !node.iter().any(|existing| existing == &module) {
+                        node.push(module);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    if !python.is_empty() {
+        requires.packages.insert("python".to_string(), python);
+    }
+    if !node.is_empty() {
+        requires.packages.insert("node".to_string(), node);
+    }
+    requires.checked = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "unknown host".to_string());
+    requires
+}
+
+fn interpreter_name(program: &str) -> String {
+    let file = Path::new(program)
+        .file_stem()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let mut name = file.to_ascii_lowercase();
+    if name == "python3" || name == "pythonw" {
+        name = "python".to_string();
+    }
+    name
+}
+
+fn python_modules(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        let module = if let Some(rest) = line.strip_prefix("import ") {
+            rest.split(&[',', ';'][..])
+                .next()
                 .unwrap_or("")
-        ));
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .split('.')
+                .next()
+                .unwrap_or("")
+                .to_string()
+        } else if let Some(rest) = line.strip_prefix("from ") {
+            rest.split_whitespace()
+                .next()
+                .unwrap_or("")
+                .split('.')
+                .next()
+                .unwrap_or("")
+                .to_string()
+        } else {
+            continue;
+        };
+        let module = module.trim().to_string();
+        if module.is_empty() || module.starts_with('.') {
+            continue;
+        }
+        if PYTHON_STDLIB.contains(&module.as_str()) {
+            continue;
+        }
+        if !out.iter().any(|existing| existing == &module) {
+            out.push(module);
+        }
     }
-    if hits.len() > 1 && hits[0].specificity == hits[1].specificity {
-        out.push_str(
-            "\n[Ambiguous] two packages claim this input at the same specificity — \
-             show both options to the user instead of picking one.\n",
-        );
+    out
+}
+
+fn node_modules(text: &str) -> Vec<String> {
+    let quotes = &['\'', '"'][..];
+    let mut out: Vec<String> = Vec::new();
+    for line in text.lines() {
+        let mut rest = line;
+        while let Some(index) = rest.find("require(").or_else(|| rest.find("from ")) {
+            rest = &rest[index..];
+            let Some(start) = rest.find(quotes) else {
+                break;
+            };
+            let after = &rest[start + 1..];
+            let Some(end) = after.find(quotes) else {
+                break;
+            };
+            let name = &after[..end];
+            rest = &after[end + 1..];
+            let name = name.trim();
+            if name.is_empty()
+                || name.starts_with('.')
+                || name.starts_with('/')
+                || name.starts_with("node:")
+            {
+                continue;
+            }
+            let base = name.split('/').next().unwrap_or(name);
+            if NODE_BUILTINS.contains(&base) || NODE_BUILTINS.contains(&name) {
+                continue;
+            }
+            if !out.iter().any(|existing| existing == name) {
+                out.push(name.to_string());
+            }
+        }
     }
     out
 }
@@ -681,171 +663,161 @@ mod tests {
     use super::*;
 
     fn temp_root(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "rabbit-exp-{tag}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        fs::create_dir_all(dir.join("experiences")).unwrap();
-        dir
+        let root = std::env::temp_dir().join(format!("rabbit-exp-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        root
     }
 
-    fn write_package(app_data: &Path, slug: &str, manifest: &str, guide: &str) {
-        let dir = root_for(app_data).join(slug);
+    fn write_package(root: &Path, slug: &str, mut manifest: Value, files: &[(&str, &str)]) {
+        let dir = root.join(slug);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join(MANIFEST_FILE), manifest).unwrap();
-        fs::write(dir.join("guide.md"), guide).unwrap();
+        if let Some(object) = manifest.as_object_mut() {
+            object.insert("schema".to_string(), Value::from(1));
+            object.insert("slug".to_string(), Value::from(slug));
+        }
+        fs::write(
+            dir.join(MANIFEST_FILE),
+            serde_json::to_string_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+        for (name, body) in files {
+            let path = dir.join(name);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+            fs::write(path, body).unwrap();
+        }
     }
 
     #[test]
     fn parses_matchers_and_ranks_specificity() {
-        assert_eq!(parse_matcher("ext:docx"), Some(Matcher::Ext("docx".into())));
-        assert_eq!(parse_matcher("ext:.PDF"), Some(Matcher::Ext("pdf".into())));
-        assert!(matches!(
-            parse_matcher("magic:504b0304:word/"),
-            Some(Matcher::Magic { .. })
-        ));
-        assert_eq!(parse_matcher("nonsense"), None);
+        assert_eq!(parse_matcher("ext:.DOCX"), Some(Matcher::Ext("docx".into())));
         assert_eq!(
-            matcher_specificity(&parse_matcher("magic:504b").unwrap()),
-            3
+            parse_matcher("magic:504b0304:word/"),
+            Some(Matcher::Magic {
+                prefix: vec![0x50, 0x4b, 0x03, 0x04],
+                needle: Some("word/".into()),
+            })
         );
-        assert_eq!(matcher_specificity(&parse_matcher("ext:docx").unwrap()), 1);
-    }
-
-    #[test]
-    fn magic_beats_extension_and_ambiguity_is_reported() {
-        let app_data = temp_root("resolve");
-        write_package(
-            &app_data,
-            "docx-ext",
-            r#"{"schema":1,"slug":"docx-ext","title":"ext","when":["ext:docx"],"contract":"argv","tools":[]}"#,
-            "by extension",
+        assert!(parse_matcher("nonsense").is_none());
+        assert!(parse_matcher("ext:").is_none());
+        assert!(
+            matcher_specificity(&parse_matcher("magic:504b0304").unwrap())
+                > matcher_specificity(&parse_matcher("ext:docx").unwrap())
         );
-        write_package(
-            &app_data,
-            "docx-magic",
-            r#"{"schema":1,"slug":"docx-magic","title":"magic","when":["magic:504b0304:word/"],"contract":"argv","tools":[]}"#,
-            "by magic",
-        );
-        let file = app_data.join("sample.docx");
-        // A real zip header + the Word part name, so the magic matcher hits.
-        let mut bytes = b"PK\x03\x04".to_vec();
-        bytes.extend_from_slice(b"....word/document.xml....");
-        fs::write(&file, &bytes).unwrap();
-
-        let hits = resolve_for_path(&app_data, &file);
-        assert_eq!(hits.len(), 2, "{hits:?}");
-        assert_eq!(hits[0].experience.slug(), "docx-magic");
-        assert_eq!(hits[0].specificity, 3);
-        assert_eq!(hits[1].experience.slug(), "docx-ext");
-
-        fs::remove_dir_all(&app_data).ok();
-    }
-
-    #[test]
-    fn scan_skips_backups_archives_and_broken_manifests() {
-        let app_data = temp_root("scan");
-        write_package(
-            &app_data,
-            "good",
-            r#"{"schema":1,"slug":"good","title":"g","when":["ext:txt"],"contract":"argv","tools":[]}"#,
-            "ok",
-        );
-        write_package(
-            &app_data,
-            "gone",
-            r#"{"schema":1,"slug":"gone","title":"g","when":[],"state":"archived","contract":"argv","tools":[]}"#,
-            "ok",
-        );
-        let broken = root_for(&app_data).join("broken");
-        fs::create_dir_all(&broken).unwrap();
-        fs::write(broken.join(MANIFEST_FILE), "{not json").unwrap();
-        fs::create_dir_all(root_for(&app_data).join(".archive")).unwrap();
-
-        let slugs: Vec<String> = scan(&app_data).into_iter().map(|e| e.slug().to_string()).collect();
-        assert_eq!(slugs, vec!["good".to_string()]);
-
-        fs::remove_dir_all(&app_data).ok();
     }
 
     #[test]
     fn rejects_path_traversal_in_slug() {
+        assert!(validate_slug("docx-text").is_ok());
         assert!(validate_slug("../etc").is_err());
         assert!(validate_slug("a/b").is_err());
         assert!(validate_slug("").is_err());
-        assert!(validate_slug("docx-text_2").is_ok());
     }
 
     #[test]
-    fn guide_text_is_capped_and_block_names_the_root() {
-        let app_data = temp_root("guide");
-        write_package(
-            &app_data,
-            "cap",
-            r#"{"schema":1,"slug":"cap","title":"t","when":["ext:txt"],"contract":"json",
-                "guide":{"file":"guide.md","max_bytes":8},"tools":[]}"#,
-            "0123456789abcdef",
-        );
-        let experience = load(&app_data, "cap").unwrap();
-        assert!(experience.guide_text().starts_with("01234567"));
-        assert!(experience.guide_text().contains("truncated"));
+    fn scan_skips_backups_archives_and_broken_manifests() {
+        let root = temp_root("scan");
+        write_package(&root, "good", serde_json::json!({ "slug": "good" }), &[]);
+        fs::create_dir_all(root.join(".archive")).unwrap();
+        fs::create_dir_all(root.join("good.bak.1")).unwrap();
+        fs::create_dir_all(root.join("broken")).unwrap();
+        fs::write(root.join("broken").join(MANIFEST_FILE), "{not json").unwrap();
+        let found = scan(&root);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].slug(), "good");
+        let _ = fs::remove_dir_all(&root);
+    }
 
+    #[test]
+    fn magic_beats_extension_and_ambiguity_is_reported() {
+        let root = temp_root("resolve");
         write_package(
-            &app_data,
-            "full",
-            r#"{"schema":1,"slug":"full","title":"t","when":[],"contract":"argv",
-                "tools":[{"name":"extract","command":["python","bin/x.py"],"args":{"path":{"type":"string"}}}]}"#,
-            "body",
+            &root,
+            "docx-text",
+            serde_json::json!({ "slug": "docx-text", "when": ["ext:docx"] }),
+            &[],
         );
-        let block = render_block(&load(&app_data, "full").unwrap());
-        assert!(block.contains("--- Experience: full ---"));
-        assert!(block.contains("[Contract: argv]"));
-        assert!(block.contains("body"));
-        assert!(block.contains("python bin/x.py"));
-
-        fs::remove_dir_all(&app_data).ok();
+        write_package(
+            &root,
+            "zip-magic",
+            serde_json::json!({ "slug": "zip-magic", "when": ["magic:504b0304"] }),
+            &[],
+        );
+        let sample = root.join("sample.docx");
+        fs::write(&sample, [0x50, 0x4b, 0x03, 0x04, 0x00]).unwrap();
+        let hits = resolve_for_path(&root, &sample);
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].experience.slug(), "zip-magic");
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
     fn search_ranks_extension_hits_above_title_hits() {
-        let app_data = temp_root("search");
+        let root = temp_root("search");
         write_package(
-            &app_data,
-            "alpha",
-            r#"{"schema":1,"slug":"alpha","title":"docx helper","when":["ext:docx"],"contract":"argv","tools":[]}"#,
-            "a",
+            &root,
+            "docx-text",
+            serde_json::json!({ "slug": "docx-text", "title": "DOCX text", "when": ["ext:docx"] }),
+            &[],
         );
         write_package(
-            &app_data,
-            "beta",
-            r#"{"schema":1,"slug":"beta","title":"docx other","when":["ext:pdf"],"contract":"argv","tools":[]}"#,
-            "b",
+            &root,
+            "docx-notes",
+            serde_json::json!({ "slug": "docx-notes", "title": "docx notes" }),
+            &[],
         );
-        let rows = search(&app_data, "docx", "docx", "");
-        assert_eq!(rows[0].slug, "alpha");
-        assert!(rows.iter().any(|row| row.slug == "beta"));
-
-        fs::remove_dir_all(&app_data).ok();
+        let rows = search(&root, "docx", "docx", "");
+        assert_eq!(rows[0].slug, "docx-text");
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn fingerprint_changes_when_the_package_changes() {
-        let app_data = temp_root("fp");
+    fn requirements_capture_imports_and_skip_stdlib_and_builtins() {
+        let root = temp_root("requires");
         write_package(
-            &app_data,
-            "fp",
-            r#"{"schema":1,"slug":"fp","title":"t","when":[],"contract":"argv","tools":[]}"#,
-            "one",
+            &root,
+            "converter",
+            serde_json::json!({ "slug": "converter" }),
+            &[
+                ("scripts/run.py", "import os\nimport docx\nfrom mylib.sub import x\n"),
+                (
+                    "scripts/run.js",
+                    "const fs = require('fs');\nconst pdf = require('pdf-parse');\n",
+                ),
+            ],
         );
-        let first = load(&app_data, "fp").unwrap().fingerprint();
-        fs::write(root_for(&app_data).join("fp").join("guide.md"), "two-two").unwrap();
-        let second = load(&app_data, "fp").unwrap().fingerprint();
-        assert_ne!(first, second);
+        let package = load(&root, "converter").unwrap();
+        let requires = scan_requirements(
+            &[
+                vec!["python".to_string(), "scripts/run.py".to_string()],
+                vec!["node".to_string(), "scripts/run.js".to_string()],
+            ],
+            &payload_files(&package.dir),
+        );
+        assert_eq!(requires.tools, vec!["python".to_string(), "node".to_string()]);
+        assert_eq!(requires.packages.get("python").unwrap(), &vec!["docx".to_string(), "mylib".to_string()]);
+        assert_eq!(requires.packages.get("node").unwrap(), &vec!["pdf-parse".to_string()]);
+        assert!(requires.summary().contains("python: docx"));
+        let _ = fs::remove_dir_all(&root);
+    }
 
-        fs::remove_dir_all(&app_data).ok();
+    #[test]
+    fn guide_text_is_capped_and_fingerprint_changes_with_payload() {
+        let root = temp_root("guide");
+        write_package(
+            &root,
+            "capped",
+            serde_json::json!({ "slug": "capped", "guide": { "file": "guide.md", "max_bytes": 8 } }),
+            &[("guide.md", "0123456789abcdef")],
+        );
+        let package = load(&root, "capped").unwrap();
+        assert_eq!(package.guide_text().chars().count(), 8);
+        let before = package.fingerprint();
+        fs::write(package.dir.join("extra.txt"), "more").unwrap();
+        let reloaded = load(&root, "capped").unwrap();
+        assert_ne!(before, reloaded.fingerprint());
+        let _ = fs::remove_dir_all(&root);
     }
 }

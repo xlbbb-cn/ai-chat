@@ -33,7 +33,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 use zip::{write::FileOptions, ZipArchive, ZipWriter};
 
-use crate::{agents, apply_config, mcp, AppConfig, AppState};
+use crate::{agents, apply_config, experience, mcp, AppConfig, AppState};
 
 const BACKUP_EXPORT_START_EVENT: &str = "backup-export-start";
 const BACKUP_EXPORT_STATUS_EVENT: &str = "backup-export-status";
@@ -104,10 +104,12 @@ fn add_path_to_zip(
     Ok(())
 }
 
-/// Append the agent definition tree (`agents/`), skipping backups and hidden
-/// entries exactly like `agents::files::scan` does.
-fn add_agent_files_to_zip(
+/// Append an app-data tree to the archive, skipping backups and hidden entries
+/// exactly like `agents::files::scan` does. `prefix` is the folder name inside
+/// the zip (`agents/`, `experiences/`).
+fn add_tree_to_zip(
     zip: &mut ZipWriter<fs::File>,
+    prefix: &str,
     base_dir: &Path,
     dir: &Path,
 ) -> Result<(), String> {
@@ -119,10 +121,10 @@ fn add_agent_files_to_zip(
             continue;
         }
         if path.is_dir() {
-            add_agent_files_to_zip(zip, base_dir, &path)?;
+            add_tree_to_zip(zip, prefix, base_dir, &path)?;
         } else if path.is_file() {
             let relative = path.strip_prefix(base_dir).map_err(|e| e.to_string())?;
-            let entry_name = format!("agents/{}", relative.to_string_lossy().replace('\\', "/"));
+            let entry_name = format!("{prefix}{}", relative.to_string_lossy().replace('\\', "/"));
             zip.start_file(entry_name, zip_options())
                 .map_err(|e| e.to_string())?;
             let mut file = fs::File::open(&path).map_err(|e| e.to_string())?;
@@ -211,7 +213,22 @@ fn export_backup(app: &AppHandle, backup_path: &Path) -> Result<(), String> {
         emit_backup_export_status(app, "Packing agents directory");
         zip.add_directory("agents/", zip_options())
             .map_err(|e| e.to_string())?;
-        add_agent_files_to_zip(&mut zip, &agents_dir, &agents_dir)?;
+        add_tree_to_zip(&mut zip, "agents/", &agents_dir, &agents_dir)?;
+    }
+
+    // Experience packages are app-wide state as well (`<app_data>/experiences`),
+    // and they hold the only copy of a packed tool: without them a restore loses
+    // every capability the model distilled. `.run`/`.archive` never travel (the
+    // hidden-entry rule above), and neither does `.trust.json` — a package must
+    // be re-confirmed on a machine it was restored onto.
+    if let Some(app_data) = state.config_path.parent() {
+        let experiences_dir = experience::root_for(app_data);
+        if experiences_dir.is_dir() {
+            emit_backup_export_status(app, "Packing experience packages");
+            zip.add_directory("experiences/", zip_options())
+                .map_err(|e| e.to_string())?;
+            add_tree_to_zip(&mut zip, "experiences/", &experiences_dir, &experiences_dir)?;
+        }
     }
 
     // Workspace-scoped state lives in the hidden `<workspace>/.data`
@@ -455,6 +472,65 @@ fn restore_agent_files(
     Ok(())
 }
 
+/// Restore `<app_data>/experiences/**` from the archive.
+///
+/// Merged file by file into the live store: the archive is the user's explicit
+/// choice, so a same-named package is overwritten. Hidden segments and backups
+/// are skipped, which also keeps a restored `.run` directory or a retired
+/// `.archive` package from coming back.
+fn restore_experience_files(
+    state: &AppState,
+    archive: &mut ZipArchive<fs::File>,
+) -> Result<(), String> {
+    let Some(app_data) = state.config_path.parent() else {
+        return Ok(());
+    };
+    let root = experience::root_for(app_data);
+    let entry_names: Vec<String> = (0..archive.len())
+        .filter_map(|index| {
+            archive
+                .by_index(index)
+                .ok()
+                .map(|entry| entry.name().to_string())
+        })
+        .filter(|name| name.starts_with("experiences/"))
+        .collect();
+    if entry_names.is_empty() {
+        return Ok(());
+    }
+
+    fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    for name in entry_names {
+        let relative = &name["experiences/".len()..];
+        if relative.is_empty()
+            || relative.contains(".bak.")
+            || relative.split('/').any(|segment| segment.starts_with('.'))
+        {
+            continue;
+        }
+        let Some(target_path) = safe_join(&root, relative) else {
+            continue;
+        };
+        if relative.ends_with('/') {
+            fs::create_dir_all(&target_path).map_err(|e| e.to_string())?;
+            continue;
+        }
+        if let Some(parent) = target_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let mut entry = archive.by_name(&name).map_err(|e| e.to_string())?;
+        let mut out = fs::File::create(&target_path).map_err(|e| e.to_string())?;
+        std::io::copy(&mut entry, &mut out).map_err(|e| e.to_string())?;
+    }
+
+    state
+        .logger
+        .lock()
+        .unwrap()
+        .log("INFO", "Restored experiences/ from backup archive");
+    Ok(())
+}
+
 pub(crate) fn import_backup(app: &AppHandle, backup_path: &Path) -> Result<(), String> {
     let state = app.state::<AppState>();
     let file = fs::File::open(backup_path).map_err(|e| e.to_string())?;
@@ -484,6 +560,7 @@ pub(crate) fn import_backup(app: &AppHandle, backup_path: &Path) -> Result<(), S
     // Agent definitions travel in `agents/`; merge them before the next load
     // so inline prompts from old archives can still be migrated.
     restore_agent_files(&state, &mut archive)?;
+    restore_experience_files(&state, &mut archive)?;
 
     // MCP roster: the archive's `mcp_servers.json` replaces the local one.
     // Parsing first keeps a hand-edited/corrupt entry from bricking the next

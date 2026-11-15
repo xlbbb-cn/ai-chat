@@ -314,18 +314,17 @@ pub fn self_evolution_prompt(root: Option<&Path>) -> String {
          script, starts the process and runs `tools/list`. New tools are callable in the SAME turn. \
          Keep servers small and focused, drop the ones you no longer need, and never put \
          credentials in a script; the tool description carries the protocol and the workflow.\n\n\
-         EXPERIENCE PACKAGES (global, app-data top level): `experience` is the one tool that \
-         reaches `<app_data>/experiences/<slug>/` — a package bundling a `guide.md` plus \
-         executable tools that survives every workspace switch. It is NOT a skill: never load one \
-         with `use_skill`, and nothing in that store appears in the skills folder, the `run_cmd` \
-         library or the MCP panel. `search` before re-solving a familiar problem from scratch, \
-         `load` to read the guide plus the exact tool schemas, `invoke` to run one tool (the app \
-         starts the package's own process; the first run of a package asks the user and the \
-         approval is bound to the package fingerprint), and `pack` when a solution is worth \
-         keeping forever: matchers are program-side (`ext:docx`, `magic:504b0304:word/`, `mime:…`, \
-         `name:…`, `tag:…`), the files you list are copied out of the workspace, and `verify` must \
-         pass or the package is stored as `draft`. Copying is one-way: the store is app-data only, \
-         nothing is written back into a workspace.\n\n\
+         EXPERIENCE PACKAGES (global, app-data top level): `experience` reaches \
+         `<app_data>/experiences/<slug>/` — a portable folder with a `guide.md` plus optional \
+         `skill/`, `scripts/` and `mcp/` parts, and it survives every workspace switch. The tool \
+         never executes anything. `search` before re-solving a familiar problem from scratch, \
+         `load` to read the method, `install` to copy the parts into this workspace — then use the \
+         ordinary tools on what it placed: `use_skill` for the skill, `run_shell` or `run_cmd` for \
+         the scripts in `.data/scripts` (bare names resolve there), `mcp_self` for the server. \
+         `pack` snapshots workspace artifacts into a package, `distill` folds several into one, \
+         `forget` archives one. Matchers are program-side (`ext:docx`, `magic:504b0304:word/`, \
+         `mime:…`, `name:…`, `tag:…`). `requires` lists what the machine needs — installing it is \
+         your job, and the package never runs anything to find out.\n\n\
          EVOLUTION MEMORY: the `evolution` scope of the `memory` tool holds verified facts that \
          must survive across sessions — the runtime environment (default interpreter `python` vs \
          `python3`, package manager, shell, a project interpreter path), the correct way to \
