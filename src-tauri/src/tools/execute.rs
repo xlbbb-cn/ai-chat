@@ -1359,6 +1359,7 @@ pub async fn execute_tool(
                 protected_skill_root,
                 mission_id,
                 session_id,
+                config.self_evolution_mode,
                 cancel,
             )
             .await
@@ -1381,6 +1382,20 @@ pub async fn execute_tool(
                     session_id,
                 )
             }
+        }
+        "experience" => {
+            // Global experience packages: only while self-evolution mode is
+            // on, never mixed with skills / scripts / MCP servers.
+            experience::handle(
+                app,
+                &args,
+                &workspace_dir,
+                config,
+                mission_id,
+                session_id,
+                cancel,
+            )
+            .await
         }
         _ => format!("Unknown tool: {}", name),
     };

@@ -453,6 +453,7 @@ const zhTW: Messages = {
             interactionMonitor: "互動監視器",
             agentMissions: "代理任務監視器",
             evolutionMemory: "自我演化記憶",
+            experiences: "全域經驗包",
             launchMonitor: "開啟監視器",
         },
 
@@ -479,6 +480,7 @@ const zhTW: Messages = {
 
         agentMissionsMonitorAria: "代理任務監視器",
         evolutionMemoryMonitorAria: "自我演化記憶監視器",
+        experiencesAria: "全域經驗包",
     },
 
     memoryPanel: {
@@ -495,6 +497,26 @@ const zhTW: Messages = {
         archivedMeta: "{entries} 條 · {chars} 字元",
         archivedMissing: " · 技能檔案缺失",
         detailFailed: "無法讀取該條目。",
+    },
+
+    experiencePanel: {
+        title: "全域經驗包",
+        summary: "{count} 個經驗包",
+        loading: "正在讀取…",
+        empty: "尚無經驗包。自我演化模式下由 experience 工具的 pack 動作建立；它們不是技能，不會出現在技能目錄裡。",
+        loadFailed: "無法讀取經驗包清單。",
+        toolCount: "{count} 個工具",
+        noTools: "無工具",
+        labelWhen: "匹配",
+        labelTools: "工具",
+        labelTrust: "信任",
+        trustOk: "已確認",
+        trustPending: "首次執行時詢問",
+        labelSource: "來源工作區",
+        labelDir: "位置",
+        delete: "歸檔",
+        deleteConfirm: "確認歸檔 {slug}？",
+        deleteFailed: "歸檔失敗。",
     },
 
     skills: {

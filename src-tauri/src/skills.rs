@@ -299,7 +299,7 @@ pub fn self_evolution_prompt(root: Option<&Path>) -> String {
         "SELF-EVOLUTION: you may install, extend, edit and delete skills yourself. \
          The one skill directory is `{}` (workspace-relative: `./.data/skills`); there is no \
          second one — do not create or look for it, and never reference app-data paths or any \
-         path outside the workspace root.\n\
+         path outside the workspace root, apart from the experience store described below.\n\
          Edit with `file_actions` and workspace-relative `./.data/skills/...` paths: `mkdir` a \
          skill folder, `write`/`patch` its `skill.md`, `move`/`rename` to reorganise, `delete` to \
          remove. A skill is a folder containing `skill.md`: YAML frontmatter with `name` and \
@@ -314,6 +314,18 @@ pub fn self_evolution_prompt(root: Option<&Path>) -> String {
          script, starts the process and runs `tools/list`. New tools are callable in the SAME turn. \
          Keep servers small and focused, drop the ones you no longer need, and never put \
          credentials in a script; the tool description carries the protocol and the workflow.\n\n\
+         EXPERIENCE PACKAGES (global, app-data top level): `experience` is the one tool that \
+         reaches `<app_data>/experiences/<slug>/` — a package bundling a `guide.md` plus \
+         executable tools that survives every workspace switch. It is NOT a skill: never load one \
+         with `use_skill`, and nothing in that store appears in the skills folder, the `run_cmd` \
+         library or the MCP panel. `search` before re-solving a familiar problem from scratch, \
+         `load` to read the guide plus the exact tool schemas, `invoke` to run one tool (the app \
+         starts the package's own process; the first run of a package asks the user and the \
+         approval is bound to the package fingerprint), and `pack` when a solution is worth \
+         keeping forever: matchers are program-side (`ext:docx`, `magic:504b0304:word/`, `mime:…`, \
+         `name:…`, `tag:…`), the files you list are copied out of the workspace, and `verify` must \
+         pass or the package is stored as `draft`. Copying is one-way: the store is app-data only, \
+         nothing is written back into a workspace.\n\n\
          EVOLUTION MEMORY: the `evolution` scope of the `memory` tool holds verified facts that \
          must survive across sessions — the runtime environment (default interpreter `python` vs \
          `python3`, package manager, shell, a project interpreter path), the correct way to \

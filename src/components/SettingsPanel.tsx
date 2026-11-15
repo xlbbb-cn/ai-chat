@@ -7,6 +7,7 @@ import { FontAwesomeIcon, faCaretDown, faCheck, faSpinner, faXmark } from "../ic
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { MonitorPanel } from "./MonitorPanel";
+import { ExperiencePanel } from "./ExperiencePanel";
 import { AgentMissionPanel } from "./AgentMissionPanel";
 import { MemoryPanel } from "./MemoryPanel";
 import { Portal } from "./Portal";
@@ -185,6 +186,7 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
   const [showMonitor, setShowMonitor] = useState(false);
   const [showAgentMonitor, setShowAgentMonitor] = useState(false);
   const [showMemoryMonitor, setShowMemoryMonitor] = useState(false);
+  const [showExperiences, setShowExperiences] = useState(false);
   const [showUpdatePanel, setShowUpdatePanel] = useState(false);
   const [appVersion, setAppVersion] = useState("");
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -1178,6 +1180,14 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
                   </button>
                 </div>
               )}
+              {config.self_evolution_mode && (
+                <div className="settings-field-row">
+                  <span className="settings-field-label">{t("settings.runtime.experiences")}</span>
+                  <button type="button" className="settings-btn" onClick={() => setShowExperiences(true)}>
+                    {t("settings.runtime.launchMonitor")}
+                  </button>
+                </div>
+              )}
             </div>
           </section>
 
@@ -1315,6 +1325,16 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
           <div className="mission-monitor-overlay" role="dialog" aria-modal="true" aria-label={t("settings.evolutionMemoryMonitorAria")}>
             <div className="mission-monitor-modal memory-monitor-modal">
               <MemoryPanel onClose={() => setShowMemoryMonitor(false)} />
+            </div>
+          </div>
+        </Portal>
+      )}
+
+      {showExperiences && (
+        <Portal>
+          <div className="mission-monitor-overlay" role="dialog" aria-modal="true" aria-label={t("settings.experiencesAria")}>
+            <div className="mission-monitor-modal experience-monitor-modal">
+              <ExperiencePanel onClose={() => setShowExperiences(false)} />
             </div>
           </div>
         </Portal>

@@ -333,6 +333,42 @@ export async function listSkills(): Promise<Skill[]> {
   return invoke("list_skills");
 }
 
+/**
+ * Global experience packages — `<app_data>/experiences/<slug>/`.
+ *
+ * These are *not* skills: they never appear in `list_skills`, the workspace
+ * `.data/skills` folder, the `run_cmd` library or the MCP roster. A package
+ * bundles a guide plus executable tools and is only reachable through the
+ * `experience` tool while self-evolution mode is on.
+ */
+export interface ExperienceRow {
+  slug: string;
+  title: string;
+  state: string;
+  contract: string;
+  when: string[];
+  tools: string[];
+  has_guide: boolean;
+  fingerprint: string;
+  trusted: boolean;
+  dir: string;
+  source_workspace: string;
+}
+
+export interface ExperienceRegistry {
+  store: string;
+  experiences: ExperienceRow[];
+}
+
+export async function listExperiences(): Promise<ExperienceRegistry> {
+  return invoke("list_experiences");
+}
+
+/** Archive a package (moved under `<store>/.archive/`, never deleted). */
+export async function deleteExperience(slug: string): Promise<void> {
+  return invoke("delete_experience", { slug });
+}
+
 export async function saveSkill(skill: Skill): Promise<void> {
   return invoke("save_skill", { skill });
 }

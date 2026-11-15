@@ -1,0 +1,227 @@
+.experience-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--c-bg);
+  color: var(--c-body);
+}
+
+/* Opened from Settings → Runtime & Debug, next to the evolution memory
+   monitor. The base modal shell is the shared `.mission-monitor-modal`; this
+   only narrows it to a list. */
+.mission-monitor-modal.experience-monitor-modal {
+  width: min(680px, 100%);
+  height: min(760px, 100%);
+}
+
+.experience-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--c-border);
+  flex-shrink: 0;
+}
+
+.experience-header h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--c-text);
+  letter-spacing: normal;
+}
+
+/* Store path is the only fixed fact; it stays on its own line so a long
+   app-data path can never push the count off-screen. */
+.experience-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--c-border);
+  font-size: 12px;
+  color: var(--c-muted);
+  flex-shrink: 0;
+}
+
+.experience-store {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--c-placeholder);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.experience-error {
+  margin: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--c-border);
+  font-size: 12px;
+  color: var(--c-danger);
+  flex-shrink: 0;
+}
+
+.experience-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.experience-empty {
+  margin: 0;
+  padding: 16px 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--c-muted);
+}
+
+.experience-item {
+  border-bottom: 1px solid var(--c-border);
+}
+
+.experience-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: calc(100% - 12px);
+  margin: 0 6px;
+  min-height: 34px;
+  padding: 7px 6px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--t-dur) var(--t-ease);
+}
+
+.experience-row:hover {
+  background: var(--c-hover);
+}
+
+.experience-row:focus-visible {
+  outline: 2px solid var(--c-accent-soft);
+  outline-offset: -2px;
+}
+
+.experience-row > svg {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--c-muted);
+  flex-shrink: 0;
+}
+
+.experience-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.experience-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--c-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.experience-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--c-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.experience-badge {
+  padding: 1px 5px;
+  border: 1px solid var(--c-border-i);
+  border-radius: 4px;
+  background: var(--c-surface-2);
+  color: var(--c-text);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.experience-slug {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color: var(--c-placeholder);
+}
+
+.experience-detail {
+  padding: 0 12px 12px 30px;
+}
+
+.experience-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 10px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.experience-facts dt {
+  color: var(--c-muted);
+}
+
+.experience-facts dd {
+  margin: 0;
+  color: var(--c-body);
+  word-break: break-word;
+}
+
+.experience-path {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--c-placeholder);
+}
+
+.experience-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 8px;
+}
+
+.experience-archive-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--c-body);
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-border-i);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color var(--t-dur) var(--t-ease), color var(--t-dur) var(--t-ease);
+}
+
+.experience-archive-btn:hover:not(:disabled) {
+  background: var(--c-hover);
+}
+
+.experience-archive-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Second click archives: the label already spells out the consequence, so the
+   colour is the only extra emphasis needed. */
+.experience-archive-btn.is-confirming {
+  color: var(--c-danger);
+  border-color: var(--c-danger);
+}

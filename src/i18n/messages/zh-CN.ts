@@ -453,6 +453,7 @@ const zhCN: Messages = {
             interactionMonitor: "交互监视器",
             agentMissions: "智能体任务监视器",
             evolutionMemory: "自进化记忆",
+            experiences: "全局经验包",
             launchMonitor: "打开监视器",
         },
 
@@ -479,6 +480,7 @@ const zhCN: Messages = {
 
         agentMissionsMonitorAria: "智能体任务监视器",
         evolutionMemoryMonitorAria: "自进化记忆监视器",
+        experiencesAria: "全局经验包",
     },
 
     memoryPanel: {
@@ -495,6 +497,26 @@ const zhCN: Messages = {
         archivedMeta: "{entries} 条 · {chars} 字符",
         archivedMissing: " · 技能文件缺失",
         detailFailed: "无法读取该条目。",
+    },
+
+    experiencePanel: {
+        title: "全局经验包",
+        summary: "{count} 个经验包",
+        loading: "正在读取…",
+        empty: "还没有经验包。自进化模式下由 experience 工具的 pack 动作创建；它们不是技能，不会出现在技能目录里。",
+        loadFailed: "无法读取经验包列表。",
+        toolCount: "{count} 个工具",
+        noTools: "无工具",
+        labelWhen: "匹配",
+        labelTools: "工具",
+        labelTrust: "信任",
+        trustOk: "已确认",
+        trustPending: "首次运行时询问",
+        labelSource: "来源工作区",
+        labelDir: "位置",
+        delete: "归档",
+        deleteConfirm: "确认归档 {slug}？",
+        deleteFailed: "归档失败。",
     },
 
     skills: {

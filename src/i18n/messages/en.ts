@@ -492,6 +492,7 @@ const en = {
             interactionMonitor: "Interaction monitor",
             agentMissions: "Agent missions monitor",
             evolutionMemory: "Evolution memory",
+            experiences: "Experience packages",
             launchMonitor: "Launch Monitor",
         },
 
@@ -520,6 +521,7 @@ const en = {
 
         agentMissionsMonitorAria: "Agent missions monitor",
         evolutionMemoryMonitorAria: "Evolution memory monitor",
+        experiencesAria: "Experience packages",
     },
 
     memoryPanel: {
@@ -536,6 +538,27 @@ const en = {
         archivedMeta: "{entries} entries · {chars} chars",
         archivedMissing: " · skill file missing",
         detailFailed: "Could not load the entry.",
+    },
+
+    experiencePanel: {
+        title: "Experience packages",
+        summary: "{count} packages",
+        loading: "Loading…",
+        empty:
+            "No experience package yet. One is created by the `experience` tool's pack action while self-evolution mode is on; these are not skills and never appear in the skills folder.",
+        loadFailed: "Could not read the experience list.",
+        toolCount: "{count} tools",
+        noTools: "no tools",
+        labelWhen: "Matches",
+        labelTools: "Tools",
+        labelTrust: "Trust",
+        trustOk: "confirmed",
+        trustPending: "asks on first run",
+        labelSource: "Source workspace",
+        labelDir: "Location",
+        delete: "Archive",
+        deleteConfirm: "Archive {slug}?",
+        deleteFailed: "Could not archive the package.",
     },
 
     skills: {

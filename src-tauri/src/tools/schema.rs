@@ -465,6 +465,14 @@ pub fn get_all_tools(
         tools.push(self::mcp_self::schema());
     }
 
+    // Global experience packages are only reachable while self-evolution mode
+    // is on, with exactly this one tool. They are deliberately *not* skills:
+    // `use_skill`, the workspace skills root, the script library and the MCP
+    // roster never see them.
+    if self_evolution {
+        tools.push(self::experience::tool_definition());
+    }
+
     tools
 }
 

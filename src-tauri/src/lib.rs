@@ -16,6 +16,7 @@ pub mod agents;
 mod backup;
 mod db;
 mod evolution_maintenance;
+mod experience;
 mod figures;
 mod html_pdf;
 mod instance;
@@ -2194,6 +2195,8 @@ pub fn run() {
             skills::filter_existing_skills,
             skills::get_skills_status,
             skills::save_skills_status,
+            tools::experience::list_experiences,
+            tools::experience::delete_experience,
             tools::memory::list_evolution_memory,
             tools::memory::read_evolution_entry,
             tools::memory::list_archived_skills,

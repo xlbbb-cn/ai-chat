@@ -27,6 +27,10 @@ pub(super) async fn handle_file_actions(
     // Chat session of the caller, routed onto the progress payloads so a
     // winding-down turn cannot paint rows into another conversation.
     session_id: Option<&str>,
+    // Self-evolution mode: enables the global experience registry to answer
+    // "which capability claims this file?" when a read fails on binary bytes.
+    // Off = plain `Error reading file: …`, exactly like before.
+    self_evolution: bool,
     // Background-task cancel flag. Only `search` observes it; every other
     // action is short enough to run to completion.
     cancel: Option<&std::sync::Arc<std::sync::atomic::AtomicBool>>,
@@ -58,9 +62,23 @@ pub(super) async fn handle_file_actions(
                     }
 
                     if start_line.is_none() && end_line.is_none() {
-                        return fs::read_to_string(&p)
-                            .map(truncate_tool_output)
-                            .unwrap_or_else(|e| format!("Error reading file: {}", e));
+                        return match fs::read_to_string(&p) {
+                            Ok(text) => truncate_tool_output(text),
+                            Err(err) => {
+                                // Program-side resolution: the experience
+                                // registry answers by extension/magic bytes, so
+                                // this never depends on the model guessing.
+                                let hint = if self_evolution {
+                                    super::experience::unsupported_hint(app, &p)
+                                } else {
+                                    None
+                                };
+                                match hint {
+                                    Some(hint) => format!("Error reading file: {err}\n\n{hint}"),
+                                    None => format!("Error reading file: {}", err),
+                                }
+                            }
+                        };
                     }
 
                     let start = start_line.unwrap_or(1);
