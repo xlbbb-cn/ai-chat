@@ -107,7 +107,7 @@ Rabbit Chat Studio 把桌面智能体拆成四个不可再分的问题：如何�
 
 ## 这些页面怎么维护
 
-文档正文放在仓库的 `docs/wiki/` 下，由 `scripts/gen-wiki.mjs` 生成本站页面，GitHub Wiki 用同一份文本同步。文中版本号跟随 `package.json`（当前 v3.3.3），每个版本的变更见 `CHANGELOG.md`。
+文档正文放在仓库的 `docs/wiki/` 下，由 `scripts/gen-wiki.mjs` 生成本站页面——这里是唯一维护中的版本。GitHub Wiki 只保留指向本站的入口页，不再承载正文。文中版本号跟随 `package.json`（当前 v3.3.3），每个版本的变更见 `CHANGELOG.md`。
 
 ## 相关链接
 

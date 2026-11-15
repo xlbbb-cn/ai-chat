@@ -148,11 +148,13 @@ Live URL: `https://xlbbb-cn.github.io/ai-chat/` — the repository needs Pages s
   loudly on a missing source file, a dead link or a dead anchor, and `pages.yml` runs it before
   `upload-pages-artifact`; the output is build product and gitignored (`docs/site/wiki/`), so never
   edit it by hand.
-- **The GitHub Wiki is a published copy, not a source.** Change `docs/wiki/` first, then push the
-  same prose to `git@github.com:xlbbb-cn/ai-chat.wiki.git` if the Wiki should stay in sync (HTTPS to
-  github.com is reset in some environments, SSH works; the main repo uses SSH too). The old Wiki only
-  ever translated its Home page into 简体中文 — its other Chinese links were never written — so the
-  repo's `zh/` tree is the complete translation and the site is the authoritative bilingual copy.
+- **The GitHub Wiki is a forwarding shell, not a source.** Its `Home.md` / `简体中文.md` are landing
+  pages pointing at the site and every other page is a stub carrying the matching site URL, so old
+  links keep working and nobody reads a stale copy. Pushing to
+  `git@github.com:xlbbb-cn/ai-chat.wiki.git` still works (HTTPS to github.com is reset in some
+  environments, SSH works); do it only to refresh those pointers. Before the site existed the Wiki
+  carried the prose and had 18 Chinese pages — those were superseded by `docs/wiki/zh/`, which is the
+  maintained translation.
 
 Preview locally (any static server; the folder has no build step):
 

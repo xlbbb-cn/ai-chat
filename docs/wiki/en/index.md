@@ -107,7 +107,7 @@ In one sentence: **the model handles cognition and planning, local tools handle 
 
 ## Keeping these pages current
 
-These docs live in the repository under `docs/wiki/` and are rendered to this site by `scripts/gen-wiki.mjs`; the GitHub Wiki is refreshed from the same text. Version numbers in the pages follow `package.json` (`v3.3.3` today) and the per-release entries in `CHANGELOG.md`.
+These docs live in the repository under `docs/wiki/` and are rendered to this site by `scripts/gen-wiki.mjs` — this site is the only maintained copy. The GitHub Wiki now holds forwarding pages that point here. Version numbers in the pages follow `package.json` (`v3.3.3` today) and the per-release entries in `CHANGELOG.md`.
 
 ## Links
 

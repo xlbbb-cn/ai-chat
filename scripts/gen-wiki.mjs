@@ -34,10 +34,10 @@ const UI = {
     next: '下一篇',
     other: 'English',
     otherLabel: 'Switch to English',
-    wiki: '本页同时维护在 GitHub Wiki',
+    wiki: '源文件',
     version: '文档版本',
     missing: '本页暂无中文版，以下为英文原文。',
-    missingLink: '在 GitHub Wiki 上阅读英文版',
+    missingLink: '在站点上阅读英文版',
     theme: '切换主题',
     footerNote: '本站不加载第三方脚本与追踪代码。',
     license: 'MIT 许可证',
@@ -54,7 +54,7 @@ const UI = {
     next: 'Next',
     other: '简体中文',
     otherLabel: '切换到中文',
-    wiki: 'Maintained on the GitHub Wiki',
+    wiki: 'Source',
     version: 'Docs version',
     missing: '',
     missingLink: '',
@@ -331,7 +331,7 @@ ${body}
     </article>
     ${pager}
     <p class="wiki-foot">
-      ${t.wiki}：<a href="https://github.com/${nav.repo}/wiki/${encodeURIComponent(p.wiki)}" target="_blank" rel="noopener noreferrer">${esc(p.wiki)} ↗</a>
+      ${t.wiki}: <a href="https://github.com/${nav.repo}/blob/main/docs/wiki/${lang}/${slug}.md" target="_blank" rel="noopener noreferrer">docs/wiki/${lang}/${slug}.md ↗</a>
       · ${t.version} v${nav.docsVersion}
     </p>
   </main>
