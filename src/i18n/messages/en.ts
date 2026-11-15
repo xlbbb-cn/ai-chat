@@ -62,7 +62,6 @@ const en = {
         appMenuRestoreBackup: "Restore backup…",
         appMenuMarkdownEdit: "Markdown edit…",
         appMenuReportIssue: "Report an issue…",
-        appMenuAbout: "About Rabbit Chat Studio",
 
         workspaceSwitch: "Switch workspace",
         workspaceSwitchAria: "Workspace {workspace} — switch workspace",
@@ -500,6 +499,9 @@ const en = {
                 "Also consider releases flagged as pre-release. Draft releases are never visible to the API.",
             updates: "Updates",
             checkNow: "Check for updates…",
+            links: "Links",
+            website: "Website",
+            github: "GitHub",
         },
 
         messageEditor: {

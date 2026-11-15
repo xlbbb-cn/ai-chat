@@ -53,7 +53,6 @@ const zhCN: Messages = {
         appMenuRestoreBackup: "恢复备份…",
         appMenuMarkdownEdit: "Markdown 编辑…",
         appMenuReportIssue: "反馈问题…",
-        appMenuAbout: "关于 Rabbit Chat Studio",
 
         workspaceSwitch: "切换工作区",
         workspaceSwitchAria: "当前工作区 {workspace} — 切换工作区",
@@ -459,6 +458,9 @@ const zhCN: Messages = {
             prereleaseHint: "同时考虑标记为预发布的版本。草稿版本对 API 始终不可见。",
             updates: "更新",
             checkNow: "检查更新…",
+            links: "链接",
+            website: "官网",
+            github: "GitHub",
         },
 
         messageEditor: {

@@ -4,6 +4,7 @@ import type { AppConfig, GlassEffect, ModelMetadata, ModelSettings, Palette, Req
 import { LOCALE_LABELS, LOCALES, useI18n, type Locale, type MessageKey } from "../i18n";
 import { matchModelCatalog, isDeepSeekModel } from "../utils/modelMetadata";
 import { FontAwesomeIcon, faCaretDown, faCheck, faSpinner, faXmark } from "../icons";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { MonitorPanel } from "./MonitorPanel";
 import { AgentMissionPanel } from "./AgentMissionPanel";
@@ -146,6 +147,19 @@ const CAPABILITY_FLAGS: { flag: keyof ModelMetadata; labelKey: MessageKey }[] = 
   { flag: "supports_audio", labelKey: "settings.api.capabilityAudio" },
   { flag: "open_weights", labelKey: "settings.api.capabilityOpenWeights" },
 ];
+
+const EXTERNAL_LINKS = {
+  website: "https://xlbbb-cn.github.io/ai-chat/",
+  github: "https://github.com/xlbbb-cn/ai-chat",
+};
+
+async function openExternalUrl(url: string): Promise<void> {
+  try {
+    await openUrl(url);
+  } catch (error) {
+    console.error("open external url failed", error);
+  }
+}
 
 /** Compact token count for capability badges: `128K`, `1M`, `512`. */
 function formatTokenCount(tokens: number): string {
@@ -1161,6 +1175,18 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
                 <span className="settings-field-label">{t("settings.about.currentVersion")}</span>
                 <div className="settings-inline-row">
                   <code>{appVersion || "—"}</code>
+                </div>
+              </div>
+
+              <div className="settings-field-row">
+                <span className="settings-field-label">{t("settings.about.links")}</span>
+                <div className="settings-inline-row">
+                  <button type="button" className="settings-btn" onClick={() => void openExternalUrl(EXTERNAL_LINKS.website)}>
+                    {t("settings.about.website")}
+                  </button>
+                  <button type="button" className="settings-btn" onClick={() => void openExternalUrl(EXTERNAL_LINKS.github)}>
+                    {t("settings.about.github")}
+                  </button>
                 </div>
               </div>
 

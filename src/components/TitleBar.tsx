@@ -17,7 +17,6 @@ import {
 } from "../icons";
 import {
     exportBackupTo,
-    getAppVersion,
     getInstanceInfo,
     getWorkspaceDir,
     getWorkspaceHistory,
@@ -312,17 +311,8 @@ export function TitleBar({
             if (typeof path === "string") await openMarkdownFile(path);
         });
 
-    /** GitHub's new-issue page — the bug-report entry, right above About. */
+    /** GitHub's new-issue page — the bug-report entry. */
     const handleReportIssue = () => run(openIssuePage);
-
-    const handleAbout = () =>
-        run(async () => {
-            const version = await getAppVersion();
-            await messageDialog(
-                `About Rabbit Chat Studio\n\nRabbit Chat Studio\nOpenAI-compatible desktop assistant\nVersion ${version}`,
-                { title: "Rabbit Chat Studio", kind: "info" },
-            );
-        });
 
     const controls = (
         <div className="titlebar-controls">
@@ -535,14 +525,6 @@ export function TitleBar({
                             onClick={handleReportIssue}
                         >
                             {t("app.appMenuReportIssue")}
-                        </button>
-                        <button
-                            type="button"
-                            role="menuitem"
-                            className="titlebar-menu-item"
-                            onClick={handleAbout}
-                        >
-                            {t("app.appMenuAbout")}
                         </button>
                     </div>
                 )}

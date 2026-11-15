@@ -9,7 +9,7 @@ use std::sync::Mutex;
 #[cfg(target_os = "macos")]
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, State};
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
 pub mod agents;
@@ -45,7 +45,6 @@ const SAVE_BACKUP_MENU_ID: &str = "save-backup";
 const RESTORE_BACKUP_MENU_ID: &str = "restore-backup";
 const MARKDOWN_EDIT_MENU_ID: &str = "markdown-edit";
 const OPEN_ISSUE_MENU_ID: &str = "open-issue";
-const ABOUT_MENU_ID: &str = "about";
 /// Where "Report an issue..." sends the user. Fixed on purpose — see
 /// `open_issue_page`.
 const ISSUE_URL: &str = "https://github.com/xlbbb-cn/ai-chat/issues/new";
@@ -83,7 +82,7 @@ struct MarkdownEditPayload {
 
 // ─── App menu actions ────────────────────────────────────────────────────────
 //
-// Shared by the native menu (macOS global menu bar, and the File/Tools/About
+// Shared by the native menu (macOS global menu bar, and the File/Tools/Help
 // entries on platforms that still show one) and the custom titlebar's `⋯`
 // menu. The titlebar picks its paths with the dialog plugin on the frontend,
 // then calls the commands below — Rust never blocks on a dialog there.
@@ -156,17 +155,6 @@ fn import_backup_archive(app: &AppHandle, backup_path: &Path) {
             .unwrap()
             .log("ERROR", &format!("Restore backup failed: {err}"));
     }
-}
-
-/// Native About dialog, shared by the menu bar and the titlebar menu.
-fn show_about(app: &AppHandle) {
-    app.dialog()
-        .message(format!(
-            "About Rabbit Chat Studio\n\nRabbit Chat Studio\nOpenAI-compatible desktop assistant\nVersion {}",
-            env!("CARGO_PKG_VERSION")
-        ))
-        .buttons(MessageDialogButtons::Ok)
-        .show(|_| {});
 }
 
 // ─── Custom titlebar commands ────────────────────────────────────────────────
@@ -1717,8 +1705,6 @@ pub fn run() {
                 }
             } else if event.id() == OPEN_ISSUE_MENU_ID {
                 let _ = open_issue_page(app);
-            } else if event.id() == ABOUT_MENU_ID {
-                show_about(app);
             }
         })
         .setup(move |app| {
@@ -1814,10 +1800,6 @@ pub fn run() {
                 )
                 .expect("failed to create edit menu");
 
-                let about_item =
-                    MenuItem::with_id(app, ABOUT_MENU_ID, "About Rabbit Chat Studio", true,
-                        None::<&str>)
-                        .expect("failed to create about menu item");
                 let issue_item = MenuItem::with_id(
                     app,
                     OPEN_ISSUE_MENU_ID,
@@ -1826,10 +1808,10 @@ pub fn run() {
                     None::<&str>,
                 )
                 .expect("failed to create issue menu item");
-                let about_menu =
-                    Submenu::with_items(app, "About", true, &[&issue_item, &about_item])
-                        .expect("failed to create about menu");
-                let menu = Menu::with_items(app, &[&file_menu, &edit_menu, &tools_menu, &about_menu])
+                let help_menu =
+                    Submenu::with_items(app, "Help", true, &[&issue_item])
+                        .expect("failed to create help menu");
+                let menu = Menu::with_items(app, &[&file_menu, &edit_menu, &tools_menu, &help_menu])
                     .expect("failed to create app menu");
                 app.set_menu(menu).expect("failed to set app menu");
             }

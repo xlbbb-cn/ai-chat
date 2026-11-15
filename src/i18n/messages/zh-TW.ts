@@ -53,7 +53,6 @@ const zhTW: Messages = {
         appMenuRestoreBackup: "還原備份…",
         appMenuMarkdownEdit: "Markdown 編輯…",
         appMenuReportIssue: "回報問題…",
-        appMenuAbout: "關於 Rabbit Chat Studio",
 
         workspaceSwitch: "切換工作區",
         workspaceSwitchAria: "目前工作區 {workspace} — 切換工作區",
@@ -459,6 +458,9 @@ const zhTW: Messages = {
             prereleaseHint: "同時考慮標記為發行前的版本。草稿版本對 API 永遠不可見。",
             updates: "更新",
             checkNow: "檢查更新…",
+            links: "連結",
+            website: "官網",
+            github: "GitHub",
         },
 
         messageEditor: {
