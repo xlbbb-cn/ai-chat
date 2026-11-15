@@ -59,11 +59,6 @@ export interface ToolCallEntry {
    */
   cwd?: string;
   /**
-   * Live `ask_main_agent` exchange for a sub-agent task. `request` is the
-   * sub-agent's question; `answer_chars` is the size of the material returned.
-   */
-  help?: ToolCallHelp;
-  /**
    * Mission-bus (mbus) activity for this task row. Counts are live; the full
    * message log lives in the Agent Mission panel. `last.body` is clipped before
    * it is persisted with the tool-call entry.
@@ -81,14 +76,6 @@ export interface ToolCallMbus {
     label: string;
     body: string;
   };
-}
-
-/** One sub-agent → main-agent help exchange, mirrored from `agent-help-*`. */
-export interface ToolCallHelp {
-  request: string;
-  status: "running" | "done" | "error";
-  answer_chars?: number;
-  error?: string;
 }
 
 /**
@@ -446,12 +433,6 @@ export interface AppConfig {
    * are delivered or the tasks are cancelled. Defaults to on.
    */
   background_tools?: boolean;
-  /**
-   * Allow `llm` sub-agents to call `ask_main_agent` and have the main agent
-   * (main model, tools, skills, MCP and conversation history) collect material
-   * for them. Defaults to on.
-   */
-  sub_agent_main_help?: boolean;
   /**
    * Draw with `svg` / `carve` figures (saved as PNG, plus 3D scenes) instead of
    * Mermaid diagrams. Defaults to on; when off the system prompt asks for a
@@ -968,22 +949,6 @@ export interface AgentTaskEvent {
   cwd?: string | null;
 }
 
-/** `agent-help-start` / `agent-help-done` / `agent-help-error` payload. */
-export interface AgentHelpEvent {
-  task_id: string;
-  /** Chat session the task belongs to; the listener drops other sessions. */
-  session_id?: string | null;
-  mission_id?: string;
-  agent_id: string;
-  agent_name?: string;
-  request?: string;
-  cwd?: string | null;
-  answer_chars?: number;
-  tokens?: number;
-  tool_calls?: number;
-  error?: string;
-}
-
 /** One live `agent-mbus-message` event (planner or sub-agent publish). */
 export interface AgentMbusMessageEvent {
   bus_id: string;
@@ -1073,7 +1038,7 @@ export interface AgentMissionSnapshot {
   mission_accomplished: boolean;
   episodic_summary: string;
   final_report: string;
-  /** One line per `ask_main_agent` exchange, newest last. */
+  /** Legacy `ask_main_agent` log. The tool is gone, so new missions leave it empty. */
   help_notes?: string;
   active_tasks: AgentMissionTask[];
   active_task_count: number;

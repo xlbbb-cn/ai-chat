@@ -104,7 +104,7 @@ With **Settings → self-evolution mode** on, the assistant gets the `mcp_self` 
 - actions: `list` / `write` / `enable` / `disable` / `test` / `restart` / `logs` / `remove`. Writing, enabling and removal ask for confirmation once (the `user_software` kind, auto-acceptable via Settings → auto-accept);
 - an entry whose `tools/list` handshake fails stays disabled, so a broken server can never stall later requests — `logs` returns the log tail so the model can fix its own script;
 - the tool registry is rebuilt at the next request boundary once the roster changes, so *write → enable → call* works within one turn;
-- sub-agents and the main-agent helper never receive `mcp_self` — they would race on the roster and a confirmation dialog would block a mission.
+- sub-agents never receive `mcp_self` — they would race on the roster and a confirmation dialog would block a mission.
 
 The panel shows these rows with a `self-built` badge; editing or deleting one writes the workspace file. You can also hand-edit `<workspace>/.data/mcp.conf` and use the server's **restart** action (or the panel's edit) to pick the change up.
 

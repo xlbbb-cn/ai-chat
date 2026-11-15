@@ -585,12 +585,6 @@ pub struct AppConfig {
     /// until a started task delivers its result or is cancelled.
     #[serde(default = "update::default_true")]
     pub background_tools: bool,
-    /// Allow `llm` sub-agents to call `ask_main_agent` and have the main agent
-    /// (main model, tools, skills, MCP and conversation history) collect
-    /// material for them. Disabled means the tool is neither advertised nor
-    /// executable.
-    #[serde(default = "update::default_true")]
-    pub sub_agent_main_help: bool,
     /// Draw with `svg` / `carve` figures instead of Mermaid diagrams
     /// (Settings → Advanced, on by default). Off means the system prompt asks
     /// for a fenced `mermaid` block, which the transcript renders itself; the
@@ -700,7 +694,6 @@ impl Default for AppConfig {
             selected_tools: vec![],
             self_evolution_mode: false,
             background_tools: true,
-            sub_agent_main_help: true,
             enhanced_figures: true,
             main_agent_max_rounds: turn_guard::DEFAULT_MAIN_AGENT_MAX_ROUNDS,
             main_agent_max_tool_calls: turn_guard::DEFAULT_MAIN_AGENT_MAX_TOOL_CALLS,

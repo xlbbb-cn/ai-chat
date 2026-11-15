@@ -538,24 +538,7 @@ fn compact_list_caps_long_capability_lists() {
 }
 
 #[test]
-fn main_helper_tools_drop_chat_only_tools() {
-    let mut config = AppConfig::default();
-    config.selected_tools = vec![
-        "run_cmd".to_string(),
-        "file_actions".to_string(),
-        "timer".to_string(),
-    ];
-    let ids = main_helper_tool_ids(&config);
-    assert!(ids.iter().any(|id| id == "run_cmd"));
-    assert!(ids.iter().any(|id| id == "file_actions"));
-    assert!(
-        !ids.iter().any(|id| id == "timer"),
-        "timer is a chat-session tool and must not reach the helper"
-    );
-}
-
-#[test]
-fn main_helper_history_is_budgeted_and_keeps_the_newest_entries() {
+fn conversation_summary_is_budgeted_and_keeps_the_newest_entries() {
     let records: Vec<crate::db::HistoryRecord> = (0..20)
         .map(|i| crate::db::HistoryRecord {
             id: i,
@@ -577,7 +560,7 @@ fn main_helper_history_is_budgeted_and_keeps_the_newest_entries() {
         })
         .collect();
 
-    let transcript = build_main_helper_history(&records);
+    let transcript = build_conversation_summary(&records);
     assert!(
         transcript.starts_with("[user]: message 8"),
         "got: {transcript}"
@@ -593,7 +576,7 @@ fn main_helper_history_is_budgeted_and_keeps_the_newest_entries() {
 }
 
 #[test]
-fn main_helper_history_respects_the_byte_budget() {
+fn conversation_summary_respects_the_byte_budget() {
     let records: Vec<crate::db::HistoryRecord> = (0..20)
         .map(|i| crate::db::HistoryRecord {
             id: i,
@@ -611,24 +594,13 @@ fn main_helper_history_respects_the_byte_budget() {
         })
         .collect();
 
-    let transcript = build_main_helper_history(&records);
-    let limit = MAIN_HELPER_HISTORY_BUDGET_BYTES + MAIN_HELPER_HISTORY_MESSAGE_BYTES + 20;
+    let transcript = build_conversation_summary(&records);
+    let limit = CONVERSATION_SUMMARY_BUDGET_BYTES + CONVERSATION_SUMMARY_MESSAGE_BYTES + 20;
     assert!(
         transcript.len() <= limit,
         "transcript exceeded the budget: {} bytes",
         transcript.len()
     );
-}
-
-#[test]
-fn main_helper_tool_results_are_capped() {
-    let short = "ok".to_string();
-    assert_eq!(cap_helper_tool_result(short.clone()), short);
-
-    let long = "x".repeat(MAIN_HELPER_TOOL_RESULT_MAX_BYTES + 100);
-    let capped = cap_helper_tool_result(long);
-    assert!(capped.len() <= MAIN_HELPER_TOOL_RESULT_MAX_BYTES + 100);
-    assert!(capped.contains("truncated"));
 }
 
 #[test]

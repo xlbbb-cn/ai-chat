@@ -55,7 +55,7 @@ One assistant round can carry several tool calls. **Settings → Runtime & Debug
 - **Concurrent**: `file_actions` `read` / `list` / `search` / `diff`, `run_cmd`, `run_shell`, `skill_read`, `call_subagent` and every MCP tool. A batch costs the slowest call instead of the sum.
 - **Alone, in order** (and they split the round into segments): `use_skill` (it changes the allowed commands and skill directories the rest of the round sees), `memory` / `todos` / `timer_*` (read-modify-write on a session file), mutating `file_actions` actions (write / patch / rename / move / mkdir / delete), `background_task`, `mcp_self`, `skill_merge`, `experience`, the mission-board tools, and any tool the app does not know.
 - **Calls per round** (`config.max_parallel_tools`, default 4, range 1–8): how many independent calls may run at once. `1` behaves like the switch being off — strictly one call at a time.
-- **Sub-agents** follow the same rules, with `mbus`, `ask_main_agent` and every MCP call as extra barriers (an MCP call owns that task's `AgentMcpSession`).
+- **Sub-agents** follow the same rules, with `mbus` and every MCP call as extra barriers (an MCP call owns that task's `AgentMcpSession`).
 - **Order never changes**: tool results, failure counting and the transcript rows always follow the model's order, whatever order the calls finished in. Stop still exits after the current batch returns.
 - One behaviour change: when a call trips the failure limit, the calls beside it are already in flight and are not cancelled — the verdict applies to the next round.
 
@@ -102,7 +102,7 @@ When a limit is spent the turn does not die mid-flight: a context-budget marker 
 | --- | --- | --- |
 | `tool_failure_limit` | 3 | Consecutive failures before a tool is disabled for the rest of the session |
 
-The counter is per session and per tool; one success resets it. A disabled tool stays advertised until the next turn (the prompt prefix, and its cache, stay stable) but is refused with a notice; it reappears in the payload on the next turn or after the limit is changed. The guard is shared between the main agent, its sub-agents and the main-agent helper, so a tool the chat gave up on does not keep failing in parallel.
+The counter is per session and per tool; one success resets it. A disabled tool stays advertised until the next turn (the prompt prefix, and its cache, stay stable) but is refused with a notice; it reappears in the payload on the next turn or after the limit is changed. The guard is shared between the main agent and its sub-agents, so a tool the chat gave up on does not keep failing in parallel.
 
 ## Risk levels L0–L6
 

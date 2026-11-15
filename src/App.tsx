@@ -24,7 +24,6 @@ import type {
   AppConfig,
   Message,
   AgentTaskEvent,
-  AgentHelpEvent,
   AgentSelectionEvent,
   AgentTaskTokenEvent,
   AgentTaskToolEvent,
@@ -1858,49 +1857,6 @@ export default function App() {
                 status: "skipped" as const,
               },
             ];
-        updateActiveAssistantToolCalls(currentToolCallsRef.current);
-      }),
-      // Sub-agent → main-agent help exchange (`ask_main_agent`). The task row
-      // shows the question and, once it returns, the size of the material.
-      listen<AgentHelpEvent>("agent-help-start", (e) => {
-        const { task_id, request } = e.payload;
-        if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
-        if (!task_id || !request) return;
-        currentToolCallsRef.current = currentToolCallsRef.current.map((entry) =>
-          entry.task_id === task_id
-            ? { ...entry, help: { request, status: "running" as const } }
-            : entry
-        );
-        updateActiveAssistantToolCalls(currentToolCallsRef.current);
-      }),
-      listen<AgentHelpEvent>("agent-help-done", (e) => {
-        const { task_id, answer_chars } = e.payload;
-        if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
-        currentToolCallsRef.current = currentToolCallsRef.current.map((entry) =>
-          entry.task_id === task_id && entry.help
-            ? {
-                ...entry,
-                help: {
-                  ...entry.help,
-                  status: "done" as const,
-                  answer_chars: answer_chars ?? 0,
-                },
-              }
-            : entry
-        );
-        updateActiveAssistantToolCalls(currentToolCallsRef.current);
-      }),
-      listen<AgentHelpEvent>("agent-help-error", (e) => {
-        const { task_id, error } = e.payload;
-        if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
-        currentToolCallsRef.current = currentToolCallsRef.current.map((entry) =>
-          entry.task_id === task_id && entry.help
-            ? {
-                ...entry,
-                help: { ...entry.help, status: "error" as const, error: error ?? "" },
-              }
-            : entry
-        );
         updateActiveAssistantToolCalls(currentToolCallsRef.current);
       }),
       // Selector chip: which agents were chosen for this turn (soft narrowing,

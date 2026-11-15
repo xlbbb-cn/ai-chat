@@ -165,8 +165,9 @@ pub fn open_db(path: &Path) -> rusqlite::Result<Connection> {
         )",
         [],
     )?;
-    // Main-agent help log (one line per `ask_main_agent` exchange). Added
-    // lazily so databases created before the feature upgrade in place.
+    // Legacy main-agent help log (one line per `ask_main_agent` exchange, a
+    // tool that no longer exists). The column stays so old databases and the
+    // snapshot query keep working; nothing writes to it any more.
     let _ = db.execute(
         "ALTER TABLE agent_missions ADD COLUMN help_notes TEXT NOT NULL DEFAULT ''",
         [],

@@ -144,9 +144,6 @@ export function AgentMissionPanel({ sessionId, onClose }: Props) {
             listen("agent-task-done", refresh),
             listen("agent-task-error", refresh),
             listen("agent-task-skipped", refresh),
-            listen("agent-help-start", refresh),
-            listen("agent-help-done", refresh),
-            listen("agent-help-error", refresh),
             listen("agent-mbus-message", refresh),
             listen("agent-mbus-delivered", refresh)
         );
@@ -337,13 +334,6 @@ export function AgentMissionPanel({ sessionId, onClose }: Props) {
                                         </div>
                                     )}
                                 </div>
-
-                                {selectedMission.help_notes && (
-                                    <div className="mission-monitor-section">
-                                        <label>{t("mission.mainAgentHelp")}</label>
-                                        <pre className="mission-monitor-code">{selectedMission.help_notes}</pre>
-                                    </div>
-                                )}
 
                                 {selectedMission.bus_id && (
                                     <div className="mission-monitor-section">

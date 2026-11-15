@@ -334,9 +334,6 @@ const en = {
         waitingOutput: "Waiting for output · {seconds}s",
         confirmTitle: "Allow this shell command?",
         rejected: "Rejected by user",
-        mainAgentHelp: "Main agent",
-        mainAgentHelpChars: "→ {count} chars",
-        mainAgentHelpFailed: "Main-agent help failed",
         mbusCounts: "mbus · {sent} sent · {received} received",
     },
 
@@ -486,9 +483,6 @@ const en = {
             maxParallelTools: "Calls per round",
             maxParallelToolsHint:
                 "How many independent calls of one round may run at once (1–8). 1 behaves like the switch above being off.",
-            subAgentMainHelp: "Sub-agent main-agent help",
-            subAgentMainHelpHint:
-                "Let `llm` sub-agents call `ask_main_agent` while they run. A bounded helper run with the main model, the real conversation history, enabled skills, MCP servers and the main tool set collects the material and hands it back, then the sub-agent continues its own task. `cli`/`cloud` agents cannot use it.",
             allowNotifications: "Allow notifications",
             allowNotificationsHint:
                 "Play a sound cue when a turn settles — the message sound for a failure, the session-finished sound for a success — and, while the window is minimized or another application holds the focus, show the desktop notification card with the reply's first line (or the error text). A turn the user stopped never notifies.",
@@ -1053,7 +1047,6 @@ const en = {
         updated: "Updated",
         context: "Context",
         activeTasksLabel: "Active Tasks",
-        mainAgentHelp: "Main-agent help",
         messageBus: "Message bus (mbus)",
         noBusMessages: "No bus messages recorded for this mission batch.",
         episodicSummary: "Episodic Summary",

@@ -3,22 +3,13 @@
 
 use super::*;
 
-// ─── Main-agent help (`ask_main_agent`) ──────────────────────────────────────
-/// Tool rounds the helper may run before it must answer.
-pub(crate) const MAIN_HELPER_MAX_ITERATIONS: u32 = 8;
-/// Wall-clock budget for one `ask_main_agent` exchange.
-pub(crate) const MAIN_HELPER_TIMEOUT_SECS: u64 = 180;
-/// How many times one sub-agent task may ask the main agent.
-pub(crate) const MAIN_HELPER_MAX_CALLS: u32 = 3;
-/// Session history handed to the helper: entries, per-entry bytes, total bytes.
-pub(crate) const MAIN_HELPER_HISTORY_MESSAGES: usize = 12;
-pub(crate) const MAIN_HELPER_HISTORY_MESSAGE_BYTES: usize = 2_000;
-pub(crate) const MAIN_HELPER_HISTORY_BUDGET_BYTES: usize = 12_000;
-/// Hard cap for the material returned to the sub-agent.
-pub(crate) const MAIN_HELPER_ANSWER_MAX_CHARS: usize = 20_000;
-/// Cap for one tool result inside the helper loop, so a huge file read or MCP
-/// response cannot blow up the helper's context before it answers.
-pub(crate) const MAIN_HELPER_TOOL_RESULT_MAX_BYTES: usize = 32_000;
+// ─── Conversation summary handed to every sub-agent task ─────────────────────
+/// Entries, per-entry bytes and total bytes of the summary a task starts with.
+/// It is the only way a sub-agent learns what the user actually asked, because
+/// a task receives just `description` + `context` from its delegator.
+pub(crate) const CONVERSATION_SUMMARY_MESSAGES: usize = 12;
+pub(crate) const CONVERSATION_SUMMARY_MESSAGE_BYTES: usize = 2_000;
+pub(crate) const CONVERSATION_SUMMARY_BUDGET_BYTES: usize = 12_000;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct MissionTaskRecord {
@@ -43,7 +34,8 @@ pub struct MissionStateView {
     pub mission_accomplished: bool,
     pub episodic_summary: String,
     pub final_report: String,
-    /// One line per `ask_main_agent` exchange, newest last.
+    /// Legacy `ask_main_agent` log, newest last. The tool is retired, so new
+    /// missions leave it empty; the column stays for existing rows.
     pub help_notes: String,
     pub active_tasks: Vec<MissionTaskRecord>,
     pub active_task_count: usize,

@@ -300,9 +300,6 @@ const zhCN: Messages = {
         waitingOutput: "等待输出 · {seconds} 秒",
         confirmTitle: "允许执行此 Shell 命令？",
         rejected: "用户已拒绝",
-        mainAgentHelp: "主代理",
-        mainAgentHelpChars: "→ {count} 字符",
-        mainAgentHelpFailed: "主代理协助失败",
         mbusCounts: "消息总线 · 发送 {sent} · 接收 {received}",
     },
 
@@ -448,9 +445,6 @@ const zhCN: Messages = {
             maxParallelTools: "单轮并发数",
             maxParallelToolsHint:
                 "同一轮里最多同时执行几个独立调用（1–8）。设为 1 等于关闭上方的开关。",
-            subAgentMainHelp: "子代理请求主代理协助",
-            subAgentMainHelpHint:
-                "允许 `llm` 子代理在运行过程中调用 `ask_main_agent`。后端会用主模型、真实会话历史、已启用技能、MCP 和主工具集起一个有上限的协助者，收集资料后交还给子代理，子代理继续自己的任务。`cli`/`cloud` 子代理无法使用。",
             allowNotifications: "允许通知",
             allowNotificationsHint:
                 "回合结束时播放提示音：失败为信息音，成功为会话结束音；窗口最小化或焦点在其他应用时，同时弹出桌面通知卡片，显示回复首行（或错误信息）。用户主动停止的回合不会通知。",
@@ -991,7 +985,6 @@ const zhCN: Messages = {
         updated: "更新时间",
         context: "上下文",
         activeTasksLabel: "进行中的任务",
-        mainAgentHelp: "主代理协助",
         messageBus: "消息总线（mbus）",
         noBusMessages: "本批任务没有消息总线记录。",
         episodicSummary: "阶段性摘要",

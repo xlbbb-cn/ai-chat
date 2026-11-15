@@ -300,9 +300,6 @@ const zhTW: Messages = {
         waitingOutput: "等待輸出 · {seconds} 秒",
         confirmTitle: "允許執行此 Shell 命令？",
         rejected: "使用者已拒絕",
-        mainAgentHelp: "主代理",
-        mainAgentHelpChars: "→ {count} 字元",
-        mainAgentHelpFailed: "主代理協助失敗",
         mbusCounts: "訊息匯流排 · 傳送 {sent} · 接收 {received}",
     },
 
@@ -448,9 +445,6 @@ const zhTW: Messages = {
             maxParallelTools: "單輪並行數",
             maxParallelToolsHint:
                 "同一輪最多同時執行幾個獨立呼叫（1–8）。設為 1 等於關閉上方的開關。",
-            subAgentMainHelp: "子代理請求主代理協助",
-            subAgentMainHelpHint:
-                "允許 `llm` 子代理在執行過程中呼叫 `ask_main_agent`。後端會用主模型、真實會話歷史、已啟用技能、MCP 和主工具集啟動一個有上限的協助者，收集資料後交還給子代理，子代理繼續自己的任務。`cli`/`cloud` 子代理無法使用。",
             allowNotifications: "允許通知",
             allowNotificationsHint:
                 "回合結束時播放提示音：失敗為訊息音，成功為會話結束音；視窗最小化或焦點在其他應用時，同時彈出桌面通知卡片，顯示回覆首行（或錯誤訊息）。使用者主動停止的回合不會通知。",
@@ -991,7 +985,6 @@ const zhTW: Messages = {
         updated: "更新時間",
         context: "上下文",
         activeTasksLabel: "進行中的任務",
-        mainAgentHelp: "主代理協助",
         messageBus: "訊息匯流排（mbus）",
         noBusMessages: "本批任務沒有訊息匯流排記錄。",
         episodicSummary: "階段性摘要",

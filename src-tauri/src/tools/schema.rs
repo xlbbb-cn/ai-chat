@@ -563,34 +563,6 @@ pub fn get_use_skill_tool() -> Value {
     })
 }
 
-/// Build the `ask_main_agent` tool definition. Only `llm` sub-agents receive
-/// this tool (and only while `config.sub_agent_main_help` is on): it hands a
-/// self-contained material request to a helper run that has the main model,
-/// conversation history, skills, MCP servers and the full main tool set.
-pub fn get_main_agent_help_tool() -> Value {
-    json!({
-        "type": "function",
-        "function": {
-            "name": "ask_main_agent",
-            "description": "Ask the main agent to collect material you cannot obtain yourself (conversation context, skills, enabled MCP servers, browser/network access, or extra tools). Use this immediately when the task needs live web/browser/API data or a tool that is not in your tool list — do not burn rounds scanning local snapshots for a missing data channel. The main agent sees the real conversation history and returns concrete material; you continue your task with the result.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "request": {
-                        "type": "string",
-                        "description": "Exactly what you need the main agent to find or clarify. Be specific (paths, names, questions)."
-                    },
-                    "context": {
-                        "type": "string",
-                        "description": "Optional: why you need it and what you already tried, so the main agent does not repeat your work."
-                    }
-                },
-                "required": ["request"]
-            }
-        }
-    })
-}
-
 pub fn get_agent_task_tools() -> Vec<Value> {
     vec![
         json!({

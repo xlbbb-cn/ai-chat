@@ -240,16 +240,6 @@ export function ToolCallGroup({ message, onConfirm, onCancelBackground }: Props)
                   </span>
                 );
               })()}
-              {entry.help && (
-                <span className={`tool-call-entry-help tool-call-entry-help--${entry.help.status}`}>
-                  {entry.help.status === "error"
-                    ? `${t("toolGroup.mainAgentHelpFailed")}: ${entry.help.error ?? ""}`
-                    : `${t("toolGroup.mainAgentHelp")}: ${entry.help.request}`}
-                  {entry.help.status === "done" && entry.help.answer_chars != null
-                    ? ` ${t("toolGroup.mainAgentHelpChars", { count: entry.help.answer_chars })}`
-                    : ""}
-                </span>
-              )}
               {entry.mbus && (entry.mbus.sent > 0 || entry.mbus.received > 0) && (
                 <span className="tool-call-entry-mbus">
                   <span className="tool-call-entry-mbus-count">

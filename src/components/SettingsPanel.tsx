@@ -1084,22 +1084,6 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
               <label className="settings-checkbox">
                 <input
                   type="checkbox"
-                  checked={config.sub_agent_main_help ?? true}
-                  onChange={(e) =>
-                    setConfig((prev) => ({
-                      ...prev,
-                      sub_agent_main_help: e.target.checked,
-                    }))
-                  }
-                />
-                <div className="settings-checkbox-copy">
-                  <span>{t("settings.runtime.subAgentMainHelp")}</span>
-                  <small>{t("settings.runtime.subAgentMainHelpHint")}</small>
-                </div>
-              </label>
-              <label className="settings-checkbox">
-                <input
-                  type="checkbox"
                   checked={config.notify_when_hidden ?? true}
                   onChange={(e) =>
                     setConfig((prev) => ({

@@ -112,6 +112,8 @@ Rabbit Chat Studio 支持三种运行时：
 
 面板只提供这三个执行类工具，`timer` 永远被过滤。每个 `llm` 子智能体还默认带 **`memory` 工具**，且记忆作用域与主智能体**共享**：`session` 按主对话的 `session_id` 归属（主智能体 + 所有同级任务），`user` / `repo` 在 `<工作区>/.data/memory`，`evolution` 在自我进化模式下存在。子智能体提示要求它开工前先搜记忆、收工前记一条简明结论；它从不执行 `consolidate`。`cli` / `cloud` 智能体调不了应用工具，因此拿不到记忆摘要。**自我进化模式**下子智能体额外获得 `file_actions`，因为它可能要演进技能。
 
+任务的静态提示里还带一段**主对话摘要**（`MAIN CONVERSATION`，最多 12 条 / 12 KB）：委派时给的 `description` 与 `context` 可能很薄，这段摘要让它看到用户的原话。它只用于理解背景，任务描述仍然是权威的。
+
 > `sub_agents.json` 里还有 `allowed_skills` 字段，但面板不暴露它，运行路径也不按它过滤技能；技能由主智能体加载。
 
 ## 创建 CLI 子智能体

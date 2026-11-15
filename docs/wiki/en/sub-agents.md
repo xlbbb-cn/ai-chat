@@ -112,6 +112,8 @@ Every planner-dispatched mission creates an in-process pub/sub bus (`mbus`): the
 
 The panel only offers those three execution tools; `timer` is always filtered. Every `llm` sub-agent also starts with the **`memory` tool** and the memory scopes are **shared with the main agent**: `session` is keyed by the main chat's `session_id` (main agent + every sibling task), `user` / `repo` live in `<workspace>/.data/memory`, and `evolution` exists in self-evolution mode. The sub-agent prompt tells it to search memory before starting and record one concise conclusion before finishing; it never runs `consolidate`. `cli` / `cloud` agents cannot call app tools, so they receive no memory digest. In **self-evolution mode** a sub-agent additionally receives `file_actions`, because it may evolve skills.
 
+A task's static prompt also carries a **conversation summary** (`MAIN CONVERSATION`, at most 12 entries / 12 KB): the delegating `description` and `context` can be thin, so the summary lets the task read what the user actually asked. It is background only — the task description stays authoritative.
+
 > `sub_agents.json` also has an `allowed_skills` field, but the panel does not expose it and the run path does not filter skills by it; skills are loaded by the main agent.
 
 ## Create a CLI sub-agent
