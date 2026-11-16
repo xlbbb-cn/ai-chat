@@ -766,18 +766,18 @@ reserves no space.
 
 The `todos` tool's `ask` action opens an interactive form while the assistant's
 tool call is blocked waiting for the answers. It is hosted **inside the
-assistant bubble that owns the `todos ask` tool call** — mounted directly under
-the tool-call group, a stable child of the message column exactly like a figure
-card, so the question sits where it was asked and the answers typed so far
-survive every streamed-token commit (figures keep that guarantee by caching and
-re-inserting the card element; the form gets the same from React
-reconciliation, because it is a sibling of the imperatively written markdown
-region, not a part of it). One tab per question, the active question's card
-underneath, one submit button for the whole form. When no transcript row can
-host it — a form restored after a webview reload mid-turn, or a second window
-mirroring the session — the same panel falls back to the floating slot above
-the chat input, beside the confirmation panel, so the waiting tool call can
-always be unblocked.
+assistant bubble that owns the `todos ask` tool call**: the last block of the
+message, on the line right after the reply's output, with the reply streaming
+above it — the question closes the assistant's turn, exactly where a trailing
+figure card would sit, and it is a stable child of the message column like one
+(figures keep that guarantee by caching and re-inserting the card element; the
+form gets the same from React reconciliation, because it is a sibling of the
+imperatively written markdown region, not a part of it). One tab per question,
+the active question's card underneath, one submit button for the whole form.
+When no transcript row can host it — a form restored after a webview reload
+mid-turn, or a second window mirroring the session — the same panel falls back
+to the floating slot above the chat input, beside the confirmation panel, so
+the waiting tool call can always be unblocked.
 
 - **Surface:** the confirmation panel's recipe — `--c-popup` + 1px
   `--c-border-i` + 4px radius, no shadow, `max-height: 46vh` with the body

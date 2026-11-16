@@ -2804,13 +2804,15 @@ button.rabbit-hop-bunny:focus-visible {
 
 /* Interactive question form — the `todos` tool's `ask` action. Same surface
    recipe as the confirmation panel, but it lives inside the assistant bubble
-   that owns the `todos ask` tool call (directly under the tool-call group, a
-   stable child of the message column like a figure card), so the question sits
-   where it was asked. When no transcript row can host it — a form restored
-   after a webview reload mid-turn, or a second window — it falls back to the
-   floating slot above the chat input. One tab per question, the active
-   question's card underneath, one submit button for the form. The 46vh cap
-   keeps a large form from pushing the transcript away in either placement. */
+   that owns the `todos ask` tool call: the last block of the message, on the
+   line right after the reply's output, with the reply streaming above it (a
+   stable child of the message column like a trailing figure card) — the
+   question sits at the end of what the assistant said, waiting to be answered.
+   When no transcript row can host it — a form restored after a webview reload
+   mid-turn, or a second window — it falls back to the floating slot above the
+   chat input. One tab per question, the active question's card underneath, one
+   submit button for the form. The 46vh cap keeps a large form from pushing the
+   transcript away in either placement. */
 .todo-ask-panel {
   display: flex;
   flex-direction: column;

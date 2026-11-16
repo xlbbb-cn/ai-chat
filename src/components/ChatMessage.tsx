@@ -327,12 +327,13 @@ interface Props {
   todoActive?: boolean;
   /**
    * The pending `todos ask` question form, already built by the caller —
-   * rendered inside this assistant bubble, directly after the tool-call group
-   * whose `todos ask` row opened it. Like a figure card, the form is a stable
-   * child of the message row: the streamed-token rebuilds replace the markdown
-   * subtree only (that region is written imperatively), so React keeps this
-   * instance — and with it the answers typed so far — alive across every
-   * commit, exactly the guarantee `mountFigures` gets from its card cache.
+   * rendered as the last block of this assistant bubble, on the line right
+   * after the reply's output. Like a figure card the form is a stable child of
+   * the message row: the streamed-token rebuilds replace the markdown subtree
+   * only (that region is written imperatively) and the reply grows above the
+   * card, so React keeps this instance — and with it the answers typed so far —
+   * alive across every commit, exactly the guarantee `mountFigures` gets from
+   * its card cache.
    */
   todoAskPanel?: ReactNode;
 }
@@ -1199,13 +1200,6 @@ function ChatMessageRow({ message, showRetry = false, onRetry, onNotice, onDelet
           </details>
         )}
         {isAssistant && <ToolCallGroup message={message} onConfirm={onConfirm} onCancelBackground={onCancelBackground} />}
-        {/* The pending `todos ask` form, hosted inside the bubble right after
-            the tool-call group whose row opened it — a stable React child at a
-            stable tree position, so the answers typed so far survive every
-            streamed-token commit (the figure-card guarantee, via reconciliation
-            instead of a moved DOM element: the markdown region below is written
-            imperatively, this sibling is not). */}
-        {isAssistant && todoAskPanel}
         {isAssistant && <TodoList sessionId={sessionId} active={todoActive} />}
         {isAssistant && backgroundTasks !== undefined && (
           <BackgroundTaskGroup
@@ -1251,6 +1245,16 @@ function ChatMessageRow({ message, showRetry = false, onRetry, onNotice, onDelet
             }
           }}
         />
+        {/* The pending `todos ask` form: the last block of the assistant
+            bubble, on the line right after the reply's output — the reply
+            keeps streaming above it (this message row is one turn), so the
+            card stays pinned after the assistant's text, exactly like a
+            trailing figure card. It is a stable React child at a stable tree
+            position, so the answers typed so far survive every streamed-token
+            commit (the figure-card guarantee, via reconciliation instead of a
+            moved DOM element: the markdown region above is written
+            imperatively, this sibling is not). */}
+        {isAssistant && todoAskPanel}
         {/* Information the user pushed into this turn while it was running.
             One turn stays one bubble, so the block sits under the reply and
             states when the model actually received it. Background task
