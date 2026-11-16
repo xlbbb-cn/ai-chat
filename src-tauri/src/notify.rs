@@ -87,7 +87,7 @@ pub fn ensure_notify_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     if let Some(window) = app.get_webview_window(NOTIFY_WINDOW) {
         return Ok(window);
     }
-    tauri::WebviewWindowBuilder::new(
+    let builder = tauri::WebviewWindowBuilder::new(
         app,
         NOTIFY_WINDOW,
         tauri::WebviewUrl::App("notify.html".into()),
@@ -100,16 +100,26 @@ pub fn ensure_notify_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     .inner_size(CARD_WIDTH, CARD_HEIGHT)
     .visible(false)
     .decorations(false)
-    .shadow(false)
-    .transparent(true)
-    .resizable(false)
-    .maximizable(false)
-    .minimizable(false)
-    .skip_taskbar(true)
-    .focused(false)
-    .always_on_top(true)
-    .build()
-    .map_err(|e| e.to_string())
+    .shadow(false);
+    // `WebviewWindowBuilder::transparent` only exists off macOS unless the
+    // `macos-private-api` feature is on (it compiles wry's private
+    // `drawsBackground` KVC). This app does not enable that feature — which is
+    // also how the previous `tauri.conf.json` entry behaved: the config path
+    // skipped the transparent call on macOS and only warned in a debug build.
+    // So the card is transparent everywhere else, and on macOS it keeps the
+    // vibrancy material / painted wash as before.
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.transparent(true);
+
+    builder
+        .resizable(false)
+        .maximizable(false)
+        .minimizable(false)
+        .skip_taskbar(true)
+        .focused(false)
+        .always_on_top(true)
+        .build()
+        .map_err(|e| e.to_string())
 }
 
 /// Show the notification card with `title` / `body`.
