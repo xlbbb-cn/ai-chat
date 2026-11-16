@@ -75,6 +75,7 @@ to a **draft** GitHub Release for the tag (also kept as workflow artifacts), pub
 once every platform finished.
 
 - **The tag drives the version.** `tauri build` runs `beforeBuildCommand` → `npm run build` → `sync-version:git-tag`, which reads the newest tag; a workflow step fails fast when the pushed tag is not the newest one.
+- **Version numbering: the patch number is the default.** Unless the request explicitly names a larger version, every release tag bumps only the patch digit (`3.5.2` → `3.5.3`) via `node scripts/sync-version.cjs --bump patch` — a feature or a fix does not by itself justify a minor bump. `--bump minor` (`x.Y.0`) or `--bump major` (`X.0.0`) happen only when the user asks for that version level; do not raise the version on your own judgement.
 - CI runs `rm -f .cargo/config.toml` so the committed rsproxy.cn mirror is not used on GitHub runners.
 - macOS uses `APPLE_SIGNING_IDENTITY='-'` (ad-hoc) — replace with real signing/notarization secrets when available.
 - `.github/workflows/winget.yml` is **inactive for now**: the package is not in `microsoft/winget-pkgs` (the earlier PR was closed), so nothing can be submitted and winget / Homebrew / Scoop must not be documented as install options. Keep the file — once a package entry is accepted it needs the `WINGET_TOKEN` secret (classic PAT, `public_repo` + `workflow`) plus a fork under `xlbbb-cn`, and it waits for the NSIS `-setup.exe` upload first.
