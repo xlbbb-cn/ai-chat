@@ -224,6 +224,17 @@ const zhCN: Messages = {
             allow: "允许",
         },
 
+        ask: {
+            title: "助手向你提问",
+            progress: "已回答 {answered}/{total}",
+            tabN: "第 {n} 问",
+            customPlaceholder: "输入你的答案…",
+            incomplete: "请回答全部问题后再提交。",
+            ready: "已回答全部问题，可以提交。",
+            dismiss: "取消问答",
+            submit: "提交回答",
+        },
+
         agents: {
             planner: "规划器",
             selector: "选择器",

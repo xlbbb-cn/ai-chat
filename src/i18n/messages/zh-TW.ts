@@ -224,6 +224,17 @@ const zhTW: Messages = {
             allow: "允許",
         },
 
+        ask: {
+            title: "助手向你提問",
+            progress: "已回答 {answered}/{total}",
+            tabN: "第 {n} 問",
+            customPlaceholder: "輸入你的答案…",
+            incomplete: "請回答全部問題後再提交。",
+            ready: "已回答全部問題，可以提交。",
+            dismiss: "取消問答",
+            submit: "提交回答",
+        },
+
         agents: {
             planner: "規劃器",
             selector: "選擇器",

@@ -2,10 +2,11 @@ import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, laz
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, listAgentMentions, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, deleteMessagesAfter, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState, setWindowVibrancy, savePastedFile, importWorkspacePaths, showNotifyCard } from "./api";
+import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, listAgentMentions, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, deleteMessagesAfter, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState, setWindowVibrancy, savePastedFile, importWorkspacePaths, showNotifyCard, todoAskReply, getPendingTodoAsk } from "./api";
 
 import { ChatMessage, ChatMessageBoundary } from "./components/ChatMessage";
 import { ToolCallGroup } from "./components/ToolCallGroup";
+import { TodoAskPanel } from "./components/TodoAskPanel";
 import { Dropdown } from "./components/Dropdown";
 import { ModelSelect } from "./components/ModelSelect";
 import { HistoryPanel } from "./components/HistoryPanel";
@@ -48,6 +49,8 @@ import type {
   EvolutionMaintenancePhase,
   UpdateInfo,
   WorkspaceFileEntry,
+  TodoAskRequest,
+  TodoAskAnswer,
 } from "./types";
 import { extensionOf, supportsMentionName } from "./attachments";
 import { activeMentionQuery, resolveFileMentions, scoreWorkspaceFile } from "./fileMention";
@@ -847,6 +850,13 @@ export default function App() {
     penalty_items?: Array<{ name: string; points: number }>;
     requires_confirmation?: boolean;
   } | null>(null);
+  /**
+   * The pending `todos ask` form (tab + cards above the input row). The
+   * backend serializes asks, so at most one is ever open; the payload is kept
+   * app-level like `confirmDialog` because the form outlives a session switch
+   * — the turn it belongs to keeps running in its own session either way.
+   */
+  const [todoAsk, setTodoAsk] = useState<TodoAskRequest | null>(null);
   const [backupExporting, setBackupExporting] = useState(false);
   const [backupExportPhase, setBackupExportPhase] = useState<"idle" | "preparing" | "status">("idle");
   const [backupExportStatus, setBackupExportStatus] = useState("");
@@ -1552,6 +1562,46 @@ export default function App() {
     };
   }, [updateActiveAssistantToolCalls]);
 
+  // Pending `todos ask` form: announced by the `todo-ask` event while a tool
+  // call waits for the user's answers. The payload carries the session it
+  // belongs to, but the panel is not gated on the active session — the form is
+  // the only way to unblock that turn, and a session switch must not strand
+  // the model behind a question nobody can see. On mount the still-open form
+  // is fetched, so a webview reload restores the panel instead of leaving the
+  // assistant waiting on something invisible.
+  useEffect(() => {
+    const unlisten = listen<TodoAskRequest>("todo-ask", (e) => {
+      setTodoAsk(e.payload);
+    });
+    // The backend closes the form on timeout, Stop, or a reply that arrived
+    // from another window — clear any panel that is still showing it. The
+    // answering window already cleared its own copy.
+    const unlistenClosed = listen<{ request_id: string }>("todo-ask-closed", (e) => {
+      setTodoAsk((current) =>
+        current?.request_id === e.payload.request_id ? null : current
+      );
+    });
+    getPendingTodoAsk()
+      .then((pending) => {
+        if (pending) setTodoAsk(pending);
+      })
+      .catch(() => {
+        // No pending form (or the workspace is switching) — stay hidden.
+      });
+    return () => {
+      unlisten.then((fn) => fn());
+      unlistenClosed.then((fn) => fn());
+    };
+  }, []);
+
+  // A pending form belongs to the turn that opened it: when streaming ends
+  // (done, error, Stop) the wait is already resolved backend-side, so the
+  // panel would be stale. Runs on mount too, before the fetch above resolves —
+  // harmless while the panel is null.
+  useEffect(() => {
+    if (!streaming) setTodoAsk(null);
+  }, [streaming]);
+
   const respondToConfirm = useCallback((confirmed: boolean) => {
     const requiresSudo = confirmDialog?.requires_auth === "sudo";
     confirmCommand(confirmDialog?.request_id ?? "", confirmed, requiresSudo ? { username: confirmUsername, password: confirmPassword } : undefined).catch(console.error);
@@ -1560,6 +1610,28 @@ export default function App() {
     setConfirmPassword("");
     setRiskAssessment(null);
   }, [confirmDialog, confirmUsername, confirmPassword]);
+
+  /**
+   * Submit the pending `todos ask` form: reply to the backend (its tool call
+   * is blocked inside the `todos` action) and close the panel. The backend
+   * ignores a stale request id, so a late panel cannot answer a newer form.
+   */
+  const submitTodoAsk = useCallback((answers: TodoAskAnswer[]) => {
+    const request = todoAsk;
+    setTodoAsk(null);
+    if (request) {
+      todoAskReply(request.request_id, answers).catch(console.error);
+    }
+  }, [todoAsk]);
+
+  /** Dismiss the pending form without answering — the tool reports it. */
+  const dismissTodoAsk = useCallback(() => {
+    const request = todoAsk;
+    setTodoAsk(null);
+    if (request) {
+      todoAskReply(request.request_id, null).catch(console.error);
+    }
+  }, [todoAsk]);
 
   /**
    * Answer an inline `run_shell` confirmation from the tool-call group: reply
@@ -3724,7 +3796,10 @@ export default function App() {
     const stopSuffix = "\n\n" + t("app.generationStopped");
     // A stopped turn also drops any pending inline confirmation: clear the
     // `confirm` payload so no stale allow/deny row survives the settle (the
-    // 120 s backend timeout already answers it as "not confirmed").
+    // 120 s backend timeout already answers it as "not confirmed"). The same
+    // applies to a pending `todos ask` form — Stop already resolved the wait
+    // backend-side as "cancelled".
+    setTodoAsk(null);
     const settledToolCalls = currentToolCallsRef.current.map((e) => {
       if (e.status !== "running") return e;
       // A sub-agent torn down by Stop was cancelled, not completed and not a
@@ -4424,6 +4499,38 @@ export default function App() {
     return null;
   }, [messages]);
 
+  /**
+   * Which assistant bubble hosts the pending `todos ask` form.
+   *
+   * The backend emits the tool-call progress row (`❓ Asking the user …`)
+   * before `todo-ask`, so the turn's assistant message already carries the
+   * matching `tool_calls` entry — match by `call_id` and the form mounts inside
+   * the bubble it belongs to, right under that row. A form restored after a
+   * webview reload (or mirrored into a second window) has no such row in this
+   * window yet: fall back to the newest assistant message while this window is
+   * the one streaming, and otherwise to `null`, which keeps the panel in its
+   * floating slot above the input — the form is the only way to unblock that
+   * turn, so it must never become invisible just because the transcript row
+   * does not exist here.
+   */
+  const todoAskHostId = useMemo(() => {
+    if (!todoAsk) return null;
+    if (todoAsk.call_id) {
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const m = messages[i];
+        if (m.role === "assistant" && (m.tool_calls ?? []).some((e) => e.task_id === todoAsk.call_id)) {
+          return m.id;
+        }
+      }
+    }
+    if (streaming) {
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        if (messages[i].role === "assistant") return messages[i].id;
+      }
+    }
+    return null;
+  }, [todoAsk, messages, streaming]);
+
   const usageTotal = usage ? (usage.total_tokens ?? usage.prompt_tokens + usage.completion_tokens) : 0;
   const fallbackMaxTokens = 131072; // 128k tokens as a hard upper bound for usage ratio calculations when no explicit max is provided
   const usageMax = usage?.max_tokens ?? maxTokens ?? fallbackMaxTokens;
@@ -4977,6 +5084,15 @@ export default function App() {
                   }
                   sessionId={sessionId}
                   todoActive={m.role === "assistant" && m.id === todoMessageId}
+                  todoAskPanel={
+                    todoAsk && m.role === "assistant" && m.id === todoAskHostId ? (
+                      <TodoAskPanel
+                        request={todoAsk}
+                        onSubmit={submitTodoAsk}
+                        onDismiss={dismissTodoAsk}
+                      />
+                    ) : undefined
+                  }
                   skillNames={knownSkillNames}
                   agentTokens={knownAgentTokens}
                 />
@@ -5092,6 +5208,19 @@ export default function App() {
             </div>
           )}
           {renderConfirmDialog()}
+          {/* Floating fallback only: normally the form is hosted inside the
+              assistant bubble that owns the `todos ask` tool call. This slot
+              covers the cases where that row does not exist in this window —
+              a form restored after a webview reload mid-turn, or a second
+              window mirroring the same session. The form is the only way to
+              unblock the waiting tool call, so it must stay answerable. */}
+          {todoAsk && !todoAskHostId && (
+            <TodoAskPanel
+              request={todoAsk}
+              onSubmit={submitTodoAsk}
+              onDismiss={dismissTodoAsk}
+            />
+          )}
           {/* Dragging a file in from the OS: say what is about to happen. The
               drop itself is handled by the native event (see the effect above),
               so this layer never needs pointer events. */}

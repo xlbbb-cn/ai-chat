@@ -702,6 +702,11 @@ pub(crate) async fn run_chat_turn(
         `pending` → `in_progress` → `completed` as you work; `add` items when a new \
         multi-step task begins. The UI mirrors every change live, so never leave stale \
         items behind. \
+        ASKING: when a decision needs the user's own choice (approach, naming, trade-offs), \
+        use action `ask` with 1-8 short questions (options or free text); the call waits \
+        until the user submits and returns their answers as JSON — never ask what the \
+        conversation already answers, and proceed on your own when the form comes back \
+        dismissed or timed out. \
         GOAL LOOP: while the list has unfinished items, a final answer does NOT end the \
         turn — it is continued automatically so you keep working; do not write a final \
         summary with goals open. End the turn explicitly by writing [goal:DONE] in your \

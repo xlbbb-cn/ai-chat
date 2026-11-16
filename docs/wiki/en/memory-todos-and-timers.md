@@ -119,6 +119,24 @@ The main agent and parallel sub-agents in the same session share one list. A new
 | `update_status` | `todo_id`, `status` | `pending` → `in_progress` → `completed` / `cancelled` |
 | `clear_completed` | — | Remove completed items |
 | `archive` | optional `new_title` | Archive the current list and start a new one (default title `Working plan`) |
+| `ask` | `questions` (1–8), optional `topic` | Open an interactive question form above the input and block until the user answers |
+
+### Question form (`ask`)
+
+When a decision needs the user's choice — an approach, a name, a trade-off — the model can ask instead of guessing. `questions` is an array of 1–8 items, each `{ title (required), description?, options?, allow_custom? }`; `topic` is an optional header for the form. Limits: ≤12 options per question, ≤500-char title, ≤2000-char description, ≤300-char option text. Without `options` a question is free-text only; with options, a manual input is offered beside them only when `allow_custom` is true.
+
+The call **blocks the turn** until the user answers: the form appears as a card **inside the assistant's reply**, directly under the tool-call row that asked — one tab per question, one card per question, and one submit button for the whole form. Typing clears the selected option and selecting clears the typed text. Dismissing the form, pressing Stop, or 15 minutes without an answer ends the wait too. (When the reply that asked is not on screen — e.g. the app was reloaded mid-question — the form falls back to a panel above the input box, so the waiting turn can always be unblocked.)
+
+Every outcome returns structured JSON — never an error — so a user who was away or stopped the turn is not counted as a tool failure:
+
+```json
+{ "status": "answered", "answers": [ { "id": "q1", "question": "…", "answer": "…", "source": "option" } ] }
+{ "status": "dismissed", "note": "…continue with your best judgement…" }
+{ "status": "timeout", "note": "…you may ask again later…" }
+{ "status": "cancelled", "note": "The turn was stopped while the question was pending." }
+```
+
+`source` is `option` when the answer was a listed choice and `custom` for typed text. Only malformed arguments (`questions` missing, empty or over 8 items) return an `Error:` result. One form is open at a time — parallel sub-agents queue theirs — and the panel stays visible when you switch to another chat, so the waiting turn cannot deadlock.
 
 ### UI
 
@@ -141,6 +159,7 @@ Both are logged as *Todo goal suspended*; the plan resumes by itself on the next
 - Write actionable, verifiable items, not "handle it".
 - Use `clear_completed` or `archive` at the end of a long task; leave a long-running plan open only when you want the loop to keep going.
 - Todos are a model-facing plan, not a project-management system; use memory or external tools for cross-session work.
+- Use `ask` when a decision needs the user's choice instead of guessing — but do not ask what the conversation already answers.
 
 ## Timers (`timer`)
 
@@ -229,6 +248,7 @@ A typical long task:
 | Todo card not updating | Is the Todos tool enabled? Did the model call `todos`? |
 | The turn keeps going after a "final" answer | The list still has open items — that is the goal loop; finish or cancel them, or wait via a timer / `[WAIT_EVT]` |
 | Turn ends even though items are open | A timer is pending, the answer declared `[WAIT_EVT: …]`, or the 4-continuation budget ran out |
+| The turn seems stuck with a form open | That is `todos ask` waiting for your answers — fill the form in the assistant's reply (or above the input box) and submit, or press Stop; it also ends by itself after 15 minutes |
 | Timer did not fire | Is the app running? Does `<workspace>/.data/timers.json` exist? Was the session deleted? Did the workspace switch since it was set? |
 | Timer fired in another session | Normal; use **Insert into input** in the notice |
 | Duplicate timers | Call `timer_list` first, then `timer_set` |

@@ -903,6 +903,14 @@ pub struct AppState {
     /// the main agent and background tasks must queue instead of overwriting
     /// each other's pending request.
     pub tool_confirm_lock: tokio::sync::Mutex<()>,
+    /// Pending `todos ask` form: the payload the UI shows (kept so a webview
+    /// reload can restore the panel via `get_pending_todo_ask`) plus the
+    /// one-shot sender that carries the user's answers back to the blocked
+    /// tool call. Addressed by `request_id` like `confirm_sender`.
+    pub todo_ask: Mutex<Option<TodoAskPending>>,
+    /// Serializes pending question forms: the UI shows one panel, so a second
+    /// `todos ask` waits here until the first is answered or torn down.
+    pub todo_ask_lock: tokio::sync::Mutex<()>,
     /// Per-server diagnostic log buffer (in-memory ring buffer, last
     /// `MAX_MCP_LOG_ENTRIES` entries per server). Populated by mcp.rs at
     /// every save / test / tool call so the UI can show what happened.
@@ -1039,6 +1047,16 @@ pub struct ToolConfirmation {
     pub confirmed: bool,
     pub username: Option<String>,
     pub password: Option<String>,
+}
+
+/// A pending `todos ask` form: what the UI shows and how the answers travel
+/// back to the blocked tool call. `tx` is consumed by the first reply; the
+/// payload stays until the wait ends so a webview reload can restore the
+/// panel (`get_pending_todo_ask`).
+pub struct TodoAskPending {
+    pub request_id: String,
+    pub payload: serde_json::Value,
+    pub tx: Option<tokio::sync::oneshot::Sender<todos::TodoAskReply>>,
 }
 
 // ─── Config commands ──────────────────────────────────────────────────────────
@@ -1391,6 +1409,34 @@ fn confirm_command(
             });
         }
     }
+}
+
+/// The frontend's answer to a pending `todos ask` form. `answers` carries one
+/// `{ id, value }` pair per question on submit; `None` dismisses the form
+/// (the tool then tells the model the user skipped it). `request_id` must
+/// match the pending request, so a stale panel cannot answer a newer form.
+#[tauri::command]
+fn todo_ask_reply(
+    state: State<'_, AppState>,
+    request_id: String,
+    answers: Option<Vec<todos::TodoAskAnswer>>,
+) {
+    let mut slot = state.todo_ask.lock().unwrap();
+    if matches!(slot.as_ref(), Some(pending) if pending.request_id == request_id) {
+        if let Some(pending) = slot.take() {
+            if let Some(tx) = pending.tx {
+                let _ = tx.send(todos::TodoAskReply { answers });
+            }
+        }
+    }
+}
+
+/// The still-open `todos ask` form, if any — a webview reload loses the
+/// listener and the panel, so the restored UI fetches the pending payload the
+/// same way `get_evolution_maintenance_state` restores the napping face.
+#[tauri::command]
+fn get_pending_todo_ask(state: State<'_, AppState>) -> Option<serde_json::Value> {
+    state.todo_ask.lock().ok()?.as_ref().map(|p| p.payload.clone())
 }
 
 #[tauri::command]
@@ -2042,6 +2088,8 @@ pub fn run() {
                 turn_inbox: Mutex::new(Vec::new()),
                 confirm_sender: Mutex::new(None),
                 tool_confirm_lock: tokio::sync::Mutex::new(()),
+                todo_ask: Mutex::new(None),
+                todo_ask_lock: tokio::sync::Mutex::new(()),
                 mcp_logs: std::sync::Arc::new(Mutex::new(Default::default())),
                 mcp_cancelled_tests: std::sync::Arc::new(Mutex::new(Default::default())),
                 mcp_children: std::sync::Arc::new(tokio::sync::Mutex::new(Default::default())),
@@ -2255,6 +2303,8 @@ pub fn run() {
             cancel_background_task,
             get_active_todo_list,
             confirm_command,
+            todo_ask_reply,
+            get_pending_todo_ask,
             get_config,
             save_config,
             set_model_context_length,

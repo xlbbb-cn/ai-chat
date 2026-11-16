@@ -325,6 +325,16 @@ interface Props {
    * assistant message gets it, so the list is drawn once per session.
    */
   todoActive?: boolean;
+  /**
+   * The pending `todos ask` question form, already built by the caller —
+   * rendered inside this assistant bubble, directly after the tool-call group
+   * whose `todos ask` row opened it. Like a figure card, the form is a stable
+   * child of the message row: the streamed-token rebuilds replace the markdown
+   * subtree only (that region is written imperatively), so React keeps this
+   * instance — and with it the answers typed so far — alive across every
+   * commit, exactly the guarantee `mountFigures` gets from its card cache.
+   */
+  todoAskPanel?: ReactNode;
 }
 
 /** Extract the textual portion of a multimodal `MessageContent`. */
@@ -742,7 +752,7 @@ function writingTailHost(content: HTMLElement): HTMLElement {
   return host;
 }
 
-function ChatMessageRow({ message, showRetry = false, onRetry, onNotice, onDelete, onFork, dbId, onConfirm, onCancelBackground, backgroundTasks, backgroundWaiting, skillNames, agentTokens, sessionId, todoActive }: Props) {
+function ChatMessageRow({ message, showRetry = false, onRetry, onNotice, onDelete, onFork, dbId, onConfirm, onCancelBackground, backgroundTasks, backgroundWaiting, skillNames, agentTokens, sessionId, todoActive, todoAskPanel }: Props) {
   const { t, locale } = useI18n();
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
@@ -1189,6 +1199,13 @@ function ChatMessageRow({ message, showRetry = false, onRetry, onNotice, onDelet
           </details>
         )}
         {isAssistant && <ToolCallGroup message={message} onConfirm={onConfirm} onCancelBackground={onCancelBackground} />}
+        {/* The pending `todos ask` form, hosted inside the bubble right after
+            the tool-call group whose row opened it — a stable React child at a
+            stable tree position, so the answers typed so far survive every
+            streamed-token commit (the figure-card guarantee, via reconciliation
+            instead of a moved DOM element: the markdown region below is written
+            imperatively, this sibling is not). */}
+        {isAssistant && todoAskPanel}
         {isAssistant && <TodoList sessionId={sessionId} active={todoActive} />}
         {isAssistant && backgroundTasks !== undefined && (
           <BackgroundTaskGroup

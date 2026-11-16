@@ -246,6 +246,17 @@ const en = {
             allow: "Allow",
         },
 
+        ask: {
+            title: "The assistant is asking you",
+            progress: "{answered}/{total} answered",
+            tabN: "Q{n}",
+            customPlaceholder: "Type your own answer…",
+            incomplete: "Answer every question, then submit.",
+            ready: "All questions answered — ready to submit.",
+            dismiss: "Dismiss",
+            submit: "Submit answers",
+        },
+
         agents: {
             planner: "Planner",
             selector: "Selector",

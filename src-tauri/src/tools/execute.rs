@@ -528,10 +528,13 @@ pub async fn execute_tool(
         }
         // The `todos` tool is a single action-based entry point (like
         // `file_actions`). Legacy per-action names are routed to the same
-        // handler so chats continued from older sessions keep working.
+        // handler so chats continued from older sessions keep working. The
+        // `ask` action blocks on the user's answers, so the turn's cancel
+        // flag is threaded through (Stop must end the wait).
         "todos" | "todo_add" | "todo_update_status" | "todo_list" | "todo_clear_completed"
         | "todo_archive" => {
-            todos::handle_todos_tool(app, name, &args, session_id, mission_id, call_id)
+            todos::handle_todos_tool(app, name, &args, session_id, mission_id, call_id, cancel)
+                .await
         }
         "skill_read" => {
             let action = args["action"].as_str().unwrap_or("");

@@ -32,6 +32,8 @@ import type {
   EvolutionMaintenanceState,
   GlassEffect,
   TodoListSummary,
+  TodoAskAnswer,
+  TodoAskRequest,
   TurnUsageMeta,
   UpdateInfo,
   UpdateDownloadProgress,
@@ -542,6 +544,28 @@ export async function getActiveTodoList(
   sessionId: string,
 ): Promise<TodoListSummary | null> {
   return invoke("get_active_todo_list", { sessionId });
+}
+
+/**
+ * Submit (or dismiss) a pending `todos ask` form. `answers` carries one
+ * `{ id, value }` pair per question; `null` dismisses the form and the tool
+ * tells the model the user skipped it. The backend ignores a stale request id,
+ * so a late panel cannot answer a newer form.
+ */
+export async function todoAskReply(
+  requestId: string,
+  answers: TodoAskAnswer[] | null,
+): Promise<void> {
+  return invoke("todo_ask_reply", { requestId, answers });
+}
+
+/**
+ * The still-open `todos ask` form, if any — called on mount so a webview
+ * reload restores the panel instead of leaving the assistant waiting on a
+ * form nobody can see.
+ */
+export async function getPendingTodoAsk(): Promise<TodoAskRequest | null> {
+  return invoke("get_pending_todo_ask");
 }
 
 /** Stop one background task; its whole process tree is terminated. */

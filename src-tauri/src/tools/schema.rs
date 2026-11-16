@@ -309,14 +309,14 @@ pub fn get_all_tools(
             "type": "function",
             "function": {
                 "name": "todos",
-                "description": "Manage this session's todo list (the `file_actions` counterpart for plans). Call 'list' first — the list is long-running session state shared with every parallel agent and the UI mirrors every change live. 'add' appends an item, 'update_status' moves one through pending → in_progress → completed/cancelled, 'clear_completed' removes finished items, 'archive' starts a fresh list.",
+                "description": "Manage this session's todo list (the `file_actions` counterpart for plans). Call 'list' first — the list is long-running session state shared with every parallel agent and the UI mirrors every change live. 'add' appends an item, 'update_status' moves one through pending → in_progress → completed/cancelled, 'clear_completed' removes finished items, 'archive' starts a fresh list. 'ask' opens an interactive question form in the UI (one card per question, selectable options or free text) and BLOCKS until the user submits answers — use it when a decision needs the user's choice (approach, naming, trade-offs) instead of guessing; do not ask what the conversation already answers.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["list", "add", "update_status", "clear_completed", "archive"],
-                            "description": "list / add / update one item's status / clear finished items / archive the active list."
+                            "enum": ["list", "add", "update_status", "clear_completed", "archive", "ask"],
+                            "description": "list / add / update one item's status / clear finished items / archive the active list / ask the user a short question form."
                         },
                         "title": {
                             "type": "string",
@@ -338,6 +338,41 @@ pub fn get_all_tools(
                         "new_title": {
                             "type": "string",
                             "description": "Optional title for the list that follows the archive ('archive' only). Defaults to 'Working plan'."
+                        },
+                        "topic": {
+                            "type": "string",
+                            "description": "Optional header for the question form ('ask' only), e.g. 'Plan review'."
+                        },
+                        "questions": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {
+                                        "type": "string",
+                                        "description": "Optional stable id echoed back with the answer; auto-generated when missing or duplicated."
+                                    },
+                                    "title": {
+                                        "type": "string",
+                                        "description": "The question itself, shown as the card title."
+                                    },
+                                    "description": {
+                                        "type": "string",
+                                        "description": "Optional context shown under the title."
+                                    },
+                                    "options": {
+                                        "type": "array",
+                                        "items": { "type": "string" },
+                                        "description": "Selectable answers, each a short label; omit for a free-text question."
+                                    },
+                                    "allow_custom": {
+                                        "type": "boolean",
+                                        "description": "Also offer a manual input beside the options (default false when options exist, always true when they don't)."
+                                    }
+                                },
+                                "required": ["title"]
+                            },
+                            "description": "Questions to ask ('ask' only), 1–8 per call. Each item: { title (required), description?, options?, allow_custom? }."
                         }
                     },
                     "required": ["action"]

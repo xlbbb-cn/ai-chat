@@ -762,6 +762,56 @@ reserves no space.
   failure bubble. The turn stays on disk with its `status: "error"` for history
   and for the retry path, but the user-facing report is the notice alone.
 
+#### Question form (`todos ask`)
+
+The `todos` tool's `ask` action opens an interactive form while the assistant's
+tool call is blocked waiting for the answers. It is hosted **inside the
+assistant bubble that owns the `todos ask` tool call** — mounted directly under
+the tool-call group, a stable child of the message column exactly like a figure
+card, so the question sits where it was asked and the answers typed so far
+survive every streamed-token commit (figures keep that guarantee by caching and
+re-inserting the card element; the form gets the same from React
+reconciliation, because it is a sibling of the imperatively written markdown
+region, not a part of it). One tab per question, the active question's card
+underneath, one submit button for the whole form. When no transcript row can
+host it — a form restored after a webview reload mid-turn, or a second window
+mirroring the session — the same panel falls back to the floating slot above
+the chat input, beside the confirmation panel, so the waiting tool call can
+always be unblocked.
+
+- **Surface:** the confirmation panel's recipe — `--c-popup` + 1px
+  `--c-border-i` + 4px radius, no shadow, `max-height: 46vh` with the body
+  scrolling; actions separated by a 1px `--c-border` rule like the confirm
+  panel's footer.
+- **Tabs** (shown from two questions on): compact 12px buttons, transparent at
+  rest, `--c-hover` on hover. The active tab is the selection state the History
+  filter tabs use — `--c-accent-soft` fill, `--c-accent-text` label — and it is
+  the only accent in the header. The tab glyph carries the answered state by
+  shape (`faCircle` → `faCircleCheck`), in the tab's own colour: metadata stays
+  neutral, the progress counter (`{answered}/{total}`, tabular numerals) does
+  the counting.
+- **Card:** `--c-btn` + 1px `--c-border-i` + 4px radius. Question 14px/500
+  `--c-text`, description 12px `--c-body`. Options are full-width rows —
+  transparent at rest, `--c-hover` on hover, selected `--c-accent-soft` +
+  `--c-accent-text`; the row glyph is `--c-placeholder` when unselected and
+  inherits when selected. The manual input (`allow_custom`, or a question with
+  no options) is a textarea on `--c-field`, 4px radius, `--c-accent-text`
+  focus border — the credentials input's recipe, two rows tall.
+- **Actions:** the footer hint is 12px `--c-muted` ("answer every question…" →
+  "ready to submit"); "Dismiss" is `.btn-secondary`, "Submit answers" is
+  `.btn-primary` and the form's single accent, disabled (40% opacity) until
+  every question carries an answer. Both buttons reuse the shared primitives
+  at the confirm panel's `34px` minimum height — this is the compact zone.
+- **Typing clears the chosen option and choosing an option clears the text** —
+  one answer per question, never a mix. Submitting sends one `{id, value}` pair
+  per question; the backend validates them against the options it offered.
+- **Lifecycle:** the panel belongs to the turn that opened it. It is not gated
+  on the active session (a session switch must not strand the model behind a
+  question nobody can see), it is restored after a webview reload from
+  `get_pending_todo_ask`, and it is removed when streaming ends, on Stop, and
+  on the backend's `todo-ask-closed` (timeout, or an answer that came from
+  another window) — a stale form must never keep asking.
+
 #### Empty-state nap face (evolution maintenance)
 
 The smiley above the empty-state greeting is an action while

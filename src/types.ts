@@ -1124,6 +1124,32 @@ export interface TodoStateEvent {
   todo?: TodoRecord;
 }
 
+/** One question of a `todos ask` form, normalized by the backend. */
+export interface TodoAskQuestion {
+  id: string;
+  title: string;
+  description?: string;
+  /** Selectable answers; absent = free-text question. */
+  options?: string[];
+  /** A manual input is offered beside (or instead of) the options. */
+  allow_custom: boolean;
+}
+
+/** Payload of the `todo-ask` Tauri event (and of `get_pending_todo_ask`). */
+export interface TodoAskRequest {
+  request_id: string;
+  session_id?: string;
+  call_id?: string;
+  topic?: string;
+  questions: TodoAskQuestion[];
+}
+
+/** One submitted answer, addressed by question id. */
+export interface TodoAskAnswer {
+  id: string;
+  value: string;
+}
+
 /**
  * Phase of the silent maintenance pass, as announced by
  * `evolution-maintenance-state` while `running` is true. The empty state maps
