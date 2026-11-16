@@ -805,3 +805,134 @@ fn tool_round_message_carries_thinking_along() {
     let msg = stream::assistant_tool_message("done", "让我看看目录", vec![]);
     assert_eq!(msg["reasoning_content"], json!("让我看看目录"));
 }
+
+// ─── Content-part normalization ─────────────────────────────────────────────
+//
+// One attachment must never fail a whole turn: a gateway that only takes text
+// and images answers a `file` part with
+// `400 invalid_request_error … file content parts are not supported here; send
+// the image as an image_url part`. The payload decides, the capability decides,
+// and neither is left to the caller.
+
+fn user_body(parts: Value) -> Value {
+    json!({
+        "messages": [
+            { "role": "system", "content": "sys" },
+            { "role": "user", "content": parts },
+        ]
+    })
+}
+
+fn file_part(name: &str, data: &str) -> Value {
+    json!({ "type": "file", "file": { "filename": name, "file_data": data } })
+}
+
+#[test]
+fn image_inside_a_file_part_becomes_an_image_url() {
+    // A mis-classified screenshot: the part type says file, the bytes say png.
+    let mut body = user_body(json!([
+        { "type": "text", "text": "看图" },
+        file_part("screenshot.avif", "data:image/avif;base64,AAAA"),
+    ]));
+    stream::normalize_content_parts(&mut body);
+    let parts = body["messages"][1]["content"].as_array().unwrap();
+    assert_eq!(parts.len(), 2);
+    assert_eq!(parts[0]["type"], json!("text"));
+    assert_eq!(parts[1]["type"], json!("image_url"));
+    assert_eq!(parts[1]["image_url"]["url"], json!("data:image/avif;base64,AAAA"));
+}
+
+#[test]
+fn image_data_url_detection_ignores_case() {
+    let mut body = user_body(json!([file_part("a.png", "DATA:IMAGE/PNG;base64,CCCC")]));
+    stream::normalize_content_parts(&mut body);
+    assert_eq!(body["messages"][1]["content"][0]["type"], json!("image_url"));
+}
+
+#[test]
+fn unreadable_file_part_degrades_to_text_instead_of_failing_the_turn() {
+    let mut body = user_body(json!([
+        { "type": "text", "text": "这份稿子" },
+        file_part("spec.docx", "data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,AAAA"),
+    ]));
+    stream::normalize_content_parts(&mut body);
+    let parts = body["messages"][1]["content"].as_array().unwrap();
+    assert_eq!(parts.len(), 2);
+    assert_eq!(parts[0]["type"], json!("text"));
+    assert_eq!(parts[1]["type"], json!("text"));
+    let note = parts[1]["text"].as_str().unwrap();
+    // The transcript still names the file, so the model can ask about it.
+    assert!(note.contains("spec.docx"), "{note}");
+    assert!(note.contains("not sent"), "{note}");
+    // No `file` part survives on the wire.
+    assert!(!body.to_string().contains("\"type\":\"file\""));
+}
+
+#[test]
+fn text_payload_inside_a_file_part_is_inlined_instead_of_dropped() {
+    // `@scripts/user_admin` was stored by an older build as an
+    // `application/octet-stream` `file` part, and it succeeded the provider
+    // question only once the bytes themselves reached the prompt.
+    let script = "IyEvdXNyL2Jpbi9lbnYgYmFzaAo="; // "#!/usr/bin/env bash\n"
+    let data = format!("data:application/octet-stream;base64,{script}");
+    let mut body = user_body(json!([file_part("scripts/user_admin", &data)]));
+    stream::normalize_content_parts(&mut body);
+    let part = &body["messages"][1]["content"][0];
+    assert_eq!(part["type"], json!("text"));
+    let text = part["text"].as_str().unwrap();
+    assert!(text.contains("#!/usr/bin/env bash"), "{text}");
+    assert!(text.contains("scripts/user_admin"), "{text}");
+    assert!(!text.contains("not sent"), "{text}");
+}
+
+#[test]
+fn a_payload_that_is_not_base64_degrades_to_a_note() {
+    let mut body = user_body(json!([file_part("raw.bin", "not-a-data-url")]));
+    stream::normalize_content_parts(&mut body);
+    let part = &body["messages"][1]["content"][0];
+    assert_eq!(part["type"], json!("text"));
+    assert!(part["text"].as_str().unwrap().contains("raw.bin"));
+}
+
+#[test]
+fn normalization_leaves_text_and_media_parts_alone() {
+    let mut body = user_body(json!([
+        { "type": "text", "text": "听一下" },
+        { "type": "image_url", "image_url": { "url": "data:image/png;base64,DDDD" } },
+        { "type": "input_audio", "input_audio": { "data": "EEEE", "format": "wav" } },
+    ]));
+    let before = body.clone();
+    stream::normalize_content_parts(&mut body);
+    assert_eq!(body, before);
+}
+
+#[test]
+fn normalization_ignores_plain_string_content() {
+    let mut body = json!({
+        "messages": [ { "role": "user", "content": "just text" } ]
+    });
+    let before = body.clone();
+    stream::normalize_content_parts(&mut body);
+    assert_eq!(body, before);
+}
+
+#[test]
+fn parts_signature_names_the_message_index() {
+    // The provider reports `.messages[N]`, so the log line must use the same
+    // numbering; text-only messages are left out on purpose.
+    let body = user_body(json!([
+        { "type": "text", "text": "看图" },
+        file_part("spec.docx", "data:application/msword;base64,AAAA"),
+        { "type": "image_url", "image_url": { "url": "data:image/png;base64,FFFF" } },
+    ]));
+    assert_eq!(
+        stream::content_parts_signature(&body),
+        "parts=m1=file+image_url"
+    );
+    let plain = json!({ "messages": [ { "role": "user", "content": "hi" } ] });
+    assert_eq!(stream::content_parts_signature(&plain), "parts=text-only");
+    assert_eq!(
+        stream::content_parts_signature(&json!({})),
+        "parts=n/a"
+    );
+}

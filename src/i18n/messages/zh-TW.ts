@@ -124,6 +124,7 @@ const zhTW: Messages = {
             listFailed: "無法列出工作區檔案：{error}",
             readFailed: "無法讀取 {name}：{error}",
             rangeNotSupported: "{name} 不支援行區間，已附加整個檔案。",
+            binaryRefused: "{name} 看起來是二進位檔案，未附加（可先用工具讀取或轉換）。",
             pdfFailed: "無法轉換 PDF {name}：{error}",
             pdfConverting: "正在把 {name} 轉成 Markdown…",
             pdfConvertingPage: "第 {page} / {total} 頁",
@@ -143,7 +144,7 @@ const zhTW: Messages = {
             noSelectable: "沒有已啟用且帶系統提示詞的 llm 子 agent，請先在子 agent 面板啟用。",
             listFailed: "無法列出子 agent：{error}",
         },
-        attachmentUnsupported: "已跳過 {names}：「{model}」無法讀取該檔案類型。",
+        attachmentUnsupported: "已略過 {names}：該檔案類型無法作為附件傳送，可讓模型用工具讀取。",
         composer: {
             dropHint: "放開即可加入對話（檔案存入 .data/tmp 並插入 @ 引用）",
             busy: "助理正在回覆：等這一輪結束再加入檔案。",

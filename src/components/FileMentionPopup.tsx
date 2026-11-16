@@ -3,7 +3,7 @@
  *
  * Typing `@` in the message box opens this popup above the input row; it lists
  * workspace files filtered by the current model's supported attachment kinds
- * (text is always allowed, images need vision, documents need `supports_files`)
+ * (text is always allowed, images need vision, binaries are not offered)
  * and ranked by file name first, path second. Selecting a file inserts
  * `@<path>`; appending `#12`, `#12-24` or `#12-` attaches only those lines.
  * A PDF is the exception: it is offered to every model because the backend

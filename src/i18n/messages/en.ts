@@ -138,6 +138,8 @@ const en = {
             readFailed: "Could not read {name}: {error}",
             rangeNotSupported:
                 "{name} cannot be sliced by lines — attached the whole file.",
+            binaryRefused:
+                "{name} looks like binary, so it was not attached — read or convert it with a tool instead.",
             pdfFailed: "Could not convert the PDF {name}: {error}",
             pdfConverting: "Converting {name} to Markdown…",
             pdfConvertingPage: "page {page} / {total}",
@@ -159,7 +161,7 @@ const en = {
             listFailed: "Could not list sub-agents: {error}",
         },
         attachmentUnsupported:
-            "Skipped {names}: “{model}” cannot read that file type.",
+            "Skipped {names}: that file type cannot be sent as an attachment — let the model read it with a tool.",
         composer: {
             dropHint: "Drop to attach — copied to .data/tmp (or referenced in place) and inserted as @",
             busy: "The assistant is replying: add files once this turn ends.",

@@ -1457,8 +1457,11 @@ still missing."
                     &state,
                     "ERROR",
                     format!(
-                        "chat_completion request failed: session_id={}, duration_ms={}, error={}",
-                        session_id, duration_ms, err
+                        "chat_completion request failed: session_id={}, duration_ms={}, {}, error={}",
+                        session_id,
+                        duration_ms,
+                        content_parts_signature(&request_snapshot),
+                        err
                     ),
                 );
             }

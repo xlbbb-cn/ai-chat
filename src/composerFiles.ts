@@ -142,7 +142,7 @@ export async function preparePastedFiles(
  * Which of `paths` the selected model can actually be shown.
  *
  * The mention pipeline classifies by extension, so the check is the same one
- * the `@` popup applies: an image needs vision, a document needs `supports_files`.
+ * the `@` popup applies: an image needs vision, a binary document is never offered.
  */
 export function partitionByModelSupport(
   paths: string[],

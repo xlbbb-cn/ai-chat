@@ -2,6 +2,7 @@
 //! request helper.
 
 use super::*;
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 
 pub struct StreamResult {
     pub finish_reason: String,
@@ -697,6 +698,138 @@ pub(crate) fn ensure_reasoning_passthrough(req_body: &mut Value, ds_format: bool
     }
 }
 
+/// Does a `data:` URL carry an image? Compared on bytes so a non-ASCII payload
+/// can never panic on a slice boundary.
+fn is_image_data_url(url: &str) -> bool {
+    let bytes = url.as_bytes();
+    bytes.len() > 11 && bytes[..11].eq_ignore_ascii_case(b"data:image/")
+}
+
+/// Rewrite content parts the provider cannot take.
+///
+/// A `file` part is never forwarded. It is a dead end for this app: text is
+/// inlined by the frontend, PDFs arrive as Markdown, images travel as
+/// `image_url` — and a provider whose catalogue entry *advertised* file input
+/// still rejected the part:
+/// `400 invalid_request_error … .messages[2]: file content parts are not
+/// supported here; send the image as an image_url part`. Worse, the part is
+/// persisted with its message, so a single one failed that session on every
+/// later turn — including after the frontend stopped producing them.
+///
+/// Three rewrites, in order:
+/// 1. `data:image/…` → an `image_url` part: the payload is an image that was
+///    classified as a binary further upstream.
+/// 2. a base64 payload that decodes to UTF-8 → the text itself, inlined in the
+///    same `<details>` shape the frontend uses. Rows saved by older builds come
+///    back with their content intact: `@scripts/user_admin` was stored as
+///    `application/octet-stream` and is a plain bash script.
+/// 3. anything else → a text part naming the file, so the turn survives.
+///
+/// Runs at the single streaming choke point, so main-agent and sub-agent
+/// requests are covered alike.
+pub(crate) fn normalize_content_parts(req_body: &mut Value) {
+    let Some(messages) = req_body.get_mut("messages").and_then(|m| m.as_array_mut()) else {
+        return;
+    };
+    for msg in messages.iter_mut() {
+        let Some(parts) = msg.get_mut("content").and_then(|c| c.as_array_mut()) else {
+            continue;
+        };
+        for part in parts.iter_mut() {
+            if part.get("type").and_then(|t| t.as_str()) != Some("file") {
+                continue;
+            }
+            let file_data = part
+                .get("file")
+                .and_then(|f| f.get("file_data"))
+                .and_then(|d| d.as_str())
+                .unwrap_or("");
+            if is_image_data_url(file_data) {
+                *part = json!({ "type": "image_url", "image_url": { "url": file_data } });
+                continue;
+            }
+            let name = part
+                .get("file")
+                .and_then(|f| f.get("filename"))
+                .and_then(|n| n.as_str())
+                .unwrap_or("attachment");
+            *part = match decode_text_payload(file_data) {
+                Some(text) => json!({
+                    "type": "text",
+                    "text": format!("\n<details><summary>Attached File: {name} — already provided below</summary>\n\n{text}\n\n</details>"),
+                }),
+                None => json!({
+                    "type": "text",
+                    "text": format!("\n[Attached file: {name} — not sent: this provider accepts text and images only]"),
+                }),
+            };
+        }
+    }
+}
+
+/// Largest `file` payload that is decoded back into the prompt, in bytes.
+///
+/// A legacy `file` part carrying a script or a config file is small; past this
+/// size the file is better named than half-inlined.
+const MAX_INLINE_FILE_BYTES: usize = 512 * 1024;
+
+/// Decode a `data:…;base64,…` payload that is really text.
+///
+/// `None` when the payload is not base64, is too large, or does not decode as
+/// UTF-8 — the caller then names the file instead of inlining it.
+fn decode_text_payload(file_data: &str) -> Option<String> {
+    let rest = file_data.strip_prefix("data:")?;
+    let (meta, payload) = rest.split_once(',')?;
+    if !meta.contains(";base64") || payload.is_empty() {
+        return None;
+    }
+    // Checked before decoding: base64 inflates by 4/3.
+    if payload.len() / 4 * 3 > MAX_INLINE_FILE_BYTES {
+        return None;
+    }
+    let bytes = BASE64.decode(payload.trim()).ok()?;
+    if bytes.is_empty() || bytes.len() > MAX_INLINE_FILE_BYTES {
+        return None;
+    }
+    let text = String::from_utf8(bytes).ok()?;
+    if text.contains('\u{0}') {
+        return None;
+    }
+    Some(text)
+}
+
+/// Which message carries which non-text content parts, e.g.
+/// `parts=m1=image_url,m2=file`.
+///
+/// Logged beside a failed request. The provider names a message index and a
+/// part type (`.messages[2]: file content parts are not supported here`), and
+/// without this line there is no way to tell which attachment produced it —
+/// exactly the dead end this one cost.
+pub(crate) fn content_parts_signature(req_body: &Value) -> String {
+    let Some(messages) = req_body.get("messages").and_then(|m| m.as_array()) else {
+        return "parts=n/a".to_string();
+    };
+    let mut out: Vec<String> = Vec::new();
+    for (idx, msg) in messages.iter().enumerate() {
+        let Some(parts) = msg.get("content").and_then(|c| c.as_array()) else {
+            continue;
+        };
+        let kinds: Vec<&str> = parts
+            .iter()
+            .filter_map(|p| p.get("type").and_then(|t| t.as_str()))
+            .filter(|k| *k != "text")
+            .collect();
+        if !kinds.is_empty() {
+            out.push(format!("m{idx}={}", kinds.join("+")));
+        }
+    }
+    if out.is_empty() {
+        "parts=text-only".to_string()
+    } else {
+        format!("parts={}", out.join(","))
+    }
+}
+
 // ─── Unified streaming helper ─────────────────────────────────────────────────
 
 /// Announced before a streaming attempt is retried: the payload is the exact
@@ -739,6 +872,10 @@ pub async fn stream_llm_request(
     // Single choke point for every streaming request (main agent + sub-agents):
     // DS-Format guard, see `ensure_reasoning_passthrough`.
     ensure_reasoning_passthrough(&mut req_body, opts.ds_format);
+    // Same choke point, attachment side: an image that arrived inside a `file`
+    // part becomes `image_url`, and a non-image `file` part the model did not
+    // advertise is degraded to text — see `normalize_content_parts`.
+    normalize_content_parts(&mut req_body);
     let mut last_err: Option<String> = None;
 
     for attempt in 1..=STREAM_MAX_RETRIES {

@@ -42,7 +42,13 @@
  */
 import { convertPdfMention, readWorkspaceFileBytes, readWorkspaceFileRange } from "./api";
 import type { PdfMentionResult } from "./api";
-import { classifyName, extensionOf, mimeForName, supportsAttachmentKind } from "./attachments";
+import {
+  classifyName,
+  extensionOf,
+  looksLikeBinaryText,
+  mimeForName,
+  supportsAttachmentKind,
+} from "./attachments";
 import { t } from "./i18n";
 import type { Attachment, ModelMetadata, WorkspaceFileEntry } from "./types";
 
@@ -177,7 +183,7 @@ export interface MentionProgress {
  * `true` when the mention names a PDF.
  *
  * A PDF is the one binary the composer can turn into *text*: sending it as a
- * `file` part needs a model with `supports_files`, while its Markdown works
+ * `file` part cannot be sent at all, while its Markdown works
  * everywhere and is far cheaper to read.
  */
 function isPdfMention(path: string): boolean {
@@ -263,6 +269,14 @@ export async function resolveFileMentions(
           startLine: token.startLine,
           endLine: token.endLine,
         });
+        // An unknown extension is treated as text (see `classifyName`); when
+        // that guess was wrong the backend hands back lossy-decoded bytes.
+        // Refusing here keeps mojibake out of the prompt and keeps the bytes
+        // out of a `file` part, which is what a gateway rejects outright.
+        if (looksLikeBinaryText(range.text)) {
+          problems.push(t("app.fileMention.binaryRefused", { name: token.path }));
+          continue;
+        }
         const label =
           range.start_line === range.end_line && !token.hasRange
             ? token.path

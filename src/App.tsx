@@ -34,8 +34,6 @@ import type {
   AgentPlannerActionEvent,
   ChatInjection,
   ToolCallEntry,
-  Attachment,
-  ContentPart,
   MessageContent,
   ModelMetadata,
   Palette,
@@ -52,13 +50,13 @@ import type {
   TodoAskRequest,
   TodoAskAnswer,
 } from "./types";
-import { extensionOf, supportsMentionName } from "./attachments";
+import { supportsMentionName } from "./attachments";
 import { activeMentionQuery, resolveFileMentions, scoreWorkspaceFile } from "./fileMention";
 import type { MentionProgress, MentionResolution } from "./fileMention";
+import { partsForContent } from "./messageParts";
 import {
   canonicalTmpMentions,
   insertMentionTokens,
-  mentionDisplayName,
   mentionTokenForPath,
   partitionByModelSupport,
   preparePastedFiles,
@@ -326,74 +324,6 @@ function timerPromptText(timer: TimerEntry): string {
 }
 
 // ─── Attachment handling ─────────────────────────────────────────────────────
-
-/** Strip the `data:<mime>;base64,` prefix — `input_audio` wants the payload. */
-function dataUrlBase64(dataUrl: string): string {
-  const comma = dataUrl.indexOf(",");
-  return comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
-}
-
-/**
- * Code-fence language for an inlined text attachment.
- *
- * The name may carry a range (`kk.pdf#2`, `src/App.tsx#12-24`), which would
- * otherwise leak into the fence tag, and a converted PDF mention is Markdown
- * no matter what its extension says.
- */
-function fenceLanguage(att: Attachment): string {
-  if (att.mime === "text/markdown") return "markdown";
-  const ext = extensionOf(att.name.split("#")[0]);
-  return /^[a-z0-9]+$/.test(ext) ? ext : "";
-}
-
-/** Render a user message's attachments into a structured `content` payload. */
-function buildMessageContent(
-  text: string,
-  attachments: Attachment[],
-): { content: MessageContent } {
-  if (attachments.length === 0) {
-    return { content: text };
-  }
-
-  const parts: ContentPart[] = [];
-  const trimmedText = text.trim();
-  if (trimmedText.length > 0) {
-    parts.push({ type: "text", text: trimmedText });
-  }
-
-  for (const att of attachments) {
-    if (att.kind === "image" && att.data_url) {
-      parts.push({
-        type: "image_url",
-        image_url: { url: att.data_url },
-      });
-    } else if (att.kind === "file" && att.data_url) {
-      parts.push({
-        type: "file",
-        file: { filename: att.name, file_data: att.data_url },
-      });
-    } else if (att.kind === "audio" && att.data_url) {
-      parts.push({
-        type: "input_audio",
-        input_audio: {
-          data: dataUrlBase64(att.data_url),
-          // The schema only accepts `wav` and `mp3` (enforced by the picker).
-          format: extensionOf(att.name) === "wav" ? "wav" : "mp3",
-        },
-      });
-    } else if (att.kind === "text" && att.text_content !== undefined) {
-      parts.push({
-        type: "text",
-        // The summary says the bytes are already here: a path the model can
-        // open is an invitation to read the file a second time, which is one
-        // wasted tool round per attachment.
-        text: `\n<details><summary>Attached File: ${mentionDisplayName(att.name)} — already provided below</summary>\n\n\`\`\`${fenceLanguage(att)}\n${att.text_content}\n\`\`\`\n</details>`,
-      });
-    }
-  }
-
-  return { content: parts };
-}
 
 /** Persist a multimodal content payload as a single text column. */
 function serializeContentForDb(content: MessageContent): string {
@@ -2691,7 +2621,11 @@ export default function App() {
             .map((agent) => agent.id)
         : undefined;
 
-    const { content: apiContent } = buildMessageContent(messageText, messageAttachments);
+    // The message's `content` is built in one place (`messageParts.ts`), which
+    // decides the part type from the payload and never emits a `file` part — a
+    // gateway that reads text and images only answers one with an upstream
+    // `invalid_request_error` and fails the whole turn.
+    const apiContent = partsForContent(messageText, messageAttachments);
     const userAttachments = messageAttachments.length > 0 ? messageAttachments : undefined;
     setPendingRetryMessageId(null);
 
@@ -3956,7 +3890,7 @@ export default function App() {
   /**
    * Files the `@file` popup offers: only the attachment kinds the selected
    * model can consume (`filter_by_externname` — text is always fine, images
-   * need vision, documents need `supports_files`), ranked by file name first
+   * need vision, binaries are hidden), ranked by file name first
    * and path second.
    */
   const mentionItems = useMemo(() => {
@@ -3964,7 +3898,7 @@ export default function App() {
     const scored: { item: WorkspaceFileEntry; score: number }[] = [];
     for (const file of workspaceFiles) {
       // `@paper.pdf#2` reaches the model as Markdown text, so PDFs are offered
-      // to every model — even one without `supports_files`.
+      // to every model.
       if (!supportsMentionName(selectedMetadata, file.name)) continue;
       const score = scoreWorkspaceFile(file, mentionState.query);
       if (score === null) continue;
@@ -4505,13 +4439,13 @@ export default function App() {
    * The backend emits the tool-call progress row (`❓ Asking the user …`)
    * before `todo-ask`, so the turn's assistant message already carries the
    * matching `tool_calls` entry — match by `call_id` and the form mounts inside
-   * the bubble it belongs to, right under that row. A form restored after a
-   * webview reload (or mirrored into a second window) has no such row in this
-   * window yet: fall back to the newest assistant message while this window is
-   * the one streaming, and otherwise to `null`, which keeps the panel in its
-   * floating slot above the input — the form is the only way to unblock that
-   * turn, so it must never become invisible just because the transcript row
-   * does not exist here.
+   * the bubble it belongs to, pinned after the reply's output. A form restored
+   * after a webview reload (or mirrored into a second window) has no such row
+   * in this window yet: fall back to the newest assistant message while this
+   * window is the one streaming, and otherwise to `null`, which keeps the panel
+   * in its floating slot above the input — the form is the only way to unblock
+   * that turn, so it must never become invisible just because the transcript
+   * row does not exist here.
    */
   const todoAskHostId = useMemo(() => {
     if (!todoAsk) return null;
