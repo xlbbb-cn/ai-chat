@@ -134,6 +134,44 @@ fn content_to_text_handles_null_and_other_types() {
     assert_eq!(content_to_text(&json!({})), "");
 }
 
+/// The memory hint is prefixed to the user's text, as its own paragraph, and
+/// the stored content stays clean (the hint is request-only).
+#[test]
+fn the_memory_hint_is_prefixed_to_a_string_message() {
+    let content = json!("改一下 tauri build");
+    let hinted = turn::prepend_memory_hint(&content, "MEMORY (c5): tag first");
+    assert_eq!(
+        hinted,
+        json!("MEMORY (c5): tag first\n\n改一下 tauri build")
+    );
+    assert_eq!(content, json!("改一下 tauri build"));
+}
+
+/// Multimodal content keeps every part in order — the hint goes in front.
+#[test]
+fn the_memory_hint_goes_in_front_of_every_multimodal_part() {
+    let content = json!([
+        { "type": "text", "text": "describe this: " },
+        { "type": "image_url", "image_url": { "url": "data:image/png;base64,XXX" } },
+    ]);
+    let hinted = turn::prepend_memory_hint(&content, "MEMORY (c5): tag first");
+    let parts = hinted.as_array().unwrap();
+    assert_eq!(parts.len(), 3);
+    assert_eq!(
+        parts[0],
+        json!({ "type": "text", "text": "MEMORY (c5): tag first" })
+    );
+    assert_eq!(parts[1], content[0]);
+    assert_eq!(parts[2], content[1]);
+}
+
+/// A shape the request cannot carry a hint in is left untouched.
+#[test]
+fn the_memory_hint_leaves_other_content_shapes_untouched() {
+    assert_eq!(turn::prepend_memory_hint(&json!(null), "x"), json!(null));
+    assert_eq!(turn::prepend_memory_hint(&json!(42), "x"), json!(42));
+}
+
 #[test]
 fn conversation_id_header_value_keeps_uuid_v4_session_ids() {
     let session_id = "01234567-89ab-4cde-8f01-23456789abcd";

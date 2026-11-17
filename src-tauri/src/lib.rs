@@ -579,6 +579,12 @@ pub struct AppConfig {
     /// rasterise-and-save path (and 3D scenes) stay unused.
     #[serde(default = "update::default_true")]
     pub enhanced_figures: bool,
+    /// Prefix the newest user message with a ≤200-character, confidence-ranked
+    /// hint of the memories matching it (Settings → Advanced, on by default).
+    /// The hint is request-only: it never enters the stored history, and off
+    /// means the model relies on `memory search` alone.
+    #[serde(default = "update::default_true")]
+    pub memory_hint: bool,
     /// Upper bound on model requests in one chat turn (`0` = unlimited; values
     /// above `turn_guard::MAX_MAIN_AGENT_ROUNDS` are clamped). A ReAct turn is
     /// driven by the model, so without a cap a tool loop could run forever;
@@ -683,6 +689,7 @@ impl Default for AppConfig {
             self_evolution_mode: false,
             background_tools: true,
             enhanced_figures: true,
+            memory_hint: true,
             main_agent_max_rounds: turn_guard::DEFAULT_MAIN_AGENT_MAX_ROUNDS,
             main_agent_max_tool_calls: turn_guard::DEFAULT_MAIN_AGENT_MAX_TOOL_CALLS,
             tool_failure_limit: turn_guard::DEFAULT_TOOL_FAILURE_LIMIT,

@@ -39,8 +39,8 @@ pub const MAINTENANCE_PROGRESS_KEY: &str = "evolution-maintenance-progress";
 
 /// Budget (in characters) of one rendered block of the self-evolution memory
 /// area — what the panel shows as the top tier and what a `plan` consolidation
-/// measures its clusters against. Nothing is preloaded into a request, so this
-/// is a UI/analysis budget, not part of the prompt prefix.
+/// measures its clusters against. A UI/analysis budget: the request only carries
+/// the much smaller `MEMORY_HINT_BUDGET_CHARS` prefix built from keyword hits.
 pub const EVOLUTION_CONTEXT_BUDGET_CHARS: usize = 4_000;
 
 /// On-disk format version of an evolution memory entry.
@@ -651,7 +651,8 @@ pub fn ranked_evolution_entries(workspace_dir: &Path) -> Vec<ScoredEntry> {
 /// into the top tier (the panel marks those rows).
 pub struct RenderedEvolution {
     /// Rendered block. Nothing injects it into a request any more (the model
-    /// searches the scope on demand), so only the reference tests read it.
+    /// searches the scope on demand and only a ≤200-char hint is prefixed), so
+    /// only the reference tests read it.
     #[cfg_attr(not(test), allow(dead_code))]
     pub text: String,
     pub injected: Vec<String>,
@@ -808,15 +809,316 @@ pub fn render_ranked_entries(ranked: &[ScoredEntry], budget_chars: usize) -> Ren
 /// Render the self-evolution memory area as one text block.
 ///
 /// This is **not** part of any request: preloading every verified fact made the
-/// first request's prefill dominate the prompt, so the model now gets a pointer
-/// to the `evolution` scope and searches it on demand. The renderer is kept as
-/// the reference implementation its tests pin down (deterministic tiering and a
-/// character budget).
+/// first request's prefill dominate the prompt, so the model now gets a ≤200
+/// character hint of the entries matching the current message (see
+/// [`build_memory_hint`]) plus a pointer to the `evolution` scope it searches on
+/// demand. The renderer is kept as the reference implementation its tests pin
+/// down (deterministic tiering and a character budget).
 #[cfg(test)]
 pub fn render_evolution_context(workspace_dir: &Path, budget_chars: usize) -> String {
     let ranked = ranked_evolution_entries(workspace_dir);
     render_ranked_entries(&ranked, budget_chars).text
 }
+
+// ─── Request hint (confidence-ranked, ≤ MEMORY_HINT_BUDGET_CHARS) ────────────
+
+/// Character budget of the memory hint prepended to the newest user message.
+///
+/// The whole rendered block — header, keys and facts — never exceeds it. It is
+/// deliberately tiny: the full memory area is searched on demand, and this only
+/// points the model at the facts that match the message it just received.
+pub const MEMORY_HINT_BUDGET_CHARS: usize = 200;
+
+/// Cap of one rendered fact, so a single long entry cannot eat the budget.
+const MEMORY_HINT_ITEM_CHARS: usize = 80;
+
+/// Upper bound of query keywords considered, longest (most specific) first.
+const MEMORY_HINT_MAX_KEYWORDS: usize = 32;
+
+/// File-backed `user` / `repo` notes carry no trust metadata of their own; they
+/// enter the ranking as a neutral fact, below a confirmed (`c4`/`c5`) entry.
+const FILE_MEMORY_CONFIDENCE: u32 = 3;
+const FILE_MEMORY_IMPORTANCE: u32 = 3;
+
+/// The two file-backed scopes whose `.md` notes are eligible for the hint.
+const MEMORY_HINT_SCOPES: [&str; 2] = ["user", "repo"];
+
+/// Field weights of a keyword hit: a key or title match is worth far more than
+/// a word buried in a long body.
+const HINT_FIELD_WEIGHTS: [u32; 4] = [3, 2, 2, 1];
+
+/// Opening of the block; `hint_text` closes the parenthesis once it knows how
+/// many matching facts were left out.
+const MEMORY_HINT_HEADER: &str = "MEMORY (confidence-ranked; verify before relying";
+
+/// A rendered hint plus the keys it placed (the keys are logged, never the
+/// facts — the request log is already noisy enough).
+pub struct MemoryHint {
+    pub text: String,
+    pub keys: Vec<String>,
+}
+
+struct HintCandidate {
+    key: String,
+    /// Distilled one-liner (already collapsed and truncated for the block).
+    fact: String,
+    confidence: u32,
+    importance: u32,
+    /// Best keyword hit weight (0 = no match, filtered out).
+    weight: u32,
+    /// Normalized key / title / tags / body — matching only, never rendered.
+    fields: [String; 4],
+}
+
+/// Build the confidence-ranked hint for one user message.
+///
+/// Read-only on purpose: this runs on the request path, so it never migrates an
+/// entry, never bumps `uses` and never touches `confidence` (a hint that
+/// counted as usage would rank itself up just by being relevant).
+///
+/// `None` means "inject nothing": no usable keyword, no candidate, no match, or
+/// a budget too small for even one line.
+pub fn build_memory_hint(
+    workspace_dir: &Path,
+    query: &str,
+    include_evolution: bool,
+) -> Option<MemoryHint> {
+    // Cheap bail-out first: an empty message must not touch the disk.
+    let keywords = hint_keywords(query);
+    if keywords.is_empty() {
+        return None;
+    }
+
+    let mut ranked: Vec<HintCandidate> = hint_candidates(workspace_dir, include_evolution)
+        .into_iter()
+        .filter_map(|mut candidate| {
+            candidate.weight = hint_weight(&candidate.fields, &keywords);
+            (candidate.weight > 0).then_some(candidate)
+        })
+        .collect();
+    if ranked.is_empty() {
+        return None;
+    }
+
+    // "Ranked by confidence" — the higher the evidence, the earlier the line.
+    // The rest only makes two differently-evidenced facts deterministic:
+    // stronger hit, higher importance, denser line, then key.
+    ranked.sort_by(|left, right| {
+        right
+            .confidence
+            .cmp(&left.confidence)
+            .then_with(|| right.weight.cmp(&left.weight))
+            .then_with(|| right.importance.cmp(&left.importance))
+            .then_with(|| left.fact.chars().count().cmp(&right.fact.chars().count()))
+            .then_with(|| left.key.cmp(&right.key))
+    });
+
+    let (text, placed) = render_hint(&ranked, MEMORY_HINT_BUDGET_CHARS)?;
+    Some(MemoryHint {
+        text,
+        keys: ranked[..placed]
+            .iter()
+            .map(|candidate| candidate.key.clone())
+            .collect(),
+    })
+}
+
+/// Keywords of one user message: ASCII words (≥3 chars) plus CJK bigrams, minus
+/// stopwords, keeping the longest `MEMORY_HINT_MAX_KEYWORDS` (a lone CJK
+/// character matches everything, so single-character tokens are dropped).
+fn hint_keywords(query: &str) -> HashSet<String> {
+    let mut tokens: Vec<String> = tokenize(query)
+        .into_iter()
+        .filter(|token| token.chars().count() >= 2)
+        .collect();
+    // Deterministic on equal length, and the truncation keeps the specific ones.
+    tokens.sort_by(|left, right| {
+        right
+            .chars()
+            .count()
+            .cmp(&left.chars().count())
+            .then_with(|| left.cmp(right))
+    });
+    tokens.dedup();
+    tokens.truncate(MEMORY_HINT_MAX_KEYWORDS);
+    tokens.into_iter().collect()
+}
+
+/// Every fact the hint may draw from: the hot evolution entries (when the mode
+/// is on) plus the file-backed `user` / `repo` notes.
+///
+/// Low-trust entries (`confidence <= LOW_TRUST_CONFIDENCE`) and the maintenance
+/// resume note are skipped: a fact the model must re-verify anyway is not worth
+/// a fifth of the budget, and the resume note is an internal bookmark.
+fn hint_candidates(workspace_dir: &Path, include_evolution: bool) -> Vec<HintCandidate> {
+    let mut candidates: Vec<HintCandidate> = Vec::new();
+
+    if include_evolution {
+        for entry in load_evolution_entries(workspace_dir) {
+            if entry.meta.key == MAINTENANCE_PROGRESS_KEY {
+                continue;
+            }
+            if entry.meta.confidence <= LOW_TRUST_CONFIDENCE {
+                continue;
+            }
+            let tags = entry.meta.tags.join(" ");
+            candidates.push(HintCandidate {
+                key: entry.meta.key.clone(),
+                fact: one_line(&entry.summary, MEMORY_HINT_ITEM_CHARS),
+                confidence: entry.meta.confidence,
+                importance: entry.meta.importance,
+                weight: 0,
+                fields: [
+                    normalize_text(&entry.meta.key),
+                    normalize_text(&entry.meta.title),
+                    normalize_text(&tags),
+                    normalize_text(&entry.body),
+                ],
+            });
+        }
+    }
+
+    for scope in MEMORY_HINT_SCOPES {
+        let dir = crate::workspace::memory_root(workspace_dir).join(scope);
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        // `read_dir` order is filesystem-dependent; sorting keeps the render
+        // byte-identical between two builds of the same memory set.
+        let mut paths: Vec<PathBuf> = entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.is_file()
+                    && path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .map(|name| name.ends_with(".md") && !name.contains(".bak."))
+                        .unwrap_or(false)
+            })
+            .collect();
+        paths.sort();
+
+        for path in paths {
+            let Some((key, body, tags)) = read_scope_note(&path) else {
+                continue;
+            };
+            candidates.push(HintCandidate {
+                fact: one_line(&body, MEMORY_HINT_ITEM_CHARS),
+                // The `# key` heading carries the readable key; the file stem
+                // is the sanitized version of it.
+                fields: [
+                    normalize_text(&key),
+                    normalize_text(&key),
+                    normalize_text(&tags.join(" ")),
+                    normalize_text(&body),
+                ],
+                key,
+                confidence: FILE_MEMORY_CONFIDENCE,
+                importance: FILE_MEMORY_IMPORTANCE,
+                weight: 0,
+            });
+        }
+    }
+
+    candidates.sort_by(|left, right| left.key.cmp(&right.key));
+    candidates
+}
+
+/// Read one `user` / `repo` note: `# key`, free text, optional `tags: a, b`.
+fn read_scope_note(path: &Path) -> Option<(String, String, Vec<String>)> {
+    let raw = fs::read_to_string(path).ok()?;
+    let (body, tags) = legacy_body(&raw);
+    let body = body.trim().to_string();
+    if body.is_empty() {
+        return None;
+    }
+    let heading = raw
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("# ").map(str::trim))
+        .filter(|heading| !heading.is_empty())
+        .map(str::to_string);
+    let stem = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or_default()
+        .to_string();
+    Some((heading.unwrap_or(stem), body, tags))
+}
+
+/// Best hit weight of one candidate against the query keywords.
+///
+/// A curated field (key / title / tags) is a hit on its own — those are the
+/// words the author chose for the entry. A **body-only** match needs two
+/// distinct keywords: one CJK bigram (`的时`, `时候`) is common enough to match
+/// almost every entry and would turn the ranking into a lottery.
+fn hint_weight(fields: &[String; 4], keywords: &HashSet<String>) -> u32 {
+    let hits = |field: &str| -> usize {
+        if field.is_empty() {
+            return 0;
+        }
+        keywords
+            .iter()
+            .filter(|keyword| field.contains(keyword.as_str()))
+            .count()
+    };
+    let mut weight = 0;
+    for index in 0..3 {
+        if hits(&fields[index]) > 0 {
+            weight = weight.max(HINT_FIELD_WEIGHTS[index]);
+        }
+    }
+    if weight == 0 && hits(&fields[3]) >= 2 {
+        weight = HINT_FIELD_WEIGHTS[3];
+    }
+    weight
+}
+
+/// Render the largest prefix of `ranked` that fits `budget_chars`; `None` when
+/// not even one line fits (a header-only block is never injected).
+fn render_hint(ranked: &[HintCandidate], budget_chars: usize) -> Option<(String, usize)> {
+    let mut placed = 0usize;
+    for index in 1..=ranked.len() {
+        let omitted = ranked.len() - index;
+        if hint_text(&ranked[..index], omitted).chars().count() <= budget_chars {
+            placed = index;
+        } else {
+            break;
+        }
+    }
+    if placed == 0 {
+        return None;
+    }
+    let text = hint_text(&ranked[..placed], ranked.len() - placed);
+    Some((text, placed))
+}
+
+/// One single-line block: header, then `key (cN): fact` joined by ` · `.
+///
+/// Single line on purpose — it is prefixed to the user's own message, so a
+/// multi-line block would read like something the user typed.
+fn hint_text(placed: &[HintCandidate], omitted: usize) -> String {
+    if placed.is_empty() {
+        return String::new();
+    }
+    let mut header = String::from(MEMORY_HINT_HEADER);
+    if omitted > 0 {
+        // Tells the model the hint is a sample, not the whole memory.
+        header.push_str(&format!(", +{omitted} more"));
+    }
+    header.push_str("): ");
+    let items: Vec<String> = placed
+        .iter()
+        .map(|candidate| {
+            format!(
+                "{} (c{}): {}",
+                candidate.key, candidate.confidence, candidate.fact
+            )
+        })
+        .collect();
+    format!("{header}{}", items.join(" · "))
+}
+
 
 // ─── Writes: upsert / merge ──────────────────────────────────────────────────
 
@@ -3779,5 +4081,230 @@ mod tests {
     fn a_missing_evolution_area_renders_nothing() {
         let workspace = TempWorkspace::new("missing");
         assert!(render_evolution_context(&workspace.dir, 4_000).is_empty());
+    }
+
+    /// Write one structured entry with an explicit confidence / importance.
+    fn write_entry(
+        workspace: &TempWorkspace,
+        key: &str,
+        title: &str,
+        confidence: u32,
+        importance: u32,
+        body: &str,
+    ) {
+        workspace.write(
+            key,
+            &format!(
+                "---\nformat_version: 2\nkey: {key}\ntitle: {title}\nimportance: {importance}\n\
+                 confidence: {confidence}\nevidence: 1\n---\n\n{body}\n"
+            ),
+        );
+    }
+
+    /// A keyword hit is injected, unrelated entries are not, and the higher
+    /// confidence comes first.
+    #[test]
+    fn a_keyword_hit_is_injected_and_ranked_by_confidence() {
+        let workspace = TempWorkspace::new("hint-rank");
+        write_entry(
+            &workspace,
+            "build-tag",
+            "Tauri build needs a tag",
+            5,
+            3,
+            "`tauri build` needs a git tag first.",
+        );
+        write_entry(
+            &workspace,
+            "python-default",
+            "Default interpreter",
+            4,
+            3,
+            "Use `python`, not `python3`.",
+        );
+        write_entry(
+            &workspace,
+            "menu-colours",
+            "Menu colours",
+            5,
+            3,
+            "The menu uses the accent token.",
+        );
+
+        let hint = build_memory_hint(
+            &workspace.dir,
+            "tauri build 需要先打 tag 吗？python 解释器用哪个",
+            true,
+        )
+        .unwrap();
+        assert!(hint.text.starts_with(MEMORY_HINT_HEADER), "{}", hint.text);
+        let tag = hint.text.find("build-tag (c5)").expect(&hint.text);
+        let python = hint.text.find("python-default (c4)").expect(&hint.text);
+        assert!(tag < python, "{}", hint.text);
+        assert!(!hint.text.contains("menu-colours"), "{}", hint.text);
+        assert_eq!(hint.keys, vec!["build-tag", "python-default"]);
+    }
+
+    /// Nothing matches → nothing is injected (an unrelated message pays zero).
+    #[test]
+    fn an_unrelated_or_empty_message_gets_no_hint() {
+        let workspace = TempWorkspace::new("hint-none");
+        write_entry(
+            &workspace,
+            "runtime",
+            "Interpreter",
+            4,
+            3,
+            "Use `python`, not `python3`.",
+        );
+
+        assert!(build_memory_hint(&workspace.dir, "", true).is_none());
+        assert!(build_memory_hint(&workspace.dir, "   \n  ", true).is_none());
+        assert!(build_memory_hint(&workspace.dir, "颜色面板的间距", true).is_none());
+    }
+
+    /// The block never exceeds the budget, and dropped facts leave a counter.
+    #[test]
+    fn the_hint_stays_within_the_budget() {
+        let workspace = TempWorkspace::new("hint-budget");
+        for index in 0..6 {
+            write_entry(
+                &workspace,
+                &format!("note-{index}"),
+                &format!("Note {index}"),
+                4,
+                3,
+                &format!(
+                    "Very long interpreter note number {index} that keeps talking about the \
+                     runtime environment and everything around it for far longer than one line."
+                ),
+            );
+        }
+
+        let hint = build_memory_hint(&workspace.dir, "the interpreter note", true).unwrap();
+        let chars = hint.text.chars().count();
+        assert!(chars <= MEMORY_HINT_BUDGET_CHARS, "{chars}: {}", hint.text);
+        assert!(!hint.text.contains('\n'), "{}", hint.text);
+        assert!(hint.text.contains(" more)"), "{}", hint.text);
+        assert_eq!(hint.keys.len(), 1);
+    }
+
+    /// A fact the model has to re-verify anyway never takes budget.
+    #[test]
+    fn low_trust_entries_are_never_injected() {
+        let workspace = TempWorkspace::new("hint-low-trust");
+        write_entry(
+            &workspace,
+            "weak",
+            "Interpreter",
+            LOW_TRUST_CONFIDENCE,
+            3,
+            "Interpreter note that was contradicted.",
+        );
+        assert!(build_memory_hint(&workspace.dir, "interpreter note", true).is_none());
+    }
+
+    /// The maintenance resume note is an internal bookmark, not a fact.
+    #[test]
+    fn the_maintenance_note_is_never_injected() {
+        let workspace = TempWorkspace::new("hint-maintenance");
+        write_entry(
+            &workspace,
+            MAINTENANCE_PROGRESS_KEY,
+            "Maintenance",
+            5,
+            5,
+            "Interpreter maintenance pass in progress.",
+        );
+        assert!(build_memory_hint(&workspace.dir, "interpreter maintenance", true).is_none());
+    }
+
+    /// `user` / `repo` notes are eligible; they rank below a confirmed fact.
+    #[test]
+    fn user_and_repo_notes_are_eligible_with_a_neutral_confidence() {
+        let workspace = TempWorkspace::new("hint-notes");
+        write_entry(
+            &workspace,
+            "runtime",
+            "Interpreter",
+            4,
+            3,
+            "Use `python`, not `python3`.",
+        );
+        let repo = crate::workspace::memory_root(&workspace.dir).join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        fs::write(
+            repo.join("interpreter.md"),
+            "# interpreter\n\nPrefer the workspace python.\n\ntags: runtime\n",
+        )
+        .unwrap();
+
+        let hint = build_memory_hint(&workspace.dir, "which python interpreter", true).unwrap();
+        let runtime = hint.text.find("runtime (c4)").expect(&hint.text);
+        let note = hint.text.find("interpreter (c3)").expect(&hint.text);
+        assert!(runtime < note, "{}", hint.text);
+        assert_eq!(hint.keys, vec!["runtime", "interpreter"]);
+    }
+
+    /// Without the self-evolution mode only file notes are considered.
+    #[test]
+    fn without_the_evolution_mode_only_file_notes_are_used() {
+        let workspace = TempWorkspace::new("hint-mode-off");
+        write_entry(
+            &workspace,
+            "runtime",
+            "Interpreter",
+            5,
+            5,
+            "Use `python`, not `python3`.",
+        );
+        assert!(build_memory_hint(&workspace.dir, "which python interpreter", false).is_none());
+
+        let repo = crate::workspace::memory_root(&workspace.dir).join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        fs::write(repo.join("interpreter.md"), "# interpreter\n\nPrefer python3.\n").unwrap();
+        let hint = build_memory_hint(&workspace.dir, "which python interpreter", false).unwrap();
+        assert_eq!(hint.keys, vec!["interpreter"]);
+    }
+
+    /// Two builds of the same memory set render byte-identical text.
+    #[test]
+    fn the_render_is_deterministic() {
+        let workspace = TempWorkspace::new("hint-determinism");
+        for (key, confidence) in [("alpha", 3), ("beta", 4), ("gamma", 5)] {
+            write_entry(
+                &workspace,
+                key,
+                key,
+                confidence,
+                3,
+                // Distinct bodies: `load_evolution_entries` folds identical
+                // facts together, which would leave a single candidate.
+                &format!("The {key} interpreter note for this workspace."),
+            );
+        }
+        let first = build_memory_hint(&workspace.dir, "interpreter note", true).unwrap();
+        let second = build_memory_hint(&workspace.dir, "interpreter note", true).unwrap();
+        assert_eq!(first.text, second.text);
+        assert_eq!(first.keys, second.keys);
+    }
+
+    /// One generic CJK bigram in a long body is not a match; two are.
+    #[test]
+    fn a_body_only_match_needs_two_keywords() {
+        let workspace = TempWorkspace::new("hint-body");
+        write_entry(&workspace, "noise", "Noise", 3, 3, "换个时候再说这件事。");
+        assert!(build_memory_hint(&workspace.dir, "什么时候构建", true).is_none());
+
+        write_entry(
+            &workspace,
+            "signal",
+            "Signal",
+            3,
+            3,
+            "什么时候构建都需要先确认。",
+        );
+        let hint = build_memory_hint(&workspace.dir, "什么时候构建", true).unwrap();
+        assert_eq!(hint.keys, vec!["signal"]);
     }
 }

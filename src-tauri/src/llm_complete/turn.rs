@@ -222,11 +222,13 @@ fn build_prompt_bundle(
         }
         system_content.push_str(&self_evolution_context);
 
-        // Earlier sessions' verified facts are deliberately NOT preloaded: a
+        // Earlier sessions' verified facts are NOT preloaded as a block: a
         // "VERIFIED FACTS" block dominated the first request's prefill and was
-        // mostly irrelevant to the current task. The self-evolution text only
-        // points at the `evolution` memory scope, and the model searches it
-        // (`memory search` / `get`) when it actually hits a problem.
+        // mostly irrelevant to the current task. What the request does carry is
+        // the tiny keyword-matched hint `build_memory_hint` prefixes to the
+        // user message; the self-evolution text still points at the `evolution`
+        // scope, and the model searches it (`memory search` / `get`) when it
+        // needs more than the hint.
 
         // The user may explicitly ask for a memory tidy-up. Point the model at
         // the consolidation flow instead of letting it delete entries by hand.
@@ -400,8 +402,9 @@ fn build_prompt_bundle(
         let memory_guidance = format!(
             "\
         MEMORY: You have a `memory` tool (scopes: `session`, `user`, `repo`{}). \
-        Nothing is preloaded — look memory up on demand: search it when you hit a problem \
-        you may have solved before, or need a verified environment/tool fact. \
+        A short, confidence-ranked hint of the memories matching the current message is \
+        prepended to the user input — it is a pointer, not the full record: search the scope \
+        when you need the actual entry, or when you hit a problem you may have solved before. \
         When you reach a definitive, accurate conclusion (a resolved question, confirmed \
         root cause, decided approach, verified fact), `memory add` it before ending your \
         turn: `repo` for codebase facts and decisions, `user` for preferences and general \
@@ -511,10 +514,12 @@ fn build_prompt_bundle(
 /// Build the initial request messages: system prompt, active skill context,
 /// the persisted summary (when its boundary still matches), the conversation
 /// history and the dynamic tail blocks (todo list, mission report, last user
-/// message). Returns the coverage bookkeeping the compressor needs.
+/// message, plus the memory hint prefixed to it). Returns the coverage
+/// bookkeeping the compressor needs.
 fn build_initial_messages(
     app: &AppHandle,
     state: &AppState,
+    config: &crate::AppConfig,
     messages: &[ChatMessage],
     session_id: &str,
     system_content: &str,
@@ -682,10 +687,64 @@ fn build_initial_messages(
     }
 
     if let Some(m) = last_user_msg {
-        all_messages.push(json!({ "role": m.role, "content": m.content }));
+        // ── Memory hint ─────────────────────────────────────────────────────
+        // A ≤200-character, confidence-ranked pointer at the memories that
+        // match this message, prefixed to the user's own text. Request-only on
+        // purpose: the stored message keeps the clean text, so the hint never
+        // accumulates in the history and every turn rebuilds it from the
+        // memory as it stands right now. `build_memory_hint` is read-only — a
+        // hint is not a use and never moves an entry's trust.
+        let mut content = m.content.clone();
+        if config.memory_hint
+            && config
+                .effective_tools()
+                .iter()
+                .any(|tool| tool == "memory")
+        {
+            let workspace_dir = state.workspace_dir.lock().unwrap().clone();
+            let user_text = content_to_text(&m.content);
+            if let Some(hint) = crate::tools::memory::build_memory_hint(
+                &workspace_dir,
+                &user_text,
+                config.self_evolution_mode,
+            ) {
+                content = prepend_memory_hint(&m.content, &hint.text);
+                // Keys only — the facts themselves already travel upstream and
+                // copying them into the log would just duplicate the prompt.
+                if let Ok(logger) = state.logger.lock() {
+                    logger.log(
+                        "DEBUG",
+                        &format!(
+                            "memory hint injected: session_id={session_id} chars={} keys={}",
+                            hint.text.chars().count(),
+                            hint.keys.join(",")
+                        ),
+                    );
+                }
+            }
+        }
+        all_messages.push(json!({ "role": m.role, "content": content }));
     }
 
     (all_messages, summary_coverage)
+}
+
+/// Put the memory hint at the very front of the user's own message.
+///
+/// String content is prefixed directly. Multimodal content gets one `text` part
+/// in front of the existing parts, which keeps their order (and any attachment
+/// reference) intact. Anything else is returned untouched.
+pub(super) fn prepend_memory_hint(content: &Value, hint: &str) -> Value {
+    match content {
+        Value::String(text) => json!(format!("{hint}\n\n{text}")),
+        Value::Array(parts) => {
+            let mut with_hint: Vec<Value> = Vec::with_capacity(parts.len() + 1);
+            with_hint.push(json!({ "type": "text", "text": hint }));
+            with_hint.extend(parts.iter().cloned());
+            Value::Array(with_hint)
+        }
+        other => other.clone(),
+    }
 }
 
 /// Assemble the complete tool payload for one request of a chat turn.
@@ -1499,6 +1558,7 @@ pub(crate) async fn run_chat_turn(
     let (mut all_messages, mut summary_coverage) = build_initial_messages(
         &app,
         &state,
+        &config,
         &messages,
         &session_id,
         &prompt.system_content,
