@@ -1012,6 +1012,23 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
                     <small>{t("settings.advanced.enhancedFiguresHint")}</small>
                   </div>
                 </label>
+
+                <label className="settings-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={config.memory_hint ?? true}
+                    onChange={(e) =>
+                      setConfig((prev) => ({
+                        ...prev,
+                        memory_hint: e.target.checked,
+                      }))
+                    }
+                  />
+                  <div className="settings-checkbox-copy">
+                    <span>{t("settings.advanced.memoryHint")}</span>
+                    <small>{t("settings.advanced.memoryHintHint")}</small>
+                  </div>
+                </label>
               </div>
             )}
           </section>

@@ -440,6 +440,13 @@ export interface AppConfig {
    */
   enhanced_figures?: boolean;
   /**
+   * Prefix the newest user message with a ≤200-character, confidence-ranked
+   * hint of the memories matching it. The hint is request-only — the stored
+   * message keeps the user's own text. Defaults to on; off means the model
+   * relies on `memory search` alone.
+   */
+  memory_hint?: boolean;
+  /**
    * Upper bound on model requests in one chat turn. `0` = unlimited; the
    * backend clamps it to 1000. When the budget is spent the turn sends one last
    * request without a tool list, so the assistant answers with what it has.

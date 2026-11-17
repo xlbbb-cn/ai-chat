@@ -473,6 +473,9 @@ const en = {
             enhancedFigures: "Enhanced drawing",
             enhancedFiguresHint:
                 "Let the assistant draw its own SVG figures — every one gets a save button and lands in figures/ as a PNG, and 3D scenes can be orbited — plus dynamic HTML5 figures (`html-fig`: animation and interaction inside a sandboxed frame, saved as a .html file), instead of writing Mermaid diagrams. Off: the assistant writes fenced `mermaid` blocks, which the transcript renders as themed diagrams.",
+            memoryHint: "Memory hint on user input",
+            memoryHintHint:
+                "Prefix the newest user message with a hint (under 200 characters) of the memories whose keywords match it, ranked by confidence. It is a pointer, not the full record: the assistant still searches a scope for the whole entry. The hint exists only in the request — the stored message keeps the user's own text.",
         },
 
         runtime: {
@@ -651,7 +654,7 @@ const en = {
                     "**session** — Short-term, in-memory only. Survives for the current chat session. Use for task-specific context and in-progress notes.",
                     "**user** — Long-term, file-backed. Cross-session persistent. Use for user preferences, patterns, and general insights.",
                     "**repo** — Long-term, file-backed. Repository-scoped. Use for codebase conventions, build commands, and project facts.",
-                    "**evolution** — Long-term, file-backed. The self-evolution area, available while self-evolution mode is on. Use for verified facts that must survive across sessions: the default interpreter and runtime environment, the correct way to operate a tool, the file locations you use often. Each entry carries a title, kind, tags, importance and an evidence count, and the scope is queried on demand (never preloaded into the prompt) in ranked order — keep each entry to one dense fact.",
+                    "**evolution** — Long-term, file-backed. The self-evolution area, available while self-evolution mode is on. Use for verified facts that must survive across sessions: the default interpreter and runtime environment, the correct way to operate a tool, the file locations you use often. Each entry carries a title, kind, tags, importance and an evidence count, and the scope is queried on demand in ranked order — a hint of the matching entries (under 200 characters, ranked by confidence) rides along with the newest user message, the full entries come from a search. Keep each entry to one dense fact.",
                     "",
                     "Supports add, get, list, search, delete, and consolidate. `consolidate` folds a large related cluster of evolution entries into a skill archive (plan first, then apply with the full skill markdown and the same keys).",
                 ].join("\n"),

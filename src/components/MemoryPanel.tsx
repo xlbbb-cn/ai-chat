@@ -22,9 +22,9 @@ interface Props {
  *
  * The rows are the exact ranking an on-demand memory search returns (`rank` and
  * `injected` come from the same backend function; `injected` now means "top
- * tier within the analysis budget", since nothing is preloaded into the
- * prompt). Nothing here mutates memory: tidying is an explicit chat request
- * that goes through `memory consolidate`.
+ * tier within the analysis budget", independent of the ≤200-character hint
+ * that rides on the user input). Nothing here mutates memory: tidying is an
+ * explicit chat request that goes through `memory consolidate`.
  */
 export function MemoryPanel({ onClose, refreshKey = 0 }: Props) {
   const { t } = useI18n();
