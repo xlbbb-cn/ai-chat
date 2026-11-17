@@ -335,8 +335,8 @@ pub fn self_evolution_prompt(root: Option<&Path>) -> String {
          one-line `title` (e.g. `python-default`, `build-tag-first`); `kind` is `fact` / `recipe` \
          / `location` / `pitfall`; `importance` 1-5 (5 = always kept). Re-adding a fact you just \
          verified raises its evidence count — do that instead of writing a second entry. No entry \
-         is preloaded as a block: a short hint of the entries matching the newest user message is \
-         prepended to it, so search the scope (`memory list` / `get` / `search`) when you need the \
+         is preloaded as a block: the titles of the entries matching the newest user message are \
+         prepended to it as a short hint, so search the scope (`memory list` / `get` / `search`) when you need the \
          full entry or a problem needs earlier experience instead of guessing or rediscovering it, \
          and `memory add` as soon as you confirm a fact; never store guesses.\n\n\
          TRUST CALIBRATION: a retrieved fact is a claim, not the truth. The moment the real result \

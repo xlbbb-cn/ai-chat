@@ -824,12 +824,13 @@ pub fn render_evolution_context(workspace_dir: &Path, budget_chars: usize) -> St
 
 /// Character budget of the memory hint prepended to the newest user message.
 ///
-/// The whole rendered block — header, keys and facts — never exceeds it. It is
+/// The whole rendered block — header and titles — never exceeds it. It is
 /// deliberately tiny: the full memory area is searched on demand, and this only
-/// points the model at the facts that match the message it just received.
+/// points the model at the memories whose *name* matches the message it just
+/// received (a title is a pointer, the body is the payload it fetches).
 pub const MEMORY_HINT_BUDGET_CHARS: usize = 200;
 
-/// Cap of one rendered fact, so a single long entry cannot eat the budget.
+/// Cap of one rendered title, so a verbose title cannot eat the budget.
 const MEMORY_HINT_ITEM_CHARS: usize = 80;
 
 /// Upper bound of query keywords considered, longest (most specific) first.
@@ -843,16 +844,19 @@ const FILE_MEMORY_IMPORTANCE: u32 = 3;
 /// The two file-backed scopes whose `.md` notes are eligible for the hint.
 const MEMORY_HINT_SCOPES: [&str; 2] = ["user", "repo"];
 
-/// Field weights of a keyword hit: a key or title match is worth far more than
-/// a word buried in a long body.
-const HINT_FIELD_WEIGHTS: [u32; 4] = [3, 2, 2, 1];
+/// Hit priority of the three tiers, highest first: **title** (a curated name —
+/// the entry's key ranks here, it is the same words) beats **tag**, which beats
+/// a word buried in **body**.
+const HINT_TITLE_WEIGHT: u32 = 3;
+const HINT_TAG_WEIGHT: u32 = 2;
+const HINT_CONTENT_WEIGHT: u32 = 1;
 
 /// Opening of the block; `hint_text` closes the parenthesis once it knows how
-/// many matching facts were left out.
+/// many matching entries were left out.
 const MEMORY_HINT_HEADER: &str = "MEMORY (confidence-ranked; verify before relying";
 
 /// A rendered hint plus the keys it placed (the keys are logged, never the
-/// facts — the request log is already noisy enough).
+/// titles — the request log is already noisy enough).
 pub struct MemoryHint {
     pub text: String,
     pub keys: Vec<String>,
@@ -860,8 +864,9 @@ pub struct MemoryHint {
 
 struct HintCandidate {
     key: String,
-    /// Distilled one-liner (already collapsed and truncated for the block).
-    fact: String,
+    /// The only thing the block renders: the entry's curated, collapsed and
+    /// truncated name. The body is matched against, never printed.
+    title: String,
     confidence: u32,
     importance: u32,
     /// Best keyword hit weight (0 = no match, filtered out).
@@ -901,17 +906,28 @@ pub fn build_memory_hint(
     }
 
     // "Ranked by confidence" — the higher the evidence, the earlier the line.
-    // The rest only makes two differently-evidenced facts deterministic:
-    // stronger hit, higher importance, denser line, then key.
+    // The rest only makes two differently-evidenced entries deterministic:
+    // stronger hit (title > tag > body), higher importance, denser line, key.
     ranked.sort_by(|left, right| {
         right
             .confidence
             .cmp(&left.confidence)
             .then_with(|| right.weight.cmp(&left.weight))
             .then_with(|| right.importance.cmp(&left.importance))
-            .then_with(|| left.fact.chars().count().cmp(&right.fact.chars().count()))
+            .then_with(|| {
+                left.title
+                    .chars()
+                    .count()
+                    .cmp(&right.title.chars().count())
+            })
             .then_with(|| left.key.cmp(&right.key))
     });
+
+    // Two entries may share a name (an evolution entry and a `repo` note about
+    // the same topic): the block renders titles, so a repeat would be a wasted
+    // line. The sort put the better-evidenced one first, so keep that.
+    let mut seen_titles: HashSet<String> = HashSet::new();
+    ranked.retain(|candidate| seen_titles.insert(normalize_text(&candidate.title)));
 
     let (text, placed) = render_hint(&ranked, MEMORY_HINT_BUDGET_CHARS)?;
     Some(MemoryHint {
@@ -964,7 +980,14 @@ fn hint_candidates(workspace_dir: &Path, include_evolution: bool) -> Vec<HintCan
             let tags = entry.meta.tags.join(" ");
             candidates.push(HintCandidate {
                 key: entry.meta.key.clone(),
-                fact: one_line(&entry.summary, MEMORY_HINT_ITEM_CHARS),
+                title: one_line(
+                    if entry.meta.title.is_empty() {
+                        &entry.meta.key
+                    } else {
+                        &entry.meta.title
+                    },
+                    MEMORY_HINT_ITEM_CHARS,
+                ),
                 confidence: entry.meta.confidence,
                 importance: entry.meta.importance,
                 weight: 0,
@@ -1004,7 +1027,8 @@ fn hint_candidates(workspace_dir: &Path, include_evolution: bool) -> Vec<HintCan
                 continue;
             };
             candidates.push(HintCandidate {
-                fact: one_line(&body, MEMORY_HINT_ITEM_CHARS),
+                // A note's name is its `# key` heading (or the file stem).
+                title: one_line(&key, MEMORY_HINT_ITEM_CHARS),
                 // The `# key` heading carries the readable key; the file stem
                 // is the sanitized version of it.
                 fields: [
@@ -1048,10 +1072,11 @@ fn read_scope_note(path: &Path) -> Option<(String, String, Vec<String>)> {
 
 /// Best hit weight of one candidate against the query keywords.
 ///
-/// A curated field (key / title / tags) is a hit on its own — those are the
-/// words the author chose for the entry. A **body-only** match needs two
-/// distinct keywords: one CJK bigram (`的时`, `时候`) is common enough to match
-/// almost every entry and would turn the ranking into a lottery.
+/// Priority is title > tag > body: a hit in the name (key or title) is a hit on
+/// its own — those are the words the author chose for the entry — and a tag hit
+/// beats anything found in the prose. A **body-only** match needs two distinct
+/// keywords: one CJK bigram (`的时`, `时候`) is common enough to match almost
+/// every entry and would turn the ranking into a lottery.
 fn hint_weight(fields: &[String; 4], keywords: &HashSet<String>) -> u32 {
     let hits = |field: &str| -> usize {
         if field.is_empty() {
@@ -1062,16 +1087,16 @@ fn hint_weight(fields: &[String; 4], keywords: &HashSet<String>) -> u32 {
             .filter(|keyword| field.contains(keyword.as_str()))
             .count()
     };
-    let mut weight = 0;
-    for index in 0..3 {
-        if hits(&fields[index]) > 0 {
-            weight = weight.max(HINT_FIELD_WEIGHTS[index]);
-        }
+    if hits(&fields[0]) > 0 || hits(&fields[1]) > 0 {
+        return HINT_TITLE_WEIGHT;
     }
-    if weight == 0 && hits(&fields[3]) >= 2 {
-        weight = HINT_FIELD_WEIGHTS[3];
+    if hits(&fields[2]) > 0 {
+        return HINT_TAG_WEIGHT;
     }
-    weight
+    if hits(&fields[3]) >= 2 {
+        return HINT_CONTENT_WEIGHT;
+    }
+    0
 }
 
 /// Render the largest prefix of `ranked` that fits `budget_chars`; `None` when
@@ -1093,7 +1118,7 @@ fn render_hint(ranked: &[HintCandidate], budget_chars: usize) -> Option<(String,
     Some((text, placed))
 }
 
-/// One single-line block: header, then `key (cN): fact` joined by ` · `.
+/// One single-line block: header, then the matched titles joined by ` · `.
 ///
 /// Single line on purpose — it is prefixed to the user's own message, so a
 /// multi-line block would read like something the user typed.
@@ -1107,16 +1132,11 @@ fn hint_text(placed: &[HintCandidate], omitted: usize) -> String {
         header.push_str(&format!(", +{omitted} more"));
     }
     header.push_str("): ");
-    let items: Vec<String> = placed
+    let titles: Vec<&str> = placed
         .iter()
-        .map(|candidate| {
-            format!(
-                "{} (c{}): {}",
-                candidate.key, candidate.confidence, candidate.fact
-            )
-        })
+        .map(|candidate| candidate.title.as_str())
         .collect();
-    format!("{header}{}", items.join(" · "))
+    format!("{header}{}", titles.join(" · "))
 }
 
 
@@ -4101,8 +4121,8 @@ mod tests {
         );
     }
 
-    /// A keyword hit is injected, unrelated entries are not, and the higher
-    /// confidence comes first.
+    /// A keyword hit is injected, unrelated entries are not, the higher
+    /// confidence comes first, and only the title is rendered.
     #[test]
     fn a_keyword_hit_is_injected_and_ranked_by_confidence() {
         let workspace = TempWorkspace::new("hint-rank");
@@ -4138,10 +4158,13 @@ mod tests {
         )
         .unwrap();
         assert!(hint.text.starts_with(MEMORY_HINT_HEADER), "{}", hint.text);
-        let tag = hint.text.find("build-tag (c5)").expect(&hint.text);
-        let python = hint.text.find("python-default (c4)").expect(&hint.text);
+        let tag = hint.text.find("Tauri build needs a tag").expect(&hint.text);
+        let python = hint.text.find("Default interpreter").expect(&hint.text);
         assert!(tag < python, "{}", hint.text);
-        assert!(!hint.text.contains("menu-colours"), "{}", hint.text);
+        assert!(!hint.text.contains("Menu colours"), "{}", hint.text);
+        // Titles only: the bodies are matched against, never printed.
+        assert!(!hint.text.contains("git tag first"), "{}", hint.text);
+        assert!(!hint.text.contains("build-tag"), "{}", hint.text);
         assert_eq!(hint.keys, vec!["build-tag", "python-default"]);
     }
 
@@ -4163,7 +4186,7 @@ mod tests {
         assert!(build_memory_hint(&workspace.dir, "颜色面板的间距", true).is_none());
     }
 
-    /// The block never exceeds the budget, and dropped facts leave a counter.
+    /// The block never exceeds the budget, and dropped entries leave a counter.
     #[test]
     fn the_hint_stays_within_the_budget() {
         let workspace = TempWorkspace::new("hint-budget");
@@ -4171,7 +4194,11 @@ mod tests {
             write_entry(
                 &workspace,
                 &format!("note-{index}"),
-                &format!("Note {index}"),
+                // Long titles: one of them already fills the block on its own.
+                &format!(
+                    "Runtime interpreter note {index} that keeps going on and on about the \
+                     environment it runs in"
+                ),
                 4,
                 3,
                 &format!(
@@ -4226,7 +4253,7 @@ mod tests {
         write_entry(
             &workspace,
             "runtime",
-            "Interpreter",
+            "Default interpreter",
             4,
             3,
             "Use `python`, not `python3`.",
@@ -4235,15 +4262,18 @@ mod tests {
         fs::create_dir_all(&repo).unwrap();
         fs::write(
             repo.join("interpreter.md"),
-            "# interpreter\n\nPrefer the workspace python.\n\ntags: runtime\n",
+            "# repo interpreter note\n\nPrefer the workspace python.\n\ntags: runtime\n",
         )
         .unwrap();
 
         let hint = build_memory_hint(&workspace.dir, "which python interpreter", true).unwrap();
-        let runtime = hint.text.find("runtime (c4)").expect(&hint.text);
-        let note = hint.text.find("interpreter (c3)").expect(&hint.text);
+        let runtime = hint.text.find("Default interpreter").expect(&hint.text);
+        let note = hint
+            .text
+            .find("repo interpreter note")
+            .expect(&hint.text);
         assert!(runtime < note, "{}", hint.text);
-        assert_eq!(hint.keys, vec!["runtime", "interpreter"]);
+        assert_eq!(hint.keys, vec!["runtime", "repo interpreter note"]);
     }
 
     /// Without the self-evolution mode only file notes are considered.
@@ -4306,5 +4336,32 @@ mod tests {
         );
         let hint = build_memory_hint(&workspace.dir, "什么时候构建", true).unwrap();
         assert_eq!(hint.keys, vec!["signal"]);
+    }
+
+    /// Two entries sharing a name render one line — the block shows titles, so a
+    /// repeat would be a wasted line.
+    #[test]
+    fn a_repeated_title_is_rendered_once() {
+        let workspace = TempWorkspace::new("hint-same-title");
+        write_entry(
+            &workspace,
+            "interpreter",
+            "Interpreter",
+            4,
+            3,
+            "Use `python`, not `python3`.",
+        );
+        let repo = crate::workspace::memory_root(&workspace.dir).join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        fs::write(
+            repo.join("interpreter.md"),
+            "# Interpreter\n\nPrefer python3.\n",
+        )
+        .unwrap();
+
+        let hint = build_memory_hint(&workspace.dir, "which python interpreter", true).unwrap();
+        assert_eq!(hint.text.matches("Interpreter").count(), 1, "{}", hint.text);
+        // The better-evidenced (`c4`) entry is the one that survives.
+        assert_eq!(hint.keys, vec!["interpreter"]);
     }
 }

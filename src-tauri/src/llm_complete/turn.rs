@@ -225,8 +225,8 @@ fn build_prompt_bundle(
         // Earlier sessions' verified facts are NOT preloaded as a block: a
         // "VERIFIED FACTS" block dominated the first request's prefill and was
         // mostly irrelevant to the current task. What the request does carry is
-        // the tiny keyword-matched hint `build_memory_hint` prefixes to the
-        // user message; the self-evolution text still points at the `evolution`
+        // the tiny keyword-matched hint (titles only) `build_memory_hint`
+        // prefixes to the user message; the self-evolution text still points at the `evolution`
         // scope, and the model searches it (`memory search` / `get`) when it
         // needs more than the hint.
 
@@ -402,8 +402,8 @@ fn build_prompt_bundle(
         let memory_guidance = format!(
             "\
         MEMORY: You have a `memory` tool (scopes: `session`, `user`, `repo`{}). \
-        A short, confidence-ranked hint of the memories matching the current message is \
-        prepended to the user input — it is a pointer, not the full record: search the scope \
+        The titles of the memories matching the current message are prepended to the user \
+        input as a short confidence-ranked hint — it is a pointer, not the full record: search the scope \
         when you need the actual entry, or when you hit a problem you may have solved before. \
         When you reach a definitive, accurate conclusion (a resolved question, confirmed \
         root cause, decided approach, verified fact), `memory add` it before ending your \
