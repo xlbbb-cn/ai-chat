@@ -70,6 +70,624 @@ fn emit_turn_error(app: &AppHandle, turn_id: &str, error: &str) {
     );
 }
 
+/// Same as [`log_event`], for helpers that hold `&AppState` instead of the
+/// Tauri `State` wrapper.
+fn log_app_event(state: &AppState, level: &str, message: String) {
+    if let Ok(logger) = state.logger.lock() {
+        logger.log(level, &message);
+    }
+}
+
+/// Everything the system prompt needs, built once per turn.
+struct PromptBundle {
+    system_content: String,
+    loaded_skills_content: String,
+    skill_allowed_commands: Vec<String>,
+    active_skill_dirs: Vec<(String, PathBuf)>,
+    skill_evolution_root: Option<PathBuf>,
+    enabled_agents: Vec<agents::SubAgent>,
+    activated_skills: Vec<String>,
+    workspace_dir_for_roots: PathBuf,
+}
+
+/// Build the stable system prefix for one turn: skills, self-evolution
+/// guidance, scripts, figures, agents, memory/timer/todo policy and embedded
+/// roles. Pure reads plus one DB lookup; the caller owns everything returned.
+fn build_prompt_bundle(
+    state: &AppState,
+    config: &crate::AppConfig,
+    messages: &[ChatMessage],
+    skill_ids: &[String],
+    session_id: &str,
+    orchestration: Option<&agents::OrchestrationOutcome>,
+    subagents_enabled: bool,
+) -> PromptBundle {
+    let mut skill_allowed_commands: Vec<String> = Vec::new();
+    let workspace_dir_for_roots = state.workspace_dir.lock().unwrap().clone();
+
+    // 1. Skills already loaded earlier in this session. The UI records the
+    // names explicitly on each message (`loaded_skills`) — explicit state
+    // instead of scanning message text, which broke silently whenever the UI
+    // event plumbing changed.
+    let activated_skills = collect_loaded_skills(&messages);
+
+    let mut system_content = config.system_message.clone(); //top-level system instructions from config
+    let mut loaded_skills_content = String::new();
+    let mut available_skills_info = String::new();
+    // Track active skill name→directory pairs for skill_read tool injection.
+    let mut active_skill_dirs: Vec<(String, PathBuf)> = Vec::new();
+
+    // The machine's OS name and version are advertised by the `run_shell` tool
+    // schema itself (tools::get_all_tools), next to the fixed script language
+    // they explain, instead of sitting in this system prompt.
+    if !system_content.is_empty() {
+        system_content.push_str("\n\n");
+    }
+    system_content.push_str(
+        "Explicit invocation: {tool:<name>} / {mcp:<server>.<tool>} / {skill:<name>} are direct \
+        requests — call the tool or load the skill before answering, no confirmation needed.",
+    ); //Add explicit invocation syntax to system prompt
+
+    // Batching guidance. Only advertised while the switch can actually
+    // parallelise: with `parallel_tools` off (or a concurrency of 1) the round
+    // runs one call at a time, and the hint would be a lie.
+    if config.parallel_tools && config.max_parallel_tools > 1 {
+        system_content.push_str(
+            "\n\nTool calls: independent calls can be emitted in ONE response and then run at the \
+            same time — file reads, searches, `run_cmd` / `run_shell`, MCP tools and sub-agent \
+            delegations. A call that writes files, touches memory/todos/timers or loads a skill \
+            runs alone and splits the round, so only batch calls that do not depend on each \
+            other's result.",
+        );
+    }
+
+    let ws_skills_dir = crate::workspace::skills_root(&workspace_dir_for_roots);
+
+    // Self-evolution mode: the assistant owns `<workspace>/.data/skills` and may
+    // install/edit/delete skills through `file_actions`. The one root is handed
+    // to the tool layer below — without it every skill write is rejected.
+    let skill_evolution_root = skills::self_evolution_skill_root(
+        Some(&workspace_dir_for_roots),
+        config.self_evolution_mode,
+    );
+
+    for skill_name in skill_ids {
+        if let Ok(resolved_skill) = skills::resolve_skill_by_name(&ws_skills_dir, skill_name) {
+            let skill = resolved_skill.skill;
+            merge_allowed_commands(&mut skill_allowed_commands, &skill.allowed_commands);
+
+            // Track skill dir for skill_read tool injection
+            if !active_skill_dirs.iter().any(|(n, _)| n == &skill.name) {
+                active_skill_dirs.push((skill.name.clone(), resolved_skill.skill_dir.clone()));
+            }
+
+            // Keep the available-skills listing stable across turns (prompt-cache
+            // friendly): activated skills stay listed here AND additionally get
+            // their full instructions appended to the loaded-skills block below.
+            available_skills_info.push_str(&format!("- {}: {}\n", skill.name, skill.description));
+            if activated_skills.contains(&skill.name) {
+                push_loaded_skill_block(
+                    &mut loaded_skills_content,
+                    &skill,
+                    &resolved_skill.skill_dir,
+                    &resolved_skill.skill_file,
+                );
+            }
+        }
+    }
+
+    // Skills loaded earlier in this session but no longer among the selected
+    // `skill_ids` (e.g. loaded dynamically, or deselected afterwards) keep
+    // their instructions pinned, so `use_skill` can report them as loaded
+    // without their content silently disappearing from the context.
+    for skill_name in &activated_skills {
+        if skill_ids.iter().any(|id| id == skill_name) {
+            continue;
+        }
+        if let Ok(resolved_skill) = skills::resolve_skill_by_name(&ws_skills_dir, skill_name) {
+            let skill = resolved_skill.skill;
+            merge_allowed_commands(&mut skill_allowed_commands, &skill.allowed_commands);
+            if !active_skill_dirs.iter().any(|(n, _)| n == &skill.name) {
+                active_skill_dirs.push((skill.name.clone(), resolved_skill.skill_dir.clone()));
+            }
+            push_loaded_skill_block(
+                &mut loaded_skills_content,
+                &skill,
+                &resolved_skill.skill_dir,
+                &resolved_skill.skill_file,
+            );
+        }
+    }
+
+    if !available_skills_info.is_empty() {
+        let skills_sys_msg = format!(
+            "Available skills — descriptions only; `use_skill` loads the full instructions when \
+            the request clearly needs them:\n{}",
+            available_skills_info
+        );
+        if !system_content.is_empty() {
+            system_content.push_str("\n\n");
+        }
+        system_content.push_str(&skills_sys_msg);
+    }
+
+    // ── Self-evolution guidance ─────────────────────────────────────────────
+    // The tool description carries the mechanics; this states the *policy* so
+    // the model actually creates/updates/deletes skills instead of only
+    // describing how it would do it.
+    let self_evolution_context = skills::self_evolution_prompt(skill_evolution_root.as_deref());
+    if !self_evolution_context.is_empty() {
+        if !system_content.is_empty() {
+            system_content.push_str("\n\n");
+        }
+        system_content.push_str(&self_evolution_context);
+
+        // Earlier sessions' verified facts are deliberately NOT preloaded: a
+        // "VERIFIED FACTS" block dominated the first request's prefill and was
+        // mostly irrelevant to the current task. The self-evolution text only
+        // points at the `evolution` memory scope, and the model searches it
+        // (`memory search` / `get`) when it actually hits a problem.
+
+        // The user may explicitly ask for a memory tidy-up. Point the model at
+        // the consolidation flow instead of letting it delete entries by hand.
+        if crate::tools::memory::wants_memory_consolidation(&last_user_text(&messages)) {
+            system_content.push_str(
+                "\n\nThe user explicitly asked to consolidate memory: call `memory` with \
+                 action `consolidate` and phase `plan` first, review the clusters, then call \
+                 `apply` with the full `skill_md` and the same `keys`. Never delete entries by hand.",
+            );
+        }
+    }
+
+    // ── Workspace script library ────────────────────────────────────────────
+    // Self-evolution mode adds the save policy; every mode lists the scripts
+    // that already exist so the model reuses them instead of retyping the same
+    // command from scratch.
+    if config.effective_tools().iter().any(|t| t == "run_cmd") {
+        let scripts_context = crate::tools::scripts::prompt_block(
+            &workspace_dir_for_roots,
+            config.self_evolution_mode,
+        );
+        if !scripts_context.is_empty() {
+            if !system_content.is_empty() {
+                system_content.push_str("\n\n");
+            }
+            system_content.push_str(&scripts_context);
+        }
+    }
+
+    // ── Figures ─────────────────────────────────────────────────────────────
+    // The transcript renders `svg` / `carve` blocks and `mermaid` blocks; the
+    // model only uses them if it is told they exist. `enhanced_figures`
+    // (Settings → Advanced, on by default) picks the hand-drawn SVG path; with
+    // it off the model writes Mermaid instead. Static text either way, so it
+    // stays a stable prefix.
+    let figures_context = crate::figures::prompt_block_for(config.enhanced_figures);
+    if !figures_context.is_empty() {
+        if !system_content.is_empty() {
+            system_content.push_str("\n\n");
+        }
+        system_content.push_str(&figures_context);
+    }
+
+    // Sub-agents (`llm`, `cli`, `cloud`) are only reachable when the sub-agent
+    // system is enabled (`use_agents`). With it off the main agent answers
+    // directly: `call_subagent` is neither advertised in the system prompt nor
+    // exposed in the tool list. Automatic planning (`auto_plan`) does not
+    // affect this — with planning off the agent delegates manually.
+    let enabled_agents: Vec<agents::SubAgent> = if subagents_enabled {
+        agents::load_configured_agents(&state.agents_config_path)
+            .agents
+            .into_iter()
+            .filter(|a| a.enabled)
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    // Soft narrowing: the system prompt lists only the agents the selector
+    // picked for this turn. The `call_subagent` executor still accepts any
+    // enabled agent id below, so one bad pick cannot lock the right agent out.
+    let advertised_agents: Vec<agents::SubAgent> = {
+        let selected_ids: Vec<&str> = orchestration
+            .as_ref()
+            .and_then(|outcome| outcome.selection.as_ref())
+            .filter(|selection| selection.delegate)
+            .map(|selection| {
+                selection
+                    .choices
+                    .iter()
+                    .map(|choice| choice.id.as_str())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let narrowed: Vec<agents::SubAgent> = enabled_agents
+            .iter()
+            .filter(|agent| selected_ids.iter().any(|id| *id == agent.id))
+            .cloned()
+            .collect();
+        if narrowed.is_empty() {
+            enabled_agents.clone()
+        } else {
+            narrowed
+        }
+    };
+
+    if !advertised_agents.is_empty() {
+        let mut available_agents_info = String::new();
+        for agent in &advertised_agents {
+            let kind = agents::normalize_agent_type(&agent.agent_type);
+            let detail = match kind.as_str() {
+                agents::AGENT_TYPE_CLI => format!(" (cli: {})", agent.cli.command.trim()),
+                agents::AGENT_TYPE_CLOUD => format!(" (cloud: {})", agent.cloud.endpoint.trim()),
+                _ => {
+                    let mcp = if agent.enable_mcp { " + MCP" } else { "" };
+                    format!(
+                        " (model {}{})",
+                        agent.model.clone().unwrap_or_else(|| "main".to_string()),
+                        mcp
+                    )
+                }
+            };
+            available_agents_info.push_str(&format!(
+                "- {} [{}] {} — {}{}\n",
+                agent.id, kind, agent.name, agent.description, detail
+            ));
+        }
+        let mut agents_sys_msg = format!(
+        "Agents you can reach with `call_subagent` (exact `agent_id`, self-contained `task_description` — they never see this conversation). Types: `llm` runs an autonomous tool loop inside the app; `cli` is a headless coding CLI on this machine that edits workspace files directly; `cloud` runs the task on a remote endpoint (its generated images/videos are saved into the workspace and reported as file paths). Pass `images` (workspace-relative input files) for image-to-image / image-to-video agents and `params` (template variables like size/quality/duration) when the agent accepts them. Prefer `llm` for reasoning/reporting, `cli`/`cloud` for large end-to-end coding; a first `cli`/`cloud` run may need the user's approval.\n\
+        Workspace root: {} — pass a workspace-relative `cwd` (e.g. \"./apps/web\") when the task targets a subfolder, omit it for the root.\n\n\
+        Available agents:\n{}",
+        workspace_dir_for_roots.display(),
+        available_agents_info
+    );
+
+        // Explain the selection so the main agent writes task descriptions that
+        // match the picked agents' purpose instead of guessing.
+        if let Some(selection) = orchestration
+            .as_ref()
+            .and_then(|outcome| outcome.selection.as_ref())
+            .filter(|selection| selection.delegate && !selection.choices.is_empty())
+        {
+            agents_sys_msg.push_str(
+                "\n<agent-selection>\nPicked for this turn (the others stay callable if the work really needs them):\n",
+            );
+            for choice in &selection.choices {
+                if choice.why.is_empty() {
+                    agents_sys_msg.push_str(&format!("- {} ({})\n", choice.name, choice.role));
+                } else {
+                    agents_sys_msg.push_str(&format!(
+                        "- {} ({}): {}\n",
+                        choice.name, choice.role, choice.why
+                    ));
+                }
+            }
+            agents_sys_msg.push_str("</agent-selection>");
+        }
+
+        if !system_content.is_empty() {
+            system_content.push_str("\n\n");
+        }
+        system_content.push_str(&agents_sys_msg);
+    }
+
+    // A declined selection is not a ban — just a hint that the cheap path is to
+    // answer directly. Keep it short so it does not become a second policy.
+    if matches!(
+        orchestration
+            .as_ref()
+            .and_then(|outcome| outcome.selection.as_ref()),
+        Some(selection) if !selection.delegate
+    ) {
+        if !system_content.is_empty() {
+            system_content.push_str("\n\n");
+        }
+        system_content.push_str(
+            "The orchestrator decided this request needs no sub-agents. Answer directly; delegate only if the request clearly requires it.",
+        );
+    }
+
+    // ── Memory guidance ─────────────────────────────────────────────────────
+    // Explicit instructions so conclusions are reliably persisted via the
+    // `memory` tool (the tool description carries the full scope/usage details).
+    if config.effective_tools().iter().any(|t| t == "memory") {
+        let evolution_hint = if config.self_evolution_mode {
+            ", `evolution` for verified facts that must survive across sessions (runtime \
+             environment, correct tool usage, file locations)"
+        } else {
+            ""
+        };
+        let memory_guidance = format!(
+            "\
+        MEMORY: You have a `memory` tool (scopes: `session`, `user`, `repo`{}). \
+        Nothing is preloaded — look memory up on demand: search it when you hit a problem \
+        you may have solved before, or need a verified environment/tool fact. \
+        When you reach a definitive, accurate conclusion (a resolved question, confirmed \
+        root cause, decided approach, verified fact), `memory add` it before ending your \
+        turn: `repo` for codebase facts and decisions, `user` for preferences and general \
+        insights, `session` for in-progress notes. Short descriptive `key`, conclusion in \
+        `content`.",
+            evolution_hint
+        );
+        if !system_content.is_empty() {
+            system_content.push_str("\n\n");
+        }
+        system_content.push_str(&memory_guidance);
+    }
+
+    // ── Timer guidance ──────────────────────────────────────────────────────
+    // The tool description carries the mechanics; this states the *policy* so
+    // the model waits asynchronously instead of burning a turn on polling.
+    if config.selected_tools.iter().any(|t| t == "timer") {
+        let timer_guidance = "\
+        TIMER: `timer_set` / `timer_list` / `timer_cancel` cover work that cannot finish within this \
+        turn. When the next step depends on something slow (log collection, build, download, \
+        deployment, external job, rate-limit window), never busy-wait, `sleep` or poll in a loop: \
+        start the slow work, arm a timer whose `message` restates what to do when it fires (that turn \
+        sees only the history plus that message), tell the user when it will fire and END YOUR TURN. \
+        Check `timer_list` first to avoid duplicates, `timer_cancel` when the wait is no longer needed.";
+        if !system_content.is_empty() {
+            system_content.push_str("\n\n");
+        }
+        system_content.push_str(timer_guidance);
+    }
+
+    // ── Todo guidance ───────────────────────────────────────────────────────
+    // The tool description carries the mechanics; this states the *policy* —
+    // check the session's list before planning so work continues from the
+    // existing plan instead of silently starting a new one.
+    if config
+        .selected_tools
+        .iter()
+        .any(|t| t == "todo_list" || t == "todo")
+    {
+        let mut todo_guidance = "\
+        TODOS: the `todos` tool holds this session's plan. Before planning or starting \
+        non-trivial work, `list` it — the active list is also injected as internal context \
+        while it has unfinished items. Continue from an existing list and move items \
+        `pending` → `in_progress` → `completed` as you work; `add` items when a new \
+        multi-step task begins. The UI mirrors every change live, so never leave stale \
+        items behind. \
+        ASKING: when a decision needs the user's own choice (approach, naming, trade-offs), \
+        use action `ask` with 1-8 short questions (options or free text); the call waits \
+        until the user submits and returns their answers as JSON — never ask what the \
+        conversation already answers, and proceed on your own when the form comes back \
+        dismissed or timed out. \
+        GOAL LOOP: while the list has unfinished items, a final answer does NOT end the \
+        turn — it is continued automatically so you keep working; do not write a final \
+        summary with goals open. End the turn explicitly by writing [goal:DONE] in your \
+        final answer, either when the goal is fully reached or when you are blocked and \
+        need the user (state plainly what is blocking you). \
+        WAITING: when the unfinished items are waiting on an external event rather than \
+        on your own work, do not force them."
+            .to_string();
+        if config.selected_tools.iter().any(|t| t == "timer") {
+            todo_guidance.push_str(
+                " Arm a delay with the `timer` tool for a time-based wait — while a timer \
+                 is pending, the goal loop stays suspended and the timer's message resumes \
+                 the plan.",
+            );
+        }
+        todo_guidance.push_str(
+            " Otherwise write [WAIT_EVT: what you are waiting for] in your final answer — \
+             the turn ends and the plan resumes on the next turn.",
+        );
+        if !system_content.is_empty() {
+            system_content.push_str("\n\n");
+        }
+        system_content.push_str(&todo_guidance);
+    }
+
+    // ── Embedded sub-agent roles (`+agent` in the composer) ─────────────────
+    // A snapshot written when the session's first message was sent. It is
+    // appended at the END of the stable system prefix, so it stays
+    // byte-identical on every turn (prompt-cache friendly) and never reorders
+    // the blocks above. A missing table/row simply means "no roles".
+    let embedded_roles = state
+        .db
+        .lock()
+        .map(|db| db::get_embedded_roles(&db, &session_id))
+        .unwrap_or_default();
+    let embedded_block = render_embedded_roles(&embedded_roles);
+    if !embedded_block.is_empty() {
+        if !system_content.is_empty() {
+            system_content.push_str("\n\n");
+        }
+        system_content.push_str(&embedded_block);
+    }
+
+    PromptBundle {
+        system_content,
+        loaded_skills_content,
+        skill_allowed_commands,
+        active_skill_dirs,
+        skill_evolution_root,
+        enabled_agents,
+        activated_skills,
+        workspace_dir_for_roots,
+    }
+}
+
+/// Build the initial request messages: system prompt, active skill context,
+/// the persisted summary (when its boundary still matches), the conversation
+/// history and the dynamic tail blocks (todo list, mission report, last user
+/// message). Returns the coverage bookkeeping the compressor needs.
+fn build_initial_messages(
+    app: &AppHandle,
+    state: &AppState,
+    messages: &[ChatMessage],
+    session_id: &str,
+    system_content: &str,
+    loaded_skills_content: &str,
+    orchestration: Option<&agents::OrchestrationOutcome>,
+) -> (Vec<Value>, CoverageState) {
+    let mut all_messages: Vec<Value> = Vec::new();
+    // ── Message layout (prompt-cache conscious) ─────────────────────────────
+    // Static prefix first (system prompt, skill context), then the persisted
+    // summary (stable across turns — only a new compression rewrites it), then
+    // the append-only conversation history. Dynamic per-turn blocks (todo
+    // list, mission report) come last, right before the latest user message,
+    // so turn-to-turn changes invalidate as little cached prefix as possible.
+    if !system_content.is_empty() {
+        all_messages.push(json!({ "role": "system", "content": system_content }));
+    }
+
+    if !loaded_skills_content.is_empty() {
+        let workspace_dir = state.workspace_dir.lock().unwrap().clone();
+        let workspace_root_display = workspace_dir.display().to_string();
+        // Generic sandbox rules live in the tool descriptions (always sent);
+        // only skill-specific notes are repeated here.
+        let active_skills_context = format!(
+            "INTERNAL CONTEXT - ACTIVE SKILLS (root: {workspace_root_display}). \
+             Local file tools are sandboxed to the workspace root; `skill_read` is locked to each \
+             skill's own directory (`..` rejected); skill edits are limited to `./.data/skills/...` \
+             and create `.bak.<n>` backups automatically; MCP tool paths are NOT sandboxed — treat \
+             them as opaque. Reuse exact paths returned by tools; never reference app-data or \
+             external absolute paths.\n\n\
+             Active skill instructions:{}",
+            loaded_skills_content
+        );
+        all_messages.push(json!({ "role": "user", "content": active_skills_context }));
+    }
+
+    // Conversation history, keeping the latest user message for the tail.
+    let (mut history, last_user_msg) = match messages.last() {
+        Some(m) if m.role == "user" => (&messages[..messages.len() - 1], Some(m)),
+        _ => (&messages[..], None),
+    };
+
+    // ── Persisted session summary: replace the history it covers ────────────
+    // A summary written by an earlier compression records how many frontend
+    // messages it covers plus the flattened prefix of the last one (the
+    // boundary). When the incoming history still matches that boundary, the
+    // covered prefix is dropped and the summary stands in for it — Claude
+    // Code's compact semantics, where the summary REPLACES the old transcript
+    // instead of being replayed on top of it. On any mismatch (history edited,
+    // truncated, restored differently) the stale summary is discarded and the
+    // full history is replayed — the old, always-safe additive behavior.
+    let mut summary_block: Option<db::SessionSummaryRow> = None;
+    let mut summary_coverage = CoverageState::default();
+    if let Ok(db_guard) = state.db.lock() {
+        match db::get_session_summary(&db_guard, &session_id) {
+            Ok(Some(saved)) if !saved.body.trim().is_empty() => {
+                let covered = usize::try_from(saved.covered_messages).unwrap_or(0);
+                let mut valid = true;
+                if covered > 0 {
+                    let boundary_message_text = covered
+                        .checked_sub(1)
+                        .and_then(|idx| history.get(idx))
+                        .map(|m| content_to_text(&m.content));
+                    match summary_trim_count(
+                        covered,
+                        &saved.boundary_text,
+                        boundary_message_text.as_deref(),
+                    ) {
+                        Some(count) => {
+                            history = &history[count..];
+                            summary_coverage.offset = count;
+                            summary_coverage.boundary = saved.boundary_text.clone();
+                        }
+                        None => valid = false,
+                    }
+                }
+                if valid {
+                    summary_block = Some(saved);
+                } else {
+                    let _ = db::delete_session_summary(&db_guard, &session_id);
+                    if let Ok(logger) = state.logger.lock() {
+                        logger.log(
+                            "INFO",
+                            &format!(
+                                "stale session summary discarded (history boundary mismatch): session_id={session_id}"
+                            ),
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // The summary goes BEFORE the remaining history: it is stable across
+    // turns (only a new compression rewrites it), so everything after it is
+    // an append-only region — the best layout for the prompt cache. Claude
+    // Code places the compact summary at the start of the continuation for
+    // the same reason.
+    if let Some(saved) = &summary_block {
+        all_messages.push(json!({
+            "role": "user",
+            "content": render_summary_message_body(&saved.body)
+        }));
+    }
+
+    for m in history {
+        let mut msg = json!({ "role": m.role, "content": m.content });
+        if let Some(rc) = &m.reasoning_content {
+            if !rc.is_empty() {
+                msg["reasoning_content"] = json!(rc);
+            }
+        }
+        all_messages.push(msg);
+    }
+
+    // ── Dynamic blocks (change between turns → placed near the tail) ────────
+
+    // Inject the active todo list (if any) so the assistant can always
+    // re-orient itself to the current plan, even mid-turn.
+    // The same snapshot is pushed to the UI: the panel is remounted per
+    // assistant message and only the newest one mirrors the session list, so
+    // without it a list created in an earlier turn would stay invisible until
+    // the model happened to touch it again.
+    let todo_snapshot = match state.workspace_dir.lock() {
+        Ok(workspace_guard) => todos::active_list_snapshot(&workspace_guard, &session_id)
+            .ok()
+            .flatten(),
+        Err(_) => None,
+    };
+    if let Some(summary) = &todo_snapshot {
+        if !summary.todos.is_empty() {
+            // Mirror the very same snapshot to the UI. Emitted together with
+            // the prompt block on purpose, and also for a finished list: the
+            // panel must be able to disappear (or never appear) instead of
+            // lingering at 100% from an earlier turn.
+            let _ = app.emit(
+                crate::events::TODO_STATE,
+                json!({
+                    "type": "todo_state",
+                    "list_id": summary.list_id,
+                    "session_id": summary.session_id,
+                    "summary": summary,
+                }),
+            );
+        }
+        // Nothing left to track → no prompt block either.
+        if let Some(todo_block) = todos::render_list_block(summary) {
+            all_messages.push(json!({
+                "role": "system",
+                "content": format!("{CONTEXT_TODO_MARKER}\n{}", todo_block)
+            }));
+        }
+    }
+
+    // Inject the finished multi-agent mission report so the main agent can
+    // define the final answer with its full context and tools.
+    if let Some(report) = orchestration
+        .as_ref()
+        .and_then(|outcome| outcome.report.as_ref())
+    {
+        all_messages.push(json!({
+            "role": "system",
+            "content": format!("{CONTEXT_MISSION_MARKER}\n{report}")
+        }));
+    }
+
+    if let Some(m) = last_user_msg {
+        all_messages.push(json!({ "role": m.role, "content": m.content }));
+    }
+
+    (all_messages, summary_coverage)
+}
+
 /// Assemble the complete tool payload for one request of a chat turn.
 ///
 /// Re-entrant on purpose: the `mcp_self` tool can create and enable an MCP
@@ -249,6 +867,512 @@ pub(crate) fn render_embedded_roles(roles: &[db::EmbeddedRole]) -> String {
     block
 }
 
+/// Record one streamed request in the API monitor and the interaction log.
+///
+/// Metrics only: the full prompt is already stored once in
+/// `interaction_log.input_data`, and writing a second copy doubled the
+/// database size. Side effects are logging only — the loop state is untouched.
+fn log_request_round(
+    state: &State<'_, AppState>,
+    session_id: &str,
+    active_model: &str,
+    request_snapshot: &Value,
+    result: &Result<StreamResult, String>,
+    duration_ms: i64,
+) {
+    match &result {
+        Ok(sr) => {
+            // Log successful request
+            let tool_calls_json = if sr.tool_calls.is_empty() {
+                String::new()
+            } else {
+                serde_json::to_string(
+                    &sr.tool_calls
+                        .iter()
+                        .map(|(id, name, args)| {
+                            json!({
+                                "id": id, "name": name, "arguments": args
+                            })
+                        })
+                        .collect::<Vec<_>>(),
+                )
+                .unwrap_or_default()
+            };
+            let db = state.db.lock().unwrap();
+            // `request_body` is deliberately not written: the full prompt is
+            // already recorded once in `interaction_log.input_data`, and
+            // storing a second copy doubled the database size
+            // (~92 KiB per request). This table keeps the metrics.
+            let _ = db.execute(
+                "INSERT INTO api_requests (session_id, model, response_content, reasoning_content, tool_calls, finish_reason, prompt_tokens, completion_tokens, cached_tokens, reasoning_ms, first_token_ms, duration_ms) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                rusqlite::params![
+                    session_id,
+                    active_model,
+                    sr.content,
+                    sr.reasoning_content,
+                    tool_calls_json,
+                    sr.finish_reason,
+                    sr.prompt_tokens,
+                    sr.completion_tokens,
+                    sr.cached_tokens.map(i64::from),
+                    sr.timing.reasoning_ms.map(i64::from),
+                    sr.timing.first_token_ms.map(i64::from),
+                    duration_ms,
+                ],
+            );
+            // Log to interaction_log table
+            let request_body_display = request_snapshot.to_string();
+            let response_display = sr.content.clone();
+            // Cache-hit metrics travel in the interaction metadata so the
+            // Monitor detail view (and the list chip) can show them without
+            // touching the interaction schema. The round's streamed phase
+            // timings ride along so the detail pane can explain the wait.
+            let usage_metadata = {
+                let mut meta = serde_json::Map::new();
+                if let Some(cached) = sr.cached_tokens {
+                    meta.insert("prompt_tokens".into(), json!(sr.prompt_tokens));
+                    meta.insert("cached_tokens".into(), json!(cached));
+                    meta.insert(
+                        "hit_ratio".into(),
+                        json!(if sr.prompt_tokens > 0 {
+                            ((cached as f64) / (sr.prompt_tokens as f64)).clamp(0.0, 1.0)
+                        } else {
+                            0.0
+                        }),
+                    );
+                }
+                if let Some(ms) = sr.timing.reasoning_ms {
+                    meta.insert("reasoning_ms".into(), json!(ms));
+                }
+                if let Some(ms) = sr.timing.first_token_ms {
+                    meta.insert("first_token_ms".into(), json!(ms));
+                }
+                (!meta.is_empty()).then(|| Value::Object(meta).to_string())
+            };
+            log_interaction(
+                &db,
+                &session_id,
+                "llm_api",
+                &active_model,
+                "chat_completion",
+                request_body_display,
+                response_display,
+                None,
+                duration_ms,
+                usage_metadata,
+            );
+            drop(db);
+            log_event(
+                &state,
+                "INFO",
+                format!(
+                    "chat_completion request succeeded: session_id={}, finish_reason={}, duration_ms={}",
+                    session_id, sr.finish_reason, duration_ms
+                ),
+            );
+        }
+        Err(err) => {
+            // Log failed request (metrics only — see the success branch for
+            // why the prompt body is not duplicated here).
+            let db = state.db.lock().unwrap();
+            let _ = db.execute(
+                "INSERT INTO api_requests (session_id, model, finish_reason, duration_ms, error) \
+                 VALUES (?1, ?2, 'error', ?3, ?4)",
+                rusqlite::params![session_id, active_model, duration_ms, err,],
+            );
+            // Log to interaction_log table
+            let request_body_display = request_snapshot.to_string();
+            log_interaction(
+                &db,
+                &session_id,
+                "llm_error",
+                &active_model,
+                "chat_completion",
+                request_body_display,
+                String::new(),
+                Some(err.clone()),
+                duration_ms,
+                None,
+            );
+            drop(db);
+            log_event(
+                &state,
+                "ERROR",
+                format!(
+                    "chat_completion request failed: session_id={}, duration_ms={}, {}, error={}",
+                    session_id,
+                    duration_ms,
+                    content_parts_signature(&request_snapshot),
+                    err
+                ),
+            );
+        }
+    }
+}
+
+/// Persist a substantive final answer before the turn closes, unless the model
+/// already wrote memory through the `memory` tool. Control markers are
+/// stripped first: they are signals, not answer text.
+fn record_turn_conclusion(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    config: &crate::AppConfig,
+    session_id: &str,
+    final_answer: Option<String>,
+    memory_tool_called: bool,
+) {
+    // ── Automatic conclusion recording ──────────────────────────────────────
+    // If the turn ended with a substantive final answer that reads like a
+    // conclusion, and the LLM did not already persist it via the `memory`
+    // tool, record it so it survives across sessions. Self-evolution mode
+    // routes it into the dedicated evolution area instead of `repo`.
+    if let Some(answer) = final_answer {
+        // Answer-level control markers (goal loop + WAIT_EVT) are signals, not
+        // answer text — they must not leak into the memory entry the answer
+        // produces.
+        let answer = strip_control_markers(&answer);
+        let memory_enabled = config.effective_tools().iter().any(|t| t == "memory");
+        if memory_enabled
+            && !memory_tool_called
+            && should_record_conclusion(&answer)
+            && looks_like_conclusion(&answer)
+        {
+            let workspace_dir = state.workspace_dir.lock().unwrap().clone();
+            let scope = if config.self_evolution_mode {
+                crate::tools::memory::EVOLUTION_SCOPE
+            } else {
+                "repo"
+            };
+            record_conclusion_to_memory(&state, &app, &workspace_dir, &session_id, scope, &answer);
+        }
+    }
+}
+
+/// Persist a compression pass and advance the coverage bookkeeping.
+fn apply_compression_outcome(
+    state: &State<'_, AppState>,
+    session_id: &str,
+    coverage: &mut CoverageState,
+    outcome: &CompressionOutcome,
+) {
+    persist_session_summary(state, session_id, outcome);
+    coverage.offset = outcome.covered_messages;
+    coverage.boundary = outcome.boundary_text.clone();
+}
+
+/// Everything the tool round needs, bundled so the round reads as one unit
+/// instead of a 260-line stretch inside the request loop.
+struct ToolRound<'a> {
+    app: &'a AppHandle,
+    state: &'a AppState,
+    config: &'a crate::AppConfig,
+    session_id: &'a str,
+    skill_evolution_root: Option<&'a Path>,
+    subagents_enabled: bool,
+    mcp_tool_map: &'a std::collections::HashMap<String, (mcp::McpServer, String)>,
+    enabled_agents: &'a [agents::SubAgent],
+    turn_cancelled: &'a Arc<AtomicBool>,
+    activated_skills: &'a [String],
+    workspace_dir_for_roots: &'a Path,
+    loaded_this_turn: &'a mut std::collections::HashSet<String>,
+    skill_allowed_commands: &'a mut Vec<String>,
+    active_skill_dirs: &'a mut Vec<(String, PathBuf)>,
+    budget: &'a mut turn_guard::TurnBudget,
+    guard: &'a turn_guard::ToolFailureGuard,
+    failure_limit: u32,
+    memory_tool_called: &'a mut bool,
+    budget_stop: &'a mut Option<turn_guard::BudgetStop>,
+}
+
+/// Plan and execute one tool-call round, then settle its results in
+/// `tool_calls` order. Blocked calls (disabled tool / spent budget) are
+/// answered with their notice, so every `tool_call_id` still gets one `tool`
+/// message; results are written back by index to keep the model's order.
+async fn run_tool_round(round: ToolRound<'_>, sr: &StreamResult, all_messages: &mut Vec<Value>) {
+    let ToolRound {
+        app,
+        state,
+        config,
+        session_id,
+        skill_evolution_root,
+        subagents_enabled,
+        mcp_tool_map,
+        enabled_agents,
+        turn_cancelled,
+        activated_skills,
+        workspace_dir_for_roots,
+        loaded_this_turn,
+        skill_allowed_commands,
+        active_skill_dirs,
+        budget,
+        guard,
+        failure_limit,
+        memory_tool_called,
+        budget_stop,
+    } = round;
+    let mut pending_skill_context_messages: Vec<Value> = vec![];
+    struct PlannedCall {
+        id: String,
+        name: String,
+        args: String,
+        parsed: Value,
+        /// `Some(notice)` when the call must not run; the notice is the
+        /// call's tool result.
+        blocked: Option<String>,
+        /// Classification only, so a blocked call never splits a segment
+        /// it would not have run in anyway.
+        concurrent: bool,
+    }
+
+    let mut planned: Vec<PlannedCall> = Vec::with_capacity(sr.tool_calls.len());
+    for (id, name, args) in &sr.tool_calls {
+        if name == "memory" {
+            *memory_tool_called = true;
+        }
+        let parsed: Value = serde_json::from_str(args).unwrap_or_default();
+
+        let blocked = match guard.blocked_notice(&session_id, name, failure_limit) {
+            Some(notice) => Some(notice),
+            None => match budget.record_tool_call() {
+                Some(stop) => {
+                    *budget_stop = Some(stop);
+                    Some(turn_guard::budget_notice(name))
+                }
+                None => None,
+            },
+        };
+        if let Some(notice) = &blocked {
+            let reason = if notice.starts_with("⛔ TOOL DISABLED") {
+                "disabled for this session"
+            } else {
+                "turn tool budget spent"
+            };
+            // One event creates and settles the row: a blocked call never
+            // reports progress, and a running row left behind would sit
+            // there until the answer starts streaming.
+            let _ = app.emit(
+                crate::events::TOOL_CALL,
+                crate::events::ToolCall {
+                    session_id: session_id.to_string(),
+                    call_id: Some(id.clone()),
+                    phase: Some("done".to_string()),
+                    ok: Some(false),
+                    text: format!("🚫 *{name}* — not executed ({reason})"),
+                },
+            );
+            log_app_event(
+                state,
+                "WARN",
+                format!(
+                    "tool call not executed: session_id={}, tool={}, reason={}",
+                    session_id, name, reason
+                ),
+            );
+        }
+
+        let concurrent = matches!(
+            tools::batch::call_mode(name, &parsed, mcp_tool_map.contains_key(name.as_str())),
+            tools::batch::CallMode::Concurrent
+        );
+        planned.push(PlannedCall {
+            id: id.clone(),
+            name: name.clone(),
+            args: args.clone(),
+            parsed,
+            blocked,
+            concurrent,
+        });
+    }
+
+    // ── Execute ──────────────────────────────────────────────────────────
+    // Neighbouring concurrent calls share one segment and run at the same
+    // time (`max_parallel_tools`, default 4). A barrier — `use_skill`, a
+    // mutating `file_actions`, `memory`, `todos`, a timer, mission state —
+    // is a one-element segment and therefore runs alone, in order, exactly
+    // like the whole round did before batching. Results are written back
+    // by index, so the `tool` messages below keep the order the model
+    // emitted whatever order the calls finished in.
+    let mut results: Vec<Option<String>> = vec![None; planned.len()];
+    let max_parallel = if config.parallel_tools {
+        config
+            .max_parallel_tools
+            .clamp(1, crate::MAX_PARALLEL_TOOLS) as usize
+    } else {
+        1
+    };
+    let modes: Vec<tools::batch::CallMode> = planned
+        .iter()
+        .map(|call| {
+            if call.concurrent {
+                tools::batch::CallMode::Concurrent
+            } else {
+                tools::batch::CallMode::Barrier
+            }
+        })
+        .collect();
+    let segments = tools::batch::plan_segments(&modes);
+    let workspace_dir = state.workspace_dir.lock().unwrap().clone();
+
+    for segment in segments {
+        if turn_cancelled.load(Ordering::SeqCst) {
+            break;
+        }
+        let runnable: Vec<usize> = segment
+            .clone()
+            .filter(|&index| planned[index].blocked.is_none())
+            .collect();
+        if runnable.is_empty() {
+            continue;
+        }
+
+        // One call at a time: a barrier, a single-call segment, or a user
+        // who set the concurrency to 1 (fully sequential).
+        if runnable.len() == 1 || max_parallel == 1 {
+            for &index in &runnable {
+                let call = &planned[index];
+                let result = if call.name == "use_skill" {
+                    let (text, context) = load_skill_for_call(
+                        &app,
+                        &session_id,
+                        &workspace_dir_for_roots,
+                        &call.id,
+                        &call.parsed,
+                        &activated_skills,
+                        &mut *loaded_this_turn,
+                        &mut *skill_allowed_commands,
+                        &mut *active_skill_dirs,
+                    );
+                    if let Some(context) = context {
+                        pending_skill_context_messages.push(context);
+                    }
+                    text
+                } else {
+                    run_tool_call(
+                        &app,
+                        state,
+                        &config,
+                        &session_id,
+                        &workspace_dir,
+                        ToolCall {
+                            id: &call.id,
+                            name: &call.name,
+                            args: &call.args,
+                            parsed: &call.parsed,
+                        },
+                        &skill_allowed_commands,
+                        skill_evolution_root.as_deref(),
+                        &active_skill_dirs,
+                        &mcp_tool_map,
+                        &enabled_agents,
+                        subagents_enabled,
+                        &turn_cancelled,
+                    )
+                    .await
+                };
+                results[index] = Some(result);
+            }
+            continue;
+        }
+
+        for chunk in runnable.chunks(max_parallel) {
+            let futures = chunk.iter().map(|&index| {
+                let call = &planned[index];
+                run_tool_call(
+                    &app,
+                    state,
+                    &config,
+                    &session_id,
+                    &workspace_dir,
+                    ToolCall {
+                        id: &call.id,
+                        name: &call.name,
+                        args: &call.args,
+                        parsed: &call.parsed,
+                    },
+                    &skill_allowed_commands,
+                    skill_evolution_root.as_deref(),
+                    &active_skill_dirs,
+                    &mcp_tool_map,
+                    &enabled_agents,
+                    subagents_enabled,
+                    &turn_cancelled,
+                )
+            });
+            let finished = futures_util::future::join_all(futures).await;
+            for (index, result) in chunk.iter().zip(finished) {
+                results[*index] = Some(result);
+            }
+        }
+    }
+
+    // ── Settle ───────────────────────────────────────────────────────────
+    // Failure accounting stays in `tool_calls` order and runs after the
+    // whole round finished, so the guard's verdict never depends on which
+    // of two concurrent calls happened to be polled first.
+    for (index, call) in planned.iter().enumerate() {
+        // A blocked call never ran: its notice *is* the result. A call with
+        // neither means the turn was cancelled before it ran — nothing is
+        // sent any more (the loop breaks at the top), and a fabricated
+        // `tool` message would claim work that never happened.
+        let Some(mut result) = results[index].take().or_else(|| call.blocked.clone()) else {
+            break;
+        };
+
+        if call.blocked.is_none() {
+            // A cancelled turn's tool results read like failures
+            // ("cancelled by the user"), but the tool did nothing wrong:
+            // see `turn_guard::counts_as_failure`.
+            let failed =
+                turn_guard::counts_as_failure(&result, turn_cancelled.load(Ordering::SeqCst));
+            if let Some(trip) = guard.record(&session_id, &call.name, failed, failure_limit) {
+                result.push_str("\n\n");
+                result.push_str(&turn_guard::disabled_notice(
+                    &call.name,
+                    trip.failures,
+                    failure_limit,
+                    true,
+                ));
+                log_app_event(
+                        state,
+                        "WARN",
+                        format!(
+                            "tool disabled for this session: session_id={}, tool={}, failures={}, limit={}",
+                            session_id, call.name, trip.failures, failure_limit
+                        ),
+                    );
+                let _ = app.emit(
+                    crate::events::CHAT_NOTICE,
+                    crate::events::ChatNotice::ToolDisabled {
+                        session_id: session_id.to_string(),
+                        tool: call.name.clone(),
+                        failures: trip.failures,
+                        limit: failure_limit,
+                    },
+                );
+            }
+            // A sub-agent owns its own task row (`agent-task-*`); a generic
+            // tool row next to it would be a second, empty step. A
+            // background-routed call owns one too — the `background-task-state`
+            // row — so it must not gain a settled "🔧 tool" twin.
+            let backgrounded = config.background_tools
+                && background_requested(&call.parsed)
+                && call.name != "call_subagent";
+            if !backgrounded && call.name != "call_subagent" {
+                tools::emit_tool_call_done(&app, Some(&session_id), &call.id, &call.name, !failed);
+            }
+        }
+
+        all_messages.push(json!({
+            "role": "tool",
+            "tool_call_id": &call.id,
+            "content": result,
+        }));
+    }
+
+    all_messages.extend(pending_skill_context_messages);
+}
+
 /// The whole chat turn: orchestration, the main-agent tool loop, and the
 /// final answer. Extracted from `chat_completion` so the command wrapper can
 /// run turn-end cleanup on every exit path (final answer, upstream error,
@@ -363,569 +1487,35 @@ pub(crate) async fn run_chat_turn(
         }
     }
 
-    let mut all_messages: Vec<Value> = vec![];
-    let mut skill_allowed_commands: Vec<String> = Vec::new();
-    let workspace_dir_for_roots = state.workspace_dir.lock().unwrap().clone();
-
-    // 1. Skills already loaded earlier in this session. The UI records the
-    // names explicitly on each message (`loaded_skills`) — explicit state
-    // instead of scanning message text, which broke silently whenever the UI
-    // event plumbing changed.
-    let activated_skills = collect_loaded_skills(&messages);
-
-    let mut system_content = config.system_message.clone(); //top-level system instructions from config
-    let mut loaded_skills_content = String::new();
-    let mut available_skills_info = String::new();
-    // Track active skill name→directory pairs for skill_read tool injection.
-    let mut active_skill_dirs: Vec<(String, PathBuf)> = Vec::new();
-
-    // The machine's OS name and version are advertised by the `run_shell` tool
-    // schema itself (tools::get_all_tools), next to the fixed script language
-    // they explain, instead of sitting in this system prompt.
-    if !system_content.is_empty() {
-        system_content.push_str("\n\n");
-    }
-    system_content.push_str(
-        "Explicit invocation: {tool:<name>} / {mcp:<server>.<tool>} / {skill:<name>} are direct \
-        requests — call the tool or load the skill before answering, no confirmation needed.",
-    ); //Add explicit invocation syntax to system prompt
-
-    // Batching guidance. Only advertised while the switch can actually
-    // parallelise: with `parallel_tools` off (or a concurrency of 1) the round
-    // runs one call at a time, and the hint would be a lie.
-    if config.parallel_tools && config.max_parallel_tools > 1 {
-        system_content.push_str(
-            "\n\nTool calls: independent calls can be emitted in ONE response and then run at the \
-            same time — file reads, searches, `run_cmd` / `run_shell`, MCP tools and sub-agent \
-            delegations. A call that writes files, touches memory/todos/timers or loads a skill \
-            runs alone and splits the round, so only batch calls that do not depend on each \
-            other's result.",
-        );
-    }
-
-    let ws_skills_dir = crate::workspace::skills_root(&workspace_dir_for_roots);
-
-    // Self-evolution mode: the assistant owns `<workspace>/.data/skills` and may
-    // install/edit/delete skills through `file_actions`. The one root is handed
-    // to the tool layer below — without it every skill write is rejected.
-    let skill_evolution_root = skills::self_evolution_skill_root(
-        Some(&workspace_dir_for_roots),
-        config.self_evolution_mode,
+    let prompt = build_prompt_bundle(
+        &state,
+        &config,
+        &messages,
+        &skill_ids,
+        &session_id,
+        orchestration.as_ref(),
+        subagents_enabled,
     );
-
-    for skill_name in &skill_ids {
-        if let Ok(resolved_skill) = skills::resolve_skill_by_name(&ws_skills_dir, skill_name) {
-            let skill = resolved_skill.skill;
-            merge_allowed_commands(&mut skill_allowed_commands, &skill.allowed_commands);
-
-            // Track skill dir for skill_read tool injection
-            if !active_skill_dirs.iter().any(|(n, _)| n == &skill.name) {
-                active_skill_dirs.push((skill.name.clone(), resolved_skill.skill_dir.clone()));
-            }
-
-            // Keep the available-skills listing stable across turns (prompt-cache
-            // friendly): activated skills stay listed here AND additionally get
-            // their full instructions appended to the loaded-skills block below.
-            available_skills_info.push_str(&format!(
-                "- {}: {}\n",
-                skill.name, skill.description
-            ));
-            if activated_skills.contains(&skill.name) {
-                push_loaded_skill_block(
-                    &mut loaded_skills_content,
-                    &skill,
-                    &resolved_skill.skill_dir,
-                    &resolved_skill.skill_file,
-                );
-            }
-        }
-    }
-
-    // Skills loaded earlier in this session but no longer among the selected
-    // `skill_ids` (e.g. loaded dynamically, or deselected afterwards) keep
-    // their instructions pinned, so `use_skill` can report them as loaded
-    // without their content silently disappearing from the context.
-    for skill_name in &activated_skills {
-        if skill_ids.iter().any(|id| id == skill_name) {
-            continue;
-        }
-        if let Ok(resolved_skill) = skills::resolve_skill_by_name(&ws_skills_dir, skill_name) {
-            let skill = resolved_skill.skill;
-            merge_allowed_commands(&mut skill_allowed_commands, &skill.allowed_commands);
-            if !active_skill_dirs.iter().any(|(n, _)| n == &skill.name) {
-                active_skill_dirs.push((skill.name.clone(), resolved_skill.skill_dir.clone()));
-            }
-            push_loaded_skill_block(
-                &mut loaded_skills_content,
-                &skill,
-                &resolved_skill.skill_dir,
-                &resolved_skill.skill_file,
-            );
-        }
-    }
-
-    if !available_skills_info.is_empty() {
-        let skills_sys_msg = format!(
-            "Available skills — descriptions only; `use_skill` loads the full instructions when \
-            the request clearly needs them:\n{}",
-            available_skills_info
-        );
-        if !system_content.is_empty() {
-            system_content.push_str("\n\n");
-        }
-        system_content.push_str(&skills_sys_msg);
-    }
-
-    // ── Self-evolution guidance ─────────────────────────────────────────────
-    // The tool description carries the mechanics; this states the *policy* so
-    // the model actually creates/updates/deletes skills instead of only
-    // describing how it would do it.
-    let self_evolution_context = skills::self_evolution_prompt(skill_evolution_root.as_deref());
-    if !self_evolution_context.is_empty() {
-        if !system_content.is_empty() {
-            system_content.push_str("\n\n");
-        }
-        system_content.push_str(&self_evolution_context);
-
-        // Earlier sessions' verified facts are deliberately NOT preloaded: a
-        // "VERIFIED FACTS" block dominated the first request's prefill and was
-        // mostly irrelevant to the current task. The self-evolution text only
-        // points at the `evolution` memory scope, and the model searches it
-        // (`memory search` / `get`) when it actually hits a problem.
-
-        // The user may explicitly ask for a memory tidy-up. Point the model at
-        // the consolidation flow instead of letting it delete entries by hand.
-        if crate::tools::memory::wants_memory_consolidation(&last_user_text(&messages)) {
-            system_content.push_str(
-                "\n\nThe user explicitly asked to consolidate memory: call `memory` with \
-                 action `consolidate` and phase `plan` first, review the clusters, then call \
-                 `apply` with the full `skill_md` and the same `keys`. Never delete entries by hand.",
-            );
-        }
-    }
-
-    // ── Workspace script library ────────────────────────────────────────────
-    // Self-evolution mode adds the save policy; every mode lists the scripts
-    // that already exist so the model reuses them instead of retyping the same
-    // command from scratch.
-    if config.effective_tools().iter().any(|t| t == "run_cmd") {
-        let scripts_context = crate::tools::scripts::prompt_block(
-            &workspace_dir_for_roots,
-            config.self_evolution_mode,
-        );
-        if !scripts_context.is_empty() {
-            if !system_content.is_empty() {
-                system_content.push_str("\n\n");
-            }
-            system_content.push_str(&scripts_context);
-        }
-    }
-
-    // ── Figures ─────────────────────────────────────────────────────────────
-    // The transcript renders `svg` / `carve` blocks and `mermaid` blocks; the
-    // model only uses them if it is told they exist. `enhanced_figures`
-    // (Settings → Advanced, on by default) picks the hand-drawn SVG path; with
-    // it off the model writes Mermaid instead. Static text either way, so it
-    // stays a stable prefix.
-    let figures_context = crate::figures::prompt_block_for(config.enhanced_figures);
-    if !figures_context.is_empty() {
-        if !system_content.is_empty() {
-            system_content.push_str("\n\n");
-        }
-        system_content.push_str(&figures_context);
-    }
-
-    // Sub-agents (`llm`, `cli`, `cloud`) are only reachable when the sub-agent
-    // system is enabled (`use_agents`). With it off the main agent answers
-    // directly: `call_subagent` is neither advertised in the system prompt nor
-    // exposed in the tool list. Automatic planning (`auto_plan`) does not
-    // affect this — with planning off the agent delegates manually.
-    let enabled_agents: Vec<agents::SubAgent> = if subagents_enabled {
-        agents::load_configured_agents(&state.agents_config_path)
-            .agents
-            .into_iter()
-            .filter(|a| a.enabled)
-            .collect()
-    } else {
-        Vec::new()
-    };
-
-    // Soft narrowing: the system prompt lists only the agents the selector
-    // picked for this turn. The `call_subagent` executor still accepts any
-    // enabled agent id below, so one bad pick cannot lock the right agent out.
-    let advertised_agents: Vec<agents::SubAgent> = {
-        let selected_ids: Vec<&str> = orchestration
-            .as_ref()
-            .and_then(|outcome| outcome.selection.as_ref())
-            .filter(|selection| selection.delegate)
-            .map(|selection| {
-                selection
-                    .choices
-                    .iter()
-                    .map(|choice| choice.id.as_str())
-                    .collect()
-            })
-            .unwrap_or_default();
-        let narrowed: Vec<agents::SubAgent> = enabled_agents
-            .iter()
-            .filter(|agent| selected_ids.iter().any(|id| *id == agent.id))
-            .cloned()
-            .collect();
-        if narrowed.is_empty() {
-            enabled_agents.clone()
-        } else {
-            narrowed
-        }
-    };
-
-    if !advertised_agents.is_empty() {
-        let mut available_agents_info = String::new();
-        for agent in &advertised_agents {
-            let kind = agents::normalize_agent_type(&agent.agent_type);
-            let detail = match kind.as_str() {
-                agents::AGENT_TYPE_CLI => format!(" (cli: {})", agent.cli.command.trim()),
-                agents::AGENT_TYPE_CLOUD => format!(" (cloud: {})", agent.cloud.endpoint.trim()),
-                _ => {
-                    let mcp = if agent.enable_mcp { " + MCP" } else { "" };
-                    format!(
-                        " (model {}{})",
-                        agent
-                            .model
-                            .clone()
-                            .unwrap_or_else(|| "main".to_string()),
-                        mcp
-                    )
-                }
-            };
-            available_agents_info.push_str(&format!(
-                "- {} [{}] {} — {}{}\n",
-                agent.id, kind, agent.name, agent.description, detail
-            ));
-        }
-        let mut agents_sys_msg = format!(
-        "Agents you can reach with `call_subagent` (exact `agent_id`, self-contained `task_description` — they never see this conversation). Types: `llm` runs an autonomous tool loop inside the app; `cli` is a headless coding CLI on this machine that edits workspace files directly; `cloud` runs the task on a remote endpoint (its generated images/videos are saved into the workspace and reported as file paths). Pass `images` (workspace-relative input files) for image-to-image / image-to-video agents and `params` (template variables like size/quality/duration) when the agent accepts them. Prefer `llm` for reasoning/reporting, `cli`/`cloud` for large end-to-end coding; a first `cli`/`cloud` run may need the user's approval.\n\
-        Workspace root: {} — pass a workspace-relative `cwd` (e.g. \"./apps/web\") when the task targets a subfolder, omit it for the root.\n\n\
-        Available agents:\n{}",
-        workspace_dir_for_roots.display(),
-        available_agents_info
+    let (mut all_messages, mut summary_coverage) = build_initial_messages(
+        &app,
+        &state,
+        &messages,
+        &session_id,
+        &prompt.system_content,
+        &prompt.loaded_skills_content,
+        orchestration.as_ref(),
     );
-
-        // Explain the selection so the main agent writes task descriptions that
-        // match the picked agents' purpose instead of guessing.
-        if let Some(selection) = orchestration
-            .as_ref()
-            .and_then(|outcome| outcome.selection.as_ref())
-            .filter(|selection| selection.delegate && !selection.choices.is_empty())
-        {
-            agents_sys_msg.push_str(
-                "\n<agent-selection>\nPicked for this turn (the others stay callable if the work really needs them):\n",
-            );
-            for choice in &selection.choices {
-                if choice.why.is_empty() {
-                    agents_sys_msg.push_str(&format!("- {} ({})\n", choice.name, choice.role));
-                } else {
-                    agents_sys_msg.push_str(&format!(
-                        "- {} ({}): {}\n",
-                        choice.name, choice.role, choice.why
-                    ));
-                }
-            }
-            agents_sys_msg.push_str("</agent-selection>");
-        }
-
-        if !system_content.is_empty() {
-            system_content.push_str("\n\n");
-        }
-        system_content.push_str(&agents_sys_msg);
-    }
-
-    // A declined selection is not a ban — just a hint that the cheap path is to
-    // answer directly. Keep it short so it does not become a second policy.
-    if matches!(
-        orchestration
-            .as_ref()
-            .and_then(|outcome| outcome.selection.as_ref()),
-        Some(selection) if !selection.delegate
-    ) {
-        if !system_content.is_empty() {
-            system_content.push_str("\n\n");
-        }
-        system_content.push_str(
-            "The orchestrator decided this request needs no sub-agents. Answer directly; delegate only if the request clearly requires it.",
-        );
-    }
-
-    // ── Memory guidance ─────────────────────────────────────────────────────
-    // Explicit instructions so conclusions are reliably persisted via the
-    // `memory` tool (the tool description carries the full scope/usage details).
-    if config.effective_tools().iter().any(|t| t == "memory") {
-        let evolution_hint = if config.self_evolution_mode {
-            ", `evolution` for verified facts that must survive across sessions (runtime \
-             environment, correct tool usage, file locations)"
-        } else {
-            ""
-        };
-        let memory_guidance = format!(
-            "\
-        MEMORY: You have a `memory` tool (scopes: `session`, `user`, `repo`{}). \
-        Nothing is preloaded — look memory up on demand: search it when you hit a problem \
-        you may have solved before, or need a verified environment/tool fact. \
-        When you reach a definitive, accurate conclusion (a resolved question, confirmed \
-        root cause, decided approach, verified fact), `memory add` it before ending your \
-        turn: `repo` for codebase facts and decisions, `user` for preferences and general \
-        insights, `session` for in-progress notes. Short descriptive `key`, conclusion in \
-        `content`.",
-            evolution_hint
-        );
-        if !system_content.is_empty() {
-            system_content.push_str("\n\n");
-        }
-        system_content.push_str(&memory_guidance);
-    }
-
-    // ── Timer guidance ──────────────────────────────────────────────────────
-    // The tool description carries the mechanics; this states the *policy* so
-    // the model waits asynchronously instead of burning a turn on polling.
-    if config.selected_tools.iter().any(|t| t == "timer") {
-        let timer_guidance = "\
-        TIMER: `timer_set` / `timer_list` / `timer_cancel` cover work that cannot finish within this \
-        turn. When the next step depends on something slow (log collection, build, download, \
-        deployment, external job, rate-limit window), never busy-wait, `sleep` or poll in a loop: \
-        start the slow work, arm a timer whose `message` restates what to do when it fires (that turn \
-        sees only the history plus that message), tell the user when it will fire and END YOUR TURN. \
-        Check `timer_list` first to avoid duplicates, `timer_cancel` when the wait is no longer needed.";
-        if !system_content.is_empty() {
-            system_content.push_str("\n\n");
-        }
-        system_content.push_str(timer_guidance);
-    }
-
-    // ── Todo guidance ───────────────────────────────────────────────────────
-    // The tool description carries the mechanics; this states the *policy* —
-    // check the session's list before planning so work continues from the
-    // existing plan instead of silently starting a new one.
-    if config
-        .selected_tools
-        .iter()
-        .any(|t| t == "todo_list" || t == "todo")
-    {
-        let mut todo_guidance = "\
-        TODOS: the `todos` tool holds this session's plan. Before planning or starting \
-        non-trivial work, `list` it — the active list is also injected as internal context \
-        while it has unfinished items. Continue from an existing list and move items \
-        `pending` → `in_progress` → `completed` as you work; `add` items when a new \
-        multi-step task begins. The UI mirrors every change live, so never leave stale \
-        items behind. \
-        ASKING: when a decision needs the user's own choice (approach, naming, trade-offs), \
-        use action `ask` with 1-8 short questions (options or free text); the call waits \
-        until the user submits and returns their answers as JSON — never ask what the \
-        conversation already answers, and proceed on your own when the form comes back \
-        dismissed or timed out. \
-        GOAL LOOP: while the list has unfinished items, a final answer does NOT end the \
-        turn — it is continued automatically so you keep working; do not write a final \
-        summary with goals open. End the turn explicitly by writing [goal:DONE] in your \
-        final answer, either when the goal is fully reached or when you are blocked and \
-        need the user (state plainly what is blocking you). \
-        WAITING: when the unfinished items are waiting on an external event rather than \
-        on your own work, do not force them."
-            .to_string();
-        if config.selected_tools.iter().any(|t| t == "timer") {
-            todo_guidance.push_str(
-                " Arm a delay with the `timer` tool for a time-based wait — while a timer \
-                 is pending, the goal loop stays suspended and the timer's message resumes \
-                 the plan.",
-            );
-        }
-        todo_guidance.push_str(
-            " Otherwise write [WAIT_EVT: what you are waiting for] in your final answer — \
-             the turn ends and the plan resumes on the next turn.",
-        );
-        if !system_content.is_empty() {
-            system_content.push_str("\n\n");
-        }
-        system_content.push_str(&todo_guidance);
-    }
-
-    // ── Embedded sub-agent roles (`+agent` in the composer) ─────────────────
-    // A snapshot written when the session's first message was sent. It is
-    // appended at the END of the stable system prefix, so it stays
-    // byte-identical on every turn (prompt-cache friendly) and never reorders
-    // the blocks above. A missing table/row simply means "no roles".
-    let embedded_roles = state
-        .db
-        .lock()
-        .map(|db| db::get_embedded_roles(&db, &session_id))
-        .unwrap_or_default();
-    let embedded_block = render_embedded_roles(&embedded_roles);
-    if !embedded_block.is_empty() {
-        if !system_content.is_empty() {
-            system_content.push_str("\n\n");
-        }
-        system_content.push_str(&embedded_block);
-    }
-
-    // ── Message layout (prompt-cache conscious) ─────────────────────────────
-    // Static prefix first (system prompt, skill context), then the persisted
-    // summary (stable across turns — only a new compression rewrites it), then
-    // the append-only conversation history. Dynamic per-turn blocks (todo
-    // list, mission report) come last, right before the latest user message,
-    // so turn-to-turn changes invalidate as little cached prefix as possible.
-    if !system_content.is_empty() {
-        all_messages.push(json!({ "role": "system", "content": system_content }));
-    }
-
-    if !loaded_skills_content.is_empty() {
-        let workspace_dir = state.workspace_dir.lock().unwrap().clone();
-        let workspace_root_display = workspace_dir.display().to_string();
-        // Generic sandbox rules live in the tool descriptions (always sent);
-        // only skill-specific notes are repeated here.
-        let active_skills_context = format!(
-            "INTERNAL CONTEXT - ACTIVE SKILLS (root: {workspace_root_display}). \
-             Local file tools are sandboxed to the workspace root; `skill_read` is locked to each \
-             skill's own directory (`..` rejected); skill edits are limited to `./.data/skills/...` \
-             and create `.bak.<n>` backups automatically; MCP tool paths are NOT sandboxed — treat \
-             them as opaque. Reuse exact paths returned by tools; never reference app-data or \
-             external absolute paths.\n\n\
-             Active skill instructions:{}",
-            loaded_skills_content
-        );
-        all_messages.push(json!({ "role": "user", "content": active_skills_context }));
-    }
-
-    // Conversation history, keeping the latest user message for the tail.
-    let (mut history, last_user_msg) = match messages.last() {
-        Some(m) if m.role == "user" => (&messages[..messages.len() - 1], Some(m)),
-        _ => (&messages[..], None),
-    };
-
-    // ── Persisted session summary: replace the history it covers ────────────
-    // A summary written by an earlier compression records how many frontend
-    // messages it covers plus the flattened prefix of the last one (the
-    // boundary). When the incoming history still matches that boundary, the
-    // covered prefix is dropped and the summary stands in for it — Claude
-    // Code's compact semantics, where the summary REPLACES the old transcript
-    // instead of being replayed on top of it. On any mismatch (history edited,
-    // truncated, restored differently) the stale summary is discarded and the
-    // full history is replayed — the old, always-safe additive behavior.
-    let mut summary_block: Option<db::SessionSummaryRow> = None;
-    let mut summary_coverage = CoverageState::default();
-    if let Ok(db_guard) = state.db.lock() {
-        match db::get_session_summary(&db_guard, &session_id) {
-            Ok(Some(saved)) if !saved.body.trim().is_empty() => {
-                let covered = usize::try_from(saved.covered_messages).unwrap_or(0);
-                let mut valid = true;
-                if covered > 0 {
-                    let boundary_message_text = covered
-                        .checked_sub(1)
-                        .and_then(|idx| history.get(idx))
-                        .map(|m| content_to_text(&m.content));
-                    match summary_trim_count(
-                        covered,
-                        &saved.boundary_text,
-                        boundary_message_text.as_deref(),
-                    ) {
-                        Some(count) => {
-                            history = &history[count..];
-                            summary_coverage.offset = count;
-                            summary_coverage.boundary = saved.boundary_text.clone();
-                        }
-                        None => valid = false,
-                    }
-                }
-                if valid {
-                    summary_block = Some(saved);
-                } else {
-                    let _ = db::delete_session_summary(&db_guard, &session_id);
-                    log_event(
-                        &state,
-                        "INFO",
-                        format!(
-                            "stale session summary discarded (history boundary mismatch): session_id={session_id}"
-                        ),
-                    );
-                }
-            }
-            _ => {}
-        }
-    }
-
-    // The summary goes BEFORE the remaining history: it is stable across
-    // turns (only a new compression rewrites it), so everything after it is
-    // an append-only region — the best layout for the prompt cache. Claude
-    // Code places the compact summary at the start of the continuation for
-    // the same reason.
-    if let Some(saved) = &summary_block {
-        all_messages.push(json!({
-            "role": "user",
-            "content": render_summary_message_body(&saved.body)
-        }));
-    }
-
-    for m in history {
-        let mut msg = json!({ "role": m.role, "content": m.content });
-        if let Some(rc) = &m.reasoning_content {
-            if !rc.is_empty() {
-                msg["reasoning_content"] = json!(rc);
-            }
-        }
-        all_messages.push(msg);
-    }
-
-    // ── Dynamic blocks (change between turns → placed near the tail) ────────
-
-    // Inject the active todo list (if any) so the assistant can always
-    // re-orient itself to the current plan, even mid-turn.
-    // The same snapshot is pushed to the UI: the panel is remounted per
-    // assistant message and only the newest one mirrors the session list, so
-    // without it a list created in an earlier turn would stay invisible until
-    // the model happened to touch it again.
-    let todo_snapshot = match state.workspace_dir.lock() {
-        Ok(workspace_guard) => todos::active_list_snapshot(&workspace_guard, &session_id)
-            .ok()
-            .flatten(),
-        Err(_) => None,
-    };
-    if let Some(summary) = &todo_snapshot {
-        if !summary.todos.is_empty() {
-            // Mirror the very same snapshot to the UI. Emitted together with
-            // the prompt block on purpose, and also for a finished list: the
-            // panel must be able to disappear (or never appear) instead of
-            // lingering at 100% from an earlier turn.
-            let _ = app.emit(
-                crate::events::TODO_STATE,
-                json!({
-                    "type": "todo_state",
-                    "list_id": summary.list_id,
-                    "session_id": summary.session_id,
-                    "summary": summary,
-                }),
-            );
-        }
-        // Nothing left to track → no prompt block either.
-        if let Some(todo_block) = todos::render_list_block(summary) {
-            all_messages.push(json!({
-                "role": "system",
-                "content": format!("{CONTEXT_TODO_MARKER}\n{}", todo_block)
-            }));
-        }
-    }
-
-    // Inject the finished multi-agent mission report so the main agent can
-    // define the final answer with its full context and tools.
-    if let Some(report) = orchestration
-        .as_ref()
-        .and_then(|outcome| outcome.report.as_ref())
-    {
-        all_messages.push(json!({
-            "role": "system",
-            "content": format!("{CONTEXT_MISSION_MARKER}\n{report}")
-        }));
-    }
-
-    if let Some(m) = last_user_msg {
-        all_messages.push(json!({ "role": m.role, "content": m.content }));
-    }
-
+    let PromptBundle {
+        skill_allowed_commands,
+        active_skill_dirs,
+        skill_evolution_root,
+        enabled_agents,
+        activated_skills,
+        workspace_dir_for_roots,
+        ..
+    } = prompt;
+    let mut skill_allowed_commands = skill_allowed_commands;
+    let mut active_skill_dirs = active_skill_dirs;
     let url = format!(
         "{}/chat/completions",
         config.api_base_url.trim_end_matches('/')
@@ -1266,9 +1856,7 @@ still missing."
                     )
                     .await
                 {
-                    persist_session_summary(&state, &session_id, &outcome);
-                    summary_coverage.offset = outcome.covered_messages;
-                    summary_coverage.boundary = outcome.boundary_text;
+                    apply_compression_outcome(&state, &session_id, &mut summary_coverage, &outcome);
                     log_event(
                         &state,
                         "INFO",
@@ -1349,141 +1937,14 @@ still missing."
 
         let duration_ms = started_at.elapsed().as_millis() as i64;
 
-        match &result {
-            Ok(sr) => {
-                // Log successful request
-                let tool_calls_json = if sr.tool_calls.is_empty() {
-                    String::new()
-                } else {
-                    serde_json::to_string(
-                        &sr.tool_calls
-                            .iter()
-                            .map(|(id, name, args)| {
-                                json!({
-                                    "id": id, "name": name, "arguments": args
-                                })
-                            })
-                            .collect::<Vec<_>>(),
-                    )
-                    .unwrap_or_default()
-                };
-                let db = state.db.lock().unwrap();
-                // `request_body` is deliberately not written: the full prompt is
-                // already recorded once in `interaction_log.input_data`, and
-                // storing a second copy doubled the database size
-                // (~92 KiB per request). This table keeps the metrics.
-                let _ = db.execute(
-                    "INSERT INTO api_requests (session_id, model, response_content, reasoning_content, tool_calls, finish_reason, prompt_tokens, completion_tokens, cached_tokens, reasoning_ms, first_token_ms, duration_ms) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-                    rusqlite::params![
-                        session_id,
-                        active_model.as_str(),
-                        sr.content,
-                        sr.reasoning_content,
-                        tool_calls_json,
-                        sr.finish_reason,
-                        sr.prompt_tokens,
-                        sr.completion_tokens,
-                        sr.cached_tokens.map(i64::from),
-                        sr.timing.reasoning_ms.map(i64::from),
-                        sr.timing.first_token_ms.map(i64::from),
-                        duration_ms,
-                    ],
-                );
-                // Log to interaction_log table
-                let request_body_display = request_snapshot.to_string();
-                let response_display = sr.content.clone();
-                // Cache-hit metrics travel in the interaction metadata so the
-                // Monitor detail view (and the list chip) can show them without
-                // touching the interaction schema. The round's streamed phase
-                // timings ride along so the detail pane can explain the wait.
-                let usage_metadata = {
-                    let mut meta = serde_json::Map::new();
-                    if let Some(cached) = sr.cached_tokens {
-                        meta.insert("prompt_tokens".into(), json!(sr.prompt_tokens));
-                        meta.insert("cached_tokens".into(), json!(cached));
-                        meta.insert(
-                            "hit_ratio".into(),
-                            json!(if sr.prompt_tokens > 0 {
-                                ((cached as f64) / (sr.prompt_tokens as f64)).clamp(0.0, 1.0)
-                            } else {
-                                0.0
-                            }),
-                        );
-                    }
-                    if let Some(ms) = sr.timing.reasoning_ms {
-                        meta.insert("reasoning_ms".into(), json!(ms));
-                    }
-                    if let Some(ms) = sr.timing.first_token_ms {
-                        meta.insert("first_token_ms".into(), json!(ms));
-                    }
-                    (!meta.is_empty()).then(|| Value::Object(meta).to_string())
-                };
-                log_interaction(
-                    &db,
-                    &session_id,
-                    "llm_api",
-                    &active_model,
-                    "chat_completion",
-                    request_body_display,
-                    response_display,
-                    None,
-                    duration_ms,
-                    usage_metadata,
-                );
-                drop(db);
-                log_event(
-                    &state,
-                    "INFO",
-                    format!(
-                        "chat_completion request succeeded: session_id={}, finish_reason={}, duration_ms={}",
-                        session_id, sr.finish_reason, duration_ms
-                    ),
-                );
-            }
-            Err(err) => {
-                // Log failed request (metrics only — see the success branch for
-                // why the prompt body is not duplicated here).
-                let db = state.db.lock().unwrap();
-                let _ = db.execute(
-                    "INSERT INTO api_requests (session_id, model, finish_reason, duration_ms, error) \
-                     VALUES (?1, ?2, 'error', ?3, ?4)",
-                    rusqlite::params![
-                        session_id,
-                        active_model.as_str(),
-                        duration_ms,
-                        err,
-                    ],
-                );
-                // Log to interaction_log table
-                let request_body_display = request_snapshot.to_string();
-                log_interaction(
-                    &db,
-                    &session_id,
-                    "llm_error",
-                    &active_model,
-                    "chat_completion",
-                    request_body_display,
-                    String::new(),
-                    Some(err.clone()),
-                    duration_ms,
-                    None,
-                );
-                drop(db);
-                log_event(
-                    &state,
-                    "ERROR",
-                    format!(
-                        "chat_completion request failed: session_id={}, duration_ms={}, {}, error={}",
-                        session_id,
-                        duration_ms,
-                        content_parts_signature(&request_snapshot),
-                        err
-                    ),
-                );
-            }
-        }
-
+        log_request_round(
+            &state,
+            &session_id,
+            &active_model,
+            &request_snapshot,
+            &result,
+            duration_ms,
+        );
         let sr = match result {
             Ok(sr) => sr,
             // A rejected wrap-up request (some gateways refuse
@@ -1525,9 +1986,12 @@ still missing."
                         )
                         .await
                     {
-                        persist_session_summary(&state, &session_id, &outcome);
-                        summary_coverage.offset = outcome.covered_messages;
-                        summary_coverage.boundary = outcome.boundary_text;
+                        apply_compression_outcome(
+                            &state,
+                            &session_id,
+                            &mut summary_coverage,
+                            &outcome,
+                        );
                         continue;
                     }
                 }
@@ -1547,9 +2011,7 @@ still missing."
                 )
                 .await
             {
-                persist_session_summary(&state, &session_id, &outcome);
-                summary_coverage.offset = outcome.covered_messages;
-                summary_coverage.boundary = outcome.boundary_text;
+                apply_compression_outcome(&state, &session_id, &mut summary_coverage, &outcome);
                 log_event(
                     &state,
                     "INFO",
@@ -1781,10 +2243,7 @@ still missing."
                 // Tell the UI now: these tasks never get a runner report the
                 // user could see (the turn is ending right after).
                 for snapshot in cancelled {
-                    let _ = app.emit(
-                        crate::events::BACKGROUND_TASK_STATE,
-                        snapshot,
-                    );
+                    let _ = app.emit(crate::events::BACKGROUND_TASK_STATE, snapshot);
                 }
             }
 
@@ -1975,302 +2434,42 @@ only when every item is done, or when you are blocked and need the user.\n\n{wai
         // Batching changes one thing about the guard: a call that trips the
         // limit no longer stops the calls beside it, because those are already
         // running. The verdict applies from the next round on.
-        let mut pending_skill_context_messages: Vec<Value> = vec![];
-        struct PlannedCall {
-            id: String,
-            name: String,
-            args: String,
-            parsed: Value,
-            /// `Some(notice)` when the call must not run; the notice is the
-            /// call's tool result.
-            blocked: Option<String>,
-            /// Classification only, so a blocked call never splits a segment
-            /// it would not have run in anyway.
-            concurrent: bool,
-        }
-
-        let mut planned: Vec<PlannedCall> = Vec::with_capacity(sr.tool_calls.len());
-        for (id, name, args) in &sr.tool_calls {
-            if name == "memory" {
-                memory_tool_called = true;
-            }
-            let parsed: Value = serde_json::from_str(args).unwrap_or_default();
-
-            let blocked = match guard.blocked_notice(&session_id, name, failure_limit) {
-                Some(notice) => Some(notice),
-                None => match budget.record_tool_call() {
-                    Some(stop) => {
-                        budget_stop = Some(stop);
-                        Some(turn_guard::budget_notice(name))
-                    }
-                    None => None,
-                },
-            };
-            if let Some(notice) = &blocked {
-                let reason = if notice.starts_with("⛔ TOOL DISABLED") {
-                    "disabled for this session"
-                } else {
-                    "turn tool budget spent"
-                };
-                // One event creates and settles the row: a blocked call never
-                // reports progress, and a running row left behind would sit
-                // there until the answer starts streaming.
-                let _ = app.emit(
-                    crate::events::TOOL_CALL,
-                    crate::events::ToolCall {
-                        session_id: session_id.clone(),
-                        call_id: Some(id.clone()),
-                        phase: Some("done".to_string()),
-                        ok: Some(false),
-                        text: format!("🚫 *{name}* — not executed ({reason})"),
-                    },
-                );
-                log_event(
-                    &state,
-                    "WARN",
-                    format!(
-                        "tool call not executed: session_id={}, tool={}, reason={}",
-                        session_id, name, reason
-                    ),
-                );
-            }
-
-            let concurrent = matches!(
-                tools::batch::call_mode(name, &parsed, mcp_tool_map.contains_key(name.as_str())),
-                tools::batch::CallMode::Concurrent
-            );
-            planned.push(PlannedCall {
-                id: id.clone(),
-                name: name.clone(),
-                args: args.clone(),
-                parsed,
-                blocked,
-                concurrent,
-            });
-        }
-
-        // ── Execute ──────────────────────────────────────────────────────────
-        // Neighbouring concurrent calls share one segment and run at the same
-        // time (`max_parallel_tools`, default 4). A barrier — `use_skill`, a
-        // mutating `file_actions`, `memory`, `todos`, a timer, mission state —
-        // is a one-element segment and therefore runs alone, in order, exactly
-        // like the whole round did before batching. Results are written back
-        // by index, so the `tool` messages below keep the order the model
-        // emitted whatever order the calls finished in.
-        let mut results: Vec<Option<String>> = vec![None; planned.len()];
-        let max_parallel = if config.parallel_tools {
-            config
-                .max_parallel_tools
-                .clamp(1, crate::MAX_PARALLEL_TOOLS) as usize
-        } else {
-            1
-        };
-        let modes: Vec<tools::batch::CallMode> = planned
-            .iter()
-            .map(|call| {
-                if call.concurrent {
-                    tools::batch::CallMode::Concurrent
-                } else {
-                    tools::batch::CallMode::Barrier
-                }
-            })
-            .collect();
-        let segments = tools::batch::plan_segments(&modes);
-        let workspace_dir = state.workspace_dir.lock().unwrap().clone();
-
-        for segment in segments {
-            if turn_cancelled.load(Ordering::SeqCst) {
-                break;
-            }
-            let runnable: Vec<usize> = segment
-                .clone()
-                .filter(|&index| planned[index].blocked.is_none())
-                .collect();
-            if runnable.is_empty() {
-                continue;
-            }
-
-            // One call at a time: a barrier, a single-call segment, or a user
-            // who set the concurrency to 1 (fully sequential).
-            if runnable.len() == 1 || max_parallel == 1 {
-                for &index in &runnable {
-                    let call = &planned[index];
-                    let result = if call.name == "use_skill" {
-                        let (text, context) = load_skill_for_call(
-                            &app,
-                            &session_id,
-                            &workspace_dir_for_roots,
-                            &call.id,
-                            &call.parsed,
-                            &activated_skills,
-                            &mut loaded_this_turn,
-                            &mut skill_allowed_commands,
-                            &mut active_skill_dirs,
-                        );
-                        if let Some(context) = context {
-                            pending_skill_context_messages.push(context);
-                        }
-                        text
-                    } else {
-                        run_tool_call(
-                            &app,
-                            state.inner(),
-                            &config,
-                            &session_id,
-                            &workspace_dir,
-                            ToolCall {
-                                id: &call.id,
-                                name: &call.name,
-                                args: &call.args,
-                                parsed: &call.parsed,
-                            },
-                            &skill_allowed_commands,
-                            skill_evolution_root.as_deref(),
-                            &active_skill_dirs,
-                            &mcp_tool_map,
-                            &enabled_agents,
-                            subagents_enabled,
-                            &turn_cancelled,
-                        )
-                        .await
-                    };
-                    results[index] = Some(result);
-                }
-                continue;
-            }
-
-            for chunk in runnable.chunks(max_parallel) {
-                let futures = chunk.iter().map(|&index| {
-                    let call = &planned[index];
-                    run_tool_call(
-                        &app,
-                        state.inner(),
-                        &config,
-                        &session_id,
-                        &workspace_dir,
-                        ToolCall {
-                            id: &call.id,
-                            name: &call.name,
-                            args: &call.args,
-                            parsed: &call.parsed,
-                        },
-                        &skill_allowed_commands,
-                        skill_evolution_root.as_deref(),
-                        &active_skill_dirs,
-                        &mcp_tool_map,
-                        &enabled_agents,
-                        subagents_enabled,
-                        &turn_cancelled,
-                    )
-                });
-                let finished = futures_util::future::join_all(futures).await;
-                for (index, result) in chunk.iter().zip(finished) {
-                    results[*index] = Some(result);
-                }
-            }
-        }
-
-        // ── Settle ───────────────────────────────────────────────────────────
-        // Failure accounting stays in `tool_calls` order and runs after the
-        // whole round finished, so the guard's verdict never depends on which
-        // of two concurrent calls happened to be polled first.
-        for (index, call) in planned.iter().enumerate() {
-            // A blocked call never ran: its notice *is* the result. A call with
-            // neither means the turn was cancelled before it ran — nothing is
-            // sent any more (the loop breaks at the top), and a fabricated
-            // `tool` message would claim work that never happened.
-            let Some(mut result) = results[index].take().or_else(|| call.blocked.clone()) else {
-                break;
-            };
-
-            if call.blocked.is_none() {
-                // A cancelled turn's tool results read like failures
-                // ("cancelled by the user"), but the tool did nothing wrong:
-                // see `turn_guard::counts_as_failure`.
-                let failed = turn_guard::counts_as_failure(
-                    &result,
-                    turn_cancelled.load(Ordering::SeqCst),
-                );
-                if let Some(trip) = guard.record(&session_id, &call.name, failed, failure_limit) {
-                    result.push_str("\n\n");
-                    result.push_str(&turn_guard::disabled_notice(
-                        &call.name,
-                        trip.failures,
-                        failure_limit,
-                        true,
-                    ));
-                    log_event(
-                        &state,
-                        "WARN",
-                        format!(
-                            "tool disabled for this session: session_id={}, tool={}, failures={}, limit={}",
-                            session_id, call.name, trip.failures, failure_limit
-                        ),
-                    );
-                    let _ = app.emit(
-                        crate::events::CHAT_NOTICE,
-                        crate::events::ChatNotice::ToolDisabled {
-                            session_id: session_id.clone(),
-                            tool: call.name.clone(),
-                            failures: trip.failures,
-                            limit: failure_limit,
-                        },
-                    );
-                }
-                // A sub-agent owns its own task row (`agent-task-*`); a generic
-                // tool row next to it would be a second, empty step. A
-                // background-routed call owns one too — the `background-task-state`
-                // row — so it must not gain a settled "🔧 tool" twin.
-                let backgrounded = config.background_tools
-                    && background_requested(&call.parsed)
-                    && call.name != "call_subagent";
-                if !backgrounded && call.name != "call_subagent" {
-                    tools::emit_tool_call_done(
-                        &app,
-                        Some(&session_id),
-                        &call.id,
-                        &call.name,
-                        !failed,
-                    );
-                }
-            }
-
-            all_messages.push(json!({
-                "role": "tool",
-                "tool_call_id": &call.id,
-                "content": result,
-            }));
-        }
-
-        all_messages.extend(pending_skill_context_messages);
+        run_tool_round(
+            ToolRound {
+                app: &app,
+                state: state.inner(),
+                config: &config,
+                session_id: &session_id,
+                skill_evolution_root: skill_evolution_root.as_deref(),
+                subagents_enabled,
+                mcp_tool_map: &mcp_tool_map,
+                enabled_agents: &enabled_agents,
+                turn_cancelled: &turn_cancelled,
+                activated_skills: &activated_skills,
+                workspace_dir_for_roots: &workspace_dir_for_roots,
+                loaded_this_turn: &mut loaded_this_turn,
+                skill_allowed_commands: &mut skill_allowed_commands,
+                active_skill_dirs: &mut active_skill_dirs,
+                budget: &mut budget,
+                guard,
+                failure_limit,
+                memory_tool_called: &mut memory_tool_called,
+                budget_stop: &mut budget_stop,
+            },
+            &sr,
+            &mut all_messages,
+        )
+        .await;
     }
 
-    // ── Automatic conclusion recording ──────────────────────────────────────
-    // If the turn ended with a substantive final answer that reads like a
-    // conclusion, and the LLM did not already persist it via the `memory`
-    // tool, record it so it survives across sessions. Self-evolution mode
-    // routes it into the dedicated evolution area instead of `repo`.
-    if let Some(answer) = final_answer {
-        // Answer-level control markers (goal loop + WAIT_EVT) are signals, not
-        // answer text — they must not leak into the memory entry the answer
-        // produces.
-        let answer = strip_control_markers(&answer);
-        let memory_enabled = config.effective_tools().iter().any(|t| t == "memory");
-        if memory_enabled
-            && !memory_tool_called
-            && should_record_conclusion(&answer)
-            && looks_like_conclusion(&answer)
-        {
-            let workspace_dir = state.workspace_dir.lock().unwrap().clone();
-            let scope = if config.self_evolution_mode {
-                crate::tools::memory::EVOLUTION_SCOPE
-            } else {
-                "repo"
-            };
-            record_conclusion_to_memory(&state, &app, &workspace_dir, &session_id, scope, &answer);
-        }
-    }
-
+    record_turn_conclusion(
+        &app,
+        &state,
+        &config,
+        &session_id,
+        final_answer,
+        memory_tool_called,
+    );
     log_event(
         &state,
         "INFO",
@@ -2415,10 +2614,7 @@ pub(crate) async fn end_turn_cleanup(app: &AppHandle, session_id: &str, turn_id:
     // the panel keeps rendering the last `running` state forever and the
     // transcript row keeps offering a cancel button for a task that is gone.
     for snapshot in removed {
-        let _ = app.emit(
-            crate::events::BACKGROUND_TASK_STATE,
-            snapshot,
-        );
+        let _ = app.emit(crate::events::BACKGROUND_TASK_STATE, snapshot);
     }
     // The waiting chip is driven by `background-waiting`; zero it on every turn
     // end so a hold that was cut short (Stop, error, budget) cannot leave it
