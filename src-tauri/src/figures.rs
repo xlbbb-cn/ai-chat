@@ -212,8 +212,7 @@ pub(crate) fn write_figure_file(
 }
 
 /// Save one rendered figure as a PNG at `<workspace>/figures/`.
-#[tauri::command]
-pub fn save_figure(
+pub(crate) fn save_figure(
     state: State<'_, AppState>,
     id: String,
     png_base64: String,
@@ -233,8 +232,7 @@ pub fn save_figure(
 /// There is no PNG here on purpose: an animation has no single frame, and a
 /// sandboxed frame cannot be rasterised from the app. What the user gets is the
 /// figure itself — a complete `.html` that opens in any browser.
-#[tauri::command]
-pub fn save_figure_html(
+pub(crate) fn save_figure_html(
     state: State<'_, AppState>,
     id: String,
     html: String,
@@ -250,8 +248,7 @@ pub fn save_figure_html(
 }
 
 /// Open `<workspace>/figures` in the OS file manager.
-#[tauri::command]
-pub fn app_open_figures_dir(app: AppHandle) -> Result<(), String> {
+pub(crate) fn app_open_figures_dir(app: AppHandle) -> Result<(), String> {
     let workspace = app
         .state::<AppState>()
         .workspace_dir

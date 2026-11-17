@@ -53,8 +53,8 @@ pub const TOOL_NAME: &str = "mcp_self";
 
 /// Emitted after every registry mutation. The panel refreshes its list from it;
 /// the chat turn uses `AppState::mcp_revision` instead (a tool can also be
-/// called by a background task, which the panel must still see).
-pub const CHANGED_EVENT: &str = "mcp-servers-changed";
+/// called by a background task, which the panel must still see). The event name
+/// lives in [`crate::events`].
 
 /// Hard cap on one server script. A generated MCP server is a tool adapter, not
 /// a project — anything larger belongs in a normal workspace file.
@@ -860,15 +860,15 @@ async fn ask_confirmation(
 
 fn emit_changed(app: &AppHandle, server: &mcp::McpServer, action: &str) {
     let _ = app.emit(
-        CHANGED_EVENT,
-        json!({
-            "id": server.id,
-            "name": server.name,
-            "action": action,
-            "enabled": server.enabled,
-            "source": server.source,
-            "definition_path": server.definition_path,
-        }),
+        crate::events::MCP_SERVERS_CHANGED,
+        crate::events::McpServersChanged {
+            id: server.id.clone(),
+            name: server.name.clone(),
+            action: action.to_string(),
+            enabled: server.enabled,
+            source: server.source.clone(),
+            definition_path: server.definition_path.clone(),
+        },
     );
 }
 

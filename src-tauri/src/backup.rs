@@ -35,12 +35,6 @@ use zip::{write::FileOptions, ZipArchive, ZipWriter};
 
 use crate::{agents, apply_config, experience, mcp, AppConfig, AppState};
 
-const BACKUP_EXPORT_START_EVENT: &str = "backup-export-start";
-const BACKUP_EXPORT_STATUS_EVENT: &str = "backup-export-status";
-const BACKUP_EXPORT_DONE_EVENT: &str = "backup-export-done";
-const BACKUP_EXPORT_ERROR_EVENT: &str = "backup-export-error";
-pub(crate) const BACKUP_RESTORED_EVENT: &str = "backup-restored";
-
 /// Workspace-scoped state directories that are part of a backup, as
 /// `(zip name, path under <workspace>/.data)`.
 fn workspace_backup_dirs(workspace_dir: &Path) -> [(&'static str, PathBuf); 6] {
@@ -156,7 +150,7 @@ fn safe_join(root: &Path, relative: &str) -> Option<PathBuf> {
 // ─── Export ──────────────────────────────────────────────────────────────────
 
 fn emit_backup_export_status(app: &AppHandle, status: &str) {
-    let _ = app.emit(BACKUP_EXPORT_STATUS_EVENT, status.to_string());
+    let _ = app.emit(crate::events::BACKUP_EXPORT_STATUS, status.to_string());
 }
 
 fn escape_sql_string(value: &str) -> String {
@@ -297,15 +291,15 @@ fn export_backup(app: &AppHandle, backup_path: &Path) -> Result<(), String> {
 /// `backup-export-*` events.
 pub(crate) fn spawn_backup_export(app: AppHandle, backup_path: PathBuf) {
     std::thread::spawn(move || {
-        let _ = app.emit(BACKUP_EXPORT_START_EVENT, ());
+        let _ = app.emit(crate::events::BACKUP_EXPORT_START, ());
         emit_backup_export_status(&app, "Preparing backup export...");
 
         match export_backup(&app, &backup_path) {
             Ok(()) => {
-                let _ = app.emit(BACKUP_EXPORT_DONE_EVENT, ());
+                let _ = app.emit(crate::events::BACKUP_EXPORT_DONE, ());
             }
             Err(err) => {
-                let _ = app.emit(BACKUP_EXPORT_ERROR_EVENT, err);
+                let _ = app.emit(crate::events::BACKUP_EXPORT_ERROR, err);
             }
         }
     });
@@ -609,7 +603,7 @@ pub(crate) fn import_backup(app: &AppHandle, backup_path: &Path) -> Result<(), S
     // definitions that are new to this machine.
     let _ = agents::load_configured_agents(&state.agents_config_path);
 
-    let _ = app.emit(BACKUP_RESTORED_EVENT, ());
+    let _ = app.emit(crate::events::BACKUP_RESTORED, ());
     state.logger.lock().unwrap().log(
         "INFO",
         &format!("Backup restored from {}", backup_path.display()),

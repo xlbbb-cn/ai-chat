@@ -30,9 +30,8 @@ use tokio::sync::Notify;
 
 /// Emitted after every state transition with the full snapshot, so the UI can
 /// upsert the matching tool-call entry idempotently.
-pub const BACKGROUND_TASK_STATE_EVENT: &str = "background-task-state";
-/// Emitted when the turn is about to be held open waiting for results.
-pub const BACKGROUND_WAITING_EVENT: &str = "background-waiting";
+///
+/// The name itself lives in [`crate::events`].
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

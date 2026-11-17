@@ -71,14 +71,14 @@ pub(crate) fn finish_skipped(
         bus.mark_skipped(result);
     }
     let _ = app.emit(
-        "agent-task-skipped",
-        json!({
-            "task_id": &result.task_id,
-            "session_id": session_id,
-            "agent_id": &result.agent_id,
-            "agent_name": &result.agent_name,
-            "reason": &result.content,
-        }),
+        crate::events::AGENT_TASK_SKIPPED,
+        crate::events::AgentTaskSkipped {
+            task_id: result.task_id.clone(),
+            session_id: session_id.to_string(),
+            agent_id: result.agent_id.clone(),
+            agent_name: result.agent_name.clone(),
+            reason: result.content.clone(),
+        },
     );
 }
 
@@ -310,13 +310,13 @@ pub(crate) async fn execute_parallel(
                             bus.finish_task(&result);
                         }
                         let _ = app.emit(
-                            "agent-task-error",
-                            json!({
-                                "task_id": &result.task_id,
-                                "session_id": session_id,
-                                "agent_id": &result.agent_id,
-                                "error": &result.content,
-                            }),
+                            crate::events::AGENT_TASK_ERROR,
+                            crate::events::AgentTaskError {
+                                task_id: result.task_id.clone(),
+                                session_id: session_id.to_string(),
+                                agent_id: result.agent_id.clone(),
+                                error: result.content.clone(),
+                            },
                         );
                         settled.insert(result.task_id.clone());
                         results.push(result);
@@ -464,24 +464,24 @@ pub async fn run_sub_agent(
         Ok(cwd) => cwd,
         Err(err) => {
             let _ = app.emit(
-                "agent-task-start",
-                json!({
-                    "task_id": task.id,
-                    "session_id": session_id,
-                    "agent_id": agent.id,
-                    "agent_name": agent.name,
-                    "description": task.description,
-                    "cwd": task.cwd,
-                }),
+                crate::events::AGENT_TASK_START,
+                crate::events::AgentTaskStart {
+                    task_id: task.id.clone(),
+                    session_id: session_id.to_string(),
+                    agent_id: agent.id.clone(),
+                    agent_name: agent.name.clone(),
+                    description: task.description.clone(),
+                    cwd: task.cwd.clone(),
+                },
             );
             let _ = app.emit(
-                "agent-task-error",
-                json!({
-                    "task_id": task.id,
-                    "session_id": session_id,
-                    "agent_id": agent.id,
-                    "error": err
-                }),
+                crate::events::AGENT_TASK_ERROR,
+                crate::events::AgentTaskError {
+                    task_id: task.id.clone(),
+                    session_id: session_id.to_string(),
+                    agent_id: agent.id.clone(),
+                    error: err.to_string(),
+                },
             );
             let result = TaskResult {
                 task_id: task.id.clone(),
@@ -632,15 +632,15 @@ pub(crate) async fn run_external_agent(
 ) -> TaskResult {
     let mission_id = mission_id_for_task(task).to_string();
     let _ = app.emit(
-        "agent-task-start",
-        json!({
-            "task_id": task.id,
-            "session_id": session_id,
-            "agent_id": agent.id,
-            "agent_name": agent.name,
-            "description": task.description,
-            "cwd": task.cwd,
-        }),
+        crate::events::AGENT_TASK_START,
+        crate::events::AgentTaskStart {
+            task_id: task.id.clone(),
+            session_id: session_id.to_string(),
+            agent_id: agent.id.clone(),
+            agent_name: agent.name.clone(),
+            description: task.description.clone(),
+            cwd: task.cwd.clone(),
+        },
     );
 
     {
@@ -650,13 +650,13 @@ pub(crate) async fn run_external_agent(
             Err(err) => {
                 let error = format!("Failed to lock database for mission initialization: {err}");
                 let _ = app.emit(
-                    "agent-task-error",
-                    json!({
-                        "task_id": task.id,
-                        "session_id": session_id,
-                        "agent_id": agent.id,
-                        "error": error
-                    }),
+                    crate::events::AGENT_TASK_ERROR,
+                    crate::events::AgentTaskError {
+                        task_id: task.id.clone(),
+                        session_id: session_id.to_string(),
+                        agent_id: agent.id.clone(),
+                        error: error.to_string(),
+                    },
                 );
                 return TaskResult {
                     task_id: task.id.clone(),
@@ -674,13 +674,13 @@ pub(crate) async fn run_external_agent(
             initialize_mission_state(&db, session_id, agent, task, mbus.map(|bus| bus.bus_id()))
         {
             let _ = app.emit(
-                "agent-task-error",
-                json!({
-                    "task_id": task.id,
-                    "session_id": session_id,
-                    "agent_id": agent.id,
-                    "error": err
-                }),
+                crate::events::AGENT_TASK_ERROR,
+                crate::events::AgentTaskError {
+                    task_id: task.id.clone(),
+                    session_id: session_id.to_string(),
+                    agent_id: agent.id.clone(),
+                    error: err.to_string(),
+                },
             );
             return TaskResult {
                 task_id: task.id.clone(),
@@ -694,7 +694,7 @@ pub(crate) async fn run_external_agent(
         }
     }
     let _ = app.emit(
-        "agent-task-state",
+        crate::events::AGENT_TASK_STATE,
         json!({ "mission_id": mission_id, "session_id": session_id, "status": "running", "event": "initialized" }),
     );
 
@@ -735,13 +735,13 @@ pub(crate) async fn run_external_agent(
             request_external_agent_approval(app, agent, &prompt, backend, cli_run.as_ref()).await
         {
             let _ = app.emit(
-                "agent-task-error",
-                json!({
-                    "task_id": task.id,
-                    "session_id": session_id,
-                    "agent_id": agent.id,
-                    "error": rejection.clone()
-                }),
+                crate::events::AGENT_TASK_ERROR,
+                crate::events::AgentTaskError {
+                    task_id: task.id.clone(),
+                    session_id: session_id.to_string(),
+                    agent_id: agent.id.clone(),
+                    error: rejection.clone(),
+                },
             );
             return TaskResult {
                 task_id: task.id.clone(),
@@ -817,27 +817,27 @@ pub(crate) async fn run_external_agent(
             // to the caller in `content`.
             if status == "error" {
                 let _ = app.emit(
-                    "agent-task-error",
-                    json!({
-                        "task_id": task.id,
-                        "session_id": session_id,
-                        "agent_id": agent.id,
-                        "error": summary.chars().take(200).collect::<String>(),
-                    }),
+                    crate::events::AGENT_TASK_ERROR,
+                    crate::events::AgentTaskError {
+                        task_id: task.id.clone(),
+                        session_id: session_id.to_string(),
+                        agent_id: agent.id.clone(),
+                        error: summary.chars().take(200).collect::<String>(),
+                    },
                 );
             } else {
                 let _ = app.emit(
-                    "agent-task-done",
-                    json!({
-                        "task_id": task.id,
-                        "session_id": session_id,
-                        "agent_id": agent.id,
-                        "agent_name": agent.name,
-                        "summary": summary.chars().take(200).collect::<String>(),
+                    crate::events::AGENT_TASK_DONE,
+                    crate::events::AgentTaskDone {
+                        task_id: task.id.clone(),
+                        session_id: session_id.to_string(),
+                        agent_id: agent.id.clone(),
+                        agent_name: agent.name.clone(),
+                        summary: summary.chars().take(200).collect::<String>(),
                         // "success" | "stopped": the row must never show a
                         // completed checkmark for a run the user cancelled.
-                        "status": status,
-                    }),
+                        status: status.to_string(),
+                    },
                 );
             }
             TaskResult {
@@ -859,13 +859,13 @@ pub(crate) async fn run_external_agent(
                 "error"
             };
             let _ = app.emit(
-                "agent-task-error",
-                json!({
-                    "task_id": task.id,
-                    "session_id": session_id,
-                    "agent_id": agent.id,
-                    "error": err
-                }),
+                crate::events::AGENT_TASK_ERROR,
+                crate::events::AgentTaskError {
+                    task_id: task.id.clone(),
+                    session_id: session_id.to_string(),
+                    agent_id: agent.id.clone(),
+                    error: err.to_string(),
+                },
             );
             TaskResult {
                 task_id: task.id.clone(),

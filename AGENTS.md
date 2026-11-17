@@ -171,6 +171,7 @@ Check the page in both themes, both languages and at ≈390px width before pushi
 ## Architecture
 
 - **Entry points**: `src/main.tsx` → `src/App.tsx`; Rust `src-tauri/src/main.rs` → `src-tauri/src/lib.rs` (command registration, state, app setup).
+- **IPC contract — two halves, both explicit.** Invoke: every `#[tauri::command]` lives in `src-tauri/src/ipc/<domain>.rs` (`app`, `config`, `chat`, `evolution`, `history`, `skills`, `experiences`, `mcp`, `agents`, `tools`, `workspace`, `update`, `figures`, `notify`) and only forwards to the owning domain module (`pub(crate)` implementation) — `src/lib.rs` keeps the one `generate_handler!` list and no command bodies. Events: `src-tauri/src/events.rs` owns every backend → frontend event name as a constant plus the payload structs for the fixed-shape events (`ChatToken`, `ChatUsage`, `ChatNotice`, `ChatInjected`, `ToolCall`, `ConfirmRequired`, `AgentTask*`, `EvolutionMaintenanceState`, …); emit sites never carry a string literal, and a field renamed there must be renamed in `src/api.ts` / `src/types.ts` too. A few payloads stay `json!` because they are assembled incrementally or nest a domain type (`todo-state`, `risk-assessment`, `syntax-error`, `agent-selection`, planner/mbus events) — their names still come from `events`.
 - **Boot bundle (frontend)**: the first frame parses exactly two JS chunks — `main` (`App.tsx`, the composer, `api.ts`, i18n) and `App` (React, framer-motion, FontAwesome). Everything a *reply* needs is behind `lazy()`: `ChatMessage` (markdown-it, highlight.js with its language pack, the figure / mermaid card machinery), `ToolCallGroup`, the sidebar panels (Settings / Skills / Tools / MCP / Agents / History) and `MarkdownPreview`. A launch starts with `messages = []`, so none of that is on the boot path. `ChatMessageBoundary` is its own module on purpose — the boundary must be mounted before the chunk it wraps arrives — and its two classes (`.markdown-fallback`, `.message-render-error`) live in `App.css`, not `ChatMessage.css`. `warmTranscriptChunk()` (idle, plus the composer's first focus — `requestTranscriptChunk`) and the idle panel prefetch fetch the chunks after the first paint, so a first message or an opened panel does not wait for a round trip. KaTeX stays a dynamic `import("katex")` (`utils/markdownMath.ts` + `preloadKatex()`); when a heavy library (katex / markdown-it / highlight.js) is *statically* reachable from `App.tsx` again, Rollup inlines it into the boot chunk — that is exactly how a ~583 KB KaTeX copy used to sit in `main`, unnoticed, until the transcript was split out. Verify with the built `dist/index.html`: only `main` and `App` may be in the entry graph.
 - **Streaming chat**: `chat_completion` command opens an SSE connection (`reqwest` + `futures-util`) and emits to the frontend:
   `chat-token`, `chat-reasoning-token`, `chat-done`, `chat-error`, `chat-usage`. Streamed tool calls are normalised before use: an empty or duplicate `id` (some relays omit it) gets a generated `call_…` id, so the assistant `tool_calls` and the following `tool` messages always agree and strict providers (DashScope) accept the next request.
@@ -370,7 +371,11 @@ src/                       # React 19 + TS frontend
                            # card renderers
 
 src-tauri/
-  src/lib.rs               # state, menu, command registration, app setup
+  src/lib.rs               # AppConfig/AppState, menu, window setup, apply_config
+  src/events.rs            # event-name constants + payload structs (push IPC contract)
+  src/ipc/                 # thin #[tauri::command] layer, one module per domain
+    app.rs config.rs chat.rs evolution.rs history.rs skills.rs experiences.rs
+    mcp.rs agents.rs tools.rs workspace.rs update.rs figures.rs notify.rs
   src/llm_complete.rs      # chat_completion (SSE streaming)
   src/agents.rs            # sub-agent types, runtime config, missions, orchestration
   src/agents/

@@ -25,7 +25,6 @@ const RELEASES_URL: &str = "https://api.github.com/repos/xlbbb-cn/ai-chat/releas
 const RELEASE_URL_PREFIX: &str = "https://github.com/xlbbb-cn/ai-chat/";
 /// GitHub rejects requests without a User-Agent.
 const USER_AGENT: &str = "rabbit-chat-studio-desktop";
-const DOWNLOAD_PROGRESS_EVENT: &str = "update-download-progress";
 /// Emit at most one progress event per this many downloaded bytes.
 const PROGRESS_STEP: u64 = 256 * 1024;
 /// Assets scoring at or above this value are marked as recommended for this machine.
@@ -304,8 +303,7 @@ async fn fetch_releases() -> Result<Vec<serde_json::Value>, String> {
 }
 
 /// Fetch the newest published release and compare it with the running version.
-#[tauri::command]
-pub async fn check_update(
+pub(crate) async fn check_update(
     app: AppHandle,
     state: State<'_, AppState>,
     include_prerelease: Option<bool>,
@@ -410,8 +408,7 @@ fn sanitize_file_name(name: &str) -> Result<String, String> {
 }
 
 /// Download one release asset into the downloads folder, streaming progress events.
-#[tauri::command]
-pub async fn download_update(
+pub(crate) async fn download_update(
     app: AppHandle,
     state: State<'_, AppState>,
     asset_name: String,
@@ -461,7 +458,7 @@ pub async fn download_update(
         if downloaded - last_emitted >= PROGRESS_STEP {
             last_emitted = downloaded;
             let _ = app.emit(
-                DOWNLOAD_PROGRESS_EVENT,
+                crate::events::UPDATE_DOWNLOAD_PROGRESS,
                 UpdateDownloadProgress {
                     asset_name: file_name.clone(),
                     downloaded,
@@ -476,7 +473,7 @@ pub async fn download_update(
         .map_err(|e| format!("Could not write {}: {e}", target.display()))?;
 
     let _ = app.emit(
-        DOWNLOAD_PROGRESS_EVENT,
+        crate::events::UPDATE_DOWNLOAD_PROGRESS,
         UpdateDownloadProgress {
             asset_name: file_name.clone(),
             downloaded,
@@ -495,8 +492,7 @@ pub async fn download_update(
 }
 
 /// Open a downloaded installer with the OS default handler.
-#[tauri::command]
-pub fn open_update_file(app: AppHandle, path: String) -> Result<(), String> {
+pub(crate) fn open_update_file(app: AppHandle, path: String) -> Result<(), String> {
     let path = PathBuf::from(path);
     if !path.is_file() {
         return Err(format!("{} no longer exists.", path.display()));
@@ -507,8 +503,7 @@ pub fn open_update_file(app: AppHandle, path: String) -> Result<(), String> {
 }
 
 /// Reveal the downloaded installer in the file manager.
-#[tauri::command]
-pub fn reveal_update_file(app: AppHandle, path: String) -> Result<(), String> {
+pub(crate) fn reveal_update_file(app: AppHandle, path: String) -> Result<(), String> {
     let path = Path::new(&path);
     if !path.exists() {
         return Err(format!("{} no longer exists.", path.display()));
@@ -517,8 +512,7 @@ pub fn reveal_update_file(app: AppHandle, path: String) -> Result<(), String> {
 }
 
 /// Open the release page in the browser (restricted to this repository).
-#[tauri::command]
-pub fn open_release_page(app: AppHandle, url: String) -> Result<(), String> {
+pub(crate) fn open_release_page(app: AppHandle, url: String) -> Result<(), String> {
     if !url.starts_with(RELEASE_URL_PREFIX) {
         return Err(format!("Refusing to open a URL outside {REPO_SLUG}."));
     }
@@ -526,8 +520,7 @@ pub fn open_release_page(app: AppHandle, url: String) -> Result<(), String> {
 }
 
 /// Version reported by the app bundle (used by the About section).
-#[tauri::command]
-pub fn get_app_version(app: AppHandle) -> String {
+pub(crate) fn get_app_version(app: AppHandle) -> String {
     app.package_info().version.to_string()
 }
 

@@ -27,10 +27,8 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::util::now_ms;
 
-/// Emitted with the full list of pending timers whenever it changes.
-pub const TIMER_STATE_EVENT: &str = "timer-state";
-/// Emitted with the [`TimerEntry`] that just fired.
-pub const TIMER_FIRED_EVENT: &str = "timer-fired";
+/// Emitted with the full list of pending timers whenever it changes. The event
+/// name lives in [`crate::events`].
 
 /// Shortest delay the model may request (seconds).
 pub const MIN_DELAY_SECONDS: u64 = 1;
@@ -103,9 +101,9 @@ pub fn format_fire_at(fire_at_ms: i64) -> String {
 // ─── Sleep lock ──────────────────────────────────────────────────────────────
 
 /// Emitted with [`SleepLockState`] whenever the sleep-lock hold count changes.
-/// The timer bar badge in the UI reflects this.
+/// The timer bar badge in the UI reflects this. The event name lives in
+/// [`crate::events`].
 #[cfg_attr(test, allow(dead_code))] // test builds never emit
-pub const SLEEP_LOCK_EVENT: &str = "sleep-lock";
 
 /// Snapshot of the cross-platform "system awake" lock.
 #[derive(Debug, Clone, Default, Serialize)]
@@ -191,7 +189,7 @@ mod platform {
         // If the spawn itself fails, the closure — and with it the receiver —
         // is dropped too, so `send` fails fast from then on.
         let _ = std::thread::Builder::new()
-            .name("sleep-lock".to_string())
+            .name(crate::events::SLEEP_LOCK.to_string())
             .spawn(move || {
                 while let Ok(on) = receiver.recv() {
                     let flags = ES_CONTINUOUS | if on { ES_SYSTEM_REQUIRED } else { 0 };
@@ -445,7 +443,7 @@ mod platform {
             // If the spawn fails, the closure — and with it the receiver — is
             // dropped too, so `send` fails fast from then on.
             let _ = std::thread::Builder::new()
-                .name("sleep-lock".to_string())
+                .name(crate::events::SLEEP_LOCK.to_string())
                 .spawn(move || {
                     let mut holds: Vec<Hold> = Vec::new();
                     // One line per cause: a session without any inhibit service
@@ -663,7 +661,7 @@ impl SleepLock {
     #[cfg(not(test))]
     fn emit(&self, holders: u32) {
         let _ = self.app.emit(
-            SLEEP_LOCK_EVENT,
+            crate::events::SLEEP_LOCK,
             SleepLockState {
                 active: holders > 0,
                 holders,
@@ -835,7 +833,7 @@ impl TimerRegistry {
 /// Push the current timer list to the UI.
 fn emit_state(app: &AppHandle) {
     let list = app.state::<TimerRegistry>().list();
-    let _ = app.emit(TIMER_STATE_EVENT, list);
+    let _ = app.emit(crate::events::TIMER_STATE, list);
 }
 
 /// Wait until `entry.fire_at`, then fire it.
@@ -874,7 +872,7 @@ fn fire(app: &AppHandle, id: &str) {
         );
     }
 
-    let _ = app.emit(TIMER_FIRED_EVENT, entry);
+    let _ = app.emit(crate::events::TIMER_FIRED, entry);
 }
 
 /// Validate a requested delay, returning a user-facing error message.
@@ -1031,21 +1029,18 @@ pub fn migrate_legacy_file(legacy: &Path, target: &Path) -> Result<(), String> {
 // ─── Commands ────────────────────────────────────────────────────────────────
 
 /// List every pending timer (soonest first) for the timer bar in the UI.
-#[tauri::command]
-pub fn list_timers(state: State<'_, TimerRegistry>) -> Vec<TimerEntry> {
+pub(crate) fn list_timers(state: State<'_, TimerRegistry>) -> Vec<TimerEntry> {
     state.list()
 }
 
 /// Current sleep-lock state, so the timer bar badge is correct on first
 /// render (the `sleep-lock` event only reports changes).
-#[tauri::command]
-pub fn get_sleep_lock_state(state: State<'_, SleepLock>) -> SleepLockState {
+pub(crate) fn get_sleep_lock_state(state: State<'_, SleepLock>) -> SleepLockState {
     state.snapshot()
 }
 
 /// Cancel a pending timer by id.
-#[tauri::command]
-pub fn cancel_timer(app: AppHandle, id: String) -> Result<TimerEntry, String> {
+pub(crate) fn cancel_timer(app: AppHandle, id: String) -> Result<TimerEntry, String> {
     cancel(&app, &id)
 }
 
@@ -1179,7 +1174,7 @@ mod tests {
     fn timer_registry_parks_the_sleep_lock_while_timers_pending() {
         let (backend, transitions) = counting_backend();
         let lock = SleepLock::for_tests(backend);
-        let registry = TimerRegistry::load(temp_path("sleep-lock"), lock);
+        let registry = TimerRegistry::load(temp_path(crate::events::SLEEP_LOCK), lock);
 
         registry.insert(entry("a", now_ms() + 60_000));
         registry.insert(entry("b", now_ms() + 60_000));

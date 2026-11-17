@@ -580,15 +580,13 @@ fn recent_output(output: &str, max_lines: usize) -> String {
 
 /// Every serve process the app knows about (running and recently finished),
 /// oldest first. Polled by the Tools panel's serve monitor.
-#[tauri::command]
-pub fn list_serve_processes(state: State<'_, crate::AppState>) -> Vec<ServeProcessInfo> {
+pub(crate) fn list_serve_processes(state: State<'_, crate::AppState>) -> Vec<ServeProcessInfo> {
     state.serve_processes.snapshot()
 }
 
 /// Stop one serve process (or drop a finished entry). Returns the same
 /// human-readable status the `run_shell` tool prints for `action: "stop"`.
-#[tauri::command]
-pub fn stop_serve_process(state: State<'_, crate::AppState>, serve_id: String) -> String {
+pub(crate) fn stop_serve_process(state: State<'_, crate::AppState>, serve_id: String) -> String {
     state.serve_processes.stop(&serve_id)
 }
 

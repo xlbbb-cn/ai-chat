@@ -612,7 +612,7 @@ impl ContextCompressor<'_> {
             req_body,
             self.cancelled,
             StreamOptions {
-                token_event: "chat-token",
+                token_event: crate::events::CHAT_TOKEN,
                 task_id: None,
                 // The summarizer runs with every UI event off; no session needed.
                 session_id: None,

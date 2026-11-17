@@ -247,8 +247,7 @@ pub struct HistoryRecord {
 }
 
 #[allow(clippy::too_many_arguments)]
-#[tauri::command]
-pub fn save_history(
+pub(crate) fn save_history(
     session_id: String,
     role: String,
     content: String,
@@ -429,8 +428,7 @@ fn history_record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryR
 
 /// Lightweight session list for the history sidebar. `keyword` filters by
 /// session id, message content or the first user message.
-#[tauri::command]
-pub fn list_history_sessions(
+pub(crate) fn list_history_sessions(
     keyword: Option<String>,
     state: tauri::State<'_, crate::AppState>,
 ) -> Result<Vec<HistorySessionSummary>, String> {
@@ -439,8 +437,7 @@ pub fn list_history_sessions(
 }
 
 /// Load all messages of one session (no truncation).
-#[tauri::command]
-pub fn load_session_messages(
+pub(crate) fn load_session_messages(
     session_id: String,
     state: tauri::State<'_, crate::AppState>,
 ) -> Result<Vec<HistoryRecord>, String> {
@@ -448,8 +445,7 @@ pub fn load_session_messages(
     query_session_messages(&db, &session_id).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-pub fn delete_history(
+pub(crate) fn delete_history(
     session_id: String,
     state: tauri::State<'_, crate::AppState>,
 ) -> Result<(), String> {
@@ -490,8 +486,7 @@ pub fn delete_history(
 }
 
 /// Delete a single message by its database id.
-#[tauri::command]
-pub fn delete_message(
+pub(crate) fn delete_message(
     message_id: i64,
     state: tauri::State<'_, crate::AppState>,
 ) -> Result<(), String> {
@@ -523,8 +518,7 @@ pub(crate) fn delete_history_after(
 }
 
 /// Backend of `deleteMessagesAfter` — see [`delete_history_after`].
-#[tauri::command]
-pub fn delete_messages_after(
+pub(crate) fn delete_messages_after(
     session_id: String,
     after_message_id: i64,
     state: tauri::State<'_, crate::AppState>,
@@ -536,8 +530,7 @@ pub fn delete_messages_after(
 /// Fork a session: copy all messages up to and including `up_to_message_id`
 /// from `source_session_id` into a new session `new_session_id`.
 /// Returns the number of messages copied.
-#[tauri::command]
-pub fn fork_session(
+pub(crate) fn fork_session(
     source_session_id: String,
     new_session_id: String,
     up_to_message_id: i64,
@@ -685,8 +678,7 @@ pub fn copy_embedded_roles(db: &Connection, from: &str, to: &str) -> Result<(), 
 
 /// List all session meta rows. Sessions without a meta row are simply absent
 /// from the result (the frontend treats missing meta as defaults).
-#[tauri::command]
-pub fn list_session_meta(
+pub(crate) fn list_session_meta(
     state: tauri::State<'_, crate::AppState>,
 ) -> Result<Vec<SessionMeta>, String> {
     let db = state.db.lock().unwrap();
@@ -710,8 +702,7 @@ pub fn list_session_meta(
 
 /// Upsert session meta fields. `None` leaves the field unchanged, so the
 /// frontend can update title / favorite / archived independently.
-#[tauri::command]
-pub fn update_session_meta(
+pub(crate) fn update_session_meta(
     session_id: String,
     title: Option<String>,
     favorite: Option<bool>,
@@ -990,8 +981,7 @@ pub fn compact_logs_at(path: &std::path::Path, days: i64) -> Result<CompactResul
 
 /// Delete every log row. The space is only reclaimed by a later `VACUUM`
 /// ([`compact_database`]).
-#[tauri::command]
-pub fn clear_logs(state: tauri::State<'_, crate::AppState>) -> Result<usize, String> {
+pub(crate) fn clear_logs(state: tauri::State<'_, crate::AppState>) -> Result<usize, String> {
     let db = state.db.lock().unwrap();
     let mut removed = 0usize;
     for table in ["api_requests", "interaction_log"] {
@@ -1004,8 +994,7 @@ pub fn clear_logs(state: tauri::State<'_, crate::AppState>) -> Result<usize, Str
 
 /// Prune expired logs and compact the database file. The retention window
 /// comes from the user's settings (`log_retention_days`).
-#[tauri::command]
-pub async fn compact_database(
+pub(crate) async fn compact_database(
     state: tauri::State<'_, crate::AppState>,
 ) -> Result<CompactResult, String> {
     let db_path = state.db_path();
@@ -1149,8 +1138,7 @@ pub fn query_interactions(
     Ok(records)
 }
 
-#[tauri::command]
-pub fn list_interactions(
+pub(crate) fn list_interactions(
     session_id: String,
     state: tauri::State<'_, crate::AppState>,
 ) -> Result<Vec<InteractionLogRecord>, String> {
@@ -1158,8 +1146,7 @@ pub fn list_interactions(
     query_interactions(&db, &session_id)
 }
 
-#[tauri::command]
-pub fn get_interaction(
+pub(crate) fn get_interaction(
     id: i64,
     state: tauri::State<'_, crate::AppState>,
 ) -> Result<InteractionLogDetail, String> {
@@ -1404,8 +1391,7 @@ pub fn session_stats(
 }
 
 /// Session analysis for the Monitor panel's bottom strip.
-#[tauri::command]
-pub fn get_session_stats(
+pub(crate) fn get_session_stats(
     session_id: String,
     state: tauri::State<'_, crate::AppState>,
 ) -> Result<SessionStats, String> {

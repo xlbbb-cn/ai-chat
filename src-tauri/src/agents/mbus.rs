@@ -1716,7 +1716,7 @@ fn record_message(app: &AppHandle, bus: &MissionBus, message: &BusMessage, recip
         "recipients": recipients,
         "created_at_ms": message.created_at_ms,
     });
-    let _ = app.emit("agent-mbus-message", payload);
+    let _ = app.emit(crate::events::AGENT_MBUS_MESSAGE, payload);
     log_agent_event(
         app,
         "INFO",
@@ -2016,9 +2016,8 @@ pub fn list_bus_messages(
         .map_err(|err| err.to_string())
 }
 
-/// Tauri command: recent bus messages for the bus that belongs to `mission_id`.
-#[tauri::command]
-pub fn list_mission_bus_messages(
+/// Panel service for `ipc::agents`: recent bus messages for the bus that belongs to `mission_id`.
+pub(crate) fn list_mission_bus_messages(
     state: tauri::State<'_, AppState>,
     mission_id: String,
     limit: Option<usize>,

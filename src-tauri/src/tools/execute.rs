@@ -124,16 +124,16 @@ pub(crate) async fn request_tool_confirmation(
     }
 
     let _ = app.emit(
-        "confirm-required",
-        serde_json::json!({
-            "request_id": request_id,
-            "call_id": call_id,
-            "reason": reason,
-            "cmd_type": cmd_type,
-            "code": code,
-            "confirm_kind": confirm_kind,
-            "requires_auth": requires_auth,
-        }),
+        crate::events::CONFIRM_REQUIRED,
+        crate::events::ConfirmRequired {
+            request_id: request_id.clone(),
+            call_id: call_id.map(str::to_string),
+            reason: reason.clone(),
+            cmd_type: cmd_type.clone(),
+            code: code.clone(),
+            confirm_kind: confirm_kind.to_string(),
+            requires_auth: requires_auth.to_string(),
+        },
     );
 
     let await_reply = async {
@@ -336,7 +336,7 @@ pub async fn execute_tool(
                         "session_id": session_id,
                         "task": task,
                     });
-                    let _ = app.emit("agent-task-state", payload.clone());
+                    let _ = app.emit(crate::events::AGENT_TASK_STATE, payload.clone());
                     serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string())
                 }
                 Err(err) => format!("Error: {err}"),
@@ -360,7 +360,7 @@ pub async fn execute_tool(
                         "session_id": session_id,
                         "task": task,
                     });
-                    let _ = app.emit("agent-task-state", payload.clone());
+                    let _ = app.emit(crate::events::AGENT_TASK_STATE, payload.clone());
                     serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string())
                 }
                 Err(err) => format!("Error: {err}"),
@@ -402,7 +402,7 @@ pub async fn execute_tool(
                         "status": "completed",
                         "final_report": final_report.unwrap_or(""),
                     });
-                    let _ = app.emit("agent-task-state", payload.clone());
+                    let _ = app.emit(crate::events::AGENT_TASK_STATE, payload.clone());
                     serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string())
                 }
                 Err(err) => format!("Error: {err}"),
@@ -874,7 +874,7 @@ pub async fn execute_tool(
 
                 // Emit syntax error event for frontend
                 let _ = app.emit(
-                    "syntax-error",
+                    crate::events::SYNTAX_ERROR,
                     serde_json::json!({
                         "request_id": request_id,
                         "cmd_type": "direct",
@@ -956,7 +956,7 @@ pub async fn execute_tool(
 
             // ── Emit risk assessment event for frontend display ───────────────
             let _ = app.emit(
-                "risk-assessment",
+                crate::events::RISK_ASSESSMENT,
                 serde_json::json!({
                     "request_id": request_id,
                     "cmd_type": "direct",
@@ -1226,7 +1226,7 @@ pub async fn execute_tool(
 
                 // Emit syntax error event for frontend
                 let _ = app.emit(
-                    "syntax-error",
+                    crate::events::SYNTAX_ERROR,
                     serde_json::json!({
                         "request_id": request_id,
                         "cmd_type": shell_type,
@@ -1257,7 +1257,7 @@ pub async fn execute_tool(
 
             // ── Emit risk assessment event for frontend display ───────────────
             let _ = app.emit(
-                "risk-assessment",
+                crate::events::RISK_ASSESSMENT,
                 serde_json::json!({
                     "request_id": request_id,
                     "cmd_type": shell_type,

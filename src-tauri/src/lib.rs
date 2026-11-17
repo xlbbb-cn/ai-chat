@@ -17,11 +17,13 @@ use tauri_plugin_opener::OpenerExt;
 pub mod agents;
 mod backup;
 mod db;
+mod events;
 mod evolution_maintenance;
 mod experience;
 mod figures;
 mod html_pdf;
 mod instance;
+mod ipc;
 mod llm_complete;
 mod logger;
 // `src/utils/` is a plain folder holding standalone crates (workspace members
@@ -63,9 +65,7 @@ const OPEN_ISSUE_MENU_ID: &str = "open-issue";
 /// Where "Report an issue..." sends the user. Fixed on purpose — see
 /// `open_issue_page`.
 const ISSUE_URL: &str = "https://github.com/xlbbb-cn/ai-chat/issues/new";
-const MARKDOWN_EDIT_OPEN_EVENT: &str = "markdown-edit-open";
-const MARKDOWN_EDIT_ERROR_EVENT: &str = "markdown-edit-error";
-const WORKSPACE_CHANGED_EVENT: &str = "workspace-changed";
+
 
 /// Tool ids that no longer exist in the tool set.
 ///
@@ -103,11 +103,7 @@ fn default_max_parallel_tools() -> u32 {
     DEFAULT_MAX_PARALLEL_TOOLS
 }
 
-#[derive(Debug, Clone, Serialize)]
-struct MarkdownEditPayload {
-    path: String,
-    content: String,
-}
+
 
 // ─── App menu actions ────────────────────────────────────────────────────────
 //
@@ -157,11 +153,11 @@ fn open_issue_page(app: &AppHandle) -> Result<(), String> {
 fn read_markdown_into_editor(app: &AppHandle, markdown_path: &Path) {
     match fs::read_to_string(markdown_path) {
         Ok(content) => {
-            let payload = MarkdownEditPayload {
+            let payload = events::MarkdownEditPayload {
                 path: markdown_path.to_string_lossy().to_string(),
                 content,
             };
-            let _ = app.emit(MARKDOWN_EDIT_OPEN_EVENT, payload);
+            let _ = app.emit(events::MARKDOWN_EDIT_OPEN, payload);
         }
         Err(err) => {
             let msg = format!("Failed to open markdown file: {err}");
@@ -170,7 +166,7 @@ fn read_markdown_into_editor(app: &AppHandle, markdown_path: &Path) {
                 .lock()
                 .unwrap()
                 .log("ERROR", &msg);
-            let _ = app.emit(MARKDOWN_EDIT_ERROR_EVENT, msg);
+            let _ = app.emit(events::MARKDOWN_EDIT_ERROR, msg);
         }
     }
 }
@@ -188,13 +184,11 @@ fn import_backup_archive(app: &AppHandle, backup_path: &Path) {
 
 // ─── Custom titlebar commands ────────────────────────────────────────────────
 
-#[tauri::command]
-fn app_open_data_dir(app: AppHandle) {
+pub(crate) fn app_open_data_dir(app: AppHandle) {
     open_app_data_dir(&app);
 }
 
-#[tauri::command]
-fn app_open_workspace_dir(app: AppHandle) -> Result<(), String> {
+pub(crate) fn app_open_workspace_dir(app: AppHandle) -> Result<(), String> {
     open_workspace_dir(&app)
 }
 
@@ -202,8 +196,7 @@ fn app_open_workspace_dir(app: AppHandle) -> Result<(), String> {
 ///
 /// It holds the PDF conversion cache (expires on its own) and the composer
 /// pastes (24 h). Sub-agent deliverables live in `.data/deliver` instead.
-#[tauri::command]
-fn app_open_workspace_tmp_dir(app: AppHandle) -> Result<(), String> {
+pub(crate) fn app_open_workspace_tmp_dir(app: AppHandle) -> Result<(), String> {
     let workspace = app
         .state::<AppState>()
         .workspace_dir
@@ -218,8 +211,7 @@ fn app_open_workspace_tmp_dir(app: AppHandle) -> Result<(), String> {
 }
 
 /// Open `<workspace>/.data/deliver` — the root of every session's deliverables.
-#[tauri::command]
-fn app_open_deliverables_dir(app: AppHandle) -> Result<(), String> {
+pub(crate) fn app_open_deliverables_dir(app: AppHandle) -> Result<(), String> {
     let workspace = app
         .state::<AppState>()
         .workspace_dir
@@ -237,8 +229,7 @@ fn app_open_deliverables_dir(app: AppHandle) -> Result<(), String> {
 ///
 /// The session id is validated by `workspace::session_deliver_root`, so the
 /// command cannot be pointed at an arbitrary directory.
-#[tauri::command]
-fn app_open_session_deliver_dir(app: AppHandle, session_id: String) -> Result<(), String> {
+pub(crate) fn app_open_session_deliver_dir(app: AppHandle, session_id: String) -> Result<(), String> {
     let workspace = app
         .state::<AppState>()
         .workspace_dir
@@ -253,14 +244,12 @@ fn app_open_session_deliver_dir(app: AppHandle, session_id: String) -> Result<()
 }
 
 /// Open the GitHub new-issue page (titlebar `⋯` menu → Report an issue…).
-#[tauri::command]
-fn app_open_issue_page(app: AppHandle) -> Result<(), String> {
+pub(crate) fn app_open_issue_page(app: AppHandle) -> Result<(), String> {
     open_issue_page(&app)
 }
 
 /// Open `<app_data>/agents` — the folder holding every `llm` agent definition.
-#[tauri::command]
-fn app_open_agents_dir(app: AppHandle) -> Result<(), String> {
+pub(crate) fn app_open_agents_dir(app: AppHandle) -> Result<(), String> {
     let dir = app
         .path()
         .app_data_dir()
@@ -272,13 +261,11 @@ fn app_open_agents_dir(app: AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-fn app_open_markdown(app: AppHandle, path: String) {
+pub(crate) fn app_open_markdown(app: AppHandle, path: String) {
     read_markdown_into_editor(&app, Path::new(&path));
 }
 
-#[tauri::command]
-fn app_export_backup(app: AppHandle, path: String) -> Result<(), String> {
+pub(crate) fn app_export_backup(app: AppHandle, path: String) -> Result<(), String> {
     if path.trim().is_empty() {
         return Err("Backup path is empty".into());
     }
@@ -286,8 +273,7 @@ fn app_export_backup(app: AppHandle, path: String) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-async fn app_import_backup(app: AppHandle, path: String) -> Result<(), String> {
+pub(crate) async fn app_import_backup(app: AppHandle, path: String) -> Result<(), String> {
     if path.trim().is_empty() {
         return Err("Backup path is empty".into());
     }
@@ -305,8 +291,7 @@ async fn app_import_backup(app: AppHandle, path: String) -> Result<(), String> {
 /// all — and printed here by a headless Chromium. `NO_PDF_ENGINE` means no
 /// browser is installed, which the frontend answers with the print dialog
 /// rather than an error.
-#[tauri::command]
-async fn app_export_pdf(html: String, out_path: String) -> Result<String, String> {
+pub(crate) async fn app_export_pdf(html: String, out_path: String) -> Result<String, String> {
     if html.trim().is_empty() {
         return Err("The document is empty".into());
     }
@@ -474,7 +459,7 @@ pub(crate) fn apply_config(
         // the old workspace may not exist in the new one. Notify the UI so it
         // can reload `skills.status` and re-validate the selection.
         let _ = app.emit(
-            WORKSPACE_CHANGED_EVENT,
+            events::WORKSPACE_CHANGED,
             new_workspace_path.to_string_lossy().to_string(),
         );
     } else {
@@ -1061,8 +1046,7 @@ pub struct TodoAskPending {
 
 // ─── Config commands ──────────────────────────────────────────────────────────
 
-#[tauri::command]
-fn get_config(state: State<'_, AppState>) -> AppConfig {
+pub(crate) fn get_config(state: State<'_, AppState>) -> AppConfig {
     let mut config = state.config.lock().unwrap().clone();
     // Retired tool ids are dropped on the way out too, so the UI never renders
     // a switch for a tool that no longer exists.
@@ -1073,8 +1057,7 @@ fn get_config(state: State<'_, AppState>) -> AppConfig {
     config
 }
 
-#[tauri::command]
-fn save_config(
+pub(crate) fn save_config(
     app: AppHandle,
     state: State<'_, AppState>,
     config: AppConfig,
@@ -1088,8 +1071,7 @@ fn save_config(
 /// sub-agent may run a different model. The budget is keyed by model id and
 /// shared by every agent that uses it, so the Agents panel updates just this
 /// entry instead of round-tripping the whole `AppConfig` form.
-#[tauri::command]
-fn set_model_context_length(
+pub(crate) fn set_model_context_length(
     app: AppHandle,
     state: State<'_, AppState>,
     model: String,
@@ -1112,8 +1094,7 @@ fn set_model_context_length(
     apply_config(&app, &state, config)
 }
 
-#[tauri::command]
-async fn fetch_models(
+pub(crate) async fn fetch_models(
     state: State<'_, AppState>,
     api_base_url: Option<String>,
     api_key: Option<String>,
@@ -1227,8 +1208,7 @@ fn extract_context_length(model: &serde_json::Value) -> Option<u64> {
         .and_then(parse)
 }
 
-#[tauri::command]
-fn stop_chat_completion(app: AppHandle, state: State<'_, AppState>) {
+pub(crate) fn stop_chat_completion(app: AppHandle, state: State<'_, AppState>) {
     // Cancel the *current* turn's flag. If no turn is running this simply
     // marks the slot's default flag — a new turn installs a fresh flag anyway,
     // so the stop never leaks into the next turn.
@@ -1250,14 +1230,15 @@ fn stop_chat_completion(app: AppHandle, state: State<'_, AppState>) {
         // so the UI would otherwise keep the row (and its cancel button) alive
         // for a task that is already dying.
         for snapshot in &cancelled {
-            let _ = app.emit(
-                tools::background::BACKGROUND_TASK_STATE_EVENT,
-                snapshot.clone(),
-            );
+            let _ = app.emit(events::BACKGROUND_TASK_STATE, snapshot.clone());
         }
         let _ = app.emit(
-            tools::background::BACKGROUND_WAITING_EVENT,
-            serde_json::json!({ "session_id": session_id, "pending": 0 }),
+            events::BACKGROUND_WAITING,
+            events::BackgroundWaiting {
+                session_id: session_id.clone(),
+                pending: 0,
+                round: None,
+            },
         );
         if !cancelled.is_empty() {
             let count = cancelled.len();
@@ -1277,7 +1258,7 @@ fn stop_chat_completion(app: AppHandle, state: State<'_, AppState>) {
         match tools::todos::settle_interrupted(&app, &session_id) {
             Ok(Some(summary)) => {
                 let _ = app.emit(
-                    "todo-state",
+                    events::TODO_STATE,
                     serde_json::json!({
                         "type": "todo_state",
                         "list_id": summary.list_id,
@@ -1302,8 +1283,7 @@ fn stop_chat_completion(app: AppHandle, state: State<'_, AppState>) {
 }
 
 /// Snapshot of the background tasks of one chat session (UI management).
-#[tauri::command]
-fn list_background_tasks(
+pub(crate) fn list_background_tasks(
     session_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Vec<tools::background::BackgroundTaskSnapshot> {
@@ -1315,8 +1295,7 @@ fn list_background_tasks(
 
 /// Cancel one background task (the UI's cancel button). Returns the updated
 /// snapshot so the caller can update its entry without waiting for an event.
-#[tauri::command]
-fn cancel_background_task(
+pub(crate) fn cancel_background_task(
     task_id: String,
     state: State<'_, AppState>,
 ) -> Result<tools::background::BackgroundTaskSnapshot, String> {
@@ -1330,8 +1309,7 @@ fn cancel_background_task(
 /// is mounted per assistant message, so a list created in an earlier turn (or
 /// before a reload) has to be fetched instead of waiting for the next
 /// `todo-state` event.
-#[tauri::command]
-fn get_active_todo_list(
+pub(crate) fn get_active_todo_list(
     app: AppHandle,
     session_id: String,
 ) -> Result<Option<todos::TodoListSummary>, String> {
@@ -1346,8 +1324,7 @@ fn get_active_todo_list(
 /// UI then sends the text as a normal next-turn message, which is the only
 /// other safe option: a turn that already finished will never make another
 /// request, so an item left here would be drained by an unrelated later turn.
-#[tauri::command]
-fn inject_user_message(
+pub(crate) fn inject_user_message(
     session_id: String,
     id: String,
     text: String,
@@ -1391,8 +1368,7 @@ fn inject_user_message(
 /// Called by the frontend to confirm or deny a pending dangerous-command execution.
 /// `request_id` must match the currently pending request; stale confirmations
 /// from an earlier dialog are ignored so they cannot approve the wrong command.
-#[tauri::command]
-fn confirm_command(
+pub(crate) fn confirm_command(
     state: State<'_, AppState>,
     request_id: String,
     confirmed: bool,
@@ -1415,8 +1391,7 @@ fn confirm_command(
 /// `{ id, value }` pair per question on submit; `None` dismisses the form
 /// (the tool then tells the model the user skipped it). `request_id` must
 /// match the pending request, so a stale panel cannot answer a newer form.
-#[tauri::command]
-fn todo_ask_reply(
+pub(crate) fn todo_ask_reply(
     state: State<'_, AppState>,
     request_id: String,
     answers: Option<Vec<todos::TodoAskAnswer>>,
@@ -1434,13 +1409,11 @@ fn todo_ask_reply(
 /// The still-open `todos ask` form, if any — a webview reload loses the
 /// listener and the panel, so the restored UI fetches the pending payload the
 /// same way `get_evolution_maintenance_state` restores the napping face.
-#[tauri::command]
-fn get_pending_todo_ask(state: State<'_, AppState>) -> Option<serde_json::Value> {
+pub(crate) fn get_pending_todo_ask(state: State<'_, AppState>) -> Option<serde_json::Value> {
     state.todo_ask.lock().ok()?.as_ref().map(|p| p.payload.clone())
 }
 
-#[tauri::command]
-fn get_workspace_dir(state: State<'_, AppState>) -> String {
+pub(crate) fn get_workspace_dir(state: State<'_, AppState>) -> String {
     state
         .workspace_dir
         .lock()
@@ -1469,8 +1442,7 @@ fn same_workspace_path(a: &str, b: &str) -> bool {
 /// current config instead of round-tripping the whole form. A form copy that
 /// predates another panel's edit must never overwrite it, which is why this is
 /// a dedicated command (same reason as `set_model_context_length`).
-#[tauri::command]
-fn set_workspace_dir(
+pub(crate) fn set_workspace_dir(
     app: AppHandle,
     state: State<'_, AppState>,
     workspace_dir: Option<String>,
@@ -1518,7 +1490,7 @@ fn set_workspace_dir(
 
 /// One row of the titlebar workspace switcher.
 #[derive(Debug, Clone, Serialize)]
-struct WorkspaceHistoryEntry {
+pub(crate) struct WorkspaceHistoryEntry {
     path: String,
     /// Whether the folder is still on disk — a recorded workspace may have
     /// been moved or deleted since it was last used.
@@ -1535,8 +1507,7 @@ struct WorkspaceHistoryEntry {
 /// The list is derived (recorded history + resolved current path), so the UI
 /// never rebuilds it from `AppConfig`: that only knows `workspace_dir: None`
 /// for the default workspace, not the path it resolves to.
-#[tauri::command]
-fn workspace_history_entries(state: State<'_, AppState>) -> Vec<WorkspaceHistoryEntry> {
+pub(crate) fn workspace_history_entries(state: State<'_, AppState>) -> Vec<WorkspaceHistoryEntry> {
     let current = state.workspace_dir.lock().unwrap().to_string_lossy().to_string();
     let config = state.config.lock().unwrap();
     config
@@ -1554,13 +1525,11 @@ fn workspace_history_entries(state: State<'_, AppState>) -> Vec<WorkspaceHistory
 /// Which window this is: the primary, or a shadow running on a temporary copy
 /// of the configuration (see `instance.rs`). The Settings panel uses it to
 /// explain why this window's changes will not be remembered.
-#[tauri::command]
-fn get_instance_info(state: State<'_, AppState>) -> instance::InstanceInfo {
+pub(crate) fn get_instance_info(state: State<'_, AppState>) -> instance::InstanceInfo {
     state.instance.info()
 }
 
-#[tauri::command]
-fn save_markdown_file(path: String, content: String) -> Result<(), String> {
+pub(crate) fn save_markdown_file(path: String, content: String) -> Result<(), String> {
     fs::write(PathBuf::from(path), content).map_err(|e| e.to_string())
 }
 
@@ -1705,8 +1674,7 @@ fn apply_window_backdrop(
 /// writes that to `<html data-vibrancy>`, which is the only switch that turns
 /// the translucent window tokens on. Called on startup (see `setup`) and from
 /// Settings → Appearance, including the live preview.
-#[tauri::command]
-fn set_window_vibrancy(
+pub(crate) fn set_window_vibrancy(
     window: tauri::WebviewWindow,
     level: String,
     dark: bool,
@@ -2293,109 +2261,122 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            llm_complete::chat_completion,
-            stop_chat_completion,
-            evolution_maintenance::start_evolution_maintenance,
-            evolution_maintenance::stop_evolution_maintenance,
-            evolution_maintenance::get_evolution_maintenance_state,
-            inject_user_message,
-            list_background_tasks,
-            cancel_background_task,
-            get_active_todo_list,
-            confirm_command,
-            todo_ask_reply,
-            get_pending_todo_ask,
-            get_config,
-            save_config,
-            set_model_context_length,
-            fetch_models,
-            model_metadata::fetch_model_metadata,
-            get_workspace_dir,
-            set_workspace_dir,
-            workspace_history_entries,
-            get_instance_info,
-            set_window_vibrancy,
-            notify::show_notify_card,
-            notify::hide_notify_card,
-            notify::focus_main_from_notify,
-            notify::refresh_notify_backdrop,
-            workspace_files::list_workspace_files,
-            workspace_files::read_workspace_file_range,
-            workspace_files::read_workspace_file_bytes,
-            workspace_files::save_pasted_file,
-            workspace_files::import_workspace_paths,
-            pdf_mentions::convert_pdf_mention,
-            save_markdown_file,
-            figures::save_figure,
-            figures::save_figure_html,
-            figures::app_open_figures_dir,
-            app_open_data_dir,
-            app_open_workspace_dir,
-            app_open_workspace_tmp_dir,
-            app_open_deliverables_dir,
-            app_open_session_deliver_dir,
-            app_open_issue_page,
-            app_open_markdown,
-            app_export_backup,
-            app_import_backup,
-            app_export_pdf,
-            skills::list_skills,
-            skills::save_skill,
-            skills::delete_skill,
-            skills::filter_existing_skills,
-            skills::get_skills_status,
-            skills::save_skills_status,
-            tools::experience::list_experiences,
-            tools::experience::delete_experience,
-            tools::memory::list_evolution_memory,
-            tools::memory::read_evolution_entry,
-            tools::memory::list_archived_skills,
-            db::save_history,
-            db::list_history_sessions,
-            db::load_session_messages,
-            db::delete_history,
-            db::delete_message,
-            db::delete_messages_after,
-            db::fork_session,
-            db::list_session_meta,
-            db::update_session_meta,
-            db::clear_logs,
-            db::compact_database,
-            db::list_interactions,
-            db::get_interaction,
-            db::get_session_stats,
-            mcp::list_mcp_servers,
-            mcp::save_mcp_server,
-            mcp::delete_mcp_server,
-            mcp::test_mcp_server,
-            mcp::get_mcp_logs,
-            mcp::clear_mcp_logs,
-            mcp::mcp_start_stdio,
-            mcp::mcp_stop_stdio,
-            agents::list_sub_agents,
-            agents::list_agent_mentions,
-            agents::refresh_agent_index,
-            agents::save_sub_agent,
-            agents::delete_sub_agent,
-            agents::get_agent_orchestration,
-            agents::save_agent_orchestration,
-            agents::list_agent_missions,
-            agents::list_deliverables,
-            agents::mbus::list_mission_bus_messages,
-            agents::probe_agent_cli,
-            agents::probe_agent_cloud,
-            app_open_agents_dir,
-            timer::list_timers,
-            timer::cancel_timer,
-            timer::get_sleep_lock_state,
-            tools::serve::list_serve_processes,
-            tools::serve::stop_serve_process,
-            update::check_update,
-            update::download_update,
-            update::open_update_file,
-            update::reveal_update_file,
-            update::open_release_page,
-            update::get_app_version,
+            // App shell: folders, backups, PDF export, window/instance actions.
+            ipc::app::app_open_data_dir,
+            ipc::app::app_open_workspace_dir,
+            ipc::app::app_open_workspace_tmp_dir,
+            ipc::app::app_open_deliverables_dir,
+            ipc::app::app_open_session_deliver_dir,
+            ipc::app::app_open_issue_page,
+            ipc::app::app_open_agents_dir,
+            ipc::app::app_open_markdown,
+            ipc::app::app_export_backup,
+            ipc::app::app_import_backup,
+            ipc::app::app_export_pdf,
+            ipc::app::save_markdown_file,
+            ipc::app::set_window_vibrancy,
+            ipc::app::get_instance_info,
+            // Notification card.
+            ipc::notify::show_notify_card,
+            ipc::notify::hide_notify_card,
+            ipc::notify::focus_main_from_notify,
+            ipc::notify::refresh_notify_backdrop,
+            // Configuration and model catalogue.
+            ipc::config::get_config,
+            ipc::config::save_config,
+            ipc::config::set_model_context_length,
+            ipc::config::fetch_models,
+            ipc::config::fetch_model_metadata,
+            // Chat turn: start/stop, injection, confirmations, todos, background.
+            ipc::chat::chat_completion,
+            ipc::chat::stop_chat_completion,
+            ipc::chat::inject_user_message,
+            ipc::chat::confirm_command,
+            ipc::chat::todo_ask_reply,
+            ipc::chat::get_pending_todo_ask,
+            ipc::chat::get_active_todo_list,
+            ipc::chat::list_background_tasks,
+            ipc::chat::cancel_background_task,
+            // Evolution maintenance.
+            ipc::evolution::start_evolution_maintenance,
+            ipc::evolution::stop_evolution_maintenance,
+            ipc::evolution::get_evolution_maintenance_state,
+            // History / monitor database.
+            ipc::history::save_history,
+            ipc::history::list_history_sessions,
+            ipc::history::load_session_messages,
+            ipc::history::delete_history,
+            ipc::history::delete_message,
+            ipc::history::delete_messages_after,
+            ipc::history::fork_session,
+            ipc::history::list_session_meta,
+            ipc::history::update_session_meta,
+            ipc::history::clear_logs,
+            ipc::history::compact_database,
+            ipc::history::list_interactions,
+            ipc::history::get_interaction,
+            ipc::history::get_session_stats,
+            // Skills and experience packages.
+            ipc::skills::list_skills,
+            ipc::skills::save_skill,
+            ipc::skills::delete_skill,
+            ipc::skills::filter_existing_skills,
+            ipc::skills::get_skills_status,
+            ipc::skills::save_skills_status,
+            ipc::experiences::list_experiences,
+            ipc::experiences::delete_experience,
+            // MCP servers.
+            ipc::mcp::list_mcp_servers,
+            ipc::mcp::save_mcp_server,
+            ipc::mcp::delete_mcp_server,
+            ipc::mcp::test_mcp_server,
+            ipc::mcp::get_mcp_logs,
+            ipc::mcp::clear_mcp_logs,
+            ipc::mcp::mcp_start_stdio,
+            ipc::mcp::mcp_stop_stdio,
+            // Sub-agents and missions.
+            ipc::agents::list_sub_agents,
+            ipc::agents::list_agent_mentions,
+            ipc::agents::refresh_agent_index,
+            ipc::agents::save_sub_agent,
+            ipc::agents::delete_sub_agent,
+            ipc::agents::get_agent_orchestration,
+            ipc::agents::save_agent_orchestration,
+            ipc::agents::list_agent_missions,
+            ipc::agents::list_deliverables,
+            ipc::agents::list_mission_bus_messages,
+            ipc::agents::probe_agent_cli,
+            ipc::agents::probe_agent_cloud,
+            // Tool-side panels: timers, serve processes, evolution memory.
+            ipc::tools::list_timers,
+            ipc::tools::cancel_timer,
+            ipc::tools::get_sleep_lock_state,
+            ipc::tools::list_serve_processes,
+            ipc::tools::stop_serve_process,
+            ipc::tools::list_evolution_memory,
+            ipc::tools::read_evolution_entry,
+            ipc::tools::list_archived_skills,
+            // Workspace files, PDF mentions and workspace switching.
+            ipc::workspace::list_workspace_files,
+            ipc::workspace::read_workspace_file_range,
+            ipc::workspace::read_workspace_file_bytes,
+            ipc::workspace::save_pasted_file,
+            ipc::workspace::import_workspace_paths,
+            ipc::workspace::convert_pdf_mention,
+            ipc::workspace::get_workspace_dir,
+            ipc::workspace::set_workspace_dir,
+            ipc::workspace::workspace_history_entries,
+            // Update check and release assets.
+            ipc::update::check_update,
+            ipc::update::download_update,
+            ipc::update::open_update_file,
+            ipc::update::reveal_update_file,
+            ipc::update::open_release_page,
+            ipc::update::get_app_version,
+            // Figures saved from the transcript.
+            ipc::figures::save_figure,
+            ipc::figures::save_figure_html,
+            ipc::figures::app_open_figures_dir,
         ])
         .build(context)
         .expect("error while building tauri application")

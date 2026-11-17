@@ -710,7 +710,7 @@ async fn ask_user(
         });
     }
 
-    let _ = app.emit("todo-ask", payload);
+    let _ = app.emit(crate::events::TODO_ASK, payload);
 
     // Wait for the reply, the turn's cancel flag, or the timeout — whichever
     // lands first. Cancellation is polled every 100 ms like the confirmation
@@ -750,7 +750,7 @@ async fn ask_user(
     // Tell every window the form is gone (timeout, Stop, or a reply that came
     // from another window): a stale panel would keep asking for answers nobody
     // reads any more. The answering window already cleared its own panel.
-    let _ = app.emit("todo-ask-closed", json!({ "request_id": request_id }));
+    let _ = app.emit(crate::events::TODO_ASK_CLOSED, json!({ "request_id": request_id }));
 
     match outcome {
         Some(reply) => match reply.answers {
@@ -1015,7 +1015,7 @@ pub(super) async fn handle_todos_tool(
                         "session_id": summary.session_id,
                         "summary": &summary,
                     });
-                    let _ = app.emit("todo-state", payload.clone());
+                    let _ = app.emit(crate::events::TODO_STATE, payload.clone());
                     serde_json::to_string_pretty(&summary).unwrap_or_else(|_| payload.to_string())
                 }
                 Err(err) => format!("Error: {err}"),
@@ -1043,7 +1043,7 @@ pub(super) async fn handle_todos_tool(
             match update_todo_status(app, session_id, todo_id, status) {
                 Ok(record) => {
                     let _ = app.emit(
-                        "todo-state",
+                        crate::events::TODO_STATE,
                         json!({
                             "type": "todo_updated",
                             "todo": &record,
@@ -1068,7 +1068,7 @@ pub(super) async fn handle_todos_tool(
             match clear_completed(app, session_id) {
                 Ok(summary) => {
                     let _ = app.emit(
-                        "todo-state",
+                        crate::events::TODO_STATE,
                         json!({
                             "type": "todo_cleared",
                             "list_id": summary.list_id,
@@ -1105,7 +1105,7 @@ pub(super) async fn handle_todos_tool(
             match rotate_active_list(app, session_id, new_title) {
                 Ok(summary) => {
                     let _ = app.emit(
-                        "todo-state",
+                        crate::events::TODO_STATE,
                         json!({
                             "type": "todo_list_changed",
                             "list_id": summary.list_id,

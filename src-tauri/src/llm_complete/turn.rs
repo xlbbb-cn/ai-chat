@@ -40,19 +40,33 @@ impl Drop for InjectionWindow {
 /// tearing down, a background hold expiring) and must not append its notices
 /// to the transcript of the turn that replaced it.
 fn emit_turn_token(app: &AppHandle, turn_id: &str, text: String) {
-    let _ = app.emit("chat-token", json!({ "turn_id": turn_id, "text": text }));
+    let _ = app.emit(
+        crate::events::CHAT_TOKEN,
+        crate::events::ChatToken {
+            turn_id: Some(turn_id.to_string()),
+            text,
+        },
+    );
 }
 
 /// Emit `chat-done` for one turn. See [`emit_turn_token`].
 fn emit_turn_done(app: &AppHandle, turn_id: &str) {
-    let _ = app.emit("chat-done", json!({ "turn_id": turn_id }));
+    let _ = app.emit(
+        crate::events::CHAT_DONE,
+        crate::events::ChatTurn {
+            turn_id: turn_id.to_string(),
+        },
+    );
 }
 
 /// Emit `chat-error` for one turn. See [`emit_turn_token`].
 fn emit_turn_error(app: &AppHandle, turn_id: &str, error: &str) {
     let _ = app.emit(
-        "chat-error",
-        json!({ "turn_id": turn_id, "error": error }),
+        crate::events::CHAT_ERROR,
+        crate::events::ChatError {
+            turn_id: Some(turn_id.to_string()),
+            error: error.to_string(),
+        },
     );
 }
 
@@ -878,7 +892,7 @@ pub(crate) async fn run_chat_turn(
             // panel must be able to disappear (or never appear) instead of
             // lingering at 100% from an earlier turn.
             let _ = app.emit(
-                "todo-state",
+                crate::events::TODO_STATE,
                 json!({
                     "type": "todo_state",
                     "list_id": summary.list_id,
@@ -1114,18 +1128,19 @@ pub(crate) async fn run_chat_turn(
             // after Stop, a confirmation timeout) must not announce its
             // deliveries inside another chat.
             let _ = app.emit(
-                "chat-injected",
-                json!({
-                    "session_id": session_id,
-                    "items": injections
+                crate::events::CHAT_INJECTED,
+                crate::events::ChatInjected {
+                    session_id: session_id.clone(),
+                    items: injections
                         .iter()
-                        .map(|item| json!({
-                            "id": item.id,
-                            "text": item.text,
-                            "created_at_ms": item.created_at_ms,
-                        }))
-                        .collect::<Vec<_>>(),
-                }),
+                        .map(|item| crate::events::ChatInjectedItem {
+                            id: item.id.clone(),
+                            text: item.text.clone(),
+                            created_at_ms: item.created_at_ms,
+                            kind: None,
+                        })
+                        .collect(),
+                },
             );
         }
 
@@ -1148,12 +1163,12 @@ pub(crate) async fn run_chat_turn(
                     "role": "user",
                     "content": text.clone(),
                 }));
-                items.push(json!({
-                    "id": delivery.id,
-                    "text": text,
-                    "created_at_ms": now_ms,
-                    "kind": "background_result",
-                }));
+                items.push(crate::events::ChatInjectedItem {
+                    id: delivery.id.clone(),
+                    text,
+                    created_at_ms: now_ms,
+                    kind: Some("background_result".to_string()),
+                });
             }
             log_event(
                 &state,
@@ -1165,8 +1180,11 @@ pub(crate) async fn run_chat_turn(
                 ),
             );
             let _ = app.emit(
-                "chat-injected",
-                json!({ "session_id": session_id, "items": items }),
+                crate::events::CHAT_INJECTED,
+                crate::events::ChatInjected {
+                    session_id: session_id.clone(),
+                    items,
+                },
             );
         }
 
@@ -1199,14 +1217,13 @@ pub(crate) async fn run_chat_turn(
                     ),
                 );
                 let _ = app.emit(
-                    "chat-notice",
-                    json!({
-                        "kind": "budget_exhausted",
-                        "session_id": session_id,
-                        "reason": stop.as_str(),
-                        "rounds": rounds,
-                        "tool_calls": tool_calls,
-                    }),
+                    crate::events::CHAT_NOTICE,
+                    crate::events::ChatNotice::BudgetExhausted {
+                        session_id: session_id.clone(),
+                        reason: stop.as_str().to_string(),
+                        rounds,
+                        tool_calls,
+                    },
                 );
                 // Appended at the tail as a `user` message: the prompt prefix
                 // stays byte-identical (only new tokens are uncached), and no
@@ -1734,12 +1751,12 @@ still missing."
                     ),
                 );
                 let _ = app.emit(
-                    tools::background::BACKGROUND_WAITING_EVENT,
-                    json!({
-                        "session_id": session_id,
-                        "pending": pending,
-                        "round": background_hold_rounds,
-                    }),
+                    crate::events::BACKGROUND_WAITING,
+                    crate::events::BackgroundWaiting {
+                        session_id: session_id.clone(),
+                        pending,
+                        round: Some(background_hold_rounds),
+                    },
                 );
                 state
                     .background_tasks
@@ -1765,7 +1782,7 @@ still missing."
                 // user could see (the turn is ending right after).
                 for snapshot in cancelled {
                     let _ = app.emit(
-                        tools::background::BACKGROUND_TASK_STATE_EVENT,
+                        crate::events::BACKGROUND_TASK_STATE,
                         snapshot,
                     );
                 }
@@ -1999,14 +2016,14 @@ only when every item is done, or when you are blocked and need the user.\n\n{wai
                 // reports progress, and a running row left behind would sit
                 // there until the answer starts streaming.
                 let _ = app.emit(
-                    "tool-call",
-                    json!({
-                        "session_id": session_id,
-                        "call_id": id,
-                        "phase": "done",
-                        "ok": false,
-                        "text": format!("🚫 *{name}* — not executed ({reason})"),
-                    }),
+                    crate::events::TOOL_CALL,
+                    crate::events::ToolCall {
+                        session_id: session_id.clone(),
+                        call_id: Some(id.clone()),
+                        phase: Some("done".to_string()),
+                        ok: Some(false),
+                        text: format!("🚫 *{name}* — not executed ({reason})"),
+                    },
                 );
                 log_event(
                     &state,
@@ -2191,14 +2208,13 @@ only when every item is done, or when you are blocked and need the user.\n\n{wai
                         ),
                     );
                     let _ = app.emit(
-                        "chat-notice",
-                        json!({
-                            "kind": "tool_disabled",
-                            "session_id": session_id,
-                            "tool": call.name,
-                            "failures": trip.failures,
-                            "limit": failure_limit,
-                        }),
+                        crate::events::CHAT_NOTICE,
+                        crate::events::ChatNotice::ToolDisabled {
+                            session_id: session_id.clone(),
+                            tool: call.name.clone(),
+                            failures: trip.failures,
+                            limit: failure_limit,
+                        },
                     );
                 }
                 // A sub-agent owns its own task row (`agent-task-*`); a generic
@@ -2334,12 +2350,12 @@ fn load_skill_for_call(
     // `call_id` ties the row to this call, so a parallel round can settle it
     // without touching the other running tools.
     let _ = app.emit(
-        "skill-loaded",
-        json!({
-            "session_id": session_id,
-            "call_id": call_id,
-            "skill_name": skill.name,
-        }),
+        crate::events::SKILL_LOADED,
+        crate::events::SkillLoaded {
+            session_id: session_id.to_string(),
+            call_id: call_id.to_string(),
+            skill_name: skill.name.clone(),
+        },
     );
 
     (
@@ -2400,7 +2416,7 @@ pub(crate) async fn end_turn_cleanup(app: &AppHandle, session_id: &str, turn_id:
     // transcript row keeps offering a cancel button for a task that is gone.
     for snapshot in removed {
         let _ = app.emit(
-            tools::background::BACKGROUND_TASK_STATE_EVENT,
+            crate::events::BACKGROUND_TASK_STATE,
             snapshot,
         );
     }
@@ -2408,8 +2424,12 @@ pub(crate) async fn end_turn_cleanup(app: &AppHandle, session_id: &str, turn_id:
     // end so a hold that was cut short (Stop, error, budget) cannot leave it
     // counting down a turn that no longer exists.
     let _ = app.emit(
-        tools::background::BACKGROUND_WAITING_EVENT,
-        json!({ "session_id": session_id, "pending": 0 }),
+        crate::events::BACKGROUND_WAITING,
+        crate::events::BackgroundWaiting {
+            session_id: session_id.to_string(),
+            pending: 0,
+            round: None,
+        },
     );
     if removed_count > 0 {
         log_event(

@@ -84,22 +84,26 @@ pub(crate) fn emit_agent_tool_state(
     duration_ms: Option<u128>,
     ok: Option<bool>,
 ) {
-    let mut payload = json!({
-        "task_id": task_id,
-        "session_id": session_id,
-        "phase": phase,
-        "tool": tool,
-    });
+    let mut payload = crate::events::AgentTaskTool {
+        task_id: task_id.to_string(),
+        session_id: Some(session_id.to_string()),
+        phase: phase.to_string(),
+        tool: Some(tool.to_string()),
+        detail: None,
+        duration_ms: None,
+        ok: None,
+        text: None,
+    };
     if let Some(detail) = detail {
-        payload["detail"] = json!(detail);
+        payload.detail = Some(detail);
     }
     if let Some(duration_ms) = duration_ms {
-        payload["duration_ms"] = json!(duration_ms.min(u64::MAX as u128) as u64);
+        payload.duration_ms = Some(duration_ms.min(u64::MAX as u128) as u64);
     }
     if let Some(ok) = ok {
-        payload["ok"] = json!(ok);
+        payload.ok = Some(ok);
     }
-    let _ = app.emit("agent-task-tool", payload);
+    let _ = app.emit(crate::events::AGENT_TASK_TOOL, payload);
 }
 
 /// Provider balance/quota failures are terminal for this account: retrying or
@@ -454,7 +458,7 @@ pub(crate) fn parse_task_plan(raw: &str, roster: &[String]) -> Result<(PlanDecis
 /// Announces the selector's decision to the UI (chip above the answer).
 pub(crate) fn emit_agent_selection(app: &AppHandle, session_id: &str, selection: &AgentSelection) {
     let _ = app.emit(
-        "agent-selection",
+        crate::events::AGENT_SELECTION,
         json!({
             "session_id": session_id,
             "delegate": selection.delegate,
@@ -552,7 +556,7 @@ pub async fn orchestrate(
     // Step 2: Plan. Stop pressed between steps aborts the mission here, before
     // any sub-agent is launched.
     let _ = app.emit(
-        "agent-plan-start",
+        crate::events::AGENT_PLAN_START,
         json!({ "task_count": 0, "session_id": session_id }),
     );
     if cancelled.load(Ordering::SeqCst) {
@@ -656,7 +660,7 @@ pub async fn orchestrate(
         None
     };
     let _ = app.emit(
-        "agent-plan-start",
+        crate::events::AGENT_PLAN_START,
         json!({
             "task_count": plan.tasks.len(),
             "session_id": session_id,
@@ -671,7 +675,7 @@ pub async fn orchestrate(
     let use_parallel = orchestration.mode != "sequential" && plan.execution_mode != "sequential";
     if let Some(bus) = &mission_bus {
         let _ = app.emit(
-            "agent-planner-action",
+            crate::events::AGENT_PLANNER_ACTION,
             json!({
                 "session_id": session_id,
                 "bus_id": bus.bus_id(),
@@ -760,8 +764,11 @@ pub async fn orchestrate(
     // below), so the event reports a *completed* step: a "start" event here
     // would leave the UI spinning until the whole final answer is streamed.
     let _ = app.emit(
-        "agent-aggregate-done",
-        json!({ "task_count": results.len(), "session_id": session_id }),
+        crate::events::AGENT_AGGREGATE_DONE,
+        crate::events::AgentAggregateDone {
+            task_count: results.len(),
+            session_id: session_id.to_string(),
+        },
     );
     Ok(OrchestrationOutcome {
         report: Some(build_mission_results_block(

@@ -153,8 +153,8 @@ BANDS = [
     dict(num="03", name="IPC 桥", path="Tauri 2",
          groups=[
              ("前后端契约", [
-                 ("invoke", "90 个 #[tauri::command]（lib.rs 注册）", "n"),
-                 ("emit / listen", "45 个事件通道：chat-* · tool-* · agent-*", "n"),
+                 ("invoke", "103 个 #[tauri::command]（ipc/ 每域一个薄命令层）", "n"),
+                 ("emit / listen", "50 个事件通道：chat-* · tool-* · agent-*（events.rs 契约）", "n"),
                  ("capabilities", "default.json 运行时权限白名单", "n"),
                  ("plugins", "opener · dialog · clipboard-manager", "n"),
              ]),
@@ -163,7 +163,9 @@ BANDS = [
          groups=[
              ("", [
                  ("main.rs", "Tauri 启动入口", "n"),
-                 ("lib.rs", "AppState · 菜单 · 命令注册 · setup", "core"),
+                 ("lib.rs", "AppState · 菜单 · setup · 单一 generate_handler 列表", "core"),
+                 ("ipc/", "103 个命令的薄转发层（按域拆分）", "core"),
+                 ("events.rs", "事件名常量 + payload 结构体（推送契约）", "core"),
                  ("llm_complete.rs", "chat_completion 流式主循环 · 5.1k 行", "core"),
                  ("turn_guard.rs", "轮次 / 工具 / 失败守卫", "n"),
                  ("instance.rs", "单实例锁 · shadow 窗口", "n"),
@@ -948,10 +950,11 @@ def build_html(d1, d2, d3):
 
   <section id="map">
     <div class="sec-head"><span class="sec-num">01</span><h2>分层架构</h2></div>
-    <p class="sec-note">九个层次，每一层只依赖它下面的那一层。想读懂这个项目，先看三个文件：
-      <code style="font-family:var(--mono);font-size:12px">lib.rs</code>（状态与命令）、
-      <code style="font-family:var(--mono);font-size:12px">llm_complete.rs</code>（对话主循环）、
-      <code style="font-family:var(--mono);font-size:12px">agents.rs</code>（派活与汇总）。</p>
+    <p class="sec-note">九个层次，每一层只依赖它下面的那一层。想读懂这个项目，先看四个文件：
+      <code style="font-family:var(--mono);font-size:12px">lib.rs</code>（状态与装配）、
+      <code style="font-family:var(--mono);font-size:12px">ipc/</code>（命令层）、
+      <code style="font-family:var(--mono);font-size:12px">events.rs</code>（事件契约）、
+      <code style="font-family:var(--mono);font-size:12px">llm_complete/</code>（对话主循环）。</p>
     <p class="figure-hint">左右滑动查看完整架构图</p>
     <div class="figure" role="region" aria-label="分层架构图，可横向滚动" tabindex="0">
 {d1}

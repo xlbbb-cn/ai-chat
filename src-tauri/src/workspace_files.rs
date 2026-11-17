@@ -209,8 +209,7 @@ fn is_skipped_dir(name: &str) -> bool {
 ///
 /// Hidden files and everything `.gitignore` excludes are skipped, as are the
 /// directories in [`SKIP_DIRS`]. Sorted by path so the popup order is stable.
-#[tauri::command]
-pub async fn list_workspace_files(
+pub(crate) async fn list_workspace_files(
     state: State<'_, AppState>,
 ) -> Result<Vec<WorkspaceFileEntry>, String> {
     let root = workspace_root(&state)?;
@@ -257,8 +256,7 @@ pub async fn list_workspace_files(
 }
 
 /// Read a text file, optionally sliced to a 1-based line range.
-#[tauri::command]
-pub async fn read_workspace_file_range(
+pub(crate) async fn read_workspace_file_range(
     state: State<'_, AppState>,
     path: String,
     start_line: Option<u64>,
@@ -284,8 +282,7 @@ pub async fn read_workspace_file_range(
 
 /// Read an image/binary file as a base64 payload (the UI builds the `data:`
 /// URL from the MIME type it derived from the extension).
-#[tauri::command]
-pub async fn read_workspace_file_bytes(
+pub(crate) async fn read_workspace_file_bytes(
     state: State<'_, AppState>,
     path: String,
 ) -> Result<String, String> {
@@ -548,8 +545,7 @@ pub(crate) fn decode_paste(payload: &str) -> Result<Vec<u8>, String> {
 /// inserts as an `@@<name>` mention — so the file is attached by the normal
 /// pipeline when the turn is sent, exactly like a workspace file that was
 /// already there.
-#[tauri::command]
-pub async fn save_pasted_file(
+pub(crate) async fn save_pasted_file(
     state: State<'_, AppState>,
     name: String,
     data_base64: String,
@@ -582,8 +578,7 @@ pub struct ImportedPaths {
 /// stable workspace path. A path that is a folder, unreadable or oversized is
 /// reported without discarding the rest; the caller attaches what arrived and
 /// shows the leftovers as a warning.
-#[tauri::command]
-pub async fn import_workspace_paths(
+pub(crate) async fn import_workspace_paths(
     state: State<'_, AppState>,
     paths: Vec<String>,
 ) -> Result<ImportedPaths, String> {

@@ -2705,15 +2705,13 @@ pub fn evolution_memory_view(workspace_dir: &Path) -> Vec<EvolutionMemoryView> {
         .collect()
 }
 
-#[tauri::command]
-pub fn list_evolution_memory(state: State<'_, crate::AppState>) -> Vec<EvolutionMemoryView> {
+pub(crate) fn list_evolution_memory(state: State<'_, crate::AppState>) -> Vec<EvolutionMemoryView> {
     let workspace_dir = state.workspace_dir.lock().unwrap().clone();
     let _ = persist_evolution_migration(&workspace_dir);
     evolution_memory_view(&workspace_dir)
 }
 
-#[tauri::command]
-pub fn read_evolution_entry(
+pub(crate) fn read_evolution_entry(
     state: State<'_, crate::AppState>,
     key: String,
 ) -> Result<String, String> {
@@ -2731,8 +2729,7 @@ pub fn read_evolution_entry(
     Err(format!("No evolution memory found for key '{key}'."))
 }
 
-#[tauri::command]
-pub fn list_archived_skills(state: State<'_, crate::AppState>) -> Vec<ArchivedSkill> {
+pub(crate) fn list_archived_skills(state: State<'_, crate::AppState>) -> Vec<ArchivedSkill> {
     let workspace_dir = state.workspace_dir.lock().unwrap().clone();
     collect_archived_skills(&workspace_dir)
 }

@@ -13,7 +13,6 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use serde::Serialize;
-use serde_json::json;
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 
@@ -495,8 +494,12 @@ fn emit_chunk(
         // `agent-task-token`. The session routes the token into the chat that
         // owns the turn.
         let _ = app.emit(
-            "agent-task-token",
-            json!({ "task_id": task_id, "session_id": session_id, "token": chunk }),
+            crate::events::AGENT_TASK_TOKEN,
+            crate::events::AgentTaskToken {
+            task_id: task_id.to_string(),
+            session_id: Some(session_id.to_string()),
+            token: chunk,
+        },
         );
     }
     *last_emit = tokio::time::Instant::now();

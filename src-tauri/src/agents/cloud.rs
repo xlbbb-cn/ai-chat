@@ -234,8 +234,12 @@ fn extract_text(value: &Value, path: &str) -> Result<String, String> {
 
 fn emit_progress(app: &AppHandle, task_id: &str, session_id: &str, text: String) {
     let _ = app.emit(
-        "agent-task-token",
-        json!({ "task_id": task_id, "session_id": session_id, "token": text }),
+        crate::events::AGENT_TASK_TOKEN,
+        crate::events::AgentTaskToken {
+            task_id: task_id.to_string(),
+            session_id: Some(session_id.to_string()),
+            token: text,
+        },
     );
 }
 

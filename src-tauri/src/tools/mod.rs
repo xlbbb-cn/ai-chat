@@ -74,13 +74,17 @@ pub(crate) fn emit_tool_progress<'a>(
     match mission_id {
         Some(task_id) => {
             let _ = app.emit(
-                "agent-task-tool",
-                json!({
-                    "task_id": task_id,
-                    "phase": "progress",
-                    "session_id": session_id,
-                    "text": text.into()
-                }),
+                crate::events::AGENT_TASK_TOOL,
+                crate::events::AgentTaskTool {
+                    task_id: task_id.to_string(),
+                    session_id: session_id.map(str::to_string),
+                    phase: "progress".to_string(),
+                    tool: None,
+                    detail: None,
+                    duration_ms: None,
+                    ok: None,
+                    text: Some(text.into()),
+                },
             );
         }
         None => {
@@ -90,7 +94,7 @@ pub(crate) fn emit_tool_progress<'a>(
             // several rows are open at once, and "the newest running row" is
             // no longer necessarily the one that emitted this step.
             let _ = app.emit(
-                "tool-call",
+                crate::events::TOOL_CALL,
                 json!({
                     "session_id": session_id,
                     "call_id": call_id,
@@ -119,7 +123,7 @@ pub(crate) fn emit_tool_call_done(
     ok: bool,
 ) {
     let _ = app.emit(
-        "tool-call",
+        crate::events::TOOL_CALL,
         json!({
             "session_id": session_id,
             "call_id": call_id,

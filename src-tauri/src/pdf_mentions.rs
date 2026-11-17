@@ -385,8 +385,7 @@ fn log_conversion(
 /// `on_progress` streams one message per visible step (`page 12 of 30`, then
 /// `parsing`, `rendering`…): a 60-page mention takes long enough that a silent
 /// composer looks broken.
-#[tauri::command]
-pub async fn convert_pdf_mention(
+pub(crate) async fn convert_pdf_mention(
     app: AppHandle,
     path: String,
     start_page: Option<usize>,

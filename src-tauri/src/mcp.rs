@@ -695,18 +695,16 @@ fn summarise_server_for_log(server: &McpServer) -> String {
     }
 }
 
-// ─── Tauri commands ───────────────────────────────────────────────────────────
+// ─── Panel service (exposed through `ipc::mcp`) ──────────────────────────────
 
-#[tauri::command]
-pub fn list_mcp_servers(state: State<'_, AppState>) -> Vec<McpServer> {
+pub(crate) fn list_mcp_servers(state: State<'_, AppState>) -> Vec<McpServer> {
     // Merged view: panel-owned entries from `mcp_servers.json` plus the
     // assistant-built ones from `<workspace>/.data/mcp.conf`. The panel renders
     // both; `source` tells them apart.
     load_effective_servers(&state)
 }
 
-#[tauri::command]
-pub fn save_mcp_server(state: State<'_, AppState>, server: McpServer) -> Result<(), String> {
+pub(crate) fn save_mcp_server(state: State<'_, AppState>, server: McpServer) -> Result<(), String> {
     // Route by provenance: an entry that lives in the workspace roster keeps
     // living there (editing it from the panel must not fork a second copy into
     // the app-data file), everything else is a normal panel server.
@@ -742,8 +740,7 @@ pub fn save_mcp_server(state: State<'_, AppState>, server: McpServer) -> Result<
     save_result
 }
 
-#[tauri::command]
-pub fn delete_mcp_server(state: State<'_, AppState>, id: String) -> Result<(), String> {
+pub(crate) fn delete_mcp_server(state: State<'_, AppState>, id: String) -> Result<(), String> {
     // Try the workspace roster first so a self-built server is deleted from the
     // file that actually holds it.
     let save_result = match remove_workspace_server(&state, &id) {
@@ -760,8 +757,7 @@ pub fn delete_mcp_server(state: State<'_, AppState>, id: String) -> Result<(), S
 }
 
 /// Start a stdio MCP process (called when user enables a server).
-#[tauri::command]
-pub async fn mcp_start_stdio(
+pub(crate) async fn mcp_start_stdio(
     state: State<'_, AppState>,
     server_id: String,
 ) -> Result<(), String> {
@@ -773,8 +769,7 @@ pub async fn mcp_start_stdio(
 }
 
 /// Stop a stdio MCP process (called when user disables a server).
-#[tauri::command]
-pub async fn mcp_stop_stdio(
+pub(crate) async fn mcp_stop_stdio(
     state: State<'_, AppState>,
     server_id: String,
 ) -> Result<(), String> {
@@ -791,8 +786,7 @@ pub async fn stop_all_stdio_processes(state: &AppState) {
 }
 
 /// Return the most recent diagnostic log entries for a server.
-#[tauri::command]
-pub fn get_mcp_logs(state: State<'_, AppState>, id: String) -> Vec<McpLogEntry> {
+pub(crate) fn get_mcp_logs(state: State<'_, AppState>, id: String) -> Vec<McpLogEntry> {
     state
         .mcp_logs
         .lock()
@@ -803,8 +797,7 @@ pub fn get_mcp_logs(state: State<'_, AppState>, id: String) -> Vec<McpLogEntry> 
 }
 
 /// Clear the diagnostic log for a server.
-#[tauri::command]
-pub fn clear_mcp_logs(state: State<'_, AppState>, id: String) {
+pub(crate) fn clear_mcp_logs(state: State<'_, AppState>, id: String) {
     state.mcp_logs.lock().unwrap().remove(&id);
 }
 
@@ -817,8 +810,7 @@ pub fn clear_mcp_logs(state: State<'_, AppState>, id: String) {
 /// For stdio it only checks basic config sanity (command non-empty).
 /// Command existence is validated in `start_stdio_process` before spawning.
 /// For SSE/HTTP it pings the URL. No MCP handshake is performed.
-#[tauri::command]
-pub async fn test_mcp_server(
+pub(crate) async fn test_mcp_server(
     state: State<'_, AppState>,
     server: McpServer,
 ) -> Result<String, String> {

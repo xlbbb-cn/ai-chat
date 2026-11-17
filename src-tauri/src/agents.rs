@@ -260,10 +260,9 @@ const AGENT_SUMMARY_MAX_TOKENS: u32 = 768;
 const AGENT_DEFAULT_CONTEXT_WINDOW: usize = 131_072;
 const AGENT_CONTINUE_PROMPT: &str = "Continue autonomously. Re-read the injected mission snapshot and active task list. Use the external task tools to add, update, or complete tasks, and only call mark_mission_accomplished when the mission is truly done.";
 
-// ─── Tauri commands ───────────────────────────────────────────────────────────
+// ─── Panel service (exposed through `ipc::agents`) ───────────────────────────
 
-#[tauri::command]
-pub fn list_sub_agents(state: State<'_, AppState>) -> Vec<SubAgent> {
+pub(crate) fn list_sub_agents(state: State<'_, AppState>) -> Vec<SubAgent> {
     load_sub_agent_list(&state.agents_config_path)
 }
 
@@ -333,8 +332,7 @@ fn agent_mention_base_token(agent: &SubAgent) -> String {
 /// The `+agent` popup roster: enabled `llm` agents that have a real system
 /// prompt (a `cli` / `cloud` agent has none to embed). Tokens are unique within
 /// the roster, with `-2`, `-3` suffixes on a collision.
-#[tauri::command]
-pub fn list_agent_mentions(state: State<'_, AppState>) -> Vec<AgentMention> {
+pub(crate) fn list_agent_mentions(state: State<'_, AppState>) -> Vec<AgentMention> {
     let roster = load_configured_agents(&state.agents_config_path);
     let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut mentions = Vec::new();
@@ -403,8 +401,7 @@ pub fn snapshot_embedded_roles(path: &Path, ids: &[String]) -> Vec<EmbeddedRole>
 /// The panel's Refresh action: migrate configured inline prompts, scan
 /// `agents/**/*.md`, **replace** `agents/index.yaml`, and return the merged
 /// roster. This is the only path that performs discovery.
-#[tauri::command]
-pub fn refresh_agent_index(state: State<'_, AppState>) -> Result<Vec<SubAgent>, String> {
+pub(crate) fn refresh_agent_index(state: State<'_, AppState>) -> Result<Vec<SubAgent>, String> {
     let path = state.agents_config_path.clone();
     let root = files::agents_root(&path);
 
@@ -424,8 +421,7 @@ pub fn refresh_agent_index(state: State<'_, AppState>) -> Result<Vec<SubAgent>, 
     Ok(agents)
 }
 
-#[tauri::command]
-pub fn save_sub_agent(state: State<'_, AppState>, agent: SubAgent) -> Result<SubAgent, String> {
+pub(crate) fn save_sub_agent(state: State<'_, AppState>, agent: SubAgent) -> Result<SubAgent, String> {
     let path = state.agents_config_path.clone();
     let mut config = load_agents_config(&path);
     let mut a = agent;
@@ -556,8 +552,7 @@ pub fn save_sub_agent(state: State<'_, AppState>, agent: SubAgent) -> Result<Sub
     Ok(a)
 }
 
-#[tauri::command]
-pub fn delete_sub_agent(state: State<'_, AppState>, id: String) -> Result<(), String> {
+pub(crate) fn delete_sub_agent(state: State<'_, AppState>, id: String) -> Result<(), String> {
     let path = state.agents_config_path.clone();
     // Resolve first: a discovered (virtual) custom agent has no config entry
     // but still owns a file the user may want to remove. The panel list includes
@@ -584,13 +579,11 @@ pub fn delete_sub_agent(state: State<'_, AppState>, id: String) -> Result<(), St
     save_agents_config_file(&path, &config)
 }
 
-#[tauri::command]
-pub fn get_agent_orchestration(state: State<'_, AppState>) -> AgentOrchestration {
+pub(crate) fn get_agent_orchestration(state: State<'_, AppState>) -> AgentOrchestration {
     load_agents_config(&state.agents_config_path).orchestration
 }
 
-#[tauri::command]
-pub fn save_agent_orchestration(
+pub(crate) fn save_agent_orchestration(
     state: State<'_, AppState>,
     orchestration: AgentOrchestration,
 ) -> Result<(), String> {
@@ -603,8 +596,7 @@ pub fn save_agent_orchestration(
 
 /// Resolve a `cli` agent's command (PATH + PATHEXT) and run it with the given
 /// arguments, so the panel can verify it before the model ever uses it.
-#[tauri::command]
-pub async fn probe_agent_cli(
+pub(crate) async fn probe_agent_cli(
     command: String,
     args: Option<Vec<String>>,
 ) -> Result<cli::CliProbe, String> {
@@ -612,8 +604,7 @@ pub async fn probe_agent_cli(
 }
 
 /// Check that a `cloud` agent's endpoint is reachable with the given token.
-#[tauri::command]
-pub async fn probe_agent_cloud(
+pub(crate) async fn probe_agent_cloud(
     endpoint: String,
     token: Option<String>,
     headers: Option<Vec<KeyValue>>,
@@ -626,8 +617,7 @@ pub async fn probe_agent_cloud(
     .await
 }
 
-#[tauri::command]
-pub fn list_deliverables(
+pub(crate) fn list_deliverables(
     state: State<'_, AppState>,
     session_id: String,
 ) -> Result<Vec<exchange::DeliverableBatch>, String> {
@@ -635,8 +625,7 @@ pub fn list_deliverables(
     exchange::list_session_deliverables(&workspace_dir, &session_id)
 }
 
-#[tauri::command]
-pub fn list_agent_missions(
+pub(crate) fn list_agent_missions(
     state: State<'_, AppState>,
     session_id: String,
 ) -> Result<Vec<MissionStateView>, String> {

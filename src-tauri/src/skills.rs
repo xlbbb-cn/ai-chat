@@ -556,8 +556,7 @@ fn refresh_skill_status(status: &mut SkillsStatus, skills_root: &Path) -> bool {
 /// Called on startup, after a workspace switch and whenever the Skills panel
 /// opens. The merged view is persisted (best effort) so newly discovered
 /// skills keep their metadata; entries are never removed here.
-#[tauri::command]
-pub fn get_skills_status(state: State<'_, AppState>) -> SkillsStatus {
+pub(crate) fn get_skills_status(state: State<'_, AppState>) -> SkillsStatus {
     let workspace_dir = state.workspace_dir.lock().unwrap().clone();
     let status_path = crate::workspace::skills_status_path(&workspace_dir);
     let mut status = load_status_file(&status_path);
@@ -583,8 +582,7 @@ pub fn get_skills_status(state: State<'_, AppState>) -> SkillsStatus {
 /// - `enabled_at` is stamped when an entry is switched on (or first enabled).
 /// - Entries are only ever added or updated, never dropped — a deleted skill
 ///   folder must not erase the user's selection for when it returns.
-#[tauri::command]
-pub fn save_skills_status(
+pub(crate) fn save_skills_status(
     state: State<'_, AppState>,
     status: SkillsStatus,
 ) -> Result<(), String> {
@@ -657,8 +655,7 @@ fn mark_skill_source(workspace_dir: &Path, name: &str, source: &str) {
     let _ = write_status_file(&status_path, &status);
 }
 
-#[tauri::command]
-pub fn list_skills(state: State<'_, AppState>) -> Vec<Skill> {
+pub(crate) fn list_skills(state: State<'_, AppState>) -> Vec<Skill> {
     let workspace_dir = state.workspace_dir.lock().unwrap().clone();
     let skills_root = crate::workspace::skills_root(&workspace_dir);
 
@@ -683,8 +680,7 @@ pub fn list_skills(state: State<'_, AppState>) -> Vec<Skill> {
     skills
 }
 
-#[tauri::command]
-pub fn save_skill(state: State<'_, AppState>, skill: Skill) -> Result<(), String> {
+pub(crate) fn save_skill(state: State<'_, AppState>, skill: Skill) -> Result<(), String> {
     let md = skill_to_md(&skill)?;
     let workspace_dir = state.workspace_dir.lock().unwrap().clone();
     let skill_dir = crate::workspace::skills_root(&workspace_dir).join(&skill.name);
@@ -803,8 +799,7 @@ pub fn enable_skill_for_workspace(workspace_dir: &Path, name: &str) -> Result<()
     write_status_file(&status_path, &status)
 }
 
-#[tauri::command]
-pub fn delete_skill(state: State<'_, AppState>, name: String) -> Result<(), String> {
+pub(crate) fn delete_skill(state: State<'_, AppState>, name: String) -> Result<(), String> {
     let workspace_dir = state.workspace_dir.lock().unwrap().clone();
     let skill_dir = crate::workspace::skills_root(&workspace_dir).join(&name);
     fs::remove_dir_all(skill_dir).map_err(|e| e.to_string())
@@ -818,8 +813,7 @@ pub fn delete_skill(state: State<'_, AppState>, name: String) -> Result<(), Stri
 /// (`resolve_skill_by_name`), so the returned names always load. It never
 /// writes, so a temporarily absent skill is never dropped from the status
 /// file.
-#[tauri::command]
-pub fn filter_existing_skills(state: State<'_, AppState>, names: Vec<String>) -> Vec<String> {
+pub(crate) fn filter_existing_skills(state: State<'_, AppState>, names: Vec<String>) -> Vec<String> {
     if names.is_empty() {
         return names;
     }

@@ -355,7 +355,7 @@ async fn run_activation(
             StreamOptions {
                 // The supervisor's reasoning is not part of the chat transcript;
                 // only its status events and bus messages reach the UI.
-                token_event: "agent-planner-token",
+                token_event: crate::events::AGENT_PLANNER_TOKEN,
                 task_id: None,
                 // The planner itself reports through `agent-planner-*` events,
                 // which carry the bus's session id instead.
@@ -568,7 +568,7 @@ fn emit_planner_action(
     detail: &str,
 ) {
     let _ = app.emit(
-        "agent-planner-action",
+        crate::events::AGENT_PLANNER_ACTION,
         json!({
             "session_id": bus.session_id(),
             "bus_id": bus.bus_id(),
@@ -794,7 +794,7 @@ fn emit_state(
     task_count: usize,
 ) {
     let _ = app.emit(
-        "agent-planner-state",
+        crate::events::AGENT_PLANNER_STATE,
         json!({
             "session_id": session_id,
             "bus_id": bus_id,

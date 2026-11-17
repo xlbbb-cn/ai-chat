@@ -86,13 +86,16 @@ fn phase_for_tool(name: &str) -> Option<&'static str> {
 /// while the pass runs. The terminal event (`running: false`) restores it.
 fn emit_progress(app: &AppHandle, phase: &str, round: u32, tool_calls: u32) {
     let _ = app.emit(
-        "evolution-maintenance-state",
-        json!({
-            "running": true,
-            "phase": phase,
-            "round": round,
-            "toolCalls": tool_calls,
-        }),
+        crate::events::EVOLUTION_MAINTENANCE_STATE,
+        crate::events::EvolutionMaintenanceState {
+            running: true,
+            phase: Some(phase.to_string()),
+            round: Some(round),
+            tool_calls: Some(tool_calls),
+            outcome: None,
+            summary: None,
+            error: None,
+        },
     );
 }
 
@@ -250,8 +253,7 @@ pub(crate) fn cancel(state: &AppState) {
 
 /// Start a maintenance pass. Returns immediately; progress and the outcome
 /// arrive through `evolution-maintenance-state`.
-#[tauri::command]
-pub fn start_evolution_maintenance(
+pub(crate) fn start_evolution_maintenance(
     app: AppHandle,
     state: State<'_, AppState>,
     model_override: Option<String>,
@@ -289,13 +291,16 @@ pub fn start_evolution_maintenance(
     }
 
     let _ = app.emit(
-        "evolution-maintenance-state",
-        json!({
-            "running": true,
-            "phase": "inventory",
-            "round": 1,
-            "toolCalls": 0,
-        }),
+        crate::events::EVOLUTION_MAINTENANCE_STATE,
+        crate::events::EvolutionMaintenanceState {
+            running: true,
+            phase: Some("inventory".to_string()),
+            round: Some(1),
+            tool_calls: Some(0),
+            outcome: None,
+            summary: None,
+            error: None,
+        },
     );
 
     let app_for_task = app.clone();
@@ -316,7 +321,15 @@ pub fn start_evolution_maintenance(
         let payload = match result {
             Ok(summary) if summary == "stopped" => {
                 log(&state, "INFO", "evolution maintenance stopped by user");
-                json!({ "running": false, "outcome": "stopped" })
+                crate::events::EvolutionMaintenanceState {
+                    running: false,
+                    phase: None,
+                    round: None,
+                    tool_calls: None,
+                    outcome: Some("stopped".to_string()),
+                    summary: None,
+                    error: None,
+                }
             }
             Ok(summary) => {
                 log(
@@ -327,7 +340,15 @@ pub fn start_evolution_maintenance(
                         clip(&summary, 500)
                     ),
                 );
-                json!({ "running": false, "outcome": "done", "summary": summary })
+                crate::events::EvolutionMaintenanceState {
+                    running: false,
+                    phase: None,
+                    round: None,
+                    tool_calls: None,
+                    outcome: Some("done".to_string()),
+                    summary: Some(summary),
+                    error: None,
+                }
             }
             Err(error) => {
                 log(
@@ -335,10 +356,18 @@ pub fn start_evolution_maintenance(
                     "WARN",
                     format!("evolution maintenance failed: {error}"),
                 );
-                json!({ "running": false, "outcome": "error", "error": error })
+                crate::events::EvolutionMaintenanceState {
+                    running: false,
+                    phase: None,
+                    round: None,
+                    tool_calls: None,
+                    outcome: Some("error".to_string()),
+                    summary: None,
+                    error: Some(error),
+                }
             }
         };
-        let _ = app_for_task.emit("evolution-maintenance-state", payload);
+        let _ = app_for_task.emit(crate::events::EVOLUTION_MAINTENANCE_STATE, payload);
     });
 
     Ok(())
@@ -346,16 +375,14 @@ pub fn start_evolution_maintenance(
 
 /// Stop the maintenance pass that is currently running (double-click on the
 /// napping face).
-#[tauri::command]
-pub fn stop_evolution_maintenance(state: State<'_, AppState>) {
+pub(crate) fn stop_evolution_maintenance(state: State<'_, AppState>) {
     cancel(&state);
 }
 
 /// Whether a maintenance pass is currently running. A webview reload loses the
 /// in-flight invoke, so the UI asks this on mount and restores the napping
 /// state instead of showing an idle face over a running pass.
-#[tauri::command]
-pub fn get_evolution_maintenance_state(state: State<'_, AppState>) -> bool {
+pub(crate) fn get_evolution_maintenance_state(state: State<'_, AppState>) -> bool {
     state
         .evolution_maintenance
         .lock()
@@ -519,7 +546,7 @@ async fn run_inner(
             StreamOptions {
                 // Never emitted (`emit_tokens: false`), but the field is
                 // mandatory for every request built by this helper.
-                token_event: "evolution-maintenance-token",
+                token_event: crate::events::EVOLUTION_MAINTENANCE_TOKEN,
                 task_id: None,
                 // The maintenance pass is silent: it emits its own
                 // `evolution-maintenance-*` events, never chat events.

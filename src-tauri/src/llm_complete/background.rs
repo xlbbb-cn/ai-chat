@@ -130,7 +130,7 @@ where
 
     let (task_id, cancel) = state.background_tasks.insert(session_id, tool_name, label);
     if let Some(snapshot) = state.background_tasks.get(&task_id) {
-        let _ = app.emit(tools::background::BACKGROUND_TASK_STATE_EVENT, snapshot);
+        let _ = app.emit(crate::events::BACKGROUND_TASK_STATE, snapshot);
     }
 
     let args_preview = args_preview.to_string();
@@ -196,7 +196,7 @@ where
                     snapshot.elapsed_ms
                 ),
             );
-            let _ = app_for_task.emit(tools::background::BACKGROUND_TASK_STATE_EVENT, snapshot);
+            let _ = app_for_task.emit(crate::events::BACKGROUND_TASK_STATE, snapshot);
         }
     });
 
@@ -430,7 +430,7 @@ pub(crate) async fn handle_background_task_tool(
                 // showing work that is already dying.
                 for snapshot in cancelled {
                     let _ = app.emit(
-                        tools::background::BACKGROUND_TASK_STATE_EVENT,
+                        crate::events::BACKGROUND_TASK_STATE,
                         snapshot,
                     );
                 }
@@ -445,7 +445,7 @@ pub(crate) async fn handle_background_task_tool(
             match state.background_tasks.cancel(id) {
                 Some(snapshot) => {
                     let _ = app.emit(
-                        tools::background::BACKGROUND_TASK_STATE_EVENT,
+                        crate::events::BACKGROUND_TASK_STATE,
                         snapshot.clone(),
                     );
                     format!(

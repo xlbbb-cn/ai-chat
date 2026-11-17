@@ -785,7 +785,6 @@ fn replace_directory(
     copy_directory(source, target)
 }
 
-#[tauri::command]
 pub(crate) fn list_experiences(app: AppHandle) -> Result<Value, String> {
     let store = store_root(&app).ok_or_else(|| "the app-data directory is unavailable".to_string())?;
     let rows: Vec<Value> = experience::scan(&store)
@@ -812,7 +811,6 @@ pub(crate) fn list_experiences(app: AppHandle) -> Result<Value, String> {
     Ok(json!({ "store": store.display().to_string(), "experiences": rows }))
 }
 
-#[tauri::command]
 pub(crate) fn delete_experience(app: AppHandle, slug: String) -> Result<(), String> {
     let store = store_root(&app).ok_or_else(|| "the app-data directory is unavailable".to_string())?;
     archive_package(&store, slug.trim()).map(|_| ())

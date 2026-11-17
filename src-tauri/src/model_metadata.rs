@@ -313,8 +313,7 @@ fn warn(app: &tauri::AppHandle, message: &str) {
 /// A failed download is reported as an error so the caller can degrade
 /// gracefully — the model list itself never depends on this feed — but an
 /// existing (stale) catalogue is served instead whenever there is one.
-#[tauri::command]
-pub async fn fetch_model_metadata(
+pub(crate) async fn fetch_model_metadata(
     app: tauri::AppHandle,
     force: Option<bool>,
 ) -> Result<Vec<ModelMetadata>, String> {

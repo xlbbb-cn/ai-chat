@@ -290,8 +290,7 @@ const BACKGROUND_RESULT_PREFIX: &str =
 /// on EVERY path — serve processes are stopped and their whole process trees
 /// are verified dead, so a `run_shell` serve child never outlives the turn
 /// that spawned it (see `ServeRegistry::shutdown_all`).
-#[tauri::command]
-pub async fn chat_completion(
+pub(crate) async fn chat_completion(
     app: AppHandle,
     messages: Vec<ChatMessage>,
     skill_ids: Vec<String>,

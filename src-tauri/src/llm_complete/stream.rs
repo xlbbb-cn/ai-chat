@@ -77,8 +77,8 @@ impl StreamMeter {
 }
 
 /// Options controlling how a streaming LLM request behaves.
-/// Main agent: reasoning + usage, token_event="chat-token", no task_id.
-/// Sub-agent:  token_event="agent-task-token", reasoning_event="agent-task-reasoning",
+/// Main agent: reasoning + usage, token_event=crate::events::CHAT_TOKEN, no task_id.
+/// Sub-agent:  token_event=crate::events::AGENT_TASK_TOKEN, reasoning_event=crate::events::AGENT_TASK_REASONING,
 ///             task_id=Some(...), no usage.
 pub struct StreamOptions<'a> {
     /// Event name for content delta tokens.
@@ -457,26 +457,32 @@ pub(crate) fn process_stream_chunk(
                 .filter(|max| *max > 0)
                 .map(|max| total_tokens as f64 / max as f64)
                 .unwrap_or(0.0);
-            let mut event = json!({
-                "prompt_tokens": *prompt_tokens,
-                "completion_tokens": *completion_tokens,
-                "total_tokens": total_tokens,
-                "max_tokens": opts.usage_max_tokens,
-                "usage_ratio": usage_ratio,
-                "session_id": opts.session_id,
-            });
             // Only reported when the provider exposes a cache dialect at all:
             // without it a hard-coded `0%` would look like real data.
-            if let Some(cached) = cached_report {
-                let hit_ratio = if *prompt_tokens > 0 {
-                    ((cached as f64) / (*prompt_tokens as f64)).clamp(0.0, 1.0)
-                } else {
-                    0.0
-                };
-                event["cached_tokens"] = json!(cached);
-                event["hit_ratio"] = json!(hit_ratio);
-            }
-            let _ = app.emit("chat-usage", event);
+            let (cached_tokens, hit_ratio) = match cached_report {
+                Some(cached) => {
+                    let hit_ratio = if *prompt_tokens > 0 {
+                        ((cached as f64) / (*prompt_tokens as f64)).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                    (Some(cached), Some(hit_ratio))
+                }
+                None => (None, None),
+            };
+            let _ = app.emit(
+                crate::events::CHAT_USAGE,
+                crate::events::ChatUsage {
+                    prompt_tokens: *prompt_tokens,
+                    completion_tokens: *completion_tokens,
+                    total_tokens,
+                    max_tokens: opts.usage_max_tokens,
+                    usage_ratio,
+                    session_id: opts.session_id.map(str::to_string),
+                    cached_tokens,
+                    hit_ratio,
+                },
+            );
         }
     }
 
@@ -511,16 +517,19 @@ pub(crate) fn process_stream_chunk(
             if let Some(task_id) = opts.task_id {
                 let _ = app.emit(
                     event,
-                    json!({
-                        "task_id": task_id,
-                        "token": reasoning,
-                        "session_id": opts.session_id,
-                    }),
+                    crate::events::AgentTaskToken {
+                        task_id: task_id.to_string(),
+                        session_id: opts.session_id.map(str::to_string),
+                        token: reasoning.to_string(),
+                    },
                 );
             } else {
                 let _ = app.emit(
                     event,
-                    json!({ "turn_id": opts.turn_id, "text": reasoning }),
+                    crate::events::ChatToken {
+                        turn_id: opts.turn_id.map(str::to_string),
+                        text: reasoning.to_string(),
+                    },
                 );
             }
         }
@@ -561,16 +570,19 @@ pub(crate) fn process_stream_chunk(
             if let Some(task_id) = opts.task_id {
                 let _ = app.emit(
                     opts.token_event,
-                    json!({
-                        "task_id": task_id,
-                        "token": token,
-                        "session_id": opts.session_id,
-                    }),
+                    crate::events::AgentTaskToken {
+                        task_id: task_id.to_string(),
+                        session_id: opts.session_id.map(str::to_string),
+                        token: token.to_string(),
+                    },
                 );
             } else {
                 let _ = app.emit(
                     opts.token_event,
-                    json!({ "turn_id": opts.turn_id, "text": token }),
+                    crate::events::ChatToken {
+                        turn_id: opts.turn_id.map(str::to_string),
+                        text: token.to_string(),
+                    },
                 );
             }
         }
@@ -836,8 +848,6 @@ pub(crate) fn content_parts_signature(req_body: &Value) -> String {
 /// text the failed attempt had streamed, so the frontend can truncate its
 /// accumulator by that tail and the retry re-streams the response cleanly
 /// (without it, regenerated tokens would be appended after the partial text).
-pub(crate) const CHAT_RETRY_EVENT: &str = "chat-retry";
-
 pub(crate) fn announce_stream_retry(
     app: &AppHandle,
     opts: &StreamOptions<'_>,
@@ -848,12 +858,12 @@ pub(crate) fn announce_stream_retry(
     // event, and UI-less callers (summaries, planner) have nothing to clear.
     if opts.task_id.is_none() && opts.emit_tokens {
         let _ = app.emit(
-            CHAT_RETRY_EVENT,
-            json!({
-                "turn_id": opts.turn_id,
-                "content": content,
-                "reasoning": reasoning,
-            }),
+            crate::events::CHAT_RETRY,
+            crate::events::ChatRetry {
+                turn_id: opts.turn_id.map(str::to_string),
+                content: content.to_string(),
+                reasoning: reasoning.to_string(),
+            },
         );
     }
 }
@@ -921,8 +931,11 @@ pub async fn stream_llm_request(
             }
             if opts.emit_errors {
                 let _ = app.emit(
-                    "chat-error",
-                    json!({ "turn_id": opts.turn_id, "error": err.clone() }),
+                    crate::events::CHAT_ERROR,
+                    crate::events::ChatError {
+                        turn_id: opts.turn_id.map(str::to_string),
+                        error: err.clone(),
+                    },
                 );
             }
             return Err(err);
@@ -1091,8 +1104,11 @@ pub async fn stream_llm_request(
             }
             if opts.emit_errors {
                 let _ = app.emit(
-                    "chat-error",
-                    json!({ "turn_id": opts.turn_id, "error": err.clone() }),
+                    crate::events::CHAT_ERROR,
+                    crate::events::ChatError {
+                        turn_id: opts.turn_id.map(str::to_string),
+                        error: err.clone(),
+                    },
                 );
             }
             return Err(err);
@@ -1122,8 +1138,11 @@ pub async fn stream_llm_request(
             }
             if opts.emit_errors {
                 let _ = app.emit(
-                    "chat-error",
-                    json!({ "turn_id": opts.turn_id, "error": err.clone() }),
+                    crate::events::CHAT_ERROR,
+                    crate::events::ChatError {
+                        turn_id: opts.turn_id.map(str::to_string),
+                        error: err.clone(),
+                    },
                 );
             }
             return Err(err);
@@ -1175,11 +1194,11 @@ pub(crate) async fn stream_request(
         req_body,
         cancelled,
         StreamOptions {
-            token_event: "chat-token",
+            token_event: crate::events::CHAT_TOKEN,
             task_id: None,
             session_id,
             turn_id,
-            reasoning_event: Some("chat-reasoning-token"),
+            reasoning_event: Some(crate::events::CHAT_REASONING_TOKEN),
             emit_usage: true,
             emit_tokens: true,
             emit_errors: true,

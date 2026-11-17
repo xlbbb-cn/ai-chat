@@ -34,7 +34,6 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
 pub const NOTIFY_WINDOW: &str = "notify";
-pub const NOTIFY_SHOW_EVENT: &str = "notify-show";
 
 /// The card webview is alive and its listeners are mounted. Flipped by the
 /// mount call of `refresh_notify_backdrop` (notify.tsx always asks for the
@@ -126,8 +125,7 @@ pub fn ensure_notify_window(app: &AppHandle) -> Result<WebviewWindow, String> {
 ///
 /// `kind` is `"done"` or `"error"` — the card UI colours the title from it
 /// (semantic status only, per DESIGN.md).
-#[tauri::command]
-pub async fn show_notify_card(
+pub(crate) async fn show_notify_card(
     app: AppHandle,
     title: String,
     body: String,
@@ -157,7 +155,7 @@ pub async fn show_notify_card(
         eprintln!("notify: placement failed: {err}");
     }
     let _ = window.set_always_on_top(true);
-    app.emit_to(NOTIFY_WINDOW, NOTIFY_SHOW_EVENT, NotifyPayload { title, body, kind })
+    app.emit_to(NOTIFY_WINDOW, crate::events::NOTIFY_SHOW, NotifyPayload { title, body, kind })
         .map_err(|e| e.to_string())?;
     // The card webview listens for `notify-show` to render; the window itself
     // is only the canvas. `show()` never activates it (tao uses
@@ -185,15 +183,13 @@ pub async fn show_notify_card(
 }
 
 /// Hide the card. Called by the card UI itself (auto-dismiss timer).
-#[tauri::command]
-pub fn hide_notify_card(window: WebviewWindow) {
+pub(crate) fn hide_notify_card(window: WebviewWindow) {
     let _ = window.hide();
 }
 
 /// Clicking the card hides it and brings the main window back, un-minimized
 /// and focused — the toast's one interaction, mirroring a system toast click.
-#[tauri::command]
-pub fn focus_main_from_notify(app: AppHandle, window: WebviewWindow) {
+pub(crate) fn focus_main_from_notify(app: AppHandle, window: WebviewWindow) {
     let _ = window.hide();
     crate::focus_main_window(&app);
 }
@@ -203,8 +199,7 @@ pub fn focus_main_from_notify(app: AppHandle, window: WebviewWindow) {
 /// the webview load and the attribute would be silently lost. Returns the
 /// backdrop kind in effect (`mica` / `acrylic` / `vibrancy`) or `None` —
 /// `None` means the card paints its own fallback wash.
-#[tauri::command]
-pub fn refresh_notify_backdrop(app: AppHandle) -> Option<String> {
+pub(crate) fn refresh_notify_backdrop(app: AppHandle) -> Option<String> {
     // The mount call doubles as the readiness signal for an on-demand card
     // (see `show_notify_card`): from here the webview can receive events.
     NOTIFY_READY.store(true, Ordering::SeqCst);
