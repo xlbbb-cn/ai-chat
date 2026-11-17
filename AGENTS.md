@@ -392,6 +392,7 @@ src-tauri/
   src/process_guard.rs     # app-wide child registry + process-tree kill / Windows job
   src/tools/               # tool executor, split by feature:
     mod.rs                 #   dispatch/schemas/shared helpers (+ tests)
+    execute/               #   execute_tool dispatcher + mission/skill_read/run_cmd/run_shell
     memory.rs              #   memory tool (session/user/repo + "all" fan-out)
     file_actions.rs        #   file_actions handler, backups, diff compare
     patch.rs               #   LLM-hardened unified patch parser/applier
