@@ -8,6 +8,8 @@
 
 use crate::util::{slugify, truncate_with_ellipsis};
 use crate::db;
+use jieba_rs::{Jieba, TokenizeMode};
+use rust_stemmers::{Algorithm, Stemmer};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -228,60 +230,68 @@ fn normalize_text(text: &str) -> String {
         .collect()
 }
 
-fn is_cjk(c: char) -> bool {
-    matches!(c as u32,
-        0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF | 0x3040..=0x30FF | 0xAC00..=0xD7AF)
-}
-
+/// Words that do not discriminate. Chinese stopwords used to be dead entries —
+/// the old word-cutter only pruned them off English runs; the jieba path below
+/// checks every token, so they are honoured now.
 const TOKEN_STOPWORDS: &[&str] = &[
+    // English
     "the", "and", "for", "with", "that", "this", "from", "into", "use", "using", "used",
-    "默认", "使用", "可以", "如果", "需要", "一个", "进行", "通过",
+    "you", "your", "have", "has", "can", "will", "would", "should", "what", "which",
+    "when", "where", "who", "how", "not", "are", "was", "were", "been", "our", "they",
+    // 中文
+    "默认", "使用", "可以", "如果", "需要", "一个", "进行", "通过", "这个", "那个", "我们",
+    "他们", "什么", "怎么", "为什么", "如何", "就是", "还是", "但是", "因为", "所以", "没有",
+    "然后", "已经", "以及", "或者", "这些", "那些", "一些", "相关", "关于", "时候",
 ];
 
-/// Tokens for clustering: ASCII words (≥3 chars) plus CJK bigrams.
+/// One tokenizer for every matcher: lowercased, cut at real word boundaries by
+/// jieba (so CJK stops being overlapping bigrams), English stemmed (Snowball,
+/// so `building`/`built` meet `build`), stopwords dropped, sorted and deduped.
+///
+/// The hint, `search` and the cluster/dedupe paths all go through this one
+/// function, so they cannot disagree on what a "word" is again.
 fn tokenize(text: &str) -> Vec<String> {
-    let mut tokens: Vec<String> = Vec::new();
-    let mut ascii = String::new();
-    let mut cjk_run: Vec<char> = Vec::new();
-
-    let flush_ascii = |ascii: &mut String, tokens: &mut Vec<String>| {
-        if ascii.chars().count() >= 3 {
-            let token = ascii.to_lowercase();
-            if !TOKEN_STOPWORDS.contains(&token.as_str()) {
-                tokens.push(token);
-            }
-        }
-        ascii.clear();
-    };
-    let flush_cjk = |run: &mut Vec<char>, tokens: &mut Vec<String>| {
-        if run.len() == 1 {
-            tokens.push(run[0].to_string());
-        } else {
-            for pair in run.windows(2) {
-                tokens.push(pair.iter().collect());
-            }
-        }
-        run.clear();
-    };
-
-    for ch in text.chars() {
-        if ch.is_ascii_alphanumeric() {
-            flush_cjk(&mut cjk_run, &mut tokens);
-            ascii.push(ch);
-        } else if is_cjk(ch) {
-            flush_ascii(&mut ascii, &mut tokens);
-            cjk_run.push(ch);
-        } else {
-            flush_ascii(&mut ascii, &mut tokens);
-            flush_cjk(&mut cjk_run, &mut tokens);
-        }
-    }
-    flush_ascii(&mut ascii, &mut tokens);
-    flush_cjk(&mut cjk_run, &mut tokens);
-
+    let mut tokens = tokenize_multi(text);
     tokens.sort();
     tokens.dedup();
     tokens
+}
+
+/// `tokenize` but keeping repeats, only for the relevance scorer which must
+/// count how often a word occurs (`tf`). Everything else wants the deduped set.
+fn tokenize_multi(text: &str) -> Vec<String> {
+    let mut tokens: Vec<String> = Vec::new();
+    for token in jieba().tokenize(text, TokenizeMode::Default, true) {
+        let word = token.word.trim();
+        if word.is_empty() || !word.chars().any(|ch| ch.is_alphanumeric()) {
+            continue;
+        }
+        let lower = word.to_lowercase();
+        if TOKEN_STOPWORDS.contains(&lower.as_str()) {
+            continue;
+        }
+        if lower.chars().all(|ch| ch.is_ascii()) {
+            if lower.chars().count() < 3 {
+                continue;
+            }
+            tokens.push(stemmer().stem(&lower).to_string());
+        } else {
+            tokens.push(lower);
+        }
+    }
+    tokens
+}
+
+/// The embedded jieba dictionary costs a small cold-start load, so it lives
+/// behind a `OnceLock` and is built on first use — not per request.
+fn jieba() -> &'static Jieba {
+    static JIEBA: std::sync::OnceLock<Jieba> = std::sync::OnceLock::new();
+    JIEBA.get_or_init(Jieba::new)
+}
+
+fn stemmer() -> &'static Stemmer {
+    static STEMMER: std::sync::OnceLock<Stemmer> = std::sync::OnceLock::new();
+    STEMMER.get_or_init(|| Stemmer::create(Algorithm::English))
 }
 
 /// Jaccard similarity of two sets; both empty means "not similar" (0.0).
@@ -871,8 +881,8 @@ struct HintCandidate {
     importance: u32,
     /// Best keyword hit weight (0 = no match, filtered out).
     weight: u32,
-    /// Normalized key / title / tags / body — matching only, never rendered.
-    fields: [String; 4],
+    /// Token bags of key / title / tags / body — matching only, never rendered.
+    fields: [Vec<String>; 4],
 }
 
 /// Build the confidence-ranked hint for one user message.
@@ -939,9 +949,10 @@ pub fn build_memory_hint(
     })
 }
 
-/// Keywords of one user message: ASCII words (≥3 chars) plus CJK bigrams, minus
-/// stopwords, keeping the longest `MEMORY_HINT_MAX_KEYWORDS` (a lone CJK
-/// character matches everything, so single-character tokens are dropped).
+/// Keywords of one user message: dictionary-segmented words plus stemmed
+/// English, minus stopwords, keeping the longest `MEMORY_HINT_MAX_KEYWORDS`
+/// (a lone CJK character matches everything, so single-character tokens are
+/// dropped).
 fn hint_keywords(query: &str) -> HashSet<String> {
     let mut tokens: Vec<String> = tokenize(query)
         .into_iter()
@@ -1026,10 +1037,10 @@ fn hint_candidates(workspace_dir: &Path, include_evolution: bool) -> Vec<HintCan
                 // The `# key` heading carries the readable key; the file stem
                 // is the sanitized version of it.
                 fields: [
-                    normalize_text(&key),
-                    normalize_text(&key),
-                    normalize_text(&tags.join(" ")),
-                    normalize_text(&body),
+                    tokenize(&key),
+                    tokenize(&key),
+                    tokenize(&tags.join(" ")),
+                    tokenize(&body),
                 ],
                 key,
                 confidence: FILE_MEMORY_CONFIDENCE,
@@ -1068,9 +1079,13 @@ fn read_scope_note(path: &Path) -> Option<(String, String, Vec<String>)> {
 struct KeywordMatch {
     /// 3 = the curated name (key or title), 2 = tags, 1 = body only.
     tier: u32,
-    /// Distinct query keywords found anywhere in the entry: the *coverage* that
-    /// `search` ranks on right after the tier.
+    /// Distinct query keywords found anywhere in the entry (the coverage).
     hits: usize,
+    /// TF-IDF relevance, only filled by `search`; the hint build ignores it.
+    score: f32,
+    /// True when two or more consecutive query words appear, in order, in the
+    /// entry's name — a strong "this memory is about the question" signal.
+    phrase: bool,
 }
 
 impl KeywordMatch {
@@ -1092,17 +1107,14 @@ impl KeywordMatch {
 
 /// Match `keywords` against `[key, title, tags, body]` and report the best tier
 /// plus how many distinct keywords matched.
-fn keyword_match(fields: &[String; 4], keywords: &HashSet<String>) -> Option<KeywordMatch> {
+fn keyword_match(fields: &[Vec<String>; 4], keywords: &HashSet<String>) -> Option<KeywordMatch> {
     let mut tiers = [false; 4];
-    let mut matched: HashSet<&str> = HashSet::new();
+    let mut matched: HashSet<&String> = HashSet::new();
     for (index, field) in fields.iter().enumerate() {
-        if field.is_empty() {
-            continue;
-        }
-        for keyword in keywords {
-            if field.contains(keyword.as_str()) {
+        for token in field {
+            if keywords.contains(token.as_str()) {
                 tiers[index] = true;
-                matched.insert(keyword.as_str());
+                matched.insert(token);
             }
         }
     }
@@ -1119,28 +1131,40 @@ fn keyword_match(fields: &[String; 4], keywords: &HashSet<String>) -> Option<Key
     Some(KeywordMatch {
         tier,
         hits: matched.len(),
+        score: 0.0,
+        phrase: false,
     })
 }
 
-/// The `[key, title, tags, body]` haystacks of one entry, normalized once.
+/// The raw `[key, title, tags, body]` texts of one entry.
+fn entry_field_texts(entry: &EvolutionEntry) -> [String; 4] {
+    [
+        entry.meta.key.clone(),
+        entry.meta.title.clone(),
+        entry.meta.tags.join(" "),
+        format!("{} {}", entry.summary, entry.body),
+    ]
+}
+
+/// The tokenized `[key, title, tags, body]` of one entry.
 ///
 /// The request hint and `search` share them on purpose: a query that lights up
-/// the hint must find the same entry in `search`, so the two paths cannot drift
-/// apart again (the hint used to be the only token-level matcher).
-fn entry_match_fields(entry: &EvolutionEntry) -> [String; 4] {
+/// the hint must find the same entry in `search` (and vice versa), so the two
+/// paths cannot drift apart again.
+fn entry_match_fields(entry: &EvolutionEntry) -> [Vec<String>; 4] {
+    let texts = entry_field_texts(entry);
     [
-        normalize_text(&entry.meta.key),
-        normalize_text(&entry.meta.title),
-        normalize_text(&entry.meta.tags.join(" ")),
-        normalize_text(&format!("{} {}", entry.summary, entry.body)),
+        tokenize(&texts[0]),
+        tokenize(&texts[1]),
+        tokenize(&texts[2]),
+        tokenize(&texts[3]),
     ]
 }
 
 /// Hit weight the hint uses: the tier, with the stricter rule that a
-/// **body-only** match needs two distinct keywords. One CJK bigram (`的时`,
-/// `时候`) is common enough to match almost every entry and would turn the
-/// 200-character block into a lottery.
-fn hint_weight(fields: &[String; 4], keywords: &HashSet<String>) -> u32 {
+/// **body-only** match needs two distinct keywords — one common word is not
+/// evidence that the entry is *about* the question.
+fn hint_weight(fields: &[Vec<String>; 4], keywords: &HashSet<String>) -> u32 {
     match keyword_match(fields, keywords) {
         Some(hit) if hit.is_credible() => hit.tier,
         _ => 0,
@@ -1154,29 +1178,135 @@ fn hint_weight(fields: &[String; 4], keywords: &HashSet<String>) -> u32 {
 /// being cut in the middle by `truncate_tool_output`.
 const EVOLUTION_SEARCH_MAX_MATCHES: usize = 12;
 
-/// Token-level match of every entry against `query`, ordered for `search`:
-/// hit tier (name > tags > body), then coverage, then the experience score,
-/// then `key` so two identical queries render identically.
-///
-/// Token-level on purpose: the old whole-string `contains` needed the query to
-/// appear verbatim, so `python 解释器` missed an entry that says
-/// "use python, not python3".
+/// Added to the score when two consecutive query words appear, in order, in the
+/// entry's name (`key`/`title`) — the phrasing matches, not just the words.
+const PHRASE_BONUS: f32 = 1.5;
+
+/// In-memory statistics of the searched corpus: how many entries, in how many
+/// of them each word occurs, and the mean entry length. Rebuilt per `search`
+/// because entries are a couple of dozen small files — not worth caching.
+struct CorpusStats {
+    n: usize,
+    df: HashMap<String, u32>,
+    avg_len: f32,
+}
+
+fn corpus_stats(entries: &[ScoredEntry]) -> CorpusStats {
+    let mut df: HashMap<String, u32> = HashMap::new();
+    let mut total_len = 0usize;
+    for scored in entries {
+        let fields = entry_match_fields(&scored.entry);
+        for token in fields.iter().flatten() {
+            *df.entry(token.clone()).or_insert(0) += 1;
+        }
+        total_len += fields.iter().map(Vec::len).sum::<usize>();
+    }
+    CorpusStats {
+        n: entries.len(),
+        df,
+        avg_len: if entries.is_empty() {
+            1.0
+        } else {
+            total_len as f32 / entries.len() as f32
+        },
+    }
+}
+
+/// Field weights of `relevance`, mirroring the hit tiers: the curated name
+/// carries most, tags next, the prose least.
+fn field_weights() -> [f32; 4] {
+    [
+        HINT_TITLE_WEIGHT as f32,
+        HINT_TITLE_WEIGHT as f32,
+        HINT_TAG_WEIGHT as f32,
+        HINT_CONTENT_WEIGHT as f32,
+    ]
+}
+
+/// TF-IDF relevance of one entry to the query: smoothed idf, field-weighted
+/// tf, lightly length-normalised, plus a phrase bonus. Comparable only within
+/// one `search` — the corpus stats are per-query.
+fn relevance(
+    scored: &ScoredEntry,
+    keywords: &HashSet<String>,
+    query_ordered: &[String],
+    corpus: &CorpusStats,
+) -> (f32, bool) {
+    let texts = entry_field_texts(&scored.entry);
+    let weights = field_weights();
+    let mut fields: [Vec<String>; 4] = Default::default();
+    let mut name_tokens: Vec<String> = Vec::new();
+    let mut doc_len = 0usize;
+    for index in 0..4 {
+        let tokens = tokenize_multi(&texts[index]);
+        doc_len += tokens.len();
+        if index < 2 {
+            name_tokens.extend(tokens.iter().cloned());
+        }
+        fields[index] = tokens;
+    }
+
+    let mut score = 0.0f32;
+    for keyword in keywords {
+        let df = corpus.df.get(keyword).copied().unwrap_or(0) as f32;
+        let idf = ((1.0 + corpus.n as f32) / (1.0 + df)).ln();
+        let mut tfw = 0.0f32;
+        for index in 0..4 {
+            let count = fields[index]
+                .iter()
+                .filter(|token| token.as_str() == keyword)
+                .count() as f32;
+            tfw += weights[index] * count;
+        }
+        score += idf * tfw;
+    }
+    score /= 1.0 + (doc_len as f32 / corpus.avg_len);
+
+    let phrase = phrase_match(&name_tokens, query_ordered);
+    if phrase {
+        score += PHRASE_BONUS;
+    }
+    (score, phrase)
+}
+
+/// Two or more consecutive query words in order inside the entry's name.
+fn phrase_match(name_tokens: &[String], query_ordered: &[String]) -> bool {
+    query_ordered.len() >= 2
+        && name_tokens.len() >= 2
+        && query_ordered
+            .windows(2)
+            .any(|pair| name_tokens.windows(2).any(|window| window == pair))
+}
+
+/// Match every entry against `query`, ordered by relevance: TF-IDF score first,
+/// then phrase, tier, coverage, the experience score, then `key`. (The hint
+/// still orders by confidence — this richer order is for `search`, where
+/// relevance beats evidence.)
 fn rank_keyword_matches(ranked: Vec<ScoredEntry>, query: &str) -> Vec<(KeywordMatch, ScoredEntry)> {
     let keywords = hint_keywords(query);
+    let query_ordered = tokenize_multi(query);
     if keywords.is_empty() {
         return Vec::new();
     }
+    let corpus = corpus_stats(&ranked);
     let mut matches: Vec<(KeywordMatch, ScoredEntry)> = ranked
         .into_iter()
         .filter_map(|scored| {
             let fields = entry_match_fields(&scored.entry);
-            keyword_match(&fields, &keywords).map(|hit| (hit, scored))
+            let mut hit = keyword_match(&fields, &keywords)?;
+            let (score, phrase) = relevance(&scored, &keywords, &query_ordered, &corpus);
+            hit.score = score;
+            hit.phrase = phrase;
+            Some((hit, scored))
         })
         .collect();
     matches.sort_by(|(left_hit, left), (right_hit, right)| {
         right_hit
-            .tier
-            .cmp(&left_hit.tier)
+            .score
+            .partial_cmp(&left_hit.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| right_hit.phrase.cmp(&left_hit.phrase))
+            .then_with(|| right_hit.tier.cmp(&left_hit.tier))
             .then_with(|| right_hit.hits.cmp(&left_hit.hits))
             .then_with(|| {
                 right
@@ -1188,8 +1318,6 @@ fn rank_keyword_matches(ranked: Vec<ScoredEntry>, query: &str) -> Vec<(KeywordMa
     });
     matches
 }
-
-/// Compact, match-ordered result list: one line per entry.
 ///
 /// The tier and the coverage are printed because they *are* the order: a name
 /// hit means the memory is about the question, a body hit only that the words
@@ -1198,12 +1326,16 @@ fn render_search_matches(matches: &[(KeywordMatch, ScoredEntry)]) -> String {
     let mut text = String::new();
     for (hit, scored) in matches.iter().take(EVOLUTION_SEARCH_MAX_MATCHES) {
         let summary = one_line(&scored.entry.summary, EVOLUTION_SUMMARY_MAX);
+        let mut label = hit.tier_label().to_string();
+        if hit.phrase {
+            label.push_str(", phrase");
+        }
         text.push_str(&format!(
             "- {} ({}, c{}, {}, {}{}): {}\n",
             scored.entry.meta.key,
             scored.entry.meta.kind,
             scored.entry.meta.confidence,
-            hit.tier_label(),
+            label,
             hit.hits,
             if hit.hits == 1 { " hit" } else { " hits" },
             summary,
@@ -3017,7 +3149,7 @@ fn handle_evolution_scope(
                 };
             }
 
-            // Only a credible hit counts as usage: a stray CJK bigram that
+            // Only a credible hit counts as usage: a stray common word that
             // merely appears somewhere in the prose must not rank the entry up
             // over time (`uses` feeds `score_evolution_entry`).
             let used: Vec<String> = matches
@@ -4446,12 +4578,21 @@ mod tests {
         assert_eq!(first.keys, second.keys);
     }
 
-    /// One generic CJK bigram in a long body is not a match; two are.
+    /// One body keyword is not evidence; two are. (English words are used here
+    /// because jieba's CJK segmentation is dictionary-driven, not a fixed
+    /// bigram — the assertion is about the strength rule, not the cutter.)
     #[test]
     fn a_body_only_match_needs_two_keywords() {
         let workspace = TempWorkspace::new("hint-body");
-        write_entry(&workspace, "noise", "Noise", 3, 3, "换个时候再说这件事。");
-        assert!(build_memory_hint(&workspace.dir, "什么时候构建", true).is_none());
+        write_entry(
+            &workspace,
+            "noise",
+            "Noise",
+            3,
+            3,
+            "A remark about the interpreter only.",
+        );
+        assert!(build_memory_hint(&workspace.dir, "python interpreter", true).is_none());
 
         write_entry(
             &workspace,
@@ -4459,9 +4600,9 @@ mod tests {
             "Signal",
             3,
             3,
-            "什么时候构建都需要先确认。",
+            "The python interpreter is explained.",
         );
-        let hint = build_memory_hint(&workspace.dir, "什么时候构建", true).unwrap();
+        let hint = build_memory_hint(&workspace.dir, "python interpreter", true).unwrap();
         assert_eq!(hint.keys, vec!["signal"]);
     }
 
@@ -4513,10 +4654,43 @@ mod tests {
         assert_eq!(matches[0].0.hits, 1);
     }
 
-    /// Hit tier first, coverage second — a two-keyword body match still lands
-    /// below a one-keyword tag match.
+    /// CJK tokens are dictionary words (`用户输入` → `用户` + `输入`), not the
+    /// old overlapping bigrams (`户输`).
     #[test]
-    fn search_orders_by_hit_tier_then_coverage() {
+    fn cjk_segmentation_yields_words_not_bigrams() {
+        let keywords = hint_keywords("用户输入的时候");
+        assert!(keywords.contains("用户"), "{keywords:?}");
+        assert!(keywords.contains("输入"), "{keywords:?}");
+        assert!(!keywords.contains("户输"), "{keywords:?}");
+    }
+
+    /// English inflections fold onto one stem, so `building` finds `build`.
+    #[test]
+    fn search_stems_english_inflections() {
+        let workspace = TempWorkspace::new("search-stem");
+        write_entry(
+            &workspace,
+            "tauri-build",
+            "Tauri build",
+            4,
+            3,
+            "A git tag is required before the tauri build.",
+        );
+
+        let matches = rank_keyword_matches(
+            ranked_evolution_entries(&workspace.dir),
+            "building the tauri app",
+        );
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].1.entry.meta.key, "tauri-build");
+        // `building` stemmed to `build`, so the title token matched.
+        assert_eq!(matches[0].0.tier, HINT_TITLE_WEIGHT);
+    }
+
+    /// Relevance first: a name hit carrying the query words *in order* (phrase)
+    /// outranks everything; after that, more coverage beats less.
+    #[test]
+    fn search_orders_by_relevance_then_tier_then_coverage() {
         let workspace = TempWorkspace::new("search-order");
         write_entry(
             &workspace,
@@ -4555,16 +4729,17 @@ mod tests {
             .iter()
             .map(|(_, scored)| scored.entry.meta.key.as_str())
             .collect();
-        assert_eq!(order, vec!["name-hit", "tag-hit", "body-two", "body-one"]);
-        let hits: Vec<usize> = matches.iter().map(|(hit, _)| hit.hits).collect();
-        assert_eq!(hits, vec![2, 1, 2, 1]);
+        assert_eq!(order, vec!["name-hit", "body-two", "tag-hit", "body-one"]);
+        // Both words, in order, in the title → the phrase flag is on.
+        assert!(matches[0].0.phrase);
 
         let text = render_search_matches(&matches);
         assert_eq!(text.lines().count(), 4, "{text}");
         assert!(text.starts_with("- name-hit ("), "{text}");
-        assert!(text.contains(", title, 2 hits):"), "{text}");
+        assert!(text.contains(", title, phrase, 2 hits):"), "{text}");
         assert!(text.contains(", tags, 1 hit):"), "{text}");
         assert!(text.contains(", body, 2 hits):"), "{text}");
+        assert!(text.contains(", body, 1 hit):"), "{text}");
     }
 
     /// A body-only single-keyword hit is still found, but it is not evidence

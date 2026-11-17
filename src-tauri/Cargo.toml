@@ -31,6 +31,12 @@ diffy = "0.4"
 uuid = { version = "1", features = ["v4"] }
 zip = "0.6"
 tiktoken-rs = "0.7"
+# Dictionary-based CJK word segmentation (embedded `default-dict`) and
+# Snowball English stemming: the memory keyword matcher (`memory::tokenize`)
+# runs every hint/search/cluster token through these, instead of sliding CJK
+# bigrams + raw substrings.
+jieba-rs = "0.7"
+rust-stemmers = "1.2"
 ignore = "0.4"
 regex = "1"
 globset = "0.4"
