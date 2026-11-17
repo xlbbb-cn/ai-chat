@@ -977,7 +977,6 @@ fn hint_candidates(workspace_dir: &Path, include_evolution: bool) -> Vec<HintCan
             if entry.meta.confidence <= LOW_TRUST_CONFIDENCE {
                 continue;
             }
-            let tags = entry.meta.tags.join(" ");
             candidates.push(HintCandidate {
                 key: entry.meta.key.clone(),
                 title: one_line(
@@ -991,12 +990,7 @@ fn hint_candidates(workspace_dir: &Path, include_evolution: bool) -> Vec<HintCan
                 confidence: entry.meta.confidence,
                 importance: entry.meta.importance,
                 weight: 0,
-                fields: [
-                    normalize_text(&entry.meta.key),
-                    normalize_text(&entry.meta.title),
-                    normalize_text(&tags),
-                    normalize_text(&entry.body),
-                ],
+                fields: entry_match_fields(&entry),
             });
         }
     }
@@ -1070,33 +1064,158 @@ fn read_scope_note(path: &Path) -> Option<(String, String, Vec<String>)> {
     Some((heading.unwrap_or(stem), body, tags))
 }
 
-/// Best hit weight of one candidate against the query keywords.
-///
-/// Priority is title > tag > body: a hit in the name (key or title) is a hit on
-/// its own — those are the words the author chose for the entry — and a tag hit
-/// beats anything found in the prose. A **body-only** match needs two distinct
-/// keywords: one CJK bigram (`的时`, `时候`) is common enough to match almost
-/// every entry and would turn the ranking into a lottery.
-fn hint_weight(fields: &[String; 4], keywords: &HashSet<String>) -> u32 {
-    let hits = |field: &str| -> usize {
-        if field.is_empty() {
-            return 0;
+/// Result of matching one memory's fields against a query's keywords.
+struct KeywordMatch {
+    /// 3 = the curated name (key or title), 2 = tags, 1 = body only.
+    tier: u32,
+    /// Distinct query keywords found anywhere in the entry: the *coverage* that
+    /// `search` ranks on right after the tier.
+    hits: usize,
+}
+
+impl KeywordMatch {
+    /// Tier name printed by the `search` output.
+    fn tier_label(&self) -> &'static str {
+        match self.tier {
+            HINT_TITLE_WEIGHT => "title",
+            HINT_TAG_WEIGHT => "tags",
+            _ => "body",
         }
-        keywords
-            .iter()
-            .filter(|keyword| field.contains(keyword.as_str()))
-            .count()
+    }
+
+    /// A hit strong enough to prove the entry is *about* the query: a name or
+    /// tag hit, or a body hit on two different keywords.
+    fn is_credible(&self) -> bool {
+        self.tier > HINT_CONTENT_WEIGHT || self.hits >= 2
+    }
+}
+
+/// Match `keywords` against `[key, title, tags, body]` and report the best tier
+/// plus how many distinct keywords matched.
+fn keyword_match(fields: &[String; 4], keywords: &HashSet<String>) -> Option<KeywordMatch> {
+    let mut tiers = [false; 4];
+    let mut matched: HashSet<&str> = HashSet::new();
+    for (index, field) in fields.iter().enumerate() {
+        if field.is_empty() {
+            continue;
+        }
+        for keyword in keywords {
+            if field.contains(keyword.as_str()) {
+                tiers[index] = true;
+                matched.insert(keyword.as_str());
+            }
+        }
+    }
+    if matched.is_empty() {
+        return None;
+    }
+    let tier = if tiers[0] || tiers[1] {
+        HINT_TITLE_WEIGHT
+    } else if tiers[2] {
+        HINT_TAG_WEIGHT
+    } else {
+        HINT_CONTENT_WEIGHT
     };
-    if hits(&fields[0]) > 0 || hits(&fields[1]) > 0 {
-        return HINT_TITLE_WEIGHT;
+    Some(KeywordMatch {
+        tier,
+        hits: matched.len(),
+    })
+}
+
+/// The `[key, title, tags, body]` haystacks of one entry, normalized once.
+///
+/// The request hint and `search` share them on purpose: a query that lights up
+/// the hint must find the same entry in `search`, so the two paths cannot drift
+/// apart again (the hint used to be the only token-level matcher).
+fn entry_match_fields(entry: &EvolutionEntry) -> [String; 4] {
+    [
+        normalize_text(&entry.meta.key),
+        normalize_text(&entry.meta.title),
+        normalize_text(&entry.meta.tags.join(" ")),
+        normalize_text(&format!("{} {}", entry.summary, entry.body)),
+    ]
+}
+
+/// Hit weight the hint uses: the tier, with the stricter rule that a
+/// **body-only** match needs two distinct keywords. One CJK bigram (`的时`,
+/// `时候`) is common enough to match almost every entry and would turn the
+/// 200-character block into a lottery.
+fn hint_weight(fields: &[String; 4], keywords: &HashSet<String>) -> u32 {
+    match keyword_match(fields, keywords) {
+        Some(hit) if hit.is_credible() => hit.tier,
+        _ => 0,
     }
-    if hits(&fields[2]) > 0 {
-        return HINT_TAG_WEIGHT;
+}
+
+/// Upper bound of one `search` result list; the rest is a pointer line.
+///
+/// A line carries a full distilled summary (`EVOLUTION_SUMMARY_MAX`), so a
+/// dozen keeps the whole result under the tool-output head budget instead of
+/// being cut in the middle by `truncate_tool_output`.
+const EVOLUTION_SEARCH_MAX_MATCHES: usize = 12;
+
+/// Token-level match of every entry against `query`, ordered for `search`:
+/// hit tier (name > tags > body), then coverage, then the experience score,
+/// then `key` so two identical queries render identically.
+///
+/// Token-level on purpose: the old whole-string `contains` needed the query to
+/// appear verbatim, so `python 解释器` missed an entry that says
+/// "use python, not python3".
+fn rank_keyword_matches(ranked: Vec<ScoredEntry>, query: &str) -> Vec<(KeywordMatch, ScoredEntry)> {
+    let keywords = hint_keywords(query);
+    if keywords.is_empty() {
+        return Vec::new();
     }
-    if hits(&fields[3]) >= 2 {
-        return HINT_CONTENT_WEIGHT;
+    let mut matches: Vec<(KeywordMatch, ScoredEntry)> = ranked
+        .into_iter()
+        .filter_map(|scored| {
+            let fields = entry_match_fields(&scored.entry);
+            keyword_match(&fields, &keywords).map(|hit| (hit, scored))
+        })
+        .collect();
+    matches.sort_by(|(left_hit, left), (right_hit, right)| {
+        right_hit
+            .tier
+            .cmp(&left_hit.tier)
+            .then_with(|| right_hit.hits.cmp(&left_hit.hits))
+            .then_with(|| {
+                right
+                    .score
+                    .partial_cmp(&left.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .then_with(|| left.entry.meta.key.cmp(&right.entry.meta.key))
+    });
+    matches
+}
+
+/// Compact, match-ordered result list: one line per entry.
+///
+/// The tier and the coverage are printed because they *are* the order: a name
+/// hit means the memory is about the question, a body hit only that the words
+/// appear somewhere in it.
+fn render_search_matches(matches: &[(KeywordMatch, ScoredEntry)]) -> String {
+    let mut text = String::new();
+    for (hit, scored) in matches.iter().take(EVOLUTION_SEARCH_MAX_MATCHES) {
+        let summary = one_line(&scored.entry.summary, EVOLUTION_SUMMARY_MAX);
+        text.push_str(&format!(
+            "- {} ({}, c{}, {}, {}{}): {}\n",
+            scored.entry.meta.key,
+            scored.entry.meta.kind,
+            scored.entry.meta.confidence,
+            hit.tier_label(),
+            hit.hits,
+            if hit.hits == 1 { " hit" } else { " hits" },
+            summary,
+        ));
     }
-    0
+    if matches.len() > EVOLUTION_SEARCH_MAX_MATCHES {
+        text.push_str(&format!(
+            "+ {} lower-ranked matches — narrow the query\n",
+            matches.len() - EVOLUTION_SEARCH_MAX_MATCHES
+        ));
+    }
+    text.trim_end().to_string()
 }
 
 /// Render the largest prefix of `ranked` that fits `budget_chars`; `None` when
@@ -2874,51 +2993,59 @@ fn handle_evolution_scope(
                 call_id,
                 format!("🧠 *Searching evolution memories for '{}'*\n", query),
             );
-            let needle = normalize_text(query);
-            let ranked = ranked_evolution_entries(workspace_dir);
-            let mut matched: Vec<String> = Vec::new();
-            let mut low_trust: Vec<String> = Vec::new();
-            for scored in &ranked {
-                let haystack = normalize_text(&format!(
-                    "{} {} {} {}",
-                    scored.entry.meta.key, scored.entry.meta.title, scored.entry.summary, scored.entry.body
-                ));
-                if !needle.is_empty() && haystack.contains(&needle) {
-                    matched.push(scored.entry.meta.key.clone());
-                    if let Some(hint) = low_trust_hint(&scored.entry) {
-                        low_trust.push(format!("- {}: {hint}", scored.entry.meta.key));
-                    }
-                }
-            }
-            bump_uses(workspace_dir, &matched);
-
-            match run_integrated_search(
-                query,
-                &dir,
-                workspace_dir,
-                &SearchOptions {
-                    include_hidden: false,
-                    glob: Some("**/*.md".to_string()),
-                    ..SearchOptions::default()
-                },
-            ) {
-                Ok(output) => {
-                    if output.is_empty() || output == "(no matches)" {
+            let matches = rank_keyword_matches(ranked_evolution_entries(workspace_dir), query);
+            if matches.is_empty() {
+                // Nothing matched a keyword (a one-character query, or a phrase
+                // that does not tokenize): fall back to a literal sweep so an
+                // archived file that `load_evolution_entries` skips is still
+                // findable.
+                return match run_integrated_search(
+                    query,
+                    &dir,
+                    workspace_dir,
+                    &SearchOptions {
+                        include_hidden: false,
+                        glob: Some("**/*.md".to_string()),
+                        ..SearchOptions::default()
+                    },
+                ) {
+                    Ok(output) if output.is_empty() || output == "(no matches)" => {
                         format!("No evolution memories match '{}'.", query)
-                    } else if matched.is_empty() {
-                        output
-                    } else {
-                        let mut text =
-                            format!("{}\n\nMatched keys: {}", output, matched.join(", "));
-                        if !low_trust.is_empty() {
-                            text.push_str("\n\nLow-trust matches — re-verify before use:\n");
-                            text.push_str(&low_trust.join("\n"));
-                        }
-                        text
                     }
-                }
-                Err(error) => format!("Error: {error}"),
+                    Ok(output) => output,
+                    Err(error) => format!("Error: {error}"),
+                };
             }
+
+            // Only a credible hit counts as usage: a stray CJK bigram that
+            // merely appears somewhere in the prose must not rank the entry up
+            // over time (`uses` feeds `score_evolution_entry`).
+            let used: Vec<String> = matches
+                .iter()
+                .filter(|(hit, _)| hit.is_credible())
+                .map(|(_, scored)| scored.entry.meta.key.clone())
+                .collect();
+            bump_uses(workspace_dir, &used);
+
+            let mut text = format!(
+                "{} evolution {} for '{}', ordered by hit tier then coverage:\n{}",
+                matches.len(),
+                if matches.len() == 1 { "match" } else { "matches" },
+                query,
+                render_search_matches(&matches)
+            );
+            let low_trust: Vec<String> = matches
+                .iter()
+                .filter_map(|(_, scored)| {
+                    low_trust_hint(&scored.entry)
+                        .map(|hint| format!("- {}: {hint}", scored.entry.meta.key))
+                })
+                .collect();
+            if !low_trust.is_empty() {
+                text.push_str("\n\nLow-trust matches — re-verify before use:\n");
+                text.push_str(&low_trust.join("\n"));
+            }
+            text
         }
         "delete" => {
             if key.is_empty() {
@@ -4364,4 +4491,94 @@ mod tests {
         // The better-evidenced (`c4`) entry is the one that survives.
         assert_eq!(hint.keys, vec!["interpreter"]);
     }
+
+    /// `search` matches tokens, not the whole query as one substring.
+    #[test]
+    fn search_matches_tokens_not_the_whole_query() {
+        let workspace = TempWorkspace::new("search-tokens");
+        write_entry(
+            &workspace,
+            "python-default",
+            "Default interpreter",
+            4,
+            3,
+            "Use `python`, not `python3`.",
+        );
+
+        // The old matcher needed "python解释器" verbatim and found nothing.
+        let matches = rank_keyword_matches(ranked_evolution_entries(&workspace.dir), "python 解释器");
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].1.entry.meta.key, "python-default");
+        assert_eq!(matches[0].0.tier, HINT_TITLE_WEIGHT);
+        assert_eq!(matches[0].0.hits, 1);
+    }
+
+    /// Hit tier first, coverage second — a two-keyword body match still lands
+    /// below a one-keyword tag match.
+    #[test]
+    fn search_orders_by_hit_tier_then_coverage() {
+        let workspace = TempWorkspace::new("search-order");
+        write_entry(
+            &workspace,
+            "name-hit",
+            "Python interpreter",
+            3,
+            3,
+            "No prose match here.",
+        );
+        workspace.write(
+            "tag-hit",
+            "---\nformat_version: 2\nkey: tag-hit\ntitle: Shell notes\nimportance: 3\nconfidence: 3\ntags: [python]\n---\n\nUnrelated prose.\n",
+        );
+        write_entry(
+            &workspace,
+            "body-two",
+            "Misc one",
+            3,
+            3,
+            "The python interpreter lives in the toolchain.",
+        );
+        write_entry(
+            &workspace,
+            "body-one",
+            "Misc two",
+            3,
+            3,
+            "Only python appears.",
+        );
+
+        let matches = rank_keyword_matches(
+            ranked_evolution_entries(&workspace.dir),
+            "python interpreter",
+        );
+        let order: Vec<&str> = matches
+            .iter()
+            .map(|(_, scored)| scored.entry.meta.key.as_str())
+            .collect();
+        assert_eq!(order, vec!["name-hit", "tag-hit", "body-two", "body-one"]);
+        let hits: Vec<usize> = matches.iter().map(|(hit, _)| hit.hits).collect();
+        assert_eq!(hits, vec![2, 1, 2, 1]);
+
+        let text = render_search_matches(&matches);
+        assert_eq!(text.lines().count(), 4, "{text}");
+        assert!(text.starts_with("- name-hit ("), "{text}");
+        assert!(text.contains(", title, 2 hits):"), "{text}");
+        assert!(text.contains(", tags, 1 hit):"), "{text}");
+        assert!(text.contains(", body, 2 hits):"), "{text}");
+    }
+
+    /// A body-only single-keyword hit is still found, but it is not evidence
+    /// enough to count as usage (`uses` feeds the ranking).
+    #[test]
+    fn a_weak_hit_is_returned_but_does_not_count_as_usage() {
+        let workspace = TempWorkspace::new("search-weak");
+        write_entry(&workspace, "prose-only", "Misc", 3, 3, "Only python appears.");
+
+        let matches =
+            rank_keyword_matches(ranked_evolution_entries(&workspace.dir), "python interpreter");
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].0.tier, HINT_CONTENT_WEIGHT);
+        assert!(!matches[0].0.is_credible());
+    }
+
 }
