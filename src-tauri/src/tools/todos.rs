@@ -687,7 +687,7 @@ async fn ask_user(
 
     let state = app.state::<AppState>();
     // One form at a time — same rule as the confirmation dialogs.
-    let _queue_guard = state.todo_ask_lock.lock().await;
+    let _queue_guard = state.confirm.todo_ask_lock.lock().await;
 
     let request_id = format!("todo-ask-{}", Uuid::new_v4());
     let payload = json!({
@@ -702,7 +702,7 @@ async fn ask_user(
     // find an empty slot and be dropped.
     let (tx, rx) = tokio::sync::oneshot::channel::<TodoAskReply>();
     {
-        let mut slot = state.todo_ask.lock().unwrap();
+        let mut slot = state.confirm.todo_ask.lock().unwrap();
         *slot = Some(crate::TodoAskPending {
             request_id: request_id.clone(),
             payload: payload.clone(),
@@ -742,7 +742,7 @@ async fn ask_user(
     // Drop our own slot entry (timeout / cancellation). A late submit then hits
     // an unknown request id and is ignored by `todo_ask_reply`.
     {
-        let mut slot = state.todo_ask.lock().unwrap();
+        let mut slot = state.confirm.todo_ask.lock().unwrap();
         if matches!(slot.as_ref(), Some(pending) if pending.request_id == request_id) {
             *slot = None;
         }

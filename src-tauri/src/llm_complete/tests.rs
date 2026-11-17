@@ -1,6 +1,9 @@
 //! Unit tests for `llm_complete.rs`.
 
 use super::*;
+// The streaming transport moved to `llm_client`; keep the historical test
+// namespace (`stream::…`) so the assertions read the same.
+use crate::llm_client as stream;
 
 /// Config with empty per-model/global effort values, for the resolver tests.
 fn config_with_efforts(per_model: &[(&str, &str)], global: &str) -> crate::AppConfig {

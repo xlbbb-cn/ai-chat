@@ -29,7 +29,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::llm_complete::{
+use crate::llm_client::{
     apply_completion_token_limit, build_stream_client, resolve_reasoning_effort,
     sanitize_tool_pairs, stream_llm_request, upstream_request_headers, StreamOptions,
 };

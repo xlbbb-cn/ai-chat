@@ -186,7 +186,7 @@ chcp 65001 > $null; \
 fn pwsh_program() -> &'static str {
     static PROGRAM: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
     PROGRAM.get_or_init(|| {
-        if crate::agents::cli::resolve_executable("pwsh").is_ok() {
+        if crate::executable::resolve_executable("pwsh").is_ok() {
             "pwsh"
         } else {
             "powershell"

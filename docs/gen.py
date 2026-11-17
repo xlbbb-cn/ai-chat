@@ -166,6 +166,8 @@ BANDS = [
                  ("lib.rs", "AppState · 菜单 · setup · 单一 generate_handler 列表", "core"),
                  ("ipc/", "103 个命令的薄转发层（按域拆分）", "core"),
                  ("events.rs", "事件名常量 + payload 结构体（推送契约）", "core"),
+                 ("llm_client.rs", "SSE 传输 / 重试 / 头 / ChatMessage（chat 与子智能体共用）", "core"),
+                 ("http.rs", "共享 reqwest 客户端（目录 + 流式）", "n"),
                  ("llm_complete.rs", "chat_completion 流式主循环 · 5.1k 行", "core"),
                  ("turn_guard.rs", "轮次 / 工具 / 失败守卫", "n"),
                  ("instance.rs", "单实例锁 · shadow 窗口", "n"),

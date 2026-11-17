@@ -18,12 +18,15 @@ pub mod agents;
 mod backup;
 mod db;
 mod events;
+mod executable;
 mod evolution_maintenance;
 mod experience;
 mod figures;
 mod html_pdf;
+mod http;
 mod instance;
 mod ipc;
+mod llm_client;
 mod llm_complete;
 mod logger;
 // `src/utils/` is a plain folder holding standalone crates (workspace members
@@ -846,6 +849,36 @@ pub struct InjectUserMessageResult {
     pub accepted: bool,
 }
 
+/// Serialized user decisions: tool confirmation, the `todos ask` form and
+/// external-agent approval. Each slot has one sender, so a second request
+/// queues on the matching lock instead of overwriting the pending dialog.
+pub struct ConfirmState {
+    /// One-shot channel sender used to relay the user's confirm/deny response
+    /// back to a waiting `execute_tool` call. Stores the request_id alongside
+    /// the sender so a stale confirmation can never approve the wrong command.
+    pub sender: Mutex<Option<(String, tokio::sync::oneshot::Sender<ToolConfirmation>)>>,
+    /// Serializes tool confirmation dialogs: `sender` is one slot, so the main
+    /// agent and background tasks must queue instead of overwriting each
+    /// other's pending request.
+    pub tool_lock: tokio::sync::Mutex<()>,
+    /// Pending `todos ask` form: the payload the UI shows (kept so a webview
+    /// reload can restore the panel via `get_pending_todo_ask`) plus the
+    /// one-shot sender that carries the user's answers back to the blocked
+    /// tool call. Addressed by `request_id` like `sender`.
+    pub todo_ask: Mutex<Option<TodoAskPending>>,
+    /// Serializes pending question forms: the UI shows one panel, so a second
+    /// `todos ask` waits here until the first is answered or torn down.
+    pub todo_ask_lock: tokio::sync::Mutex<()>,
+    /// External-agent ids (`cli` / `cloud`) the user already approved in this
+    /// app run. Each such agent asks once, then runs without prompting until
+    /// restart — unless its `require_approval` switch is off.
+    pub external_confirmed: Mutex<std::collections::HashSet<String>>,
+    /// Serializes external-agent approval requests: `sender` holds one pending
+    /// request at a time, so parallel agents must queue here instead of
+    /// overwriting each other's dialog.
+    pub external_lock: tokio::sync::Mutex<()>,
+}
+
 pub struct AppState {
     pub config: Mutex<AppConfig>,
     pub config_path: PathBuf,
@@ -880,22 +913,11 @@ pub struct AppState {
     pub active_turn: Mutex<Option<(u64, String)>>,
     /// Mid-turn injections waiting for the next request boundary of that turn.
     pub turn_inbox: Mutex<Vec<TurnInboxItem>>,
-    /// One-shot channel sender used to relay the user's confirm/deny response
-    /// back to a waiting `execute_tool` call. Stores the request_id alongside
-    /// the sender so a stale confirmation can never approve the wrong command.
-    pub confirm_sender: Mutex<Option<(String, tokio::sync::oneshot::Sender<ToolConfirmation>)>>,
-    /// Serializes tool confirmation dialogs: `confirm_sender` is one slot, so
-    /// the main agent and background tasks must queue instead of overwriting
-    /// each other's pending request.
-    pub tool_confirm_lock: tokio::sync::Mutex<()>,
-    /// Pending `todos ask` form: the payload the UI shows (kept so a webview
-    /// reload can restore the panel via `get_pending_todo_ask`) plus the
-    /// one-shot sender that carries the user's answers back to the blocked
-    /// tool call. Addressed by `request_id` like `confirm_sender`.
-    pub todo_ask: Mutex<Option<TodoAskPending>>,
-    /// Serializes pending question forms: the UI shows one panel, so a second
-    /// `todos ask` waits here until the first is answered or torn down.
-    pub todo_ask_lock: tokio::sync::Mutex<()>,
+    /// Everything that blocks on a user decision: tool confirmation, the
+    /// `todos ask` form and external-agent approval. Grouped because they share
+    /// one rule — at most one dialog at a time — and must not be scattered
+    /// across the rest of the application state.
+    pub confirm: ConfirmState,
     /// Per-server diagnostic log buffer (in-memory ring buffer, last
     /// `MAX_MCP_LOG_ENTRIES` entries per server). Populated by mcp.rs at
     /// every save / test / tool call so the UI can show what happened.
@@ -928,14 +950,6 @@ pub struct AppState {
     pub session_memories: Mutex<
         std::collections::HashMap<String, std::collections::HashMap<String, serde_json::Value>>,
     >,
-    /// External-agent ids (`cli` / `cloud`) the user already approved in this
-    /// app run. Each such agent asks once, then runs without prompting until
-    /// restart — unless its `require_approval` switch is off.
-    pub external_agent_confirmed: Mutex<std::collections::HashSet<String>>,
-    /// Serializes external-agent approval requests: `confirm_sender` holds one
-    /// pending request at a time, so parallel agents must queue here instead of
-    /// overwriting each other's dialog.
-    pub external_agent_confirm_lock: tokio::sync::Mutex<()>,
     /// Tools disabled for the rest of a chat session after repeated failures
     /// (Settings → Advanced). Shared by the main agent, its helper and every
     /// sub-agent of the session; in-memory only, cleared when the limit is
@@ -1375,7 +1389,7 @@ pub(crate) fn confirm_command(
     username: Option<String>,
     password: Option<String>,
 ) {
-    let mut guard = state.confirm_sender.lock().unwrap();
+    let mut guard = state.confirm.sender.lock().unwrap();
     if let Some((pending_id, tx)) = guard.take() {
         if pending_id == request_id {
             let _ = tx.send(ToolConfirmation {
@@ -1396,7 +1410,7 @@ pub(crate) fn todo_ask_reply(
     request_id: String,
     answers: Option<Vec<todos::TodoAskAnswer>>,
 ) {
-    let mut slot = state.todo_ask.lock().unwrap();
+    let mut slot = state.confirm.todo_ask.lock().unwrap();
     if matches!(slot.as_ref(), Some(pending) if pending.request_id == request_id) {
         if let Some(pending) = slot.take() {
             if let Some(tx) = pending.tx {
@@ -1410,7 +1424,7 @@ pub(crate) fn todo_ask_reply(
 /// listener and the panel, so the restored UI fetches the pending payload the
 /// same way `get_evolution_maintenance_state` restores the napping face.
 pub(crate) fn get_pending_todo_ask(state: State<'_, AppState>) -> Option<serde_json::Value> {
-    state.todo_ask.lock().ok()?.as_ref().map(|p| p.payload.clone())
+    state.confirm.todo_ask.lock().ok()?.as_ref().map(|p| p.payload.clone())
 }
 
 pub(crate) fn get_workspace_dir(state: State<'_, AppState>) -> String {
@@ -2054,10 +2068,14 @@ pub fn run() {
                 turn_seq: AtomicU64::new(1),
                 active_turn: Mutex::new(None),
                 turn_inbox: Mutex::new(Vec::new()),
-                confirm_sender: Mutex::new(None),
-                tool_confirm_lock: tokio::sync::Mutex::new(()),
-                todo_ask: Mutex::new(None),
-                todo_ask_lock: tokio::sync::Mutex::new(()),
+                confirm: ConfirmState {
+                    sender: Mutex::new(None),
+                    tool_lock: tokio::sync::Mutex::new(()),
+                    todo_ask: Mutex::new(None),
+                    todo_ask_lock: tokio::sync::Mutex::new(()),
+                    external_confirmed: Mutex::new(Default::default()),
+                    external_lock: tokio::sync::Mutex::new(()),
+                },
                 mcp_logs: std::sync::Arc::new(Mutex::new(Default::default())),
                 mcp_cancelled_tests: std::sync::Arc::new(Mutex::new(Default::default())),
                 mcp_children: std::sync::Arc::new(tokio::sync::Mutex::new(Default::default())),
@@ -2065,8 +2083,6 @@ pub fn run() {
                 serve_processes: Default::default(),
                 background_tasks: Default::default(),
                 session_memories: Mutex::new(Default::default()),
-                external_agent_confirmed: Mutex::new(Default::default()),
-                external_agent_confirm_lock: tokio::sync::Mutex::new(()),
                 tool_guard: Default::default(),
             });
 

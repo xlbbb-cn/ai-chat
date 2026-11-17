@@ -198,7 +198,7 @@ async fn prepare_agent_run<'a>(
     // provider's `/models` response, the metadata catalogue, or entered for the
     // model in the Agents panel), otherwise a conservative default. Output-token
     // caps are a different quantity and must never shrink the context budget.
-    let context_budget = crate::llm_complete::resolve_context_window(
+    let context_budget = crate::llm_client::resolve_context_window(
         config,
         model,
         AGENT_DEFAULT_CONTEXT_WINDOW as u32,
@@ -1215,7 +1215,16 @@ pub(crate) async fn run_llm_agent_body(
                     if runnable.len() == 1 || max_parallel == 1 {
                         for &index in &runnable {
                             let call = &planned[index];
-                            let result = if call.name == "mbus" {
+                            let parsed: Value = serde_json::from_str(&call.args).unwrap_or_default();
+                    let result = if let Some(result) = mission_tools::handle(
+                        app,
+                        &call.name,
+                        Some(&mission_id),
+                        Some(session_id),
+                        &parsed,
+                    ) {
+                        result
+                    } else if call.name == "mbus" {
                                 match mbus {
                                     Some(bus) => {
                                         let parsed: Value =

@@ -980,7 +980,7 @@ pub(crate) async fn request_external_agent_approval(
 ) -> Option<String> {
     let state = app.state::<AppState>();
     if state
-        .external_agent_confirmed
+        .confirm.external_confirmed
         .lock()
         .map(|set| set.contains(&agent.id))
         .unwrap_or(false)
@@ -991,10 +991,10 @@ pub(crate) async fn request_external_agent_approval(
     // Only one confirmation dialog can be pending at a time (single
     // `confirm_sender`), so parallel agents must queue here instead of
     // overwriting each other's request.
-    let _guard = state.external_agent_confirm_lock.lock().await;
+    let _guard = state.confirm.external_lock.lock().await;
 
     if state
-        .external_agent_confirmed
+        .confirm.external_confirmed
         .lock()
         .map(|set| set.contains(&agent.id))
         .unwrap_or(false)
@@ -1042,7 +1042,7 @@ pub(crate) async fn request_external_agent_approval(
         ));
     }
 
-    if let Ok(mut set) = state.external_agent_confirmed.lock() {
+    if let Ok(mut set) = state.confirm.external_confirmed.lock() {
         set.insert(agent.id.clone());
     }
     None

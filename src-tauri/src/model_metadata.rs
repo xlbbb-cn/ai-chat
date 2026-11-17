@@ -42,7 +42,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
-use crate::llm_complete;
+use crate::http::build_http_client;
 
 /// Source label + URL for the models.dev catalogue — the first source in the
 /// merge order, because it covers the most models and is the only one that
@@ -420,7 +420,7 @@ fn write_catalog(app: &tauri::AppHandle, path: &Path, catalog: &CatalogFile) {
 /// is 6 MB and slow, github.io sometimes rate-limits) must not cost the caller the
 /// whole catalogue.
 async fn build_catalog() -> Result<CatalogFile, String> {
-    let client = llm_complete::build_http_client()?;
+    let client = build_http_client()?;
     let mut parts: Vec<Vec<ModelMetadata>> = Vec::new();
     let mut failures: Vec<String> = Vec::new();
 

@@ -1,6 +1,4 @@
-use futures_util::StreamExt;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -77,45 +75,7 @@ fn push_loaded_skill_block(
 
 // ─── Chat ────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChatMessage {
-    pub role: String,
-    /// `content` is either a plain string or a multimodal array of parts
-    /// (`text` / `image_url` / `file`) following the OpenAI Chat Completions
-    /// `messages[].content` schema. We keep it as a generic `Value` so the
-    /// struct can be deserialized from either form without losing fidelity.
-    pub content: Value,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reasoning_content: Option<String>,
-    /// Names of the skills that were loaded (via `use_skill`) during this
-    /// message's turn, recorded explicitly by the UI. This is the durable
-    /// "already loaded" state across turns — the backend must not infer it
-    /// from message text.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub loaded_skills: Option<Vec<String>>,
-}
 
-/// Extract the textual portion of a `messages[].content` value.
-/// - `String` content is returned verbatim.
-/// - Array content concatenates all `{"type":"text","text":...}` parts.
-/// - Anything else (e.g. malformed payloads) returns an empty string.
-pub(crate) fn content_to_text(value: &Value) -> String {
-    match value {
-        Value::String(s) => s.clone(),
-        Value::Array(parts) => {
-            let mut out = String::new();
-            for part in parts {
-                if part.get("type").and_then(|v| v.as_str()) == Some("text") {
-                    if let Some(text) = part.get("text").and_then(|v| v.as_str()) {
-                        out.push_str(text);
-                    }
-                }
-            }
-            out
-        }
-        _ => String::new(),
-    }
-}
 
 /// The most recent user message as plain text (empty when there is none).
 fn last_user_text(messages: &[ChatMessage]) -> String {
@@ -166,14 +126,13 @@ mod tests;
 mod background;
 mod conclusion;
 mod context;
-mod stream;
 mod tool_call;
 mod turn;
 
 pub(crate) use self::background::*;
 pub(crate) use self::conclusion::*;
 pub(crate) use self::context::*;
-pub(crate) use self::stream::*;
+pub(crate) use crate::llm_client::*;
 pub(crate) use self::tool_call::*;
 pub(crate) use self::turn::*;
 
@@ -256,8 +215,6 @@ const TOKEN_ESTIMATE_CHARS_PER_TOKEN: usize = 4;
 /// before a request whose estimated prompt already approaches the cap.
 const CONTEXT_PRECHECK_RATIO: f32 = 0.9;
 const DEFAULT_MODEL_MAX_TOKENS: u32 = 524_288;
-const STREAM_MAX_RETRIES: usize = 3;
-const STREAM_RETRY_BACKOFF_MS: [u64; 2] = [300, 900];
 
 /// Wrapper around text the user pushed into a running turn. It has to read as
 /// a NEW user instruction, not as an internal note: some OpenAI-compatible

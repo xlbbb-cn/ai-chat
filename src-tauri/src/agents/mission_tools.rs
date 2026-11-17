@@ -3,9 +3,31 @@
 //! Split out of the dispatcher so the ledger calls are visible on their own;
 //! the dispatcher only forwards.
 
-use super::*;
+use serde_json::{json, Value};
+use tauri::{AppHandle, Emitter, Manager};
 
-pub(super) fn add_task(
+/// The four mission-ledger tools. Returns `None` for any other tool name, so
+/// dispatchers can chain it in front of the regular tool executor.
+pub(crate) fn handle(
+    app: &AppHandle,
+    name: &str,
+    mission_id: Option<&str>,
+    session_id: Option<&str>,
+    args: &Value,
+) -> Option<String> {
+    let out = match name {
+        "add_task" => add_task(app, mission_id, session_id, args),
+        "update_task_status" => update_task_status(app, mission_id, session_id, args),
+        "get_active_tasks" => get_active_tasks(app, mission_id),
+        "mark_mission_accomplished" => {
+            mark_mission_accomplished(app, mission_id, session_id, args)
+        }
+        _ => return None,
+    };
+    Some(out)
+}
+
+fn add_task(
     app: &AppHandle,
     mission_id: Option<&str>,
     session_id: Option<&str>,
@@ -36,7 +58,7 @@ pub(super) fn add_task(
     }
 }
 
-pub(super) fn update_task_status(
+fn update_task_status(
     app: &AppHandle,
     mission_id: Option<&str>,
     session_id: Option<&str>,
@@ -66,7 +88,7 @@ pub(super) fn update_task_status(
     }
 }
 
-pub(super) fn get_active_tasks(app: &AppHandle, mission_id: Option<&str>) -> String {
+fn get_active_tasks(app: &AppHandle, mission_id: Option<&str>) -> String {
     let Some(mission_id) = mission_id else {
         return "Error: get_active_tasks is only available inside an autonomous sub-agent mission."
             .to_string();
@@ -86,7 +108,7 @@ pub(super) fn get_active_tasks(app: &AppHandle, mission_id: Option<&str>) -> Str
     }
 }
 
-pub(super) fn mark_mission_accomplished(
+fn mark_mission_accomplished(
     app: &AppHandle,
     mission_id: Option<&str>,
     session_id: Option<&str>,

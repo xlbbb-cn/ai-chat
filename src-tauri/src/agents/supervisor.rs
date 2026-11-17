@@ -19,7 +19,7 @@ use tauri::{AppHandle, Emitter};
 
 use super::mbus::{self, ActivityEvent, BusMessage, MissionBus, PLANNER_ID};
 use super::{log_agent_event, preview_text, Task};
-use crate::llm_complete::{
+use crate::llm_client::{
     apply_completion_token_limit, content_to_text, sanitize_tool_pairs, stream_llm_request,
     upstream_request_headers, ChatMessage, StreamOptions,
 };

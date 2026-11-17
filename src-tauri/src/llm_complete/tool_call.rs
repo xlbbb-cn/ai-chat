@@ -196,22 +196,31 @@ pub(crate) async fn run_tool_call(
 
     // ── Built-in tool ───────────────────────────────────────────────────────
     let start_time = std::time::Instant::now();
-    let tool_result = tools::execute_tool(
-        app,
-        name,
-        args,
-        workspace_dir.to_path_buf(),
-        config,
-        skill_allowed_commands,
-        skill_evolution_root,
-        None,
-        Some(session_id),
-        Some(id),
-        active_skill_dirs,
-        None,
-        None,
-    )
-    .await;
+    // Mission-ledger tools live with the agent system now. The main chat passes
+    // `mission_id: None`, so the handler answers with its "only inside a
+    // sub-agent mission" error instead of the tool being unknown.
+    let tool_result = if let Some(result) =
+        crate::agents::mission_tools::handle(app, name, None, Some(session_id), parsed)
+    {
+        result
+    } else {
+        tools::execute_tool(
+            app,
+            name,
+            args,
+            workspace_dir.to_path_buf(),
+            config,
+            skill_allowed_commands,
+            skill_evolution_root,
+            None,
+            Some(session_id),
+            Some(id),
+            active_skill_dirs,
+            None,
+            None,
+        )
+        .await
+    };
     let duration_ms = start_time.elapsed().as_millis() as i64;
 
     // Log tool execution

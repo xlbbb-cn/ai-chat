@@ -3,7 +3,6 @@
 
 use super::*;
 
-mod mission;
 mod run_cmd;
 mod run_shell;
 mod skill_read;
@@ -130,7 +129,7 @@ pub(crate) async fn request_tool_confirmation(
     // each other's dialog. Serialize here; the lock is held while the user
     // decides, which is exactly the intended one-at-a-time behaviour.
     let state = app.state::<crate::AppState>();
-    let _confirm_guard = state.tool_confirm_lock.lock().await;
+    let _confirm_guard = state.confirm.tool_lock.lock().await;
 
     // Unique id ties the frontend's confirm/deny response back to THIS pending
     // request, so a stale response cannot approve a different command.
@@ -140,7 +139,7 @@ pub(crate) async fn request_tool_confirmation(
     // find an empty slot and be dropped.
     let (tx, rx) = tokio::sync::oneshot::channel::<crate::ToolConfirmation>();
     {
-        *state.confirm_sender.lock().unwrap() = Some((request_id.clone(), tx));
+        *state.confirm.sender.lock().unwrap() = Some((request_id.clone(), tx));
     }
 
     let _ = app.emit(
@@ -183,7 +182,7 @@ pub(crate) async fn request_tool_confirmation(
     // Drop our own slot entry (timeout / cancellation). A late click then hits
     // an unknown request id and is ignored by `confirm_command`.
     {
-        let mut slot = state.confirm_sender.lock().unwrap();
+        let mut slot = state.confirm.sender.lock().unwrap();
         if matches!(slot.as_ref(), Some((id, _)) if id == &request_id) {
             *slot = None;
         }
@@ -300,12 +299,6 @@ pub async fn execute_tool(
         working_dir,
     };
     let tool_output = match name {
-        "add_task" => mission::add_task(app, mission_id, session_id, &args),
-        "update_task_status" => mission::update_task_status(app, mission_id, session_id, &args),
-        "get_active_tasks" => mission::get_active_tasks(app, mission_id),
-        "mark_mission_accomplished" => {
-            mission::mark_mission_accomplished(app, mission_id, session_id, &args)
-        }
         "timer_set" => {
             let Some(session_id) = session_id else {
                 return "Error: timer_set is only available in an interactive chat session."

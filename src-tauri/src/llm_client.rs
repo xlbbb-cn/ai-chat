@@ -1,8 +1,138 @@
 //! Streaming transport: chunk processing, retries and the unified
 //! request helper.
 
-use super::*;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use futures_util::StreamExt;
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+use tauri::{AppHandle, Emitter};
+
+use crate::db;
+
+pub(crate) use crate::http::{build_http_client, build_stream_client};
+
+/// Streaming retry policy: attempts and the two backoff steps.
+const STREAM_MAX_RETRIES: usize = 3;
+const STREAM_RETRY_BACKOFF_MS: [u64; 2] = [300, 900];
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatMessage {
+    pub role: String,
+    /// `content` is either a plain string or a multimodal array of parts
+    /// (`text` / `image_url` / `file`) following the OpenAI Chat Completions
+    /// `messages[].content` schema. We keep it as a generic `Value` so the
+    /// struct can be deserialized from either form without losing fidelity.
+    pub content: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
+    /// Names of the skills that were loaded (via `use_skill`) during this
+    /// message's turn, recorded explicitly by the UI. This is the durable
+    /// "already loaded" state across turns — the backend must not infer it
+    /// from message text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loaded_skills: Option<Vec<String>>,
+}
+
+/// Extract the textual portion of a `messages[].content` value.
+/// - `String` content is returned verbatim.
+/// - Array content concatenates all `{"type":"text","text":...}` parts.
+/// - Anything else (e.g. malformed payloads) returns an empty string.
+pub(crate) fn content_to_text(value: &Value) -> String {
+    match value {
+        Value::String(s) => s.clone(),
+        Value::Array(parts) => {
+            let mut out = String::new();
+            for part in parts {
+                if part.get("type").and_then(|v| v.as_str()) == Some("text") {
+                    if let Some(text) = part.get("text").and_then(|v| v.as_str()) {
+                        out.push_str(text);
+                    }
+                }
+            }
+            out
+        }
+        _ => String::new(),
+    }
+}
+
+/// Validate and sanitize the messages array before sending to the API.
+///
+/// Ensures that every `role: "tool"` message has a preceding `role: "assistant"`
+/// message whose `tool_calls` array contains a matching `tool_call_id`.  Any
+/// orphaned tool message (no matching assistant), duplicate tool response for
+/// an already-satisfied id, and incomplete assistant round (one or more of its
+/// tool_call_ids never received a response) are **all** removed — including the
+/// tool messages tied to an incomplete assistant.
+pub fn sanitize_tool_pairs(all_messages: &mut Vec<Value>) {
+    if all_messages.is_empty() {
+        return;
+    }
+
+    let mut keep = vec![true; all_messages.len()];
+
+    // Stack entries: (assistant_index, unconsumed_ids, consumed_tool_indices)
+    let mut assistant_stack: Vec<(usize, std::collections::HashSet<String>, Vec<usize>)> =
+        Vec::new();
+
+    for (i, msg) in all_messages.iter().enumerate() {
+        let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("");
+
+        if role == "assistant" {
+            if let Some(tcs) = msg.get("tool_calls").and_then(|v| v.as_array()) {
+                if !tcs.is_empty() {
+                    let ids: std::collections::HashSet<String> = tcs
+                        .iter()
+                        .filter_map(|tc| tc.get("id").and_then(|v| v.as_str()))
+                        .map(|s| s.to_string())
+                        .collect();
+                    assistant_stack.push((i, ids, Vec::new()));
+                }
+            }
+        } else if role == "tool" {
+            let call_id = msg
+                .get("tool_call_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            // Search from newest assistant backwards so a tool response is
+            // paired with the most recent round that declared its id.
+            let mut found = false;
+            for (_, ref mut ids, ref mut consumed) in assistant_stack.iter_mut().rev() {
+                if ids.remove(&call_id) {
+                    consumed.push(i);
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                keep[i] = false; // orphaned (or duplicate) — no matching assistant tool_call
+            }
+        }
+    }
+
+    // Remove incomplete assistants (unconsumed ids remain) AND their tool
+    // messages, so we never send a partial round to the API.
+    for &(idx, ref remaining_ids, ref tool_indices) in &assistant_stack {
+        if !remaining_ids.is_empty() {
+            keep[idx] = false; // incomplete round
+            for &ti in tool_indices {
+                keep[ti] = false;
+            }
+        }
+    }
+
+    // ── Apply removals ───────────────────────────────────────────────────────
+    let mut cleaned: Vec<Value> = Vec::with_capacity(all_messages.len());
+    for (i, msg) in all_messages.drain(..).enumerate() {
+        if keep[i] {
+            cleaned.push(msg);
+        }
+    }
+    *all_messages = cleaned;
+}
 
 pub struct StreamResult {
     pub finish_reason: String,
@@ -189,35 +319,6 @@ pub(crate) fn is_retryable_http_error_body(body: &str) -> bool {
     is_retryable_network_error(&extract_upstream_error_message(body))
 }
 
-pub(crate) fn build_http_client() -> Result<Client, String> {
-    Client::builder()
-        .connect_timeout(Duration::from_secs(12))
-        .timeout(Duration::from_secs(300))
-        .pool_idle_timeout(Duration::from_secs(90))
-        .tcp_keepalive(Duration::from_secs(60))
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {e}"))
-}
-
-/// Client for streaming chat requests.
-///
-/// Unlike [`build_http_client`] there is NO total request timeout: reqwest's
-/// `timeout` covers the whole response body, which for an SSE stream is the
-/// entire generation — a thinking model (or a slow relay) that streams longer
-/// than the limit died mid-answer no matter how healthy the connection was.
-/// Liveness is enforced per read instead: [`ClientBuilder::read_timeout`]
-/// fails when no bytes arrive for the interval, so a stalled upstream errors
-/// quickly (and retries) while a slow-but-alive stream may run arbitrarily
-/// long. Every caller that runs `stream_llm_request` must use this builder.
-pub(crate) fn build_stream_client() -> Result<Client, String> {
-    Client::builder()
-        .connect_timeout(Duration::from_secs(12))
-        .read_timeout(Duration::from_secs(120))
-        .pool_idle_timeout(Duration::from_secs(90))
-        .tcp_keepalive(Duration::from_secs(60))
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {e}"))
-}
 
 /// Default header correlating every upstream request with the chat session it belongs to.
 pub(crate) const CONVERSATION_ID_HEADER: &str = "x-conversation-id";

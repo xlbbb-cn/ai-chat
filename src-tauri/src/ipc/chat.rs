@@ -2,7 +2,7 @@
 //!
 //! Keep the argument names identical to `src/api.ts`: they are the wire names.
 
-use crate::llm_complete::ChatMessage;
+use crate::llm_client::ChatMessage;
 use crate::tools;
 use crate::tools::todos;
 use crate::AppState;

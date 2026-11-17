@@ -14,7 +14,7 @@ const LLM_DEFAULT_MAX_COMLETE_TOKENS: u32 = 8_192;
 
 use crate::{
     db::EmbeddedRole,
-    llm_complete::{
+    llm_client::{
         apply_completion_token_limit, apply_request_headers, build_stream_client, content_to_text,
         extract_upstream_error_message, has_authorization_header, resolve_reasoning_effort,
         sanitize_tool_pairs, stream_llm_request, upstream_request_headers, StreamOptions,
@@ -26,6 +26,7 @@ pub mod cli;
 pub mod cloud;
 pub mod exchange;
 pub mod files;
+pub(crate) mod mission_tools;
 pub mod mbus;
 pub mod supervisor;
 

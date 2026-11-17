@@ -478,7 +478,7 @@ pub async fn orchestrate(
     app: &AppHandle,
     state: &AppState,
     config: &AppConfig,
-    messages: &[crate::llm_complete::ChatMessage],
+    messages: &[crate::llm_client::ChatMessage],
     session_id: &str,
     cancelled: Arc<AtomicBool>,
 ) -> Result<OrchestrationOutcome, String> {
@@ -848,7 +848,7 @@ pub(crate) async fn select_agents(
     api_key: &str,
     headers: &[(String, String)],
     model: &str,
-    messages: &[crate::llm_complete::ChatMessage],
+    messages: &[crate::llm_client::ChatMessage],
     existing: &[SubAgent],
 ) -> Result<SelectionResult, String> {
     // One agent means there is nothing to choose: skip the request entirely.
@@ -1023,7 +1023,7 @@ pub(crate) async fn plan_tasks(
     api_key: &str,
     headers: &[(String, String)],
     model: &str,
-    messages: &[crate::llm_complete::ChatMessage],
+    messages: &[crate::llm_client::ChatMessage],
     agents: &[SubAgent],
     workspace_dir: &Path,
     exchange_root: &Path,
