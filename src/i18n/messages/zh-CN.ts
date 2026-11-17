@@ -497,6 +497,8 @@ const zhCN: Messages = {
         empty: "还没有自进化记忆。开启自进化模式后会自动记录。",
         pinned: "常驻",
         auto: "自动",
+        confidence: "信任度 {value}/5",
+        conflicts: "冲突 {count} 次",
         evidence: "确认 {count} 次",
         uses: "使用 {count} 次",
         archivedTitle: "已归档到技能（{count} 条）",

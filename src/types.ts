@@ -685,6 +685,10 @@ export interface EvolutionMemoryEntry {
   tags: string[];
   importance: number;
   confidence: number;
+  /** Times a real result contradicted this fact (trust calibration). */
+  contradictions: number;
+  /** One-line reason of the most recent conflict, if any. */
+  last_conflict?: string | null;
   evidence: number;
   uses: number;
   pinned: boolean;

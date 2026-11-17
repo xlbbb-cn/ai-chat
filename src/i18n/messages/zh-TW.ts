@@ -497,6 +497,8 @@ const zhTW: Messages = {
         empty: "尚無自我演化記憶。開啟自我演化模式後會自動記錄。",
         pinned: "常駐",
         auto: "自動",
+        confidence: "信任度 {value}/5",
+        conflicts: "衝突 {count} 次",
         evidence: "確認 {count} 次",
         uses: "使用 {count} 次",
         archivedTitle: "已歸檔到技能（{count} 條）",

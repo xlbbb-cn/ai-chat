@@ -49,6 +49,8 @@ pub const EVOLUTION_FORMAT_VERSION: u32 = 2;
 /// Character caps that keep one entry from crowding out the rest.
 const EVOLUTION_TITLE_MAX: usize = 100;
 const EVOLUTION_SUMMARY_MAX: usize = 300;
+/// Cap of the one-line conflict reason kept in `last_conflict`.
+const EVOLUTION_CONFLICT_NOTE_MAX: usize = 200;
 /// Maximum number of automatic (`source: auto`) entries kept on disk.
 const EVOLUTION_AUTO_LIMIT: usize = 40;
 /// A memory cluster is only a consolidation candidate above these thresholds —
@@ -116,6 +118,14 @@ pub struct EvolutionMeta {
     pub importance: u32,
     /// 1–5, how strong the evidence behind the fact is.
     pub confidence: u32,
+    /// Times a real result disagreed with this fact. A conflict forces
+    /// `confidence` down to the floor and is never cleared automatically.
+    pub contradictions: u32,
+    /// One-line reason of the most recent conflict (`get` only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_conflict: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_conflict_at: Option<String>,
     /// Independent confirmations (a repeated `add` bumps this).
     pub evidence: u32,
     /// Times the entry was explicitly retrieved/searched.
@@ -417,6 +427,9 @@ pub fn parse_evolution_entry(path: &Path) -> Option<EvolutionEntry> {
             tags,
             importance: if is_auto { 1 } else { 3 },
             confidence: 3,
+            contradictions: 0,
+            last_conflict: None,
+            last_conflict_at: None,
             evidence: 1,
             uses: 0,
             pinned: false,
@@ -807,10 +820,13 @@ pub fn render_evolution_context(workspace_dir: &Path, budget_chars: usize) -> St
 
 // ─── Writes: upsert / merge ──────────────────────────────────────────────────
 
+#[derive(Debug)]
 pub struct UpsertOutcome {
     pub entry: EvolutionEntry,
     pub merged_into: Option<String>,
     pub created: bool,
+    /// Trust before this call, so the caller can report the delta.
+    pub confidence_before: u32,
 }
 
 fn find_similar(entries: &[EvolutionEntry], title: &str, tags: &[String]) -> Option<usize> {
@@ -874,6 +890,9 @@ fn resolve_entry_index(entries: &[EvolutionEntry], key: &str) -> Option<usize> {
 /// The same key is an upsert (evidence += 1). A *similar* title/tag pair with a
 /// different key is merged into the existing entry instead of creating a
 /// second file — that is what keeps auto-recorded conclusions from piling up.
+///
+/// A plain re-add also counts as a **confirmation**: it raises `confidence` by
+/// one. Use [`upsert_evolution_entry_trusted`] to refute a fact instead.
 #[allow(clippy::too_many_arguments)]
 pub fn upsert_evolution_entry(
     workspace_dir: &Path,
@@ -886,6 +905,64 @@ pub fn upsert_evolution_entry(
     tags: &[String],
     merge: bool,
 ) -> Result<UpsertOutcome, String> {
+    upsert_evolution_entry_trusted(
+        workspace_dir,
+        key,
+        content,
+        title,
+        kind,
+        importance,
+        pinned,
+        tags,
+        merge,
+        TrustUpdate::confirming(),
+    )
+}
+
+/// How one `add` treats the stored fact: a plain re-add confirms it, a
+/// `conflict` refutes it.
+#[derive(Debug, Clone, Default)]
+pub struct TrustUpdate {
+    /// Explicit trust (1–5). It **overwrites** the stored value, which is the
+    /// only way trust may fall — `importance` keeps its `max` semantics.
+    pub confidence: Option<u32>,
+    /// The real result disagreed with the stored fact.
+    pub conflict: bool,
+    /// One-line reason of the conflict, stored as `last_conflict`.
+    pub note: String,
+    /// Count a plain re-add as a confirmation (+1 confidence). Off by default:
+    /// an automatic recording is not evidence of anything.
+    pub confirm: bool,
+}
+
+impl TrustUpdate {
+    /// A plain re-add: one confirmation, no refutation.
+    pub fn confirming() -> Self {
+        Self {
+            confirm: true,
+            ..Self::default()
+        }
+    }
+}
+
+/// Insert or update an entry and calibrate its trust (see [`TrustUpdate`]).
+///
+/// Why the asymmetry: a fact costs one conflict to lose its credibility but one
+/// confirmation to earn a single point of it back. Trust is cheap to lose and
+/// expensive to regain — that is what keeps a stale fact from staying loud.
+#[allow(clippy::too_many_arguments)]
+pub fn upsert_evolution_entry_trusted(
+    workspace_dir: &Path,
+    key: &str,
+    content: &str,
+    title: &str,
+    kind: &str,
+    importance: Option<u32>,
+    pinned: bool,
+    tags: &[String],
+    merge: bool,
+    trust: TrustUpdate,
+) -> Result<UpsertOutcome, String> {
     upsert_evolution_entry_with_source(
         workspace_dir,
         key,
@@ -897,6 +974,7 @@ pub fn upsert_evolution_entry(
         tags,
         merge,
         "verified",
+        trust,
     )
 }
 
@@ -922,6 +1000,7 @@ fn upsert_evolution_entry_with_source(
     tags: &[String],
     merge: bool,
     source: &str,
+    trust: TrustUpdate,
 ) -> Result<UpsertOutcome, String> {
     let dir = evolution_dir(workspace_dir);
     fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
@@ -944,6 +1023,27 @@ fn upsert_evolution_entry_with_source(
         }
     }
 
+    // A conflict must name an entry that exists: refuting something never
+    // retrieved would invent a fact at the lowest trust. The maintenance note
+    // is a task note, not knowledge, so it has no trust to calibrate.
+    if trust.conflict {
+        if key == MAINTENANCE_PROGRESS_KEY
+            || index
+                .map(|found| existing_entries[found].meta.key == MAINTENANCE_PROGRESS_KEY)
+                .unwrap_or(false)
+        {
+            return Err(format!(
+                "The '{MAINTENANCE_PROGRESS_KEY}' entry is the maintenance resume note and has no trust to calibrate."
+            ));
+        }
+        if index.is_none() {
+            return Err(format!(
+                "No evolution memory found for key '{key}': a conflict must target an entry you \
+                 retrieved. Record a new fact with a plain add instead."
+            ));
+        }
+    }
+
     let now = chrono::Utc::now().to_rfc3339();
     let (mut entry, created, previous_path) = match index {
         Some(found) => {
@@ -960,6 +1060,9 @@ fn upsert_evolution_entry_with_source(
                     tags: Vec::new(),
                     importance: 3,
                     confidence: 3,
+                    contradictions: 0,
+                    last_conflict: None,
+                    last_conflict_at: None,
                     evidence: 0,
                     uses: 0,
                     pinned: false,
@@ -978,10 +1081,30 @@ fn upsert_evolution_entry_with_source(
         ),
     };
 
-    if !created {
+    let confidence_before = entry.meta.confidence.clamp(1, 5);
+    if trust.conflict {
+        // A conflict is not a confirmation: evidence stays where it was.
+        entry.meta.evidence = entry.meta.evidence.max(1);
+    } else if !created {
         entry.meta.evidence = entry.meta.evidence.max(1) + 1;
     } else {
         entry.meta.evidence = 1;
+    }
+    if trust.conflict {
+        // Fast to distrust: one contradiction drops the fact to the floor.
+        entry.meta.contradictions = entry.meta.contradictions.saturating_add(1);
+        let note = trust.note.trim();
+        if !note.is_empty() {
+            entry.meta.last_conflict =
+                Some(truncate_with_ellipsis(note, EVOLUTION_CONFLICT_NOTE_MAX));
+        }
+        entry.meta.last_conflict_at = Some(now.clone());
+        entry.meta.confidence = 1;
+    } else if let Some(explicit) = trust.confidence.map(|value| value.clamp(1, 5)) {
+        entry.meta.confidence = explicit;
+    } else if !created && trust.confirm {
+        // Slow to trust: a plain re-add is one confirmation, +1 capped at 5.
+        entry.meta.confidence = (confidence_before + 1).clamp(1, 5);
     }
     if let Some(importance) = importance {
         let clamped = importance.clamp(1, 5);
@@ -1045,6 +1168,7 @@ fn upsert_evolution_entry_with_source(
         entry,
         merged_into,
         created,
+        confidence_before,
     })
 }
 
@@ -1697,6 +1821,7 @@ pub fn record_auto_conclusion(workspace_dir: &Path, _session_id: &str, answer: &
         &[],
         true,
         "auto",
+        TrustUpdate::default(),
     )
     .ok()?;
 
@@ -2209,6 +2334,30 @@ pub(super) async fn handle_memory_tool(
     }
 }
 
+/// Confidence at or below which a fact is flagged as low trust, so the model
+/// re-verifies it before relying on it again.
+const LOW_TRUST_CONFIDENCE: u32 = 2;
+
+/// Warning line for a fact whose trust was calibrated down. `None` while the
+/// fact is still trusted.
+fn low_trust_hint(entry: &EvolutionEntry) -> Option<String> {
+    if entry.meta.confidence > LOW_TRUST_CONFIDENCE {
+        return None;
+    }
+    let mut hint = format!("⚠ Low trust: confidence {}/5", entry.meta.confidence.max(1));
+    if entry.meta.contradictions > 0 {
+        hint.push_str(&format!(", contradicted {}×", entry.meta.contradictions));
+    }
+    if let Some(reason) = entry.meta.last_conflict.as_deref().filter(|r| !r.is_empty()) {
+        hint.push_str(&format!(" — last conflict: {reason}"));
+    }
+    hint.push_str(
+        ". Verify it against the real environment before relying on it, then re-add the fact \
+         (`conflict: true` if it is still wrong).",
+    );
+    Some(hint)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn handle_evolution_scope(
     app: &AppHandle,
@@ -2242,8 +2391,17 @@ fn handle_evolution_scope(
                 .map(|value| value.clamp(1, 5) as u32);
             let pinned = args["pinned"].as_bool().unwrap_or(false);
             let merge = args["merge"].as_bool().unwrap_or(true);
+            let trust = TrustUpdate {
+                confidence: args["confidence"]
+                    .as_u64()
+                    .map(|value| value.clamp(1, 5) as u32),
+                conflict: args["conflict"].as_bool().unwrap_or(false),
+                note: args["note"].as_str().unwrap_or("").to_string(),
+                confirm: true,
+            };
+            let conflicted = trust.conflict;
 
-            match upsert_evolution_entry(
+            match upsert_evolution_entry_trusted(
                 workspace_dir,
                 key,
                 content,
@@ -2253,6 +2411,7 @@ fn handle_evolution_scope(
                 pinned,
                 tags,
                 merge,
+                trust,
             ) {
                 Ok(outcome) => {
                     let _ = emit_tool_progress(
@@ -2262,7 +2421,13 @@ fn handle_evolution_scope(
                         call_id,
                         format!(
                             "🧠 *Evolution memory {}: {}*\n",
-                            if outcome.created { "stored" } else { "updated" },
+                            if conflicted {
+                                "contradicted"
+                            } else if outcome.created {
+                                "stored"
+                            } else {
+                                "updated"
+                            },
                             outcome.entry.meta.key
                         ),
                     );
@@ -2273,6 +2438,8 @@ fn handle_evolution_scope(
                         "tags": outcome.entry.meta.tags,
                         "importance": outcome.entry.meta.importance,
                         "confidence": outcome.entry.meta.confidence,
+                        "confidence_before": outcome.confidence_before,
+                        "contradictions": outcome.entry.meta.contradictions,
                         "evidence": outcome.entry.meta.evidence,
                         "scope": EVOLUTION_SCOPE,
                         "created": outcome.created,
@@ -2280,9 +2447,23 @@ fn handle_evolution_scope(
                     if let Some(merged_into) = outcome.merged_into {
                         payload["merged_into"] = json!(merged_into);
                     }
-                    serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string())
+                    if let Some(reason) = outcome
+                        .entry
+                        .meta
+                        .last_conflict
+                        .as_deref()
+                        .filter(|reason| !reason.is_empty())
+                    {
+                        payload["last_conflict"] = json!(reason);
+                    }
+                    let mut text = serde_json::to_string_pretty(&payload)
+                        .unwrap_or_else(|_| payload.to_string());
+                    if let Some(hint) = low_trust_hint(&outcome.entry) {
+                        text.push_str(&format!("\n\n{hint}"));
+                    }
+                    text
                 }
-                Err(error) => format!("Error writing memory file: {}", error),
+                Err(error) => format!("Error: {error}"),
             }
         }
         "get" => {
@@ -2303,7 +2484,11 @@ fn handle_evolution_scope(
                     call_id,
                     format!("🧠 *Evolution memory retrieved: {}*\n", entry.meta.key),
                 );
-                return evolution_entry_to_md(entry);
+                let mut text = evolution_entry_to_md(entry);
+                if let Some(hint) = low_trust_hint(entry) {
+                    text.push_str(&format!("\n{hint}\n"));
+                }
+                return text;
             }
             if let Some((skill, path)) = find_archived_entry(workspace_dir, key) {
                 return format!(
@@ -2338,6 +2523,8 @@ fn handle_evolution_scope(
                         "tags": scored.entry.meta.tags,
                         "importance": scored.entry.meta.importance,
                         "confidence": scored.entry.meta.confidence,
+                        "contradictions": scored.entry.meta.contradictions,
+                        "last_conflict": scored.entry.meta.last_conflict,
                         "evidence": scored.entry.meta.evidence,
                         "uses": scored.entry.meta.uses,
                         "pinned": scored.entry.meta.pinned,
@@ -2368,6 +2555,7 @@ fn handle_evolution_scope(
             let needle = normalize_text(query);
             let ranked = ranked_evolution_entries(workspace_dir);
             let mut matched: Vec<String> = Vec::new();
+            let mut low_trust: Vec<String> = Vec::new();
             for scored in &ranked {
                 let haystack = normalize_text(&format!(
                     "{} {} {} {}",
@@ -2375,6 +2563,9 @@ fn handle_evolution_scope(
                 ));
                 if !needle.is_empty() && haystack.contains(&needle) {
                     matched.push(scored.entry.meta.key.clone());
+                    if let Some(hint) = low_trust_hint(&scored.entry) {
+                        low_trust.push(format!("- {}: {hint}", scored.entry.meta.key));
+                    }
                 }
             }
             bump_uses(workspace_dir, &matched);
@@ -2395,7 +2586,13 @@ fn handle_evolution_scope(
                     } else if matched.is_empty() {
                         output
                     } else {
-                        format!("{}\n\nMatched keys: {}", output, matched.join(", "))
+                        let mut text =
+                            format!("{}\n\nMatched keys: {}", output, matched.join(", "));
+                        if !low_trust.is_empty() {
+                            text.push_str("\n\nLow-trust matches — re-verify before use:\n");
+                            text.push_str(&low_trust.join("\n"));
+                        }
+                        text
                     }
                 }
                 Err(error) => format!("Error: {error}"),
@@ -2463,6 +2660,10 @@ pub struct EvolutionMemoryView {
     pub tags: Vec<String>,
     pub importance: u32,
     pub confidence: u32,
+    /// Times a real result contradicted this fact (never reset).
+    pub contradictions: u32,
+    /// One-line reason of the most recent conflict.
+    pub last_conflict: Option<String>,
     pub evidence: u32,
     pub uses: u32,
     pub pinned: bool,
@@ -2490,6 +2691,8 @@ pub fn evolution_memory_view(workspace_dir: &Path) -> Vec<EvolutionMemoryView> {
             tags: scored.entry.meta.tags.clone(),
             importance: scored.entry.meta.importance,
             confidence: scored.entry.meta.confidence,
+            contradictions: scored.entry.meta.contradictions,
+            last_conflict: scored.entry.meta.last_conflict.clone(),
             evidence: scored.entry.meta.evidence,
             uses: scored.entry.meta.uses,
             pinned: scored.entry.meta.pinned,
@@ -3267,6 +3470,287 @@ mod tests {
         assert!(wants_memory_consolidation("帮我整理记忆"));
         assert!(wants_memory_consolidation("Please consolidate memory now"));
         assert!(!wants_memory_consolidation("explain how memory works"));
+    }
+
+    /// Trust calibration: an explicit `confidence` overwrites (so trust can
+    /// fall) while `importance` keeps its `max` semantics.
+    #[test]
+    fn explicit_confidence_can_lower_trust_while_importance_only_grows() {
+        let workspace = TempWorkspace::new("trust-explicit");
+        upsert_evolution_entry(
+            &workspace.dir,
+            "python-default",
+            "Use `python`.",
+            "默认解释器",
+            "fact",
+            Some(3),
+            false,
+            &[],
+            false,
+        )
+        .unwrap();
+
+        let lowered = upsert_evolution_entry_trusted(
+            &workspace.dir,
+            "python-default",
+            "",
+            "",
+            "",
+            None,
+            false,
+            &[],
+            false,
+            TrustUpdate {
+                confidence: Some(2),
+                ..TrustUpdate::confirming()
+            },
+        )
+        .unwrap();
+        assert_eq!(lowered.confidence_before, 3);
+        assert_eq!(lowered.entry.meta.confidence, 2);
+        assert_eq!(
+            lowered.entry.body, "Use `python`.",
+            "an empty content keeps the stored body"
+        );
+
+        let raised = upsert_evolution_entry_trusted(
+            &workspace.dir,
+            "python-default",
+            "",
+            "",
+            "",
+            Some(1),
+            false,
+            &[],
+            false,
+            TrustUpdate {
+                confidence: Some(5),
+                ..TrustUpdate::confirming()
+            },
+        )
+        .unwrap();
+        assert_eq!(raised.entry.meta.confidence, 5);
+        assert_eq!(raised.entry.meta.importance, 3, "importance never drops");
+    }
+
+    /// A plain re-add is one confirmation: +1 confidence, capped at 5.
+    #[test]
+    fn a_plain_re_add_raises_confidence_by_one_capped_at_five() {
+        let workspace = TempWorkspace::new("trust-confirm");
+        let mut confidences: Vec<u32> = Vec::new();
+        for _ in 0..5 {
+            let outcome = upsert_evolution_entry(
+                &workspace.dir,
+                "build-tag-first",
+                "Run the tagged build before the tests.",
+                "build tag first",
+                "recipe",
+                None,
+                false,
+                &[],
+                false,
+            )
+            .unwrap();
+            confidences.push(outcome.entry.meta.confidence);
+        }
+        assert_eq!(confidences, vec![3, 4, 5, 5, 5]);
+    }
+
+    /// A conflict is fast to lose: confidence drops straight to 1, the body is
+    /// rewritten when the corrected fact is supplied, and evidence stays put.
+    #[test]
+    fn a_conflict_drops_confidence_to_one_and_rewrites_the_body() {
+        let workspace = TempWorkspace::new("trust-conflict");
+        upsert_evolution_entry(
+            &workspace.dir,
+            "python-default",
+            "Use `python3` for everything.",
+            "默认解释器",
+            "fact",
+            Some(4),
+            false,
+            &[],
+            false,
+        )
+        .unwrap();
+
+        let outcome = upsert_evolution_entry_trusted(
+            &workspace.dir,
+            "python-default",
+            "Use `python`, not `python3` — python3 is a Store stub here.",
+            "默认解释器",
+            "fact",
+            None,
+            false,
+            &[],
+            true,
+            TrustUpdate {
+                conflict: true,
+                note: "python3 打开应用商店，实测失败".to_string(),
+                ..TrustUpdate::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(outcome.confidence_before, 3);
+        assert_eq!(outcome.entry.meta.confidence, 1);
+        assert_eq!(outcome.entry.meta.contradictions, 1);
+        assert_eq!(
+            outcome.entry.meta.evidence, 1,
+            "a conflict is not a confirmation"
+        );
+        assert!(outcome.entry.body.contains("Store stub"));
+        assert!(outcome
+            .entry
+            .meta
+            .last_conflict
+            .as_deref()
+            .unwrap_or_default()
+            .contains("python3"));
+        assert!(outcome.entry.meta.last_conflict_at.is_some());
+
+        // Persisted, not only returned in memory.
+        let stored =
+            parse_evolution_entry(&workspace.evolution().join("python-default.md")).unwrap();
+        assert_eq!(stored.meta.confidence, 1);
+        assert_eq!(stored.meta.contradictions, 1);
+        assert!(stored.body.contains("Store stub"));
+        assert!(!stored.body.contains("for everything"));
+    }
+
+    /// Without a corrected fact the entry keeps its body — only trust drops and
+    /// the reason is recorded.
+    #[test]
+    fn a_conflict_without_content_keeps_the_body_but_records_the_reason() {
+        let workspace = TempWorkspace::new("trust-no-content");
+        upsert_evolution_entry(
+            &workspace.dir,
+            "idc-sh",
+            "跳板机 10.0.0.1",
+            "上海机房跳板机",
+            "location",
+            Some(3),
+            false,
+            &[],
+            false,
+        )
+        .unwrap();
+
+        let outcome = upsert_evolution_entry_trusted(
+            &workspace.dir,
+            "idc-sh",
+            "",
+            "",
+            "",
+            None,
+            false,
+            &[],
+            false,
+            TrustUpdate {
+                conflict: true,
+                note: "该跳板机已下线".to_string(),
+                ..TrustUpdate::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(outcome.entry.body, "跳板机 10.0.0.1");
+        assert_eq!(outcome.entry.meta.confidence, 1);
+        assert_eq!(
+            outcome.entry.meta.last_conflict.as_deref(),
+            Some("该跳板机已下线")
+        );
+    }
+
+    /// A conflict must target an entry that exists, and the maintenance resume
+    /// note has no trust to calibrate.
+    #[test]
+    fn a_conflict_never_invents_an_entry_or_touches_the_resume_note() {
+        let workspace = TempWorkspace::new("trust-guards");
+        let unknown = upsert_evolution_entry_trusted(
+            &workspace.dir,
+            "never-stored",
+            "",
+            "",
+            "",
+            None,
+            false,
+            &[],
+            true,
+            TrustUpdate {
+                conflict: true,
+                ..TrustUpdate::default()
+            },
+        )
+        .unwrap_err();
+        assert!(unknown.contains("must target"), "{unknown}");
+        assert!(load_evolution_entries(&workspace.dir).is_empty());
+
+        let note = upsert_evolution_entry_trusted(
+            &workspace.dir,
+            MAINTENANCE_PROGRESS_KEY,
+            "progress",
+            "resume note",
+            "fact",
+            Some(5),
+            false,
+            &[],
+            true,
+            TrustUpdate {
+                conflict: true,
+                ..TrustUpdate::default()
+            },
+        )
+        .unwrap_err();
+        assert!(note.contains(MAINTENANCE_PROGRESS_KEY), "{note}");
+    }
+
+    /// The panel row and the tool hints surface the calibration, so a
+    /// contradicted entry cannot be mistaken for a trusted one.
+    #[test]
+    fn the_panel_and_the_hints_surface_a_contradicted_entry() {
+        let workspace = TempWorkspace::new("trust-panel");
+        upsert_evolution_entry(
+            &workspace.dir,
+            "python-default",
+            "Use python3",
+            "默认解释器",
+            "fact",
+            Some(4),
+            false,
+            &[],
+            false,
+        )
+        .unwrap();
+        assert!(low_trust_hint(&load_evolution_entries(&workspace.dir)[0]).is_none());
+
+        upsert_evolution_entry_trusted(
+            &workspace.dir,
+            "python-default",
+            "Use python",
+            "默认解释器",
+            "fact",
+            None,
+            false,
+            &[],
+            false,
+            TrustUpdate {
+                conflict: true,
+                note: "python3 是 Store 桩".to_string(),
+                ..TrustUpdate::default()
+            },
+        )
+        .unwrap();
+
+        let entries = load_evolution_entries(&workspace.dir);
+        let hint = low_trust_hint(&entries[0]).expect("a confidence-1 entry is flagged");
+        assert!(hint.contains("confidence 1/5"), "{hint}");
+        assert!(hint.contains("contradicted 1×"), "{hint}");
+        assert!(hint.contains("Store"), "{hint}");
+
+        let view = evolution_memory_view(&workspace.dir);
+        assert_eq!(view[0].confidence, 1);
+        assert_eq!(view[0].contradictions, 1);
+        assert_eq!(view[0].last_conflict.as_deref(), Some("python3 是 Store 桩"));
     }
 
     /// The panel view uses the same ranking and marks injected rows.

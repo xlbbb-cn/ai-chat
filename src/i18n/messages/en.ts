@@ -539,6 +539,8 @@ const en = {
         empty: "No evolution memories yet. They are recorded while self-evolution mode is on.",
         pinned: "pinned",
         auto: "auto",
+        confidence: "trust {value}/5",
+        conflicts: "{count}× contradicted",
         evidence: "{count}× confirmed",
         uses: "{count}× used",
         archivedTitle: "Archived into skills ({count} entries)",

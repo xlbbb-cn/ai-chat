@@ -338,6 +338,16 @@ pub fn self_evolution_prompt(root: Option<&Path>) -> String {
          is preloaded into your prompt: search the scope (`memory list` / `get` / `search`) when a \
          problem needs earlier experience instead of guessing or rediscovering it, and \
          `memory add` as soon as you confirm a fact; never store guesses.\n\n\
+         TRUST CALIBRATION: a retrieved fact is a claim, not the truth. The moment the real result \
+         disagrees with it, rewrite that same entry — `memory add` with the same `key`, \
+         `conflict: true`, the corrected `content` if you know it, and a one-line `note`. That \
+         call drops its `confidence` to 1 and records the contradiction, so a stale fact cannot \
+         keep ranking itself on top just by being old. When the result matches, a plain re-add \
+         raises `confidence` by one: trust is cheap to lose and expensive to regain. Pass \
+         `confidence` 1-5 explicitly only when you truly know how strong the evidence is — it \
+         overwrites, whereas `importance` only ever grows. Never leave a known-wrong entry at its \
+         old wording, and never rely on an entry at `confidence` 2 or below, or one with recorded \
+         conflicts, before re-verifying it against the real environment.\n\n\
          ARCHIVING MEMORY INTO A SKILL: only when the user explicitly asks to tidy / consolidate \
          / archive memory (e.g. 「整理记忆」, 'consolidate memory'). Never delete entries by hand: \
          call `memory` `consolidate` `plan` first, then write one skill covering a cluster — \

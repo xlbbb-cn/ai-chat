@@ -111,6 +111,22 @@ export function MemoryPanel({ onClose, refreshKey = 0 }: Props) {
                 <span className="memory-meta">
                   {entry.kind && <span className="memory-badge">{entry.kind}</span>}
                   <span className="memory-badge">{entry.importance}★</span>
+                  <span
+                    className={`memory-badge${
+                      entry.confidence <= 2 ? " is-low-trust" : ""
+                    }`}
+                    title={entry.last_conflict ?? undefined}
+                  >
+                    {t("memoryPanel.confidence", { value: entry.confidence })}
+                  </span>
+                  {entry.contradictions > 0 && (
+                    <span
+                      className="memory-badge is-low-trust"
+                      title={entry.last_conflict ?? undefined}
+                    >
+                      {t("memoryPanel.conflicts", { count: entry.contradictions })}
+                    </span>
+                  )}
                   <span>{t("memoryPanel.evidence", { count: entry.evidence })}</span>
                   <span>{t("memoryPanel.uses", { count: entry.uses })}</span>
                   {entry.pinned && (

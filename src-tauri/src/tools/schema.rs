@@ -210,7 +210,7 @@ pub fn get_all_tools(
             "type": "function",
             "function": {
                 "name": "memory",
-                "description": format!("Manage persistent memory in these scopes:\n- `session`: in-memory, cleared at app restart — task context and in-progress notes.\n- `user`: file-backed, cross-session — preferences, patterns, general insights.\n- `repo`: file-backed, repository-scoped — conventions, build commands, project facts.{evolution_scope}\n\n`scope: \"all\"` runs get/list/search over every scope at once (read-only); add/delete need one concrete scope. `user`/`repo` are markdown files in the workspace `.data/memory` (app-managed — never edit them with file tools). Nothing is preloaded into the prompt: you look memory up yourself. Evolution entries are structured (key, title, kind, tags, importance, evidence) and ranked by experience, so a search returns the most useful entries first — keep each to one dense fact. `consolidate` folds a large evolution cluster into a skill archive: `phase: \"plan\"` first, then `phase: \"apply\"` with the full `skill_md` and the same `keys`."),
+                "description": format!("Manage persistent memory in these scopes:\n- `session`: in-memory, cleared at app restart — task context and in-progress notes.\n- `user`: file-backed, cross-session — preferences, patterns, general insights.\n- `repo`: file-backed, repository-scoped — conventions, build commands, project facts.{evolution_scope}\n\n`scope: \"all\"` runs get/list/search over every scope at once (read-only); add/delete need one concrete scope. `user`/`repo` are markdown files in the workspace `.data/memory` (app-managed — never edit them with file tools). Nothing is preloaded into the prompt: you look memory up yourself. Evolution entries are structured (key, title, kind, tags, importance, confidence, evidence) and ranked by experience, so a search returns the most useful entries first — keep each to one dense fact. `consolidate` folds a large evolution cluster into a skill archive: `phase: \"plan\"` first, then `phase: \"apply\"` with the full `skill_md` and the same `keys`.\n\nTRUST CALIBRATION (evolution): a fact you retrieved is a claim, not the truth. When the real result disagrees with it, immediately `add` the same key with `conflict: true` — plus the corrected `content` if you know it, and a one-line `note` — so the entry is rewritten in that same call and its confidence drops to 1. When it matched, a plain re-add raises confidence by one. Entries at confidence 2 or below (and anything recently contradicted) must be re-verified against the real environment before you rely on them."),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -238,11 +238,11 @@ pub fn get_all_tools(
                         },
                         "key": {
                             "type": "string",
-                            "description": "Unique key (required for add/get/delete); a short descriptive slug like 'api-keys'. Re-adding the same key updates the entry and raises its evidence count."
+                            "description": "Unique key (required for add/get/delete); a short descriptive slug like 'api-keys'. Re-adding the same key updates the entry and raises its evidence and confidence (one confirmation each)."
                         },
                         "content": {
                             "type": "string",
-                            "description": "The fact (required for 'add'). Markdown is allowed; for evolution keep it to one dense sentence — never a whole conversation or answer."
+                            "description": "The fact (required for 'add'). Markdown is allowed; for evolution keep it to one dense sentence — never a whole conversation or answer. On a conflict, pass the corrected fact here and the entry is rewritten in the same call."
                         },
                         "title": {
                             "type": "string",
@@ -266,6 +266,20 @@ pub fn get_all_tools(
                         "merge": {
                             "type": "boolean",
                             "description": "Evolution: merge into a similar existing entry instead of creating a second file (default true)."
+                        },
+                        "confidence": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 5,
+                            "description": "Evolution: explicit trust 1-5. Unlike `importance` it OVERWRITES the stored value, so it is the way to lower trust; omit it on a plain re-add to let the confirmation add one point."
+                        },
+                        "conflict": {
+                            "type": "boolean",
+                            "description": "Evolution: the real result contradicted this stored fact. Forces `confidence` to 1, counts a contradiction, keeps `note` as the reason and rewrites the body when `content` is given. Only valid for an existing key you retrieved."
+                        },
+                        "note": {
+                            "type": "string",
+                            "description": "Evolution: one-line reason for a conflict (max ~200 chars), e.g. 'python3 works here, the stored fact is wrong'."
                         },
                         "tags": {
                             "type": "array",

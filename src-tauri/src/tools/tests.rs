@@ -44,6 +44,39 @@ fn memory_schema_advertises_consolidate_only_in_self_evolution_mode() {
     assert!(!actions(&memory_tool(false)).contains(&"consolidate".to_string()));
 }
 
+/// Trust calibration rides on `add`: the model gets the three knobs that let it
+/// rewrite a wrong fact, and they never become a separate action.
+#[test]
+fn memory_schema_exposes_the_trust_calibration_knobs() {
+    let tool = super::get_all_tools(&["memory".to_string()], true, false)
+        .into_iter()
+        .find(|tool| tool["function"]["name"] == "memory")
+        .expect("memory tool must be advertised");
+    let properties = &tool["function"]["parameters"]["properties"];
+
+    assert_eq!(properties["confidence"]["type"], "integer");
+    assert_eq!(properties["confidence"]["minimum"], serde_json::json!(1));
+    assert_eq!(properties["confidence"]["maximum"], serde_json::json!(5));
+    assert_eq!(properties["conflict"]["type"], "boolean");
+    assert_eq!(properties["note"]["type"], "string");
+
+    let actions: Vec<&str> = properties["action"]["enum"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_str().unwrap())
+        .collect();
+    assert_eq!(
+        actions,
+        vec!["add", "get", "list", "search", "delete", "consolidate"],
+        "trust calibration must not add an action"
+    );
+
+    let description = tool["function"]["description"].as_str().unwrap();
+    assert!(description.contains("TRUST CALIBRATION"), "{description}");
+    assert!(description.contains("conflict: true"), "{description}");
+}
+
 /// The OS label is injected through the `run_shell` schema and the script
 /// language is fixed by the build — the model is never asked to pick an
 /// interpreter per call.

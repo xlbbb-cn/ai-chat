@@ -899,8 +899,10 @@ fn build_system_prompt(workspace_dir: &Path) -> String {
          4. Merge duplicate evolution memory entries. Use `memory list` / `search` on the \
          evolution scope. If several entries state the same fact, write one dense entry with \
          `memory add` (upsert) and then delete the redundant keys with `memory delete`. Keep the \
-         highest-confidence wording; never invent facts. Never edit memory files with \
-         `file_actions`.\n\
+         highest-confidence wording and pass that source's `confidence` explicitly: a merge must \
+         never come out more trusted than its most trusted source. An entry with recorded \
+         conflicts (`contradictions` > 0) is stale — delete it rather than folding it into a \
+         trusted entry. Never invent facts. Never edit memory files with `file_actions`.\n\
          5. Verify and report. List skills and evolution memory again. If you are running low on \
          rounds or tool calls, stop starting new work and report what is already saved. Report:\n\
             - skills merged (old → new) or \"none\";\n\

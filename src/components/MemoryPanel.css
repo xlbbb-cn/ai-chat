@@ -151,6 +151,14 @@
   line-height: 1.5;
 }
 
+/* A fact whose trust was calibrated down (confidence <= 2) or that a real
+   result already contradicted: the badge turns warning-coloured so the stale
+   entry is visible without opening it. */
+.memory-badge.is-low-trust {
+  border-color: var(--c-warning);
+  color: var(--c-warning);
+}
+
 .memory-tag {
   color: var(--c-placeholder);
 }
