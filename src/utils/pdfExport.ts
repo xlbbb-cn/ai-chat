@@ -11,7 +11,6 @@
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { exportPdf } from "../api";
-import { buildPrintDocumentHtml, printHtmlDocument } from "./printDocument";
 
 export interface PdfExportOptions {
   /** Document title, shown by the PDF viewer. */
@@ -39,6 +38,9 @@ export async function exportHtmlAsPdf(options: PdfExportOptions): Promise<PdfExp
   });
   if (!target) return "cancelled";
 
+  // The print shell (plus the KaTeX stylesheet text and its font URLs) is only
+  // needed once a file is really written, so the transcript does not carry it.
+  const { buildPrintDocumentHtml, printHtmlDocument } = await import("./printDocument");
   const document = {
     title: options.title,
     bodyHtml: options.bodyHtml,

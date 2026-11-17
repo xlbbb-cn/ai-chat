@@ -1,6 +1,5 @@
 import type { BackgroundTaskState, ChatInjection, Message, MessageContent, TurnUsageMeta } from "../types";
 import {
-  Component,
   memo,
   useEffect,
   useLayoutEffect,
@@ -15,7 +14,7 @@ import { TodoList } from "./TodoList";
 import MarkdownIt from "markdown-it";
 import "highlight.js/styles/github.css";
 import "katex/dist/katex.min.css";
-import { katexMathPlugin } from "../utils/markdownMath";
+import { katexMathPlugin, isKatexReady, onKatexReady } from "../utils/markdownMath";
 import hljs from "../utils/highlight";
 import { escapeHtml } from "../utils/format";
 import { exportHtmlAsPdf, type PdfExportResult } from "../utils/pdfExport";
@@ -134,6 +133,18 @@ const md = createMarkdown({ images: true });
  * so a typed symbol can never become an element.
  */
 const mdLiteral = createMarkdown({ images: false });
+
+/**
+ * Flips once when the lazily loaded KaTeX module arrives (see
+ * `utils/markdownMath.ts`). Math rendered before that shows the escaped
+ * source; this state bumps the render memo so every message re-renders its
+ * formulas as real markup the moment the module is in.
+ */
+function useKatexReady(): boolean {
+  const [ready, setReady] = useState(isKatexReady);
+  useEffect(() => onKatexReady(() => setReady(true)), []);
+  return ready;
+}
 
 /**
  * Render markdown without letting a renderer failure escape.
@@ -797,6 +808,7 @@ function ChatMessageRow({ message, showRetry = false, onRetry, onNotice, onDelet
   // Only a reply draws: what the user typed stays literal, so a pasted `svg`
   // snippet in the composer is still code.
   const replyStreaming = isAssistant && Boolean(message.streaming);
+  const katexReady = useKatexReady();
   const rendered = useMemo<{ html: string; figures: FigureSpec[]; diagrams: DiagramSpec[] }>(() => {
     // The user's own text is rendered by the literal profile: no image rule, so
     // a typed `![a](b)` stays those characters instead of becoming an element.
@@ -812,7 +824,9 @@ function ChatMessageRow({ message, showRetry = false, onRetry, onNotice, onDelet
       figures: extracted.figures,
       diagrams: diagrams.diagrams,
     };
-  }, [streamedMainContent, replyStreaming, isAssistant]);
+    // `katexReady` re-renders math that fell back to raw text while the module
+    // was still loading.
+  }, [streamedMainContent, replyStreaming, isAssistant, katexReady]);
   const renderedMainContent = rendered.html;
   const figures = rendered.figures;
   const diagrams = rendered.diagrams;
@@ -1383,42 +1397,3 @@ function ChatMessageRow({ message, showRetry = false, onRetry, onNotice, onDelet
  * every row's layout effects re-checked, once per token.
  */
 export const ChatMessage = memo(ChatMessageRow);
-
-/**
- * Keeps one broken message from taking the transcript down with it.
- *
- * The markdown pipeline already degrades to literal text when a renderer
- * throws, but an error raised *while React renders* this component (a malformed
- * figure spec, a plugin that throws outside `render`) would otherwise unmount
- * the whole tree — the window goes blank and the console shows the stack. The
- * boundary turns that into one readable row.
- */
-export class ChatMessageBoundary extends Component<
-  { children: ReactNode },
-  { error: string | null }
-> {
-  state: { error: string | null } = { error: null };
-
-  static getDerivedStateFromError(error: unknown): { error: string } {
-    return { error: error instanceof Error ? error.message : String(error) };
-  }
-
-  componentDidCatch(error: unknown): void {
-    console.error("Message rendering failed", error);
-  }
-
-  render(): ReactNode {
-    if (this.state.error === null) return this.props.children;
-    return (
-      <div className="chat-message-shell assistant">
-        <div className="chat-message assistant">
-          <div className="message-content">
-            <pre className="markdown-fallback">
-              {text("app.messageRenderFailed", { error: this.state.error })}
-            </pre>
-          </div>
-        </div>
-      </div>
-    );
-  }
-}

@@ -3525,6 +3525,36 @@ button.rabbit-hop-bunny:focus-visible {
 }
 
 /* ===================================================================
+   Transcript fallbacks — shared with `ChatMessageBoundary`
+
+   `ChatMessage` is a lazy chunk (the markdown stack is not needed before a
+   message exists), so its stylesheet arrives with it. The boundary that has to
+   stay mounted around that chunk cannot wait for it: these two rules live here,
+   and the transcript's own stylesheet no longer declares them.
+   =================================================================== */
+
+.message-render-error {
+  align-self: stretch;
+  width: 100%;
+}
+
+/* Last-resort body: a message the markdown pipeline could not process
+   (`renderMarkdown`) or one a boundary had to replace. It is literal text, so
+   it must not pretend to be prose — monospace, wrapped, muted. */
+.markdown-fallback {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--c-border-s);
+  border-radius: var(--r-sm);
+  background: var(--c-surface-2);
+  color: var(--c-muted);
+  font-family: "RazerF5", "Cascadia Code", Consolas, "Microsoft YaHei", monospace;
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ===================================================================
    Dropdowns — the one select / listbox primitive
 
    A native `<select>` opens a list drawn by the platform — GTK on Linux, a

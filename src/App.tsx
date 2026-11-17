@@ -4,12 +4,10 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, listAgentMentions, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, deleteMessagesAfter, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState, setWindowVibrancy, savePastedFile, importWorkspacePaths, showNotifyCard, todoAskReply, getPendingTodoAsk } from "./api";
 
-import { ChatMessage, ChatMessageBoundary } from "./components/ChatMessage";
-import { ToolCallGroup } from "./components/ToolCallGroup";
+import { ChatMessageBoundary } from "./components/ChatMessageBoundary";
 import { TodoAskPanel } from "./components/TodoAskPanel";
 import { Dropdown } from "./components/Dropdown";
 import { ModelSelect } from "./components/ModelSelect";
-import { HistoryPanel } from "./components/HistoryPanel";
 import { Portal } from "./components/Portal";
 import { TitleBar } from "./components/TitleBar";
 import { ChatNotice } from "./components/ChatNotice";
@@ -68,8 +66,8 @@ import type { AgentMentionOption } from "./agentMention";
 import { isGenerationStopped, isLocale, stripGenerationStopped, t, useI18n } from "./i18n";
 import { formatCountdown } from "./utils/time";
 import { playSound } from "./utils/sounds";
-import { MARKDOWN_PRINT_CSS } from "./utils/printDocument";
 import { exportHtmlAsPdf } from "./utils/pdfExport";
+import { preloadKatex } from "./utils/markdownMath";
 import {
   FontAwesomeIcon,
   faBrain,
@@ -124,6 +122,16 @@ function reportStartupTiming(): void {
  * bundle the first frame waits on (`mermaid` / `three` / `elk` / `katex` are
  * already lazy chunks — this applies the same split to the panels).
  *
+ * The transcript is split the same way and for the same reason: a launch starts
+ * with no messages, and the renderer behind one reply is the heaviest thing the
+ * frontend has — markdown-it, highlight.js with its language pack, KaTeX and
+ * its stylesheet, the figure / mermaid card machinery and the print document
+ * shell. None of it is needed before a message exists, so it lives in a chunk
+ * that is warmed right after the first paint (`warmTranscriptChunk` below) and
+ * fetched on demand if a message arrives first. `ToolCallGroup` rides along
+ * with it; `ChatMessageBoundary` cannot (it has to be mounted before the chunk
+ * arrives), so it is its own module with two shared rules in `App.css`.
+ *
  * `MarkdownPreview` is only the Markdown editor's preview column (titlebar
  * `⋯` menu). The mention popups stay eager: they must open inside a
  * keystroke. The fallback is `null` — each container paints its own shell, so
@@ -144,12 +152,64 @@ const McpPanel = lazy(() =>
 const AgentsPanel = lazy(() =>
   import("./components/AgentsPanel").then((m) => ({ default: m.AgentsPanel })),
 );
+const HistoryPanel = lazy(() =>
+  import("./components/HistoryPanel").then((m) => ({ default: m.HistoryPanel })),
+);
 const UpdatePanel = lazy(() =>
   import("./components/UpdatePanel").then((m) => ({ default: m.UpdatePanel })),
 );
 const MarkdownPreview = lazy(() =>
   import("./components/MarkdownPreview").then((m) => ({ default: m.MarkdownPreview })),
 );
+const ChatMessage = lazy(() =>
+  import("./components/ChatMessage").then((m) => ({ default: m.ChatMessage })),
+);
+const ToolCallGroup = lazy(() =>
+  import("./components/ToolCallGroup").then((m) => ({ default: m.ToolCallGroup })),
+);
+
+/**
+ * Start fetching the transcript chunks. The idle warm-up below and the
+ * composer's first focus both call it, so a message typed immediately after
+ * launch does not suspend the transcript (and a warm chunk is never requested
+ * twice).
+ */
+let transcriptChunkRequested = false;
+
+function requestTranscriptChunk(): void {
+  if (transcriptChunkRequested) return;
+  transcriptChunkRequested = true;
+  void import("./components/ChatMessage");
+  void import("./components/ToolCallGroup");
+}
+
+/**
+ * Fetch the transcript chunks while the window is idle.
+ *
+ * An empty start never needs them before it paints, which is why they are not
+ * in the boot bundle — but the first message should not wait for a chunk round
+ * trip either. The idle callback keeps this off the first frame; the timeout
+ * guarantees it happens even when the app never goes fully idle.
+ */
+function warmTranscriptChunk(): () => void {
+  let cancelled = false;
+  const warm = () => {
+    if (cancelled) return;
+    requestTranscriptChunk();
+  };
+  if (typeof window.requestIdleCallback === "function") {
+    const handle = window.requestIdleCallback(warm, { timeout: 3000 });
+    return () => {
+      cancelled = true;
+      window.cancelIdleCallback(handle);
+    };
+  }
+  const timer = window.setTimeout(warm, 1200);
+  return () => {
+    cancelled = true;
+    window.clearTimeout(timer);
+  };
+}
 
 /**
  * Glyphs shown in the napping face's speech bubble. Kept as plain Unicode so
@@ -204,6 +264,18 @@ function applyTheme(theme: ThemeMode | undefined, palette: Palette | undefined) 
   const resolved = theme === "dark" || (theme !== "light" && prefersDark) ? "dark" : "light";
   document.documentElement.setAttribute("data-theme", resolved);
   document.documentElement.setAttribute("data-palette", palette ?? "default");
+  // First-paint cache: the inline script in `index.html` applies this before
+  // any stylesheet is parsed, so a dark launch never paints the light default
+  // for a frame. The real config still arrives over IPC and wins; storage
+  // being unavailable (private mode) only costs the script one boot.
+  try {
+    window.localStorage.setItem(
+      "ai-chat.theme",
+      JSON.stringify({ mode: theme ?? "auto", palette: palette ?? "default" }),
+    );
+  } catch {
+    // Ignore: the boot script then falls back to the OS colour scheme.
+  }
   // Mica's light / dark variant is a native flag, not a CSS token, so a theme
   // change re-applies the backdrop the vibrancy switch already asked for.
   if (document.documentElement.hasAttribute("data-vibrancy")) {
@@ -977,6 +1049,48 @@ export default function App() {
     };
   }, []);
 
+  // KaTeX arrives on idle: math renders as escaped source text until the
+  // module is in (see `utils/markdownMath.ts`), so the first paint never
+  // parses the ~250 KB library. The 1 s delay keeps it clear of the boot's
+  // first frames; the silent update probe follows at 5 s.
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      preloadKatex().catch((err) => console.warn("[startup] katex preload failed", err));
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  // The sidebar panels are lazy chunks (the `lazy()` calls above); prefetch
+  // them once the browser is idle so the first open of each panel paints
+  // instantly. A dynamic import resolves through the module cache, so these
+  // are exactly the modules the lazy() calls later reuse — nothing loads twice.
+  useEffect(() => {
+    let cancelled = false;
+    const prefetch = () => {
+      if (cancelled) return;
+      void import("./components/SettingsPanel");
+      void import("./components/SkillsPanel");
+      void import("./components/ToolsPanel");
+      void import("./components/McpPanel");
+      void import("./components/AgentsPanel");
+      void import("./components/UpdatePanel");
+      void import("./components/MarkdownPreview");
+      void import("./components/HistoryPanel");
+    };
+    if (typeof window.requestIdleCallback === "function") {
+      const handle = window.requestIdleCallback(prefetch, { timeout: 3000 });
+      return () => {
+        cancelled = true;
+        window.cancelIdleCallback(handle);
+      };
+    }
+    const timer = window.setTimeout(prefetch, 2000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, []);
+
   const updateActiveAssistantToolCalls = useCallback((toolCalls: ToolCallEntry[]) => {
     const assistantId = currentAssistantMessageIdRef.current;
     if (!assistantId) return;
@@ -1591,6 +1705,9 @@ export default function App() {
   useEffect(() => {
     performance.mark("boot:app-mount");
   }, []);
+
+  // Warm the transcript chunk once the window is idle (see `warmTranscriptChunk`).
+  useEffect(() => warmTranscriptChunk(), []);
 
   useEffect(() => {
     applyConfigToUi()
@@ -3865,6 +3982,10 @@ export default function App() {
       : "markdown.pdf";
     setMarkdownPdfBusy(true);
     try {
+      // `printDocument` (the print shell + the inlined KaTeX stylesheet and
+      // its font URLs) is only needed when a PDF is actually written, so it is
+      // not part of the boot bundle.
+      const { MARKDOWN_PRINT_CSS } = await import("./utils/printDocument");
       const result = await exportHtmlAsPdf({
         title: suggested.replace(/^.*[\\/]/, ""),
         bodyHtml: markdownPreviewRef.current?.innerHTML ?? "",
@@ -4987,6 +5108,11 @@ export default function App() {
               )}
             </div>
           )}
+          {/* One Suspense for the whole transcript: `ChatMessage` and
+              `ToolCallGroup` are lazy chunks, and a message cannot exist
+              before the first render that needs them. The chunk is normally
+              already warm (see `warmTranscriptChunk`). */}
+          <Suspense fallback={null}>
           {messages.map((m) => {
             // Only the row that can actually offer a retry receives the
             // callback: its identity changes with the transcript, and handing
@@ -5033,6 +5159,7 @@ export default function App() {
               </ChatMessageBoundary>
             )
           })}
+          </Suspense>
         </div>
 
         {/* Input */}
@@ -5206,6 +5333,7 @@ export default function App() {
                 syncAgentMentionFromInput(value, caret);
               }}
               onKeyDown={handleKeyDown}
+              onFocus={requestTranscriptChunk}
               onPaste={handleComposerPaste}
               // A real blur (clicking elsewhere) dismisses the popup; the popup
               // itself accepts on `mousedown` + `preventDefault`, so choosing a

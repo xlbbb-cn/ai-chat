@@ -1,8 +1,53 @@
 import type MarkdownIt from "markdown-it";
 import type StateBlock from "markdown-it/lib/rules_block/state_block.mjs";
 import type StateInline from "markdown-it/lib/rules_inline/state_inline.mjs";
-import katex from "katex";
 import { escapeHtml } from "./format";
+
+/**
+ * KaTeX is loaded lazily: the library is ~250 KB of the eager bundle (the
+ * single largest third-party block in it), while most conversations contain no
+ * math at all. The markdown rules below stay synchronous — until the module
+ * has arrived, `renderMath` falls back to the escaped LaTeX text (the same
+ * fallback a KaTeX failure uses today), and the transcript re-renders the
+ * moment the load completes. `App.tsx` preloads the module ~1 s after boot on
+ * a timer, so a reply that arrives later never sees the fallback at all.
+ */
+type KatexModule = (typeof import("katex"))["default"];
+
+let katexModule: KatexModule | null = null;
+let katexPromise: Promise<KatexModule> | null = null;
+const readyListeners = new Set<() => void>();
+
+export function isKatexReady(): boolean {
+    return katexModule !== null;
+}
+
+/**
+ * Subscribe to the module's arrival; fires immediately when it is already
+ * loaded. Returns the unsubscribe function.
+ */
+export function onKatexReady(listener: () => void): () => void {
+    if (katexModule !== null) {
+        listener();
+        return () => {};
+    }
+    readyListeners.add(listener);
+    return () => {
+        readyListeners.delete(listener);
+    };
+}
+
+/** Dynamic-import KaTeX once; later calls reuse the same promise. */
+export function preloadKatex(): Promise<KatexModule> {
+    katexPromise ??= import("katex").then((mod) => {
+        katexModule = mod.default;
+        const listeners = [...readyListeners];
+        readyListeners.clear();
+        for (const listener of listeners) listener();
+        return katexModule;
+    });
+    return katexPromise;
+}
 
 type BlockState = StateBlock;
 type InlineState = StateInline;
@@ -26,8 +71,13 @@ function isDigitChar(code: number): boolean {
 }
 
 function renderMath(latex: string, displayMode: boolean): string {
+    if (katexModule === null) {
+        // Module still loading: render the source as text. The katex-ready
+        // re-render (via `onKatexReady`) replaces it with real markup.
+        return escapeHtml(latex);
+    }
     try {
-        return katex.renderToString(latex, {
+        return katexModule.renderToString(latex, {
             displayMode,
             throwOnError: false,
             strict: "ignore",
