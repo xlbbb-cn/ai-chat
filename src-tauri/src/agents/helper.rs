@@ -24,8 +24,7 @@ pub(crate) fn build_conversation_summary(records: &[crate::db::HistoryRecord]) -
     let mut used = 0usize;
 
     for record in records.iter().rev() {
-        if lines.len() >= CONVERSATION_SUMMARY_MESSAGES
-            || used >= CONVERSATION_SUMMARY_BUDGET_BYTES
+        if lines.len() >= CONVERSATION_SUMMARY_MESSAGES || used >= CONVERSATION_SUMMARY_BUDGET_BYTES
         {
             break;
         }
@@ -110,34 +109,41 @@ pub(crate) fn resolve_completion_limit(agent: &SubAgent) -> u32 {
         .unwrap_or(LLM_DEFAULT_MAX_COMLETE_TOKENS)
 }
 
-pub(crate) async fn run_llm_agent_body(
+/// Everything a sub-agent run needs before its first request. Built once;
+/// the loop owns the returned counters and working memory.
+struct AgentRunSetup<'a> {
+    model: &'a str,
+    headers: Vec<(String, String)>,
+    req_tools: Vec<Value>,
+    mcp_tool_map: std::collections::HashMap<String, (mcp::McpServer, String)>,
+    static_system_prompt: String,
+    max_iterations: Option<u32>,
+    context_budget: usize,
+    max_complete_tokens: u32,
+    failure_limit: u32,
+    mission_id: String,
+    working_memory: Vec<Value>,
+    total_tokens: u32,
+    tool_calls_count: u32,
+}
+
+/// Build the tool payload and the static system prompt, and initialize the
+/// mission row. An initialization failure is returned as the task result the
+/// caller should hand back, not as a turn error.
+#[allow(clippy::too_many_arguments)]
+async fn prepare_agent_run<'a>(
     app: &AppHandle,
-    client: &Client,
-    url: &str,
-    config: &AppConfig,
+    config: &'a AppConfig,
     session_id: &str,
-    agent: &SubAgent,
+    agent: &'a SubAgent,
     task: &Task,
-    workspace_dir: PathBuf,
-    task_cwd: PathBuf,
+    workspace_dir: &Path,
+    task_cwd: &Path,
     exchange: Option<&exchange::ExchangeArea>,
-    skill_access_root: Option<PathBuf>,
-    cancelled: &AtomicBool,
+    skill_access_root: Option<&Path>,
     mcp_session: &mut mcp::AgentMcpSession,
     mbus: Option<&mbus::MissionBus>,
-) -> TaskResult {
-    let _ = app.emit(
-        crate::events::AGENT_TASK_START,
-        crate::events::AgentTaskStart {
-            task_id: task.id.clone(),
-            session_id: session_id.to_string(),
-            agent_id: agent.id.clone(),
-            agent_name: agent.name.clone(),
-            description: task.description.clone(),
-            cwd: task.cwd.clone(),
-        },
-    );
-
+) -> Result<AgentRunSetup<'a>, TaskResult> {
     let model = agent.model.as_deref().unwrap_or(&config.model);
     // Same configured conversation-id header and custom headers as the main
     // chat: a sub-agent is still part of the same gateway conversation.
@@ -185,8 +191,8 @@ pub(crate) async fn run_llm_agent_body(
     // agent runs inside a chat turn, so pressing Stop in the chat tears the
     // autonomous loop down as well. It is never a fresh local flag: a detached
     // flag can never become true, and Stop would be ignored.
-    let mut total_tokens: u32 = 0;
-    let mut tool_calls_count: u32 = 0;
+    let total_tokens: u32 = 0;
+    let tool_calls_count: u32 = 0;
     let mission_id = mission_id_for_task(task).to_string();
     // Context budget: the per-model window from config (auto-detected from the
     // provider's `/models` response, the metadata catalogue, or entered for the
@@ -238,7 +244,7 @@ pub(crate) async fn run_llm_agent_body(
                         error: error.to_string(),
                     },
                 );
-                return TaskResult {
+                return Err(TaskResult {
                     task_id: task.id.clone(),
                     agent_id: agent.id.clone(),
                     agent_name: agent.name.clone(),
@@ -246,7 +252,7 @@ pub(crate) async fn run_llm_agent_body(
                     content: error,
                     tool_calls_count,
                     tokens_used: total_tokens,
-                };
+                });
             }
         };
 
@@ -262,7 +268,7 @@ pub(crate) async fn run_llm_agent_body(
                     error: err.to_string(),
                 },
             );
-            return TaskResult {
+            return Err(TaskResult {
                 task_id: task.id.clone(),
                 agent_id: agent.id.clone(),
                 agent_name: agent.name.clone(),
@@ -270,7 +276,7 @@ pub(crate) async fn run_llm_agent_body(
                 content: format!("Error: {}", err),
                 tool_calls_count,
                 tokens_used: total_tokens,
-            };
+            });
         }
     }
     let _ = app.emit(
@@ -278,7 +284,7 @@ pub(crate) async fn run_llm_agent_body(
         json!({ "mission_id": mission_id, "session_id": session_id, "status": "running", "event": "initialized" }),
     );
 
-    let mut working_memory: Vec<Value> = vec![json!({
+    let working_memory: Vec<Value> = vec![json!({
         "role": "user",
         "content": task_system,
     })];
@@ -398,7 +404,6 @@ pub(crate) async fn run_llm_agent_body(
         tool_fit,
     );
     let max_iterations = (agent.max_iterations > 0).then_some(agent.max_iterations);
-    let mut iterations: u32 = 0;
     // Session-scoped tool failure guard, shared with the main agent: a tool the
     // chat already gave up on must not be retried by a sub-agent either.
     let failure_limit = config
@@ -422,6 +427,175 @@ pub(crate) async fn run_llm_agent_body(
         .cloned()
         .collect();
 
+    Ok(AgentRunSetup {
+        model,
+        headers,
+        req_tools,
+        mcp_tool_map,
+        static_system_prompt,
+        max_iterations,
+        context_budget,
+        max_complete_tokens,
+        failure_limit,
+        mission_id,
+        working_memory,
+        total_tokens,
+        tool_calls_count,
+    })
+}
+
+/// Collect what the loop managed to produce when it ran out of iterations or
+/// stopped, then close the task with the mission's own final report when one
+/// was recorded. A loop without the completion flag is `stopped`, not
+/// `success`.
+fn finish_agent_run(
+    app: &AppHandle,
+    session_id: &str,
+    mission_id: &str,
+    task: &Task,
+    agent: &SubAgent,
+    working_memory: &[Value],
+    max_iterations: Option<u32>,
+    tool_calls_count: u32,
+    total_tokens: u32,
+) -> TaskResult {
+    // Max iterations reached — return whatever was last generated
+    let last_content = working_memory
+        .iter()
+        .rev()
+        .find_map(|m| {
+            m["content"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_else(|| {
+            if max_iterations.is_some() {
+                "Max iterations reached without final answer.".to_string()
+            } else {
+                "Autonomous loop stopped without a final answer.".to_string()
+            }
+        });
+
+    let mission_summary = {
+        let state = app.state::<AppState>();
+        state
+            .db
+            .lock()
+            .ok()
+            .and_then(|db| load_mission_state(&db, &mission_id).ok())
+    };
+
+    let final_content = mission_summary
+        .as_ref()
+        .and_then(|mission| {
+            if mission.mission_accomplished && !mission.final_report.trim().is_empty() {
+                Some(mission.final_report.clone())
+            } else {
+                None
+            }
+        })
+        .unwrap_or(last_content);
+
+    let accomplished = mission_summary
+        .as_ref()
+        .map(|mission| mission.mission_accomplished)
+        .unwrap_or(false);
+    let _ = app.emit(
+        crate::events::AGENT_TASK_DONE,
+        crate::events::AgentTaskDone {
+            task_id: task.id.clone(),
+            session_id: session_id.to_string(),
+            agent_id: agent.id.clone(),
+            agent_name: agent.name.clone(),
+            summary: if max_iterations.is_some() {
+                "Max iterations reached"
+            } else {
+                "Loop stopped"
+            }
+            .to_string(),
+            // A loop that ended without the completion flag was stopped, not
+            // completed: the row must not show a success checkmark.
+            status: if accomplished { "success" } else { "stopped" }.to_string(),
+        },
+    );
+    TaskResult {
+        task_id: task.id.clone(),
+        agent_id: agent.id.clone(),
+        agent_name: agent.name.clone(),
+        status: if accomplished {
+            "success".to_string()
+        } else {
+            "stopped".to_string()
+        },
+        content: final_content,
+        tool_calls_count,
+        tokens_used: total_tokens,
+    }
+}
+
+pub(crate) async fn run_llm_agent_body(
+    app: &AppHandle,
+    client: &Client,
+    url: &str,
+    config: &AppConfig,
+    session_id: &str,
+    agent: &SubAgent,
+    task: &Task,
+    workspace_dir: PathBuf,
+    task_cwd: PathBuf,
+    exchange: Option<&exchange::ExchangeArea>,
+    skill_access_root: Option<PathBuf>,
+    cancelled: &AtomicBool,
+    mcp_session: &mut mcp::AgentMcpSession,
+    mbus: Option<&mbus::MissionBus>,
+) -> TaskResult {
+    let _ = app.emit(
+        crate::events::AGENT_TASK_START,
+        crate::events::AgentTaskStart {
+            task_id: task.id.clone(),
+            session_id: session_id.to_string(),
+            agent_id: agent.id.clone(),
+            agent_name: agent.name.clone(),
+            description: task.description.clone(),
+            cwd: task.cwd.clone(),
+        },
+    );
+
+    let setup = match prepare_agent_run(
+        app,
+        config,
+        session_id,
+        agent,
+        task,
+        &workspace_dir,
+        &task_cwd,
+        exchange,
+        skill_access_root.as_deref(),
+        mcp_session,
+        mbus,
+    )
+    .await
+    {
+        Ok(setup) => setup,
+        Err(result) => return result,
+    };
+    let AgentRunSetup {
+        model,
+        headers,
+        req_tools,
+        mcp_tool_map,
+        static_system_prompt,
+        max_iterations,
+        context_budget,
+        max_complete_tokens,
+        failure_limit,
+        mission_id,
+        mut working_memory,
+        mut total_tokens,
+        mut tool_calls_count,
+    } = setup;
+    let mut iterations: u32 = 0;
     loop {
         if cancelled.load(Ordering::SeqCst) {
             break;
@@ -822,11 +996,11 @@ pub(crate) async fn run_llm_agent_body(
                                 let _ = app.emit(
                                     crate::events::AGENT_TASK_ERROR,
                                     crate::events::AgentTaskError {
-                            task_id: task.id.clone(),
-                            session_id: session_id.to_string(),
-                            agent_id: agent.id.clone(),
-                            error: error.to_string(),
-                        },
+                                        task_id: task.id.clone(),
+                                        session_id: session_id.to_string(),
+                                        agent_id: agent.id.clone(),
+                                        error: error.to_string(),
+                                    },
                                 );
                                 return TaskResult {
                                     task_id: task.id.clone(),
@@ -882,14 +1056,14 @@ pub(crate) async fn run_llm_agent_body(
                         let summary: String = final_content.chars().take(200).collect();
                         let _ = app.emit(
                             crate::events::AGENT_TASK_DONE,
-                    crate::events::AgentTaskDone {
-                        task_id: task.id.clone(),
-                        session_id: session_id.to_string(),
-                        agent_id: agent.id.clone(),
-                        agent_name: agent.name.clone(),
-                        summary: summary.clone(),
-                        status: "success".to_string(),
-                    },
+                            crate::events::AgentTaskDone {
+                                task_id: task.id.clone(),
+                                session_id: session_id.to_string(),
+                                agent_id: agent.id.clone(),
+                                agent_name: agent.name.clone(),
+                                summary: summary.clone(),
+                                status: "success".to_string(),
+                            },
                         );
                         return TaskResult {
                             task_id: task.id.clone(),
@@ -981,10 +1155,11 @@ pub(crate) async fn run_llm_agent_body(
                     // Session-level gate: a tool disabled after repeated
                     // failures never runs again. The call is still answered —
                     // the protocol needs one `tool` message per `tool_call_id`.
-                    let blocked = app
-                        .state::<AppState>()
-                        .tool_guard
-                        .blocked_notice(session_id, name, failure_limit);
+                    let blocked = app.state::<AppState>().tool_guard.blocked_notice(
+                        session_id,
+                        name,
+                        failure_limit,
+                    );
                     let is_mcp = mcp_tool_map.contains_key(name.as_str());
                     let concurrent = blocked.is_none()
                         && !is_mcp
@@ -1047,15 +1222,17 @@ pub(crate) async fn run_llm_agent_body(
                                             serde_json::from_str(&call.args).unwrap_or_default();
                                         mbus::handle_tool(app, bus, &task.id, &parsed, false)
                                     }
-                                    None => "Error: the mission bus is not available for this task."
-                                        .to_string(),
+                                    None => {
+                                        "Error: the mission bus is not available for this task."
+                                            .to_string()
+                                    }
                                 }
                             } else if let Some((mcp_server, actual_tool_name)) =
                                 mcp_tool_map.get(call.name.as_str())
                             {
                                 let state = app.state::<AppState>();
-                                let arguments: Value = serde_json::from_str(&call.args)
-                                    .unwrap_or_else(|_| json!({}));
+                                let arguments: Value =
+                                    serde_json::from_str(&call.args).unwrap_or_else(|_| json!({}));
                                 let owner = format!("agent:{}", agent.name);
                                 match mcp::invoke_mcp_tool_for_agent(
                                     &state,
@@ -1085,7 +1262,7 @@ pub(crate) async fn run_llm_agent_body(
                                     Some(&mission_id),
                                     Some(session_id),
                                     None,
-                                    &[],  // sub-agents don't track active skill dirs for skill_read
+                                    &[], // sub-agents don't track active skill dirs for skill_read
                                     None, // background tasks are never advertised to sub-agents
                                     Some(task_cwd.as_path()),
                                 )
@@ -1192,74 +1369,17 @@ pub(crate) async fn run_llm_agent_body(
         }
     }
 
-    // Max iterations reached — return whatever was last generated
-    let last_content = working_memory
-        .iter()
-        .rev()
-        .find_map(|m| {
-            m["content"]
-                .as_str()
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_string())
-        })
-        .unwrap_or_else(|| {
-            if max_iterations.is_some() {
-                "Max iterations reached without final answer.".to_string()
-            } else {
-                "Autonomous loop stopped without a final answer.".to_string()
-            }
-        });
-
-    let mission_summary = {
-        let state = app.state::<AppState>();
-        state
-            .db
-            .lock()
-            .ok()
-            .and_then(|db| load_mission_state(&db, &mission_id).ok())
-    };
-
-    let final_content = mission_summary
-        .as_ref()
-        .and_then(|mission| {
-            if mission.mission_accomplished && !mission.final_report.trim().is_empty() {
-                Some(mission.final_report.clone())
-            } else {
-                None
-            }
-        })
-        .unwrap_or(last_content);
-
-    let accomplished = mission_summary
-        .as_ref()
-        .map(|mission| mission.mission_accomplished)
-        .unwrap_or(false);
-    let _ = app.emit(
-        crate::events::AGENT_TASK_DONE,
-        crate::events::AgentTaskDone {
-            task_id: task.id.clone(),
-            session_id: session_id.to_string(),
-            agent_id: agent.id.clone(),
-            agent_name: agent.name.clone(),
-            summary: if max_iterations.is_some() { "Max iterations reached" } else { "Loop stopped" }.to_string(),
-            // A loop that ended without the completion flag was stopped, not
-            // completed: the row must not show a success checkmark.
-            status: if accomplished { "success" } else { "stopped" }.to_string(),
-        },
-    );
-    TaskResult {
-        task_id: task.id.clone(),
-        agent_id: agent.id.clone(),
-        agent_name: agent.name.clone(),
-        status: if accomplished {
-            "success".to_string()
-        } else {
-            "stopped".to_string()
-        },
-        content: final_content,
+    finish_agent_run(
+        app,
+        session_id,
+        &mission_id,
+        task,
+        agent,
+        &working_memory,
+        max_iterations,
         tool_calls_count,
-        tokens_used: total_tokens,
-    }
+        total_tokens,
+    )
 }
 
 /// Last non-empty assistant text in the working memory. Used when the planner
@@ -1318,7 +1438,6 @@ pub(crate) fn finalize_mission_task(
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
-
 
 // ─── Final result hand-off ──────────────────────────────────────────────────
 
