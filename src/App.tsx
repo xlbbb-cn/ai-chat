@@ -4733,9 +4733,14 @@ export default function App() {
           </div>
         </Portal>
       )}
-      {/* Sidebar */}
+      {/* Sidebar — the panels that live in the 400px dock. Settings is not one
+          of them: it opens as the fullscreen page above, so the aside must not
+          mount here. Its framer-motion inline `opacity: 1` would defeat the
+          `body:has(> .settings-overlay)` fade in SettingsPanel.css and leave an
+          empty 400px sheet visible through the translucent page (the two-tone
+          seam on the settings canvas). */}
       <AnimatePresence>
-      {sidebar && (
+      {sidebar && sidebar !== "settings" && (
         <motion.aside
           key="sidebar"
           className="sidebar"
@@ -4744,7 +4749,7 @@ export default function App() {
           exit={SIDEBAR_HIDDEN}
           transition={reducedMotion ? { duration: 0 } : SIDEBAR_SPRING}
         >
-          <div className={`sidebar-shell ${sidebar === "settings" ? "panel-settings" : ""} ${sidebar === "skills" ? "panel-skills" : ""} ${sidebar === "history" ? "panel-history" : ""} ${sidebar === "tools" ? "panel-tools" : ""} ${sidebar === "mcp" ? "panel-mcp" : ""} ${sidebar === "agents" ? "panel-agents" : ""}`} key={sidebar}>
+          <div className={`sidebar-shell ${sidebar === "skills" ? "panel-skills" : ""} ${sidebar === "history" ? "panel-history" : ""} ${sidebar === "tools" ? "panel-tools" : ""} ${sidebar === "mcp" ? "panel-mcp" : ""} ${sidebar === "agents" ? "panel-agents" : ""}`} key={sidebar}>
             <Suspense fallback={null}>
             {sidebar === "skills" && (
               <SkillsPanel
