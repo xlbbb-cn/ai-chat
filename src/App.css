@@ -3895,7 +3895,9 @@ button.rabbit-hop-bunny:focus-visible {
 }
 
 /* Title — 500 max per the type scale; the error card takes the semantic
-   status colour, the success card stays plain text. */
+   status colour, the success card stays plain text. The ask card uses the
+   accent as a label (a question waiting for an answer), the confirm card
+   the semantic warning (an approval waiting for the user). */
 .notify-card-title {
   font-size: 13px;
   font-weight: 500;
@@ -3908,6 +3910,14 @@ button.rabbit-hop-bunny:focus-visible {
 
 .notify-card-title.kind-error {
   color: var(--c-danger);
+}
+
+.notify-card-title.kind-ask {
+  color: var(--c-accent-text);
+}
+
+.notify-card-title.kind-confirm {
+  color: var(--c-warning);
 }
 
 .notify-card-body {

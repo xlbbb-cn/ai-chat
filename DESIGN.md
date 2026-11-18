@@ -377,6 +377,13 @@ only sanctioned exception to "one accent". Never use them decoratively.
 > that paints an accent **line or label** uses `--c-accent-text`. Mixing them up
 > is what makes a pastel palette unreadable.
 
+**The desktop notification card's title** (`.notify-card-title`, the `notify`
+window) carries one of four semantic kinds: `done` stays plain `--c-text`,
+`error` takes `--c-danger`, `ask` (a `todos ask` question waiting for an
+answer) takes `--c-accent-text` — the accent as a label — and `confirm` (a
+risk approval waiting for the user) takes `--c-warning`. The card body is
+always `--c-muted`; no other surface may reuse these kind classes.
+
 ### Surface washes
 
 | Token | Default | Role |

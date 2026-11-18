@@ -178,6 +178,8 @@ const zhCN: Messages = {
         notify: {
             doneTitle: "任务已完成",
             errorTitle: "任务失败",
+            askTitle: "助手正在提问",
+            confirmTitle: "需要你的授权",
         },
         sessionSwitchBlocked: "正在生成回复，请先停止后再切换历史会话。",
         deleteFailed: "删除消息失败：{error}",

@@ -178,6 +178,8 @@ const zhTW: Messages = {
         notify: {
             doneTitle: "任務已完成",
             errorTitle: "任務失敗",
+            askTitle: "助手正在提問",
+            confirmTitle: "需要你的授權",
         },
         sessionSwitchBlocked: "正在生成回覆，請先停止後再切換歷史工作階段。",
         deleteFailed: "刪除訊息失敗：{error}",

@@ -197,6 +197,8 @@ const en = {
         notify: {
             doneTitle: "Task completed",
             errorTitle: "Task failed",
+            askTitle: "Assistant is asking",
+            confirmTitle: "Approval required",
         },
         sessionSwitchBlocked:
             "A reply is currently being generated. Please stop it before switching history sessions.",

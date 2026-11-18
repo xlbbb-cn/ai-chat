@@ -28,7 +28,9 @@ import noticeImage from "./assets/notice1.png";
 interface NotifyPayload {
   title: string;
   body: string;
-  /** `"done"` | `"error"` — semantic status only (DESIGN.md). */
+  /** `"done"` | `"error"` | `"ask"` | `"confirm"` — semantic status only
+   * (DESIGN.md): settled turn, failed turn, question waiting for an answer,
+   * approval waiting for the user. */
   kind: string;
 }
 
@@ -156,7 +158,10 @@ function App() {
     return () => window.clearTimeout(id);
   }, [item, shown, hovering, dismiss]);
 
-  const kind = item?.kind === "error" ? "error" : "done";
+  const kind =
+    item?.kind === "error" || item?.kind === "ask" || item?.kind === "confirm"
+      ? item.kind
+      : "done";
 
   return (
     <div className="notify-root">

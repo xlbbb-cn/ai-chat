@@ -381,6 +381,20 @@ function notifyTurnSettled(ok: boolean, body: string, enabled: boolean) {
   }
 }
 
+/**
+ * A turn blocked on the user — the `todos ask` question card or the risk
+ * approval dialog. Same two-channel rule as `notifyTurnSettled`: when the
+ * main window is not being watched the notification card carries the ask
+ * (the *message* sound), when it is visible the in-app card is already on
+ * screen and nothing plays. Fire and forget, like every card show.
+ */
+function notifyTurnBlocked(title: string, body: string, kind: string, enabled: boolean) {
+  if (!enabled) return;
+  if (document.visibilityState !== "hidden" && document.hasFocus()) return;
+  playSound("info");
+  showNotifyCard(title, body.replace(/\s+/g, " ").trim().slice(0, 160), kind).catch(() => {});
+}
+
 // ─── Delay timers ────────────────────────────────────────────────────────────
 
 /**
@@ -1568,6 +1582,16 @@ export default function App() {
       "confirm-required",
       (e) => {
         const { request_id, reason, cmd_type, code, confirm_kind, requires_auth, risk_level, risk_score, disposition, blacklist_hits, penalty_items } = e.payload;
+        // The turn is blocked on the user either way — an inline allow/deny
+        // row and the standalone dialog both wait — so the notification fires
+        // for both paths (external-agent approvals included; they arrive on
+        // the same event).
+        notifyTurnBlocked(
+          t("app.notify.confirmTitle"),
+          reason || code.split("\n")[0] || "",
+          "confirm",
+          notifyWhenHiddenRef.current
+        );
         // `run_shell` confirmations that need no credentials are answered
         // inline in the tool-call group (allow/deny buttons on the card);
         // everything else — run_cmd, sudo/elevation, external agents — keeps
@@ -1616,6 +1640,15 @@ export default function App() {
   useEffect(() => {
     const unlisten = listen<TodoAskRequest>("todo-ask", (e) => {
       setTodoAsk(e.payload);
+      // The form blocks the turn until answered — cue a user who is not
+      // looking at the app. The mount-time `getPendingTodoAsk()` restore
+      // below deliberately stays silent: a reload means the user is here.
+      notifyTurnBlocked(
+        t("app.notify.askTitle"),
+        e.payload.questions[0]?.title || e.payload.topic || "",
+        "ask",
+        notifyWhenHiddenRef.current
+      );
     });
     // The backend closes the form on timeout, Stop, or a reply that arrived
     // from another window — clear any panel that is still showing it. The
