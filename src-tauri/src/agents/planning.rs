@@ -885,6 +885,30 @@ pub(crate) async fn select_agents(
         SELECTION_QUERY_MAX_BYTES,
     );
 
+    // The selector sees the same compact recent conversation the planner gets:
+    // a short follow-up ("继续", "then do the rest") is undelegable on its own,
+    // and a wrong decline skips planning for the whole turn.
+    let conversation = messages
+        .iter()
+        .rev()
+        .take(3)
+        .rev()
+        .map(|m| {
+            let text = content_to_text(&m.content);
+            format!(
+                "[{}]: {}",
+                m.role,
+                preview_text(&text, PLANNER_CONVERSATION_MAX_BYTES)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let user_content = if conversation.is_empty() {
+        user_query.clone()
+    } else {
+        format!("Recent conversation:\n{conversation}\n\nCurrent request:\n{user_query}")
+    };
+
     // An attachment-only turn has no text for the selector to judge. Narrowing
     // on an empty query would wrongly decline delegation, so skip the call.
     if user_query.trim().is_empty() {
@@ -894,6 +918,9 @@ pub(crate) async fn select_agents(
     let system = format!(
         "You are an AI orchestrator. Decide which sub-agents should work on the user's request.\n\
          Existing agents:\n{catalogue}\n\n\
+         Note: `skills=` is configuration metadata (the agent's allowed-skill list) — no skill \
+         content is auto-injected for a sub-agent; it reaches skill files only through its \
+         `tools=` (e.g. `file_actions`). Match on `tools=` and `mcp=` first.\n\n\
          Rules:\n\
          - Smallest set that can do the job: 0 to {MAX_SELECTED_AGENTS} agents.\n\
          - `llm` for reasoning, analysis and writing; `cli` for large code changes in the workspace; `cloud` for long remote jobs.\n\
@@ -912,7 +939,7 @@ pub(crate) async fn select_agents(
         headers,
         vec![
             json!({"role":"system","content": system}),
-            json!({"role":"user","content": user_query}),
+            json!({"role":"user","content": user_content}),
         ],
         model,
         1024,
@@ -1078,13 +1105,15 @@ pub(crate) async fn plan_tasks(
         - When unsure, delegate — a wrong decline loses capability, a needless mission only costs one \
         task. A single task is a valid plan.\n\n\
         Step 2 — only for delegate:true, plan the tasks.\n\
-        Available agents:\n{agents_desc}\n\n\
+        Available agents:\n{agents_desc}\n\
+        (`skills=` is configuration metadata only — no skill content is auto-injected for a \
+        sub-agent; it reaches skill files only through its `tools=`.)\n\n\
         Workspace root: {workspace_root}\n\
         Deliverable exchange area: {exchange_root} — every task gets a directory named after its id, \
         shared files go to {exchange_root}/shared. In `context`, name a dependency artifact as \
         `<task-id>/<filename>` relative to the exchange root; never paste large artifacts into a \
         description.\n\n\
-        A task may name one working directory with `cwd` (workspace-relative, e.g. \"apps/web\") — use \
+        A task may name one working directory with `cwd` (workspace-relative, e.g. \"./apps/web\") — use \
         it whenever the request names or targets a specific project/folder, omit it (or \".\") for the \
         workspace root, and never invent a directory the conversation does not mention.\n\n\
         A task may also carry `images` (workspace-relative input file paths the conversation names, \

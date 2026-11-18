@@ -167,7 +167,7 @@ async fn prepare_agent_run<'a>(
             }
         }
     }
-    let mut tools_list = tools::get_all_tools(&agent_tool_ids, config.self_evolution_mode, false);
+    let mut tools_list = tools::get_all_tools(&agent_tool_ids, config.self_evolution_mode, false, false);
     drop_mcp_self(&mut tools_list);
     tools_list.extend(tools::get_agent_task_tools());
     // The mission bus is available only inside a planner-dispatched batch.
@@ -204,8 +204,11 @@ async fn prepare_agent_run<'a>(
         AGENT_DEFAULT_CONTEXT_WINDOW as u32,
     ) as usize;
 
-    let mut self_evolution_context =
-        crate::skills::self_evolution_prompt(skill_access_root.as_deref());
+    let mut self_evolution_context = crate::skills::self_evolution_prompt(
+        skill_access_root.as_deref(),
+        true,  // sub-agent: no `use_skill` / `mcp_self`, no memory hint
+        false,
+    );
 
     // Verified facts are not preloaded here either: the sub-agent searches the
     // `evolution` memory scope on demand (see the self-evolution text), which

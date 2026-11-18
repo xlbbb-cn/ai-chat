@@ -25,7 +25,7 @@ fn make_temp_dir(label: &str) -> PathBuf {
 #[test]
 fn memory_schema_advertises_consolidate_only_in_self_evolution_mode() {
     let memory_tool = |self_evolution: bool| {
-        super::get_all_tools(&["memory".to_string()], self_evolution, false)
+        super::get_all_tools(&["memory".to_string()], self_evolution, false, false)
             .into_iter()
             .find(|tool| tool["function"]["name"] == "memory")
             .expect("memory tool must be advertised")
@@ -44,11 +44,34 @@ fn memory_schema_advertises_consolidate_only_in_self_evolution_mode() {
     assert!(!actions(&memory_tool(false)).contains(&"consolidate".to_string()));
 }
 
+/// The memory description may only claim the request-time hint while the
+/// pipeline actually prepends it (`config.memory_hint`); otherwise the model
+/// would wait for a hint that never arrives.
+#[test]
+fn memory_description_states_the_hint_only_when_the_pipeline_provides_it() {
+    let description = |memory_hint: bool| {
+        super::get_all_tools(&["memory".to_string()], true, false, memory_hint)
+            .into_iter()
+            .find(|tool| tool["function"]["name"] == "memory")
+            .expect("memory tool must be advertised")["function"]["description"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+
+    assert!(description(true).contains("is prepended to that message"));
+    assert!(
+        !description(false).contains("prepended"),
+        "without the hint the description must not claim it: {}",
+        description(false)
+    );
+}
+
 /// Trust calibration rides on `add`: the model gets the three knobs that let it
 /// rewrite a wrong fact, and they never become a separate action.
 #[test]
 fn memory_schema_exposes_the_trust_calibration_knobs() {
-    let tool = super::get_all_tools(&["memory".to_string()], true, false)
+    let tool = super::get_all_tools(&["memory".to_string()], true, false, false)
         .into_iter()
         .find(|tool| tool["function"]["name"] == "memory")
         .expect("memory tool must be advertised");
@@ -82,7 +105,7 @@ fn memory_schema_exposes_the_trust_calibration_knobs() {
 /// interpreter per call.
 #[test]
 fn run_shell_schema_carries_the_machine_and_fixes_the_shell() {
-    let tools = super::get_all_tools(&["run_shell".to_string()], false, false);
+    let tools = super::get_all_tools(&["run_shell".to_string()], false, false, false);
     let run_shell = tools
         .iter()
         .find(|tool| tool["function"]["name"] == "run_shell")
@@ -111,7 +134,7 @@ fn run_shell_schema_carries_the_machine_and_fixes_the_shell() {
 /// the app-data MCP registry and starts local processes).
 #[test]
 fn mcp_self_is_advertised_only_in_self_evolution_mode() {
-    let advertised = super::get_all_tools(&["file_actions".to_string()], true, false);
+    let advertised = super::get_all_tools(&["file_actions".to_string()], true, false, false);
     assert!(
         advertised
             .iter()
@@ -119,7 +142,7 @@ fn mcp_self_is_advertised_only_in_self_evolution_mode() {
         "self-evolution mode must advertise mcp_self"
     );
 
-    let plain = super::get_all_tools(&["file_actions".to_string()], false, false);
+    let plain = super::get_all_tools(&["file_actions".to_string()], false, false, false);
     assert!(
         !plain
             .iter()
@@ -134,6 +157,7 @@ fn background_flag_and_control_tool_are_only_advertised_when_enabled() {
         &["run_cmd".to_string(), "run_shell".to_string()],
         false,
         true,
+        false,
     );
     assert!(
         tools
@@ -150,7 +174,7 @@ fn background_flag_and_control_tool_are_only_advertised_when_enabled() {
         "boolean"
     );
 
-    let disabled = super::get_all_tools(&["run_cmd".to_string()], false, false);
+    let disabled = super::get_all_tools(&["run_cmd".to_string()], false, false, false);
     assert!(
         !disabled
             .iter()

@@ -466,10 +466,15 @@ pub(crate) const CONTEXT_SUMMARY_SYSTEM_PROMPT: &str = "You compress a conversat
 3. Files and Code Sections: every file touched or read, with exact paths and what was done or found\n\
 4. Errors and Fixes: each error hit and how it was resolved, so it is not repeated\n\
 5. Problem Solving: approaches tried, what worked, what did not\n\
-6. All User Messages: list every user message, condensed but never dropped\n\
+6. All User Messages: list every user message the transcript still contains (older entries may have been truncated to fit the window), condensed but not dropped\n\
 7. Pending Tasks: what is not finished yet\n\
 8. Current Work: precisely what was being done when this summary was requested\n\
 9. Next Step: the immediate next action, quoting the instruction that drives it\n\n\
+Transcript markers: a `[user]` line beginning with a bracketed marker was injected by the \
+runtime, not typed by the user. `[User update received while you were working` wraps a REAL \
+user addition written mid-turn — include the text inside it in section 6. \
+`[BACKGROUND TASK RESULT`, `[INTERNAL CONTEXT -` and `⏱️ [Timer fired` are automatic notices — \
+reflect their content in sections 7-9 where relevant, but do not count them as user messages.\n\n\
 Keep file paths, commands, identifiers and code references EXACT. Be dense and factual; no preamble, no closing remarks.";
 
 /// Everything the context compressor needs to run its (optional) LLM

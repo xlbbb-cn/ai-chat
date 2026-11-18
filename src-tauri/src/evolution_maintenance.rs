@@ -420,6 +420,7 @@ async fn run_inner(
         &["memory".to_string(), "file_actions".to_string()],
         true,
         false,
+        false, // the maintenance loop never prepends a memory hint
     );
     tools_list.push(tools::skill_admin::merge_tool_definition());
 

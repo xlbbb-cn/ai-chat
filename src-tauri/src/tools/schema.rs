@@ -6,10 +6,16 @@ use super::*;
 ///
 /// `self_evolution` adds the dedicated `evolution` memory scope to the memory
 /// tool — it only exists while self-evolution mode is on.
+///
+/// `memory_hint` must reflect whether the request pipeline actually prepends
+/// the keyword-ranked memory hint to the newest user message (main chat:
+/// `config.memory_hint`; every other caller: `false`). The memory description
+/// states the behaviour, so it has to agree with the gating.
 pub fn get_all_tools(
     selected_tools: &[String],
     self_evolution: bool,
     background_tools: bool,
+    memory_hint: bool,
 ) -> Vec<Value> {
     let mut tools = vec![];
 
@@ -21,7 +27,7 @@ pub fn get_all_tools(
             "type": "function",
             "function": {
                 "name": "run_cmd",
-                "description": "Execute a program or a workspace script with patent-compliant risk assessment. L5/L6 (safe/read-only) run directly; L0-L4 need the user's confirmation with the risk score; syntax errors are rejected with a detailed report. Returns the result or the rejection reason.\n\n`action: \"run\"` (default) runs `command`. The first word is a script name in the library `<workspace>/.data/scripts` (extension optional, e.g. `build-frontend`, `deploy.py`) or a bare program name resolved through PATH (`python`, `git`, `node`); the library is prepended to the child's PATH, so a script wins over a same-named program. Absolute and relative paths are refused — use `run_shell` when a path is really needed.\n\n`action: \"list\"` lists the library with its `@description` / `@usage` header, interpreter and use count, and executes nothing. Scripts are plain files in that folder: write them with `file_actions` and give them `@description` / `@usage` header comments.",
+                "description": "Execute a program or a workspace script under tiered risk assessment: L0-L3 need the user's confirmation with the risk score; L4-L6 run directly (L4 is a sensitive read, L5/L6 are safe/read-only); syntax errors are rejected with a detailed report. Returns the result or the rejection reason.\n\n`action: \"run\"` (default) runs `command`. The first word is a script name in the library `<workspace>/.data/scripts` (extension optional, e.g. `build-frontend`, `deploy.py`) or a bare program name resolved through PATH (`python`, `git`, `node`); the library is prepended to the child's PATH, so a script wins over a same-named program. Absolute and relative paths are refused — use `run_shell` when a path is really needed.\n\n`action: \"list\"` lists the library with its `@description` / `@usage` header, interpreter and use count, and executes nothing. Scripts are plain files in that folder: write them with `file_actions` and give them `@description` / `@usage` header comments.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -61,6 +67,7 @@ pub fn get_all_tools(
                     "Execute or manage a shell script under the same risk assessment and confirmation rules as `run_cmd`.\n\n\
                      This machine runs {machine}. The shell is fixed for this build: write {language} scripts (there is no shell-type argument to choose).\n\n\
                      The script starts in the working directory (the workspace root for the main chat, the task directory inside a sub-agent mission) but may `cd` and run anything — pipes, loops, redirections, absolute paths. Use it when a PATH-resolved program is not enough.\n\n\
+                     The script runs headless (no terminal): interactive elevation — a `sudo` password prompt or a UAC dialog — is not available. If a step needs it, tell the user to run that step themselves.\n\n\
                      `run_type: \"direct\"` (default) runs to completion and returns the output. `run_type: \"serve\"` starts a long-lived child (HTTP service, watcher…) and returns a `serve_id`; then `action: \"list\"` shows the processes and `action: \"stop\"` kills one id (or `serve_id: \"all\"`). Serve processes die with this chat turn and at app exit."
                 ),
                 "parameters": {
@@ -84,14 +91,6 @@ pub fn get_all_tools(
                             "type": "string",
                             "description": "The shell script body. Required for run_type 'direct' and serve 'start'; not needed for 'stop'/'list'."
                         },
-                        "sudo": {
-                            "type": "boolean",
-                            "description": "If true (bash only), run the whole script through sudo. Asks for confirmation and sudo credentials."
-                        },
-                        "elevated": {
-                            "type": "boolean",
-                            "description": "If true (PowerShell only), request administrator elevation (UAC). Asks for confirmation."
-                        },
                         "timeout_seconds": {
                             "type": "integer",
                             "minimum": 1,
@@ -109,7 +108,6 @@ pub fn get_all_tools(
             "type": "function",
             "function": {
                 "name": "file_actions",
-                "description": "File operations strictly inside the workspace. Use `./...` paths (e.g. `./src/App.tsx`) or `.` for the root; absolute paths inside the workspace work, anything resolving outside is rejected — use `run_shell` only when external access is genuinely required. `.data` is part of the workspace and writable: skills under `./.data/skills/...`, the `run_cmd` script library under `./.data/scripts/...`, memory/todos/status — everything except `.data/chat.db`. Temporary and scratch output belongs in `./.data/tmp/` (the shared workspace scratch area: the PDF cache and composer pastes live there; every plain file sitting directly in it expires after a day, so long-lived output belongs in a subdirectory). Sub-agent deliverables are written to `./.data/deliver/<session-id>/` by the runtime. Protected self-evolution targets get an automatic `.bak.<n>` backup before mutation.",
                 "description": "File operations strictly inside the workspace. Use `./...` paths (e.g. `./src/App.tsx`) or `.` for the root; absolute paths inside the workspace work, anything resolving outside is rejected — use `run_shell` only when external access is genuinely required. `.data` is part of the workspace and writable: skills under `./.data/skills/...`, the `run_cmd` script library under `./.data/scripts/...`, memory/todos/status — everything except `.data/chat.db`. Temporary and scratch output belongs in `./.data/tmp/` (the shared workspace scratch area: the PDF cache and composer pastes live there; every plain file sitting directly in it expires after a day, so long-lived output belongs in a subdirectory). Sub-agent deliverables are written to `./.data/deliver/<session-id>/` by the runtime. An `@path` mention in a user message was already inlined at send time — the `<details><summary>Attached File: … — already provided below` block holds those bytes — so read the file only for the parts that are missing (other lines, other files), never to re-check what the user already sent. Protected self-evolution targets get an automatic `.bak.<n>` backup before mutation.",
                 "parameters": {
                     "type": "object",
@@ -206,11 +204,22 @@ pub fn get_all_tools(
         } else {
             ""
         };
+        // The hint clause must match the actual gating: when the request
+        // pipeline does not prepend the hint, the description must not claim
+        // that it does (the model would otherwise wait for a hint that never
+        // arrives).
+        let hint_clause = if memory_hint {
+            " A short hint (under 200 characters, ranked by confidence) listing the titles of the \
+             memories whose keywords match the newest user message is prepended to that message — \
+             it is a pointer, not the record: `search`/`get` the scope to read the whole entry."
+        } else {
+            ""
+        };
         tools.push(json!({
             "type": "function",
             "function": {
                 "name": "memory",
-                "description": format!("Manage persistent memory in these scopes:\n- `session`: in-memory, cleared at app restart — task context and in-progress notes.\n- `user`: file-backed, cross-session — preferences, patterns, general insights.\n- `repo`: file-backed, repository-scoped — conventions, build commands, project facts.{evolution_scope}\n\n`scope: \"all\"` runs get/list/search over every scope at once (read-only); add/delete need one concrete scope. `user`/`repo` are markdown files in the workspace `.data/memory` (app-managed — never edit them with file tools). A short hint (under 200 characters, ranked by confidence) listing the titles of the memories whose keywords match the newest user message is prepended to that message — it is a pointer, not the record: `search`/`get` the scope to read the whole entry. Evolution entries are structured (key, title, kind, tags, importance, confidence, evidence); `search` matches keywords with a title > tags > body priority and returns the strongest hits first (hit tier, then how many keywords matched) — keep each to one dense fact. `consolidate` folds a large evolution cluster into a skill archive: `phase: \"plan\"` first, then `phase: \"apply\"` with the full `skill_md` and the same `keys`.\n\nTRUST CALIBRATION (evolution): a fact you retrieved is a claim, not the truth. When the real result disagrees with it, immediately `add` the same key with `conflict: true` — plus the corrected `content` if you know it, and a one-line `note` — so the entry is rewritten in that same call and its confidence drops to 1. When it matched, a plain re-add raises confidence by one. Entries at confidence 2 or below (and anything recently contradicted) must be re-verified against the real environment before you rely on them."),
+                "description": format!("Manage persistent memory in these scopes:\n- `session`: in-memory, cleared at app restart — task context and in-progress notes.\n- `user`: file-backed, cross-session — preferences, patterns, general insights.\n- `repo`: file-backed, repository-scoped — conventions, build commands, project facts.{evolution_scope}\n\n`scope: \"all\"` runs get/list/search over every scope at once (read-only); add/delete need one concrete scope. `user`/`repo` are markdown files in the workspace `.data/memory` (app-managed — never edit them with file tools).{hint_clause} Evolution entries are structured (key, title, kind, tags, importance, confidence, evidence); `search` matches keywords with a title > tags > body priority and returns the strongest hits first (hit tier, then how many keywords matched) — keep each to one dense fact. `consolidate` folds a large evolution cluster into a skill archive: `phase: \"plan\"` first, then `phase: \"apply\"` with the full `skill_md` and the same `keys`.\n\nTRUST CALIBRATION (evolution): a fact you retrieved is a claim, not the truth. When the real result disagrees with it, immediately `add` the same key with `conflict: true` — plus the corrected `content` if you know it, and a one-line `note` — so the entry is rewritten in that same call and its confidence drops to 1. When it matched, a plain re-add raises confidence by one. Entries at confidence 2 or below (and anything recently contradicted) must be re-verified against the real environment before you rely on them."),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -465,7 +474,7 @@ pub fn get_all_tools(
             if matches!(name, "run_cmd" | "run_shell" | "file_actions") {
                 tool["function"]["parameters"]["properties"]["run_in_background"] = json!({
                     "type": "boolean",
-                    "description": "Run as a background task: return a task id immediately instead of blocking the turn. The result arrives automatically before your next request and the turn stays open until it does. Use it for slow work (large searches, builds, long commands) you can do something else meanwhile — not for a quick command, and never start one and then finish without `background_task` action `wait`."
+                    "description": "Run as a background task: return a task id immediately instead of blocking the turn. The result is delivered automatically before your next request (the turn is held open until it arrives), so there is nothing to clean up. Use it for slow work (large searches, builds, long commands) you can do something else meanwhile — not for a quick command. Use `background_task` action `wait` only when you cannot continue without the result right away."
                 });
             }
         }

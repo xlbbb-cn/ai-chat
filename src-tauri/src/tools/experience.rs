@@ -25,8 +25,10 @@ pub(crate) fn tool_definition() -> Value {
                 MCP parts, and the environment it needs; this tool never runs it. \
                 Use `search` before solving a problem from scratch, `load` to read the method, \
                 `install` to copy the parts into this workspace — then run them with the ordinary \
-                tools: `use_skill` for the skill part, `run_shell`/`run_cmd` for the scripts, \
-                `mcp_self` for the server. `pack` snapshots workspace artifacts into a package, \
+                tools: `use_skill` loads the skill part (where `use_skill` is not offered, read \
+                its `.data/skills/<slug>/skill.md` with `file_actions`), \
+                `run_shell`/`run_cmd` run the scripts, and the MCP part is served by the main \
+                agent's `mcp_self`. `pack` snapshots workspace artifacts into a package, \
                 `distill` folds several packages into one, `forget` archives one. \
                 Available only while self-evolution mode is on.",
             "parameters": {
@@ -240,7 +242,8 @@ fn install(store: &Path, args: &Value, workspace_dir: &Path) -> String {
         } else {
             match replace_directory(&skill_source, &target, overwrite, true) {
                 Ok(()) => done.push(format!(
-                    "skill `{slug}` → `.data/skills/{slug}/` (then `use_skill {slug}`)"
+                    "skill `{slug}` → `.data/skills/{slug}/` (load with `use_skill`, or read its \
+                     `skill.md` with `file_actions` where `use_skill` is not offered)"
                 )),
                 Err(err) => return format!("Error: cannot install the skill part: {err}"),
             }

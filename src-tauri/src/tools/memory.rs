@@ -2128,7 +2128,8 @@ pub fn apply_consolidation(
 
     Ok(format!(
         "Archived {moved} entries ({freed} chars) into skill '{}' — the description is now the only \
-         permanent prompt cost; load the archive with `use_skill` (source-memory lists {} keys).",
+         permanent prompt cost; load the skill with `use_skill`, or read its `skill.md` with \
+         `file_actions` where `use_skill` is not offered (source-memory lists {} keys).",
         skill.name,
         skill.source_memory.len()
     ))
@@ -3065,8 +3066,9 @@ fn handle_evolution_scope(
             }
             if let Some((skill, path)) = find_archived_entry(workspace_dir, key) {
                 return format!(
-                    "Memory '{key}' was archived into skill '{skill}'. Load it with `use_skill` \
-                     (name: {skill}); the archived file is {}.",
+                    "Memory '{key}' was archived into skill '{skill}'. Load the skill with \
+                     `use_skill`, or read its `skill.md` with `file_actions` where `use_skill` is \
+                     not offered; the archived file is {}.",
                     path.display()
                 );
             }

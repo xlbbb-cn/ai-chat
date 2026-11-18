@@ -124,8 +124,10 @@ fn build_prompt_bundle(
         system_content.push_str("\n\n");
     }
     system_content.push_str(
-        "Explicit invocation: {tool:<name>} / {mcp:<server>.<tool>} / {skill:<name>} are direct \
-        requests — call the tool or load the skill before answering, no confirmation needed.",
+        "Explicit invocation: `{tool:<name>}`, `{mcp:<server>.<tool>}` and `{skill:<name>}` written \
+        in a user message are direct requests — call the tool or load the skill before answering, \
+        instead of asking the user for permission in chat. The ordinary risk-based confirmation \
+        dialogs still apply to whatever the call runs.",
     ); //Add explicit invocation syntax to system prompt
 
     // Batching guidance. Only advertised while the switch can actually
@@ -215,7 +217,11 @@ fn build_prompt_bundle(
     // The tool description carries the mechanics; this states the *policy* so
     // the model actually creates/updates/deletes skills instead of only
     // describing how it would do it.
-    let self_evolution_context = skills::self_evolution_prompt(skill_evolution_root.as_deref());
+    let self_evolution_context = skills::self_evolution_prompt(
+        skill_evolution_root.as_deref(),
+        false, // main chat: owns `use_skill` / `mcp_self`
+        config.memory_hint,
+    );
     if !self_evolution_context.is_empty() {
         if !system_content.is_empty() {
             system_content.push_str("\n\n");
@@ -399,12 +405,21 @@ fn build_prompt_bundle(
         } else {
             ""
         };
+        // The hint sentence must agree with the actual gating: with
+        // `memory_hint` off no titles are prepended, and the model must not be
+        // told to expect one.
+        let hint_sentence = if config.memory_hint {
+            "The titles of the memories matching the current message are prepended to the user \
+             input as a short confidence-ranked hint — it is a pointer, not the full record: \
+             search the scope when you need the actual entry, or when you hit a problem you may \
+             have solved before. "
+        } else {
+            ""
+        };
         let memory_guidance = format!(
             "\
         MEMORY: You have a `memory` tool (scopes: `session`, `user`, `repo`{}). \
-        The titles of the memories matching the current message are prepended to the user \
-        input as a short confidence-ranked hint — it is a pointer, not the full record: search the scope \
-        when you need the actual entry, or when you hit a problem you may have solved before. \
+        {hint_sentence}\
         When you reach a definitive, accurate conclusion (a resolved question, confirmed \
         root cause, decided approach, verified fact), `memory add` it before ending your \
         turn: `repo` for codebase facts and decisions, `user` for preferences and general \
@@ -771,6 +786,7 @@ pub(crate) async fn build_turn_tools(
         &config.effective_tools(),
         config.self_evolution_mode,
         config.background_tools,
+        config.memory_hint,
     );
 
     // ── Skill-read tool ─────────────────────────────────────────────────────

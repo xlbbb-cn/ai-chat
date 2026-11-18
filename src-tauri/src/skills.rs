@@ -287,40 +287,109 @@ pub fn self_evolution_skill_root(
 
 /// Model-facing description of the self-evolution capability.
 ///
-/// Shared by the main chat and by sub-agents so both describe the same
-/// contract: skills may be installed, edited and deleted **only** under
-/// `<workspace>/.data/skills`, through the `file_actions` tool.
-pub fn self_evolution_prompt(root: Option<&Path>) -> String {
+/// Model-facing description of the self-evolution capability.
+///
+/// The audience decides which capabilities the text may name: the main chat
+/// owns `use_skill` and `mcp_self` (a sub-agent calling either only earns an
+/// unknown-tool error), while the `experience` tool is handed to both — so the
+/// sub-agent variant routes the installed parts through `file_actions` /
+/// `run_shell` instead. `memory_hint` must mirror the request pipeline
+/// (`config.memory_hint` for the main chat, always `false` for sub-agents),
+/// because the text states that matched titles are prepended to the user
+/// message.
+pub fn self_evolution_prompt(root: Option<&Path>, for_sub_agent: bool, memory_hint: bool) -> String {
     let Some(root) = root else {
         return String::new();
     };
 
-    format!(
-        "SELF-EVOLUTION: you may install, extend, edit and delete skills yourself. \
+    let opener = if for_sub_agent {
+        "SELF-EVOLUTION: this workspace is self-evolving and you may edit skills yourself — \
+         but you have no `use_skill` and no `mcp_self` tool; what those tools do belongs to the \
+         main agent (see below). "
+    } else {
+        "SELF-EVOLUTION: you may install, extend, edit and delete skills yourself. "
+    };
+    let skill_shape = if for_sub_agent {
+        "A skill is a folder containing `skill.md`: YAML frontmatter with `name` and \
+         `description`, then the instructions — read the file itself with `file_actions`; \
+         nothing loads it for you."
+    } else {
+        "A skill is a folder containing `skill.md`: YAML frontmatter with `name` and \
+         `description`, then the instructions that `use_skill` loads into the conversation."
+    };
+
+    // ── EXPERIENCE PACKAGES: the run-them part depends on the audience ──────
+    let experience_run = if for_sub_agent {
+        "then run what it placed with your ordinary tools: read the skill part with \
+         `file_actions` (`./.data/skills/<slug>/skill.md`), run the scripts with `run_shell` or \
+         `run_cmd` (bare names resolve in `.data/scripts`); the MCP part needs the main agent's \
+         `mcp_self`, so report that starting the server belongs to the main agent."
+    } else {
+        "then use the ordinary tools on what it placed: `use_skill` for the skill, `run_shell` \
+         or `run_cmd` for the scripts in `.data/scripts` (bare names resolve there), `mcp_self` \
+         for the server."
+    };
+
+    // The hint claim must agree with the request pipeline: with `memory_hint`
+    // off, no titles are prepended and the text must not say they are.
+    let hint_clause = if memory_hint {
+        " No entry is preloaded as a block: the titles of the entries matching the newest user \
+         message are prepended to it as a short hint, so search the scope"
+    } else {
+        " No entry is preloaded as a block: search the scope"
+    };
+
+    // ── Skill consolidation belongs to the main agent / its maintenance pass.
+    // A sub-agent must not fold memory into skills even though it can edit
+    // them.
+    let archiving = if for_sub_agent {
+        "CONSOLIDATION BELONGS TO THE MAIN AGENT: never run `memory` `consolidate` and never \
+         archive memory entries into skills yourself."
+    } else {
+        "ARCHIVING MEMORY INTO A SKILL: only when the user explicitly asks to tidy / consolidate \
+         / archive memory (e.g. 「整理记忆」, 'consolidate memory'). Never delete entries by hand: \
+         call `memory` `consolidate` `plan` first, then write one skill covering a cluster — \
+         `source-memory` frontmatter lists every archived key and the body keeps the exact \
+         commands, hosts, paths and procedures grouped by kind (`环境与入口` / `常用操作` / \
+         `处置流程` / `坑与禁忌` / `校验`) — and call `apply` with `keys` and the full `skill_md`. \
+         `apply` writes and enables the skill first, then archives the entries. Never call \
+         `apply` before `plan`."
+    };
+
+    let mut out = format!(
+        "{opener}\
          The one skill directory is `{}` (workspace-relative: `./.data/skills`); there is no \
          second one — do not create or look for it, and never reference app-data paths or any \
          path outside the workspace root, apart from the experience store described below.\n\
          Edit with `file_actions` and workspace-relative `./.data/skills/...` paths: `mkdir` a \
          skill folder, `write`/`patch` its `skill.md`, `move`/`rename` to reorganise, `delete` to \
-         remove. A skill is a folder containing `skill.md`: YAML frontmatter with `name` and \
-         `description`, then the instructions loaded into the model. Every mutation creates a \
+         remove. {skill_shape} Every mutation creates a \
          `.bak.<n>` backup. The rest of the workspace — including the `.data` state folder \
          (memory, todos, skills, scripts, mcp.conf, skill status) — is yours to read and write; \
          only `.data/chat.db` is protected by the application. Reuse exact paths returned by tools.\n\n\
-         SELF-BUILT MCP SERVERS: `mcp_self` builds and runs your own stdio MCP servers — script \
-         under `./.data/mcp/<slug>/`, roster in `./.data/mcp.conf` (merged with the app-data \
-         `mcp_servers.json` that belongs to the user's panel, which you never write). Prefer the \
-         tool over hand-editing `mcp.conf`: one audited step picks the interpreter, backs up the \
-         script, starts the process and runs `tools/list`. New tools are callable in the SAME turn. \
-         Keep servers small and focused, drop the ones you no longer need, and never put \
-         credentials in a script; the tool description carries the protocol and the workflow.\n\n\
-         EXPERIENCE PACKAGES (global, app-data top level): `experience` reaches \
+         ",
+        root.display()
+    );
+
+    if !for_sub_agent {
+        out.push_str(
+            "SELF-BUILT MCP SERVERS: `mcp_self` builds and runs your own stdio MCP servers — script \
+             under `./.data/mcp/<slug>/`, roster in `./.data/mcp.conf` (merged with the app-data \
+             `mcp_servers.json` that belongs to the user's panel, which you never write). Prefer the \
+             tool over hand-editing `mcp.conf`: one audited step picks the interpreter, backs up the \
+             script, starts the process and runs `tools/list`. New tools are callable in the SAME turn. \
+             Keep servers small and focused, drop the ones you no longer need, and never put \
+             credentials in a script; the tool description carries the protocol and the workflow.\n\n\
+             ",
+        );
+    }
+
+    out.push_str(&format!(
+        "EXPERIENCE PACKAGES (global, app-data top level): `experience` reaches \
          `<app_data>/experiences/<slug>/` — a portable folder with a `guide.md` plus optional \
          `skill/`, `scripts/` and `mcp/` parts, and it survives every workspace switch. The tool \
          never executes anything. `search` before re-solving a familiar problem from scratch, \
-         `load` to read the method, `install` to copy the parts into this workspace — then use the \
-         ordinary tools on what it placed: `use_skill` for the skill, `run_shell` or `run_cmd` for \
-         the scripts in `.data/scripts` (bare names resolve there), `mcp_self` for the server. \
+         `load` to read the method, `install` to copy the parts into this workspace — {experience_run} \
          `pack` snapshots workspace artifacts into a package, `distill` folds several into one, \
          `forget` archives one. Matchers are program-side (`ext:docx`, `magic:504b0304:word/`, \
          `mime:…`, `name:…`, `tag:…`). `requires` lists what the machine needs — installing it is \
@@ -334,9 +403,8 @@ pub fn self_evolution_prompt(root: Option<&Path>) -> String {
          of body — never a transcript, never a whole answer; a stable descriptive `key` plus a \
          one-line `title` (e.g. `python-default`, `build-tag-first`); `kind` is `fact` / `recipe` \
          / `location` / `pitfall`; `importance` 1-5 (5 = always kept). Re-adding a fact you just \
-         verified raises its evidence count — do that instead of writing a second entry. No entry \
-         is preloaded as a block: the titles of the entries matching the newest user message are \
-         prepended to it as a short hint, so search the scope (`memory list` / `get` / `search`) when you need the \
+         verified raises its evidence count — do that instead of writing a second entry.\
+         {hint_clause} (`memory list` / `get` / `search`) when you need the \
          full entry or a problem needs earlier experience instead of guessing or rediscovering it, \
          and `memory add` as soon as you confirm a fact; never store guesses.\n\n\
          TRUST CALIBRATION: a retrieved fact is a claim, not the truth. The moment the real result \
@@ -349,16 +417,10 @@ pub fn self_evolution_prompt(root: Option<&Path>) -> String {
          overwrites, whereas `importance` only ever grows. Never leave a known-wrong entry at its \
          old wording, and never rely on an entry at `confidence` 2 or below, or one with recorded \
          conflicts, before re-verifying it against the real environment.\n\n\
-         ARCHIVING MEMORY INTO A SKILL: only when the user explicitly asks to tidy / consolidate \
-         / archive memory (e.g. 「整理记忆」, 'consolidate memory'). Never delete entries by hand: \
-         call `memory` `consolidate` `plan` first, then write one skill covering a cluster — \
-         `source-memory` frontmatter lists every archived key and the body keeps the exact \
-         commands, hosts, paths and procedures grouped by kind (`环境与入口` / `常用操作` / \
-         `处置流程` / `坑与禁忌` / `校验`) — and call `apply` with `keys` and the full `skill_md`. \
-         `apply` writes and enables the skill first, then archives the entries. Never call \
-         `apply` before `plan`.",
-        root.display()
-    )
+         {archiving}",
+    ));
+
+    out
 }
 
 // ─── Skill status (`<workspace>/.data/skills.status`) ────────────────────────

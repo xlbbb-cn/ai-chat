@@ -185,7 +185,7 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
         .await;
     }
 
-    // ── L0-L4: require frontend confirmation ─────────────────────────
+    // ── L0-L3: require frontend confirmation (L4-L6 were auto-approved) ──
     let confirm = request_tool_confirmation(
         app,
         format!(
