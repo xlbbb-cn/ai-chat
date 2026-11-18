@@ -3861,12 +3861,15 @@ button.rabbit-hop-bunny:focus-visible {
    subject (the rabbit) is left of centre, so the crop window is biased there
    instead of dead-centre. The artwork's edges are feathered — a radial mask
    melts the photo into the frost instead of ending it in a rectangle. The
-   fade's vertical radius is half the card's length (112px / 2 = 56px, the
-   requested feather radius, reaching past the artwork's own 44px half-height);
-   the horizontal radius is the artwork's half-width, so the sides dissolve
-   exactly at the box, and the transparent stop sits a hair inside the
-   artwork's edge (78% of 56px ≈ its 44px half-height), so no hard step
-   survives on any side. A small opaque core keeps the subject solid. */
+   fade's vertical radius is half the card's length (112px / 2 = 56px, reaching
+   past the artwork's own 44px half-height); the horizontal radius is the
+   artwork's half-width, so the sides dissolve exactly at the box, and the
+   transparent stop sits a hair inside the artwork's edge (78% of 56px ≈ its
+   44px half-height), so no hard step survives on any side. The feather band
+   itself is one fifth of its original length — opaque to 69.4% and transparent
+   at 78% leaves a 8.6-point melt (43 / 5): ≈4.8px vertically, ≈2.8px
+   horizontally — so the photo stays solid until a hair from its rim and then
+   fades fast, instead of haloing a quarter of the way in. */
 .notify-card-art {
   flex: 0 0 auto;
   width: 64px;
@@ -3876,12 +3879,12 @@ button.rabbit-hop-bunny:focus-visible {
   object-position: 30% 50%;
   -webkit-mask-image: radial-gradient(
     ellipse 32px 56px at center,
-    #000 35%,
+    #000 69.4%,
     transparent 78%
   );
   mask-image: radial-gradient(
     ellipse 32px 56px at center,
-    #000 35%,
+    #000 69.4%,
     transparent 78%
   );
 }
