@@ -19,7 +19,12 @@ import hljs from "../utils/highlight";
 import { escapeHtml } from "../utils/format";
 import { exportHtmlAsPdf, type PdfExportResult } from "../utils/pdfExport";
 import { extractFigures, type FigureSpec } from "../utils/figures";
-import { mountFigures, saveAllFigures } from "../utils/figureCard";
+import {
+  deferMessageFigureDisposal,
+  mountFigures,
+  retainMessageFigures,
+  saveAllFigures,
+} from "../utils/figureCard";
 import {
   extractDiagrams,
   inlineDiagramsForPrint,
@@ -876,6 +881,12 @@ function ChatMessageRow({ message, showRetry = false, onRetry, onNotice, onDelet
     base: 0,
     starts: [],
   });
+  useEffect(() => {
+    const messageId = String(message.id);
+    retainMessageFigures(messageId);
+    return () => deferMessageFigureDisposal(messageId);
+  }, [message.id]);
+
   useLayoutEffect(() => {
     const el = contentRef.current;
     if (!el) return;

@@ -18,6 +18,7 @@ import { openFiguresDir, saveFigure, saveFigureHtml } from "../api";
 import { t as text } from "../i18n";
 import {
   defaultView,
+  disposeCarve,
   parseCarve,
   renderCarve,
   type CarvePalette,
@@ -95,13 +96,48 @@ interface FigureHandle {
   beforeMount?: () => void;
 }
 
-/** Newest 48 cards stay alive; a longer conversation rebuilds one on scroll back. */
+/** Detached cards are reused until this bound; connected cards are never evicted. */
 const MAX_CACHED = 48;
 
 const cache = new Map<string, FigureHandle>();
+const pendingDisposals = new Map<string, object>();
 
 /** Element → handle, so "save all" can await the real save it triggers. */
 const handles = new WeakMap<HTMLElement, FigureHandle>();
+
+function releaseHandle(key: string, handle: FigureHandle): void {
+  if (cache.get(key) === handle) cache.delete(key);
+  handle.dispose?.();
+}
+
+function destroyMessageHandles(messageId: string): void {
+  const prefix = `${messageId}|`;
+  for (const [key, handle] of [...cache]) {
+    if (!key.startsWith(prefix)) continue;
+    releaseHandle(key, handle);
+    handle.element.remove();
+  }
+}
+
+/** Release the imperatively mounted cards owned by one transcript message. */
+export function disposeMessageFigures(messageId: string): void {
+  pendingDisposals.delete(messageId);
+  destroyMessageHandles(messageId);
+}
+
+export function retainMessageFigures(messageId: string): void {
+  pendingDisposals.delete(messageId);
+}
+
+export function deferMessageFigureDisposal(messageId: string): void {
+  const token = {};
+  pendingDisposals.set(messageId, token);
+  queueMicrotask(() => {
+    if (pendingDisposals.get(messageId) !== token) return;
+    pendingDisposals.delete(messageId);
+    destroyMessageHandles(messageId);
+  });
+}
 
 /** Slot marker for a figure card; `figures.ts` emits it, this module mounts it. */
 const SLOT_OPTIONS = { marker: "\u2063F", className: "chat-figure-slot", datasetKey: "figureSlot" };
@@ -113,7 +149,8 @@ export function readToken(element: Element, name: string, fallback: string): str
 }
 
 function readPalette(element: Element): CarvePalette {
-  const read = (name: string, fallback: string) => readToken(element, name, fallback);
+  const computed = window.getComputedStyle(element);
+  const read = (name: string, fallback: string) => computed.getPropertyValue(name).trim() || fallback;
   return {
     // The viewport's own fill: a saved PNG and a 3D canvas both continue the
     // sheet the drawing sits on instead of introducing a third surface.
@@ -125,14 +162,14 @@ function readPalette(element: Element): CarvePalette {
     text: read("--c-text", "#171a20"),
     muted: read("--c-muted", "#5c5e62"),
     // Label sprites are drawn in the interface's typeface.
-    font: window.getComputedStyle(element).fontFamily || "system-ui, sans-serif",
+    font: computed.fontFamily || "system-ui, sans-serif",
   };
 }
 
 // ─── Theme following ────────────────────────────────────────────────────────
 //
 // A 3D figure bakes its colours into pixels, so a theme switch has to redraw
-// it. One observer for the whole app; cards that left the document drop out.
+// it. One observer for the whole app; card disposal removes its callback.
 
 const themeRedraws = new Set<() => void>();
 let themeObserver: MutationObserver | null = null;
@@ -403,47 +440,76 @@ function buildCarveCard(spec: FigureSpec, index: number): FigureHandle {
 
   const home = defaultView(scene);
   const view: CarveView = { ...home };
+  let palette: CarvePalette | null = null;
   let ready = false;
   let drawnWidth = 0;
   let busy = false;
   let queued = false;
+  let frame = 0;
+  let disposed = false;
+  let endDrag: (() => void) | null = null;
 
   const draw = async (): Promise<void> => {
+    if (disposed) return;
     if (busy) {
       queued = true;
       return;
     }
     busy = true;
+    queued = false;
     try {
       const width = Math.round(canvas.clientWidth || 640);
-      canvas.width = Math.max(2, width);
-      canvas.height = Math.max(2, Math.round(width * 0.625));
-      const ok = await renderCarve(canvas, scene, view, readPalette(parts.figure));
+      const nextWidth = Math.max(2, width);
+      const nextHeight = Math.max(2, Math.round(width * 0.625));
+      if (canvas.width !== nextWidth) canvas.width = nextWidth;
+      if (canvas.height !== nextHeight) canvas.height = nextHeight;
+      if (canvas.parentNode !== parts.viewport) parts.viewport.replaceChildren(canvas);
+      palette ??= readPalette(parts.figure);
+      const ok = await renderCarve(canvas, scene, view, palette);
+      if (disposed) {
+        disposeCarve(scene);
+        return;
+      }
       ready = ok;
-      drawnWidth = width;
+      drawnWidth = ok ? width : 0;
       parts.figure.dataset.figureState = ok ? "ready" : "error";
-      if (!ok) parts.viewport.title = text("figure.webglUnavailable");
+      if (ok) parts.viewport.removeAttribute("title");
+      else parts.viewport.title = text("figure.webglUnavailable");
+    } catch (error) {
+      if (disposed) return;
+      ready = false;
+      drawnWidth = 0;
+      showSource(parts, spec.source, String(error));
     } finally {
       busy = false;
-      if (queued) {
+      if (queued && !disposed) {
         queued = false;
-        void draw();
+        scheduleDraw();
       }
     }
   };
 
+  const scheduleDraw = (): void => {
+    if (disposed) return;
+    queued = true;
+    if (busy || frame !== 0) return;
+    frame = window.requestAnimationFrame(() => {
+      frame = 0;
+      void draw();
+    });
+  };
+
   const redraw = () => {
-    if (!parts.figure.isConnected) {
-      themeRedraws.delete(redraw);
-      return;
-    }
-    void draw();
+    if (disposed || !parts.figure.isConnected) return;
+    palette = readPalette(parts.figure);
+    scheduleDraw();
   };
 
   // Orbit by dragging. No wheel zoom on purpose: the transcript scrolls with
   // the wheel, and swallowing it inside a reply is worse than a missing zoom.
   canvas.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0) return;
+    if (disposed || event.button !== 0) return;
+    endDrag?.();
     const startX = event.clientX;
     const startY = event.clientY;
     const startYaw = view.yaw;
@@ -452,16 +518,19 @@ function buildCarveCard(spec: FigureSpec, index: number): FigureHandle {
     const move = (moveEvent: PointerEvent) => {
       view.yaw = startYaw - (moveEvent.clientX - startX) * 0.45;
       view.pitch = Math.max(-89, Math.min(89, startPitch + (moveEvent.clientY - startY) * 0.35));
-      void draw();
+      scheduleDraw();
     };
     const end = () => {
       canvas.removeEventListener("pointermove", move);
       canvas.removeEventListener("pointerup", end);
       canvas.removeEventListener("pointercancel", end);
+      if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+      if (endDrag === end) endDrag = null;
     };
     canvas.addEventListener("pointermove", move);
     canvas.addEventListener("pointerup", end);
     canvas.addEventListener("pointercancel", end);
+    endDrag = end;
   });
 
   addButton(parts.actions, text("figure.resetView"), "chat-figure-reset", () => {
@@ -491,10 +560,21 @@ function buildCarveCard(spec: FigureSpec, index: number): FigureHandle {
   return {
     element: parts.figure,
     activate: () => {
-      if (!ready || Math.abs(canvas.clientWidth - drawnWidth) > 8) void draw();
+      if (!ready || Math.abs(canvas.clientWidth - drawnWidth) > 8) scheduleDraw();
     },
     png,
     save,
+    dispose: () => {
+      if (disposed) return;
+      disposed = true;
+      if (frame !== 0) window.cancelAnimationFrame(frame);
+      frame = 0;
+      queued = false;
+      endDrag?.();
+      endDrag = null;
+      themeRedraws.delete(redraw);
+      disposeCarve(scene);
+    },
   };
 }
 
@@ -547,8 +627,10 @@ function buildFlowCard(spec: FigureSpec, index: number): FigureHandle {
 
   let busy = false;
   let queued = false;
+  let disposed = false;
 
   const paint = (): void => {
+    if (disposed) return;
     if (busy) {
       queued = true;
       return;
@@ -556,6 +638,7 @@ function buildFlowCard(spec: FigureSpec, index: number): FigureHandle {
     busy = true;
     void renderFlowSvg(parsed, resolveFlowPalette(parts.figure), caption)
       .then((svg) => {
+        if (disposed) return;
         // A spec that parsed but did not lay out shows its source, like a
         // scene that parsed but drew nothing.
         if (!svg) {
@@ -567,10 +650,12 @@ function buildFlowCard(spec: FigureSpec, index: number): FigureHandle {
         fitFlowDiagram(svg, parts.viewport, parts.figure);
         parts.figure.dataset.figureState = "ready";
       })
-      .catch((error: unknown) => showSource(parts, spec.source, String(error)))
+      .catch((error: unknown) => {
+        if (!disposed) showSource(parts, spec.source, String(error));
+      })
       .finally(() => {
         busy = false;
-        if (queued) {
+        if (queued && !disposed) {
           queued = false;
           paint();
         }
@@ -578,18 +663,23 @@ function buildFlowCard(spec: FigureSpec, index: number): FigureHandle {
   };
 
   const redraw = () => {
-    // A card that left the document stops listening for theme changes.
-    if (!parts.figure.isConnected) {
-      themeRedraws.delete(redraw);
-      return;
-    }
+    if (disposed || !parts.figure.isConnected) return;
     paint();
   };
 
   watchTheme(redraw);
   paint();
 
-  return { element: parts.figure, activate: noop, png, save };
+  return {
+    element: parts.figure,
+    activate: noop,
+    png,
+    save,
+    dispose: () => {
+      disposed = true;
+      themeRedraws.delete(redraw);
+    },
+  };
 }
 
 /**
@@ -678,6 +768,7 @@ function buildHtmlCard(
 
   let frame: HTMLIFrameElement | null = null;
   let stopMessages: (() => void) | null = null;
+  let disposed = false;
   // Load count of the live frame. Reset when the frame document starts and when
   // the card is re-inserted (a move reloads the document without the fragment
   // navigating), so exactly one load is the document this card wrote.
@@ -739,7 +830,7 @@ function buildHtmlCard(
   };
 
   const play = (): void => {
-    if (frame || options.streaming) return;
+    if (disposed || frame || options.streaming) return;
     parts.figure.dataset.figureState = "loading";
 
     const element = document.createElement("iframe");
@@ -783,6 +874,7 @@ function buildHtmlCard(
     // and to not draw an outside page inside a reply. One load is the document
     // this card wrote, a second one is the fragment leaving it.
     element.addEventListener("load", () => {
+      if (disposed) return;
       loadCount += 1;
       if (loadCount === 1) {
         parts.figure.dataset.figureState = "ready";
@@ -804,10 +896,7 @@ function buildHtmlCard(
   // A theme switch re-sends the tokens instead of rewriting `srcdoc`: the
   // animation keeps its place, which a rebuild would throw away.
   const redraw = () => {
-    if (!parts.figure.isConnected) {
-      themeRedraws.delete(redraw);
-      return;
-    }
+    if (disposed || !parts.figure.isConnected) return;
     if (frame) postFigureTokens(frame, tokens());
   };
   watchTheme(redraw);
@@ -828,7 +917,10 @@ function buildHtmlCard(
     },
     save,
     dispose: () => {
+      if (disposed) return;
+      disposed = true;
       stopMessages?.();
+      stopMessages = null;
       themeRedraws.delete(redraw);
     },
     beforeMount: () => {
@@ -846,17 +938,13 @@ function buildHtmlCard(
 // ─── Slot expansion and mounting ────────────────────────────────────────────
 
 function prune(messageId: string, live: Set<string>): void {
-  for (const key of cache.keys()) {
-    if (key.startsWith(`${messageId}|`) && !live.has(key)) {
-      cache.get(key)?.dispose?.();
-      cache.delete(key);
-    }
+  const prefix = `${messageId}|`;
+  for (const [key, handle] of [...cache]) {
+    if (key.startsWith(prefix) && !live.has(key)) releaseHandle(key, handle);
   }
-  while (cache.size > MAX_CACHED) {
-    const oldest = cache.keys().next().value;
-    if (oldest === undefined) break;
-    cache.get(oldest)?.dispose?.();
-    cache.delete(oldest);
+  for (const [key, handle] of [...cache]) {
+    if (cache.size <= MAX_CACHED) break;
+    if (!handle.element.isConnected) releaseHandle(key, handle);
   }
 }
 
@@ -870,7 +958,11 @@ export function mountFigures(
   figures: FigureSpec[],
   options: MountFiguresOptions,
 ): void {
-  if (figures.length === 0) return;
+  retainMessageFigures(options.messageId);
+  if (figures.length === 0) {
+    destroyMessageHandles(options.messageId);
+    return;
+  }
   const slots = expandSlots(root, SLOT_OPTIONS);
   if (slots.length === 0) return;
 

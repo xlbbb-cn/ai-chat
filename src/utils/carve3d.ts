@@ -105,8 +105,10 @@ export function defaultView(scene: CarveScene): CarveView {
 }
 
 type ThreeModule = typeof import("three");
+type SharedRenderer = { three: ThreeModule; renderer: WebGLRenderer } | null;
 
-let rendererPromise: Promise<{ three: ThreeModule; renderer: WebGLRenderer } | null> | null = null;
+let rendererPromise: Promise<SharedRenderer> | null = null;
+let activeRenderer: WebGLRenderer | null = null;
 
 /**
  * The shared renderer, created on first use and imported lazily so a
@@ -115,26 +117,39 @@ let rendererPromise: Promise<{ three: ThreeModule; renderer: WebGLRenderer } | n
  * Returns `null` when WebGL is unavailable (GPU-disabled WebView2, remote
  * session): the card then explains itself instead of throwing on every token.
  */
-function glRenderer(): Promise<{ three: ThreeModule; renderer: WebGLRenderer } | null> {
-  rendererPromise ??= import("three")
-    .then((three) => {
-      try {
-        const renderer = new three.WebGLRenderer({
-          antialias: true,
-          alpha: true,
-          // The canvas is read back with `drawImage` for every frame and for
-          // the saved PNG, in the same task as the render.
-          preserveDrawingBuffer: true,
-        });
-        renderer.setPixelRatio(1);
-        renderer.outputColorSpace = three.SRGBColorSpace;
-        renderer.toneMapping = three.NoToneMapping;
-        return { three, renderer };
-      } catch {
-        return null;
-      }
-    })
-    .catch(() => null);
+async function glRenderer(): Promise<SharedRenderer> {
+  if (!rendererPromise) {
+    const pending: Promise<SharedRenderer> = import("three")
+      .then((three) => {
+        try {
+          const renderer = new three.WebGLRenderer({
+            antialias: true,
+            alpha: true,
+            preserveDrawingBuffer: true,
+          });
+          renderer.setPixelRatio(1);
+          renderer.outputColorSpace = three.SRGBColorSpace;
+          renderer.toneMapping = three.NoToneMapping;
+          renderer.domElement.addEventListener("webglcontextlost", (event) => {
+            event.preventDefault();
+            if (activeRenderer === renderer) {
+              activeRenderer = null;
+              rendererPromise = null;
+            }
+            renderer.dispose();
+          }, { once: true });
+          activeRenderer = renderer;
+          return { three, renderer };
+        } catch {
+          return null;
+        }
+      })
+      .catch(() => null);
+    rendererPromise = pending;
+    const ready = await pending;
+    if (!ready && rendererPromise === pending) rendererPromise = null;
+    return ready;
+  }
   return rendererPromise;
 }
 
@@ -160,30 +175,86 @@ function colorOf(palette: CarvePalette, name: string | undefined): string {
   return palette.accent;
 }
 
-/**
- * Draw one scene into `target` (a 2D canvas the figure owns).
- *
- * `target.width/height` are the backing-store pixels, already scaled for the
- * display; the shared renderer is resized to match, so the blit is 1:1.
- */
-export async function renderCarve(
-  target: HTMLCanvasElement,
+const MAX_CACHED_SCENES = 8;
+
+type CarveRuntime = {
+  scene: import("three").Scene;
+  camera: import("three").PerspectiveCamera;
+  radius: number;
+  fov: number;
+  paletteKey: string;
+  disposables: Array<{ dispose: () => void }>;
+};
+
+const sceneCache = new Map<CarveScene, CarveRuntime>();
+
+function paletteKey(palette: CarvePalette): string {
+  return JSON.stringify([
+    palette.background,
+    palette.accent,
+    palette.success,
+    palette.warning,
+    palette.danger,
+    palette.text,
+    palette.muted,
+    palette.font,
+  ]);
+}
+
+function disposeItems(disposables: Array<{ dispose: () => void }>): void {
+  for (const item of disposables) item.dispose();
+}
+
+function disposeRuntime(runtime: CarveRuntime): void {
+  disposeItems(runtime.disposables);
+  runtime.scene.clear();
+}
+
+export function disposeCarve(scene: CarveScene): void {
+  const runtime = sceneCache.get(scene);
+  if (!runtime) return;
+  sceneCache.delete(scene);
+  disposeRuntime(runtime);
+}
+
+function touchRuntime(scene: CarveScene, runtime: CarveRuntime): void {
+  sceneCache.delete(scene);
+  sceneCache.set(scene, runtime);
+  while (sceneCache.size > MAX_CACHED_SCENES) {
+    const oldest = sceneCache.keys().next().value;
+    if (oldest === undefined || oldest === scene) break;
+    disposeCarve(oldest);
+  }
+}
+
+function buildRuntime(
+  three: ThreeModule,
   scene: CarveScene,
-  view: CarveView,
   palette: CarvePalette,
-): Promise<boolean> {
-  const ctx = target.getContext("2d");
-  if (!ctx) return false;
-  const ready = await glRenderer();
-  if (!ready) return false;
-  const { three, renderer } = ready;
-
-  const width = Math.max(1, target.width);
-  const height = Math.max(1, target.height);
-  if (width < 2 || height < 2) return false;
-
-  const group = new three.Group();
+  key: string,
+): CarveRuntime | null {
   const disposables: Array<{ dispose: () => void }> = [];
+  try {
+    const runtime = buildScene(three, scene, palette, key, disposables);
+    if (!runtime) disposeItems(disposables);
+    return runtime;
+  } catch (error) {
+    disposeItems(disposables);
+    throw error;
+  }
+}
+
+/**
+ * Build the reusable Three.js objects; the camera is the only per-frame state.
+ */
+function buildScene(
+  three: ThreeModule,
+  scene: CarveScene,
+  palette: CarvePalette,
+  key: string,
+  disposables: Array<{ dispose: () => void }>,
+): CarveRuntime | null {
+  const group = new three.Group();
   // Labels are deferred until the scene radius is known (the sprite scale is
   // relative to it), and edges are built after the extent is measured, so an
   // arrowhead is sized by the scene rather than by its own edge.
@@ -309,8 +380,7 @@ export async function renderCarve(
   }
 
   if (group.children.length === 0) {
-    for (const item of disposables) item.dispose();
-    return false;
+    return null;
   }
 
   // The extent covers the solids *and* every edge endpoint, so an arrow that
@@ -490,41 +560,73 @@ export async function renderCarve(
     }
 
     const fov = Math.min(90, Math.max(15, finite(scene.camera?.fov, 35)));
-    const camera = new three.PerspectiveCamera(fov, width / height, 0.01, radius * 200);
-    const distance = (radius / Math.sin(((fov / 2) * Math.PI) / 180)) * 1.15 / view.zoom;
-    const yaw = (view.yaw * Math.PI) / 180;
-    const pitch = (Math.min(89, Math.max(-89, view.pitch)) * Math.PI) / 180;
-    camera.position.set(
-      distance * Math.cos(pitch) * Math.sin(yaw),
-      distance * Math.sin(pitch),
-      distance * Math.cos(pitch) * Math.cos(yaw),
-    );
-    camera.lookAt(0, 0, 0);
-
+    const camera = new three.PerspectiveCamera(fov, 1, 0.01, radius * 200);
     const scene3 = new three.Scene();
     scene3.add(new three.AmbientLight(0xffffff, 2.2));
-    const key = new three.DirectionalLight(0xffffff, 1.7);
-    key.position.set(radius * 2, radius * 3, radius * 2.4);
-    scene3.add(key);
+    const keyLight = new three.DirectionalLight(0xffffff, 1.7);
+    keyLight.position.set(radius * 2, radius * 3, radius * 2.4);
+    scene3.add(keyLight);
     const fill = new three.DirectionalLight(0xffffff, 0.7);
     fill.position.set(-radius * 2.4, radius * 0.6, -radius * 2);
     scene3.add(fill);
     scene3.add(group);
-
-    try {
-      renderer.setSize(width, height, false);
-      renderer.setClearColor(0x000000, 0);
-      renderer.render(scene3, camera);
-      ctx.clearRect(0, 0, width, height);
-      ctx.fillStyle = palette.background;
-      ctx.fillRect(0, 0, width, height);
-      ctx.drawImage(renderer.domElement, 0, 0, width, height);
-    } finally {
-      for (const item of disposables) item.dispose();
-    }
-    return true;
+    return { scene: scene3, camera, radius, fov, paletteKey: key, disposables };
   }
 
-  for (const item of disposables) item.dispose();
-  return false;
+  return null;
+}
+
+/**
+ * Draw one cached scene into `target` (a 2D canvas the figure owns).
+ * The shared renderer is resized only when the backing store changes.
+ */
+export async function renderCarve(
+  target: HTMLCanvasElement,
+  scene: CarveScene,
+  view: CarveView,
+  palette: CarvePalette,
+): Promise<boolean> {
+  const ctx = target.getContext("2d");
+  if (!ctx) return false;
+  const width = Math.max(1, target.width);
+  const height = Math.max(1, target.height);
+  if (width < 2 || height < 2) return false;
+  const ready = await glRenderer();
+  if (!ready) return false;
+  const { three, renderer } = ready;
+  const key = paletteKey(palette);
+  let runtime = sceneCache.get(scene);
+  if (runtime?.paletteKey !== key) {
+    if (runtime) disposeCarve(scene);
+    runtime = buildRuntime(three, scene, palette, key) ?? undefined;
+    if (!runtime) return false;
+  }
+  touchRuntime(scene, runtime);
+
+  const { camera, radius, fov } = runtime;
+  if (camera.aspect !== width / height) {
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+  }
+  const distance = (radius / Math.sin(((fov / 2) * Math.PI) / 180)) * 1.15 / view.zoom;
+  const yaw = (view.yaw * Math.PI) / 180;
+  const pitch = (Math.min(89, Math.max(-89, view.pitch)) * Math.PI) / 180;
+  camera.position.set(
+    distance * Math.cos(pitch) * Math.sin(yaw),
+    distance * Math.sin(pitch),
+    distance * Math.cos(pitch) * Math.cos(yaw),
+  );
+  camera.lookAt(0, 0, 0);
+
+  if (renderer.domElement.width !== width || renderer.domElement.height !== height) {
+    renderer.setSize(width, height, false);
+  }
+  renderer.setClearColor(0x000000, 0);
+  renderer.render(runtime.scene, camera);
+  if (renderer.getContext().isContextLost()) return false;
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = palette.background;
+  ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(renderer.domElement, 0, 0, width, height);
+  return true;
 }
