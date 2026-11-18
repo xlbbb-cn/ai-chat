@@ -162,6 +162,8 @@ const zhCN: Messages = {
             placeholder: "助手正在工作，输入新信息即可追加给它（Enter 追加）",
         },
         selectModel: "选择模型",
+        modelFilterPlaceholder: "筛选模型…",
+        modelFilterEmpty: "无匹配模型",
         reasoningDepth: "思考深度",
         reasoningDepthTitle: "模型回答前的思考量 —— 以 reasoning_effort 参数发送。",
         reasoningDefault: "默认",

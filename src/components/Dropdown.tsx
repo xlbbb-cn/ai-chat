@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { FontAwesomeIcon, type IconDefinition } from "../icons";
 import { Portal } from "./Portal";
@@ -44,6 +44,12 @@ interface Props {
     maxPopupHeight?: number;
     /** `auto` flips up when there is no room below; `up` pins it upwards. */
     placement?: "auto" | "up" | "down";
+    /** Put a filter input at the top of the popup that narrows the list. */
+    searchable?: boolean;
+    /** Placeholder / accessible name of that filter input (localized by the caller). */
+    searchPlaceholder?: string;
+    /** Row shown while the filter matches nothing (localized by the caller). */
+    emptyText?: string;
 }
 
 /** Gap between the trigger and the popup, and the popup's viewport margin. */
@@ -94,6 +100,9 @@ export function Dropdown({
     minPopupWidth,
     maxPopupHeight = DEFAULT_MAX_POPUP_HEIGHT,
     placement = "auto",
+    searchable = false,
+    searchPlaceholder,
+    emptyText,
 }: Props) {
     const listId = useId();
     const [open, setOpen] = useState(false);
@@ -102,15 +111,30 @@ export function Dropdown({
     const [anchor, setAnchor] = useState<Anchor | null>(null);
     const triggerRef = useRef<HTMLButtonElement>(null);
     const listRef = useRef<HTMLDivElement>(null);
+    const searchRef = useRef<HTMLInputElement>(null);
+    /** Focus the filter once per opening, not on every geometry refresh. */
+    const searchFocusedRef = useRef(false);
     const typeAheadRef = useRef({ buffer: "", at: 0 });
+    /** Current filter text; reset whenever the popup closes. */
+    const [query, setQuery] = useState("");
     /** Geometry of the 2px scroll indicator, in percent of the track. */
     const [scroll, setScroll] = useState({ thumb: 100, offset: 0 });
 
     const selectedIndex = options.findIndex((option) => option.value === value);
     const selected = selectedIndex >= 0 ? options[selectedIndex] : undefined;
-    /** Text for type-ahead — the visible label when it is a plain string. */
-    const textOf = (option: DropdownOption) =>
-        option.text ?? (typeof option.label === "string" ? option.label : option.value);
+    /** Text for type-ahead and filtering — the visible label when it is a string. */
+    const textOf = useCallback(
+        (option: DropdownOption) =>
+            option.text ?? (typeof option.label === "string" ? option.label : option.value),
+        [],
+    );
+    /** Options actually rendered — narrowed by the filter, when there is one. */
+    const list = useMemo(() => {
+        if (!searchable) return options;
+        const needle = query.trim().toLowerCase();
+        if (!needle) return options;
+        return options.filter((option) => textOf(option).toLowerCase().includes(needle));
+    }, [searchable, options, query, textOf]);
 
     /**
      * Native scrollbars are hidden and drawn in the DOM instead: WebKit on
@@ -134,25 +158,28 @@ export function Dropdown({
 
     const close = useCallback((refocus = false) => {
         setOpen(false);
+        // A filter is a one-shot view into the list, never a persisted setting:
+        // reopening the popup starts from the full catalogue again.
+        setQuery("");
         if (refocus) triggerRef.current?.focus();
     }, []);
 
     const openList = useCallback(
         (index: number) => {
-            setHighlight(index >= 0 && index < options.length ? index : 0);
+            setHighlight(index >= 0 && index < list.length ? index : 0);
             setOpen(true);
         },
-        [options.length],
+        [list.length],
     );
 
     const commit = useCallback(
         (index: number) => {
-            const option = options[index];
+            const option = list[index];
             if (!option || option.disabled) return;
             if (option.value !== value) onChange(option.value);
             close(true);
         },
-        [options, onChange, value, close],
+        [list, onChange, value, close],
     );
 
     // Keep the popup glued to the trigger: panels scroll, the window resizes
@@ -204,7 +231,11 @@ export function Dropdown({
 
         const onPointerDown = (event: PointerEvent) => {
             const target = event.target as Node;
-            if (triggerRef.current?.contains(target) || listRef.current?.contains(target)) return;
+            if (
+                triggerRef.current?.contains(target) ||
+                listRef.current?.contains(target) ||
+                searchRef.current?.contains(target)
+            ) return;
             close();
         };
         const onKeyDown = (event: KeyboardEvent) => {
@@ -228,29 +259,48 @@ export function Dropdown({
         listRef.current
             ?.querySelector<HTMLElement>(`[data-option-index="${highlight}"]`)
             ?.scrollIntoView({ block: "nearest" });
-    }, [open, highlight]);
+    }, [open, highlight, list]);
 
     // Re-measure whenever the popup (re)opens or the option count changes —
     // `anchor` is a dependency because the list mounts one render after `open`
     // flips (the popup waits for its geometry).
     useEffect(() => {
         if (open && anchor) measureScroll();
-    }, [open, anchor, options.length, measureScroll]);
+    }, [open, anchor, list.length, measureScroll]);
 
     // A streaming turn disables the field — the popup must not linger over it.
     useEffect(() => {
         if (disabled && open) close();
     }, [disabled, open, close]);
 
+    // The filter input mounts one render after `open` flips (the popup waits for
+    // its geometry), so focus once both are ready and never steal focus again
+    // while the user is typing.
+    useEffect(() => {
+        if (!open) {
+            searchFocusedRef.current = false;
+            return;
+        }
+        if (!searchable || searchFocusedRef.current || !anchor) return;
+        searchFocusedRef.current = true;
+        searchRef.current?.focus();
+    }, [searchable, open, anchor]);
+
+    // A changed filter means a different list: park the highlight on its first
+    // row (or back on the selected row when the filter is cleared).
+    useEffect(() => {
+        if (searchable) setHighlight(query ? 0 : selectedIndex);
+    }, [searchable, query, selectedIndex]);
+
     const move = useCallback(
         (delta: number) => {
             setHighlight((prev) => {
-                if (options.length === 0) return -1;
-                if (prev < 0) return delta > 0 ? 0 : options.length - 1;
-                return (prev + delta + options.length) % options.length;
+                if (list.length === 0) return -1;
+                if (prev < 0) return delta > 0 ? 0 : list.length - 1;
+                return (prev + delta + list.length) % list.length;
             });
         },
-        [options.length],
+        [list.length],
     );
 
     /** Native selects jump to the first entry matching what you type. */
@@ -262,7 +312,7 @@ export function Dropdown({
             state.at = now;
 
             const needle = state.buffer.toLowerCase();
-            const index = options.findIndex((option) =>
+            const index = list.findIndex((option) =>
                 textOf(option).toLowerCase().startsWith(needle),
             );
             if (index >= 0) {
@@ -270,9 +320,7 @@ export function Dropdown({
                 else openList(index);
             }
         },
-        // `textOf` reads `options` only.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-        [options, open, openList],
+        [list, open, openList, textOf],
     );
 
     function handleTriggerKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
@@ -286,7 +334,7 @@ export function Dropdown({
             }
             if (event.key === "ArrowUp") {
                 event.preventDefault();
-                openList(options.length - 1);
+                openList(list.length - 1);
                 return;
             }
         } else {
@@ -302,7 +350,7 @@ export function Dropdown({
             }
             if (event.key === "Home" || event.key === "End") {
                 event.preventDefault();
-                setHighlight(event.key === "Home" ? 0 : options.length - 1);
+                setHighlight(event.key === "Home" ? 0 : list.length - 1);
                 return;
             }
             if (event.key === "Enter" || event.key === " ") {
@@ -317,7 +365,51 @@ export function Dropdown({
         }
 
         if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) {
+            if (searchable) {
+                // Typing on the closed trigger opens the filter with that
+                // character already in it; the input owns the keys from then on.
+                event.preventDefault();
+                setQuery(event.key);
+                openList(0);
+                return;
+            }
             handleTypeAhead(event.key);
+        }
+    }
+
+    /**
+     * Keyboard contract while the filter input owns the focus. Escape is
+     * deliberately absent: the document capture listener closes the popup and
+     * refocuses the trigger, exactly as it does for every other dropdown.
+     */
+    function handleSearchKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+        if (event.key === "ArrowDown") {
+            event.preventDefault();
+            move(1);
+            return;
+        }
+        if (event.key === "ArrowUp") {
+            event.preventDefault();
+            move(-1);
+            return;
+        }
+        if (event.key === "Home") {
+            event.preventDefault();
+            setHighlight(0);
+            return;
+        }
+        if (event.key === "End") {
+            event.preventDefault();
+            setHighlight(list.length - 1);
+            return;
+        }
+        if (event.key === "Enter") {
+            event.preventDefault();
+            commit(highlight);
+            return;
+        }
+        if (event.key === "Tab") {
+            close();
         }
     }
 
@@ -341,7 +433,11 @@ export function Dropdown({
                 aria-haspopup="listbox"
                 aria-expanded={open}
                 aria-controls={open ? listId : undefined}
-                aria-activedescendant={open && highlight >= 0 ? `${listId}-${highlight}` : undefined}
+                aria-activedescendant={
+                    open && highlight >= 0 && list.length > 0
+                        ? `${listId}-${highlight}`
+                        : undefined
+                }
                 disabled={disabled}
                 onClick={() => (open ? close() : openList(selectedIndex))}
                 onKeyDown={handleTriggerKeyDown}
@@ -358,7 +454,7 @@ export function Dropdown({
             {open && anchor && (
                 <Portal>
                     <div
-                        className="dropdown-popup"
+                        className={`dropdown-popup${searchable ? " dropdown-popup--searchable" : ""}`}
                         style={{
                             left: `${anchor.left}px`,
                             width: `${anchor.width}px`,
@@ -367,6 +463,28 @@ export function Dropdown({
                             ...(anchor.bottom !== undefined ? { bottom: `${anchor.bottom}px` } : {}),
                         }}
                     >
+                        {searchable && (
+                            <div className="dropdown-search">
+                                <input
+                                    ref={searchRef}
+                                    type="text"
+                                    className="dropdown-search-input"
+                                    value={query}
+                                    onChange={(event) => setQuery(event.target.value)}
+                                    onKeyDown={handleSearchKeyDown}
+                                    placeholder={searchPlaceholder ?? ""}
+                                    aria-label={searchPlaceholder ?? label}
+                                    aria-controls={listId}
+                                    aria-activedescendant={
+                                        highlight >= 0 && list.length > 0
+                                            ? `${listId}-${highlight}`
+                                            : undefined
+                                    }
+                                    autoComplete="off"
+                                    spellCheck={false}
+                                />
+                            </div>
+                        )}
                         <div
                             ref={listRef}
                             id={listId}
@@ -375,7 +493,7 @@ export function Dropdown({
                             aria-label={label}
                             onScroll={measureScroll}
                         >
-                            {options.map((option, index) => (
+                            {list.map((option, index) => (
                                 <div
                                     key={option.value}
                                     id={`${listId}-${index}`}
@@ -401,6 +519,11 @@ export function Dropdown({
                                     )}
                                 </div>
                             ))}
+                            {searchable && list.length === 0 && (
+                                <div className="dropdown-empty" role="presentation">
+                                    {emptyText}
+                                </div>
+                            )}
                         </div>
                         {scroll.thumb < 100 && (
                             <div className="dropdown-scrollbar" aria-hidden="true">

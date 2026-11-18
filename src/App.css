@@ -3686,6 +3686,55 @@ button.rabbit-hop-bunny:focus-visible {
   animation: dropdown-in var(--t-dur) var(--t-ease);
 }
 
+/* The filterable variant stacks a compact field above the list. Everything it
+   wears is borrowed from the field anatomy in DESIGN.md: 1px hairline, 4px
+   radius, `--c-field` fill, accent border on focus. No new colour, no shadow. */
+.dropdown-popup--searchable {
+  flex-direction: column;
+}
+
+.dropdown-search {
+  flex: 0 0 auto;
+  padding: 4px 4px 6px;
+  border-bottom: 1px solid var(--c-border);
+}
+
+.dropdown-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--c-border-i);
+  border-radius: var(--r-sm);
+  background: var(--c-field);
+  color: var(--c-text);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+  transition: border-color var(--t-dur) var(--t-ease);
+}
+
+.dropdown-search-input:focus {
+  border-color: var(--c-accent-text);
+}
+
+.dropdown-search-input::placeholder {
+  color: var(--c-placeholder);
+}
+
+/* The list must be allowed to shrink inside the capped popup once the search
+   row takes its share of the height. */
+.dropdown-popup--searchable .dropdown-list {
+  min-height: 0;
+}
+
+.dropdown-empty {
+  padding: 8px;
+  color: var(--c-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
 .dropdown-list {
   flex: 1 1 auto;
   overflow-y: auto;

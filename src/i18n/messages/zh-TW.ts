@@ -162,6 +162,8 @@ const zhTW: Messages = {
             placeholder: "助理正在工作，輸入新資訊即可追加給它（Enter 追加）",
         },
         selectModel: "選擇模型",
+        modelFilterPlaceholder: "篩選模型…",
+        modelFilterEmpty: "無符合模型",
         reasoningDepth: "思考深度",
         reasoningDepthTitle: "模型回答前的思考量 —— 以 reasoning_effort 參數送出。",
         reasoningDefault: "預設",

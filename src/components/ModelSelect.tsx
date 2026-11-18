@@ -95,6 +95,9 @@ export function ModelSelect({ models, value, metadata, disabled, onChange }: Pro
             value={value}
             disabled={disabled}
             onChange={onChange}
+            searchable
+            searchPlaceholder={t("app.modelFilterPlaceholder")}
+            emptyText={t("app.modelFilterEmpty")}
         />
     );
 }

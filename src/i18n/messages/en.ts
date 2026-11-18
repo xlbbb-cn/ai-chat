@@ -180,6 +180,8 @@ const en = {
                 "The assistant is working — type an update to add it mid-turn (Enter to add)",
         },
         selectModel: "Select model",
+        modelFilterPlaceholder: "Filter models…",
+        modelFilterEmpty: "No matching models",
         reasoningDepth: "Thinking depth",
         reasoningDepthTitle:
             "How much the model should think before answering — sent as reasoning_effort.",
