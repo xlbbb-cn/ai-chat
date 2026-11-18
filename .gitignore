@@ -37,3 +37,4 @@ docs/site/architecture.html
 docs/site/wiki/
 # 同理：仓库里的 docs/banner.png 会被复制成站点资产
 docs/site/assets/banner.png
+.vscode/extensions.json
