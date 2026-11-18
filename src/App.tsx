@@ -574,6 +574,13 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   /**
+   * The composer switches to its expanded, framed layout once the text wraps
+   * past one visual line. The line count is measured at a fixed reference
+   * width (see `measureComposer`), so the layout change cannot feed back into
+   * the measurement and make the two states oscillate.
+   */
+  const [composerMultiline, setComposerMultiline] = useState(false);
+  /**
    * Composer `@file` popup. `start` is the index of the `@` that opened it —
    * the whole token is replaced when an item is accepted.
    */
@@ -920,6 +927,12 @@ export default function App() {
   const toolbarActionsRef = useRef<HTMLDivElement>(null);
   const inputAreaRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const inputRowRef = useRef<HTMLDivElement>(null);
+  const composerControlsRef = useRef<HTMLDivElement>(null);
+  /** Offscreen twin of the textarea, used only to measure wrapped line count
+   *  at a fixed width without disturbing the live field (which keeps its CSS
+   *  height transition intact). */
+  const measureRef = useRef<HTMLTextAreaElement>(null);
   /**
    * The draft as it exists *now*. A paste or a drop resolves its insertion
    * point from an event callback, which may run before React has committed the
@@ -1290,12 +1303,92 @@ export default function App() {
     useAgentsEnabled,
   ]);
 
-  useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height = textareaRef.current.scrollHeight + "px";
-    }
-  }, [input]);
+  /**
+   * Content width of the picker / thinking-depth / send group. This must be
+   * the sum of the children, NOT `controls.offsetWidth`: in the expanded
+   * layout the wrapper is `flex: 1 1 100%` and spans the whole row, so reading
+   * its own width would make the reference width collapse to a few pixels and
+   * the composer could never return to one line.
+   */
+  const composerControlsWidth = useCallback(() => {
+    const controls = composerControlsRef.current;
+    if (!controls) return 0;
+    const children = Array.from(controls.children) as HTMLElement[];
+    return (
+      children.reduce((sum, child) => sum + child.getBoundingClientRect().width, 0) +
+      Math.max(0, children.length - 1) * 6
+    );
+  }, []);
+
+  /**
+   * Grow the composer and decide whether it has outgrown the single-line
+   * layout. Measurement happens on a hidden mirror textarea at a FIXED
+   * reference width — the width the live textarea has in the single-line
+   * layout (row width minus the controls group minus the gap) — regardless of
+   * which layout is currently painted. That keeps the decision stable (no
+   * oscillation) and, because the live textarea is never reset to `height:
+   * auto`, lets CSS animate its height smoothly between states.
+   */
+  const measureComposer = useCallback(() => {
+    const mirror = measureRef.current;
+    const el = textareaRef.current;
+    const row = inputRowRef.current;
+    if (!mirror || !el || !row) return;
+
+    const referenceWidth = Math.max(1, row.getBoundingClientRect().width - composerControlsWidth() - 6);
+    mirror.style.width = `${referenceWidth}px`;
+    // Force a synchronous reflow so `scrollHeight` reflects the new width.
+    const measuredHeight = mirror.scrollHeight;
+
+    // Read geometry from the mirror, which always carries the BASE `.chat-input`
+    // frame (1px border). Reading the live field would report `border: 0` while
+    // it is expanded and under-size the height just before it collapses back,
+    // clipping the last line.
+    const style = window.getComputedStyle(mirror);
+    const lineHeight = Number.parseFloat(style.lineHeight) || 21;
+    const padding =
+      Number.parseFloat(style.paddingTop) + Number.parseFloat(style.paddingBottom);
+    // scrollHeight is content + padding (border excluded), so this is the
+    // number of rendered text lines at the reference width.
+    const lines = (measuredHeight - padding) / lineHeight;
+    // box-sizing is border-box, so the height we write must include the frame
+    // or the tail of the last line gets clipped in the single-line state.
+    const border =
+      Number.parseFloat(style.borderTopWidth) + Number.parseFloat(style.borderBottomWidth);
+
+    el.style.height = `${Math.min(measuredHeight + border, 140)}px`;
+    setComposerMultiline(lines > 1.5);
+  }, [composerControlsWidth]);
+
+  useLayoutEffect(() => {
+    measureComposer();
+  }, [input, measureComposer]);
+
+  // The wrap count depends on the available width, so a window resize (or a
+  // model with a longer name widening the picker) must re-measure. Compare the
+  // controls' *content* width (stable in both layouts), not the wrapper's width
+  // — the latter jumps to the full row width in the expanded layout.
+  useLayoutEffect(() => {
+    const row = inputRowRef.current;
+    const controls = composerControlsRef.current;
+    if (!row || !controls) return;
+    let lastRow = row.getBoundingClientRect().width;
+    let lastControls = composerControlsWidth();
+    const observer = new ResizeObserver(() => {
+      const rowWidth = row.getBoundingClientRect().width;
+      const controlsWidth = composerControlsWidth();
+      if (
+        Math.abs(rowWidth - lastRow) < 1 &&
+        Math.abs(controlsWidth - lastControls) < 1
+      ) return;
+      lastRow = rowWidth;
+      lastControls = controlsWidth;
+      measureComposer();
+    });
+    observer.observe(row);
+    Array.from(controls.children).forEach((child) => observer.observe(child));
+    return () => observer.disconnect();
+  }, [measureComposer, composerControlsWidth]);
 
   useEffect(() => {
     const unlisten = listen<{
@@ -5329,7 +5422,22 @@ export default function App() {
               <span>{t("app.composer.dropHint")}</span>
             </div>
           )}
-          <div className="input-row">
+          {/* Offscreen measuring twin: same font / padding / line-height as
+              `.chat-input`, fixed inline width set by `measureComposer`. Kept
+              out of the layout and the a11y tree. */}
+          <textarea
+            ref={measureRef}
+            className="chat-input chat-input-measure"
+            rows={1}
+            aria-hidden="true"
+            tabIndex={-1}
+            readOnly
+            value={input}
+          />
+          <div
+            className={`input-row${composerMultiline ? " composer-multiline" : ""}`}
+            ref={inputRowRef}
+          >
             <AgentMentionPopup
               open={agentMentionState.open}
               items={agentMentionItems}
@@ -5386,38 +5494,45 @@ export default function App() {
               // the running turn instead of starting a new one.
               disabled={backupExporting}
             />
-            <ModelSelect
-              models={availableModels}
-              value={selectedModel}
-              metadata={modelMetadata}
-              disabled={streaming || backupExporting}
-              onChange={setSelectedModel}
-            />
-            {reasoningSupported && (
-              <Dropdown
-                className="reasoning-select"
-                label={t("app.reasoningDepth")}
-                title={t("app.reasoningDepthTitle")}
-                icon={faBrain}
-                compact
-                value={reasoningEffort}
-                onChange={(next) => void handleReasoningEffortChange(next)}
-                disabled={streaming || backupExporting}
-                options={[
-                  { value: "", label: t("app.reasoningDefault") },
-                  { value: "low", label: t("app.reasoningLow") },
-                  { value: "medium", label: t("app.reasoningMedium") },
-                  { value: "high", label: t("app.reasoningHigh") },
-                ]}
-              />
-            )}
-            <button
-              className="send-btn"
-              onClick={() => (streaming ? void stopStreaming() : void sendMessage())}
-              disabled={backupExporting || (!streaming && !input.trim())}
+            <motion.div
+              className="composer-controls"
+              ref={composerControlsRef}
+              layout={!reducedMotion}
+              transition={{ duration: 0.18, ease: [0.25, 1, 0.5, 1] }}
             >
-              {streaming ? t("app.stop") : t("app.send")}
-            </button>
+              <ModelSelect
+                models={availableModels}
+                value={selectedModel}
+                metadata={modelMetadata}
+                disabled={streaming || backupExporting}
+                onChange={setSelectedModel}
+              />
+              {reasoningSupported && (
+                <Dropdown
+                  className="reasoning-select"
+                  label={t("app.reasoningDepth")}
+                  title={t("app.reasoningDepthTitle")}
+                  icon={faBrain}
+                  compact
+                  value={reasoningEffort}
+                  onChange={(next) => void handleReasoningEffortChange(next)}
+                  disabled={streaming || backupExporting}
+                  options={[
+                    { value: "", label: t("app.reasoningDefault") },
+                    { value: "low", label: t("app.reasoningLow") },
+                    { value: "medium", label: t("app.reasoningMedium") },
+                    { value: "high", label: t("app.reasoningHigh") },
+                  ]}
+                />
+              )}
+              <button
+                className="send-btn"
+                onClick={() => (streaming ? void stopStreaming() : void sendMessage())}
+                disabled={backupExporting || (!streaming && !input.trim())}
+              >
+                {streaming ? t("app.stop") : t("app.send")}
+              </button>
+            </motion.div>
           </div>
         </div>
       </div >

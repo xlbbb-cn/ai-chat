@@ -2181,12 +2181,78 @@ button.rabbit-hop-bunny:focus-visible {
 }
 
 .input-row {
-  /* Anchor for the composer's `@file` popup, which floats above this row. */
+  /* Anchor for the composer's `@file` popup, which floats above this row.
+     The transparent frame and zero padding are the single-line resting state;
+     the expanded state only repaints them, so the whole switch can transition
+     on the shared motion tokens instead of snapping. */
   position: relative;
   display: flex;
   gap: 6px;
   align-items: flex-end;
   width: 100%;
+  padding: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  transition: padding var(--t-dur) var(--t-ease),
+    background-color var(--t-dur) var(--t-ease),
+    border-color var(--t-dur) var(--t-ease);
+}
+
+/* The picker / thinking-depth / send controls travel as one group, so the
+   expanded composer can drop the whole strip to its own bottom row instead of
+   leaving the buttons stranded beside a tall textarea. */
+.composer-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+/* `.dropdown-trigger` is `width: 100%` so it fills a full-width flex row. Here
+   the group is auto-sized, and that percentage resolves against a container
+   whose width is itself derived from its children — the triggers end up
+   narrower than their content and the send button is pushed past the row's
+   right edge (hidden). Size them to their content instead; the existing
+   per-trigger `max-width` caps still truncate long model names. */
+.composer-controls .dropdown-trigger {
+  width: auto;
+}
+
+/* Expanded composer: the textarea owns the first line inside a hairline field,
+   the controls sit in a right-aligned strip at its bottom. The textarea keeps
+   its padding in both states so the measured height stays valid across the
+   switch; its focus border moves to the frame, per DESIGN.md. */
+.input-row.composer-multiline {
+  flex-wrap: wrap;
+  padding: 6px;
+  border-color: var(--c-border-i);
+  border-radius: var(--r-sm);
+  background: var(--c-field);
+}
+
+.input-row.composer-multiline:focus-within {
+  border-color: var(--c-accent-text);
+}
+
+.input-row.composer-multiline .chat-input {
+  flex: 1 1 100%;
+  border: 0;
+  background: transparent;
+  border-radius: 0;
+}
+
+/* Keep the group at its content width in both states so its trip from the
+   first row to the bottom row is a pure position change — framer-motion's
+   `layout` animation can then slide it instead of resizing it mid-flight. */
+.input-row.composer-multiline .composer-controls {
+  margin-left: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .input-row,
+  .chat-input {
+    transition: border-color var(--t-dur) var(--t-ease);
+  }
 }
 
 /* Injections waiting for the running turn's next request. They live above the
@@ -2463,7 +2529,27 @@ button.rabbit-hop-bunny:focus-visible {
   scrollbar-width: none; /* no gutter: the field keeps its full width */
   -ms-overflow-style: none;
   line-height: 1.5;
-  transition: border-color var(--t-dur) var(--t-ease);
+  transition: border-color var(--t-dur) var(--t-ease),
+    height var(--t-dur) var(--t-ease);
+}
+
+/* Offscreen twin used for line measurement. It shares `.chat-input`'s text
+   metrics, but is removed from layout / a11y and never animates — the height
+   we read from it must be instantaneous even while the live field transitions. */
+.chat-input-measure {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: -1;
+  visibility: hidden;
+  pointer-events: none;
+  flex: none !important;
+  width: 1px;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: hidden !important;
+  transition: none !important;
 }
 
 /* The composer grows to `max-height` and then scrolls. A bar inside a 34px-tall

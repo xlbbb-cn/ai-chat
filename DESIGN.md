@@ -572,6 +572,26 @@ transition: border-color var(--t-dur) var(--t-ease);
 Focus is a **border-colour change to `--c-accent-text`** — no glow, no ring, no shadow.
 Placeholder uses `--c-placeholder`.
 
+The composer (`.chat-input`) has two layouts decided by its visual line count.
+One line: a 34px field inline with the model picker, optional thinking-depth
+selector and primary `send-btn`. More than one line: `.input-row` becomes a
+framed container — `--c-field` fill, 1px `--c-border-i`, 4px radius, 6px inner
+padding — the textarea loses its own border and fills the first line, and the
+three controls drop into a right-aligned strip at the bottom. Focus tint moves
+from the textarea to the frame (`:focus-within`). No new tokens, no elevation;
+the mention popups keep anchoring above the row in both states.
+
+The single-line frame is a transparent 1px border with zero padding, so the
+switch is a **repaint of that frame** (padding, `--c-field` fill, border colour)
+plus the textarea's height, all on `--t-dur` / `--t-ease` — the one place a size
+change animates, and `prefers-reduced-motion` keeps only the colour transition.
+The line count is measured on a hidden twin of the textarea at a fixed width,
+so the live field never resets to `height: auto` mid-measurement and the
+transition stays continuous. The controls group keeps its content width in
+both states and slides between rows with framer-motion's `layout` (same
+`--t-dur` / `--t-ease` values, disabled under reduced motion), so the switch
+reads as one continuous movement rather than a reflow snap.
+
 A `<select>` is never a native one. The list it opens is drawn by the platform —
 GTK on Linux, a menu on macOS, its own popup on Windows — so the OS, not this
 document, would author the control's loudest state. Every picker goes through
