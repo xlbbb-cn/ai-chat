@@ -453,9 +453,10 @@ the OS itself gives the app's windows: Windows 11 rounds every app window
 the same rounding (`DWMWCP_ROUND` in `notify.rs`), while macOS has the
 vibrancy view rounded natively with the same 8px. The painted frame, the
 native backdrop and the window silhouette therefore share one corner. The
-card artwork's radius is derived (`calc(var(--r-toast) - 4px)`), and its
-edges are feathered into the card with a radial mask. Never propagate this
-radius to in-app chrome — inside the window, 4px stays the rule.
+card artwork reads as a round avatar: a circular mask (the artwork's
+half-width) clips the banner and feathers its rim into the card. Never
+propagate this radius to in-app chrome — inside the window, 4px stays the
+rule.
 
 ### Motion
 
