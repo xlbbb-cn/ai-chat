@@ -5201,15 +5201,16 @@ export default function App() {
                 className={`rabbit-hop${selfEvolutionMode && dreamState === "running" ? " rabbit-hop--sleeping" : ""}`}
                 aria-hidden={selfEvolutionMode ? undefined : true}
               >
-                {/* Visual affordance only: the button's aria-label carries the
-                    same sentence for assistive technology. Both the hint and
-                    the button disappear when self-evolution mode is off — the
-                    face is then a plain decorative div with no hover/click. */}
-                {selfEvolutionMode && (
+                {/* Visual affordance only, and idle-only: during a nap the
+                    hover bubble would collide with the dream bubble above the
+                    face, so nothing is shown on hover/focus while maintenance
+                    runs. The button's aria-label still carries the state for
+                    assistive technology. Both the hint and the button
+                    disappear when self-evolution mode is off — the face is
+                    then a plain decorative div with no hover/click. */}
+                {selfEvolutionMode && dreamState !== "running" && (
                   <span className="rabbit-hop-hint" aria-hidden="true">
-                    {dreamState === "running"
-                      ? `${t("app.dream.sleeping")} · ${t("app.dream.cancelHint")}`
-                      : t("app.dream.hint")}
+                    {t("app.dream.hint")}
                   </span>
                 )}
                 {selfEvolutionMode && dreamState === "running" && (

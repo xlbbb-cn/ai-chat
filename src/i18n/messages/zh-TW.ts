@@ -65,8 +65,6 @@ const zhTW: Messages = {
 
         dream: {
             hint: "點擊讓我小憩一下",
-            sleeping: "正在小憩，整理技能與記憶…",
-            cancelHint: "雙擊可終止（不建議）",
             statusTitle: "正在整理技能與記憶…",
             statusDetail: "Dreaming Scene {round}/{tools}",
             phase: {

@@ -75,8 +75,6 @@ const en = {
 
         dream: {
             hint: "Click to let me take a short nap",
-            sleeping: "Napping while tidying skills and memory…",
-            cancelHint: "Double-click to stop (not recommended)",
             statusTitle: "Tidying skills and memory…",
             statusDetail: "Dreaming Scene {round}/{tools}",
             phase: {

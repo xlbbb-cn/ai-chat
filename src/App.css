@@ -1759,10 +1759,6 @@ button.rabbit-hop-bunny:focus-visible {
   transition: opacity var(--t-dur) var(--t-ease);
 }
 
-.rabbit-hop--sleeping .rabbit-hop-hint {
-  bottom: calc(100% + 54px);
-}
-
 /* Nap bubble: 4px radius, hairline + surface, no elevation. The clip layer
    keeps the scrolling track inside the rounded box; the tail is a rotated
    square on the outer element. */
