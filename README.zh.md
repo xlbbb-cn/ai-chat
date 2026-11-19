@@ -356,7 +356,7 @@ rabbit-chat-studio/
 运行时布局 —— 应用数据目录放应用文件，工作区内放该工作区自己的状态：
 
 ```text
-<应用数据目录>/            config.json、app.log、mcp_servers.json、sub_agents.json、
+<应用数据目录>/            config.json、app-<日期>.log、mcp_servers.json、sub_agents.json、
                           profiles.json、agents/（llm 定义 + index.yaml 发现清单）、
                           shadow/（多窗口配置分叉）、workspace/（默认工作区）
 <workspace>/.data/         chat.db、memory/{user,repo,evolution}/、todos/、skills/、

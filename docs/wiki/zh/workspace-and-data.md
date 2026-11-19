@@ -99,7 +99,7 @@ Windows 上该目录带隐藏属性；macOS/Linux 靠点前缀隐藏。
 | `profiles.json` | 应用内**配置方案** |
 | `agents/` | `llm` 智能体定义（Markdown）+ `index.yaml` 发现清单 |
 | `shadow/` | 主实例锁 + 每个额外窗口一份分叉配置 |
-| `app.log` | Debug 构建日志（Release 默认不写） |
+| `app-<日期>.log` | Debug 构建日志，一天一个文件（Release 默认不写） |
 | `workspace/` | 默认工作区 |
 
 完整配置字段见 [配置与备份](配置与备份)。

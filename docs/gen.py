@@ -172,7 +172,7 @@ BANDS = [
                  ("turn_guard.rs", "轮次 / 工具 / 失败守卫", "n"),
                  ("instance.rs", "单实例锁 · shadow 窗口", "n"),
                  ("process_guard.rs", "子进程登记 · 进程树终止", "n"),
-                 ("logger.rs", "app.log · 保留天数", "n"),
+                 ("logger.rs", "app-<日期>.log · 保留天数", "n"),
                  ("utils/", "knowledge_graph · pdf2md-rs 两个独立 crate", "n"),
              ]),
          ]),
@@ -253,7 +253,7 @@ BANDS = [
                  ("model_metadata.json", "三源能力目录 · 每周缓存", "n"),
                  ("agents/", "定义 + index.yaml 发现清单", "n"),
                  ("shadow/", "每窗口一份配置 fork", "n"),
-                 ("app.log", "日志 · 按保留天数清理", "n"),
+                 ("app-<日期>.log", "日志 · 按保留天数清理", "n"),
              ]),
          ]),
     dict(num="09", name="外部依赖", path="进程之外",
@@ -1007,7 +1007,7 @@ def build_html(d1, d2, d3):
 <b>agents/</b>             <span class="cm"># llm 型 agent 的 markdown 定义 + index.yaml</span>
 <b>shadow/</b>             <span class="cm"># 每个窗口一份 config fork</span>
 <b>workspace/</b>          <span class="cm"># 默认工作区</span>
-<b>app.log</b>             <span class="cm"># 日志，按 log_retention_days 清理</span></pre>
+<b>app-日期.log</b>     <span class="cm"># 日志，按 log_retention_days 清理</span></pre>
       </div>
       <div>
         <h3>&lt;workspace&gt;/.data/</h3>

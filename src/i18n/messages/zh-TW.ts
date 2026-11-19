@@ -447,7 +447,7 @@ const zhTW: Messages = {
             title: "執行與偵錯",
             subtitle: "執行行為、日誌寫入位置與保留時間，以及請求的監控方式。",
             loggerOutput: "日誌輸出（僅偵錯組建）",
-            loggerFile: "寫入 app.log",
+            loggerFile: "寫入 app-日期.log",
             loggerPrintln: "輸出到終端機（println）",
             retention: "日誌保留天數",
             retentionHint:

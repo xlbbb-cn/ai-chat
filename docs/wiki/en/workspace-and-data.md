@@ -99,7 +99,7 @@ Application-level files do not live in the workspace:
 | `profiles.json` | In-app **Profiles** |
 | `agents/` | `llm` agent definitions (Markdown) + the `index.yaml` discovery manifest |
 | `shadow/` | Primary-instance lock + one forked config per extra window |
-| `app.log` | Debug-build logs (release builds do not write it by default) |
+| `app-<date>.log` | Debug-build logs, one file per day (release builds do not write them by default) |
 | `workspace/` | Default workspace |
 
 Full config fields: [Configuration and Backup](Configuration-and-Backup).

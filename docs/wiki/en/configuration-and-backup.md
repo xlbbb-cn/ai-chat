@@ -23,7 +23,7 @@ Rabbit Chat Studio configuration has two layers:
 | `agents/` | `llm` agent definitions (Markdown) + the `index.yaml` discovery manifest |
 | `model_metadata.json` | Merged model catalogue (~2 900 entries, ~1.2 MB); refreshed at most weekly |
 | `shadow/` | Primary-instance lock + one forked `config-<timestamp>-<id>/` per extra window (see [Multiple windows](#multiple-windows)) |
-| `app.log` | Debug-build logs (release builds do not write it by default) |
+| `app-<date>.log` | Debug-build logs, one file per day (release builds do not write them by default) |
 | `workspace/` | Default workspace |
 
 ## `config.json` fields

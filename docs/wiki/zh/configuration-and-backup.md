@@ -23,7 +23,7 @@ Rabbit Chat Studio 的配置分两层：
 | `agents/` | `llm` 智能体定义（Markdown）与 `index.yaml` 发现清单 |
 | `model_metadata.json` | 合并后的模型目录（约 2900 条、约 1.2 MB），最多每周刷新一次 |
 | `shadow/` | 单实例锁 + 每个额外窗口一份 `config-<时间戳>-<id>/`（见[多窗口](#多窗口)） |
-| `app.log` | 调试版日志（发布版默认不写） |
+| `app-<日期>.log` | 调试版日志，一天一个文件（发布版默认不写） |
 | `workspace/` | 默认工作区 |
 
 ## `config.json` 字段

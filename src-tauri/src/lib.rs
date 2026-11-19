@@ -51,7 +51,7 @@ use tools::{timer, todos};
 /// When `run()` entered — the earliest point the process owns. The startup
 /// probes (`Logger initialized`, `Startup: setup finished`, the update check)
 /// report their elapsed milliseconds against it, so a slow launch can be
-/// located from `app.log` alone.
+/// located from the dated `app-*.log` files alone.
 static STARTED: OnceLock<Instant> = OnceLock::new();
 
 /// Milliseconds since `run()` started, or `0` before it ran.
@@ -1917,7 +1917,7 @@ pub fn run() {
                 None => instance::Instance::claim(data_dir.clone()),
             };
             let swept = instance::collect_garbage(&data_dir);
-            // Reported to `app.log` below — the logger does not exist yet.
+            // Reported to the dated `app-*.log` below — the logger does not exist yet.
             let mut prepare_error: Option<String> = None;
             let config_path = instance.prepare().unwrap_or_else(|err| {
                 // Opening the app beats perfect isolation: fall back to the
@@ -2007,7 +2007,8 @@ pub fn run() {
             let app_logger = AppLogger::new(
                 cfg!(debug_assertions),
                 config.logger_output.clone(),
-                data_dir.join("app.log"),
+                data_dir.clone(),
+                format!("{}-{}", instance.role().as_str(), std::process::id()),
             );
             app_logger.log(
                 "INFO",
@@ -2059,6 +2060,19 @@ pub fn run() {
                     ),
                 ),
                 Err(err) => app_logger.log("WARN", &format!("Log retention failed: {err}")),
+            }
+
+            // The dated log files follow the same window (`0` = keep forever):
+            // startup sweeps `app-*.log` so they cannot accumulate forever.
+            let removed_logs = logger::sweep_dated_files(&data_dir, config.log_retention_days);
+            if removed_logs > 0 {
+                app_logger.log(
+                    "INFO",
+                    &format!(
+                        "Log retention: removed {removed_logs} app-*.log file(s) older than {} days",
+                        config.log_retention_days
+                    ),
+                );
             }
 
             app.manage(AppState {

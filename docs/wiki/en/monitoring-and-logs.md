@@ -106,23 +106,25 @@ See [Sub-Agents](Sub-Agents).
 
 This is the first place to look when MCP fails: `npx` download, PATH, auth and protocol handshake errors all appear here.
 
-## `app.log`
+## `app-<date>.log`
 
-Location:
+Location (`app-<YYYY-MM-DD>.log`, one file per local day):
 
 | Platform | Path |
 | --- | --- |
-| Windows | `%APPDATA%\com.leonard.aichat\app.log` |
-| macOS | `~/Library/Application Support/com.leonard.aichat/app.log` |
-| Linux | `~/.local/share/com.leonard.aichat/app.log` |
+| Windows | `%APPDATA%\com.leonard.aichat\app-<date>.log` |
+| macOS | `~/Library/Application Support/com.leonard.aichat/app-<date>.log` |
+| Linux | `~/.local/share/com.leonard.aichat/app-<date>.log` |
 
 Notes:
 
-- Under the Microsoft Store (MSIX) build, Windows redirects this path to `%LOCALAPPDATA%\Packages\XLBBB.RabbitChatStudio\LocalCache\Roaming\com.leonard.aichat\app.log`.
+- Under the Microsoft Store (MSIX) build, Windows redirects this path to `%LOCALAPPDATA%\Packages\XLBBB.RabbitChatStudio\LocalCache\Roaming\com.leonard.aichat\app-<date>.log`.
 - Only **debug builds** (`cargo` / `tauri dev`) write it; release builds disable it by default.
 - **Settings → Runtime & Debug → Log output** selects file vs terminal (`println`); debug builds only.
 - It contains startup, config apply, workspace switch, MCP start, auto-accept, context compression, goal-loop continuations and request success/failure.
-- It appends lines and does not rotate; delete it manually after long debugging.
+- Every line carries a process tag (`[primary-<pid>]` / `[shadow-<pid>]`), so several app windows (multi-instance) writing the same file stay attributable.
+- The date is resolved per log line, so a window running across midnight starts the next day's file automatically.
+- Old files are swept at startup by the same **log retention days** setting that prunes the database log rows (`0` keeps them forever). The legacy `app.log` is no longer written and is left in place.
 
 ## Debugging workflows
 
@@ -160,6 +162,6 @@ Notes:
 | Monitor is empty | No interactions in this session, or logs were cleared |
 | Disk usage did not shrink after clearing | Deleting rows does not shrink the file; run **Compact database** |
 | Compaction is slow | `VACUUM` on a large database takes time; do not click repeatedly |
-| Release build has no `app.log` | By design; use the Interaction Monitor and MCP logs |
+| Release build has no `app-<date>.log` | By design; use the Interaction Monitor and MCP logs |
 | Logs contain secrets | Request bodies include prompts and tool results; clean before exporting/sharing |
 | Mission monitor has no missions | No sub-agent ran in this session, or orchestration fell back |

@@ -447,7 +447,7 @@ const zhCN: Messages = {
             title: "运行与调试",
             subtitle: "执行行为、日志写入位置与保留时长，以及请求的监控方式。",
             loggerOutput: "日志输出（仅调试构建）",
-            loggerFile: "写入 app.log",
+            loggerFile: "写入 app-日期.log",
             loggerPrintln: "输出到终端（println）",
             retention: "日志保留天数",
             retentionHint:

@@ -26,7 +26,7 @@
 //! writes it like any other folder (the SQLite database excepted — see
 //! `tools::paths`). On Windows the directory carries the file-system hidden
 //! attribute so it stays out of Explorer. Application-level files
-//! (config.json, app.log, MCP/sub-agent definitions, backups) remain in the OS
+//! (config.json, app-<date>.log, MCP/sub-agent definitions, backups) remain in the OS
 //! app data directory; timers live here because a timer resumes a chat session
 //! of *this* workspace.
 

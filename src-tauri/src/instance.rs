@@ -67,6 +67,16 @@ pub enum Role {
     Shadow,
 }
 
+impl Role {
+    /// Lowercase name used in the `app.log` process tag (`[primary-<pid>]`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Role::Primary => "primary",
+            Role::Shadow => "shadow",
+        }
+    }
+}
+
 /// What the UI needs to know about the running process (`get_instance_info`).
 #[derive(Debug, Clone, Serialize)]
 pub struct InstanceInfo {

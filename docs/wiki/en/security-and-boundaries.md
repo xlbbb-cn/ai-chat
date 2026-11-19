@@ -167,7 +167,7 @@ Recommendations:
 - `allowed-commands` is enforced only on `run_cmd`.
 - Risk assessment is a static rule set, not a runtime sandbox; obfuscated commands may evade the score.
 - Auto-accept `"*"` also covers future confirmation kinds.
-- Release builds do not write `app.log`; use the Interaction Monitor and MCP logs.
+- Release builds do not write `app-<date>.log`; use the Interaction Monitor and MCP logs.
 - `config.json` / `mcp_servers.json` secrets are not stored in the OS keychain.
 
 For stronger isolation, run Rabbit Chat Studio in a VM/container, mount only the project directory, and keep MCP/CLI in the same isolated environment.

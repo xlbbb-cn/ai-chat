@@ -167,7 +167,7 @@ Rabbit Chat Studio 的工具拥有真实的系统权限。边界设计的目标�
 - `allowed-commands` 只对 `run_cmd` 生效。
 - 风险评估是静态规则集，不是运行时沙箱；混淆过的命令可能逃过打分。
 - 自动接受 `"*"` 也会覆盖未来新增的确认类型。
-- 发布版不写 `app.log`；请用交互监视器与 MCP 日志。
+- 发布版不写 `app-<日期>.log`；请用交互监视器与 MCP 日志。
 - `config.json` / `mcp_servers.json` 的密钥不存进系统钥匙串。
 
 需要更强隔离时，把 Rabbit Chat Studio 放进虚拟机/容器，只挂载项目目录，并让 MCP/CLI 留在同一隔离环境里。

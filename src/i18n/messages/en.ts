@@ -486,7 +486,7 @@ const en = {
             title: "Runtime & Debug",
             subtitle: "Execution behavior, where logs are written, how long they are kept, and how requests are monitored.",
             loggerOutput: "Logger Output (debug build only)",
-            loggerFile: "Write to app.log",
+            loggerFile: "Write to app-<date>.log",
             loggerPrintln: "Print to terminal (println)",
             retention: "Log retention (days)",
             retentionHint:

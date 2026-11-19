@@ -106,23 +106,25 @@ Rabbit Chat Studio 在本地记录模型请求与工具调用，所以"模型为
 
 MCP 出问题先看这里：`npx` 下载、PATH、认证、协议握手错误都会出现在此。
 
-## `app.log`
+## `app-<日期>.log`
 
-位置：
+位置（`app-<YYYY-MM-DD>.log`，按本地日期一天一个文件）：
 
 | 平台 | 路径 |
 | --- | --- |
-| Windows | `%APPDATA%\com.leonard.aichat\app.log` |
-| macOS | `~/Library/Application Support/com.leonard.aichat/app.log` |
-| Linux | `~/.local/share/com.leonard.aichat/app.log` |
+| Windows | `%APPDATA%\com.leonard.aichat\app-<日期>.log` |
+| macOS | `~/Library/Application Support/com.leonard.aichat/app-<日期>.log` |
+| Linux | `~/.local/share/com.leonard.aichat/app-<日期>.log` |
 
 说明：
 
-- 商店（MSIX）版下 Windows 会把该路径重定向到 `%LOCALAPPDATA%\Packages\XLBBB.RabbitChatStudio\LocalCache\Roaming\com.leonard.aichat\app.log`。
+- 商店（MSIX）版下 Windows 会把该路径重定向到 `%LOCALAPPDATA%\Packages\XLBBB.RabbitChatStudio\LocalCache\Roaming\com.leonard.aichat\app-<日期>.log`。
 - 只有**调试版**（`cargo` / `tauri dev`）会写；发布版默认关闭。
 - **设置 → 运行时与调试 → 日志输出** 可在文件与终端（`println`）之间切换；仅调试版。
 - 内容含启动、配置应用、工作区切换、MCP 启动、自动接受、上下文压缩、目标循环续跑、请求成功/失败。
-- 只追加、不轮转；长时间调试后请手动删除。
+- 每行带进程标签（`[primary-<pid>]` / `[shadow-<pid>]`），多开窗口（多实例）写同一个文件时也能区分来源。
+- 日期在每次写日志时计算，窗口跨午夜运行会自动切到第二天的文件。
+- 启动时按与数据库日志相同的**日志保留天数**设置清理过期文件（`0` 表示永久保留）。旧的 `app.log` 不再写入，原样留在磁盘上。
 
 ## 调试流程
 
@@ -160,6 +162,6 @@ MCP 出问题先看这里：`npx` 下载、PATH、认证、协议握手错误都
 | 监视器是空的 | 本次会话没有交互，或日志被清空 |
 | 清空后磁盘没变小 | 删行不会缩小文件；跑 **压缩数据库** |
 | 压缩很慢 | 大库上的 `VACUUM` 需要时间；别反复点 |
-| 发布版没有 `app.log` | 设计如此；用交互监视器与 MCP 日志 |
+| 发布版没有 `app-<日期>.log` | 设计如此；用交互监视器与 MCP 日志 |
 | 日志里有密钥 | 请求体含提示与工具结果；导出/分享前先清理 |
 | 任务监视器里没有任务 | 本次会话没跑子智能体，或编排退回了直接回答 |

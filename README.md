@@ -359,7 +359,7 @@ rabbit-chat-studio/
 Runtime layout — app data holds the application files, the workspace holds its own state:
 
 ```text
-<app data>/                 config.json, app.log, mcp_servers.json, sub_agents.json,
+<app data>/                 config.json, app-<date>.log, mcp_servers.json, sub_agents.json,
                             agents/ (llm definitions + index.yaml
                             discovery manifest), shadow/ (per-window config forks),
                             workspace/ (default workspace)

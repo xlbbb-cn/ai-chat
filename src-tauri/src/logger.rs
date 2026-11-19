@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -20,15 +20,22 @@ impl Default for LoggerOutput {
 pub struct AppLogger {
     enabled: bool,
     output: LoggerOutput,
-    file_path: PathBuf,
+    /// Directory the dated log files live in. One file per local day,
+    /// `app-<YYYY-MM-DD>.log` — the date is resolved per log call, so a
+    /// process that runs across midnight simply starts the next file.
+    dir: PathBuf,
+    /// Process tag rendered into every line (`primary-<pid>` / `shadow-<pid>`),
+    /// so two multi-instance windows writing the same file stay attributable.
+    prefix: String,
 }
 
 impl AppLogger {
-    pub fn new(enabled: bool, output: LoggerOutput, file_path: PathBuf) -> Self {
+    pub fn new(enabled: bool, output: LoggerOutput, dir: PathBuf, prefix: String) -> Self {
         Self {
             enabled,
             output,
-            file_path,
+            dir,
+            prefix,
         }
     }
 
@@ -45,21 +52,57 @@ impl AppLogger {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or_default();
-        let line = format!("[{}][{}] {}", ts, level, message);
+        let line = format!("[{}][{}][{}] {}", ts, self.prefix, level, message);
 
         match self.output {
             LoggerOutput::Println => {
                 println!("{}", line);
             }
             LoggerOutput::File => {
-                if let Ok(mut file) = OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&self.file_path)
-                {
+                let date = chrono::Local::now().format("%Y-%m-%d");
+                let path = self.dir.join(format!("app-{date}.log"));
+                if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&path) {
                     let _ = writeln!(file, "{}", line);
                 }
             }
         }
     }
+}
+
+/// Delete `app-<YYYY-MM-DD>.log` files older than `retention_days` local days —
+/// the same `log_retention_days` setting that prunes the database log rows;
+/// `0` disables the sweep, matching `db::prune_old_logs`. Files whose name does
+/// not parse as a dated log (the legacy `app.log`, foreign files) are left
+/// untouched. Returns how many files were removed.
+pub fn sweep_dated_files(dir: &Path, retention_days: u32) -> usize {
+    if retention_days == 0 || !dir.is_dir() {
+        return 0;
+    }
+    let cutoff = chrono::Local::now().date_naive() - chrono::Duration::days(retention_days as i64);
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut removed = 0usize;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let Some(date) = name
+            .strip_prefix("app-")
+            .and_then(|rest| rest.strip_suffix(".log"))
+        else {
+            continue;
+        };
+        if date.len() != 10 {
+            continue;
+        }
+        let Ok(file_date) = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d") else {
+            continue;
+        };
+        if file_date < cutoff && std::fs::remove_file(&path).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
 }
