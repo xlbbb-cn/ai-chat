@@ -462,6 +462,36 @@ pub fn get_all_tools(
         }));
     }
 
+    if selected_tools.iter().any(|t| t == "calculator") {
+        tools.push(json!({
+            "type": "function",
+            "function": {
+                "name": "calculator",
+                "description": "Evaluate a mathematical expression and return the numeric result. Use it instead of doing arithmetic in your head whenever exactness matters (multi-step arithmetic, powers, roots, large numbers, unit-style formulas).\n\n\
+Operators (lowest to highest precedence): `|` (bitwise OR), `^^` or `xor` (bitwise XOR), `&` or `and` (bitwise AND), `<<` / `>>` (shifts), `+` / `-`, `*` / `/` / `%`, unary `+` / `-` / `~`, `^` or `**` (exponentiation, right-associative: `2^3^2 = 512`; `^-2` and `^0.5` work), postfix `!` (factorial, max 20!). Parentheses nest and implicit multiplication is accepted: `2(3+4)`, `2pi`, `(1+2)(3+4)`.\n\n\
+Numbers: decimal and scientific (`1.5e3`), hex `0xFF`, binary `0b1010`, octal `0o17`, `_` separators. Constants: `pi`, `e`, `tau`.\n\n\
+Functions: `sqrt abs exp ln log log10 log2 sin cos tan asin acos atan atan2 sinh cosh tanh floor ceil round trunc sign min max pow hypot fact factorial not and or xor shl shr`.\n\n\
+`^` is exponentiation, NOT XOR — use `^^` / `xor(...)` for XOR. Bitwise operators, shifts and factorial require integer operands and return exact 64-bit integers; all other math is f64. Division by zero, non-real results (`sqrt(-1)`, `log(0)`), `NaN`/overflow and syntax errors return an `Error:` message with the offending position.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "expression": {
+                            "type": "string",
+                            "description": "The expression to evaluate, e.g. `(2+3)^2/4`, `0xFF & 0b1111`, `sqrt(2)*10`, `5!`."
+                        },
+                        "precision": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 15,
+                            "description": "Optional number of decimal places to round the displayed result to (0-15). Omit for full precision."
+                        }
+                    },
+                    "required": ["expression"]
+                }
+            }
+        }));
+    }
+
     // ── Background execution ────────────────────────────────────────────────
     // Only the long-running, read-mostly tools accept the flag: a background
     // mutation could race an unrelated edit the model starts while it waits.

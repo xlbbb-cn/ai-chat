@@ -665,6 +665,13 @@ const en = {
                     "Privileged operations and dangerous commands require explicit confirmation.",
                 ].join("\n"),
             },
+            calculator: {
+                name: "Calculator",
+                description: [
+                    "Evaluate mathematical expressions: + - * / %, exponentiation `^` / `**` (right-associative, negative and fractional exponents), parentheses, unary + - ~, factorial `!`, bitwise `&` / `|` / `^^` (XOR) / `~` / `<<` / `>>`, the constants pi, e and tau, common functions (sqrt, sin, cos, ln, log, min, max, pow, …), implicit multiplication (`2(3+4)`, `2pi`) and 0x / 0b / 0o literals.",
+                    "Use it whenever exactness matters instead of doing arithmetic in your head. Bitwise operators and factorial require integer operands and return exact 64-bit integers; everything else is f64. `^` is exponentiation — XOR is `^^` or `xor(...)`.",
+                ].join("\n"),
+            },
             memory: {
                 name: "Memory",
                 description: [

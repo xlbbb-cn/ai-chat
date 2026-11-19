@@ -7,6 +7,7 @@ Tools are the "what can the model do to the local world" switches. All built-in 
 | File Actions | `file_actions` | `file_actions` | Read/write/search/patch/rename/delete files inside the workspace (including `.data`) | [Files and Commands](Files-and-Commands) |
 | Run Command | `run_cmd` | `run_cmd` | Run one program or a workspace script directly (no shell); maintains `.data/scripts` | [Files and Commands](Files-and-Commands) |
 | Run Script | `run_shell` | `run_shell` | Run PowerShell/Bash scripts, including background serve | [Files and Commands](Files-and-Commands) |
+| Calculator | `calculator` | `calculator` | Evaluate expressions: arithmetic, powers, parentheses, factorial, bitwise, functions and constants | — |
 | Memory | `memory` | `memory` | Four scopes: session / user / repo / evolution | [Memory, Todos and Timers](Memory-Todos-and-Timers) |
 | Todos | `todo_list` (alias `todo`) | `todos` | Session-level plan and progress | [Memory, Todos and Timers](Memory-Todos-and-Timers) |
 | Timer | `timer` | `timer_set` / `timer_list` / `timer_cancel` | Resume the chat later | [Memory, Todos and Timers](Memory-Todos-and-Timers) |
@@ -52,7 +53,7 @@ Background tasks keep every normal check: risk assessment and confirmation still
 
 One assistant round can carry several tool calls. **Tools sidebar → Parallel tool calls** (`config.parallel_tools`, at the bottom of the panel, on by default) decides whether they run at the same time:
 
-- **Concurrent**: `file_actions` `read` / `list` / `search` / `diff`, `run_cmd`, `run_shell`, `skill_read`, `call_subagent` and every MCP tool. A batch costs the slowest call instead of the sum.
+- **Concurrent**: `file_actions` `read` / `list` / `search` / `diff`, `run_cmd`, `run_shell`, `calculator`, `skill_read`, `call_subagent` and every MCP tool. A batch costs the slowest call instead of the sum.
 - **Alone, in order** (and they split the round into segments): `use_skill` (it changes the allowed commands and skill directories the rest of the round sees), `memory` / `todos` / `timer_*` (read-modify-write on a session file), mutating `file_actions` actions (write / patch / rename / move / mkdir / delete), `background_task`, `mcp_self`, `skill_merge`, `experience`, the mission-board tools, and any tool the app does not know.
 - **Calls per round** (`config.max_parallel_tools`, default 4, range 1–8): how many independent calls may run at once. `1` behaves like the switch being off — strictly one call at a time.
 - **Sub-agents** follow the same rules, with `mbus` and every MCP call as extra barriers (an MCP call owns that task's `AgentMcpSession`).

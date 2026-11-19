@@ -431,6 +431,7 @@ pub async fn execute_tool(
             todos::handle_todos_tool(app, name, &args, session_id, mission_id, call_id, cancel)
                 .await
         }
+        "calculator" => calculator::handle(&args),
         "skill_read" => skill_read::handle(&ctx, &args).await,
         "run_cmd" => return run_cmd::handle(&ctx, &args).await,
         "run_shell" => return run_shell::handle(&ctx, &args).await,

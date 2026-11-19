@@ -39,7 +39,7 @@ Chat is the easy part. Rabbit Chat Studio gives the agent a workspace, real util
 | --- | :---: | :---: | :---: | :---: | :---: |
 | **Skill sandbox** — one skill root per workspace (`.data/skills`), root pinned to its `SKILL.md` | ✅ | ✅ OS-sandboxed workspaces | ◐ agent workspaces | — | — |
 | **Self-evolution** — the assistant installs/edits/deletes its own skills, keeps verified facts in a dedicated memory scope | ✅ | ◐ plugin creation via chat | — | — | — |
-| **Built-in agent utilities** — 4-level memory (`session` / `user` / `repo` / `evolution`), timers, todos | ✅ | ◐ scheduled tasks | ◐ scheduled tasks | — | — |
+| **Built-in agent utilities** — 4-level memory (`session` / `user` / `repo` / `evolution`), calculator, timers, todos | ✅ | ◐ scheduled tasks | ◐ scheduled tasks | — | — |
 | **Agent runtime** — LLM, local CLI or remote cloud, configured in-app | ✅ | ✅ LLM + CLI (delegates to Codex / Claude Code) | ◐ LLM agents | — | — |
 | **No account login** — run with just an API key or a local model; no sign-up, no real-name verification | ✅ | ◐ DeepSeek account by default (API key path exists) | ✅ | ✅ | ✅ |
 | **Prompt ownership** — no default persona or hidden rewrite; your system message is the base, tool/skill guidance is appended | ✅ | ◐ swappable prompt sections | ◐ assistant prompts | ◐ prompt library | ◐ per-model prompt |

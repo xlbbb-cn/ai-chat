@@ -7,6 +7,7 @@
 | 文件操作 | `file_actions` | `file_actions` | 在工作区内读写/搜索/patch/改名/删除文件（含 `.data`） | [文件与命令](文件与命令) |
 | 运行命令 | `run_cmd` | `run_cmd` | 直接运行单个程序或工作区脚本（不经 shell）；维护 `.data/scripts` | [文件与命令](文件与命令) |
 | 运行脚本 | `run_shell` | `run_shell` | 运行 PowerShell/Bash 脚本，含后台 serve | [文件与命令](文件与命令) |
+| 计算器 | `calculator` | `calculator` | 计算表达式：四则、幂、括号、阶乘、位运算、函数与常量 | — |
 | 记忆 | `memory` | `memory` | 四个作用域：session / user / repo / evolution | [记忆待办与定时器](记忆待办与定时器) |
 | 待办 | `todo_list`（别名 `todo`） | `todos` | 会话级计划与进度 | [记忆待办与定时器](记忆待办与定时器) |
 | 定时器 | `timer` | `timer_set` / `timer_list` / `timer_cancel` | 稍后恢复对话 | [记忆待办与定时器](记忆待办与定时器) |
@@ -52,7 +53,7 @@
 
 一轮回复里模型可以给出多个工具调用。**工具侧边栏底部的“并行工具调用”**（`config.parallel_tools`，默认开启）决定它们是否同时执行：
 
-- **同时执行**：`file_actions` 的 `read` / `list` / `search` / `diff`、`run_cmd`、`run_shell`、`skill_read`、`call_subagent`，以及所有 MCP 工具。它们的执行时间从"逐个相加"变成"取最慢的那个"。
+- **同时执行**：`file_actions` 的 `read` / `list` / `search` / `diff`、`run_cmd`、`run_shell`、`calculator`、`skill_read`、`call_subagent`，以及所有 MCP 工具。它们的执行时间从"逐个相加"变成"取最慢的那个"。
 - **独占执行**（按模型给出的顺序，并把这一轮切成若干段）：`use_skill`（会改变本轮后续调用看到的允许命令与技能目录）、`memory` / `todos` / `timer_*`（会话文件的读改写）、写/改/删/重命名类的 `file_actions`、`background_task`、`mcp_self`、`skill_merge`、`experience`、任务板工具，以及任何本应用不认识的工具。
 - **单轮并发数**（`config.max_parallel_tools`，默认 4，范围 1–8）：一次最多同时跑几个独立调用。设为 1 等于关闭该开关，回到严格逐个执行。
 - **子智能体**用同一套规则，另外把 `mbus` 和所有 MCP 调用作为独占段（MCP 会独占该任务的 `AgentMcpSession`）。

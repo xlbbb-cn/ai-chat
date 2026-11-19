@@ -28,6 +28,11 @@ const AVAILABLE_TOOLS: { id: string; nameKey: MessageKey; descriptionKey: Messag
         descriptionKey: "tools.items.runShell.description",
     },
     {
+        id: "calculator",
+        nameKey: "tools.items.calculator.name",
+        descriptionKey: "tools.items.calculator.description",
+    },
+    {
         id: "memory",
         nameKey: "tools.items.memory.name",
         descriptionKey: "tools.items.memory.description",

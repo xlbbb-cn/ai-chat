@@ -55,6 +55,8 @@ pub(crate) fn call_mode(name: &str, args: &Value, is_mcp: bool) -> CallMode {
         }
         // Read-only within one skill directory.
         "skill_read" => CallMode::Concurrent,
+        // Pure computation with no shared state at all.
+        "calculator" => CallMode::Concurrent,
         // A delegation owns its own mission, MCP session and deliverable
         // directory; two delegations in one round are independent.
         "call_subagent" => CallMode::Concurrent,
@@ -111,6 +113,7 @@ mod tests {
         assert_eq!(mode("run_cmd", json!({})), CallMode::Concurrent);
         assert_eq!(mode("run_shell", json!({})), CallMode::Concurrent);
         assert_eq!(mode("skill_read", json!({})), CallMode::Concurrent);
+        assert_eq!(mode("calculator", json!({})), CallMode::Concurrent);
         assert_eq!(mode("call_subagent", json!({})), CallMode::Concurrent);
     }
 

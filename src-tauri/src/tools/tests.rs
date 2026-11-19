@@ -151,6 +151,24 @@ fn mcp_self_is_advertised_only_in_self_evolution_mode() {
     );
 }
 
+/// `calculator` is an ordinary opt-in tool: advertised only when the user
+/// selected it, and never forced on by self-evolution mode.
+#[test]
+fn calculator_is_advertised_only_when_selected() {
+    let advertised = |selected: &[String], self_evolution: bool| {
+        super::get_all_tools(selected, self_evolution, false, false)
+            .iter()
+            .any(|tool| tool["function"]["name"] == "calculator")
+    };
+
+    assert!(!advertised(&[], false), "calculator is off by default");
+    assert!(advertised(&["calculator".to_string()], false));
+    assert!(
+        !advertised(&["file_actions".to_string()], true),
+        "self-evolution mode must not force the calculator on"
+    );
+}
+
 #[test]
 fn background_flag_and_control_tool_are_only_advertised_when_enabled() {
     let tools = super::get_all_tools(

@@ -39,7 +39,7 @@
 | --- | :---: | :---: | :---: | :---: | :---: |
 | **Skills 沙箱** —— 每个工作区**唯一**的技能根目录 `.data/skills`，根目录锁定在自身 `SKILL.md` | ✅ | ✅ 系统级沙箱工作区 | ◐ Agent 工作区 | — | — |
 | **自我进化** —— 助手自行安装/修改/删除技能，并把已验证的关键事实存进专属记忆区 | ✅ | ◐ 对话式创建插件 | — | — | — |
-| **内置 Agent 工具** —— 4 级 memory（`session` / `user` / `repo` / `evolution`）、timer、todos | ✅ | ◐ 定时任务 | ◐ 定时任务 | — | — |
+| **内置 Agent 工具** —— 4 级 memory（`session` / `user` / `repo` / `evolution`）、计算器、timer、todos | ✅ | ◐ 定时任务 | ◐ 定时任务 | — | — |
 | **Agent 运行时** —— LLM、本地 CLI 或远程 cloud，界面内自由配置 | ✅ | ✅ LLM + CLI（可委派 Codex / Claude Code） | ◐ LLM Agent | — | — |
 | **无需账户登录** —— 只要一个 API Key 或本地模型即可运行，无注册、实名门槛 | ✅ | ◐ 默认登录 DeepSeek 账号（也可用官方 API Key） | ✅ | ✅ | ✅ |
 | **提示词自主** —— 无默认人设、无隐藏改写；你的 system message 是基底，只追加工具/技能说明 | ✅ | ◐ 提示词分区可替换 | ◐ 助手提示词 | ◐ 提示词库 | ◐ 按模型提示词 |

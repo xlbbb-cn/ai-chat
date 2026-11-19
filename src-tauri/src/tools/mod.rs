@@ -9,6 +9,7 @@ use self::risk::{generate_risk_report, score_to_risk_level};
 use self::search::{run_integrated_search, SearchOptions, SEARCH_MAX_MATCHES};
 
 pub(crate) mod batch;
+pub(crate) mod calculator;
 mod execute;
 pub(crate) mod experience;
 mod file_actions;
