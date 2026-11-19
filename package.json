@@ -1,7 +1,7 @@
 {
   "name": "rabbit-chat-studio",
   "private": true,
-  "version": "3.5.6",
+  "version": "3.5.7",
   "license": "MIT",
   "type": "module",
   "scripts": {
