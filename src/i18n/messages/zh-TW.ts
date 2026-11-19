@@ -63,8 +63,6 @@ const zhTW: Messages = {
         workspaceBusy: "回覆仍在進行，回合結束後可切換。",
         workspaceShadowNote: "此視窗使用獨立的設定副本，工作區歷史共用。",
 
-        emptyStart: "開始一段對話",
-        emptyHint: "使用{skills}設定系統提示詞，或在{settings}中設定 API。",
         dream: {
             hint: "點擊讓我小憩一下",
             sleeping: "正在小憩，整理技能與記憶…",
@@ -83,6 +81,21 @@ const zhTW: Messages = {
             ariaStart: "點擊讓我小憩一下，整理技能與記憶",
             ariaRunning: "正在小憩並整理技能與記憶，雙擊可終止，不建議",
             failed: "記憶整理失敗：{error}",
+        },
+
+        tip: {
+            organizeMemory:
+                "用「記憶」工具記下可重複使用的事實，再到「設定 → 執行與偵錯」整理與合併記憶。",
+            archiveExperience:
+                "開啟「自我進化模式」後，請助手把成熟的流程打包成經驗，就能在其他工作區一鍵安裝。",
+            skills: "在「技能」面板啟用技能後，在輸入框輸入 /skill 即可按需載入。",
+            subAgents: "在新對話裡輸入 +代理程式，可把子代理程式的角色直接嵌入本次工作階段。",
+            fileMentions:
+                "在輸入框輸入 @ 引用工作區檔案；PDF 會自動轉換為 Markdown 供模型閱讀。",
+            figures: "請助手畫一張圖，回覆裡會出現可互動的圖表卡片，3D 場景還能拖曳旋轉。",
+            maintenance:
+                "開啟「自我進化模式」後，點擊上方的笑臉，助手會在你等待時整理技能與記憶。",
+            backup: "用標題列的 ⋯ 選單匯出備份，設定、技能、記憶和聊天記錄會一起打包。",
         },
 
         backupExportLabel: "正在匯出並壓縮備份…",

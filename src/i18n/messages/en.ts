@@ -73,8 +73,6 @@ const en = {
         workspaceShadowNote:
             "This window keeps its own settings; the workspace history is shared.",
 
-        emptyStart: "Start a conversation",
-        emptyHint: "Use {skills} to set a system prompt, or configure the API in {settings}.",
         dream: {
             hint: "Click to let me take a short nap",
             sleeping: "Napping while tidying skills and memory…",
@@ -93,6 +91,25 @@ const en = {
             ariaStart: "Click to let me take a short nap and tidy skills and memory",
             ariaRunning: "Napping while tidying skills and memory; double-click to stop, not recommended",
             failed: "Memory maintenance failed: {error}",
+        },
+
+        tip: {
+            organizeMemory:
+                "Use the Memory tool to save reusable facts, then open Settings → Runtime & Debug to review and consolidate them.",
+            archiveExperience:
+                "In Self-evolution mode, ask the assistant to pack a finished workflow into an experience you can install in any workspace.",
+            skills:
+                "Enable a skill in the Skills panel, then type /skill in the composer to load it on demand.",
+            subAgents:
+                "Type +agent in a fresh conversation to embed a sub-agent's role into this session.",
+            fileMentions:
+                "Type @ in the composer to attach a workspace file — PDFs are converted to Markdown automatically.",
+            figures:
+                "Ask for a diagram and it becomes an interactive figure card; drag 3D scenes to orbit them.",
+            maintenance:
+                "Turn on Self-evolution mode and click the face above to tidy skills and memory while you wait.",
+            backup:
+                "Use the titlebar ⋯ menu to export a backup — config, skills, memory and chat history in one zip.",
         },
 
         backupExportLabel: "Exporting and compressing the backup...",

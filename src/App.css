@@ -1524,6 +1524,29 @@ body {
   color: var(--c-muted);
 }
 
+/* Randomly rotating feature tip under the face. A quiet borderless surface —
+   no outline, no tail, no shadow, no accent — that slides down into place,
+   dwells, then slides further down and out before the next tip is mounted.
+   No hover/focus state: only the timer ever changes it. */
+.empty-tip {
+  width: min(420px, calc(100vw - 48px));
+  margin: 10px auto 0;
+  padding: 8px 12px;
+  border-radius: var(--r-sm);
+  background: var(--c-surface);
+  color: var(--c-body);
+  font-size: 13px;
+  line-height: 1.55;
+  text-align: center;
+  overflow-wrap: anywhere;
+  opacity: 0;
+  animation: empty-tip-in var(--t-dur) var(--t-ease) forwards;
+}
+
+.empty-tip--out {
+  animation: empty-tip-out var(--t-dur) var(--t-ease) forwards;
+}
+
 /* While the nap runs, the greeting's two lines become one live status block:
    the same 17px/500 title plus a 14px muted detail, so the empty state keeps
    its size when the greeting is swapped back in. Counts use tabular figures so
@@ -1613,13 +1636,11 @@ body {
 }
 
 /* Idle face — a round face with two tall blinking eyes (no mouth or other
-   features) that hops back and forth above the empty-state greeting while the
-   conversation is empty; class names keep the hopping motion. Pure CSS/SVG:
-   no image asset, token colours only (currentColor → --c-muted face, eyes →
-   --c-bg), no shadow. Nested layers keep the transforms independent: shuttle
-   (runner) / hop squash (bunny) / gaze (eyes group) / blink (each eye). The
-   gaze keyframes mirror the shuttle percentages so the face looks where it is
-   going. prefers-reduced-motion parks it, eyes open.
+   features) sitting still above the empty state; the only idle motion is the
+   blink. Pure CSS/SVG: no image asset, token colours only (currentColor →
+   --c-muted face, eyes → --c-bg), no shadow. The old shuttle / hop / gaze
+   layers are kept in the markup but have no animation, so the face never
+   travels, tilts or squashes; prefers-reduced-motion also stops the blink.
 
    The same face is the entry point of the silent evolution-maintenance turn:
    hovering it shows a small tooltip, clicking starts the pass, and while it
@@ -1629,15 +1650,14 @@ body {
   position: relative;
   display: flex;
   justify-content: center;
-  height: 56px;
+  height: 48px;
   color: var(--c-muted);
 }
 
 .rabbit-hop-runner {
   position: relative;
-  width: 120px;
-  height: 56px;
-  animation: rabbit-hop-path 7s var(--t-ease) infinite;
+  width: 48px;
+  height: 48px;
 }
 
 .rabbit-hop-bunny {
@@ -1649,7 +1669,6 @@ body {
   border-radius: var(--r-sm);
   color: inherit;
   transform-origin: 50% 100%;
-  animation: rabbit-hop-hop 0.62s ease-in-out infinite alternate;
 }
 
 /* Only the interactive button resets the native chrome and shows a pointer.
@@ -1682,11 +1701,10 @@ button.rabbit-hop-bunny:focus-visible {
   fill: var(--c-bg);
 }
 
-/* Gaze rides on the eyes group so it composes with each eye's blink. */
+/* The eyes group stays centred; only each eye's blink animates. */
 .rabbit-hop .rabbit-hop-eyes {
   transform-box: fill-box;
   transform-origin: 50% 50%;
-  animation: rabbit-hop-gaze 7s linear infinite;
 }
 
 /* Each eye is a tall ellipse; blink squashes it around its own centre. */
@@ -1837,11 +1855,10 @@ button.rabbit-hop-bunny:focus-visible {
   animation-delay: 1.6s;
 }
 
-/* Sleeping: the shuttle parks in the middle, the hop becomes a slow breath,
-   the gaze stops and each eye squashes into a thin closed line. */
+/* Sleeping: the face stays put, the stillness becomes a slow breath and each
+   eye squashes into a thin closed line. */
 .rabbit-hop--sleeping .rabbit-hop-runner {
-  animation: none;
-  transform: translateX(36px);
+  transform: none;
 }
 
 .rabbit-hop--sleeping .rabbit-hop-bunny {
@@ -1858,37 +1875,11 @@ button.rabbit-hop-bunny:focus-visible {
   transition: transform var(--t-dur) var(--t-ease);
 }
 
-@keyframes rabbit-hop-path {
-  0%, 10% { transform: translateX(0); }
-  46%, 54% { transform: translateX(72px); }
-  90%, 100% { transform: translateX(0); }
-}
-
-/* Same 7s timeline as the shuttle: centre while resting, glance toward the
-   direction of travel while crossing, back to centre at each end. */
-@keyframes rabbit-hop-gaze {
-  0%, 10% { transform: translateX(0); }
-  14%, 42% { transform: translateX(2.2px); }
-  46%, 54% { transform: translateX(0); }
-  58%, 86% { transform: translateX(-2.2px); }
-  90%, 100% { transform: translateX(0); }
-}
-
 /* Quick squash to a thin line, then open again — about once per 4.6s. */
 @keyframes rabbit-hop-blink {
   0%, 91%, 100% { transform: scaleY(1); }
   94.5% { transform: scaleY(0.1); }
   98% { transform: scaleY(1); }
-}
-
-/* Landing squash (scale) at the ground, stretch and tilt at the top. */
-@keyframes rabbit-hop-hop {
-  from {
-    transform: translateY(0) scale(1.06, 0.92);
-  }
-  to {
-    transform: translateY(-14px) scale(0.98, 1.04) rotate(-7deg);
-  }
 }
 
 @keyframes rabbit-hop-breathe {
@@ -1899,6 +1890,16 @@ button.rabbit-hop-bunny:focus-visible {
 @keyframes rabbit-hop-bubble-in {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+
+@keyframes empty-tip-in {
+  from { opacity: 0; transform: translateY(-14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes empty-tip-out {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(14px); }
 }
 
 /* The track is the glyph list twice; -50% lands exactly on the second copy,
@@ -1915,27 +1916,22 @@ button.rabbit-hop-bunny:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rabbit-hop-runner,
-  .rabbit-hop-bunny,
-  .rabbit-hop .rabbit-hop-eyes,
   .rabbit-hop .rabbit-hop-eye,
   .rabbit-hop-bubble,
   .rabbit-hop-dream-track,
   .rabbit-hop-zzz span,
-  .empty-dream-result {
+  .empty-dream-result,
+  .empty-tip {
     animation: none;
   }
 
-  .empty-dream-result {
+  .empty-dream-result,
+  .empty-tip {
     opacity: 1;
   }
 
   .rabbit-hop-hint {
     transition: none;
-  }
-
-  .rabbit-hop--sleeping .rabbit-hop-runner {
-    transform: translateX(36px);
   }
 
   .rabbit-hop--sleeping .rabbit-hop-bunny {

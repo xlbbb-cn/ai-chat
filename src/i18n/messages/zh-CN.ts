@@ -63,8 +63,6 @@ const zhCN: Messages = {
         workspaceBusy: "回复仍在进行，回合结束后可切换。",
         workspaceShadowNote: "此窗口使用独立的设置副本，工作区历史共用。",
 
-        emptyStart: "开始一段对话",
-        emptyHint: "使用{skills}设置系统提示词，或在{settings}中配置 API。",
         dream: {
             hint: "点击让我小憩一下",
             sleeping: "正在小憩，整理技能与记忆…",
@@ -83,6 +81,21 @@ const zhCN: Messages = {
             ariaStart: "点击让我小憩一下，整理技能与记忆",
             ariaRunning: "正在小憩并整理技能与记忆，双击可终止，不建议",
             failed: "记忆整理失败：{error}",
+        },
+
+        tip: {
+            organizeMemory:
+                "用「记忆」工具记下可复用的事实，再到「设置 → 运行与调试」里整理与合并记忆。",
+            archiveExperience:
+                "开启「自我进化模式」后，让助手把成熟的流程打包成经验，就能在其他工作区一键安装。",
+            skills: "在「技能」面板启用技能后，在输入框输入 /skill 即可按需加载。",
+            subAgents: "在新对话里输入 +智能体，可把子智能体的角色直接嵌入本次会话。",
+            fileMentions:
+                "在输入框输入 @ 引用工作区文件；PDF 会自动转换为 Markdown 供模型阅读。",
+            figures: "让助手画一张图，回复里会出现可交互的图表卡片，3D 场景还能拖动旋转。",
+            maintenance:
+                "开启「自我进化模式」后，点击上方的笑脸，助手会在你等待时整理技能与记忆。",
+            backup: "用标题栏的 ⋯ 菜单导出备份，配置、技能、记忆和聊天记录会一起打包。",
         },
 
         backupExportLabel: "正在导出并压缩备份…",

@@ -842,37 +842,37 @@ the waiting tool call can always be unblocked.
 
 #### Empty-state nap face (evolution maintenance)
 
-The smiley above the empty-state greeting is an action while
-`self_evolution_mode` is on. It is a real `<button>` around the same SVG (the
-hopping animation is unchanged); the decorative hint/bubble layers sit beside
-it and are `aria-hidden`, while the button's `aria-label` carries the action.
-When the mode is off the same face is rendered as a plain decorative `<div>`:
-no hint, no hover treatment, no click handler and no focus target.
+The smiley above the empty state is an action while
+`self_evolution_mode` is on. It is a real `<button>` around the same SVG; the
+decorative hint/bubble layers sit beside it and are `aria-hidden`, while the
+button's `aria-label` carries the action. When the mode is off the same face is
+rendered as a plain decorative `<div>`: no hint, no hover treatment, no click
+handler and no focus target. The face never travels or tilts — its only idle
+motion is the eye blink.
 
 - **Idle:** hovering or focusing shows a 12px speech bubble — `--c-surface`,
   1px `--c-border-i`, 4px radius and a rotated 8px square tail pointing at the
   face — "点击让我小憩一下", fading in on `--t-dur` / `--t-ease` (opacity only,
-  no movement). The face keeps hopping.
-- **Running (the `rabbit-hop--sleeping` modifier):** the shuttle parks at
-  `translateX(36px)` (centred in its 120px lane), the hop is replaced by a slow
-  `scale` breathing loop, the gaze stops and each eye squashes to
+  no movement). The face stays still and keeps blinking.
+- **Running (the `rabbit-hop--sleeping` modifier):** the face stays in place,
+  the stillness becomes a slow `scale` breathing loop and each eye squashes to
   `scaleY(0.12)` — a closed line. The hint bubble moves above the nap bubble
   and reads "正在小憩，整理技能与记忆… · 双击可终止（不建议）".
-- **Status block:** while the pass runs, the greeting's two lines are replaced
-  by a two-line live status: a 17px/500 `--c-text` title ("正在整理技能与记忆…")
+- **Status block:** while the pass runs, the idle tip bubble is replaced by a
+  two-line live status: a 17px/500 `--c-text` title ("正在整理技能与记忆…")
   and a 14px `--c-muted` detail ("Dreaming Scene N/M", where N is the current
   round and M the executed tool-call count). The phase from
   `evolution-maintenance-state` (`inventory` / `files` / `skills` / `memory` /
   `wrap_up`) is kept as the detail line's `title` tooltip. Round and tool-call
   counts use tabular figures so changing numbers never shift the line.
-- **Result bubble:** a completed pass replaces the greeting with a clickable
-  speech bubble in the same slot: `--c-surface`, 1px `--c-border-i`, 4px
+- **Result bubble:** a completed pass replaces the idle tip bubble with a
+  clickable speech bubble in the same slot: `--c-surface`, 1px `--c-border-i`, 4px
   radius, a rotated 8px tail pointing up at the face, 13px `--c-body` text
   (the model's report, `pre-wrap`), a 13px/500 `--c-text` title and an 11px
   `--c-muted` "点击关闭" line. It is capped at 420px wide / `min(260px, 45vh)`
   tall with its own scroll area (the tail sits on the outer wrapper so scrolling
   cannot clip it). Clicking anywhere in the bubble dismisses it and restores the
-  greeting; starting a new pass also clears it. It fades in on `--t-dur` /
+  idle tip bubble; starting a new pass also clears it. It fades in on `--t-dur` /
   `--t-ease` (opacity only) and is static under `prefers-reduced-motion`. No
   extra colours, no elevation.
 - **Bubble:** 100×46px, `--c-surface` + 1px `--c-border-i`, 4px radius, no
@@ -882,16 +882,45 @@ no hint, no hover treatment, no click handler and no focus target.
   seamless. Three `z` glyphs (13/11/9px) drift up to the right of the bubble.
 - **Cancel:** two clicks inside a 320ms window on the napping face stop the
   pass; a keyboard activation (`detail === 0`) stops it immediately. A
-  double-click on the *hopping* face only starts the pass (the first click's
-  start is deliberately not treated as a cancel).
+  double-click on the idle face only starts the pass (the first click's start is
+  deliberately not treated as a cancel).
 - **Done / stopped / error:** the terminal event removes the bubble and
-  restores the hop. An error also surfaces through the normal `ChatNotice`
-  warning. Nothing is added to the transcript.
+  restores the idle blinking face. An error also surfaces through the normal
+  `ChatNotice` warning. Nothing is added to the transcript.
 - **Tokens only:** face `--c-muted`, eyes `--c-bg`, bubble/hint `--c-surface`
   with `--c-border-i`; no accent, no literal hex, no elevation.
-- **`prefers-reduced-motion: reduce`:** every loop stops — the face is parked
-  and breathing-less, eyes stay closed, the ticker is static and the `z`s are
+- **`prefers-reduced-motion: reduce`:** every loop stops — the face is still and
+  breathing-less, eyes stay closed, the ticker is static and the `z`s are
   visible at their offset positions.
+
+#### Empty-state feature tips
+
+While the chat is idle (empty transcript, no maintenance pass and no result
+bubble) the empty state is just the still, blinking face plus one small feature bubble
+underneath, which switches to a different random tip every 7s. It quietly
+teaches the discovery-level features a new user may never find on their own —
+Memory consolidation, archiving a workflow as a portable experience, skills,
+`+agent` roles, `@` file mentions, figure cards, the nap face and backup export.
+There is no separate "Start a conversation" headline or hint line in this idle
+state.
+
+- **Surface:** a quiet borderless, tailless surface — `--c-surface`, 4px radius,
+  no outline, no shadow, no accent, `min(420px, calc(100vw - 48px))` wide,
+  centred directly below the face. The single line of tip text is 13px
+  `--c-body` / 1.55 with `overflow-wrap: anywhere`.
+- **Interaction:** none. There is no hover or focus state, no click handler and
+  no pointer-driven reveal — the bubble only changes when the timer fires.
+- **Motion:** the timed rotation slides the current tip **down and out**
+  (`translateY(0 → 14px)`, opacity 1 → 0), then mounts the new tip keyed on its
+  index so it slides **in from above** (`translateY(-14px → 0)`, opacity 0 → 1).
+  Both use `--t-dur` / `--t-ease`; there is no hover transform, no scale and no
+  elevation. Under `prefers-reduced-motion: reduce` both animations are removed
+  and the tip stays at full opacity while its text swaps. Rotation is paused —
+  not merely hidden — while a nap runs or a result bubble is being read, and the
+  bubble is absent entirely once a conversation starts.
+- **i18n:** every tip is an `app.tip.*` message in en / zh-CN / zh-TW; the key
+  list lives beside `DREAM_PHASE_KEYS` in `App.tsx`. Adding a tip means adding
+  its string to all three catalogues and one key to that list.
 
 ### Chat transcript
 

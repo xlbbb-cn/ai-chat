@@ -227,11 +227,10 @@ function makeDreamGlyphs(count = 18): string[] {
 }
 
 /**
- * The round face (no mouth, no other features) that hops back and forth. The
- * eyes are tall ellipses (token cutouts) inside a gaze group — the group
- * glances toward the travel direction while each eye blinks on its own
- * transform. Shared by the interactive button and the plain decorative div so
- * both states stay pixel-identical.
+ * The round face (no mouth, no other features) sits still; only its tall
+ * ellipses (token cutouts) blink on their own transform. Shared by the
+ * interactive button and the plain decorative div so both states stay
+ * pixel-identical.
  */
 const DREAM_FACE = (
   <svg viewBox="0 0 64 64" role="presentation" focusable="false">
@@ -251,6 +250,27 @@ const DREAM_PHASE_KEYS = {
   memory: "app.dream.phase.memory",
   wrap_up: "app.dream.phase.wrap_up",
 } as const;
+
+/**
+ * Empty-state feature tips, rotated at random while the chat is idle so the
+ * home page quietly teaches the parts of the app a new user may not discover.
+ * Keys must exist in the message catalogue (en.ts is the type source).
+ */
+const EMPTY_TIP_KEYS = [
+  "app.tip.organizeMemory",
+  "app.tip.archiveExperience",
+  "app.tip.skills",
+  "app.tip.subAgents",
+  "app.tip.fileMentions",
+  "app.tip.figures",
+  "app.tip.maintenance",
+  "app.tip.backup",
+] as const;
+
+/** How long one empty-state tip stays on screen before the next random one. */
+const EMPTY_TIP_INTERVAL_MS = 7000;
+/** Wait for the downward slide-out to finish before swapping in the next tip. */
+const EMPTY_TIP_SWAP_MS = 340;
 
 /**
  * Paint the current theme + palette on `<html>`.
@@ -672,6 +692,11 @@ export default function App() {
    * instead of starting and immediately cancelling it.
    */
   const lastDreamClickRef = useRef(0);
+  /** Index of the feature tip shown under the face, and its slide phase. */
+  const [tipIndex, setTipIndex] = useState(() =>
+    Math.floor(Math.random() * EMPTY_TIP_KEYS.length),
+  );
+  const [tipPhase, setTipPhase] = useState<"in" | "out">("in");
   const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
   /**
    * Start a fresh conversation: drop the transcript, the turn-scoped bars and
@@ -1620,6 +1645,34 @@ export default function App() {
       unlisten.then((fn) => fn());
     };
   }, [setError, t]);
+
+  // Rotate the empty-state feature tip while the home page is idle: slide the
+  // current one downward, then mount a new random one that slides in from above.
+  // Paused during a nap or while a result bubble is read; nothing is scheduled
+  // for a non-empty chat, and both timers are cleared on every state change.
+  useEffect(() => {
+    if (messages.length !== 0 || dreamState !== "idle" || dreamResult) return;
+    setTipPhase("in");
+    let swapTimer: number | undefined;
+    const timer = window.setInterval(() => {
+      setTipPhase("out");
+      swapTimer = window.setTimeout(() => {
+        setTipIndex((current) => {
+          if (EMPTY_TIP_KEYS.length < 2) return current;
+          let next = current;
+          while (next === current) {
+            next = Math.floor(Math.random() * EMPTY_TIP_KEYS.length);
+          }
+          return next;
+        });
+        setTipPhase("in");
+      }, EMPTY_TIP_SWAP_MS);
+    }, EMPTY_TIP_INTERVAL_MS);
+    return () => {
+      window.clearInterval(timer);
+      if (swapTimer !== undefined) window.clearTimeout(swapTimer);
+    };
+  }, [messages.length, dreamState, dreamResult]);
 
   useEffect(() => {
     const unlisteners: Promise<() => void>[] = [];
@@ -5228,13 +5281,12 @@ export default function App() {
                 </div>
               ) : (
                 <>
-                  <p>{t("app.emptyStart")}</p>
-                  <p className="empty-hint">
-                    {t("app.emptyHint", {
-                      skills: t("app.toolbarSkills"),
-                      settings: t("app.toolbarSettings"),
-                    })}
-                  </p>
+                  <div
+                    className={`empty-tip${tipPhase === "out" ? " empty-tip--out" : ""}`}
+                    key={tipIndex}
+                  >
+                    {t(EMPTY_TIP_KEYS[tipIndex])}
+                  </div>
                 </>
               )}
             </div>
