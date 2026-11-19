@@ -1,0 +1,21 @@
+[package]
+name = "model-catalog"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+description = "Model capability catalogue builder: three public feeds merged into one model_metadata.json (a CI artifact the app fetches from GitHub Pages)"
+license = "MIT"
+
+[lib]
+name = "model_catalog"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The catalogue builder (`build_catalog`, used by bin `build-catalog` in CI and
+# by the live test) downloads the three feeds with its own blocking client.
+# The app never calls this code — it fetches the finished catalogue from
+# GitHub Pages with its own streaming client (src/http.rs) — but the dependency
+# still compiles for the workspace, so the TLS stack stays the reqwest default.
+reqwest = { version = "0.12", features = ["json", "blocking"] }

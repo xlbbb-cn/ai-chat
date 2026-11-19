@@ -2884,6 +2884,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "model-catalog"
+version = "0.1.0"
+dependencies = [
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "moxcms"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3874,7 +3883,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rabbit-chat-studio"
-version = "3.5.4"
+version = "3.5.5"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -3886,6 +3895,7 @@ dependencies = [
  "jieba-rs",
  "libc",
  "lopdf",
+ "model-catalog",
  "os_info",
  "pdf2md-rs",
  "regex",
@@ -4080,6 +4090,7 @@ dependencies = [
  "cookie",
  "cookie_store",
  "encoding_rs",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "h2",

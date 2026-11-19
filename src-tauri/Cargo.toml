@@ -47,6 +47,10 @@ base64 = "0.22"
 # by this crate (a library, not a CLI — see its README) and then inlined into
 # the prompt as text.
 pdf2md-rs = { path = "src/utils/pdf2md-rs" }
+# Model capability catalogue: this crate only *fetches* the file CI builds
+# (bin `build-catalog` inside pages.yml publishes it through GitHub Pages) —
+# the merge logic itself lives in the crate.
+model-catalog = { path = "src/utils/model-catalog" }
 
 [dev-dependencies]
 # The PDF mention command is tested against a real PDF generated on the fly.
@@ -86,4 +90,5 @@ members = [
   # Standalone library crates that live under the app's `src/utils/` folder.
   "src/utils/pdf2md-rs",
   "src/utils/knowledge_graph",
+  "src/utils/model-catalog",
 ]

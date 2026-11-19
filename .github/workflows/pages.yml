@@ -16,6 +16,11 @@ on:
       - 'docs/wiki/**'
       - 'scripts/gen-wiki.mjs'
       - '.github/workflows/pages.yml'
+  # 每周一重建一次 model_metadata.json（连同整站重新部署）：该文件由
+  # model-catalog crate 在部署时生成（三个公开目录合并为一个），应用直接从
+  # Pages 拉取，所以目录的更新节奏由这个定时器决定。
+  schedule:
+    - cron: '30 3 * * 1'
   workflow_dispatch:
 
 permissions:
@@ -38,6 +43,30 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # 仓库里的 .cargo/config.toml 把 crates-io 指向 rsproxy.cn（国内加速），
+      # runner 上不可达，先移除（同 release.yml）。
+      - name: Remove the cargo mirror config
+        run: rm -f .cargo/config.toml
+
+      # model_metadata.json 由 model-catalog crate 在这里生成（三个公开目录
+      # 合并成一个文件，构建失败或产出不合格时该步骤失败，部署中止），应用
+      # 直接从 Pages 拉取。只编译这一个 crate，不需要 WebKit 等系统依赖；
+      # reqwest 的 native-tls 需要 OpenSSL 头文件（同 release.yml）。
+      - name: Install OpenSSL dev headers
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Generate model metadata catalogue
+        working-directory: src-tauri
+        run: cargo run -p model-catalog --bin build-catalog -- ../docs/site/model_metadata.json
 
       - name: Generate architecture page
         run: python3 docs/gen.py
