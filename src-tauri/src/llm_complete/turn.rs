@@ -1448,6 +1448,58 @@ async fn run_tool_round(round: ToolRound<'_>, sr: &StreamResult, all_messages: &
     all_messages.extend(pending_skill_context_messages);
 }
 
+/// Drop one tool-call round — its assistant message plus the tool responses
+/// that follow it — from the request history, for the pairing-error retry.
+///
+/// `focus` is the `message[N]` index the provider reported, when it reports
+/// one: the round containing that index goes. Without a usable index (or when
+/// it names no round) the LAST round goes — the newest block is the one the
+/// failed request added, so it is the most likely offender. Messages after the
+/// dropped block (mid-turn injections delivered at the same boundary) are
+/// kept. Returns whether anything was dropped.
+pub(crate) fn drop_tool_round(messages: &mut Vec<Value>, focus: Option<usize>) -> bool {
+    let is_round_assistant = |msg: &Value| {
+        msg.get("role").and_then(|v| v.as_str()) == Some("assistant")
+            && msg
+                .get("tool_calls")
+                .and_then(|v| v.as_array())
+                .map(|tcs| !tcs.is_empty())
+                .unwrap_or(false)
+    };
+    let block_end = |messages: &[Value], assistant_idx: usize| -> usize {
+        let mut j = assistant_idx + 1;
+        while j < messages.len()
+            && messages[j].get("role").and_then(|v| v.as_str()) == Some("tool")
+        {
+            j += 1;
+        }
+        j
+    };
+    let last_round = |messages: &[Value]| -> Option<usize> {
+        (0..messages.len())
+            .rev()
+            .find(|&i| is_round_assistant(&messages[i]))
+    };
+
+    let Some(mut assistant_idx) = last_round(messages) else {
+        return false;
+    };
+    if let Some(n) = focus {
+        if n < messages.len() {
+            // The newest round assistant at or before the reported index —
+            // only its own block may claim the index.
+            if let Some(a) = (0..=n).rev().find(|&i| is_round_assistant(&messages[i])) {
+                if n < block_end(messages, a) {
+                    assistant_idx = a;
+                }
+            }
+        }
+    }
+    let end = block_end(messages, assistant_idx);
+    messages.drain(assistant_idx..end);
+    true
+}
+
 /// The whole chat turn: orchestration, the main-agent tool loop, and the
 /// final answer. Extracted from `chat_completion` so the command wrapper can
 /// run turn-end cleanup on every exit path (final answer, upstream error,
@@ -1621,13 +1673,16 @@ pub(crate) async fn run_chat_turn(
         cancelled: turn_cancelled.as_ref(),
     };
     // The reactive (context-overflow) compression may retry the request once
-    // per turn; the flag keeps that retry from looping.
+    // per turn; the flag keeps that retry from looping. Same pattern for the
+    // tool-pairing repair: a provider that rejects the message sequence over
+    // tool_call_id pairing gets ONE round-drop retry.
     let mut reactive_compress_used = false;
     // Set when a predictive compression ran but the estimate stayed above the
     // threshold — the static payload (system prompt + tool definitions) is
     // itself near the cap, so further pre-checks would only burn summary
     // calls. Reactive / post-response paths still cover the rest of the turn.
     let mut predictive_compress_saturated = false;
+    let mut pairing_repair_used = false;
 
     let (mut tools_list, mut mcp_tool_map, mut tools_revision) = build_turn_tools(
         &state,
@@ -1755,7 +1810,11 @@ pub(crate) async fn run_chat_turn(
 
         // Sanitize tool call pairs before each request to prevent the API error:
         // "Messages with role 'tool' must be a response to a preceding message with 'tool_calls'"
-        sanitize_tool_pairs(&mut all_messages);
+        // The strict variant validates the exact shape DashScope enforces
+        // (responses adjacent to their assistant, one per id), so a sequence
+        // the provider would reject is cleaned here instead of failing the
+        // request.
+        sanitize_tool_pairs_strict(&mut all_messages);
 
         // ── Mid-turn injections ──────────────────────────────────────────────
         // The user can append new information while the assistant is working
@@ -2067,6 +2126,46 @@ still missing."
                             &session_id,
                             &mut summary_coverage,
                             &outcome,
+                        );
+                        continue;
+                    }
+                }
+
+                // ── Reactive pairing repair (tool-id mismatch recovery) ─────
+                // A strict provider (DashScope) can 400 the request because a
+                // `tool` response does not sit in the block of the assistant
+                // that declared its id. Our own construction keeps each round
+                // adjacent by design, so the offending block is either a
+                // construction bug or something a relay mangled on the way
+                // through. Dropping the reported round and retrying once keeps
+                // the turn alive: the model loses that round's results but
+                // re-plans from everything before it. Without the repair this
+                // error killed the whole turn ("…does not match the
+                // tool_call_id…: messages: message[24]").
+                if !pairing_repair_used && is_tool_pairing_error(&err) {
+                    pairing_repair_used = true;
+                    let focus = reported_message_index(&err);
+                    // The message map is the only forensic record of the
+                    // rejected sequence — `request_body` is deliberately not
+                    // persisted in the monitor.
+                    log_event(
+                        &state,
+                        "WARN",
+                        format!(
+                            "tool-pairing request rejected, attempting repair: session_id={}, \
+                             focus={:?}, error={err}\n{}",
+                            session_id,
+                            focus,
+                            message_id_map(&all_messages),
+                        ),
+                    );
+                    if drop_tool_round(&mut all_messages, focus) {
+                        log_event(
+                            &state,
+                            "INFO",
+                            format!(
+                                "tool round dropped for the pairing retry: session_id={session_id}"
+                            ),
                         );
                         continue;
                     }

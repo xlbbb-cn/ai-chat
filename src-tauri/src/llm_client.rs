@@ -134,6 +134,163 @@ pub fn sanitize_tool_pairs(all_messages: &mut Vec<Value>) {
     *all_messages = cleaned;
 }
 
+/// DashScope-strict variant of [`sanitize_tool_pairs`].
+///
+/// The lenient version pairs a `tool` response with the newest assistant that
+/// declared its id, wherever that assistant sits in the array. DashScope (and
+/// strict OpenAI-compatible gateways) validate a tighter shape: every `tool`
+/// message must sit in the block that directly follows its assistant, and that
+/// block must answer every declared id exactly once — this is exactly what the
+/// `400 … The tool_call_id in the response message does not match the
+/// tool_call_id in the tool_call` rejection enforces. Where the two rules
+/// diverge, the lenient version blesses a sequence the provider then rejects,
+/// so what actually goes out is validated with the provider's own rule here.
+///
+/// On the sequences the chat loop builds this is a no-op: each round is pushed
+/// as one adjacent block (assistant, then its tool responses) and nothing is
+/// inserted between them.
+pub fn sanitize_tool_pairs_strict(all_messages: &mut Vec<Value>) {
+    if all_messages.is_empty() {
+        return;
+    }
+
+    let mut keep = vec![true; all_messages.len()];
+    let mut i = 0usize;
+    while i < all_messages.len() {
+        let role = all_messages[i]
+            .get("role")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if role == "assistant" {
+            // Declared ids, with multiplicities: a duplicated id needs one
+            // response per occurrence, so counts, not a set.
+            let mut pending: std::collections::HashMap<String, usize> =
+                std::collections::HashMap::new();
+            if let Some(tcs) = all_messages[i]
+                .get("tool_calls")
+                .and_then(|v| v.as_array())
+            {
+                for tc in tcs {
+                    if let Some(id) = tc.get("id").and_then(|v| v.as_str()) {
+                        *pending.entry(id.to_string()).or_insert(0) += 1;
+                    }
+                }
+            }
+            if !pending.is_empty() {
+                // The response block: the run of `tool` messages that directly
+                // follows the assistant.
+                let mut j = i + 1;
+                while j < all_messages.len()
+                    && all_messages[j]
+                        .get("role")
+                        .and_then(|v| v.as_str())
+                        == Some("tool")
+                {
+                    let call_id = all_messages[j]
+                        .get("tool_call_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    match pending.get_mut(&call_id) {
+                        Some(count) if *count > 0 => {
+                            *count -= 1;
+                        }
+                        _ => keep[j] = false, // orphan or duplicate response
+                    }
+                    j += 1;
+                }
+                if pending.values().any(|count| *count > 0) {
+                    // Incomplete round: the provider would reject it wholesale,
+                    // so the assistant AND its response block both go.
+                    keep[i] = false;
+                    for k in i + 1..j {
+                        keep[k] = false;
+                    }
+                }
+                i = j;
+                continue;
+            }
+            // A plain assistant without tool_calls falls through: `tool`
+            // messages after it have no adjacent declarer and are orphans.
+        }
+        if role == "tool" {
+            keep[i] = false;
+        }
+        i += 1;
+    }
+
+    let mut cleaned: Vec<Value> = Vec::with_capacity(all_messages.len());
+    for (i, msg) in all_messages.drain(..).enumerate() {
+        if keep[i] {
+            cleaned.push(msg);
+        }
+    }
+    *all_messages = cleaned;
+}
+
+/// Does an upstream error mean the provider rejected the message sequence over
+/// tool-call pairing? DashScope answers 400 when a `tool` response does not
+/// match the `tool_calls` of the assistant it follows, phrased several ways
+/// across providers/relays. The turn can repair that (drop the offending round
+/// and retry), so the error must be classified instead of staying fatal: a
+/// false positive costs one harmless repair retry, a false negative fails the
+/// turn.
+pub(crate) fn is_tool_pairing_error(err: &str) -> bool {
+    let lower = err.to_ascii_lowercase();
+    const PATTERNS: &[&str] = &[
+        "tool_call_id in the response message",
+        "must be followed by tool messages",
+        "must be a response to a preceding message",
+        "tool_call_ids did not have response messages",
+    ];
+    PATTERNS.iter().any(|pattern| lower.contains(pattern))
+}
+
+/// The `message[N]` index a provider's pairing error points at, when it
+/// reports one (`…: messages: message[24].`). Best effort: a relay may have
+/// rewritten the array, so the index is a hint, not a guarantee.
+pub(crate) fn reported_message_index(err: &str) -> Option<usize> {
+    let start = err.find("message[")? + "message[".len();
+    let rest = &err[start..];
+    let end = rest.find(']')?;
+    rest[..end].trim().parse::<usize>().ok()
+}
+
+/// Compact per-message id map for the pairing-repair log: index, role, the ids
+/// an assistant declares, and the id a `tool` response answers. No content is
+/// included — the full prompt is already in the interaction log, and this map
+/// only has to show the pairing structure DashScope complained about.
+pub(crate) fn message_id_map(messages: &[Value]) -> String {
+    const MAX_ASSISTANT_IDS: usize = 8;
+    let mut out = String::new();
+    for (i, msg) in messages.iter().enumerate() {
+        let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("?");
+        let mut line = format!("[{i}] {role}");
+        if let Some(tcs) = msg.get("tool_calls").and_then(|v| v.as_array()) {
+            let mut ids: Vec<String> = tcs
+                .iter()
+                .map(|tc| {
+                    tc.get("id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string()
+                })
+                .collect();
+            if ids.len() > MAX_ASSISTANT_IDS {
+                ids.truncate(MAX_ASSISTANT_IDS);
+                ids.push("…".to_string());
+            }
+            line.push_str(&format!(" calls={}", ids.join(",")));
+        }
+        if let Some(cid) = msg.get("tool_call_id").and_then(|v| v.as_str()) {
+            line.push_str(&format!(" for={cid}"));
+        }
+        out.push_str(&line);
+        out.push('\n');
+    }
+    out
+}
+
 pub struct StreamResult {
     pub finish_reason: String,
     pub tool_calls: Vec<(String, String, String)>,

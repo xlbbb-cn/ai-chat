@@ -883,6 +883,247 @@ fn image_inside_a_file_part_becomes_an_image_url() {
     assert_eq!(parts[1]["image_url"]["url"], json!("data:image/avif;base64,AAAA"));
 }
 
+// ─── Strict tool-pair sanitization ──────────────────────────────────────────
+//
+// DashScope validates a tighter shape than the lenient sanitizer pairs for:
+// every `tool` response must sit in the block directly following its
+// assistant, and that block must answer every declared id exactly once. Where
+// the two rules diverge the lenient version blesses a sequence the provider
+// then rejects with `400 … The tool_call_id in the response message does not
+// match the tool_call_id in the tool_call`. On the sequences the chat loop
+// builds the strict pass is a no-op.
+
+fn round_assistant(ids: &[&str]) -> Value {
+    json!({
+        "role": "assistant",
+        "content": null,
+        "tool_calls": ids.iter().map(|id| streamed_call(id)).collect::<Vec<_>>(),
+    })
+}
+
+fn tool_response(id: &str) -> Value {
+    json!({ "role": "tool", "tool_call_id": id, "content": "ok" })
+}
+
+#[test]
+fn strict_sanitize_keeps_healthy_rounds_and_between_round_messages() {
+    let mut messages = vec![
+        json!({ "role": "user", "content": "start" }),
+        round_assistant(&["c1"]),
+        tool_response("c1"),
+        // Injections and narrations between rounds are fine: they sit after
+        // the whole block, never inside one.
+        json!({ "role": "user", "content": "injected note" }),
+        round_assistant(&["c2", "c3"]),
+        tool_response("c2"),
+        tool_response("c3"),
+        json!({ "role": "assistant", "content": "answer" }),
+    ];
+    let expected = messages.clone();
+    sanitize_tool_pairs_strict(&mut messages);
+    assert_eq!(messages, expected);
+}
+
+#[test]
+fn strict_sanitize_drops_a_response_not_adjacent_to_its_assistant() {
+    // The lenient sanitizer pairs T(c1) with A(c1) across the interleaved
+    // user message; DashScope rejects exactly this shape — so the strict
+    // version must drop the orphan response AND the now-incomplete round.
+    let mut messages = vec![
+        json!({ "role": "user", "content": "start" }),
+        round_assistant(&["c1"]),
+        json!({ "role": "user", "content": "interrupted" }),
+        tool_response("c1"),
+    ];
+    sanitize_tool_pairs_strict(&mut messages);
+    assert_eq!(
+        messages,
+        vec![
+            json!({ "role": "user", "content": "start" }),
+            json!({ "role": "user", "content": "interrupted" }),
+        ]
+    );
+}
+
+#[test]
+fn strict_sanitize_drops_duplicate_and_orphaned_responses() {
+    // One response per declared id, in the block: the second T(c1) is a
+    // duplicate, T(c9) answers nothing.
+    let mut messages = vec![
+        round_assistant(&["c1", "c2"]),
+        tool_response("c1"),
+        tool_response("c1"),
+        tool_response("c9"),
+        tool_response("c2"),
+        json!({ "role": "assistant", "content": "answer" }),
+    ];
+    sanitize_tool_pairs_strict(&mut messages);
+    assert_eq!(
+        messages,
+        vec![
+            round_assistant(&["c1", "c2"]),
+            tool_response("c1"),
+            tool_response("c2"),
+            json!({ "role": "assistant", "content": "answer" }),
+        ]
+    );
+}
+
+#[test]
+fn strict_sanitize_drops_an_incomplete_round_with_its_block() {
+    // T(c2) never arrived (a dropped/cancelled round): the assistant and the
+    // whole block go — a partial round is rejected wholesale.
+    let mut messages = vec![
+        round_assistant(&["c1", "c2"]),
+        tool_response("c1"),
+        json!({ "role": "user", "content": "next" }),
+    ];
+    sanitize_tool_pairs_strict(&mut messages);
+    assert_eq!(messages, vec![json!({ "role": "user", "content": "next" })]);
+}
+
+#[test]
+fn strict_sanitize_drops_a_duplicated_id_only_once_per_occurrence() {
+    // Two calls sharing one id (a relay repeat): ensure_tool_call_ids
+    // normally prevents this, but the strict pass must still consume one
+    // response per occurrence and keep the round when both are answered.
+    let mut messages = vec![
+        round_assistant(&["c1", "c1"]),
+        tool_response("c1"),
+        tool_response("c1"),
+    ];
+    let expected = messages.clone();
+    sanitize_tool_pairs_strict(&mut messages);
+    assert_eq!(messages, expected);
+}
+
+// ─── Tool-pairing error classifier ──────────────────────────────────────────
+//
+// The turn can repair a pairing rejection (drop the offending round, retry
+// once); it must be classified instead of staying fatal.
+
+#[test]
+fn pairing_error_classifier_matches_the_provider_phrasings() {
+    assert!(is_tool_pairing_error(
+        "<400> InternalError.Algo.InvalidParameter: The tool_call_id in the response message does not match the tool_call_id in the tool_call: messages: message[24]."
+    ));
+    assert!(is_tool_pairing_error(
+        "400: An assistant message with 'tool_calls' must be followed by tool messages responding to each 'tool_call_id'."
+    ));
+    assert!(is_tool_pairing_error(
+        "400: Messages with role 'tool' must be a response to a preceding message with 'tool_calls'"
+    ));
+    assert!(is_tool_pairing_error(
+        "400 InvalidParameter: The following tool_call_ids did not have response messages: message[296].role"
+    ));
+    // Ordinary upstream failures must not trigger the repair.
+    assert!(!is_tool_pairing_error("429: rate limited"));
+    assert!(!is_tool_pairing_error(
+        "400: maximum context length exceeded"
+    ));
+    assert!(!is_tool_pairing_error("stream closed without finish_reason/[DONE]"));
+}
+
+#[test]
+fn reported_message_index_parses_the_reported_position() {
+    assert_eq!(
+        reported_message_index(
+            "<400> InternalError.Algo.InvalidParameter: The tool_call_id in the response message does not match the tool_call_id in the tool_call: messages: message[24]."
+        ),
+        Some(24)
+    );
+    // The `messages:` prefix must not swallow the bracketed index.
+    assert_eq!(
+        reported_message_index("…must be followed by tool messages: message[296].role"),
+        Some(296)
+    );
+    assert_eq!(reported_message_index("400: tool_call_id mismatch"), None);
+}
+
+#[test]
+fn message_id_map_lists_roles_and_ids_without_content() {
+    let messages = vec![
+        json!({ "role": "system", "content": "a very long system prompt" }),
+        round_assistant(&["c1", "c2"]),
+        tool_response("c1"),
+        json!({ "role": "user", "content": "injected" }),
+    ];
+    let map = message_id_map(&messages);
+    assert!(map.contains("[0] system\n"));
+    assert!(map.contains("[1] assistant calls=c1,c2\n"));
+    assert!(map.contains("[2] tool for=c1\n"));
+    assert!(map.contains("[3] user\n"));
+    assert!(!map.contains("very long system prompt"));
+}
+
+// ─── Pairing-repair round drop ──────────────────────────────────────────────
+//
+// `drop_tool_round` removes the round the provider's `message[N]` points at
+// (assistant + its following tool block), keeping everything after it.
+
+#[test]
+fn drop_tool_round_removes_the_reported_round_and_keeps_the_rest() {
+    let mut messages = vec![
+        json!({ "role": "user", "content": "start" }),
+        round_assistant(&["c1"]),
+        tool_response("c1"),
+        round_assistant(&["c2"]),
+        tool_response("c2"),
+        json!({ "role": "user", "content": "injected mid-turn" }),
+    ];
+    // message[3] is the second round's assistant.
+    assert!(drop_tool_round(&mut messages, Some(3)));
+    assert_eq!(
+        messages,
+        vec![
+            json!({ "role": "user", "content": "start" }),
+            round_assistant(&["c1"]),
+            tool_response("c1"),
+            json!({ "role": "user", "content": "injected mid-turn" }),
+        ]
+    );
+}
+
+#[test]
+fn drop_tool_round_removes_the_whole_block_when_the_index_names_a_response() {
+    let mut messages = vec![
+        round_assistant(&["c1", "c2"]),
+        tool_response("c1"),
+        tool_response("c2"),
+        json!({ "role": "user", "content": "after" }),
+    ];
+    // message[2] is the block's second tool response: the round goes whole.
+    assert!(drop_tool_round(&mut messages, Some(2)));
+    assert_eq!(messages, vec![json!({ "role": "user", "content": "after" })]);
+}
+
+#[test]
+fn drop_tool_round_falls_back_to_the_last_round_without_a_usable_index() {
+    let mut messages = vec![
+        round_assistant(&["c1"]),
+        tool_response("c1"),
+        round_assistant(&["c2"]),
+        tool_response("c2"),
+    ];
+    assert!(drop_tool_round(&mut messages, None));
+    assert_eq!(
+        messages,
+        vec![round_assistant(&["c1"]), tool_response("c1")]
+    );
+
+    // An index outside the array behaves the same way.
+    let mut messages = vec![round_assistant(&["c1"]), tool_response("c1")];
+    assert!(drop_tool_round(&mut messages, Some(999)));
+    assert!(messages.is_empty());
+}
+
+#[test]
+fn drop_tool_round_is_a_noop_without_any_round() {
+    let mut messages = vec![json!({ "role": "user", "content": "hi" })];
+    assert!(!drop_tool_round(&mut messages, None));
+    assert_eq!(messages.len(), 1);
+}
+
 #[test]
 fn image_data_url_detection_ignores_case() {
     let mut body = user_body(json!([file_part("a.png", "DATA:IMAGE/PNG;base64,CCCC")]));
