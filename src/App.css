@@ -71,6 +71,12 @@
   --c-reason-b: #D0D1D2;
   --c-toolbar: rgba(255, 255, 255, 0.62);
   /* frosted-glass nav */
+  /* Ambient empty-state particles: muted ink from the active palette, never
+     the accent. The dark block raises the alpha so the dots stay visible on
+     the canvas; both are derived, so every palette follows automatically. */
+  --c-particle: color-mix(in srgb, var(--c-muted) 42%, transparent);
+  /* Proximity links are quieter than the dots themselves. */
+  --c-particle-line: color-mix(in srgb, var(--c-muted) 20%, transparent);
 
   /* Accent — Electric Blue, primary calls to action only */
   --c-accent: #3E6AE1;
@@ -282,6 +288,8 @@
   --c-reason: rgba(255, 255, 255, 0.04);
   --c-reason-b: rgba(255, 255, 255, 0.14);
   --c-toolbar: rgba(23, 26, 32, 0.62);
+  --c-particle: color-mix(in srgb, var(--c-muted) 55%, transparent);
+  --c-particle-line: color-mix(in srgb, var(--c-muted) 28%, transparent);
 
   --c-accent: #5B7EF0;
   --c-accent-hover: #6F8DF3;
@@ -1509,6 +1517,10 @@ body {
   margin: auto;
   text-align: center;
   color: var(--c-muted);
+  /* Isolation keeps the particle layer behind the face without dropping it
+     under the transcript's own background. */
+  position: relative;
+  isolation: isolate;
 }
 
 .empty-state p {
@@ -1532,6 +1544,14 @@ body {
   width: min(420px, calc(100vw - 48px));
   margin: 10px auto 0;
   padding: 8px 12px;
+  /* Reserve two lines of height: the face and the particle field are anchored
+     to the top of .empty-state, so a tip rewrapping from one line to two must
+     not change the block's height and shift either animation. One line sits
+     centred in the same box as two. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(3.1em + 16px);
   border-radius: var(--r-sm);
   background: var(--c-surface);
   color: var(--c-body);

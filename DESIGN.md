@@ -97,6 +97,8 @@ All tokens live in `src/App.css`. Nothing else may define colour/radius/motion.
 | `--c-hover` | `rgba(23,26,32,.04)` | `rgba(255,255,255,.06)` | Hover fill |
 | `--c-active` | `rgba(23,26,32,.07)` | `rgba(255,255,255,.10)` | Pressed fill |
 | `--c-toolbar` | `rgba(255,255,255,.62)` | `rgba(23,26,32,.62)` | Frosted bars: toolbar, input area, sidebar, panel headers |
+| `--c-particle` | `color-mix(in srgb, var(--c-muted) 42%, transparent)` | `color-mix(in srgb, var(--c-muted) 55%, transparent)` | Ambient empty-state dots; derived from the palette's muted ink, never the accent |
+| `--c-particle-line` | `color-mix(in srgb, var(--c-muted) 20%, transparent)` | `color-mix(in srgb, var(--c-muted) 28%, transparent)` | Proximity links between those dots; quieter than the dots themselves |
 
 #### Frosted glass (`--glass-*`)
 
@@ -470,6 +472,10 @@ of the 120–200ms band the interaction spec asks for; anything longer reads as 
 in a keyboard-driven tool. The curve is a fast-out / slow-in ease (Out Quad). The
 only sanctioned deviation is `box-shadow 0.25s var(--t-ease)` on the inset
 focus/active ring of primary buttons.
+
+Ambient decoration is the one other exception: the empty-state particle layer
+uses a damped random walk rather than a transition — there is no easing token
+or period to reuse. `prefers-reduced-motion` freezes the field.
 
 ### Legacy aliases that must stay
 
@@ -893,6 +899,33 @@ motion is the eye blink.
   breathing-less, eyes stay closed, the ticker is static and the `z`s are
   visible at their offset positions.
 
+#### Ambient floating particles
+
+While the transcript is empty, a quiet particle layer sits behind the face and
+the tip bubble. Dots are spread with a golden-angle spiral and drift between
+two bounds by a damped random walk — they never assemble into a shape. When two
+dots come within the link distance, a faint hairline joins them, so the field
+reads as a few quiet connections rather than a mesh. It is background motion,
+never a second focus target: 2–3px dots, no glow, no shadow, no pointer events,
+`aria-hidden`, and no layout box of its own.
+
+- **Colour:** `--c-particle` for the dots and `--c-particle-line` for the links,
+  both derived from the palette's `--c-muted` with a higher alpha on dark. Never
+  `--c-accent`: the accent marks the primary action of a view, it is not
+  decoration.
+- **Motion:** each dot keeps a velocity that receives a small random impulse
+  and decays every frame, so it wanders smoothly and reflects at the field's
+  edge. Links are recomputed with the dots every frame and fade out as their
+  endpoints drift apart. Under `prefers-reduced-motion: reduce` the loop stops
+  and the field, including its links, stays still.
+- **Links:** pairs within 58 viewBox units get a 1px `--c-particle-line`
+  hairline; a 180-segment pool covers the field, and the closest pairs win if
+  the field ever gets crowded. The line opacity fades with distance — there is
+  no snap at the threshold.
+- **Placement:** anchored at the face's centre inside `.empty-state`, behind
+  the face and bubble via an isolated stacking context. It scrolls with the
+  empty state and disappears the moment a conversation starts.
+
 #### Empty-state feature tips
 
 While the chat is idle (empty transcript, no maintenance pass and no result
@@ -906,8 +939,12 @@ state.
 
 - **Surface:** a quiet borderless, tailless surface — `--c-surface`, 4px radius,
   no outline, no shadow, no accent, `min(420px, calc(100vw - 48px))` wide,
-  centred directly below the face. The single line of tip text is 13px
-  `--c-body` / 1.55 with `overflow-wrap: anywhere`.
+  centred directly below the face. Tip text is 13px `--c-body` / 1.55 with
+  `overflow-wrap: anywhere`.
+- **Layout stability:** the bubble reserves two lines of height
+  (`min-height: calc(3.1em + 16px)`) and centres its text in that box. Whether a
+  tip wraps to one line or two, the empty state keeps the same height, so the
+  face's blink and the anchored particle field never shift.
 - **Interaction:** none. There is no hover or focus state, no click handler and
   no pointer-driven reveal — the bubble only changes when the timer fires.
 - **Motion:** the timed rotation slides the current tip **down and out**

@@ -16,6 +16,7 @@ import type {
   ChatNoticeState,
   ChatNoticeTone,
 } from "./components/ChatNotice";
+import { FloatingParticles } from "./components/FloatingParticles";
 import { FileMentionPopup } from "./components/FileMentionPopup";
 import { SlashMentionPopup } from "./components/SlashMentionPopup";
 import { AgentMentionPopup } from "./components/AgentMentionPopup";
@@ -5197,6 +5198,7 @@ export default function App() {
         <div className="messages" ref={messagesRef} onScroll={handleMessagesScroll}>
           {messages.length === 0 && (
             <div className="empty-state">
+              <FloatingParticles />
               <div
                 className={`rabbit-hop${selfEvolutionMode && dreamState === "running" ? " rabbit-hop--sleeping" : ""}`}
                 aria-hidden={selfEvolutionMode ? undefined : true}
