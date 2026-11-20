@@ -473,7 +473,7 @@ pub(crate) const CONTEXT_SUMMARY_SYSTEM_PROMPT: &str = "You compress a conversat
 Transcript markers: a `[user]` line beginning with a bracketed marker was injected by the \
 runtime, not typed by the user. `[User update received while you were working` wraps a REAL \
 user addition written mid-turn — include the text inside it in section 6. \
-`[BACKGROUND TASK RESULT`, `[INTERNAL CONTEXT -` and `⏱️ [Timer fired` are automatic notices — \
+`[BACKGROUND TASK RESULT`, `[INTERNAL CONTEXT -` and `[Timer fired` are automatic notices — \
 reflect their content in sections 7-9 where relevant, but do not count them as user messages.\n\n\
 Keep file paths, commands, identifiers and code references EXACT. Be dense and factual; no preamble, no closing remarks.";
 

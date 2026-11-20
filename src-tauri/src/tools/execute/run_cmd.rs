@@ -55,7 +55,7 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
     let scripts_dir = crate::workspace::scripts_root(&workspace_dir);
     let resolved = match scripts::resolve(&workspace_dir, program) {
         Ok(resolved) => resolved,
-        Err(err) => return format!("⛔ {err}"),
+        Err(err) => return format!("Error: {err}"),
     };
 
     // ── Allowed-commands enforcement (skill context) ──────────────────
@@ -84,7 +84,7 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
         }
         if !permitted {
             return format!(
-                "⛔ Command '{}' is not in this skill's allowed-commands list ({}).",
+                "Error: Command '{}' is not in this skill's allowed-commands list ({}).",
                 exe_name,
                 allowed_commands.join(", ")
             );
@@ -129,7 +129,7 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
         );
 
         return format!(
-            "⛔ Syntax gate blocked: the script is syntactically invalid and will not run\n\n\
+            "Error: Syntax gate blocked: the script is syntactically invalid and will not run\n\n\
             Error details:\n{}\n\n\
             Fix suggestions:\n{}\n\n\
             Structured report:\n```json\n{}\n```",
@@ -166,7 +166,7 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
     for path in &scan_targets {
         match scripts::scan(path) {
             Ok(scan) => scans.push(scan),
-            Err(err) => return format!("⛔ Script safety scan failed: {err}"),
+            Err(err) => return format!("Error: Script safety scan failed: {err}"),
         }
     }
 
@@ -233,7 +233,7 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
             session_id,
             call_id,
             format!(
-                "✅ *Risk assessment passed: {} (score: {}) - running directly*\n\n```\n{}\n```\n\n",
+                "*Risk assessment passed: {} (score: {}) - running directly*\n\n```\n{}\n```\n\n",
                 report.risk_level, report.risk_score, command
             ),
         );
@@ -312,7 +312,7 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
     .await;
 
     if !confirm.confirmed {
-        let mut out = String::from("⛔ Execution rejected by user");
+        let mut out = String::from("Error: Execution rejected by user");
         if needs_risk_confirmation {
             out.push_str(&format!(
                 "\n\nRisk level: {}\nRisk score: {}\nDisposition: {}\n\nStructured report:\n```json\n{}\n```",
@@ -347,12 +347,12 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
         call_id,
         if needs_risk_confirmation {
             format!(
-                "⚠️ *User confirmed execution: {} (score: {})*\n\n```\n{}\n```\n\n",
+                "*User confirmed execution: {} (score: {})*\n\n```\n{}\n```\n\n",
                 report.risk_level, report.risk_score, command
             )
         } else {
             format!(
-                "⚠️ *User approved script content: {}*\n\n```\n{}\n```\n\n",
+                "*User approved script content: {}*\n\n```\n{}\n```\n\n",
                 unapproved
                     .iter()
                     .map(|scan| scan.file_name.as_str())

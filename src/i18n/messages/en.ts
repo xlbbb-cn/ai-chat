@@ -762,7 +762,7 @@ const en = {
         testingTitle: "Testing connection…",
         toggleTitle: "Click to {action} {name}",
         logsTitle: "Logs: {name}",
-        cancelTest: "⏹ Cancel Test",
+        cancelTest: "Cancel Test",
         testInProgress: "Test in progress — logs auto-refresh every 1.5s",
         noLogs: "No log entries yet. Run a test to populate.",
         logCount: {

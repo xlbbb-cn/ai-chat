@@ -147,10 +147,8 @@ where
 
         let status = if cancel_for_task.load(Ordering::SeqCst) {
             tools::background::BgStatus::Cancelled
-        } else if result.starts_with('⛔')
-            || result.starts_with("Error")
+        } else if result.trim_start().starts_with("Error")
             || result.contains("timed out after")
-            || result.contains("⏱ timeout")
         {
             tools::background::BgStatus::Failed
         } else {
@@ -201,7 +199,7 @@ where
     });
 
     Ok(format!(
-        "⏳ Background task started: {task_id} ({tool_name})\n\n\
+        "Background task started: {task_id} ({tool_name})\n\n\
          The call is running in the background. Continue with independent work; do NOT poll it.\n\
          - Its result is delivered automatically before your next request when it finishes.\n\
          - If you need it sooner: background_task {{\"action\":\"wait\",\"task_ids\":[\"{task_id}\"],\"timeout_seconds\":60}}\n\

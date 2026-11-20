@@ -979,7 +979,7 @@ pub(super) async fn handle_todos_tool(
             let Some(session_id) = session_id else {
                 return "Error: todos requires an active chat session.".to_string();
             };
-            let _ = emit_tool_progress(app, mission_id, session_id, call_id, "📋 *Listing active todos*\n".to_string());
+            let _ = emit_tool_progress(app, mission_id, session_id, call_id, "*Listing active todos*\n".to_string());
             match get_active_list(app, session_id) {
                 Ok(Some(summary)) => {
                     serde_json::to_string_pretty(&summary).unwrap_or_else(|_| "null".to_string())
@@ -1005,7 +1005,7 @@ pub(super) async fn handle_todos_tool(
                 mission_id,
                 session_id,
                 call_id,
-                format!("✅ *Adding todo: {}*\n", title.trim()),
+                format!("*Adding todo: {}*\n", title.trim()),
             );
             match add_todo(app, session_id, &title, &description) {
                 Ok(summary) => {
@@ -1038,7 +1038,7 @@ pub(super) async fn handle_todos_tool(
                 mission_id,
                 session_id,
                 call_id,
-                format!("🔄 *Updating todo status: {} → {}*\n", id_preview, status),
+                format!("*Updating todo status: {} → {}*\n", id_preview, status),
             );
             match update_todo_status(app, session_id, todo_id, status) {
                 Ok(record) => {
@@ -1063,7 +1063,7 @@ pub(super) async fn handle_todos_tool(
                 mission_id,
                 session_id,
                 call_id,
-                "🧹 *Clearing completed todos*\n".to_string(),
+                "*Clearing completed todos*\n".to_string(),
             );
             match clear_completed(app, session_id) {
                 Ok(summary) => {
@@ -1095,7 +1095,7 @@ pub(super) async fn handle_todos_tool(
                 session_id,
                 call_id,
                 format!(
-                    "📦 *Archiving todo list, starting new: {}*\n",
+                    "*Archiving todo list, starting new: {}*\n",
                     new_title.unwrap_or("Working plan")
                 ),
             );
@@ -1134,7 +1134,7 @@ pub(super) async fn handle_todos_tool(
                 session_id,
                 call_id,
                 format!(
-                    "❓ *Asking the user {} question(s)*\n",
+                    "*Asking the user {} question(s)*\n",
                     questions.len()
                 ),
             );

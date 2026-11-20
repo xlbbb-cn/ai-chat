@@ -49,7 +49,7 @@ pub(super) async fn handle_file_actions(
     let backup_root = Some(skills_root.as_path());
     match action {
         "read" => {
-            let _ = emit_tool_progress(app, mission_id, session_id, call_id, format!("📄 *Reading {}*\n\n", path_str));
+            let _ = emit_tool_progress(app, mission_id, session_id, call_id, format!("*Reading {}*\n\n", path_str));
             let start_line = args["start_line"].as_i64();
             let end_line = args["end_line"].as_i64();
             match resolve_file_action_path(path_str, &root_dir, true) {
@@ -128,7 +128,7 @@ pub(super) async fn handle_file_actions(
         }
         "write" => {
             let content_str = args["content"].as_str().unwrap_or("");
-            let _ = emit_tool_progress(app, mission_id, session_id, call_id, format!("💾 *Writing {}*\n\n", path_str));
+            let _ = emit_tool_progress(app, mission_id, session_id, call_id, format!("*Writing {}*\n\n", path_str));
             match resolve_file_action_path(path_str, &root_dir, false) {
                 Ok(p) => {
                     if let Err(e) = ensure_mutation_target_allowed(
@@ -171,7 +171,7 @@ pub(super) async fn handle_file_actions(
             }
         }
         "list" => {
-            let _ = emit_tool_progress(app, mission_id, session_id, call_id, format!("📂 *Listing {}*\n\n", path_str));
+            let _ = emit_tool_progress(app, mission_id, session_id, call_id, format!("*Listing {}*\n\n", path_str));
             match resolve_file_action_path(path_str, &root_dir, true) {
                 Ok(p) => {
                     match fs::metadata(&p) {
@@ -254,7 +254,7 @@ pub(super) async fn handle_file_actions(
                 session_id,
                 call_id,
                 format!(
-                    "🔎 *Searching {} for {}*\n\n",
+                    "*Searching {} for {}*\n\n",
                     path_str,
                     serde_json::to_string(&query).unwrap_or_else(|_| query.to_string())
                 ),
@@ -287,7 +287,7 @@ pub(super) async fn handle_file_actions(
                 mission_id,
                 session_id,
                 call_id,
-                format!("🔁 *Moving {} -> {}*\n\n", path_str, new_path),
+                format!("*Moving {} -> {}*\n\n", path_str, new_path),
             );
             if new_path.is_empty() {
                 return "Error: new_path is required for move/rename.".to_string();
@@ -373,7 +373,7 @@ pub(super) async fn handle_file_actions(
                     })
                     .unwrap_or_default(),
             };
-            let _ = emit_tool_progress(app, mission_id, session_id, call_id, format!("🩹 *Patching {}*\n\n", path_str));
+            let _ = emit_tool_progress(app, mission_id, session_id, call_id, format!("*Patching {}*\n\n", path_str));
             match resolve_file_action_path(path_str, &root_dir, true) {
                 Ok(p) => {
                     if let Err(e) = ensure_mutation_target_allowed(
@@ -418,7 +418,7 @@ pub(super) async fn handle_file_actions(
                                 Err(e) => format!("Error writing patched file: {}", e),
                             },
                             Err(report) => format!(
-                                "⛔ Error applying patch to {}:\n{}",
+                                "Error: applying patch to {}:\n{}",
                                 path_str, report
                             ),
                         },
@@ -444,7 +444,7 @@ pub(super) async fn handle_file_actions(
                 mission_id,
                 session_id,
                 call_id,
-                format!("🔀 *Comparing {} → {}*\n\n", path_str, new_path),
+                format!("*Comparing {} → {}*\n\n", path_str, new_path),
             );
 
             let original_path =
@@ -490,7 +490,7 @@ pub(super) async fn handle_file_actions(
                 mission_id,
                 session_id,
                 call_id,
-                format!("📁 *Creating directory {}*\n\n", path_str),
+                format!("*Creating directory {}*\n\n", path_str),
             );
             match resolve_file_action_path(path_str, &root_dir, false) {
                 Ok(p) => {
@@ -514,7 +514,7 @@ pub(super) async fn handle_file_actions(
             }
         }
         "delete" => {
-            let _ = emit_tool_progress(app, mission_id, session_id, call_id, format!("🗑️ *Deleting {}*\n\n", path_str));
+        let _ = emit_tool_progress(app, mission_id, session_id, call_id, format!("*Deleting {}*\n\n", path_str));
             match resolve_file_action_path(path_str, &root_dir, true) {
                 Ok(p) => {
                     if let Err(e) = ensure_mutation_target_allowed(
@@ -593,7 +593,7 @@ fn resolve_file_action_path(
 }
 
 fn format_file_action_error(err: String) -> String {
-    if err.starts_with('⛔') {
+    if err.starts_with("Error") {
         err
     } else {
         format!("Error: {}", err)

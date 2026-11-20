@@ -1036,7 +1036,7 @@ pub(crate) async fn request_external_agent_approval(
 
     if !confirm.confirmed {
         return Some(format!(
-            "⛔ The user rejected running the {} agent '{}'. Do not retry it; ask the user how to proceed or do the work with the available tools.",
+            "Error: The user rejected running the {} agent '{}'. Do not retry it; ask the user how to proceed or do the work with the available tools.",
             backend.label(),
             agent.name
         ));

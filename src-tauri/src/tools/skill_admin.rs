@@ -138,7 +138,7 @@ pub(crate) fn handle_skill_merge(
         mission_id,
         session_id,
         call_id,
-        format!("🧩 *Merging skills into {}*\n\n", target),
+        format!("*Merging skills into {}*\n\n", target),
     );
 
     merge_skill(workspace_dir, args)

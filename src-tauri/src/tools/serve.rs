@@ -150,7 +150,7 @@ impl ServeRegistry {
             "No background serve processes are running.".to_string()
         } else {
             format!(
-                "✅ Stopped {running} running background serve process(es); removed {total} registry entries."
+                "Stopped {running} running background serve process(es); removed {total} registry entries."
             )
         }
     }
@@ -321,7 +321,7 @@ fn stop_entry(process: ServeProcess) -> String {
         "Removed finished"
     };
     format!(
-        "✅ {verb} serve process {} (pid {}, previous state: {})",
+        "{verb} serve process {} (pid {}, previous state: {})",
         process.id,
         process.pid,
         if was_running {
@@ -507,7 +507,7 @@ pub async fn start(
     });
 
     format!(
-        "✅ Background serve process started.\n\
+        "Background serve process started.\n\
          serve_id: {id}\n\
          pid: {pid}\n\
          shell: {shell_type}\n\

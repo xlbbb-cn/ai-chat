@@ -115,7 +115,7 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
         );
 
         return format!(
-            "⛔ Syntax gate blocked: the script is syntactically invalid and will not run\n\n\
+            "Error: Syntax gate blocked: the script is syntactically invalid and will not run\n\n\
             Error details:\n{}\n\n\
             Fix suggestions:\n{}\n\n\
             Structured report:\n```json\n{}\n```",
@@ -160,7 +160,7 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
             session_id,
             call_id,
             format!(
-                "✅ *Risk assessment passed: {} (score: {}) - running directly*\n\n```{}\n{}\n```\n\n",
+                "*Risk assessment passed: {} (score: {}) - running directly*\n\n```{}\n{}\n```\n\n",
                 report.risk_level, report.risk_score, shell_type, code
             ),
         );
@@ -213,7 +213,7 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
 
     if !confirm.confirmed {
         return format!(
-            "⛔ Execution rejected by user\n\n\
+            "Error: Execution rejected by user\n\n\
             Risk level: {}\n\
             Risk score: {}\n\
             Disposition: {}\n\n\
@@ -232,7 +232,7 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
         session_id,
         call_id,
         format!(
-            "⚠️ *User confirmed execution: {} (score: {})*\n\n```{}\n{}\n```\n\n",
+            "*User confirmed execution: {} (score: {})*\n\n```{}\n{}\n```\n\n",
             report.risk_level, report.risk_score, shell_type, code
         ),
     );

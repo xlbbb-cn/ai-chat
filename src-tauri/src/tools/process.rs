@@ -251,7 +251,7 @@ pub(crate) fn validate_path_resolved_program(program: &str) -> Result<(), String
     // like one bare name and only fail later with a confusing ENOENT.
     if looks_like_windows_path(trimmed) {
         return Err(format!(
-            "⛔ run_cmd only runs programs that PATH resolves (for example 'python' or \
+            "Error: run_cmd only runs programs that PATH resolves (for example 'python' or \
              'python3'). '{}' is a path — pass a bare program name instead, or use \
              `run_shell` when an absolute path is really needed.",
             trimmed
@@ -266,7 +266,7 @@ pub(crate) fn validate_path_resolved_program(program: &str) -> Result<(), String
 
     if !is_bare_name {
         return Err(format!(
-            "⛔ run_cmd only runs programs that PATH resolves (for example 'python' or \
+            "Error: run_cmd only runs programs that PATH resolves (for example 'python' or \
              'python3'). '{}' is a path — pass a bare program name instead, or use \
              `run_shell` when an absolute path is really needed.",
             trimmed
@@ -604,7 +604,7 @@ async fn run_prepared_cancellable(
         Some(Some(output)) => format_process_output(output, decode_hint),
         Some(None) => "Error: the command could not be awaited (process handle lost).".to_string(),
         None if cancel.load(Ordering::SeqCst) => {
-            "⛔ Background task cancelled — the process tree was terminated.".to_string()
+            "Error: Background task cancelled — the process tree was terminated.".to_string()
         }
         None => format!("Command timed out after {timeout_secs} seconds."),
     }

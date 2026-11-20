@@ -1218,7 +1218,7 @@ async fn run_tool_round(round: ToolRound<'_>, sr: &StreamResult, all_messages: &
             },
         };
         if let Some(notice) = &blocked {
-            let reason = if notice.starts_with("⛔ TOOL DISABLED") {
+            let reason = if notice.starts_with("Error: TOOL DISABLED") {
                 "disabled for this session"
             } else {
                 "turn tool budget spent"
@@ -1233,7 +1233,7 @@ async fn run_tool_round(round: ToolRound<'_>, sr: &StreamResult, all_messages: &
                     call_id: Some(id.clone()),
                     phase: Some("done".to_string()),
                     ok: Some(false),
-                    text: format!("🚫 *{name}* — not executed ({reason})"),
+                    text: format!("*{name}* — not executed ({reason})"),
                 },
             );
             log_app_event(
@@ -1429,7 +1429,7 @@ async fn run_tool_round(round: ToolRound<'_>, sr: &StreamResult, all_messages: &
             // A sub-agent owns its own task row (`agent-task-*`); a generic
             // tool row next to it would be a second, empty step. A
             // background-routed call owns one too — the `background-task-state`
-            // row — so it must not gain a settled "🔧 tool" twin.
+            // row — so it must not gain a settled "tool" twin.
             let backgrounded = config.background_tools
                 && background_requested(&call.parsed)
                 && call.name != "call_subagent";

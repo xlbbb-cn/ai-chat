@@ -325,7 +325,7 @@ pub async fn execute_tool(
                         session_id,
                         call_id,
                         format!(
-                            "⏱️ *Timer set: {}*\n\n```\n{}\n```\n",
+                            "*Timer set: {}*\n\n```\n{}\n```\n",
                             crate::timer::format_delay(delay_seconds),
                             entry.message
                         ),
@@ -381,7 +381,7 @@ pub async fn execute_tool(
                         mission_id,
                         session_id,
                         call_id,
-                        format!("⏱️ *Timer cancelled: {}*\n", entry.label),
+                        format!("*Timer cancelled: {}*\n", entry.label),
                     );
                     format!(
                         "Timer '{}' ({}) cancelled — it will no longer resume the conversation.",

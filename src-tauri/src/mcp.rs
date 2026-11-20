@@ -2177,7 +2177,7 @@ pub async fn invoke_mcp_tool_isolated(
             )),
         },
         _ = wait_cancelled(&cancel) => Err(
-            "⛔ Background task cancelled — the MCP request was abandoned.".to_string()
+            "Error: Background task cancelled — the MCP request was abandoned.".to_string()
         ),
     };
     log_mcp_call_result(state, server, tool_name, &result, None);

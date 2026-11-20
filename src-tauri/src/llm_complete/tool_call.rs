@@ -146,7 +146,7 @@ pub(crate) async fn run_tool_call(
             Some(session_id),
             Some(id),
             format!(
-                "🔌 *MCP [{}]: {}*\n\n{}",
+                "*MCP [{}]: {}*\n\n{}",
                 mcp_server.name,
                 actual_tool_name,
                 tool_args_block(&args_json)

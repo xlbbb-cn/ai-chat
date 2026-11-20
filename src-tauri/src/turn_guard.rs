@@ -221,12 +221,12 @@ impl ToolFailureGuard {
 
 /// Does a tool result represent a failure?
 ///
-/// The three prefixes are the ones the tool layer actually emits: `⛔` for a
-/// refused/failed tool, `Error` for the hand-written error strings in
-/// `tools/mod.rs` and `agents.rs`, and `MCP tool error` for a failed MCP call.
+/// The two prefixes are the ones the tool layer actually emits: `Error`/`Error:`
+/// for a refused or failed tool (every error string in `tools/` and
+/// `agents.rs` starts with it), and `MCP tool error` for a failed MCP call.
 pub fn tool_output_is_error(output: &str) -> bool {
     let text = output.trim_start();
-    text.starts_with('⛔') || text.starts_with("Error") || text.starts_with("MCP tool error")
+    text.starts_with("Error") || text.starts_with("MCP tool error")
 }
 
 /// Does a tool result count towards the failure budget?
@@ -242,7 +242,7 @@ pub fn counts_as_failure(output: &str, turn_cancelled: bool) -> bool {
 /// Answer for a call the turn's tool-call budget refused to run.
 pub fn budget_notice(tool: &str) -> String {
     format!(
-        "⛔ TURN BUDGET EXHAUSTED — the tool-call limit for this turn was reached, so `{tool}` was \
+        "Error: TURN BUDGET EXHAUSTED — the tool-call limit for this turn was reached, so `{tool}` was \
 not executed.\nNo further tool call will run in this turn. Answer now with the material already \
 collected and state plainly what is still missing."
     )
@@ -255,13 +255,13 @@ collected and state plainly what is still missing."
 pub fn disabled_notice(tool: &str, failures: u32, limit: u32, just_now: bool) -> String {
     if just_now {
         format!(
-            "⛔ TOOL DISABLED FOR THIS SESSION — `{tool}` failed {failures} time(s) in a row (limit \
+            "Error: TOOL DISABLED FOR THIS SESSION — `{tool}` failed {failures} time(s) in a row (limit \
 {limit}).\nIt will not run again in this session. Do not call it again: use a different tool or \
 MCP server, or tell the user what is blocking you."
         )
     } else {
         format!(
-            "⛔ TOOL DISABLED FOR THIS SESSION — `{tool}` was disabled after {failures} consecutive \
+            "Error: TOOL DISABLED FOR THIS SESSION — `{tool}` was disabled after {failures} consecutive \
 failure(s) (limit {limit}).\nThis call was not executed. Use a different tool or MCP server, or \
 tell the user what is blocking you."
         )
@@ -376,7 +376,7 @@ mod tests {
     /// The three error prefixes the tool layer emits are recognised.
     #[test]
     fn error_prefixes_are_recognised() {
-        assert!(tool_output_is_error("⛔ Command blocked"));
+        assert!(tool_output_is_error("Error: Command blocked"));
         assert!(tool_output_is_error("Error: file not found"));
         assert!(tool_output_is_error("MCP tool error: connection reset"));
         assert!(tool_output_is_error("  Error: indented"));

@@ -707,7 +707,7 @@ const zhCN: Messages = {
         testingTitle: "正在测试连接…",
         toggleTitle: "点击{action} {name}",
         logsTitle: "日志：{name}",
-        cancelTest: "⏹ 取消测试",
+        cancelTest: "取消测试",
         testInProgress: "测试进行中 —— 日志每 1.5 秒自动刷新",
         noLogs: "暂无日志。运行一次测试即可生成。",
         logCount: "{count} 条日志（每 1.5 秒自动刷新）",

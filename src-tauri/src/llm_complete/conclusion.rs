@@ -101,7 +101,7 @@ pub(crate) fn record_conclusion_to_memory(
                     crate::events::TOOL_CALL,
                     json!({
                         "session_id": session_id,
-                        "text": format!("🧠 *Conclusion distilled into evolution memory: {}*\n", key),
+                        "text": format!("*Conclusion distilled into evolution memory: {}*\n", key),
                     }),
                 );
             }
@@ -144,7 +144,7 @@ pub(crate) fn record_conclusion_to_memory(
                 crate::events::TOOL_CALL,
                 json!({
                     "session_id": session_id,
-                    "text": format!("🧠 *Conclusion recorded to {scope} memory: {}*\n", key),
+                    "text": format!("*Conclusion recorded to {scope} memory: {}*\n", key),
                 }),
             );
         }

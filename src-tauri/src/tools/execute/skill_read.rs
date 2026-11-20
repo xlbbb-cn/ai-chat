@@ -67,7 +67,7 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
                 mission_id,
                 session_id,
                 call_id,
-                format!("📄 *Reading skill file {}/{}*\n\n", skill_name, rel_path),
+                format!("*Reading skill file {}/{}*\n\n", skill_name, rel_path),
             );
 
             if !target_path.exists() {
@@ -139,7 +139,7 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
                 session_id,
                 call_id,
                 format!(
-                    "📂 *Listing skill directory {}/{}*\n\n",
+                    "*Listing skill directory {}/{}*\n\n",
                     skill_name, rel_path
                 ),
             );
@@ -217,7 +217,7 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
                 session_id,
                 call_id,
                 format!(
-                    "🔎 *Searching skill {} for {}*\n\n",
+                    "*Searching skill {} for {}*\n\n",
                     skill_name,
                     serde_json::to_string(&query).unwrap_or_else(|_| query.to_string())
                 ),

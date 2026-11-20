@@ -707,7 +707,7 @@ const zhTW: Messages = {
         testingTitle: "正在測試連線…",
         toggleTitle: "點選以{action} {name}",
         logsTitle: "日誌：{name}",
-        cancelTest: "⏹ 取消測試",
+        cancelTest: "取消測試",
         testInProgress: "測試進行中 —— 日誌每 1.5 秒自動重新整理",
         noLogs: "尚無日誌。執行一次測試即可產生。",
         logCount: "{count} 筆日誌（每 1.5 秒自動重新整理）",

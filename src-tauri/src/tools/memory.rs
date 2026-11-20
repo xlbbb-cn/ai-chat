@@ -2528,7 +2528,7 @@ pub(super) async fn handle_memory_tool(
             mission_id,
             session_id,
             call_id,
-            format!("🧠 *Memory {} across all scopes*\n", action),
+            format!("*Memory {} across all scopes*\n", action),
         );
 
         let mut sections: Vec<String> = Vec::new();
@@ -2587,7 +2587,7 @@ pub(super) async fn handle_memory_tool(
                     mission_id,
                     session_id,
                     call_id,
-                    format!("🧠 *Session memory stored: {}*\n", key),
+                    format!("*Session memory stored: {}*\n", key),
                 );
                 serde_json::to_string_pretty(&entry).unwrap_or_else(|_| entry.to_string())
             }
@@ -2602,7 +2602,7 @@ pub(super) async fn handle_memory_tool(
                             mission_id,
                             session_id,
                             call_id,
-                            format!("🧠 *Session memory retrieved: {}*\n", key),
+                            format!("*Session memory retrieved: {}*\n", key),
                         );
                         serde_json::to_string_pretty(entry).unwrap_or_else(|_| entry.to_string())
                     }
@@ -2619,7 +2619,7 @@ pub(super) async fn handle_memory_tool(
                     mission_id,
                     session_id,
                     call_id,
-                    format!("🧠 *Listing {} session memories*\n", keys.len()),
+                    format!("*Listing {} session memories*\n", keys.len()),
                 );
                 serde_json::to_string_pretty(&json!({
                     "scope": "session",
@@ -2663,7 +2663,7 @@ pub(super) async fn handle_memory_tool(
                     mission_id,
                     session_id,
                     call_id,
-                    format!("🧠 *Searching session memories for '{}'*\n", query),
+                    format!("*Searching session memories for '{}'*\n", query),
                 );
 
                 let has_in_memory = !in_memory_matches.is_empty();
@@ -2712,7 +2712,7 @@ pub(super) async fn handle_memory_tool(
                             mission_id,
                             session_id,
                             call_id,
-                            format!("🧠 *Session memory deleted: {}*\n", key),
+                            format!("*Session memory deleted: {}*\n", key),
                         );
                         format!("Session memory '{}' deleted.", key)
                     }
@@ -2768,7 +2768,7 @@ pub(super) async fn handle_memory_tool(
                             mission_id,
                             session_id,
                             call_id,
-                            format!("🧠 *{} memory stored: {}*\n", scope, key),
+                            format!("*{} memory stored: {}*\n", scope, key),
                         );
                         let entry = json!({
                             "key": key,
@@ -2796,7 +2796,7 @@ pub(super) async fn handle_memory_tool(
                             mission_id,
                             session_id,
                             call_id,
-                            format!("🧠 *{} memory retrieved: {}*\n", scope, key),
+                            format!("*{} memory retrieved: {}*\n", scope, key),
                         );
                         content
                     }
@@ -2823,7 +2823,7 @@ pub(super) async fn handle_memory_tool(
                         mission_id,
                         session_id,
                         call_id,
-                        format!("🧠 *Listing {} {} memories*\n", items.len(), scope),
+                        format!("*Listing {} {} memories*\n", items.len(), scope),
                     );
                     if items.is_empty() {
                         format!("(no {} memories)", scope)
@@ -2847,7 +2847,7 @@ pub(super) async fn handle_memory_tool(
                     mission_id,
                     session_id,
                     call_id,
-                    format!("🧠 *Searching {} memories for '{}'*\n", scope, query),
+                    format!("*Searching {} memories for '{}'*\n", scope, query),
                 );
                 match run_integrated_search(
                     &query,
@@ -2883,7 +2883,7 @@ pub(super) async fn handle_memory_tool(
                             mission_id,
                             session_id,
                             call_id,
-                            format!("🧠 *{} memory deleted: {}*\n", scope, key),
+                            format!("*{} memory deleted: {}*\n", scope, key),
                         );
                         format!("{} memory '{}' deleted.", scope, key)
                     }
@@ -2918,7 +2918,7 @@ fn low_trust_hint(entry: &EvolutionEntry) -> Option<String> {
     if entry.meta.confidence > LOW_TRUST_CONFIDENCE {
         return None;
     }
-    let mut hint = format!("⚠ Low trust: confidence {}/5", entry.meta.confidence.max(1));
+    let mut hint = format!("Low trust: confidence {}/5", entry.meta.confidence.max(1));
     if entry.meta.contradictions > 0 {
         hint.push_str(&format!(", contradicted {}×", entry.meta.contradictions));
     }
@@ -2994,7 +2994,7 @@ fn handle_evolution_scope(
                         session_id,
                         call_id,
                         format!(
-                            "🧠 *Evolution memory {}: {}*\n",
+                            "*Evolution memory {}: {}*\n",
                             if conflicted {
                                 "contradicted"
                             } else if outcome.created {
@@ -3056,7 +3056,7 @@ fn handle_evolution_scope(
                     mission_id,
                     session_id,
                     call_id,
-                    format!("🧠 *Evolution memory retrieved: {}*\n", entry.meta.key),
+                    format!("*Evolution memory retrieved: {}*\n", entry.meta.key),
                 );
                 let mut text = evolution_entry_to_md(entry);
                 if let Some(hint) = low_trust_hint(entry) {
@@ -3081,7 +3081,7 @@ fn handle_evolution_scope(
                 mission_id,
                 session_id,
                 call_id,
-                format!("🧠 *Listing {} evolution memories*\n", ranked.len()),
+                format!("*Listing {} evolution memories*\n", ranked.len()),
             );
             if ranked.is_empty() {
                 return "(no evolution memories)".to_string();
@@ -3125,7 +3125,7 @@ fn handle_evolution_scope(
                 mission_id,
                 session_id,
                 call_id,
-                format!("🧠 *Searching evolution memories for '{}'*\n", query),
+                format!("*Searching evolution memories for '{}'*\n", query),
             );
             let matches = rank_keyword_matches(ranked_evolution_entries(workspace_dir), query);
             if matches.is_empty() {
@@ -3197,7 +3197,7 @@ fn handle_evolution_scope(
                         mission_id,
                         session_id,
                         call_id,
-                        format!("🧠 *Evolution memory deleted: {}*\n", key),
+                        format!("*Evolution memory deleted: {}*\n", key),
                     );
                     format!("Evolution memory '{key}' deleted.")
                 }
@@ -3220,7 +3220,7 @@ fn handle_evolution_scope(
                 mission_id,
                 session_id,
                 call_id,
-                "🧠 *Consolidating evolution memory*\n".to_string(),
+                "*Consolidating evolution memory*\n".to_string(),
             );
             report
         }

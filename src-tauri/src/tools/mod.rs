@@ -130,7 +130,7 @@ pub(crate) fn emit_tool_call_done(
             "call_id": call_id,
             "phase": "done",
             "ok": ok,
-            "text": format!("🔧 *{name}*"),
+            "text": format!("*{name}*"),
         }),
     );
 }

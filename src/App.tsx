@@ -426,8 +426,8 @@ function notifyTurnBlocked(title: string, body: string, kind: string, enabled: b
 function timerPromptText(timer: TimerEntry): string {
   const label = timer.label?.trim();
   return label
-    ? `⏱️ [Timer fired: ${label}]\n${timer.message}`
-    : `⏱️ [Timer fired]\n${timer.message}`;
+    ? `[Timer fired: ${label}]\n${timer.message}`
+    : `[Timer fired]\n${timer.message}`;
 }
 
 // ─── Attachment handling ─────────────────────────────────────────────────────
@@ -2495,7 +2495,7 @@ export default function App() {
         // A tool call inside a sub-agent task. It updates only the activity
         // line — never the row status (the task's own `agent-task-done` /
         // `agent-task-error` owns that).
-        const { task_id, phase, tool, detail, text, duration_ms, ok } = e.payload;
+        const { task_id, phase, tool, detail, text, duration_ms } = e.payload;
         if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
         if (!task_id) return;
         currentToolCallsRef.current = currentToolCallsRef.current.map((entry) => {
@@ -2514,9 +2514,7 @@ export default function App() {
           // done: keep the tool name visible; the duration is informational.
           const seconds =
             duration_ms !== undefined ? ` · ${(duration_ms / 1000).toFixed(1)}s` : "";
-          const label = [ok === false ? `⚠ ${tool}` : tool, detail]
-            .filter(Boolean)
-            .join(" · ");
+          const label = [tool, detail].filter(Boolean).join(" · ");
           return {
             ...entry,
             activity: (label + seconds).trim().slice(0, 200),
@@ -4737,7 +4735,7 @@ export default function App() {
   /**
    * Which assistant bubble hosts the pending `todos ask` form.
    *
-   * The backend emits the tool-call progress row (`❓ Asking the user …`)
+   * The backend emits the tool-call progress row (`Asking the user …`)
    * before `todo-ask`, so the turn's assistant message already carries the
    * matching `tool_calls` entry — match by `call_id` and the form mounts inside
    * the bubble it belongs to, pinned after the reply's output. A form restored
