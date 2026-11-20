@@ -200,12 +200,14 @@
 }
 
 /* ---- Parallel tool calls ----
-   The last footer block, next to the tools it applies to. Rows reuse the
-   auto-accept row geometry (compact 34px controls, 13px text) and the shared
-   hairline above; the count only exists while the switch is on. */
+   The last footer block, next to the tools it applies to. The switch and the
+   count input share one row (auto-accept's compact 34px / 13px geometry);
+   the count input only exists while the switch is on. */
 
 .tools-parallel-section {
-    gap: 2px;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
 }
 
 .tools-parallel-toggle,
@@ -222,6 +224,11 @@
     transition: background-color var(--t-dur) var(--t-ease);
 }
 
+.tools-parallel-toggle {
+    flex: 1;
+    min-width: 0;
+}
+
 .tools-parallel-toggle:hover,
 .tools-parallel-toggle:focus-within,
 .tools-parallel-count:hover,
@@ -232,10 +239,11 @@
 .tools-parallel-label {
     font-weight: 500;
     letter-spacing: normal;
+    white-space: nowrap;
 }
 
 .tools-parallel-count {
-    justify-content: space-between;
+    flex-shrink: 0;
     color: var(--c-body);
 }
 
