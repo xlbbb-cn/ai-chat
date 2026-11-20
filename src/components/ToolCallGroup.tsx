@@ -1,7 +1,7 @@
 import type { Message, ToolCallEntry } from "../types";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { useI18n } from "../i18n";
-import { FontAwesomeIcon, faCheck, faChevronRight, faMinus, faSpinner, faTriangleExclamation, faXmark } from "../icons";
+import { FontAwesomeIcon, faChevronRight, faTriangleExclamation } from "../icons";
 import "./ToolCallGroup.css";
 
 interface Props {
@@ -15,13 +15,15 @@ interface Props {
   onCancelBackground?: (taskId: string) => void;
 }
 
-/** Per-status glyph; the running spinner is the only animated one. */
-function StatusIcon({ status }: { status: ToolCallEntry["status"] }) {
-  if (status === "running") return <FontAwesomeIcon icon={faSpinner} spin />;
-  if (status === "done") return <FontAwesomeIcon icon={faCheck} />;
-  // Skipped is neutral: the task never ran, which is not a failure.
-  if (status === "skipped") return <FontAwesomeIcon icon={faMinus} />;
-  return <FontAwesomeIcon icon={faXmark} />;
+/**
+ * Per-status light, rendered inside a fixed-width slot: a red dot for a
+ * failure, a pulsing green dot while the task runs, and nothing at all for a
+ * finished step — success is the quiet default. Skipped keeps a dim neutral dot
+ * (the task never ran, which is not a failure).
+ */
+function StatusLight({ status }: { status: ToolCallEntry["status"] }) {
+  if (status === "done") return null;
+  return <span className={`tool-call-light tool-call-light--${status}`} aria-hidden="true" />;
 }
 
 /**
@@ -38,46 +40,6 @@ function AgentLabel({ entry }: { entry: ToolCallEntry }) {
       {" · "}
       {entry.agent_name}
     </>
-  );
-}
-
-interface FlipRowProps {
-  /** Identity of the content currently shown; changing it triggers the flip. */
-  flipKey: string;
-  className?: string;
-  children: ReactNode;
-}
-
-/**
- * Preview row (rows 2–3). A content swap plays a card flip: the outgoing
- * render is parked on the hidden back face and the card is animated from
- * edge-on, so the first frame still matches what was on screen before the
- * swap and the new content never hard-cuts into place.
- */
-function FlipRow({ flipKey, className, children }: FlipRowProps) {
-  // Previous render, kept around so it can rotate out as the back face.
-  const lastRenderRef = useRef<{ key: string; node: ReactNode }>({ key: flipKey, node: children });
-  const [outgoing, setOutgoing] = useState<ReactNode>(null);
-
-  if (lastRenderRef.current.key !== flipKey) {
-    // Render-phase adjustment: park the outgoing render on the back face and
-    // re-render immediately with the flip armed.
-    setOutgoing(lastRenderRef.current.node);
-  }
-  lastRenderRef.current = { key: flipKey, node: children };
-
-  return (
-    <span className={className}>
-      <span
-        className={`tool-call-flip${outgoing !== null ? " tool-call-flip--live" : ""}`}
-        onAnimationEnd={(e) => {
-          if (e.animationName === "tool-flip-in") setOutgoing(null);
-        }}
-      >
-        <span className="tool-call-flip-face">{children}</span>
-        <span className="tool-call-flip-face tool-call-flip-face--back">{outgoing}</span>
-      </span>
-    </span>
   );
 }
 
@@ -138,7 +100,7 @@ export function ToolCallGroup({ message, onConfirm, onCancelBackground }: Props)
   };
 
   // Rows 2–3 preview the running tool call; once nothing is running the last
-  // entry stays put, so the next call gives the flip something to swap with.
+  // entry stays put, so the next call replaces it instead of leaving a gap.
   // A running sub-agent always wins: with parallel tasks the first running row
   // would otherwise hide the task that actually has progress to show.
   const previewEntry =
@@ -185,36 +147,20 @@ export function ToolCallGroup({ message, onConfirm, onCancelBackground }: Props)
           {!open && (
             <span className="tool-call-group-preview" aria-hidden="true">
               <span className="tool-call-preview-line">
-                <FlipRow
-                  className="tool-call-preview-row tool-call-preview-main"
-                  flipKey={previewEntry.task_id}
-                >
+                <span className="tool-call-preview-row tool-call-preview-main">
                   <span className="tool-call-preview-name" title={previewEntry.task_id}>
                     [<AgentLabel entry={previewEntry} />]
                   </span>
                   <span className="tool-call-preview-desc">{previewEntry.description}</span>
-                </FlipRow>
+                </span>
                 {/* Outside the masked text row so the fade does not dim the
-                    glyph; sits at the right edge like the expanded rows. */}
-                <span
-                  className={`tool-call-preview-icon tool-call-preview-icon--${previewEntry.status}`}
-                >
-                  <StatusIcon status={previewEntry.status} />
+                    status light; sits at the right edge like the expanded rows. */}
+                <span className="tool-call-preview-icon">
+                  <StatusLight status={previewEntry.status} />
                 </span>
               </span>
-              <FlipRow
-                className={previewSubClass}
-                // A sub-agent row streams text continuously: flipping on every
-                // 400 ms chunk would keep the line permanently reversed. Only
-                // ordinary tool rows swap (args → result) with a flip.
-                flipKey={
-                  previewEntry.kind === "agent"
-                    ? previewEntry.task_id
-                    : `${previewEntry.task_id}|${previewSub}`
-                }
-              >
-                {previewSub}
-              </FlipRow>
+              {/* The row simply re-renders on a content swap — no transition. */}
+              <span className={previewSubClass}>{previewSub}</span>
             </span>
           )}
         </summary>
@@ -224,7 +170,7 @@ export function ToolCallGroup({ message, onConfirm, onCancelBackground }: Props)
               key={entry.task_id}
               className={`tool-call-entry tool-call-entry--${entry.status}`}
             >
-              <span className="tool-call-entry-icon"><StatusIcon status={entry.status} /></span>
+              <span className="tool-call-entry-icon"><StatusLight status={entry.status} /></span>
               <span className="tool-call-entry-name" title={entry.task_id}>
                 <AgentLabel entry={entry} />
               </span>
