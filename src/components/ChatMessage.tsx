@@ -1225,7 +1225,6 @@ function ChatMessageRow({ message, showRetry = false, onRetry, onNotice, onDelet
           </details>
         )}
         {isAssistant && <ToolCallGroup message={message} onConfirm={onConfirm} onCancelBackground={onCancelBackground} />}
-        {isAssistant && <TodoList sessionId={sessionId} active={todoActive} />}
         {isAssistant && backgroundTasks !== undefined && (
           <BackgroundTaskGroup
             tasks={backgroundTasks}
@@ -1233,6 +1232,8 @@ function ChatMessageRow({ message, showRetry = false, onRetry, onNotice, onDelet
             onCancelTask={onCancelBackground}
           />
         )}
+        {isAssistant && <TodoList sessionId={sessionId} active={todoActive} />}
+
         <div
           className="message-content"
           ref={contentRef}
