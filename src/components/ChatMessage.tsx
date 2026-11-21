@@ -354,6 +354,33 @@ interface Props {
   todoAskPanel?: ReactNode;
 }
 
+/**
+ * Strip the inline "Attached File" blocks from a user message body.
+ *
+ * `partsForContent` inlines a text attachment as
+ * `<details><summary>Attached File: NAME — already provided below</summary>`
+ * followed by a fenced code region and `</details>`. The file's bytes are
+ * already named by the accent `@mention` token, so the transcript hides the
+ * whole block instead of repeating it as escaped source text.
+ *
+ * The end must not be found by lazily searching for the first `</details>`:
+ * the inlined content is arbitrary file text, and a source file that itself
+ * contains `</details>` (this component does) would cut the match short and
+ * leak the rest of the file into the bubble as literal text. The generated
+ * block always closes with its fenced region, so the match is anchored to
+ * that structure: the summary line, an opening fence, the content, and the
+ * closing fence directly before `</details>`. The one remaining ambiguity —
+ * file text that itself holds a ` ``` ` line immediately followed by
+ * `</details>` — is the same point where the markdown fence itself would
+ * break, so it is accepted here.
+ */
+const ATTACHED_FILE_BLOCK_RE =
+  /<details><summary>Attached File:[^<]*<\/summary>\n\n```[^\n]*\n[\s\S]*?\n```\n<\/details>/g;
+
+function stripAttachedFileBlocks(text: string): string {
+  return text.replace(ATTACHED_FILE_BLOCK_RE, "").trim();
+}
+
 /** Extract the textual portion of a multimodal `MessageContent`. */
 function contentToText(content: MessageContent): string {
   if (typeof content === "string") return content;
@@ -791,9 +818,7 @@ function ChatMessageRow({ message, showRetry = false, onRetry, onNotice, onDelet
   const visibleInjections = (message.injections ?? []).filter(
     (injection) => injection.kind !== "background_result",
   );
-  const displayContent = isUser
-    ? textContent.replace(/<details><summary>Attached File:[^<]*<\/summary>[\s\S]*?<\/details>/g, "").trim()
-    : textContent;
+  const displayContent = isUser ? stripAttachedFileBlocks(textContent) : textContent;
   const embeddedThought = extractEmbeddedThoughtProcess(displayContent);
   const reasoningContent = message.reasoning_content ?? embeddedThought.reasoningContent;
   const mainContent = message.reasoning_content
