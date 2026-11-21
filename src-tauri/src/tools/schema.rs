@@ -27,7 +27,7 @@ pub fn get_all_tools(
             "type": "function",
             "function": {
                 "name": "run_cmd",
-                "description": "Execute a program or a workspace script under tiered risk assessment: L0-L3 need the user's confirmation with the risk score; L4-L6 run directly (L4 is a sensitive read, L5/L6 are safe/read-only); syntax errors are rejected with a detailed report. Returns the result or the rejection reason.\n\n`action: \"run\"` (default) runs `command`. The first word is a script name in the library `<workspace>/.data/scripts` (extension optional, e.g. `build-frontend`, `deploy.py`) or a bare program name resolved through PATH (`python`, `git`, `node`); the library is prepended to the child's PATH, so a script wins over a same-named program. Absolute and relative paths are refused — use `run_shell` when a path is really needed.\n\n`action: \"list\"` lists the library with its `@description` / `@usage` header, interpreter and use count, and executes nothing. Scripts are plain files in that folder: write them with `file_actions` and give them `@description` / `@usage` header comments.",
+                "description": "Execute a program or a workspace script under tiered risk assessment: L0-L3 need the user's confirmation with the risk score; L4-L6 run directly (L4 is a sensitive read, L5/L6 are safe/read-only); syntax errors are rejected with a detailed report. Returns the result or the rejection reason.\n\n`action: \"run\"` (default) runs `command`. The first word is a script name in the library `<workspace>/.data/scripts` (extension optional, e.g. `build-frontend`, `deploy.py`) or a bare program name resolved through PATH (`python`, `git`, `node`); the library is prepended to the child's PATH, so a script wins over a same-named program. Absolute and relative paths are refused, and shell interpreters (`bash`, `sh`, `csh`, `zsh`, `cmd`, `powershell`, …) are refused too — their arguments would bypass the script audit. Write the script with `file_actions` and hand it to `run_shell`, or save it in the library and run it by name.\n\n`action: \"list\"` lists the library with its `@description` / `@usage` header, interpreter and use count, and executes nothing. Scripts are plain files in that folder: write them with `file_actions` and give them `@description` / `@usage` header comments.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -38,7 +38,7 @@ pub fn get_all_tools(
                         },
                         "command": {
                             "type": "string",
-                            "description": "Required for 'run'. Full command line (e.g. 'build-frontend --release', 'python -V', 'curl -s https://example.com'): the first word is a library script name or a bare PATH program, the rest are arguments."
+                            "description": "Required for 'run'. Full command line (e.g. 'build-frontend --release', 'python -V', 'curl -s https://example.com'): the first word is a library script name or a bare PATH program (never a path and never a shell interpreter such as bash/sh/cmd/powershell), the rest are arguments."
                         },
                         "timeout_seconds": {
                             "type": "integer",

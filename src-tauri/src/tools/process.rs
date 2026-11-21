@@ -276,6 +276,48 @@ pub(crate) fn validate_path_resolved_program(program: &str) -> Result<(), String
     Ok(())
 }
 
+/// Shell interpreters `run_cmd` refuses to launch, compared against the
+/// lowercased file stem (`bash.exe`, `CMD`, `Powershell` all match).
+///
+/// Running `run_cmd {command: "bash script.sh"}` would hand arbitrary script
+/// text to an interpreter and bypass the audit `run_shell` applies to every
+/// script it runs (syntax gate, dangerous-pattern scan, per-hash approval).
+/// Workspace library scripts are the exception: they are content-scanned and
+/// approved, and the resolved-script path never reaches this check.
+const SHELL_INTERPRETER_NAMES: &[&str] = &[
+    // POSIX / Unix shells.
+    "sh", "bash", "dash", "ash", "csh", "tcsh", "zsh", "ksh", "ksh93", "fish",
+    // Windows shells and interpreters of the same kind.
+    "cmd", "powershell", "pwsh",
+    // Bridges that would start a shell of another platform.
+    "wsl", "busybox",
+];
+
+/// Reject a `run_cmd` program that is itself a shell interpreter.
+///
+/// `run_cmd` runs a single program with fixed arguments; the interpreter
+/// tools (`bash`, `sh`, `csh`, `cmd`, `powershell`, …) are refused because
+/// their arguments are free-form code that the "direct" risk assessment of
+/// `run_cmd` cannot audit. `run_shell` is the tool that runs scripts, under
+/// the full risk audit.
+pub(crate) fn reject_shell_interpreter(program: &str) -> Result<(), String> {
+    let trimmed = program.trim();
+    let stem = Path::new(trimmed)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(trimmed)
+        .to_lowercase();
+    if SHELL_INTERPRETER_NAMES.contains(&stem.as_str()) {
+        return Err(format!(
+            "Error: run_cmd cannot run shell interpreters ('{trimmed}'). Its arguments would \
+             bypass the script audit. Write the script with `file_actions` and run it through \
+             `run_shell`, or save it in `<workspace>/.data/scripts` and run the library \
+             script by name."
+        ));
+    }
+    Ok(())
+}
+
 /// `C:\dir\x.exe` or `dir\x.exe`: a Windows path, whatever the host platform.
 pub(crate) fn looks_like_windows_path(value: &str) -> bool {
     if value.contains('\\') {
@@ -312,8 +354,9 @@ pub(crate) fn build_command_with_path(
                 return Err("Empty command".to_string());
             }
             // `direct` is the `run_cmd` contract: a PATH-resolved program name,
-            // never a path.
+            // never a path, and never a shell interpreter.
             validate_path_resolved_program(&parts[0])?;
+            reject_shell_interpreter(&parts[0])?;
             let mut c = tokio::process::Command::new(&parts[0]);
             if parts.len() > 1 {
                 c.args(&parts[1..]);
@@ -623,7 +666,7 @@ async fn wait_cancelled(flag: &Arc<AtomicBool>) {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_path_resolved_program;
+    use super::{reject_shell_interpreter, validate_path_resolved_program};
 
     /// `run_cmd` runs a program the OS resolves through `PATH`.
     #[test]
@@ -745,5 +788,55 @@ mod tests {
     fn an_empty_program_is_refused() {
         assert!(validate_path_resolved_program("").is_err());
         assert!(validate_path_resolved_program("   ").is_err());
+    }
+
+    /// Shell interpreters are refused: `run_cmd "bash script.sh"` would hand
+    /// free-form code to an interpreter and bypass the script audit of
+    /// `run_shell`.
+    #[test]
+    fn shell_interpreters_are_refused() {
+        for program in [
+            "bash",
+            "sh",
+            "csh",
+            "tcsh",
+            "zsh",
+            "ksh",
+            "dash",
+            "fish",
+            "cmd",
+            "powershell",
+            "pwsh",
+            "wsl",
+            "busybox",
+            // Case and Windows spelling variations hit the same check.
+            "Bash",
+            "SH",
+            "CMD",
+            "Powershell",
+            "bash.exe",
+            "sh.exe",
+            "cmd.exe",
+            "powershell.exe",
+        ] {
+            let err = reject_shell_interpreter(program)
+                .expect_err(&format!("'{program}' must be refused"));
+            assert!(
+                err.contains("run_shell"),
+                "unexpected error for '{program}': {err}"
+            );
+        }
+    }
+
+    /// Ordinary PATH programs stay accepted — including a name that merely
+    /// contains a shell word.
+    #[test]
+    fn ordinary_programs_pass_the_interpreter_check() {
+        for program in ["python", "git", "node", "cargo", "bashike", "git-bash", "resh"] {
+            assert!(
+                reject_shell_interpreter(program).is_ok(),
+                "'{program}' must be accepted"
+            );
+        }
     }
 }

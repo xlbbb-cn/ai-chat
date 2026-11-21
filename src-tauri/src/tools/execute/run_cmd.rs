@@ -58,6 +58,19 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
         Err(err) => return format!("Error: {err}"),
     };
 
+    // ── No shell interpreters as PATH programs ────────────────────────
+    // `bash script.sh`, `cmd /c …`, `powershell -File …` would hand
+    // free-form code to an interpreter under run_cmd's "direct" risk
+    // assessment, bypassing the script audit `run_shell` applies. A
+    // resolved library script is the exception: its content is scanned
+    // and approved below, so `bash` as the interpreter of `bash.sh`
+    // (or any `.sh` library script) stays legal.
+    if resolved.is_none() {
+        if let Err(e) = process::reject_shell_interpreter(program) {
+            return e;
+        }
+    }
+
     // ── Allowed-commands enforcement (skill context) ──────────────────
     // A library script is allowed by its command name, its file name or
     // the interpreter that runs it.
