@@ -85,6 +85,14 @@ pub const RETIRED_TOOL_IDS: [&str; 1] = ["knowledge_graph"];
 /// switched off — not from the Tools panel and not by hand-editing `config.json`.
 pub const SELF_EVOLUTION_REQUIRED_TOOLS: [&str; 2] = ["file_actions", "memory"];
 
+/// Tools each entry of `TOOL_DEPENDENCIES` pulls in automatically.
+///
+/// `calculator`'s tool description (tools/schema.rs) tells the model to compute
+/// anything its expression grammar cannot express with `run_cmd` instead — so
+/// selecting the calculator silently selects `run_cmd`. Enforced on every
+/// config write / load / read, exactly like the self-evolution tools.
+pub const TOOL_DEPENDENCIES: [(&str, &str); 1] = [("calculator", "run_cmd")];
+
 /// How many workspaces `AppConfig::workspace_history` keeps.
 ///
 /// The Settings dropdown is a shortcut, not an archive: ten entries cover the
@@ -376,6 +384,7 @@ pub(crate) fn apply_config(
     let mut config = config;
     config.strip_retired_tools();
     config.enforce_self_evolution_tools();
+    config.enforce_tool_dependencies();
     config.normalize_turn_limits();
 
     // The workspace history lives in the persisted config, so the resolved
@@ -738,6 +747,29 @@ impl AppConfig {
         }
     }
 
+    /// Force the tools a selected tool depends on into the selection.
+    ///
+    /// `calculator`'s description tells the model to fall back to `run_cmd`
+    /// for anything its expression grammar cannot express, so the calculator
+    /// never reaches the model without it. Called on every config write /
+    /// load / read next to `enforce_self_evolution_tools`, so the persisted
+    /// selection, the Tools panel and the request payload all agree.
+    fn enforce_tool_dependencies(&mut self) {
+        for (tool, required) in TOOL_DEPENDENCIES {
+            if self
+                .selected_tools
+                .iter()
+                .any(|selected| selected == tool)
+                && !self
+                    .selected_tools
+                    .iter()
+                    .any(|existing| existing == required)
+            {
+                self.selected_tools.push(required.to_string());
+            }
+        }
+    }
+
     /// Clamp the turn guards to their hard ceilings.
     ///
     /// Called on every config write (and on startup), so neither a hand-edited
@@ -808,6 +840,16 @@ impl AppConfig {
                 if !tools.iter().any(|existing| existing == required) {
                     tools.push(required.to_string());
                 }
+            }
+        }
+        // Tool dependencies as the last line of defence for a stale in-memory
+        // selection: the calculator's prompt advertises `run_cmd` as its
+        // fallback, so the pair must reach the request payload together.
+        for (tool, required) in TOOL_DEPENDENCIES {
+            if tools.iter().any(|existing| existing == tool)
+                && !tools.iter().any(|existing| existing == required)
+            {
+                tools.push(required.to_string());
             }
         }
         tools
@@ -1073,8 +1115,10 @@ pub(crate) fn get_config(state: State<'_, AppState>) -> AppConfig {
     // a switch for a tool that no longer exists.
     config.strip_retired_tools();
     // The UI must see the enforced selection, so the two self-evolution tools
-    // always show as enabled while the mode is on.
+    // always show as enabled while the mode is on — and a selected calculator
+    // always shows its required `run_cmd`.
     config.enforce_self_evolution_tools();
+    config.enforce_tool_dependencies();
     config
 }
 
@@ -1941,6 +1985,7 @@ pub fn run() {
             let mut config = config;
             config.strip_retired_tools();
             config.enforce_self_evolution_tools();
+            config.enforce_tool_dependencies();
             config.normalize_turn_limits();
 
             // Resolve the active workspace first: the database, memory, todo
@@ -2501,6 +2546,50 @@ mod tests {
         config.selected_tools.push("knowledge_graph".to_string());
         let tools = config.effective_tools();
         assert!(!tools.contains(&"knowledge_graph".to_string()));
+        assert!(tools.contains(&"run_cmd".to_string()));
+    }
+
+    /// The calculator's description tells the model to compute anything its
+    /// grammar cannot express with `run_cmd`, so selecting the calculator
+    /// silently selects `run_cmd` — persisted on write, read back on load,
+    /// and patched into `effective_tools` as the last line of defence.
+    #[test]
+    fn calculator_selects_run_cmd_through_the_tool_dependency() {
+        let mut config = AppConfig::default();
+        config.selected_tools = vec!["calculator".to_string()];
+
+        config.enforce_tool_dependencies();
+        assert!(
+            config.selected_tools.contains(&"run_cmd".to_string()),
+            "selecting the calculator pulls run_cmd in"
+        );
+
+        // Enforcing twice must not duplicate the entry.
+        config.enforce_tool_dependencies();
+        assert_eq!(
+            config
+                .selected_tools
+                .iter()
+                .filter(|tool| *tool == "run_cmd")
+                .count(),
+            1
+        );
+
+        // An already-explicit selection is left alone.
+        config.selected_tools = vec!["run_cmd".to_string(), "calculator".to_string()];
+        config.enforce_tool_dependencies();
+        assert_eq!(config.selected_tools.len(), 2);
+
+        // Tools without dependencies are untouched.
+        config.selected_tools = vec!["run_shell".to_string()];
+        config.enforce_tool_dependencies();
+        assert_eq!(config.selected_tools, vec!["run_shell".to_string()]);
+
+        // `effective_tools` patches a stale in-memory selection that never
+        // went through the enforcement.
+        let mut stale = AppConfig::default();
+        stale.selected_tools = vec!["calculator".to_string()];
+        let tools = stale.effective_tools();
         assert!(tools.contains(&"run_cmd".to_string()));
     }
 

@@ -167,6 +167,16 @@ async fn prepare_agent_run<'a>(
             }
         }
     }
+    // Tool dependencies: the calculator's shared description advertises
+    // `run_cmd` as its fallback, so a sub-agent given the calculator must get
+    // `run_cmd` too — it can never be told to call a tool it does not have.
+    for (tool, required) in crate::TOOL_DEPENDENCIES {
+        if agent_tool_ids.iter().any(|id| id == tool)
+            && !agent_tool_ids.iter().any(|id| id == required)
+        {
+            agent_tool_ids.push(required.to_string());
+        }
+    }
     let mut tools_list = tools::get_all_tools(&agent_tool_ids, config.self_evolution_mode, false, false);
     drop_mcp_self(&mut tools_list);
     tools_list.extend(tools::get_agent_task_tools());

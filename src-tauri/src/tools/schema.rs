@@ -463,15 +463,29 @@ pub fn get_all_tools(
     }
 
     if selected_tools.iter().any(|t| t == "calculator") {
+        // The calculator pulls `run_cmd` in as a dependency (AppConfig::
+        // enforce_tool_dependencies), so the fallback sentence below can name
+        // it unconditionally. `run_shell` is mentioned only when selected, so
+        // the model is never pointed at a tool it does not have.
+        let shell_fallback = if selected_tools.iter().any(|t| t == "run_shell") {
+            " For larger computations the grammar cannot express — library functions, scripts, batch data, date arithmetic — run the calculation with `run_cmd` or `run_shell` (for example a short python / node snippet) instead."
+        } else {
+            " For larger computations the grammar cannot express — library functions, scripts, batch data, date arithmetic — run the calculation with `run_cmd` (for example a short python / node snippet) instead."
+        };
+        let description = concat!(
+            "Evaluate a mathematical expression and return the numeric result.\n\n",
+            "MANDATORY: every computation-related result you report — multi-step arithmetic, powers, roots, large numbers, unit conversions, percentages, statistics, date arithmetic, any numeric conclusion — MUST come from a tool execution. Use this tool for it; NEVER do arithmetic in your head, guess, or report a number from memory. When exactness matters this is not optional.\n\n",
+            "Operators (lowest to highest precedence): `|` (bitwise OR), `^^` or `xor` (bitwise XOR), `&` or `and` (bitwise AND), `<<` / `>>` (shifts), `+` / `-`, `*` / `/` / `%`, unary `+` / `-` / `~`, `^` or `**` (exponentiation, right-associative: `2^3^2 = 512`; `^-2` and `^0.5` work), postfix `!` (factorial, max 20!). Parentheses nest and implicit multiplication is accepted: `2(3+4)`, `2pi`, `(1+2)(3+4)`.\n\n",
+            "Numbers: decimal and scientific (`1.5e3`), hex `0xFF`, binary `0b1010`, octal `0o17`, `_` separators. Constants: `pi`, `e`, `tau`.\n\n",
+            "Functions: `sqrt abs exp ln log log10 log2 sin cos tan asin acos atan atan2 sinh cosh tanh floor ceil round trunc sign min max pow hypot fact factorial not and or xor shl shr`.\n\n",
+            "`^` is exponentiation, NOT XOR — use `^^` / `xor(...)` for XOR. Bitwise operators, shifts and factorial require integer operands and return exact 64-bit integers; all other math is f64. Division by zero, non-real results (`sqrt(-1)`, `log(0)`), `NaN`/overflow and syntax errors return an `Error:` message with the offending position."
+        );
+        let description = format!("{description}{shell_fallback}");
         tools.push(json!({
             "type": "function",
             "function": {
                 "name": "calculator",
-                "description": "Evaluate a mathematical expression and return the numeric result. Use it instead of doing arithmetic in your head whenever exactness matters (multi-step arithmetic, powers, roots, large numbers, unit-style formulas).\n\n\
-Operators (lowest to highest precedence): `|` (bitwise OR), `^^` or `xor` (bitwise XOR), `&` or `and` (bitwise AND), `<<` / `>>` (shifts), `+` / `-`, `*` / `/` / `%`, unary `+` / `-` / `~`, `^` or `**` (exponentiation, right-associative: `2^3^2 = 512`; `^-2` and `^0.5` work), postfix `!` (factorial, max 20!). Parentheses nest and implicit multiplication is accepted: `2(3+4)`, `2pi`, `(1+2)(3+4)`.\n\n\
-Numbers: decimal and scientific (`1.5e3`), hex `0xFF`, binary `0b1010`, octal `0o17`, `_` separators. Constants: `pi`, `e`, `tau`.\n\n\
-Functions: `sqrt abs exp ln log log10 log2 sin cos tan asin acos atan atan2 sinh cosh tanh floor ceil round trunc sign min max pow hypot fact factorial not and or xor shl shr`.\n\n\
-`^` is exponentiation, NOT XOR — use `^^` / `xor(...)` for XOR. Bitwise operators, shifts and factorial require integer operands and return exact 64-bit integers; all other math is f64. Division by zero, non-real results (`sqrt(-1)`, `log(0)`), `NaN`/overflow and syntax errors return an `Error:` message with the offending position.",
+                "description": description,
                 "parameters": {
                     "type": "object",
                     "properties": {

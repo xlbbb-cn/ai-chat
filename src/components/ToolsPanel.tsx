@@ -62,6 +62,16 @@ const AVAILABLE_TOOL_IDS = new Set(AVAILABLE_TOOLS.map((t) => t.id));
 const SELF_EVOLUTION_LOCKED_TOOLS = ["file_actions", "memory"];
 
 /**
+ * Tools a selected tool silently pulls in, mirrored from `TOOL_DEPENDENCIES`
+ * in `src-tauri/src/lib.rs`. The calculator's tool description tells the model
+ * to compute anything its expression grammar cannot express with `run_cmd`, so
+ * enabling the calculator enables `run_cmd` with it — and `run_cmd` stays
+ * locked while the calculator is on. The backend enforces the same invariant
+ * on every config write, so this is only the UI mirror.
+ */
+const TOOL_DEPENDENCIES: Record<string, string> = { calculator: "run_cmd" };
+
+/**
  * Confirmation kinds that can actually reach the approval dialog. The `kind`
  * strings are matched against `auto_accept_confirm_kinds` by the Rust side,
  * which sends them from `RiskLevel::confirm_kind()` in `src-tauri/src/tools/risk.rs`
@@ -156,10 +166,24 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
         if (!config) return;
         // Self-evolution mode owns these two — they stay on.
         if (config.self_evolution_mode && SELF_EVOLUTION_LOCKED_TOOLS.includes(toolId)) return;
+        // A required tool cannot be switched off while the tool that needs it
+        // is selected (the calculator keeps `run_cmd` on).
+        const dependencyLocked = Object.entries(TOOL_DEPENDENCIES).some(
+            ([tool, required]) => toolId === required && (config.selected_tools ?? []).includes(tool)
+        );
+        if (dependencyLocked) return;
         const current = config.selected_tools ?? [];
-        const updated = current.includes(toolId)
+        let updated = current.includes(toolId)
             ? current.filter(t => t !== toolId)
             : [...current, toolId];
+
+        // Enabling a tool with a dependency enables the requirement too: the
+        // calculator's description advertises `run_cmd` as its fallback, so
+        // the pair must reach the selection together.
+        const required = TOOL_DEPENDENCIES[toolId];
+        if (required && updated.includes(toolId) && !updated.includes(required)) {
+            updated = [...updated, required];
+        }
 
         const newConfig = { ...config, selected_tools: updated };
         setConfig(newConfig);
@@ -225,8 +249,18 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
 
     const selectedTools = config.selected_tools ?? [];
     const selfEvolution = config.self_evolution_mode ?? false;
-    const isLockedTool = (toolId: string) =>
+    const isSelfEvolutionLocked = (toolId: string) =>
         selfEvolution && SELF_EVOLUTION_LOCKED_TOOLS.includes(toolId);
+    const isDependencyLocked = (toolId: string) =>
+        Object.entries(TOOL_DEPENDENCIES).some(
+            ([tool, required]) => toolId === required && selectedTools.includes(tool)
+        );
+    const isLockedTool = (toolId: string) =>
+        isSelfEvolutionLocked(toolId) || isDependencyLocked(toolId);
+    const lockReason = (toolId: string) =>
+        isSelfEvolutionLocked(toolId)
+            ? t("tools.lockedBySelfEvolution")
+            : t("tools.lockedByDependency");
     const autoAcceptKinds = sanitizeAutoAcceptKinds(config.auto_accept_confirm_kinds);
     const autoAcceptAll = autoAcceptKinds.includes(AUTO_ACCEPT_ALL);
     const allAutoAcceptEnabled =
@@ -258,7 +292,7 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                                     className="toggle-switch"
                                     title={
                                         locked
-                                            ? t("tools.lockedBySelfEvolution")
+                                            ? lockReason(tool.id)
                                             : enabled
                                                 ? t("common.disable")
                                                 : t("common.enable")

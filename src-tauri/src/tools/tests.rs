@@ -169,6 +169,44 @@ fn calculator_is_advertised_only_when_selected() {
     );
 }
 
+/// The calculator's description carries the mandatory "compute with a tool"
+/// policy and the `run_cmd` fallback. `run_cmd` is pulled in by the
+/// calculator's dependency (`AppConfig::enforce_tool_dependencies`), so the
+/// sentence names it unconditionally; `run_shell` is named only when selected.
+#[test]
+fn calculator_description_mandates_tool_computation_with_run_cmd_fallback() {
+    let description = |selected: &[String]| {
+        super::get_all_tools(selected, false, false, false)
+            .iter()
+            .find(|tool| tool["function"]["name"] == "calculator")
+            .expect("calculator is selected")
+            ["function"]["description"]
+            .as_str()
+            .expect("description is a string")
+            .to_string()
+    };
+
+    let bare = description(&["calculator".to_string()]);
+    assert!(
+        bare.contains("MUST come from a tool execution"),
+        "the mandatory policy must open the description"
+    );
+    assert!(
+        bare.contains("`run_cmd`"),
+        "run_cmd is a guaranteed dependency and must be named"
+    );
+    assert!(
+        !bare.contains("`run_shell`"),
+        "run_shell is not selected and must not be advertised"
+    );
+
+    let with_shell = description(&["calculator".to_string(), "run_shell".to_string()]);
+    assert!(
+        with_shell.contains("`run_cmd` or `run_shell`"),
+        "a selected run_shell joins the fallback sentence"
+    );
+}
+
 #[test]
 fn background_flag_and_control_tool_are_only_advertised_when_enabled() {
     let tools = super::get_all_tools(
