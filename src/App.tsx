@@ -288,7 +288,7 @@ const EMPTY_TIP_SWAP_MS = 340;
  * so `<html data-palette>` never selects a token block that does not exist.
  */
 function normalizePalette(palette: Palette | undefined): Palette {
-  return palette === "cream" ? "cream" : "default";
+  return palette === "cream" || palette === "macaron" ? palette : "default";
 }
 
 /**

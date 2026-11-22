@@ -112,7 +112,7 @@ dangerous, system_config, user_software, user_data, external_agent, *
 | 字段 | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- |
 | `theme` | string? | `auto` | `auto` / `light` / `dark` |
-| `palette` | string? | `default` | 配色：`default` / `cream`；各有浅色与深色两套 token。旧配置中的 `sakura` 会在加载时迁移为 `default` |
+| `palette` | string? | `default` | 配色：`default` / `cream` / `macaron`（马卡龙，粉白马卡龙色系，玫瑰粉强调色）；各有浅色与深色两套 token。旧配置中的 `sakura` 会在加载时迁移为 `default` |
 | `chat_background` | string? | 无 | 可选的聊天区背景照片，保存为应用数据目录下的相对路径，例如 `backgrounds/chat-background-<id>.png`。在「设置 → 外观 → 聊天区背景」选择后立即把文件复制到 `<应用数据目录>/backgrounds/` |
 | `single_instance` | boolean | `false` | 仅发布版。开：第二次启动只聚焦已有窗口。关：每次启动都是一个窗口（见[多窗口](#多窗口)）。下次启动生效 |
 | `language` | string? | 自动 | `en` / `zh-CN` / `zh-TW` |

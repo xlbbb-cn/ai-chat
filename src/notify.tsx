@@ -54,7 +54,10 @@ function applyCardTheme(config: AppConfig) {
   root.setAttribute("data-theme", theme);
   // The same normalization as `applyTheme()` in App.tsx: an old config may
   // still name the removed Sakura palette, which has no token block here.
-  root.setAttribute("data-palette", config.palette === "cream" ? "cream" : "default");
+  root.setAttribute(
+    "data-palette",
+    config.palette === "cream" || config.palette === "macaron" ? config.palette : "default"
+  );
   const glass = config.glass_effect;
   root.setAttribute(
     "data-glass",

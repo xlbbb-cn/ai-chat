@@ -638,8 +638,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub theme: Option<String>,
     /// Colour scheme layered on top of the light / dark theme
-    /// (`default`, `cream`). Persisted like `theme`; the backend never
-    /// interprets the value — the frontend turns it into `data-palette`.
+    /// (`default`, `cream`, `macaron`). Persisted like `theme`; the backend
+    /// never interprets the value — the frontend turns it into `data-palette`.
     #[serde(default)]
     pub palette: Option<String>,
     /// Frosted-glass level (`off`, `subtle`, `standard`, `strong`). Persisted

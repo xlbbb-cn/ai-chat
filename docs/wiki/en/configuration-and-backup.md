@@ -112,7 +112,7 @@ A built-in command at risk level L0–L3 asks before it runs; auto-accepting its
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `theme` | string? | `auto` | `auto` / `light` / `dark` |
-| `palette` | string? | `default` | Colour scheme: `default` / `cream`; each ships a light and a dark token set. Older values of `sakura` are migrated to `default` on load |
+| `palette` | string? | `default` | Colour scheme: `default` / `cream` / `macaron` (马卡龙, pink / white pastels with a rose-pink accent); each ships a light and a dark token set. Older values of `sakura` are migrated to `default` on load |
 | `chat_background` | string? | none | Optional chat background photo, stored as an app-data-relative path such as `backgrounds/chat-background-<id>.png`. Set by Settings → Appearance → Chat background, which copies the file into `<app data>/backgrounds/` immediately |
 | `single_instance` | boolean | `false` | Release builds only. On: a second launch focuses the running window. Off: every launch becomes a window (see [Multiple windows](#multiple-windows)). Applies on next launch |
 | `language` | string? | auto | `en` / `zh-CN` / `zh-TW` |

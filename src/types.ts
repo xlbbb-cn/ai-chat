@@ -327,7 +327,7 @@ export type ThemeMode = "auto" | "light" | "dark";
  * light / dark mode. Each palette ships a light *and* a dark token set,
  * so the two dimensions are independent.
  */
-export type Palette = "default" | "cream";
+export type Palette = "default" | "cream" | "macaron";
 
 /**
  * Frosted-glass strength for every translucent surface, applied as
@@ -497,8 +497,9 @@ export interface AppConfig {
   theme?: ThemeMode;
   /**
    * Colour scheme layered on top of the light / dark mode: `default`
-   * (Pure White + Electric Blue) or `cream` (乳白, the adjacent warm-white
-   * group washed with oklab gradients).
+   * (Pure White + Electric Blue), `cream` (乳白, the adjacent warm-white
+   * group washed with oklab gradients) or `macaron` (马卡龙, a pink / white
+   * pastel scheme with a rose-pink accent).
    */
   palette?: Palette;
   /**

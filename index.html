@@ -23,7 +23,9 @@
       // an unknown value must never select a token block that no longer exists.
       document.documentElement.setAttribute(
         "data-palette",
-        cached.palette === "cream" ? "cream" : "default"
+        cached.palette === "cream" || cached.palette === "macaron"
+          ? cached.palette
+          : "default"
       );
     } catch (e) {}
   </script>

@@ -705,6 +705,22 @@ body:has(> .settings-overlay) .sidebar {
   background: var(--sw-cream-4);
 }
 
+.palette-swatch-macaron .palette-chip:nth-child(1) {
+  background: var(--sw-macaron-1);
+}
+
+.palette-swatch-macaron .palette-chip:nth-child(2) {
+  background: var(--sw-macaron-2);
+}
+
+.palette-swatch-macaron .palette-chip:nth-child(3) {
+  background: var(--sw-macaron-3);
+}
+
+.palette-swatch-macaron .palette-chip:nth-child(4) {
+  background: var(--sw-macaron-4);
+}
+
 /* ===================================================================
    Chat background photo
    =================================================================== */

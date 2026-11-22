@@ -40,6 +40,7 @@ interface Props {
 const PALETTES: { id: Palette; labelKey: MessageKey }[] = [
   { id: "default", labelKey: "settings.appearance.paletteDefault" },
   { id: "cream", labelKey: "settings.appearance.paletteCream" },
+  { id: "macaron", labelKey: "settings.appearance.paletteMacaron" },
 ];
 
 /** Image formats the backend accepts for a chat background (`background.rs`). */

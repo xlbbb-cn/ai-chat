@@ -48,17 +48,18 @@ The interface has **two independent colour dimensions**, both set on `<html>`:
 | Attribute | Values | Meaning |
 |---|---|---|
 | `data-theme` | `light` / `dark` | Light vs. dark resolution. `auto` follows the OS and resolves to one of the two. |
-| `data-palette` | `default` / `cream` | The colour scheme: which hues the surfaces, the accent and the semantic states wear. |
+| `data-palette` | `default` / `cream` / `macaron` | The colour scheme: which hues the surfaces, the accent and the semantic states wear. |
 
 Both are written by `applyTheme()` in `src/App.tsx` from `config.theme` and
 `config.palette`. Every palette therefore needs a **light *and* a dark token
 set** — the two dimensions are orthogonal, so `cream` + `dark` must look as
-finished as `cream` + `light`.
+finished as `cream` + `light`, and the same goes for `macaron`.
 
 | Palette | Light | Dark | Character |
 |---|---|---|---|
 | `default` | Pure White canvas, Electric Blue accent | Carbon Dark canvas, lifted Electric Blue | The monochrome-plus-one baseline. |
 | `cream` (乳白) | The adjacent warm-white group — 蚌肉白 `#F9F1DB` canvas, 乳白 `#F9F4DC` panels, 奶油白 `#FFF8E7` alternate surface, 粉白 `#FBF2E3` secondary — washed with oklab gradients instead of flat fills | Deep umber canvas, the same tones as warm greys | Paper. The accent stays Electric Blue: this palette is about the neutrals. |
+| `macaron` (马卡龙) | 奶油粉 `#FFF2F6` canvas, near-white `#FFFBFB` panels, 玫瑰粉 `#FFE6EE` alternate surface, 薄荷绿 `#E7F5EC` code, 薰衣草紫 `#EFE7FA` reasoning — flat pastels | Deep plum `#2A1B24` canvas, the same pastels as low-alpha washes | Candy. 玫瑰粉 `#D6346B` is this palette's one accent; its darker twin `#A32553` carries text, icons, hairlines and focus rings (lifted to `#FF9CC2` on dark). |
 
 ### Rules for a palette block
 
@@ -75,6 +76,10 @@ finished as `cream` + `light`.
 - The Cream palette is the sanctioned place for gradients on a surface: its
   `--c-bg-image` / `--c-code-image` / `--c-reason-image` are oklab washes of its
   own adjacent group. Everywhere else, surfaces stay flat.
+- The Macaron palette is the sanctioned place for a non-blue accent: 玫瑰粉
+  `#D6346B` is still the view's *one* accent (never a second chromatic accent),
+  with `--c-accent-text` as its legible twin for text, icons and hairlines.
+  Default and Cream keep Electric Blue.
 
 ---
 

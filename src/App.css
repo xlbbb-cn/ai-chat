@@ -260,6 +260,14 @@
   --sw-cream-4: #FBF2E3;
   /* 粉白 */
   --sw-cream-strip: linear-gradient(90deg in oklab, #F9F1DB 0%, #F9F4DC 33%, #FFF8E7 67%, #FBF2E3 100%);
+  --sw-macaron-1: #FFF2F6;
+  /* 奶油粉 — canvas */
+  --sw-macaron-2: #D6346B;
+  /* 玫瑰粉 — accent */
+  --sw-macaron-3: #E7F5EC;
+  /* 薄荷绿 — code */
+  --sw-macaron-4: #EFE7FA;
+  /* 薰衣草紫 — reasoning */
   /* Toggle knob — the one fill that stays white on every palette: it sits
      on the accent and has to read as "on" in all of them. */
   --c-knob: #FFFFFF;
@@ -375,6 +383,8 @@
 
      Cream  乳白 — the warm-white group, washed with oklab gradients
                     instead of flat fills.
+     Macaron 马卡龙 — a pink / white pastel group with a rose-pink accent,
+                      mint code and lavender reasoning.
    ══════════════════════════════════════════════════════════════════════════ */
 
 /* ── Cream (乳白) — light ────────────────────────────────────────────────── */
@@ -487,6 +497,144 @@
   --c-card-think-rule: #D9B8D0;
   --c-card-tool: rgba(222, 210, 170, 0.10);
   --c-card-tool-rule: #CFC3A0;
+  --c-card-plan: var(--c-accent-soft);
+  --c-card-plan-rule: var(--c-accent-text);
+  --c-card-bg-task: var(--c-success-soft);
+  --c-card-bg-task-rule: var(--c-success);
+
+  --c-bg-image: none;
+  --c-code-image: none;
+  --c-reason-image: none;
+  /* Toggle knob — the one fill that stays white on every palette: it sits
+     on the accent and has to read as "on" in all of them. */
+  --c-knob: #FFFFFF;
+  /* Favourite star in the history list. */
+  --c-favorite: #EAB308;
+  /* Dark code syntax. The bundled `github.css` is a light theme, so the
+     dark half restates it through tokens instead of literals in the chat
+     stylesheet. */
+  --c-syn-text: #E8EAED;
+  --c-syn-comment: #8A8A90;
+  --c-syn-keyword: #9DB7FF;
+  --c-syn-string: #C8E6A0;
+  --c-syn-title: #8EC5FF;
+  --c-syn-number: #F2C38F;
+  --c-syn-builtin: #9ADBB7;
+  --c-syn-deletion: #FFB4B4;
+}
+
+/* ── Macaron (马卡龙) — light ─────────────────────────────────────────────── */
+[data-palette="macaron"] {
+  /* 奶油粉 — the canvas */
+  --c-bg: #FFF2F6;
+  /* panels, popups, cards — almost white, with a blush */
+  --c-surface: #FFFBFB;
+  /* 玫瑰粉 — alternate surface */
+  --c-surface-2: #FFE6EE;
+  /* secondary surface */
+  --c-bg-secondary: #FFF0F4;
+  /* 薄荷绿 — code blocks */
+  --c-code: #E7F5EC;
+  /* 薰衣草紫 — reasoning blocks */
+  --c-reason: #EFE7FA;
+
+  --c-hover: rgba(142, 63, 96, 0.06);
+  --c-active: rgba(142, 63, 96, 0.12);
+
+  --c-text: #4A2333;
+  --c-body: #5C3446;
+  --c-muted: #7C5265;
+  --c-placeholder: #8A6274;
+  --c-text-secondary: #7C5265;
+
+  --c-border: rgba(142, 63, 96, 0.16);
+  --c-border-s: rgba(142, 63, 96, 0.09);
+  --c-border-i: rgba(142, 63, 96, 0.26);
+  --c-reason-b: rgba(126, 96, 160, 0.22);
+  --c-toolbar: rgba(255, 251, 251, 0.70);
+
+  /* Rose pink is this palette's one accent. The darker twin carries labels,
+     icons, hairlines and focus rings; the fill keeps a white label. */
+  --c-accent: #D6346B;
+  --c-accent-hover: #B82A59;
+  --c-accent-soft: rgba(214, 52, 107, 0.10);
+  --c-accent-text: #A32553;
+  --c-on-accent: #FFFFFF;
+
+  --c-danger: #C0392B;
+  --c-danger-soft: rgba(192, 57, 43, 0.10);
+  --c-success: #1F8A3B;
+  --c-success-soft: rgba(31, 138, 59, 0.10);
+  --c-warning: #B07500;
+  --c-warning-soft: rgba(176, 117, 0, 0.10);
+
+  /* Transcript card tints — the palette's own pastels for thinking / tool,
+     the accent and success tokens for plan / background tasks. */
+  --c-card-think: #EFE7FA;
+  --c-card-think-rule: #7A5AA8;
+  --c-card-tool: #E7F5EC;
+  --c-card-tool-rule: #356B52;
+  --c-card-plan: var(--c-accent-soft);
+  --c-card-plan-rule: var(--c-accent-text);
+  --c-card-bg-task: var(--c-success-soft);
+  --c-card-bg-task-rule: var(--c-success);
+
+  /* Macaron stays flat; the oklab washes are Cream's alone. */
+  --c-bg-image: none;
+  --c-code-image: none;
+  --c-reason-image: none;
+  /* Toggle knob — the one fill that stays white on every palette: it sits
+     on the accent and has to read as "on" in all of them. */
+  --c-knob: #FFFFFF;
+  /* Favourite star in the history list. */
+  --c-favorite: #EAB308;
+}
+
+/* ── Macaron (马卡龙) — dark ──────────────────────────────────────────────── */
+[data-theme="dark"][data-palette="macaron"] {
+  /* deep plum — the same pastel group, turned down to a dark ground */
+  --c-bg: #2A1B24;
+  --c-surface: #37232E;
+  --c-surface-2: #422D39;
+  --c-bg-secondary: #422D39;
+  --c-code: rgba(231, 245, 236, 0.07);
+  --c-reason: rgba(239, 231, 250, 0.06);
+
+  --c-hover: rgba(255, 235, 244, 0.06);
+  --c-active: rgba(255, 235, 244, 0.11);
+
+  --c-text: #FFF2F6;
+  --c-body: #F0D8E1;
+  --c-muted: #C6A5B4;
+  --c-placeholder: #9E7C8C;
+  --c-text-secondary: #C6A5B4;
+
+  --c-border: rgba(255, 235, 244, 0.10);
+  --c-border-s: rgba(255, 235, 244, 0.06);
+  --c-border-i: rgba(255, 235, 244, 0.18);
+  --c-reason-b: rgba(239, 231, 250, 0.14);
+  --c-toolbar: rgba(55, 35, 46, 0.68);
+
+  /* The fill stays deep enough for a white label; the text twin is lifted to
+     read against the plum canvas. */
+  --c-accent: #D6346B;
+  --c-accent-hover: #E04A7C;
+  --c-accent-soft: rgba(255, 155, 192, 0.16);
+  --c-accent-text: #FF9CC2;
+  --c-on-accent: #FFFFFF;
+
+  --c-danger: #E5655C;
+  --c-danger-soft: rgba(229, 101, 92, 0.14);
+  --c-success: #3BB55C;
+  --c-success-soft: rgba(59, 181, 92, 0.14);
+  --c-warning: #E0A33C;
+  --c-warning-soft: rgba(224, 163, 60, 0.14);
+
+  /* Transcript card tints — low-alpha pastel washes on the plum canvas. */
+  --c-card-think: rgba(199, 176, 240, 0.12);
+  --c-card-think-rule: #D2BEF0;
+  --c-card-tool: rgba(160, 220, 190, 0.10);
+  --c-card-tool-rule: #A8D5BE;
   --c-card-plan: var(--c-accent-soft);
   --c-card-plan-rule: var(--c-accent-text);
   --c-card-bg-task: var(--c-success-soft);

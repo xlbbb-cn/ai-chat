@@ -375,6 +375,7 @@ const zhCN: Messages = {
             palette: "配色",
             paletteDefault: "默认",
             paletteCream: "乳白",
+            paletteMacaron: "马卡龙",
             paletteHint: "立即生效，并保存到配置中。",
             glass: "毛玻璃",
             glassOff: "关闭",

@@ -375,6 +375,7 @@ const zhTW: Messages = {
             palette: "配色",
             paletteDefault: "預設",
             paletteCream: "乳白",
+            paletteMacaron: "馬卡龍",
             paletteHint: "立即生效，並儲存至設定檔中。",
             glass: "毛玻璃",
             glassOff: "關閉",

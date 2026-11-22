@@ -421,6 +421,7 @@ const en = {
             palette: "Color scheme",
             paletteDefault: "Default",
             paletteCream: "Cream",
+            paletteMacaron: "Macaron",
             paletteHint: "Applies immediately and is stored in your configuration.",
             glass: "Frosted glass",
             glassOff: "Off",
