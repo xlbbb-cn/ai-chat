@@ -84,3 +84,13 @@ pub(crate) fn set_workspace_dir(
 pub(crate) fn workspace_history_entries(state: State<'_, AppState>) -> Vec<WorkspaceHistoryEntry> {
     crate::workspace_history_entries(state)
 }
+
+/// List-only removal — the folder and its data stay on disk.
+#[tauri::command]
+pub(crate) fn forget_workspace(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    workspace_path: String,
+) -> Result<(), String> {
+    crate::forget_workspace(app, state, workspace_path)
+}

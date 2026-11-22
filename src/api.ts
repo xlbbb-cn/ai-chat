@@ -91,6 +91,15 @@ export async function getWorkspaceHistory(): Promise<WorkspaceHistoryEntry[]> {
 }
 
 /**
+ * Remove one workspace from the titlebar switcher's list. List-only: the
+ * folder, its `.data` state and its chat database are untouched, and picking
+ * the folder again re-adds it. The active workspace cannot be removed.
+ */
+export async function forgetWorkspace(workspacePath: string): Promise<void> {
+  return invoke("forget_workspace", { workspacePath });
+}
+
+/**
  * Files the composer's `@` mention popup can offer (hidden files and
  * `.gitignore`d entries are already filtered out by the backend).
  */

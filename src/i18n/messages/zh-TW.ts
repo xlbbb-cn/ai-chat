@@ -58,6 +58,7 @@ const zhTW: Messages = {
         workspaceSwitchAria: "目前工作區 {workspace} — 切換工作區",
         workspaceCurrent: "目前",
         workspaceMissing: "不存在",
+        workspaceRemove: "從清單移除（不刪除資料夾）",
         workspacePickOther: "選擇其他資料夾…",
         workspacePickTitle: "選擇工作區資料夾",
         workspaceBusy: "回覆仍在進行，回合結束後可切換。",

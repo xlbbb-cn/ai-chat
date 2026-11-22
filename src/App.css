@@ -1067,9 +1067,63 @@ body {
   display: none;
 }
 
+/* Each history row is a switch button plus (optionally) a trailing remove
+   action. The wrapper keeps the two as siblings — a <button> inside a <button>
+   is invalid — and gives the hover reveal a stable hit area. */
+.titlebar-workspace-row {
+  display: flex;
+  align-items: center;
+}
+
 .titlebar-workspace-item {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
   gap: 6px;
   white-space: nowrap;
+}
+
+/* List-only removal, revealed on the row's right edge: default invisible and
+   out of the pointer's way, shown on row hover / keyboard focus. Mirrors
+   `.history-action-btn` in the History panel — no new visual language. */
+.workspace-item-remove {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--c-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--t-dur) var(--t-ease),
+    background-color var(--t-dur) var(--t-ease),
+    color var(--t-dur) var(--t-ease);
+}
+
+.workspace-item-remove:hover {
+  background: var(--c-hover);
+  color: var(--c-danger);
+}
+
+.workspace-item-remove:focus-visible {
+  outline: 1px solid var(--c-accent-text);
+  outline-offset: 0;
+}
+
+.titlebar-workspace-row:hover .workspace-item-remove,
+.titlebar-workspace-row:focus-within .workspace-item-remove,
+.workspace-item-remove:hover,
+.workspace-item-remove:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 /* The folder name is the identity of the row, so it is never truncated — it

@@ -67,6 +67,7 @@ const en = {
         workspaceSwitchAria: "Workspace {workspace} — switch workspace",
         workspaceCurrent: "Current",
         workspaceMissing: "Not found",
+        workspaceRemove: "Remove from list (the folder is not deleted)",
         workspacePickOther: "Choose another folder…",
         workspacePickTitle: "Choose a workspace folder",
         workspaceBusy: "A reply is still streaming — switch when the turn ends.",

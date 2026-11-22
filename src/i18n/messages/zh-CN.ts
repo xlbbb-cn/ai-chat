@@ -58,6 +58,7 @@ const zhCN: Messages = {
         workspaceSwitchAria: "当前工作区 {workspace} — 切换工作区",
         workspaceCurrent: "当前",
         workspaceMissing: "不存在",
+        workspaceRemove: "从列表移除（不删除文件夹）",
         workspacePickOther: "选择其他文件夹…",
         workspacePickTitle: "选择工作区文件夹",
         workspaceBusy: "回复仍在进行，回合结束后可切换。",

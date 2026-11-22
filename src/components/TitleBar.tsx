@@ -10,6 +10,7 @@ import {
     FontAwesomeIcon,
     faBolt,
     faEllipsis,
+    faTrash,
     faWindowMaximize,
     faWindowMinimize,
     faWindowRestore,
@@ -17,6 +18,7 @@ import {
 } from "../icons";
 import {
     exportBackupTo,
+    forgetWorkspace,
     getInstanceInfo,
     getWorkspaceDir,
     getWorkspaceHistory,
@@ -275,6 +277,22 @@ export function TitleBar({
         }
     };
 
+    /**
+     * The row's trailing action removes only the list entry — no filesystem
+     * operation, no confirmation. Re-read the rows afterwards: `exists` /
+     * `current` are derived on the backend, and the popup stays open so several
+     * stale rows can be cleared in one go.
+     */
+    const forgetEntry = async (path: string) => {
+        try {
+            await forgetWorkspace(path);
+            setWorkspaceEntries(await getWorkspaceHistory());
+        } catch (err) {
+            await messageDialog(String(err), { title: "Rabbit Chat Studio", kind: "error" })
+                .catch(() => { });
+        }
+    };
+
     const handleOpenDataDir = () => run(openAppDataDir);
 
     const handleOpenWorkspaceDir = () => run(openWorkspaceDir);
@@ -379,37 +397,56 @@ export function TitleBar({
                                 aria-label={t("app.workspaceSwitch")}
                             >
                                 {workspaceEntries.map((entry) => (
-                                    <button
-                                        key={entry.path}
-                                        type="button"
-                                        role="menuitemradio"
-                                        aria-checked={entry.current}
-                                        className={`titlebar-menu-item titlebar-workspace-item ${entry.current
-                                            ? "is-current"
-                                            : ""
-                                            }`}
-                                        title={entry.path}
-                                        disabled={workspaceBusy}
-                                        onClick={() => void switchWorkspace(entry.path)}
-                                    >
-                                        <span className="workspace-item-name">
-                                            {workspaceLabel(entry.path)}
-                                        </span>
-                                        <span className="workspace-item-path">
-                                            {workspaceParent(entry.path)}
-                                        </span>
-                                        {entry.current ? (
-                                            <span className="workspace-item-note">
-                                                {t("app.workspaceCurrent")}
+                                    /* A row is the switch button plus an optional remove
+                                       action. The wrapper keeps them separate: a button
+                                       inside a button is invalid HTML, and the remove
+                                       click must never trigger a switch. */
+                                    <div className="titlebar-workspace-row" key={entry.path}>
+                                        <button
+                                            type="button"
+                                            role="menuitemradio"
+                                            aria-checked={entry.current}
+                                            className={`titlebar-menu-item titlebar-workspace-item ${entry.current
+                                                ? "is-current"
+                                                : ""
+                                                }`}
+                                            title={entry.path}
+                                            disabled={workspaceBusy}
+                                            onClick={() => void switchWorkspace(entry.path)}
+                                        >
+                                            <span className="workspace-item-name">
+                                                {workspaceLabel(entry.path)}
                                             </span>
-                                        ) : (
-                                            !entry.exists && (
-                                                <span className="workspace-item-note is-missing">
-                                                    {t("app.workspaceMissing")}
+                                            <span className="workspace-item-path">
+                                                {workspaceParent(entry.path)}
+                                            </span>
+                                            {entry.current ? (
+                                                <span className="workspace-item-note">
+                                                    {t("app.workspaceCurrent")}
                                                 </span>
-                                            )
+                                            ) : (
+                                                !entry.exists && (
+                                                    <span className="workspace-item-note is-missing">
+                                                        {t("app.workspaceMissing")}
+                                                    </span>
+                                                )
+                                            )}
+                                        </button>
+                                        {!entry.current && !workspaceBusy && (
+                                            <button
+                                                type="button"
+                                                className="workspace-item-remove"
+                                                title={t("app.workspaceRemove")}
+                                                aria-label={`${workspaceLabel(entry.path)} — ${t("app.workspaceRemove")}`}
+                                                onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    void forgetEntry(entry.path);
+                                                }}
+                                            >
+                                                <FontAwesomeIcon icon={faTrash} />
+                                            </button>
                                         )}
-                                    </button>
+                                    </div>
                                 ))}
                                 {workspaceBusy && (
                                     <p className="titlebar-menu-note">

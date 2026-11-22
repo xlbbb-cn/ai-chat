@@ -1587,6 +1587,50 @@ pub(crate) fn workspace_history_entries(state: State<'_, AppState>) -> Vec<Works
         .collect()
 }
 
+/// Remove one row from the titlebar switcher's list — the row's trailing
+/// remove action.
+///
+/// This is a **list-only** edit: nothing on disk is touched, so the folder,
+/// its hidden `.data` state and its chat database stay exactly where they are.
+/// Picking the folder again (or using "Choose another folder…") adds it back.
+/// The active workspace is refused: every config write re-records the resolved
+/// current path, so removing it would silently undo itself on the next save.
+pub(crate) fn forget_workspace(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    workspace_path: String,
+) -> Result<(), String> {
+    let target = workspace_path.trim();
+    if target.is_empty() {
+        return Err("A workspace path is required.".to_string());
+    }
+    let current = state
+        .workspace_dir
+        .lock()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    if same_workspace_path(target, &current) {
+        return Err(
+            "The workspace in use cannot be removed — switch to another one first.".to_string(),
+        );
+    }
+
+    let mut config = state.config.lock().unwrap().clone();
+    if !forget_workspace_entry(&mut config.workspace_history, target) {
+        return Ok(()); // no such row — nothing to persist
+    }
+    apply_config(&app, &state, config)
+}
+
+/// Pure list edit behind `forget_workspace`, so the case / separator matching
+/// is testable without an `AppHandle`. Returns whether a row was removed.
+fn forget_workspace_entry(history: &mut Vec<String>, target: &str) -> bool {
+    let before = history.len();
+    history.retain(|entry| !same_workspace_path(entry, target));
+    history.len() != before
+}
+
 /// Which window this is: the primary, or a shadow running on a temporary copy
 /// of the configuration (see `instance.rs`). The Settings panel uses it to
 /// explain why this window's changes will not be remembered.
@@ -2448,6 +2492,7 @@ pub fn run() {
             ipc::workspace::get_workspace_dir,
             ipc::workspace::set_workspace_dir,
             ipc::workspace::workspace_history_entries,
+            ipc::workspace::forget_workspace,
             // Update check and release assets.
             ipc::update::check_update,
             ipc::update::download_update,
@@ -2770,5 +2815,30 @@ mod tests {
         assert!(same_workspace_path("  /home/leonard/acme  ", "/home/leonard/acme"));
         assert!(!same_workspace_path("/home/leonard/acme", "/home/leonard/acme2"));
         assert!(!same_workspace_path("C:\\one", "C:\\two"));
+    }
+
+    /// Removing a row is case / separator insensitive, touches only that row,
+    /// and is a no-op when the path is not recorded.
+    #[test]
+    fn forgetting_a_workspace_only_edits_the_list() {
+        let mut history = vec![
+            "D:\\projects\\beta".to_string(),
+            "D:\\projects\\alpha".to_string(),
+            "/home/leonard/acme".to_string(),
+        ];
+
+        assert!(forget_workspace_entry(&mut history, "d:/PROJECTS/alpha"));
+        assert_eq!(
+            history,
+            vec!["D:\\projects\\beta", "/home/leonard/acme"]
+        );
+
+        // Already gone: no change, reported as such.
+        assert!(!forget_workspace_entry(&mut history, "D:\\projects\\alpha"));
+        assert_eq!(history.len(), 2);
+
+        // A trailing separator / different case still matches the same row.
+        assert!(forget_workspace_entry(&mut history, "/home/leonard/acme/"));
+        assert_eq!(history, vec!["D:\\projects\\beta"]);
     }
 }
