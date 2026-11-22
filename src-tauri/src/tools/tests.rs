@@ -430,6 +430,90 @@ fn search_skips_oversized_and_binary_files() {
 }
 
 #[test]
+fn search_prunes_build_directories_below_the_root() {
+    let root = make_temp_dir("search-noise");
+    let src = root.join("src");
+    let build = root.join("target").join("debug");
+    let modules = root.join("node_modules").join("dep");
+    fs::create_dir_all(&src).unwrap();
+    fs::create_dir_all(&build).unwrap();
+    fs::create_dir_all(&modules).unwrap();
+    fs::write(src.join("keep.rs"), "needle source\n").unwrap();
+    fs::write(build.join("artifact.rs"), "needle artifact\n").unwrap();
+    fs::write(modules.join("index.js"), "needle dependency\n").unwrap();
+
+    let output =
+        run_integrated_search("needle", &root, &root, &SearchOptions::default()).unwrap();
+
+    assert!(output.contains("src/keep.rs:1:needle source"), "{output}");
+    assert!(!output.contains("artifact.rs"), "{output}");
+    assert!(!output.contains("index.js"), "{output}");
+    assert!(output.contains("build/dependency dir"), "{output}");
+
+    // The tree is still reachable when it *is* the search root: pruning only
+    // ever applies below the root, never to the root itself.
+    let nested = run_integrated_search("needle", &build, &root, &SearchOptions::default()).unwrap();
+    assert!(nested.contains("artifact.rs:1:needle artifact"), "{nested}");
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn search_keeps_data_reachable_when_gitignore_ignores_it() {
+    let root = make_temp_dir("search-data-gitignore");
+    fs::create_dir_all(root.join(".git")).unwrap();
+    fs::create_dir_all(root.join(".data").join("memory")).unwrap();
+    fs::write(root.join(".gitignore"), ".data/\ntarget/\n").unwrap();
+    fs::write(
+        root.join(".data").join("memory").join("note.md"),
+        "needle state\n",
+    )
+    .unwrap();
+    fs::write(root.join("notes.md"), "needle source\n").unwrap();
+
+    let output =
+        run_integrated_search("needle", &root, &root, &SearchOptions::default()).unwrap();
+
+    assert!(output.contains("notes.md:1:needle source"), "{output}");
+    assert!(
+        output.contains(".data/memory/note.md"),
+        "the workspace state directory must survive gitignore-by-default: {output}"
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn glob_filtered_files_do_not_consume_the_scan_budget() {
+    let root = make_temp_dir("search-glob-budget");
+    let dir = root.join("docs");
+    fs::create_dir_all(&dir).unwrap();
+    for index in 0..30 {
+        fs::write(dir.join(format!("skip-{index:02}.txt")), "needle\n").unwrap();
+    }
+    fs::write(dir.join("keep.md"), "needle keep\n").unwrap();
+
+    let output = run_integrated_search(
+        "needle",
+        &dir,
+        &root,
+        &SearchOptions {
+            glob: Some("**/*.md".to_string()),
+            ..SearchOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert!(output.contains("docs/keep.md:1:needle keep"), "{output}");
+    assert!(!output.contains("skip-"), "{output}");
+    // Only the file the glob kept was opened; the other 30 cost nothing.
+    assert!(output.contains("1 file(s) scanned"), "{output}");
+    assert!(output.contains("30 file(s) excluded by the `glob` filter"), "{output}");
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn case_insensitive_literal_search_avoids_regressions() {
     assert!(contains_ignore_case("Hello World", "hello"));
     assert!(contains_ignore_case("HELLO", "hello"));

@@ -2,10 +2,11 @@
 // store: glob/space matcher, budgeted parallel tree walk and output renderer.
 
 use ignore::WalkState;
+use std::ffi::OsStr;
 use std::fs;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 enum SearchMatcher {
     Literal {
@@ -92,6 +93,53 @@ const SEARCH_MAX_FILES: usize = 20_000;
 pub(super) const SEARCH_MAX_MATCHES: usize = 1_000;
 const SEARCH_MAX_ERRORS: usize = 20;
 
+/// Directory names that hold build output or dependency caches, never project
+/// source. `respect_gitignore` now defaults to true and hides most of them in a
+/// git tree, but a plain folder has no `.gitignore` — and this workspace's
+/// `target/` alone holds 92k files, so a default search used to spend its whole
+/// budget there and return build artifacts instead of source. The check is a
+/// name compare per directory (not a glob per file) and never applies to the
+/// search root itself, so `path: ./target` still searches the build tree when
+/// that is exactly what was asked for.
+const NOISE_DIR_NAMES: &[&str] = &[
+    ".git",
+    ".hg",
+    ".svn",
+    "node_modules",
+    "bower_components",
+    "target",
+    "dist",
+    "build",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".tox",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".next",
+    ".nuxt",
+    ".svelte-kit",
+    ".turbo",
+    ".cache",
+    ".parcel-cache",
+    ".angular",
+    ".gradle",
+    "coverage",
+];
+
+fn is_noise_dir_name(name: &OsStr) -> bool {
+    name.to_str()
+        .is_some_and(|name| NOISE_DIR_NAMES.contains(&name))
+}
+
+/// Why the walk stopped before finishing the tree. The footer names the reason
+/// so the model narrows the query instead of retrying the same search.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExhaustReason {
+    MatchBudget,
+    FileBudget,
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct SearchOptions {
     pub(super) recursive: bool,
@@ -117,7 +165,10 @@ impl Default for SearchOptions {
             use_regex: false,
             smart_case: false,
             include_hidden: true,
-            respect_gitignore: false,
+            // On by default: a workspace is usually a git repo, and its
+            // `.gitignore` is the most accurate list of "not source" that
+            // exists. `false` stays available as the escape hatch.
+            respect_gitignore: true,
             glob: None,
             max_matches: SEARCH_MAX_MATCHES,
             abort: None,
@@ -169,8 +220,11 @@ pub(super) fn is_probably_binary(bytes: &[u8]) -> bool {
 
 /// Result of inspecting one candidate file.
 enum FileScan {
-    /// Nothing matched (also used for glob-filtered-out files).
+    /// Nothing matched.
     Empty,
+    /// Rejected by the `glob` filter before the file was opened, so it must not
+    /// consume the scanned-file budget.
+    FilteredOut,
     Hits(Vec<String>),
     /// Larger than `SEARCH_MAX_FILE_BYTES`; skipped without being read.
     TooLarge,
@@ -187,7 +241,7 @@ fn scan_entry(
     if let Some(glob_matcher) = glob_matcher {
         let match_path = normalize_search_match_path(target, target_root);
         if !glob_matcher.is_match(&match_path) {
-            return Ok(FileScan::Empty);
+            return Ok(FileScan::FilteredOut);
         }
     }
 
@@ -230,10 +284,14 @@ struct SearchAccumulator {
     results: Vec<String>,
     errors: Vec<String>,
     files_scanned: usize,
+    files_glob_filtered: usize,
     files_skipped_large: usize,
     files_skipped_binary: usize,
+    /// Build/dependency directories the walker refused to descend into.
+    pruned_noise_dirs: usize,
+    pruned_noise_names: String,
     match_budget_left: usize,
-    exhausted: bool,
+    exhausted_reason: Option<ExhaustReason>,
     /// The background task behind this search was cancelled.
     cancelled: bool,
 }
@@ -256,13 +314,21 @@ impl SearchAccumulator {
 /// Folds one file's scan into the accumulator. Returns `WalkState::Quit` once a
 /// budget is spent so the walker stops descending immediately.
 fn accumulate_scan(acc: &mut SearchAccumulator, scan: Result<FileScan, String>) -> WalkState {
-    if acc.exhausted {
+    if acc.exhausted_reason.is_some() {
         return WalkState::Quit;
+    }
+
+    // A file the `glob` rejected is never opened, so it must not consume the
+    // scanned-file budget: `glob: "**/*.md"` over a `node_modules` tree used to
+    // burn all 20 000 slots on files it never looked at.
+    if matches!(&scan, Ok(FileScan::FilteredOut)) {
+        acc.files_glob_filtered += 1;
+        return WalkState::Continue;
     }
 
     acc.files_scanned += 1;
     if acc.files_scanned > SEARCH_MAX_FILES {
-        acc.exhausted = true;
+        acc.exhausted_reason = Some(ExhaustReason::FileBudget);
         return WalkState::Quit;
     }
 
@@ -272,13 +338,13 @@ fn accumulate_scan(acc: &mut SearchAccumulator, scan: Result<FileScan, String>) 
             acc.match_budget_left -= take;
             acc.results.extend(hits.into_iter().take(take));
             if acc.match_budget_left == 0 {
-                acc.exhausted = true;
+                acc.exhausted_reason = Some(ExhaustReason::MatchBudget);
                 return WalkState::Quit;
             }
         }
         Ok(FileScan::TooLarge) => acc.files_skipped_large += 1,
         Ok(FileScan::Binary) => acc.files_skipped_binary += 1,
-        Ok(FileScan::Empty) => {}
+        Ok(FileScan::Empty) | Ok(FileScan::FilteredOut) => {}
         Err(err) => acc.push_error(err),
     }
 
@@ -306,10 +372,14 @@ fn render_search_output(acc: &SearchAccumulator, max_matches: usize) -> String {
     if acc.cancelled {
         notes.push("search cancelled before completion — results are partial".to_string());
     }
-    if acc.exhausted {
-        notes.push(format!(
+    match acc.exhausted_reason {
+        Some(ExhaustReason::MatchBudget) => notes.push(format!(
             "stopped early at the {max_matches}-match limit — narrow the path, add a `glob`, or raise `max_results`"
-        ));
+        )),
+        Some(ExhaustReason::FileBudget) => notes.push(format!(
+            "stopped early after scanning {SEARCH_MAX_FILES} files — narrow the path, add a `glob`, or search a subdirectory"
+        )),
+        None => {}
     }
     if acc.files_skipped_large > 0 {
         notes.push(format!(
@@ -324,6 +394,23 @@ fn render_search_output(acc: &SearchAccumulator, max_matches: usize) -> String {
             acc.files_skipped_binary
         ));
     }
+    if acc.files_glob_filtered > 0 {
+        notes.push(format!(
+            "{} file(s) excluded by the `glob` filter",
+            acc.files_glob_filtered
+        ));
+    }
+    if acc.pruned_noise_dirs > 0 {
+        let names = if acc.pruned_noise_names.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", acc.pruned_noise_names)
+        };
+        notes.push(format!(
+            "skipped {} build/dependency dir(s){} — search one explicitly to include it",
+            acc.pruned_noise_dirs, names
+        ));
+    }
     if !notes.is_empty() {
         if !output.is_empty() {
             output.push('\n');
@@ -336,6 +423,115 @@ fn render_search_output(acc: &SearchAccumulator, max_matches: usize) -> String {
     }
 
     output
+}
+
+/// One budgeted parallel walk over `root`. Returns the noise directories it
+/// pruned (count, distinct names) so a search that walks more than one root can
+/// merge the counters.
+#[allow(clippy::too_many_arguments)]
+fn walk_tree(
+    root: &Path,
+    target_root: &Path,
+    matcher: &SearchMatcher,
+    glob_matcher: Option<&globset::GlobSet>,
+    options: &SearchOptions,
+    respect_gitignore: bool,
+    acc: &Mutex<SearchAccumulator>,
+    exhausted: &AtomicBool,
+) -> (usize, Vec<String>) {
+    let mut walker = ignore::WalkBuilder::new(root);
+    walker.standard_filters(false);
+    walker.hidden(!options.include_hidden);
+    walker.git_ignore(respect_gitignore);
+    walker.git_exclude(respect_gitignore);
+    walker.parents(respect_gitignore);
+    walker.ignore(respect_gitignore);
+    walker.follow_links(false);
+
+    if !options.recursive {
+        walker.max_depth(Some(1));
+    }
+
+    // Prune build output and dependency caches below the search root. Without
+    // this a workspace with a 92k-file `target/` spends the entire scan budget
+    // there and never reaches `src/`. `filter_entry` only ever skips *more*, so
+    // it cannot resurrect an entry an ignore rule already dropped.
+    let pruned_noise_dirs = Arc::new(AtomicUsize::new(0));
+    let pruned_noise_names = Arc::new(Mutex::new(Vec::<String>::new()));
+    {
+        let pruned_noise_dirs = Arc::clone(&pruned_noise_dirs);
+        let pruned_noise_names = Arc::clone(&pruned_noise_names);
+        walker.filter_entry(move |entry| {
+            if entry.depth() == 0 || !entry.file_type().is_some_and(|kind| kind.is_dir()) {
+                return true;
+            }
+            let name = entry.file_name();
+            if !is_noise_dir_name(name) {
+                return true;
+            }
+            pruned_noise_dirs.fetch_add(1, Ordering::Relaxed);
+            let mut names = pruned_noise_names
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if names.len() < 4 {
+                let name = name.to_string_lossy().to_string();
+                if !names.contains(&name) {
+                    names.push(name);
+                }
+            }
+            false
+        });
+    }
+
+    let abort = options.abort.as_ref();
+
+    // Directory traversal dominates the cost of a search over a few thousand
+    // files (one `stat` + one `open` + one `read` per file, all IO-bound), so
+    // it is fanned out across cores. `ignore` defaults to
+    // `available_parallelism().min(12)` worker threads.
+    walker.build_parallel().run(|| {
+        Box::new(move |entry| {
+            if exhausted.load(Ordering::Relaxed)
+                || abort.is_some_and(|flag| flag.load(Ordering::Relaxed))
+            {
+                return WalkState::Quit;
+            }
+
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(err) => {
+                    acc.lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .push_error(err.to_string());
+                    return WalkState::Continue;
+                }
+            };
+
+            if !entry
+                .file_type()
+                .is_some_and(|file_type| file_type.is_file())
+            {
+                return WalkState::Continue;
+            }
+
+            // Read + match outside the lock; only the merge is serialised.
+            let scan = scan_entry(entry.path(), target_root, matcher, glob_matcher);
+            let state = accumulate_scan(&mut acc.lock().unwrap_or_else(|p| p.into_inner()), scan);
+            if state == WalkState::Quit {
+                exhausted.store(true, Ordering::Relaxed);
+            }
+            state
+        })
+    });
+
+    let pruned = pruned_noise_dirs.load(Ordering::Relaxed);
+    let names = {
+        let names = pruned_noise_names
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        names.clone()
+    };
+    (pruned, names)
 }
 
 pub(super) fn run_integrated_search(
@@ -364,76 +560,63 @@ pub(super) fn run_integrated_search(
         ));
     }
 
-    let mut walker = ignore::WalkBuilder::new(target);
-    walker.standard_filters(false);
-    walker.hidden(!options.include_hidden);
-    walker.git_ignore(options.respect_gitignore);
-    walker.git_exclude(options.respect_gitignore);
-    walker.parents(options.respect_gitignore);
-    walker.ignore(options.respect_gitignore);
-    walker.follow_links(false);
-    // `.data` (database, memory, todos, skills) is part of the workspace, so
-    // the search engine reaches it like any other folder — the assistant may
-    // look up its own skills, memories and todo lists.
-
-    if !options.recursive {
-        walker.max_depth(Some(1));
-    }
-
     let acc = Mutex::new(SearchAccumulator::with_match_budget(max_matches));
     // Read-mostly flag so the other worker threads bail out without first
     // serialising on the accumulator mutex.
     let exhausted = AtomicBool::new(false);
-    let matcher = &matcher;
-    let glob_matcher = glob_matcher.as_ref();
-    let acc_ref = &acc;
-    let exhausted_ref = &exhausted;
-    let abort_ref = options.abort.as_ref();
 
-    // Directory traversal dominates the cost of a search over a few thousand
-    // files (one `stat` + one `open` + one `read` per file, all IO-bound), so
-    // it is fanned out across cores. `ignore` defaults to
-    // `available_parallelism().min(12)` worker threads.
-    walker.build_parallel().run(|| {
-        Box::new(move |entry| {
-            if exhausted_ref.load(Ordering::Relaxed)
-                || abort_ref.is_some_and(|flag| flag.load(Ordering::Relaxed))
-            {
-                return WalkState::Quit;
-            }
+    let (mut pruned_noise_dirs, mut pruned_noise_names) = walk_tree(
+        target,
+        target_root,
+        &matcher,
+        glob_matcher.as_ref(),
+        options,
+        options.respect_gitignore,
+        &acc,
+        &exhausted,
+    );
 
-            let entry = match entry {
-                Ok(entry) => entry,
-                Err(err) => {
-                    acc_ref
-                        .lock()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner())
-                        .push_error(err.to_string());
-                    return WalkState::Continue;
+    // `.data` (database, memory, todos, skills) is part of the workspace, so the
+    // assistant can look up its own skills, memories and todo lists. Repos do
+    // ignore it (this one lists `.data/`), and `ignore` has no "rescue this
+    // subtree" primitive — an override's plain pattern means *only include* and
+    // its `!` pattern means exclude, while `filter_entry` runs after the ignore
+    // rules. So when the state directory produced no rows it is walked as its
+    // own root with the ignore files off: it is small, and the shared
+    // accumulator keeps one match budget across both walks.
+    let state_dir = target.join(".data");
+    if options.respect_gitignore && options.include_hidden {
+        let already_walked = acc
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .results
+            .iter()
+            .any(|row| row.starts_with(".data/"));
+        if !already_walked && !exhausted.load(Ordering::Relaxed) && state_dir.is_dir() {
+            let (dirs, names) = walk_tree(
+                &state_dir,
+                target_root,
+                &matcher,
+                glob_matcher.as_ref(),
+                options,
+                false,
+                &acc,
+                &exhausted,
+            );
+            pruned_noise_dirs += dirs;
+            for name in names {
+                if pruned_noise_names.len() < 4 && !pruned_noise_names.contains(&name) {
+                    pruned_noise_names.push(name);
                 }
-            };
-
-            if !entry
-                .file_type()
-                .is_some_and(|file_type| file_type.is_file())
-            {
-                return WalkState::Continue;
             }
-
-            // Read + match outside the lock; only the merge is serialised.
-            let scan = scan_entry(entry.path(), target_root, matcher, glob_matcher);
-            let state =
-                accumulate_scan(&mut acc_ref.lock().unwrap_or_else(|p| p.into_inner()), scan);
-            if state == WalkState::Quit {
-                exhausted_ref.store(true, Ordering::Relaxed);
-            }
-            state
-        })
-    });
+        }
+    }
 
     let mut acc = acc
         .into_inner()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
+    acc.pruned_noise_dirs = pruned_noise_dirs;
+    acc.pruned_noise_names = pruned_noise_names.join(", ");
     if options
         .abort
         .as_ref()
@@ -442,8 +625,10 @@ pub(super) fn run_integrated_search(
         acc.cancelled = true;
     }
     // Parallel traversal returns rows in nondeterministic order; sort so the
-    // same tree always produces byte-identical output.
+    // same tree always produces byte-identical output. `dedup` collapses rows a
+    // second walk could repeat.
     acc.results.sort();
+    acc.results.dedup();
 
     Ok(render_search_output(&acc, max_matches))
 }

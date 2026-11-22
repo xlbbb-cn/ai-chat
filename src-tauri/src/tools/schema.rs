@@ -169,7 +169,7 @@ pub fn get_all_tools(
                         },
                         "respect_gitignore": {
                             "type": "boolean",
-                            "description": "Respect .gitignore/.ignore/git-exclude rules ('search', default false). Set true on large trees — skipping node_modules/, target/ etc. is the biggest speedup."
+                            "description": "Respect .gitignore/.ignore/git-exclude rules ('search', default true). Build and dependency directories (node_modules/, target/, dist/, …) are pruned regardless, unless `path` points inside one, so this rarely needs changing; set false to also search files the repository ignores. `.data` stays searchable either way."
                         },
                         "max_results": {
                             "type": "integer",

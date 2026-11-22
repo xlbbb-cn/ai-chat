@@ -235,7 +235,7 @@ pub(super) async fn handle_file_actions(
                 smart_case: args["smart_case"].as_bool().unwrap_or(false),
                 use_regex: args["use_regex"].as_bool().unwrap_or(false),
                 include_hidden: args["include_hidden"].as_bool().unwrap_or(true),
-                respect_gitignore: args["respect_gitignore"].as_bool().unwrap_or(false),
+                respect_gitignore: args["respect_gitignore"].as_bool().unwrap_or(true),
                 glob: args["glob"].as_str().map(str::to_string),
                 max_matches: args["max_results"]
                     .as_u64()
