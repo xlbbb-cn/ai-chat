@@ -39,6 +39,7 @@ import type { Locale, MessageKey, TranslateVars } from "../i18n";
 import type { ChatNoticeTone } from "./ChatNotice";
 import {
   FontAwesomeIcon,
+  faCircleInfo,
   faCodeBranch,
   faFileArrowDown,
   faImages,
@@ -541,6 +542,37 @@ function highlightAgentMentions(root: HTMLElement, known: Set<string>) {
   }
 }
 
+/**
+ * Lift the backend's `[System] …` notices out of a reply body.
+ *
+ * Compression, output-token continuation and todo suspension are notes *about*
+ * the turn, not model output, so they must not break up the prose. The
+ * backend writes each one as `\n\n{notice}\n\n` (`llm_complete/turn.rs`); that
+ * paragraph shape is the wire format parsed here, which also catches a notice
+ * that landed inside a code fence because a `length` cut left it open.
+ *
+ * Only the leading separator is consumed, so two adjacent notices still match
+ * one another and the seam keeps exactly one blank line. Notices are single
+ * lines (`[^\n]*`); the outer blank lines are trimmed afterwards.
+ */
+function splitSystemNotes(text: string): { body: string; notes: string[] } {
+  if (!text.includes("[System]")) return { body: text, notes: [] };
+  const notes: string[] = [];
+  const body = text
+    .replace(/\r\n?/g, "\n")
+    .replace(
+      /(?:^|\n{2,})\[System\][ \t]*([^\n]*)(?=\n{2,}|$)/g,
+      (_match, note: string) => {
+        const value = note.trim();
+        if (value) notes.push(value);
+        return "";
+      },
+    )
+    .replace(/^\n+/, "")
+    .replace(/\n+$/, "");
+  return { body, notes };
+}
+
 function extractEmbeddedThoughtProcess(content: string): {
   reasoningContent: string;
   mainContent: string;
@@ -804,6 +836,16 @@ function ChatMessageRow({ message, showRetry = false, onRetry, onNotice, onDelet
 
   // Display text: collapse multimodal parts to their textual portion.
   const textContent = contentToText(message.content);
+  // `[System] …` paragraphs are the app's notes about this turn (context
+  // compression, output-token continuation, todo suspension), not model
+  // output. Lift them out of the reply so they render as one footnote card at
+  // the end of the turn instead of interrupting the prose. Only a reply is
+  // parsed: what the user typed stays literal.
+  const systemNoteSplit = useMemo(
+    () => (isAssistant ? splitSystemNotes(textContent) : null),
+    [isAssistant, textContent],
+  );
+  const systemNotes = systemNoteSplit?.notes ?? [];
   // An attachment is named, never listed: every file is already called by the
   // accent `@name` token in the body (`highlightFileMentions`), so a chip row
   // underneath only repeats it — and repeated the machine path before the
@@ -818,7 +860,9 @@ function ChatMessageRow({ message, showRetry = false, onRetry, onNotice, onDelet
   const visibleInjections = (message.injections ?? []).filter(
     (injection) => injection.kind !== "background_result",
   );
-  const displayContent = isUser ? stripAttachedFileBlocks(textContent) : textContent;
+  const displayContent = isUser
+    ? stripAttachedFileBlocks(textContent)
+    : systemNoteSplit?.body ?? textContent;
   const embeddedThought = extractEmbeddedThoughtProcess(displayContent);
   const reasoningContent = message.reasoning_content ?? embeddedThought.reasoningContent;
   const mainContent = message.reasoning_content
@@ -1296,6 +1340,24 @@ function ChatMessageRow({ message, showRetry = false, onRetry, onNotice, onDelet
             }
           }}
         />
+        {/* Status notes the backend injected into this turn: one flat card at
+            the end of the reply, so compression / continuation / todo
+            suspension read as a footnote instead of breaking up the prose.
+            The card is a sibling (not part of `.message-content`), which also
+            keeps it out of the PDF export and out of the markdown pipeline. */}
+        {isAssistant && systemNotes.length > 0 && (
+          <div className="message-system-notes" role="note">
+            <div className="message-system-notes-head">
+              <FontAwesomeIcon icon={faCircleInfo} aria-hidden="true" />
+              {t("chat.systemNotes")}
+            </div>
+            {systemNotes.map((note, index) => (
+              <p className="message-system-note" key={`${index}-${note}`}>
+                {note}
+              </p>
+            ))}
+          </div>
+        )}
         {/* The pending `todos ask` form: the last block of the assistant
             bubble, on the line right after the reply's output — the reply
             keeps streaming above it (this message row is one turn), so the

@@ -1026,6 +1026,16 @@ This is the one place with a deliberate asymmetry:
   `.inline-edit-btn` primitive at message density (24px). The fold is *measured*
   after paint (`scrollHeight > clientHeight`), so a note that fits never shows a
   dead toggle.
+- **System notices are a footnote card, not prose.** The backend's
+  `[System] …` paragraphs (context compression, output-token continuation,
+  todo suspension) are lifted out of the reply body and rendered as one flat
+  card at the end of the assistant turn — `.message-system-notes`, placed
+  directly after `.message-content`. Recipe: `--c-surface-2` fill, 1px
+  `--c-border-s`, `--r-md` radius, `padding: 10px 12px`, a 12px/500
+  `--c-muted` heading with the info glyph, and 13px/1.55 `--c-text-secondary`
+  note lines. No accent, no shadow and no motion: it is an informational
+  footnote, not a state, and it stays out of the PDF export (the export clones
+  `.message-content` only).
 - **Turn cost sits to the right of the reply's action buttons.** A settled turn
   shows one muted line (`.message-usage-meta`): duration, total tokens, and —
   only when the provider reported prompt caching — the turn's hit rate,

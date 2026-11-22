@@ -3198,9 +3198,12 @@ export default function App() {
         // (belt and braces — `onToken` already drops the trailing form).
         accumulatedContent = stripControlMarkers(accumulatedContent);
         // The user may be elsewhere (minimized, another window): settle the
-        // turn with a desktop notification card.
+        // turn with a desktop notification card. A `[System]` status line is
+        // not the reply — never let it become the notification's title.
         const notifyLine =
-          accumulatedContent.split("\n").find((line) => line.trim()) ?? "";
+          accumulatedContent
+            .split("\n")
+            .find((line) => line.trim() && !line.trim().startsWith("[System]")) ?? "";
         notifyTurnSettled(true, notifyLine, notifyWhenHiddenRef.current);
         // Deliveries are stored on the assistant row: one turn is one row, and
         // the reply was generated after the model saw them.
@@ -3633,9 +3636,12 @@ export default function App() {
         // (belt and braces — `onToken` already drops the trailing form).
         accumulatedContent = stripControlMarkers(accumulatedContent);
         // The user may be elsewhere (minimized, another window): settle the
-        // turn with a desktop notification card.
+        // turn with a desktop notification card. A `[System]` status line is
+        // not the reply — never let it become the notification's title.
         const notifyLine =
-          accumulatedContent.split("\n").find((line) => line.trim()) ?? "";
+          accumulatedContent
+            .split("\n")
+            .find((line) => line.trim() && !line.trim().startsWith("[System]")) ?? "";
         notifyTurnSettled(true, notifyLine, notifyWhenHiddenRef.current);
         // Deliveries are stored on the assistant row: one turn is one row, and
         // the reply was generated after the model saw them.

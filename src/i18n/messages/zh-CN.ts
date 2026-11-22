@@ -290,6 +290,7 @@ const zhCN: Messages = {
         deleteTitle: "删除这条消息",
         forkTitle: "从这条消息创建分支会话",
         injected: "本轮内追加",
+        systemNotes: "系统提示",
         foldMore: "展开",
         foldLess: "收起",
         continue: "继续",

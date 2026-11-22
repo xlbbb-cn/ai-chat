@@ -290,6 +290,7 @@ const zhTW: Messages = {
         deleteTitle: "刪除這則訊息",
         forkTitle: "從這則訊息建立分支工作階段",
         injected: "本輪內追加",
+        systemNotes: "系統提示",
         foldMore: "展開",
         foldLess: "收合",
         continue: "繼續",

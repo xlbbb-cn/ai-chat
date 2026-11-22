@@ -30,6 +30,7 @@ export {
     faCircle,
     faCircleCheck,
     faCircleHalfStroke,
+    faCircleInfo,
     faCircleXmark,
     faClockRotateLeft,
     faCodeBranch,

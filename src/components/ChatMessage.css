@@ -572,6 +572,43 @@
   font-size: 12px;
 }
 
+/* Status notes the backend injects between requests — context compression,
+   output-token continuation, todo suspension. They are a footnote about the
+   turn, not model output, so they render as one flat card at the end of the
+   assistant bubble: alternate surface, one hairline, no accent, no shadow and
+   no motion (the figure/code card recipe). */
+.message-system-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--c-border-s);
+  background: var(--c-surface-2);
+}
+
+.message-system-notes-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--c-muted);
+}
+
+.message-system-notes-head svg {
+  flex-shrink: 0;
+}
+
+.message-system-note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--c-text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* `@file#lines` mention inside a user turn: the accent is the reference
    colour, so the token the user typed reads as a reference and not as prose.
    That token *is* the attachment's representation — a pasted file is renamed
