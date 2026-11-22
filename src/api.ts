@@ -61,6 +61,14 @@ export async function setChatBackground(sourcePath: string): Promise<ChatBackgro
   return invoke("set_chat_background", { sourcePath });
 }
 
+/**
+ * Use the wallpaper bundled with the app. The bytes are embedded in the
+ * backend, so this needs no file picker and works on a fresh install.
+ */
+export async function useDefaultChatBackground(): Promise<ChatBackground> {
+  return invoke("use_default_chat_background");
+}
+
 /** Remove the stored background photo: config field first, then the file. */
 export async function clearChatBackground(): Promise<void> {
   return invoke("clear_chat_background");
@@ -1259,7 +1267,7 @@ export async function openWorkspaceTmpDir(): Promise<void> {
 
 /** Open `<workspace>/.data/deliver` — the root of all session deliverables. */
 export async function openDeliverablesDir(): Promise<void> {
-  return invoke("app_open_deliverables_dir");
+  return invoke("app_open_ws_data_dir");
 }
 
 /** Open `<workspace>/.data/deliver/<session-id>` — this chat's deliverables. */

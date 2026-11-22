@@ -222,15 +222,15 @@ pub(crate) fn app_open_workspace_tmp_dir(app: AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-/// Open `<workspace>/.data/deliver` — the root of every session's deliverables.
-pub(crate) fn app_open_deliverables_dir(app: AppHandle) -> Result<(), String> {
+/// Open `<workspace>/.data/` — the root of every session's deliverables.
+pub(crate) fn app_open_ws_data_dir(app: AppHandle) -> Result<(), String> {
     let workspace = app
         .state::<AppState>()
         .workspace_dir
         .lock()
         .unwrap()
         .clone();
-    let dir = workspace::deliver_root(&workspace);
+    let dir = workspace::data_root(&workspace);
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     app.opener()
         .open_path(dir.to_string_lossy().into_owned(), None::<&str>)
@@ -2419,7 +2419,7 @@ pub fn run() {
             ipc::app::app_open_data_dir,
             ipc::app::app_open_workspace_dir,
             ipc::app::app_open_workspace_tmp_dir,
-            ipc::app::app_open_deliverables_dir,
+            ipc::app::app_open_ws_data_dir,
             ipc::app::app_open_session_deliver_dir,
             ipc::app::app_open_issue_page,
             ipc::app::app_open_agents_dir,
@@ -2432,6 +2432,7 @@ pub fn run() {
             ipc::app::get_instance_info,
             // Chat background photo (app-data `backgrounds/`).
             ipc::app::set_chat_background,
+            ipc::app::use_default_chat_background,
             ipc::app::clear_chat_background,
             ipc::app::read_chat_background,
             // Notification card.

@@ -23,8 +23,8 @@ pub(crate) fn app_open_workspace_tmp_dir(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub(crate) fn app_open_deliverables_dir(app: AppHandle) -> Result<(), String> {
-    crate::app_open_deliverables_dir(app)
+pub(crate) fn app_open_ws_data_dir(app: AppHandle) -> Result<(), String> {
+    crate::app_open_ws_data_dir(app)
 }
 
 #[tauri::command]
@@ -67,6 +67,14 @@ pub(crate) fn set_chat_background(
     source_path: String,
 ) -> Result<crate::background::ChatBackground, String> {
     crate::background::set(&app, &state, &source_path)
+}
+
+#[tauri::command]
+pub(crate) fn use_default_chat_background(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<crate::background::ChatBackground, String> {
+    crate::background::use_default(&app, &state)
 }
 
 #[tauri::command]

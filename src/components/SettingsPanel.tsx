@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { clearChatBackground, fetchModels, fetchModelMetadata, getAppVersion, getConfig, saveConfig, setChatBackground } from "../api";
+import { clearChatBackground, fetchModels, fetchModelMetadata, getAppVersion, getConfig, saveConfig, setChatBackground, useDefaultChatBackground } from "../api";
 import type { AppConfig, GlassEffect, ModelMetadata, ModelSettings, Palette, RequestHeader } from "../types";
 import { LOCALE_LABELS, LOCALES, useI18n, type Locale, type MessageKey } from "../i18n";
 import { matchModelCatalog, isDeepSeekModel } from "../utils/modelMetadata";
@@ -457,6 +457,22 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
     }
   }
 
+  /** Apply the wallpaper bundled with the app — no picker, no staged save. */
+  async function chooseDefaultChatBackground() {
+    setChatBackgroundBusy(true);
+    setChatBackgroundError(null);
+    try {
+      const stored = await useDefaultChatBackground();
+      setConfig((prev) => ({ ...prev, chat_background: stored.path }));
+      onChatBackgroundPreview?.(stored.data_url);
+    } catch (e) {
+      console.error("Failed to apply the default chat background", e);
+      setChatBackgroundError(String(e));
+    } finally {
+      setChatBackgroundBusy(false);
+    }
+  }
+
   /** Remove the stored photo (config field first, then the file). */
   async function removeChatBackground() {
     setChatBackgroundBusy(true);
@@ -657,6 +673,14 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
                       {config.chat_background
                         ? t("settings.appearance.chatBackgroundReplace")
                         : t("settings.appearance.chatBackgroundChoose")}
+                    </button>
+                    <button
+                      type="button"
+                      className="settings-btn"
+                      onClick={() => void chooseDefaultChatBackground()}
+                      disabled={chatBackgroundBusy}
+                    >
+                      {t("settings.appearance.chatBackgroundDefault")}
                     </button>
                     {config.chat_background && (
                       <button

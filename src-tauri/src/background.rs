@@ -11,7 +11,6 @@
 
 use std::ffi::OsStr;
 use std::fs;
-use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -32,6 +31,14 @@ const MAX_BACKGROUND_BYTES: u64 = 20 * 1024 * 1024;
 /// WebView2 build does not decode it everywhere); SVG is absent because a photo
 /// picker has no business accepting executable markup.
 const ALLOWED_FORMATS: [&str; 5] = ["png", "jpeg", "webp", "gif", "bmp"];
+
+/// The wallpaper shipped with the app, embedded so "use default" works on a
+/// fresh install with no picker round trip. `docs/wallpaper.png` stays the one
+/// source of truth: a build fails loudly if it is moved or removed.
+const DEFAULT_WALLPAPER: &[u8] = include_bytes!("../../docs/wallpaper.png");
+/// Stable file name — clicking "use default" again replaces the same file
+/// instead of leaving a new copy behind (the previous custom photo is retired).
+const DEFAULT_WALLPAPER_FILE: &str = "chat-background-default.png";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ChatBackground {
@@ -106,44 +113,40 @@ fn read_data_url(app_data: &Path, relative: &str) -> Option<String> {
     ))
 }
 
-/// Copy the picked photo into the app data directory and persist its path.
-///
-/// The config write happens before the previous photo is deleted: a failed
-/// write must leave the old setting and its file intact. A failed write after
-/// the copy removes the copy again, so no orphan is left behind.
-pub(crate) fn set(
-    app: &AppHandle,
-    state: &AppState,
-    source_path: &str,
-) -> Result<ChatBackground, String> {
-    let source = Path::new(source_path);
-    let metadata =
-        fs::metadata(source).map_err(|e| format!("Cannot read the selected photo: {e}"))?;
-    if !metadata.is_file() {
-        return Err("The selected path is not a file.".to_string());
+/// Validate image bytes before they are written. `subject` keeps the error
+/// wording aligned with where the image came from (picker or built-in).
+fn validate(bytes: &[u8], subject: &str) -> Result<(), String> {
+    if bytes.is_empty() {
+        return Err(format!("{subject} is empty."));
     }
-    if metadata.len() == 0 {
-        return Err("The selected photo is empty.".to_string());
-    }
-    if metadata.len() > MAX_BACKGROUND_BYTES {
+    if bytes.len() as u64 > MAX_BACKGROUND_BYTES {
         return Err(format!(
-            "The selected photo is too large ({} MB, limit {} MB).",
-            metadata.len() / (1024 * 1024),
+            "{subject} is too large ({} MB, limit {} MB).",
+            bytes.len() / (1024 * 1024),
             MAX_BACKGROUND_BYTES / (1024 * 1024)
         ));
     }
-
-    let mut header = [0u8; 12];
-    let read = fs::File::open(source)
-        .and_then(|mut file| file.read(&mut header))
-        .map_err(|e| format!("Cannot read the selected photo: {e}"))?;
-    let format = sniff_format(&header[..read]).ok_or_else(|| {
-        format!(
+    if sniff_format(bytes).is_none() {
+        return Err(format!(
             "Unsupported image format. Choose a {} file.",
             ALLOWED_FORMATS.join(" / ")
-        )
-    })?;
+        ));
+    }
+    Ok(())
+}
 
+/// Write image bytes under `backgrounds/`, persist the path and retire the old
+/// photo. The config write happens before the previous file is deleted: a
+/// failed write must leave the old setting and its file intact. A failed write
+/// after the copy removes the copy again, so no orphan is left behind.
+fn install(
+    app: &AppHandle,
+    state: &AppState,
+    bytes: &[u8],
+    file_name: &str,
+    subject: &str,
+) -> Result<ChatBackground, String> {
+    validate(bytes, subject)?;
     let app_data = app
         .path()
         .app_data_dir()
@@ -151,9 +154,8 @@ pub(crate) fn set(
     let dir = backgrounds_dir(&app_data);
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
-    let file_name = format!("chat-background-{}.{}", uuid::Uuid::new_v4().simple(), format);
-    let target = dir.join(&file_name);
-    fs::copy(source, &target).map_err(|e| format!("Cannot copy the photo: {e}"))?;
+    let target = dir.join(file_name);
+    fs::write(&target, bytes).map_err(|e| format!("Cannot save the background: {e}"))?;
     let relative = format!("{BACKGROUND_DIR}/{file_name}");
 
     let previous = state.config.lock().unwrap().chat_background.clone();
@@ -174,11 +176,61 @@ pub(crate) fn set(
     }
 
     let data_url = read_data_url(&app_data, &relative)
-        .ok_or_else(|| "The copied photo could not be read back.".to_string())?;
+        .ok_or_else(|| "The saved background could not be read back.".to_string())?;
     Ok(ChatBackground {
         path: relative,
         data_url,
     })
+}
+
+/// Copy the picked photo into the app data directory and persist its path.
+pub(crate) fn set(
+    app: &AppHandle,
+    state: &AppState,
+    source_path: &str,
+) -> Result<ChatBackground, String> {
+    let source = Path::new(source_path);
+    let metadata =
+        fs::metadata(source).map_err(|e| format!("Cannot read the selected photo: {e}"))?;
+    if !metadata.is_file() {
+        return Err("The selected path is not a file.".to_string());
+    }
+    if metadata.len() == 0 {
+        return Err("The selected photo is empty.".to_string());
+    }
+    // Check the size before reading: a huge pick must not be pulled into memory.
+    if metadata.len() > MAX_BACKGROUND_BYTES {
+        return Err(format!(
+            "The selected photo is too large ({} MB, limit {} MB).",
+            metadata.len() / (1024 * 1024),
+            MAX_BACKGROUND_BYTES / (1024 * 1024)
+        ));
+    }
+    let bytes = fs::read(source).map_err(|e| format!("Cannot read the selected photo: {e}"))?;
+    let format = sniff_format(&bytes).ok_or_else(|| {
+        format!(
+            "Unsupported image format. Choose a {} file.",
+            ALLOWED_FORMATS.join(" / ")
+        )
+    })?;
+    let file_name = format!("chat-background-{}.{}", uuid::Uuid::new_v4().simple(), format);
+    install(app, state, &bytes, &file_name, "The selected photo")
+}
+
+/// Install the wallpaper bundled with the app as the chat background.
+///
+/// The bytes come from `include_bytes!`, so there is no file-picker round trip
+/// and the image is available in a fresh install. It lands under the same
+/// stable name every time, so repeated clicks replace one file instead of
+/// piling up copies, and a backup carries it like any picked photo.
+pub(crate) fn use_default(app: &AppHandle, state: &AppState) -> Result<ChatBackground, String> {
+    install(
+        app,
+        state,
+        DEFAULT_WALLPAPER,
+        DEFAULT_WALLPAPER_FILE,
+        "The default wallpaper",
+    )
 }
 
 /// Drop the stored photo: clear the config field first, then delete the file.
@@ -230,6 +282,13 @@ mod tests {
         assert_eq!(resolve(root, "other/photo.png"), None);
         assert_eq!(resolve(root, "backgrounds/nested/photo.png"), None);
         assert_eq!(resolve(root, "C:/photo.png"), None);
+    }
+
+    #[test]
+    fn default_wallpaper_is_a_valid_png() {
+        assert_eq!(sniff_format(DEFAULT_WALLPAPER), Some("png"));
+        assert!(DEFAULT_WALLPAPER.len() as u64 <= MAX_BACKGROUND_BYTES);
+        assert!(DEFAULT_WALLPAPER_FILE.ends_with(".png"));
     }
 
     #[test]

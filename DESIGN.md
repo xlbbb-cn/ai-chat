@@ -91,7 +91,10 @@ chosen file into `<app data>/backgrounds/chat-background-<id>.<ext>` and stores
 only that app-data-relative path in `config.chat_background`, so a backup and
 MSIX's redirected app data carry the photo together with the config. The
 frontend reads the bytes over IPC and paints a Blob URL; it never stores a
-multi-megabyte data URL in a CSS custom property.
+multi-megabyte data URL in a CSS custom property. The "Use default wallpaper"
+button installs the image embedded from `docs/wallpaper.png` as
+`backgrounds/chat-background-default.png` — the same path shape as a picked
+photo, so it rides along in backups and needs no file picker.
 
 | Token | Light | Dark | Role |
 |---|---|---|---|
