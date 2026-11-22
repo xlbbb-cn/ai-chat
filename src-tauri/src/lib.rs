@@ -2079,6 +2079,15 @@ pub fn run() {
             );
             let workspace_fallback = resolved.fallback;
             let workspace_dir = resolved.path;
+            // Warm the memory-entry cache off the request path. The first turn
+            // of a session builds its hint from every evolution entry, and on a
+            // large scope that read+parse+tokenize pass (~1.6 s at 6 000
+            // entries) is latency the user would otherwise feel before the
+            // model starts. A plain thread keeps it off startup as well.
+            let warm_workspace = workspace_dir.clone();
+            std::thread::spawn(move || {
+                crate::tools::memory::warm_memory_cache(&warm_workspace)
+            });
             // First launch (or a config that never carried a choice): adopt the
             // OS user-interface language once and persist it. The value is a
             // decision, not a default — a pick in Settings or an imported

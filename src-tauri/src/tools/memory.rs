@@ -175,11 +175,17 @@ impl EvolutionEntry {
     }
 }
 
-/// An entry plus its ranking score.
+/// An entry plus its ranking score and the text/token views derived from it.
+///
+/// `views` is private on purpose: it is shared with the parse cache, so
+/// `search` matches the same tokens the hint saw instead of re-deriving them
+/// from the entry (three tokenization passes per entry were the bulk of a
+/// search over a few thousand entries).
 #[derive(Debug, Clone)]
 pub struct ScoredEntry {
     pub entry: EvolutionEntry,
     pub score: f64,
+    views: Arc<EntryViews>,
 }
 
 // ─── Small text helpers ──────────────────────────────────────────────────────
@@ -614,9 +620,35 @@ fn merge_evidence(merged: &mut EvolutionEntry, loser: &EvolutionEntry) {
     }
 }
 
+/// Everything one entry derives from a pass over its text: the raw field texts
+/// and their token bags.
+///
+/// The hint builds these for every entry on every user message, and `search`
+/// used to derive them up to three more times per entry. They are computed once
+/// when the file is parsed and shared by both paths.
+#[derive(Debug)]
+struct EntryViews {
+    /// `[key, title, tags, summary + body]`.
+    texts: [String; 4],
+    /// `tokenize` of each text: deduped, order preserved.
+    fields: [Vec<String>; 4],
+}
+
+impl EntryViews {
+    fn of(entry: &EvolutionEntry) -> Self {
+        let texts = entry_field_texts(entry);
+        let fields = [
+            tokenize(&texts[0]),
+            tokenize(&texts[1]),
+            tokenize(&texts[2]),
+            tokenize(&texts[3]),
+        ];
+        Self { texts, fields }
+    }
+}
+
 /// One parsed entry plus everything derived from it by a pass over its text:
-/// the `[key, title, tags, body]` token bags and the body signature the dedupe
-/// groups on.
+/// the views above and the body signature the dedupe groups on.
 struct CachedEntry {
     /// File identity the cache validates against. A rewrite changes at least one
     /// of the two — a `confidence`/`uses` bump changes the length, an edited body
@@ -624,7 +656,7 @@ struct CachedEntry {
     length: u64,
     modified: Option<std::time::SystemTime>,
     entry: EvolutionEntry,
-    fields: Arc<[Vec<String>; 4]>,
+    views: Arc<EntryViews>,
     signature: String,
 }
 
@@ -681,13 +713,13 @@ fn scan_entries(workspace_dir: &Path) -> Vec<Arc<CachedEntry>> {
         let Some(entry) = parse_evolution_entry(&path) else {
             continue;
         };
-        let fields = Arc::new(entry_match_fields(&entry));
+        let views = Arc::new(EntryViews::of(&entry));
         let signature = normalize_text(&entry.body);
         let cached = Arc::new(CachedEntry {
             length,
             modified,
             entry,
-            fields,
+            views,
             signature,
         });
         cache.insert(path, Arc::clone(&cached));
@@ -724,7 +756,7 @@ fn dedupe_cached(entries: Vec<Arc<CachedEntry>>) -> Vec<Arc<CachedEntry>> {
                     // so it carries no file identity to validate.
                     length: 0,
                     modified: None,
-                    fields: Arc::new(entry_match_fields(&merged)),
+                    views: Arc::new(EntryViews::of(&merged)),
                     signature: cached.signature.clone(),
                     entry: merged,
                 });
@@ -748,14 +780,27 @@ pub fn load_evolution_entries(workspace_dir: &Path) -> Vec<EvolutionEntry> {
     )
 }
 
+/// Read, parse and tokenize the whole hot scope, discarding the result.
+///
+/// Called on a background thread at app start. The first turn of a session
+/// builds the hint from every entry, so on a large scope (a few thousand
+/// entries) the cold pass is seconds of latency the user would otherwise feel
+/// before the model even starts. Warming moves that work off the request path;
+/// the cache still validates by `(mtime, len)`, so a warmed scan can never
+/// serve stale text.
+pub fn warm_memory_cache(workspace_dir: &Path) {
+    let _ = scan_entries(workspace_dir);
+}
+
 /// Load + rank. The single read entry point shared by `memory list`, the
 /// consolidation planner and the panel.
 pub fn ranked_evolution_entries(workspace_dir: &Path) -> Vec<ScoredEntry> {
-    let mut scored: Vec<ScoredEntry> = load_evolution_entries(workspace_dir)
+    let mut scored: Vec<ScoredEntry> = dedupe_cached(scan_entries(workspace_dir))
         .into_iter()
-        .map(|entry| ScoredEntry {
-            score: score_evolution_entry(&entry),
-            entry,
+        .map(|cached| ScoredEntry {
+            score: score_evolution_entry(&cached.entry),
+            entry: cached.entry.clone(),
+            views: Arc::clone(&cached.views),
         })
         .collect();
     scored.sort_by(|left, right| {
@@ -994,9 +1039,9 @@ struct HintCandidate {
     importance: u32,
     /// Best keyword hit weight (0 = no match, filtered out).
     weight: u32,
-    /// Token bags of key / title / tags / body — matching only, never rendered.
-    /// Shared with the entry cache, so a warm turn clones nothing.
-    fields: Arc<[Vec<String>; 4]>,
+    /// Key / title / tags / body views — matching only, never rendered. Shared
+    /// with the entry cache, so a warm turn clones nothing.
+    views: Arc<EntryViews>,
 }
 
 /// Build the confidence-ranked hint for one user message.
@@ -1021,7 +1066,7 @@ pub fn build_memory_hint(
     let mut ranked: Vec<HintCandidate> = hint_candidates(workspace_dir, include_evolution)
         .into_iter()
         .filter_map(|mut candidate| {
-            candidate.weight = hint_weight(&candidate.fields, &keywords);
+            candidate.weight = hint_weight(&candidate.views.fields, &keywords);
             (candidate.weight > 0).then_some(candidate)
         })
         .collect();
@@ -1116,7 +1161,7 @@ fn hint_candidates(workspace_dir: &Path, include_evolution: bool) -> Vec<HintCan
                 confidence: entry.meta.confidence,
                 importance: entry.meta.importance,
                 weight: 0,
-                fields: Arc::clone(&cached.fields),
+                views: Arc::clone(&cached.views),
             });
         }
     }
@@ -1151,12 +1196,15 @@ fn hint_candidates(workspace_dir: &Path, include_evolution: bool) -> Vec<HintCan
                 title: one_line(&key, MEMORY_HINT_ITEM_CHARS),
                 // The `# key` heading carries the readable key; the file stem
                 // is the sanitized version of it.
-                fields: Arc::new([
-                    tokenize(&key),
-                    tokenize(&key),
-                    tokenize(&tags.join(" ")),
-                    tokenize(&body),
-                ]),
+                views: Arc::new(EntryViews {
+                    fields: [
+                        tokenize(&key),
+                        tokenize(&key),
+                        tokenize(&tags.join(" ")),
+                        tokenize(&body),
+                    ],
+                    texts: [key.clone(), key.clone(), tags.join(" "), body.clone()],
+                }),
                 key,
                 confidence: FILE_MEMORY_CONFIDENCE,
                 importance: FILE_MEMORY_IMPORTANCE,
@@ -1261,21 +1309,6 @@ fn entry_field_texts(entry: &EvolutionEntry) -> [String; 4] {
     ]
 }
 
-/// The tokenized `[key, title, tags, body]` of one entry.
-///
-/// The request hint and `search` share them on purpose: a query that lights up
-/// the hint must find the same entry in `search` (and vice versa), so the two
-/// paths cannot drift apart again.
-fn entry_match_fields(entry: &EvolutionEntry) -> [Vec<String>; 4] {
-    let texts = entry_field_texts(entry);
-    [
-        tokenize(&texts[0]),
-        tokenize(&texts[1]),
-        tokenize(&texts[2]),
-        tokenize(&texts[3]),
-    ]
-}
-
 /// Hit weight the hint uses: the tier, with the stricter rule that a
 /// **body-only** match needs two distinct keywords — one common word is not
 /// evidence that the entry is *about* the question.
@@ -1310,7 +1343,7 @@ fn corpus_stats(entries: &[ScoredEntry]) -> CorpusStats {
     let mut df: HashMap<String, u32> = HashMap::new();
     let mut total_len = 0usize;
     for scored in entries {
-        let fields = entry_match_fields(&scored.entry);
+        let fields = &scored.views.fields;
         for token in fields.iter().flatten() {
             *df.entry(token.clone()).or_insert(0) += 1;
         }
@@ -1347,7 +1380,7 @@ fn relevance(
     query_ordered: &[String],
     corpus: &CorpusStats,
 ) -> (f32, bool) {
-    let texts = entry_field_texts(&scored.entry);
+    let texts = &scored.views.texts;
     let weights = field_weights();
     let mut fields: [Vec<String>; 4] = Default::default();
     let mut name_tokens: Vec<String> = Vec::new();
@@ -1407,8 +1440,7 @@ fn rank_keyword_matches(ranked: Vec<ScoredEntry>, query: &str) -> Vec<(KeywordMa
     let mut matches: Vec<(KeywordMatch, ScoredEntry)> = ranked
         .into_iter()
         .filter_map(|scored| {
-            let fields = entry_match_fields(&scored.entry);
-            let mut hit = keyword_match(&fields, &keywords)?;
+            let mut hit = keyword_match(&scored.views.fields, &keywords)?;
             let (score, phrase) = relevance(&scored, &keywords, &query_ordered, &corpus);
             hit.score = score;
             hit.phrase = phrase;
