@@ -15,6 +15,7 @@ use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{AppHandle, Manager, State};
 
 use super::emit_tool_progress;
@@ -574,33 +575,15 @@ fn dedupe_entries(entries: Vec<EvolutionEntry>) -> Vec<EvolutionEntry> {
         let signature = normalize_text(&entry.body);
         if !signature.is_empty() {
             if let Some(&index) = by_body.get(&signature) {
-                let current_score = score_evolution_entry(&out[index]);
-                let incoming_score = score_evolution_entry(&entry);
-                let keep_incoming = incoming_score > current_score;
+                let keep_incoming =
+                    score_evolution_entry(&entry) > score_evolution_entry(&out[index]);
                 let mut merged = if keep_incoming {
                     entry.clone()
                 } else {
                     out[index].clone()
                 };
-                let loser = if keep_incoming {
-                    out[index].clone()
-                } else {
-                    entry.clone()
-                };
-                merged.meta.evidence = merged.meta.evidence.max(1) + loser.meta.evidence.max(1);
-                merged.meta.uses = merged.meta.uses.saturating_add(loser.meta.uses);
-                merged.meta.pinned |= loser.meta.pinned;
-                merged.meta.importance = merged.meta.importance.max(loser.meta.importance);
-                for tag in loser.meta.tags {
-                    if !merged.meta.tags.iter().any(|t| t.eq_ignore_ascii_case(&tag)) {
-                        merged.meta.tags.push(tag);
-                    }
-                }
-                if loser.meta.key != merged.meta.key
-                    && !merged.meta.aliases.contains(&loser.meta.key)
-                {
-                    merged.meta.aliases.push(loser.meta.key.clone());
-                }
+                let loser = if keep_incoming { &out[index] } else { &entry };
+                merge_evidence(&mut merged, loser);
                 out[index] = merged;
                 continue;
             }
@@ -612,27 +595,157 @@ fn dedupe_entries(entries: Vec<EvolutionEntry>) -> Vec<EvolutionEntry> {
     out
 }
 
-/// Load every hot entry (migration is **not** performed here).
-pub fn load_evolution_entries(workspace_dir: &Path) -> Vec<EvolutionEntry> {
+/// Fold a duplicate's evidence into the survivor.
+///
+/// Shared by the owned and the cached loader so the two cannot disagree about
+/// what merging an entry means.
+fn merge_evidence(merged: &mut EvolutionEntry, loser: &EvolutionEntry) {
+    merged.meta.evidence = merged.meta.evidence.max(1) + loser.meta.evidence.max(1);
+    merged.meta.uses = merged.meta.uses.saturating_add(loser.meta.uses);
+    merged.meta.pinned |= loser.meta.pinned;
+    merged.meta.importance = merged.meta.importance.max(loser.meta.importance);
+    for tag in &loser.meta.tags {
+        if !merged.meta.tags.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
+            merged.meta.tags.push(tag.clone());
+        }
+    }
+    if loser.meta.key != merged.meta.key && !merged.meta.aliases.contains(&loser.meta.key) {
+        merged.meta.aliases.push(loser.meta.key.clone());
+    }
+}
+
+/// One parsed entry plus everything derived from it by a pass over its text:
+/// the `[key, title, tags, body]` token bags and the body signature the dedupe
+/// groups on.
+struct CachedEntry {
+    /// File identity the cache validates against. A rewrite changes at least one
+    /// of the two — a `confidence`/`uses` bump changes the length, an edited body
+    /// changes both — so an entry on disk can never be served stale.
+    length: u64,
+    modified: Option<std::time::SystemTime>,
+    entry: EvolutionEntry,
+    fields: Arc<[Vec<String>; 4]>,
+    signature: String,
+}
+
+fn entry_cache() -> &'static Mutex<HashMap<PathBuf, Arc<CachedEntry>>> {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, Arc<CachedEntry>>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Every hot entry, reusing the cached parse for any file whose `(mtime, len)`
+/// did not change.
+///
+/// The hint runs once per user message and used to re-read, re-parse and
+/// re-tokenize the whole scope every time; at a few thousand entries that is
+/// seconds of work for a 200-character block. A warm call now costs one
+/// `metadata` per file plus a hash lookup, and the `Arc`s it returns are shared
+/// rather than cloned.
+fn scan_entries(workspace_dir: &Path) -> Vec<Arc<CachedEntry>> {
     let dir = evolution_dir(workspace_dir);
-    let Ok(entries) = fs::read_dir(&dir) else {
+    let Ok(read_dir) = fs::read_dir(&dir) else {
         return Vec::new();
     };
-    let mut loaded: Vec<EvolutionEntry> = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-        let name = entry.file_name().to_string_lossy().to_string();
+
+    let mut cache = entry_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut out: Vec<Arc<CachedEntry>> = Vec::new();
+    let mut seen: HashSet<PathBuf> = HashSet::new();
+
+    for dirent in read_dir.flatten() {
+        let name = dirent.file_name().to_string_lossy().to_string();
         if !name.ends_with(".md") || name.contains(".bak.") {
             continue;
         }
-        if let Some(parsed) = parse_evolution_entry(&path) {
-            loaded.push(parsed);
+        // `DirEntry::metadata` reuses the handle `read_dir` already opened on
+        // Windows, unlike `path.metadata()`, which resolves the path again.
+        let Ok(metadata) = dirent.metadata() else {
+            continue;
+        };
+        if !metadata.is_file() {
+            continue;
         }
+        let path = dirent.path();
+        let length = metadata.len();
+        let modified = metadata.modified().ok();
+        seen.insert(path.clone());
+
+        if let Some(cached) = cache.get(&path) {
+            if cached.length == length && cached.modified == modified {
+                out.push(Arc::clone(cached));
+                continue;
+            }
+        }
+
+        let Some(entry) = parse_evolution_entry(&path) else {
+            continue;
+        };
+        let fields = Arc::new(entry_match_fields(&entry));
+        let signature = normalize_text(&entry.body);
+        let cached = Arc::new(CachedEntry {
+            length,
+            modified,
+            entry,
+            fields,
+            signature,
+        });
+        cache.insert(path, Arc::clone(&cached));
+        out.push(cached);
     }
-    dedupe_entries(loaded)
+
+    // A deleted entry must stop answering: drop everything this directory no
+    // longer lists, while keeping other workspaces' warmed entries.
+    cache.retain(|path, _| !path.starts_with(&dir) || seen.contains(path));
+
+    out
+}
+
+/// The entries after body-dedupe, kept as shared handles so the hint does not
+/// clone a few thousand bodies per turn.
+fn dedupe_cached(entries: Vec<Arc<CachedEntry>>) -> Vec<Arc<CachedEntry>> {
+    let mut by_body: HashMap<String, usize> = HashMap::new();
+    let mut out: Vec<Arc<CachedEntry>> = Vec::new();
+
+    for cached in entries {
+        if !cached.signature.is_empty() {
+            if let Some(&index) = by_body.get(cached.signature.as_str()) {
+                let keep_incoming = score_evolution_entry(&cached.entry)
+                    > score_evolution_entry(&out[index].entry);
+                let (winner, loser) = if keep_incoming {
+                    (&cached, &out[index])
+                } else {
+                    (&out[index], &cached)
+                };
+                let mut merged = winner.entry.clone();
+                merge_evidence(&mut merged, &loser.entry);
+                out[index] = Arc::new(CachedEntry {
+                    // A merged entry is synthesized in memory and never written,
+                    // so it carries no file identity to validate.
+                    length: 0,
+                    modified: None,
+                    fields: Arc::new(entry_match_fields(&merged)),
+                    signature: cached.signature.clone(),
+                    entry: merged,
+                });
+                continue;
+            }
+            by_body.insert(cached.signature.clone(), out.len());
+        }
+        out.push(cached);
+    }
+
+    out
+}
+
+/// Load every hot entry (migration is **not** performed here).
+pub fn load_evolution_entries(workspace_dir: &Path) -> Vec<EvolutionEntry> {
+    dedupe_entries(
+        scan_entries(workspace_dir)
+            .into_iter()
+            .map(|cached| cached.entry.clone())
+            .collect(),
+    )
 }
 
 /// Load + rank. The single read entry point shared by `memory list`, the
@@ -882,7 +995,8 @@ struct HintCandidate {
     /// Best keyword hit weight (0 = no match, filtered out).
     weight: u32,
     /// Token bags of key / title / tags / body — matching only, never rendered.
-    fields: [Vec<String>; 4],
+    /// Shared with the entry cache, so a warm turn clones nothing.
+    fields: Arc<[Vec<String>; 4]>,
 }
 
 /// Build the confidence-ranked hint for one user message.
@@ -981,7 +1095,8 @@ fn hint_candidates(workspace_dir: &Path, include_evolution: bool) -> Vec<HintCan
     let mut candidates: Vec<HintCandidate> = Vec::new();
 
     if include_evolution {
-        for entry in load_evolution_entries(workspace_dir) {
+        for cached in dedupe_cached(scan_entries(workspace_dir)) {
+            let entry = &cached.entry;
             if entry.meta.key == MAINTENANCE_PROGRESS_KEY {
                 continue;
             }
@@ -1001,7 +1116,7 @@ fn hint_candidates(workspace_dir: &Path, include_evolution: bool) -> Vec<HintCan
                 confidence: entry.meta.confidence,
                 importance: entry.meta.importance,
                 weight: 0,
-                fields: entry_match_fields(&entry),
+                fields: Arc::clone(&cached.fields),
             });
         }
     }
@@ -1036,12 +1151,12 @@ fn hint_candidates(workspace_dir: &Path, include_evolution: bool) -> Vec<HintCan
                 title: one_line(&key, MEMORY_HINT_ITEM_CHARS),
                 // The `# key` heading carries the readable key; the file stem
                 // is the sanitized version of it.
-                fields: [
+                fields: Arc::new([
                     tokenize(&key),
                     tokenize(&key),
                     tokenize(&tags.join(" ")),
                     tokenize(&body),
-                ],
+                ]),
                 key,
                 confidence: FILE_MEMORY_CONFIDENCE,
                 importance: FILE_MEMORY_IMPORTANCE,
@@ -3354,6 +3469,42 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.dir);
         }
+    }
+
+    /// The parse cache is keyed by `(mtime, len)`: a rewrite that keeps the
+    /// length the same is still re-read, so only the mtime can save it.
+    #[test]
+    fn a_rewritten_entry_is_not_served_from_the_cache() {
+        let workspace = TempWorkspace::new("cache-rewrite");
+        let first = "---\nformat_version: 2\nkey: python\ntitle: Python\nkind: fact\ntags: []\n---\n\nAlfa1 is the interpreter.\n";
+        let second = "---\nformat_version: 2\nkey: python\ntitle: Python\nkind: fact\ntags: []\n---\n\nBeta2 is the interpreter.\n";
+        assert_eq!(first.len(), second.len(), "the test needs equal lengths");
+
+        workspace.write("python", first);
+        let loaded = load_evolution_entries(&workspace.dir);
+        assert_eq!(loaded.len(), 1);
+        assert!(loaded[0].body.contains("Alfa1"), "{}", loaded[0].body);
+
+        workspace.write("python", second);
+        let reloaded = load_evolution_entries(&workspace.dir);
+        assert_eq!(reloaded.len(), 1);
+        assert!(reloaded[0].body.contains("Beta2"), "{}", reloaded[0].body);
+        assert!(!reloaded[0].body.contains("Alfa1"));
+    }
+
+    /// A deleted file disappears on the next read instead of being resurrected
+    /// from the cache.
+    #[test]
+    fn a_deleted_entry_leaves_the_cache() {
+        let workspace = TempWorkspace::new("cache-delete");
+        workspace.write("alpha", "# alpha\n\nAlpha fact.\n");
+        workspace.write("beta", "# beta\n\nBeta fact.\n");
+        assert_eq!(load_evolution_entries(&workspace.dir).len(), 2);
+
+        fs::remove_file(workspace.evolution().join("alpha.md")).unwrap();
+        let remaining = load_evolution_entries(&workspace.dir);
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].meta.key, "beta");
     }
 
     /// The evolution scope only exists while self-evolution mode is on.
