@@ -1,5 +1,7 @@
-// Integrated search engine for `file_actions`, `skill_read` and the memory
-// store: glob/space matcher, budgeted parallel tree walk and output renderer.
+// Integrated search engine shared by `file_actions` and `skill_read`: literal
+// and regex matcher, glob filter, budgeted parallel tree walk and output
+// renderer. The memory store does not use it — it ranks its own parsed entries
+// instead (`memory::rank_keyword_matches`).
 
 use ignore::WalkState;
 use std::ffi::OsStr;
