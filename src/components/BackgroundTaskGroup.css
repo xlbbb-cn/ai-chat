@@ -1,12 +1,17 @@
 /* Background work group: the one place serve processes and background tool
-   tasks are listed. Same card language as `.tool-call-group` — an ash block
-   with a clickable summary row — so the transcript keeps one visual rhythm. */
+   tasks are listed. Same card anatomy as `.tool-call-group` — a tinted block
+   with a clickable summary row — but its own success tint and rule so the
+   transcript keeps one rhythm while the card kinds stay distinguishable. */
 .background-group {
     align-self: flex-start;
     width: 100%;
     min-width: 200px;
     border-radius: 4px;
-    background: var(--ts-ash, var(--c-reason));
+    /* Background work gets the success tint + rule: it is live work, and this
+       keeps it distinct from the thinking / tool / plan cards. Rows below give
+       back 2px of left padding so the rule shifts no text and no width. */
+    background: var(--c-card-bg-task);
+    border-left: 2px solid var(--c-card-bg-task-rule);
     overflow: hidden;
 }
 
@@ -15,7 +20,7 @@
     align-items: center;
     gap: 6px;
     width: 100%;
-    padding: 6px 10px;
+    padding: 6px 10px 6px 8px;
     border: none;
     background: transparent;
     color: inherit;
@@ -59,7 +64,7 @@
     min-width: 0;
     font-size: 14px;
     font-weight: 500;
-    color: var(--ts-carbon, var(--c-text));
+    color: var(--c-card-bg-task-rule);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -95,7 +100,7 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
-    padding: 6px 10px 8px;
+    padding: 6px 10px 8px 8px;
 }
 
 .background-group-section-title {

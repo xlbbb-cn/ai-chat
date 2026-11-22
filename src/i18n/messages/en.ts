@@ -109,6 +109,20 @@ const en = {
                 "Turn on Self-evolution mode and click the face above to tidy skills and memory while you wait.",
             backup:
                 "Use the titlebar ⋯ menu to export a backup — config, skills, memory and chat history in one zip.",
+            createSkill:
+                "Skills panel → + New Skill: name it, add a one-line description and system prompt, save, then enable and load it with /skill.",
+            mcpSetup:
+                "MCP panel → + Add Server: stdio needs a command, args and env vars; SSE/HTTP needs a URL and token — test with the bolt icon.",
+            subAgentCreate:
+                "Agents panel → + New Agent: name it, describe it, write its system prompt; enable it, then embed it with +agent.",
+            scriptLibrary:
+                "Ask the assistant to save a proven command as a script — run_cmd then runs it by name, no retyping.",
+            modelDepth:
+                "Switch models any time from the toolbar picker; reasoning models also offer a thinking-depth control.",
+            workspaceSwitch:
+                "Click the workspace name in the titlebar to switch — each workspace keeps its own history, skills, memory and todos.",
+            timerBackground:
+                "Let the assistant wait with a timer for slow work; turn on Background execution to keep commands running while you chat.",
         },
 
         backupExportLabel: "Exporting and compressing the backup...",
@@ -406,7 +420,6 @@ const en = {
             themeDark: "Dark",
             palette: "Color scheme",
             paletteDefault: "Default",
-            paletteSakura: "Sakura",
             paletteCream: "Cream",
             paletteHint: "Applies immediately and is stored in your configuration.",
             glass: "Frosted glass",
@@ -414,9 +427,17 @@ const en = {
             glassSubtle: "Subtle",
             glassStandard: "Standard",
             glassStrong: "Strong",
-  glassHint: "Blur strength for the titlebar, toolbar and panel headers. Off makes those bars opaque instead of blurred — cheaper on weak GPUs and remote sessions. The level also makes the window frame translucent: over the blurred desktop where the system provides a backdrop (Acrylic on Windows), and elsewhere over a soft backdrop the app draws itself. The transcript always stays solid.",
+  glassHint: "Blur strength for the titlebar, toolbar and panel headers. Off makes those bars opaque instead of blurred — cheaper on weak GPUs and remote sessions. The level also makes the window frame translucent: over the blurred desktop where the system provides a backdrop (Acrylic on Windows), and elsewhere over a soft backdrop the app draws itself. The transcript stays solid unless a background photo is set.",
             language: "Language",
             languageHint: "Applies immediately and is stored in your configuration.",
+            chatBackground: "Chat background",
+            chatBackgroundHint: "A photo behind the messages only. It is copied into the app data folder when chosen, so the original can be moved or deleted afterwards.",
+            chatBackgroundChoose: "Choose photo…",
+            chatBackgroundReplace: "Replace photo…",
+            chatBackgroundRemove: "Remove",
+            chatBackgroundPickTitle: "Choose a chat background",
+            chatBackgroundFilter: "Images",
+            chatBackgroundMissing: "The saved photo could not be found. Choose another one.",
         },
 
 

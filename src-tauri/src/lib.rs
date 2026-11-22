@@ -15,6 +15,7 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
 pub mod agents;
+mod background;
 mod backup;
 mod db;
 mod events;
@@ -386,6 +387,7 @@ pub(crate) fn apply_config(
     config.enforce_self_evolution_tools();
     config.enforce_tool_dependencies();
     config.normalize_turn_limits();
+    config.normalize_removed_palette();
 
     // The workspace history lives in the persisted config, so the resolved
     // path must be recorded *before* the file is written. Resolving it here
@@ -636,7 +638,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub theme: Option<String>,
     /// Colour scheme layered on top of the light / dark theme
-    /// (`default`, `sakura`, `cream`). Persisted like `theme`; the backend never
+    /// (`default`, `cream`). Persisted like `theme`; the backend never
     /// interprets the value — the frontend turns it into `data-palette`.
     #[serde(default)]
     pub palette: Option<String>,
@@ -646,6 +648,13 @@ pub struct AppConfig {
     /// in App.css. Missing means `standard` (the design's own blur).
     #[serde(default)]
     pub glass_effect: Option<String>,
+    /// Chat transcript background photo, as an app-data-relative path
+    /// (`backgrounds/chat-background-<id>.<ext>`). `None` = the plain canvas.
+    /// Persisted like `palette`; the backend only copies / reads / deletes the
+    /// file (`background.rs`), the frontend turns its bytes into the
+    /// `--chat-bg-photo` token.
+    #[serde(default)]
+    pub chat_background: Option<String>,
     /// UI language (`en`, `zh-CN`, `zh-TW`). Persisted so the frontend restores
     /// it on startup; the backend never interprets the value.
     #[serde(default)]
@@ -711,6 +720,7 @@ impl Default for AppConfig {
             theme: None,
             palette: None,
             glass_effect: None,
+            chat_background: None,
             language: None,
             check_updates_on_startup: true,
             include_prerelease_updates: false,
@@ -784,6 +794,18 @@ impl AppConfig {
             .min(turn_guard::MAX_MAIN_AGENT_TOOL_CALLS);
         self.tool_failure_limit = self.tool_failure_limit.min(turn_guard::MAX_TOOL_FAILURE_LIMIT);
         self.max_parallel_tools = self.max_parallel_tools.clamp(1, MAX_PARALLEL_TOOLS);
+    }
+
+    /// Drop a palette this build no longer ships.
+    ///
+    /// `sakura` was removed from the design system; an old `config.json` or a
+    /// backup restored from an earlier version still carries it. Mapping it to
+    /// `None` (the default scheme) means the UI never paints an attribute no
+    /// token block defines, and the next save writes the cleaned value back.
+    fn normalize_removed_palette(&mut self) {
+        if self.palette.as_deref() == Some("sakura") {
+            self.palette = None;
+        }
     }
 
     /// Record `path` as the most recent workspace.
@@ -1119,6 +1141,8 @@ pub(crate) fn get_config(state: State<'_, AppState>) -> AppConfig {
     // always shows its required `run_cmd`.
     config.enforce_self_evolution_tools();
     config.enforce_tool_dependencies();
+    // A value written by an older build must not reach the UI either.
+    config.normalize_removed_palette();
     config
 }
 
@@ -2031,6 +2055,10 @@ pub fn run() {
             config.enforce_self_evolution_tools();
             config.enforce_tool_dependencies();
             config.normalize_turn_limits();
+            // A palette this build no longer ships is dropped now; the startup
+            // write below persists the cleaned value.
+            let removed_palette = config.palette.as_deref() == Some("sakura");
+            config.normalize_removed_palette();
 
             // Resolve the active workspace first: the database, memory, todo
             // lists and skills all live in its hidden `.data` directory, so the
@@ -2056,7 +2084,7 @@ pub fn run() {
             // decision, not a default — a pick in Settings or an imported
             // backup is never overwritten — so the UI cannot silently switch
             // language later when the system language changes.
-            let mut config_dirty = false;
+            let mut config_dirty = removed_palette;
             let mut adopted_language: Option<String> = None;
             if !config
                 .language
@@ -2402,6 +2430,10 @@ pub fn run() {
             ipc::app::save_markdown_file,
             ipc::app::set_window_vibrancy,
             ipc::app::get_instance_info,
+            // Chat background photo (app-data `backgrounds/`).
+            ipc::app::set_chat_background,
+            ipc::app::clear_chat_background,
+            ipc::app::read_chat_background,
             // Notification card.
             ipc::notify::show_notify_card,
             ipc::notify::hide_notify_card,

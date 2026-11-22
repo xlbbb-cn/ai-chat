@@ -112,7 +112,8 @@ A built-in command at risk level L0–L3 asks before it runs; auto-accepting its
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `theme` | string? | `auto` | `auto` / `light` / `dark` |
-| `palette` | string? | `default` | Colour scheme: `default` / `sakura` / `cream`; each ships a light and a dark token set |
+| `palette` | string? | `default` | Colour scheme: `default` / `cream`; each ships a light and a dark token set. Older values of `sakura` are migrated to `default` on load |
+| `chat_background` | string? | none | Optional chat background photo, stored as an app-data-relative path such as `backgrounds/chat-background-<id>.png`. Set by Settings → Appearance → Chat background, which copies the file into `<app data>/backgrounds/` immediately |
 | `single_instance` | boolean | `false` | Release builds only. On: a second launch focuses the running window. Off: every launch becomes a window (see [Multiple windows](#multiple-windows)). Applies on next launch |
 | `language` | string? | auto | `en` / `zh-CN` / `zh-TW` |
 | `logger_output` | string | `file` | `file` / `println`; debug builds only |
@@ -199,6 +200,7 @@ profiles.json           named profiles
 mcp_servers.json        MCP servers
 sub_agents.json         sub-agents + orchestration
 agents/...              `llm` agent definitions (app-wide, Markdown)
+backgrounds/...         chat background photo (app-wide)
 workspace/memory/...    current workspace memory
 workspace/todos/...     current workspace todos
 workspace/skills/...    current workspace skills
@@ -222,8 +224,9 @@ Import:
 2. writes `sub_agents.json`;
 3. writes `profiles.json` (only if it is a real profiles file);
 4. **merges `agents/**/*.md`** into the app-global `agents/` store (an identical file is left untouched);
-5. restores `workspace/memory`, `workspace/todos`, `workspace/skills`, `workspace/scripts`, `workspace/mcp` and `workspace/mcp.conf` into the **current** workspace's `.data`;
-6. restores `workspace/skills.status`.
+5. restores `backgrounds/` (replacing the folder) so the background path in `config.json` still resolves;
+6. restores `workspace/memory`, `workspace/todos`, `workspace/skills`, `workspace/scripts`, `workspace/mcp` and `workspace/mcp.conf` into the **current** workspace's `.data`;
+7. restores `workspace/skills.status`.
 
 It does **not** currently restore:
 
@@ -241,7 +244,8 @@ The most reliable method is to quit the app and copy both locations:
 
 ```text
 <app data>/                     → config.json, mcp_servers.json, sub_agents.json,
-                                  profiles.json, agents/, model_metadata.json, shadow/
+                                  profiles.json, agents/, backgrounds/,
+                                  model_metadata.json, shadow/
 <workspace>/.data/              → chat.db, memory/, todos/, skills/, skills.status,
                                   timers.json, scripts/, mcp/, mcp.conf
 ```

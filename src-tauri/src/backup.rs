@@ -7,6 +7,7 @@
 //! mcp_servers.json        MCP servers created by hand (the MCP panel)
 //! sub_agents.json         sub-agent runtime config + orchestration
 //! agents/...              `llm` agent definitions (md, app-wide)
+//! backgrounds/...         chat background photo (app-wide)
 //! workspace/memory/...    workspace-scoped memory notes
 //! workspace/todos/...     workspace-scoped todo lists
 //! workspace/skills/...    workspace skills (the one skills root)
@@ -222,6 +223,20 @@ fn export_backup(app: &AppHandle, backup_path: &Path) -> Result<(), String> {
             zip.add_directory("experiences/", zip_options())
                 .map_err(|e| e.to_string())?;
             add_tree_to_zip(&mut zip, "experiences/", &experiences_dir, &experiences_dir)?;
+        }
+    }
+
+    // The chat background photo lives next to the config
+    // (`<app_data>/backgrounds`) and the config only stores its relative path,
+    // so a backup without the folder would restore a setting pointing at
+    // nothing.
+    if let Ok(app_data) = app.path().app_data_dir() {
+        let backgrounds_dir = app_data.join(crate::background::BACKGROUND_DIR);
+        if backgrounds_dir.is_dir() {
+            emit_backup_export_status(app, "Packing background photo");
+            zip.add_directory("backgrounds/", zip_options())
+                .map_err(|e| e.to_string())?;
+            add_tree_to_zip(&mut zip, "backgrounds/", &backgrounds_dir, &backgrounds_dir)?;
         }
     }
 
@@ -525,6 +540,68 @@ fn restore_experience_files(
     Ok(())
 }
 
+/// Restore `<app_data>/backgrounds/**` from the archive.
+///
+/// The folder is replaced rather than merged: the config in the same archive
+/// names exactly one photo, and leaving the previous machine's files behind
+/// would only accumulate orphans. An archive without the folder (one exported
+/// before chat backgrounds existed) leaves the live files alone; the config's
+/// path then simply resolves to nothing and the Settings row offers a re-pick.
+fn restore_backgrounds(
+    app: &AppHandle,
+    state: &AppState,
+    archive: &mut ZipArchive<fs::File>,
+) -> Result<(), String> {
+    let Ok(app_data) = app.path().app_data_dir() else {
+        return Ok(());
+    };
+    let root = app_data.join(crate::background::BACKGROUND_DIR);
+    let entry_names: Vec<String> = (0..archive.len())
+        .filter_map(|index| {
+            archive
+                .by_index(index)
+                .ok()
+                .map(|entry| entry.name().to_string())
+        })
+        .filter(|name| name.starts_with("backgrounds/"))
+        .collect();
+    if entry_names.is_empty() {
+        return Ok(());
+    }
+
+    if root.exists() {
+        fs::remove_dir_all(&root).map_err(|e| e.to_string())?;
+    }
+    fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+
+    for name in entry_names {
+        let relative = &name["backgrounds/".len()..];
+        if relative.is_empty() || relative.contains(".bak.") {
+            continue;
+        }
+        let Some(target_path) = safe_join(&root, relative) else {
+            continue;
+        };
+        if relative.ends_with('/') {
+            fs::create_dir_all(&target_path).map_err(|e| e.to_string())?;
+            continue;
+        }
+        if let Some(parent) = target_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let mut entry = archive.by_name(&name).map_err(|e| e.to_string())?;
+        let mut out = fs::File::create(&target_path).map_err(|e| e.to_string())?;
+        std::io::copy(&mut entry, &mut out).map_err(|e| e.to_string())?;
+    }
+
+    state
+        .logger
+        .lock()
+        .unwrap()
+        .log("INFO", "Restored backgrounds/ from backup archive");
+    Ok(())
+}
+
 pub(crate) fn import_backup(app: &AppHandle, backup_path: &Path) -> Result<(), String> {
     let state = app.state::<AppState>();
     let file = fs::File::open(backup_path).map_err(|e| e.to_string())?;
@@ -555,6 +632,7 @@ pub(crate) fn import_backup(app: &AppHandle, backup_path: &Path) -> Result<(), S
     // so inline prompts from old archives can still be migrated.
     restore_agent_files(&state, &mut archive)?;
     restore_experience_files(&state, &mut archive)?;
+    restore_backgrounds(app, &state, &mut archive)?;
 
     // MCP roster: the archive's `mcp_servers.json` replaces the local one.
     // Parsing first keeps a hand-edited/corrupt entry from bricking the next

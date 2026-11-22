@@ -48,7 +48,7 @@ The interface has **two independent colour dimensions**, both set on `<html>`:
 | Attribute | Values | Meaning |
 |---|---|---|
 | `data-theme` | `light` / `dark` | Light vs. dark resolution. `auto` follows the OS and resolves to one of the two. |
-| `data-palette` | `default` / `sakura` / `cream` | The colour scheme: which hues the surfaces, the accent and the semantic states wear. |
+| `data-palette` | `default` / `cream` | The colour scheme: which hues the surfaces, the accent and the semantic states wear. |
 
 Both are written by `applyTheme()` in `src/App.tsx` from `config.theme` and
 `config.palette`. Every palette therefore needs a **light *and* a dark token
@@ -58,7 +58,6 @@ finished as `cream` + `light`.
 | Palette | Light | Dark | Character |
 |---|---|---|---|
 | `default` | Pure White canvas, Electric Blue accent | Carbon Dark canvas, lifted Electric Blue | The monochrome-plus-one baseline. |
-| `sakura` (樱花粉) | 草莓牛奶 `#FFDDE9` canvas, `#FFF7FA` panels, 樱花粉 `#FF8FB1` accent with `#8E2450` as its legible twin, 薄荷奶绿 `#DFF5EA` code, 薰衣草紫 `#EDE4FF` reasoning — the pastel-pink group of Color Hunt (`#FFCED8` / `#FFDDDD` / `#FFF4DE` / `#FFE8C4`), cooled into a strawberry-milk scheme | Deep plum canvas `#2B1A23`, `#37212C` panels, lifted `#FFA6C2` accent | Cute. Soft pastel pink, deliberately the one palette that is not paper-white. |
 | `cream` (乳白) | The adjacent warm-white group — 蚌肉白 `#F9F1DB` canvas, 乳白 `#F9F4DC` panels, 奶油白 `#FFF8E7` alternate surface, 粉白 `#FBF2E3` secondary — washed with oklab gradients instead of flat fills | Deep umber canvas, the same tones as warm greys | Paper. The accent stays Electric Blue: this palette is about the neutrals. |
 
 ### Rules for a palette block
@@ -69,13 +68,37 @@ finished as `cream` + `light`.
 - `[data-palette="x"]` holds the light set; `[data-theme="dark"][data-palette="x"]`
   overrides it for dark mode. Both blocks sit **after** `[data-theme="dark"]` in
   `src/App.css`, so the dark+palette selector (specificity 0-2-0) wins.
-- A pastel accent cannot carry a label. That is what `--c-accent-text` is for:
-  the same hue, darkened, used for **text, icons, hairlines and focus rings**.
-  Fills (buttons, chips, toggles) keep `--c-accent` and take `--c-on-accent` as
-  their label colour.
+- An accent fill cannot carry a label in the same hue when it is light. That is
+  what `--c-accent-text` is for: the same hue in its legible form, used for
+  **text, icons, hairlines and focus rings**. Fills (buttons, chips, toggles)
+  keep `--c-accent` and take `--c-on-accent` as their label colour.
 - The Cream palette is the sanctioned place for gradients on a surface: its
   `--c-bg-image` / `--c-code-image` / `--c-reason-image` are oklab washes of its
   own adjacent group. Everywhere else, surfaces stay flat.
+
+---
+
+## Chat background photo
+
+A user-picked photo is an optional layer **behind the messages only** — the
+toolbar, composer and sidebars keep their normal fills. The backend copies the
+chosen file into `<app data>/backgrounds/chat-background-<id>.<ext>` and stores
+only that app-data-relative path in `config.chat_background`, so a backup and
+MSIX's redirected app data carry the photo together with the config. The
+frontend reads the bytes over IPC and paints a Blob URL; it never stores a
+multi-megabyte data URL in a CSS custom property.
+
+| Token | Light | Dark | Role |
+|---|---|---|---|
+| `--chat-bg-photo` | `none` | `none` | Replaced by `url("blob:…")` when a photo is configured |
+| `--chat-bg-scrim` | `color-mix(in srgb, var(--c-bg) 86%, transparent)` | `color-mix(in srgb, var(--c-bg) 92%, transparent)` | Fixed veil between the photo and the text, derived from the active palette's canvas |
+
+`html[data-chat-bg] .messages` paints three image layers — scrim, photo, then
+the existing `--glass-transcript-image` wash. `background-color` stays
+`--glass-transcript`, so the translucent floor under window vibrancy is never
+replaced by the picture. The photo uses `cover` and stays put while the
+conversation scrolls. There is no intensity control: the scrim is one measured
+value, denser on dark canvases, not a second chromatic accent.
 
 ---
 
@@ -302,8 +325,8 @@ surface. Strength is where this had to be measured rather than chosen:
 
 | | Rendered band at the blob peak (vs the flat canvas) | `--c-muted` on the band |
 |---|---|---|
-| light, 10% ink | `255 → 243` (12/255 darker) | 5.8 Default · 5.0 Sakura · 4.7 Cream |
-| dark, 6% ink | `26 → 36` (10/255 lighter — a 40% lift on a dark band) | 4.7 Default · 5.9 Sakura · 6.2 Cream |
+| light, 10% ink | `255 → 243` (12/255 darker) | 5.8 Default · 4.7 Cream |
+| dark, 6% ink | `26 → 36` (10/255 lighter — a 40% lift on a dark band) | 4.7 Default · 6.2 Cream |
 
 That ceiling is the honest limit of a *painted* backdrop: the bands carry
 `--c-muted` labels, and the ink can only move the canvas as far as `--c-muted`
@@ -474,8 +497,9 @@ only sanctioned deviation is `box-shadow 0.25s var(--t-ease)` on the inset
 focus/active ring of primary buttons.
 
 Ambient decoration is the one other exception: the empty-state particle layer
-uses a damped random walk rather than a transition — there is no easing token
-or period to reuse. `prefers-reduced-motion` freezes the field.
+uses a *slow* damped random walk rather than a transition — a tiny impulse fed
+into a high-inertia velocity, with no easing token or period to reuse.
+`prefers-reduced-motion` freezes the field.
 
 ### Legacy aliases that must stay
 
@@ -903,8 +927,10 @@ motion is the eye blink.
 
 While the transcript is empty, a quiet particle layer sits behind the face and
 the tip bubble. Dots are spread with a golden-angle spiral and drift between
-two bounds by a damped random walk — they never assemble into a shape. When two
-dots come within the link distance, a faint hairline joins them, so the field
+two bounds by a slow damped random walk — a very small impulse into a
+high-inertia velocity, so paths bend in long, gentle arcs instead of turning
+sharply; they never assemble into a shape. When two dots come within the link
+distance, a faint hairline joins them, so the field
 reads as a few quiet connections rather than a mesh. It is background motion,
 never a second focus target: 2–3px dots, no glow, no shadow, no pointer events,
 `aria-hidden`, and no layout box of its own.
@@ -913,11 +939,12 @@ never a second focus target: 2–3px dots, no glow, no shadow, no pointer events
   both derived from the palette's `--c-muted` with a higher alpha on dark. Never
   `--c-accent`: the accent marks the primary action of a view, it is not
   decoration.
-- **Motion:** each dot keeps a velocity that receives a small random impulse
-  and decays every frame, so it wanders smoothly and reflects at the field's
-  edge. Links are recomputed with the dots every frame and fade out as their
-  endpoints drift apart. Under `prefers-reduced-motion: reduce` the loop stops
-  and the field, including its links, stays still.
+- **Motion:** each dot keeps a high-inertia velocity that receives a tiny
+  random impulse — the path drifts in gentle arcs rather than turning on a
+  dime — and reflects at the field's edge. Links are recomputed with the dots
+  every frame and fade out as their endpoints drift apart. Under
+  `prefers-reduced-motion: reduce` the loop stops and the field, including its
+  links, stays still.
 - **Links:** pairs within 58 viewBox units get a 1px `--c-particle-line`
   hairline; a 180-segment pool covers the field, and the closest pairs win if
   the field ever gets crowded. The line opacity fades with distance — there is
@@ -932,19 +959,23 @@ While the chat is idle (empty transcript, no maintenance pass and no result
 bubble) the empty state is just the still, blinking face plus one small feature bubble
 underneath, which switches to a different random tip every 7s. It quietly
 teaches the discovery-level features a new user may never find on their own —
-Memory consolidation, archiving a workflow as a portable experience, skills,
-`+agent` roles, `@` file mentions, figure cards, the nap face and backup export.
+Memory consolidation, archiving a workflow as a portable experience, creating
+skills and MCP servers, sub-agents, the script library, model and thinking-depth
+controls, `@` file mentions, figure cards, workspace switching, the nap face,
+timers / background tasks and backup export.
 There is no separate "Start a conversation" headline or hint line in this idle
 state.
 
-- **Surface:** a quiet borderless, tailless surface — `--c-surface`, 4px radius,
-  no outline, no shadow, no accent, `min(420px, calc(100vw - 48px))` wide,
-  centred directly below the face. Tip text is 13px `--c-body` / 1.55 with
-  `overflow-wrap: anywhere`.
+- **Surface:** transparent — no surface, radius, outline, tail, shadow or
+  accent; `min(420px, calc(100vw - 48px))` wide, centred directly below the
+  face, so the particle field, glass and chat background show through. Tip text
+  is 13px `--c-muted` / 1.55 with `overflow-wrap: anywhere`.
 - **Layout stability:** the bubble reserves two lines of height
   (`min-height: calc(3.1em + 16px)`) and centres its text in that box. Whether a
   tip wraps to one line or two, the empty state keeps the same height, so the
-  face's blink and the anchored particle field never shift.
+  face's blink and the anchored particle field never shift. New tips are
+  written to fit two lines in every language; a longer string would grow the
+  box and move those anchors.
 - **Interaction:** none. There is no hover or focus state, no click handler and
   no pointer-driven reveal — the bubble only changes when the timer fires.
 - **Motion:** the timed rotation slides the current tip **down and out**
@@ -1438,16 +1469,15 @@ v1.3 refused a glass transcript. The refusal is reversed in the one place glass
 can exist — `data-vibrancy`, where the desktop is behind the column — and kept
 everywhere else, because a translucent sheet over the canvas it already is
 cannot be seen: it can only flatten Cream's wash, and pulling the fill toward
-the bars' white would cost each palette its canvas (Sakura would lose the pink
-the palette is named for). Glass is a *material* the column shares; the colour
-it shares is the canvas.
+the bars' white would cost each palette its canvas. Glass is a *material* the
+column shares; the colour it shares is the canvas.
 
 | v1.3 said | Here, and why |
 |---|---|
 | `--glass-backdrop` resolves to `--c-surface` at `off`, so the transcript would become a panel | **accepted.** The transcript does not use `--glass-backdrop`. Its fill is `--glass-transcript`, which is `--c-bg` at every glass level, so `off` — and every level without a desktop behind it — is byte-identical to v1.3 |
 | under vibrancy `--glass-backdrop` is `--c-window`, and the column would lose its contrast guarantee | **accepted, answered with a floor.** The column carries its own alpha: 94% of `--c-bg`, the density of the Settings sheet. Measured over a black desktop (light palettes) and a white one (dark palettes): `--c-text` ≥ 9.3:1, `--c-body` ≥ 7.2:1, `--c-muted` ≥ 4.5:1 across all six palette × theme pairs. At 90% the dark palettes' meta text lands at 4.0:1 |
 | it would re-composite on every scroll frame | **not applicable.** The column paints no `backdrop-filter`. Without vibrancy the only thing behind it is the flat canvas; under vibrancy the compositor has already blurred the desktop, so a CSS blur would filter a filtered image. A translucent fill scrolls like any other background |
-| simply copy the bars' fill, which is what “adapt the message background to the toolbar” reads as | **refused.** `--glass-backdrop` is a gradient in Cream and a near-white in Sakura: copying it turns the column into another band and buries the palette's canvas. The transcript borrows the material and the frame's tint family, not its density |
+| simply copy the bars' fill, which is what “adapt the message background to the toolbar” reads as | **refused.** `--glass-backdrop` is a gradient in Cream and a frosted white in the default palette: copying it turns the column into another band and buries the palette's canvas. The transcript borrows the material and the frame's tint family, not its density |
 | follow the `data-glass` ladder like `--c-window` does | **refused.** The floor is a readability constraint, not decoration: 24–58% under a wall of 13px text is what v1.3 was right about. The transcript is the densest glass in the app and stays there at every level |
 
 ---
@@ -1599,9 +1629,12 @@ workspace: the thing that names it is the thing that changes it.
 
 `data-theme` and `data-palette` on `<html>` are set by `applyTheme()` in
 `src/App.tsx` from `config.theme` (`auto` / `light` / `dark`) and
-`config.palette` (`default` / `sakura` / `cream`). Everything must work through the
-token layer — no component should branch on the theme or the palette itself
-except where a literal is unavoidable (currently: the toggle knob in dark mode).
+`config.palette` (`default` / `cream`). A value this build no longer ships is
+normalised to `default` on load (the removed `sakura` scheme), so neither the
+first-paint cache in `index.html` nor the notification card can select a token
+block that does not exist. Everything must work through the token layer — no
+component should branch on the theme or the palette itself except where a
+literal is unavoidable (currently: the toggle knob in dark mode).
 
 The Settings picker previews a change immediately but persists it with the
 form's **Save Changes**; `config.palette` rides along with `config.theme` in

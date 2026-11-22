@@ -5,6 +5,7 @@ import type {
   AppConfig,
   Attachment,
   ArchivedSkill,
+  ChatBackground,
   EvolutionMemoryEntry,
   InstanceInfo,
   Message,
@@ -45,6 +46,32 @@ import type {
 
 export async function getConfig(): Promise<AppConfig> {
   return invoke("get_config");
+}
+
+/**
+ * Copy the photo the user picked into `<app_data>/backgrounds/` and make it the
+ * chat transcript background.
+ *
+ * The choice is persisted immediately (the background row is a preference, not
+ * a staged Settings field), and the previous photo is deleted once the new path
+ * is stored. Returns the app-data-relative path plus a `data:` URL for the
+ * preview.
+ */
+export async function setChatBackground(sourcePath: string): Promise<ChatBackground> {
+  return invoke("set_chat_background", { sourcePath });
+}
+
+/** Remove the stored background photo: config field first, then the file. */
+export async function clearChatBackground(): Promise<void> {
+  return invoke("clear_chat_background");
+}
+
+/**
+ * The stored background as a `data:` URL, or `null` when none is configured or
+ * the file has gone missing (for example a backup restored without its folder).
+ */
+export async function readChatBackground(): Promise<string | null> {
+  return invoke("read_chat_background");
 }
 
 /**

@@ -1,11 +1,12 @@
 /**
  * Ambient particles behind the empty-state face.
  *
- * The dots are placed once with a golden-angle spiral, then each one wanders
- * on a damped random walk: a small random acceleration is added to a velocity
- * that decays every frame, so the path roams without jittering. When two dots
- * come within `LINK_DISTANCE`, a faint hairline connects them; the links are
- * recomputed from the same positions, so they always end on their dots.
+ * The dots are placed once with a golden-angle spiral, then each one drifts
+ * on a slow damped random walk: a very small random acceleration is fed into
+ * a high-inertia velocity, so the path bends in long, gentle arcs instead of
+ * turning sharply. When two dots come within `LINK_DISTANCE`, a faint hairline
+ * connects them; the links are recomputed from the same positions, so they
+ * always end on their dots.
  *
  * Motion is decorative, not a state transition, so there is no easing or
  * period token. Colour comes from particle tokens derived from the palette's
@@ -29,12 +30,12 @@ const MAX_LINES = 180;
 /** Golden angle — even coverage without a visible lattice. */
 const GOLDEN_ANGLE = 2.399963229728653;
 
-/** Random impulse added to each velocity component per 60Hz frame. */
-const WANDER_ACCEL = 0.45;
-/** Velocity retained each frame; below 1 keeps the walk smooth, not jumpy. */
-const WANDER_DAMPING = 0.94;
-/** Upper bound on travel per frame, so a lucky run of impulses cannot dart. */
-const MAX_SPEED = 0.8;
+/** Tiny impulse per 60Hz frame — the path bends, it does not turn. */
+const WANDER_ACCEL = 0.07;
+/** Strong inertia: a direction persists for about a second, hence the drift. */
+const WANDER_DAMPING = 0.985;
+/** Upper bound on travel per frame; keeps the whole field calm. */
+const MAX_SPEED = 0.28;
 /** One 60Hz frame; long gaps (a hidden tab) are capped rather than replayed. */
 const FRAME_MS = 1000 / 60;
 

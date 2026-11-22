@@ -3,12 +3,16 @@
     width: 100%;
     min-width: 200px;
     border-radius: 4px;
-    background: var(--ts-ash, var(--c-reason));
+    /* The tool card gets its own cool tint + leading rule; the 2px rule is
+       compensated by a 2px smaller left padding on every row below, so no
+       text shifts and the outer width stays identical (border-box). */
+    background: var(--c-card-tool);
+    border-left: 2px solid var(--c-card-tool-rule);
     overflow: hidden;
 }
 
 .tool-call-group--running {
-    background: var(--ts-ash, var(--c-reason));
+    background: var(--c-card-tool);
 }
 
 .tool-call-group-details {
@@ -22,7 +26,7 @@
     display: flex;
     flex-direction: column;
     gap: 3px;
-    padding: 6px 10px;
+    padding: 6px 10px 6px 8px;
     cursor: pointer;
     user-select: none;
     list-style: none;
@@ -55,7 +59,7 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    color: var(--ts-carbon, var(--c-text));
+    color: var(--c-card-tool-rule);
     letter-spacing: 0;
 }
 
@@ -217,7 +221,7 @@
     column-gap: 6px;
     row-gap: 1px;
     align-items: start;
-    padding: 4px 10px;
+    padding: 4px 10px 4px 8px;
     font-size: 12px;
     line-height: 1.4;
 }
@@ -313,7 +317,7 @@
    primitives — never re-declare them here. */
 .tool-call-confirm {
     border-top: 1px solid var(--c-border);
-    padding: 8px 10px;
+    padding: 8px 10px 8px 8px;
     display: flex;
     flex-direction: column;
     gap: 6px;

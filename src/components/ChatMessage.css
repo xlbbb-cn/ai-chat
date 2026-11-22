@@ -77,14 +77,21 @@
 
 .message-reasoning {
   margin-bottom: 3px;
-  background-color: var(--ts-ash);
-  padding: 6px 10px;
+  /* The thinking card owns a soft violet tint instead of sharing the grey
+     alternate surface with every other card. The 2px leading rule is the card
+     kind's marker; padding-left drops by the same 2px so the summary text
+     keeps its exact position (the box is border-box, so the outer width does
+     not move either). */
+  background-color: var(--c-card-think);
+  background-image: var(--c-reason-image);
+  border-left: 2px solid var(--c-card-think-rule);
+  padding: 6px 10px 6px 8px;
   border-radius: 4px;
 }
 
 .message-reasoning summary {
   cursor: pointer;
-  color: var(--ts-carbon);
+  color: var(--c-card-think-rule);
   user-select: none;
   font-size: 14px;
   font-weight: 500;

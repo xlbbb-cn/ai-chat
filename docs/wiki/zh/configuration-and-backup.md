@@ -112,7 +112,8 @@ dangerous, system_config, user_software, user_data, external_agent, *
 | 字段 | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- |
 | `theme` | string? | `auto` | `auto` / `light` / `dark` |
-| `palette` | string? | `default` | 配色：`default` / `sakura` / `cream`；各有浅色与深色两套 token |
+| `palette` | string? | `default` | 配色：`default` / `cream`；各有浅色与深色两套 token。旧配置中的 `sakura` 会在加载时迁移为 `default` |
+| `chat_background` | string? | 无 | 可选的聊天区背景照片，保存为应用数据目录下的相对路径，例如 `backgrounds/chat-background-<id>.png`。在「设置 → 外观 → 聊天区背景」选择后立即把文件复制到 `<应用数据目录>/backgrounds/` |
 | `single_instance` | boolean | `false` | 仅发布版。开：第二次启动只聚焦已有窗口。关：每次启动都是一个窗口（见[多窗口](#多窗口)）。下次启动生效 |
 | `language` | string? | 自动 | `en` / `zh-CN` / `zh-TW` |
 | `logger_output` | string | `file` | `file` / `println`；仅调试版 |
@@ -199,6 +200,7 @@ profiles.json           命名配置档
 mcp_servers.json        MCP 服务器
 sub_agents.json         子智能体 + 编排
 agents/...              `llm` 智能体定义（应用级，Markdown）
+backgrounds/...         聊天区背景照片（应用级）
 workspace/memory/...    当前工作区记忆
 workspace/todos/...     当前工作区待办
 workspace/skills/...    当前工作区技能
@@ -222,8 +224,9 @@ chat.db                 SQLite 快照（VACUUM INTO）
 2. 写入 `sub_agents.json`；
 3. 写入 `profiles.json`（仅当它确实是配置档文件）；
 4. **合并 `agents/**/*.md`** 到应用级 `agents/` 库（完全相同的文件不动）；
-5. 把 `workspace/memory`、`workspace/todos`、`workspace/skills`、`workspace/scripts`、`workspace/mcp`、`workspace/mcp.conf` 恢复到**当前**工作区的 `.data`；
-6. 恢复 `workspace/skills.status`。
+5. 恢复 `backgrounds/`（替换整个目录），让 `config.json` 里的背景路径继续有效；
+6. 把 `workspace/memory`、`workspace/todos`、`workspace/skills`、`workspace/scripts`、`workspace/mcp`、`workspace/mcp.conf` 恢复到**当前**工作区的 `.data`；
+7. 恢复 `workspace/skills.status`。
 
 目前**不会**恢复：
 
@@ -241,7 +244,8 @@ chat.db                 SQLite 快照（VACUUM INTO）
 
 ```text
 <应用数据>/                    → config.json、mcp_servers.json、sub_agents.json、
-                                 profiles.json、agents/、model_metadata.json、shadow/
+                                 profiles.json、agents/、backgrounds/、
+                                 model_metadata.json、shadow/
 <工作区>/.data/                → chat.db、memory/、todos/、skills/、skills.status、
                                  timers.json、scripts/、mcp/、mcp.conf
 ```

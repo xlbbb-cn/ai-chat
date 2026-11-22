@@ -327,7 +327,7 @@ export type ThemeMode = "auto" | "light" | "dark";
  * light / dark mode. Each palette ships a light *and* a dark token set,
  * so the two dimensions are independent.
  */
-export type Palette = "default" | "sakura" | "cream";
+export type Palette = "default" | "cream";
 
 /**
  * Frosted-glass strength for every translucent surface, applied as
@@ -497,8 +497,7 @@ export interface AppConfig {
   theme?: ThemeMode;
   /**
    * Colour scheme layered on top of the light / dark mode: `default`
-   * (Pure White + Electric Blue), `sakura` (樱花, a pastel scheme on a
-   * strawberry-milk pink canvas) or `cream` (乳白, the adjacent warm-white
+   * (Pure White + Electric Blue) or `cream` (乳白, the adjacent warm-white
    * group washed with oklab gradients).
    */
   palette?: Palette;
@@ -508,6 +507,12 @@ export interface AppConfig {
    * `standard`.
    */
   glass_effect?: GlassEffect;
+  /**
+   * Chat transcript background photo, as an app-data-relative path
+   * (`backgrounds/chat-background-<id>.<ext>`). The bytes are copied there when
+   * the photo is picked, so moving the original later changes nothing.
+   */
+  chat_background?: string | null;
   /**
    * UI language. Kept in the config so it survives restarts and travels with
    * exported backups; the frontend also caches it in `localStorage` so the
@@ -665,6 +670,18 @@ export interface SavedFigure {
   bytes: number;
   /** That name already existed, so a `-2`, `-3`… suffix was used. */
   renamed: boolean;
+}
+
+/**
+ * The chat background after it was copied into `<app_data>/backgrounds/`.
+ *
+ * `path` is what the config stores (portable across machines and MSIX
+ * redirects); `data_url` is the same bytes as a `data:` URL, which the
+ * frontend turns into a Blob URL for the `--chat-bg-photo` token.
+ */
+export interface ChatBackground {
+  path: string;
+  data_url: string;
 }
 
 export interface Skill {

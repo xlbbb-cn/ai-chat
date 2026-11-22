@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, laz
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, listAgentMentions, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, deleteMessagesAfter, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState, setWindowVibrancy, savePastedFile, importWorkspacePaths, showNotifyCard, todoAskReply, getPendingTodoAsk } from "./api";
+import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, listAgentMentions, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, deleteMessagesAfter, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState, setWindowVibrancy, savePastedFile, importWorkspacePaths, showNotifyCard, todoAskReply, getPendingTodoAsk, readChatBackground } from "./api";
 
 import { ChatMessageBoundary } from "./components/ChatMessageBoundary";
 import { TodoAskPanel } from "./components/TodoAskPanel";
@@ -266,12 +266,30 @@ const EMPTY_TIP_KEYS = [
   "app.tip.figures",
   "app.tip.maintenance",
   "app.tip.backup",
+  "app.tip.createSkill",
+  "app.tip.mcpSetup",
+  "app.tip.subAgentCreate",
+  "app.tip.scriptLibrary",
+  "app.tip.modelDepth",
+  "app.tip.workspaceSwitch",
+  "app.tip.timerBackground",
 ] as const;
 
 /** How long one empty-state tip stays on screen before the next random one. */
 const EMPTY_TIP_INTERVAL_MS = 7000;
 /** Wait for the downward slide-out to finish before swapping in the next tip. */
 const EMPTY_TIP_SWAP_MS = 340;
+
+/**
+ * Map a persisted palette onto the schemes this build ships.
+ *
+ * `sakura` was removed; an old `localStorage` cache or a config written by an
+ * earlier version can still name it. Anything unknown falls back to `default`,
+ * so `<html data-palette>` never selects a token block that does not exist.
+ */
+function normalizePalette(palette: Palette | undefined): Palette {
+  return palette === "cream" ? "cream" : "default";
+}
 
 /**
  * Paint the current theme + palette on `<html>`.
@@ -283,8 +301,9 @@ const EMPTY_TIP_SWAP_MS = 340;
 function applyTheme(theme: ThemeMode | undefined, palette: Palette | undefined) {
   const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
   const resolved = theme === "dark" || (theme !== "light" && prefersDark) ? "dark" : "light";
+  const resolvedPalette = normalizePalette(palette);
   document.documentElement.setAttribute("data-theme", resolved);
-  document.documentElement.setAttribute("data-palette", palette ?? "default");
+  document.documentElement.setAttribute("data-palette", resolvedPalette);
   // First-paint cache: the inline script in `index.html` applies this before
   // any stylesheet is parsed, so a dark launch never paints the light default
   // for a frame. The real config still arrives over IPC and wins; storage
@@ -292,7 +311,7 @@ function applyTheme(theme: ThemeMode | undefined, palette: Palette | undefined) 
   try {
     window.localStorage.setItem(
       "ai-chat.theme",
-      JSON.stringify({ mode: theme ?? "auto", palette: palette ?? "default" }),
+      JSON.stringify({ mode: theme ?? "auto", palette: resolvedPalette }),
     );
   } catch {
     // Ignore: the boot script then falls back to the OS colour scheme.
@@ -353,6 +372,49 @@ function applyGlassEffect(glass: GlassEffect | undefined) {
   // The desktop seen *through* the window is blurred by the compositor, not by
   // `backdrop-filter`, so the level also drives a native Mica / Acrylic call.
   applyWindowVibrancy(level, document.documentElement.getAttribute("data-theme") === "dark");
+}
+
+// ─── Chat background photo ──────────────────────────────────────────────────
+
+/** Blob URL currently painted as the transcript background. */
+let chatBackgroundObjectUrl: string | null = null;
+/** Generation counter: a slow read must not overwrite a newer photo. */
+let chatBackgroundRequest = 0;
+
+/**
+ * Paint the chat transcript photo on `<html>`.
+ *
+ * The bytes arrive from the backend as a `data:` URL (the config stores only
+ * the app-data-relative path) and are turned into a Blob URL: a CSS custom
+ * property holding a multi-megabyte data URL would be re-parsed on every style
+ * recalculation. `null` clears the photo and restores the plain canvas.
+ *
+ * Returns the Blob URL now painted, or `null` when there is no photo (or a
+ * newer call superseded this one).
+ */
+async function applyChatBackground(dataUrl: string | null): Promise<string | null> {
+  const request = ++chatBackgroundRequest;
+  const root = document.documentElement;
+
+  if (!dataUrl) {
+    if (chatBackgroundObjectUrl) {
+      URL.revokeObjectURL(chatBackgroundObjectUrl);
+      chatBackgroundObjectUrl = null;
+    }
+    root.removeAttribute("data-chat-bg");
+    root.style.removeProperty("--chat-bg-photo");
+    return null;
+  }
+
+  const blob = await (await fetch(dataUrl)).blob();
+  if (request !== chatBackgroundRequest) return chatBackgroundObjectUrl;
+
+  const url = URL.createObjectURL(blob);
+  if (chatBackgroundObjectUrl) URL.revokeObjectURL(chatBackgroundObjectUrl);
+  chatBackgroundObjectUrl = url;
+  root.setAttribute("data-chat-bg", "");
+  root.style.setProperty("--chat-bg-photo", `url("${url}")`);
+  return url;
 }
 
 // ─── Desktop notification card & sound effects ──────────────────────────────
@@ -971,6 +1033,10 @@ export default function App() {
   const cleanupRef = useRef<(() => void) | null>(null);
   const themeRef = useRef<ThemeMode>("auto");
   const paletteRef = useRef<Palette>("default");
+  /** Blob URL of the configured chat background (Settings thumbnail + preview). */
+  const [chatBackgroundUrl, setChatBackgroundUrl] = useState<string | null>(null);
+  /** The config names a photo, but its file could not be read back. */
+  const [chatBackgroundMissing, setChatBackgroundMissing] = useState(false);
   /** Settings → Runtime & Debug: notify when minimized / unfocused. Read into
    * an argument by `notifyTurnSettled` call sites, never captured live. */
   const notifyWhenHiddenRef = useRef(true);
@@ -1051,6 +1117,31 @@ export default function App() {
     setSkillStatusLoaded(true);
   }, []);
 
+  /**
+   * Load the configured background photo and paint it.
+   *
+   * A config path whose file has gone missing (an old backup, a cleaned
+   * app-data folder) clears the photo instead of failing the config load.
+   */
+  const applyChatBackgroundFromConfig = useCallback(async (cfg: AppConfig) => {
+    if (!cfg.chat_background) {
+      await applyChatBackground(null);
+      setChatBackgroundUrl(null);
+      setChatBackgroundMissing(false);
+      return;
+    }
+    try {
+      const dataUrl = await readChatBackground();
+      setChatBackgroundUrl(await applyChatBackground(dataUrl));
+      setChatBackgroundMissing(dataUrl === null);
+    } catch (err) {
+      console.error("Failed to load the chat background", err);
+      await applyChatBackground(null);
+      setChatBackgroundUrl(null);
+      setChatBackgroundMissing(true);
+    }
+  }, []);
+
   /** Reload persisted config into the UI, pruning skills that no longer exist. */
   const applyConfigToUi = useCallback(async (): Promise<AppConfig> => {
     const cfg = await getConfig();
@@ -1072,8 +1163,11 @@ export default function App() {
     // The config is the source of truth for the UI language (localStorage is
     // only a first-paint cache), so a backup import can switch it too.
     if (isLocale(cfg.language)) setLocale(cfg.language);
+    // The photo is app-wide, but a backup restore replaces it and a reload has
+    // to repaint it; this is the one path both go through.
+    void applyChatBackgroundFromConfig(cfg);
     return cfg;
-  }, [setLocale]);
+  }, [setLocale, applyChatBackgroundFromConfig]);
 
   // Silent update probe on startup: it never blocks the chat and never surfaces
   // errors — Settings has an explicit "Check for updates" action instead.
@@ -4887,6 +4981,14 @@ export default function App() {
               }}
               onGlassPreview={(glass) => {
                 applyGlassEffect(glass);
+              }}
+              chatBackgroundUrl={chatBackgroundUrl}
+              chatBackgroundMissing={chatBackgroundMissing}
+              onChatBackgroundPreview={(dataUrl) => {
+                void applyChatBackground(dataUrl).then((url) => {
+                  setChatBackgroundUrl(url);
+                  setChatBackgroundMissing(false);
+                });
               }}
               onConfigSaved={(cfg) => {
                 const catalog = Array.from(new Set([...(cfg.model_catalog ?? []), cfg.model].filter(Boolean)));

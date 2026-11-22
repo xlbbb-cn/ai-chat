@@ -61,6 +61,28 @@ pub(crate) async fn app_import_backup(app: AppHandle, path: String) -> Result<()
 }
 
 #[tauri::command]
+pub(crate) fn set_chat_background(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    source_path: String,
+) -> Result<crate::background::ChatBackground, String> {
+    crate::background::set(&app, &state, &source_path)
+}
+
+#[tauri::command]
+pub(crate) fn clear_chat_background(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    crate::background::clear(&app, &state)
+}
+
+#[tauri::command]
+pub(crate) fn read_chat_background(app: AppHandle, state: State<'_, AppState>) -> Option<String> {
+    crate::background::read(&app, &state)
+}
+
+#[tauri::command]
 pub(crate) async fn app_export_pdf(html: String, out_path: String) -> Result<String, String> {
     crate::app_export_pdf(html, out_path).await
 }

@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from "react";
-import { fetchModels, fetchModelMetadata, getAppVersion, getConfig, saveConfig } from "../api";
+import { clearChatBackground, fetchModels, fetchModelMetadata, getAppVersion, getConfig, saveConfig, setChatBackground } from "../api";
 import type { AppConfig, GlassEffect, ModelMetadata, ModelSettings, Palette, RequestHeader } from "../types";
 import { LOCALE_LABELS, LOCALES, useI18n, type Locale, type MessageKey } from "../i18n";
 import { matchModelCatalog, isDeepSeekModel } from "../utils/modelMetadata";
-import { FontAwesomeIcon, faCaretDown, faCheck, faSpinner, faXmark } from "../icons";
+import { FontAwesomeIcon, faCaretDown, faCheck, faImages, faSpinner, faXmark } from "../icons";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { MonitorPanel } from "./MonitorPanel";
 import { ExperiencePanel } from "./ExperiencePanel";
@@ -21,6 +22,12 @@ interface Props {
   onThemePreview?: (theme: "auto" | "light" | "dark" | undefined) => void;
   onPalettePreview?: (palette: Palette) => void;
   onGlassPreview?: (glass: GlassEffect) => void;
+  /** Blob URL of the current chat background, for the row's thumbnail. */
+  chatBackgroundUrl?: string | null;
+  /** The config names a photo whose file could not be read. */
+  chatBackgroundMissing?: boolean;
+  /** Apply a newly picked photo (`data:` URL) or clear it (`null`) live. */
+  onChatBackgroundPreview?: (dataUrl: string | null) => void;
   sessionId?: string;
   /** A turn is streaming — the interaction monitor waits for it to finish. */
   turnActive?: boolean;
@@ -32,9 +39,11 @@ interface Props {
  */
 const PALETTES: { id: Palette; labelKey: MessageKey }[] = [
   { id: "default", labelKey: "settings.appearance.paletteDefault" },
-  { id: "sakura", labelKey: "settings.appearance.paletteSakura" },
   { id: "cream", labelKey: "settings.appearance.paletteCream" },
 ];
+
+/** Image formats the backend accepts for a chat background (`background.rs`). */
+const CHAT_BACKGROUND_EXTENSIONS = ["png", "jpg", "jpeg", "webp", "gif", "bmp"];
 
 /**
  * Frosted-glass strengths. `standard` is the design's own blur (20px), so it
@@ -169,7 +178,7 @@ function formatTokenCount(tokens: number): string {
   return String(tokens);
 }
 
-export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalettePreview, onGlassPreview, sessionId, turnActive = false }: Props) {
+export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalettePreview, onGlassPreview, chatBackgroundUrl, chatBackgroundMissing, onChatBackgroundPreview, sessionId, turnActive = false }: Props) {
   const { t, locale, setLocale } = useI18n();
   const [config, setConfig] = useState<AppConfig>(defaultConfig);
   const [saving, setSaving] = useState(false);
@@ -183,6 +192,8 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
   const [isMessageEditorOpen, setIsMessageEditorOpen] = useState(false);
   const [messageDraft, setMessageDraft] = useState("");
   const [messageSaving, setMessageSaving] = useState(false);
+  const [chatBackgroundBusy, setChatBackgroundBusy] = useState(false);
+  const [chatBackgroundError, setChatBackgroundError] = useState<string | null>(null);
   const [showMonitor, setShowMonitor] = useState(false);
   const [showAgentMonitor, setShowAgentMonitor] = useState(false);
   const [showMemoryMonitor, setShowMemoryMonitor] = useState(false);
@@ -341,11 +352,14 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
       // `selected_tools` is owned by the tools panel and `workspace_dir` by the
       // titlebar switcher — neither belongs to this form. Re-read both before
       // saving so that toggling a tool or switching workspace while this panel
-      // was open is never rolled back by "Save Changes".
+      // was open is never rolled back by "Save Changes". The background photo
+      // is written by its own row, so a pick made after this form was opened
+      // must not be undone by a stale copy either.
       const persisted = await getConfig();
       const normalized: AppConfig = {
         ...config,
         workspace_dir: persisted.workspace_dir,
+        chat_background: persisted.chat_background ?? null,
         conversation_id_header: normalizeConversationHeader(config.conversation_id_header),
         custom_headers: normalizeCustomHeaders(config.custom_headers),
         model_catalog: modelCatalog,
@@ -387,6 +401,7 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
         language: next,
         // Owned by the titlebar switcher — never roll a switch back.
         workspace_dir: persisted.workspace_dir,
+        chat_background: persisted.chat_background ?? null,
         conversation_id_header: normalizeConversationHeader(config.conversation_id_header),
         custom_headers: normalizeCustomHeaders(config.custom_headers),
         // Owned by the tools panel — never roll those back.
@@ -406,6 +421,57 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
     setIsMessageEditorOpen(false);
   }
 
+  /**
+   * Pick a photo and copy it into `<app_data>/backgrounds/` right away.
+   *
+   * The background is a preference, not a staged form field: the backend
+   * persists the new path and deletes the previous photo, so the row works
+   * without "Save Changes" and the file cannot be orphaned by a discarded
+   * Settings form.
+   */
+  async function pickChatBackground() {
+    setChatBackgroundBusy(true);
+    setChatBackgroundError(null);
+    try {
+      const picked = await openDialog({
+        multiple: false,
+        directory: false,
+        title: t("settings.appearance.chatBackgroundPickTitle"),
+        filters: [
+          {
+            name: t("settings.appearance.chatBackgroundFilter"),
+            extensions: CHAT_BACKGROUND_EXTENSIONS,
+          },
+        ],
+      });
+      if (!picked || Array.isArray(picked)) return;
+      const stored = await setChatBackground(picked);
+      setConfig((prev) => ({ ...prev, chat_background: stored.path }));
+      onChatBackgroundPreview?.(stored.data_url);
+    } catch (e) {
+      console.error("Failed to set the chat background", e);
+      setChatBackgroundError(String(e));
+    } finally {
+      setChatBackgroundBusy(false);
+    }
+  }
+
+  /** Remove the stored photo (config field first, then the file). */
+  async function removeChatBackground() {
+    setChatBackgroundBusy(true);
+    setChatBackgroundError(null);
+    try {
+      await clearChatBackground();
+      setConfig((prev) => ({ ...prev, chat_background: null }));
+      onChatBackgroundPreview?.(null);
+    } catch (e) {
+      console.error("Failed to clear the chat background", e);
+      setChatBackgroundError(String(e));
+    } finally {
+      setChatBackgroundBusy(false);
+    }
+  }
+
   async function applyMessageEditor() {
     setMessageSaving(true);
     try {
@@ -414,6 +480,7 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
         ...config,
         // Owned by the titlebar switcher — never roll a switch back.
         workspace_dir: persisted.workspace_dir,
+        chat_background: persisted.chat_background ?? null,
         conversation_id_header: normalizeConversationHeader(config.conversation_id_header),
         custom_headers: normalizeCustomHeaders(config.custom_headers),
         system_message: messageDraft,
@@ -563,6 +630,54 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
                   ))}
                 </div>
                 <small className="settings-field-hint">{t("settings.appearance.languageHint")}</small>
+              </div>
+
+              <div className="settings-field-row settings-field-row-stacked">
+                <span className="settings-field-label">{t("settings.appearance.chatBackground")}</span>
+                <div className="chat-bg-row">
+                  <span className={`chat-bg-thumb${chatBackgroundUrl ? " has-photo" : ""}`} aria-hidden="true">
+                    {chatBackgroundUrl ? (
+                      <img src={chatBackgroundUrl} alt="" />
+                    ) : (
+                      <FontAwesomeIcon icon={faImages} />
+                    )}
+                  </span>
+                  <div className="chat-bg-actions">
+                    <button
+                      type="button"
+                      className="settings-btn"
+                      onClick={() => void pickChatBackground()}
+                      disabled={chatBackgroundBusy}
+                      aria-busy={chatBackgroundBusy}
+                    >
+                      {chatBackgroundBusy && (
+                        <FontAwesomeIcon icon={faSpinner} spin aria-hidden="true" />
+                      )}
+                      {config.chat_background
+                        ? t("settings.appearance.chatBackgroundReplace")
+                        : t("settings.appearance.chatBackgroundChoose")}
+                    </button>
+                    {config.chat_background && (
+                      <button
+                        type="button"
+                        className="settings-btn"
+                        onClick={() => void removeChatBackground()}
+                        disabled={chatBackgroundBusy}
+                      >
+                        {t("settings.appearance.chatBackgroundRemove")}
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {chatBackgroundError ? (
+                  <div className="settings-error">{chatBackgroundError}</div>
+                ) : (
+                  <small className="settings-field-hint">
+                    {chatBackgroundMissing
+                      ? t("settings.appearance.chatBackgroundMissing")
+                      : t("settings.appearance.chatBackgroundHint")}
+                  </small>
+                )}
               </div>
             </div>
           </section>

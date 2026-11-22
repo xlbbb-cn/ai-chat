@@ -3,7 +3,11 @@
   width: 100%;
   min-width: 200px;
   border-radius: 4px;
-  background: var(--ts-ash, var(--c-reason));
+  /* The plan/todo card borrows the accent's soft tint and its legible twin as
+     the leading rule (a label use, per the split rule). Row padding below is
+     2px smaller on the left so the rule costs no text shift and no width. */
+  background: var(--c-card-plan);
+  border-left: 2px solid var(--c-card-plan-rule);
   overflow: hidden;
   margin-top: 6px;
 }
@@ -19,7 +23,7 @@
   display: flex;
   flex-direction: column;
   gap: 3px;
-  padding: 6px 10px;
+  padding: 6px 10px 6px 8px;
   cursor: pointer;
   user-select: none;
   list-style: none;
@@ -51,6 +55,7 @@
   align-items: center;
   flex-shrink: 0;
   font-size: 13px;
+  color: var(--c-card-plan-rule);
 }
 
 .todo-list-title {
@@ -140,7 +145,7 @@
   display: flex;
   align-items: flex-start;
   gap: 6px;
-  padding: 4px 10px;
+  padding: 4px 10px 4px 8px;
   font-size: 12px;
   line-height: 1.4;
   transition: background-color 0.15s;
@@ -251,4 +256,14 @@
 .todo-cancelled .todo-item-title {
   color: var(--c-muted);
   text-decoration: line-through;
+}
+
+/* The in-progress title shimmer is decoration; freeze it at its starting
+   colour when the reader asks for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  .todo-list-summary--active .todo-list-title {
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    animation: none;
+  }
 }

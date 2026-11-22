@@ -82,8 +82,7 @@
   --c-accent: #3E6AE1;
   --c-accent-hover: #3457C4;
   --c-accent-soft: rgba(62, 106, 225, 0.10);
-  /* The same hue in its legible form: text, icons and hairlines. A pastel
-     accent (see the Sakura palette) needs this darker twin — a light fill
+  /* The same hue in its legible form: text, icons and hairlines. A light fill
      cannot carry a label, or a 1px line, on a light surface. */
   --c-accent-text: var(--c-accent);
   /* Label colour that sits ON an accent fill. */
@@ -93,12 +92,32 @@
   --c-bg-image: none;
   --c-code-image: none;
   --c-reason-image: none;
+  /* Chat background photo. The frontend sets `--chat-bg-photo` to
+     `url("blob:…")` and adds `data-chat-bg` on <html> once a photo is
+     configured; both are unset for the plain canvas. The scrim is mixed from
+     the active palette's own canvas, so every scheme keeps its contrast
+     without another block of literal colours. */
+  --chat-bg-photo: none;
+  --chat-bg-scrim: color-mix(in srgb, var(--c-bg) 86%, transparent);
   --c-danger: #C0392B;
   --c-danger-soft: rgba(192, 57, 43, 0.10);
   --c-success: #1F8A3B;
   --c-success-soft: rgba(31, 138, 59, 0.10);
   --c-warning: #B07500;
   --c-warning-soft: rgba(176, 117, 0, 0.10);
+
+  /* Transcript card tints — one soft surface + one leading rule per card kind.
+     The tints stay low-saturation and the rules are legible ink, so thinking /
+     tool / plan / background cards read apart without becoming a second
+     accent. Semantic kinds reuse the accent / success tokens below. */
+  --c-card-think: #F3F1FB;
+  --c-card-think-rule: #6A5CAE;
+  --c-card-tool: #EEF3FA;
+  --c-card-tool-rule: #4E6689;
+  --c-card-plan: var(--c-accent-soft);
+  --c-card-plan-rule: var(--c-accent-text);
+  --c-card-bg-task: var(--c-success-soft);
+  --c-card-bg-task-rule: var(--c-success);
 
   /* Elevation — deliberately none. Layering is z-index + opacity only,
      so the token names are kept as no-ops for the rules that reference
@@ -232,14 +251,6 @@
   --sw-default-2: #3E6AE1;
   --sw-default-3: #171A20;
   --sw-default-4: #F4F4F4;
-  --sw-sakura-1: #FFDDE9;
-  /* 草莓牛奶 — base */
-  --sw-sakura-2: #FF8FB1;
-  /* 樱花粉 — primary */
-  --sw-sakura-3: #DFF5EA;
-  /* 薄荷奶绿 — secondary */
-  --sw-sakura-4: #EDE4FF;
-  /* 薰衣草紫 — emphasis */
   --sw-cream-1: #F9F1DB;
   /* 蚌肉白 */
   --sw-cream-2: #F9F4DC;
@@ -290,6 +301,9 @@
   --c-toolbar: rgba(23, 26, 32, 0.62);
   --c-particle: color-mix(in srgb, var(--c-muted) 55%, transparent);
   --c-particle-line: color-mix(in srgb, var(--c-muted) 28%, transparent);
+  /* A busier photo needs a denser veil over a dark canvas to keep 13px text
+     at the same contrast as the plain theme. */
+  --chat-bg-scrim: color-mix(in srgb, var(--c-bg) 92%, transparent);
 
   --c-accent: #5B7EF0;
   --c-accent-hover: #6F8DF3;
@@ -302,6 +316,17 @@
   --c-success-soft: rgba(59, 181, 92, 0.14);
   --c-warning: #E0A33C;
   --c-warning-soft: rgba(224, 163, 60, 0.14);
+
+  /* Transcript card tints — dark: low-alpha washes over the canvas, with the
+     rules lifted so a title still reads on the tinted surface. */
+  --c-card-think: rgba(154, 140, 230, 0.12);
+  --c-card-think-rule: #B9ACEA;
+  --c-card-tool: rgba(120, 150, 200, 0.10);
+  --c-card-tool-rule: #9DB6D6;
+  --c-card-plan: var(--c-accent-soft);
+  --c-card-plan-rule: var(--c-accent-text);
+  --c-card-bg-task: var(--c-success-soft);
+  --c-card-bg-task-rule: var(--c-success);
 
   --shadow-sm: none;
   --shadow-md: none;
@@ -348,129 +373,9 @@
    token set — a palette never inherits from another one, so a missing
    token can never leak a neighbouring scheme's colour into the UI.
 
-     Sakura 樱花 — a pastel scheme on a strawberry-milk pink canvas, with
-                    mint code blocks and lavender reasoning blocks (the pink
-                    pastels of Color Hunt: #FFCED8 / #FFDDDD / #FFF4DE /
-                    #FFE8C4 family, with #FF8FB1 as the primary accent).
-     Cream  乳白 — the adjacent warm-white group, washed with oklab
-                    gradients instead of flat fills.
+     Cream  乳白 — the warm-white group, washed with oklab gradients
+                    instead of flat fills.
    ══════════════════════════════════════════════════════════════════════════ */
-
-/* ── Sakura (樱花) — light ───────────────────────────────────────────────── */
-[data-palette="sakura"] {
-  /* 草莓牛奶 — the canvas */
-  --c-bg: #FFDDE9;
-  /* panels, popups, cards */
-  --c-surface: #FFF7FA;
-  /* alternate surface */
-  --c-surface-2: #FFEAF2;
-  --c-hover: rgba(74, 35, 51, 0.07);
-  --c-active: rgba(74, 35, 51, 0.13);
-
-  --c-text: #4A2333;
-  --c-body: #5C3446;
-  --c-muted: #7C5265;
-  --c-placeholder: #A98495;
-  --c-text-secondary: #7C5265;
-
-  --c-border: rgba(74, 35, 51, 0.16);
-  --c-border-s: rgba(74, 35, 51, 0.09);
-  --c-border-i: rgba(74, 35, 51, 0.26);
-  --c-bg-secondary: #FFEAF2;
-  /* 薄荷奶绿 — code blocks */
-  --c-code: #DFF5EA;
-  /* 薰衣草紫 — reasoning blocks */
-  --c-reason: #EDE4FF;
-  --c-reason-b: rgba(74, 35, 51, 0.22);
-  --c-toolbar: rgba(255, 247, 250, 0.68);
-
-  /* 樱花粉 — the primary action */
-  --c-accent: #FF8FB1;
-  --c-accent-hover: #FF7BA4;
-  --c-accent-soft: rgba(255, 143, 177, 0.30);
-  /* the same hue, darkened so it can carry a label on the canvas */
-  --c-accent-text: #8E2450;
-  --c-on-accent: #4A1B2D;
-
-  --c-danger: #A61B3C;
-  --c-danger-soft: rgba(166, 27, 60, 0.12);
-  --c-success: #1B6B3A;
-  --c-success-soft: rgba(27, 107, 58, 0.12);
-  --c-warning: #8A5A00;
-  --c-warning-soft: rgba(138, 90, 0, 0.12);
-
-  --c-bg-image: none;
-  --c-code-image: none;
-  --c-reason-image: none;
-  /* Toggle knob — the one fill that stays white on every palette: it sits
-     on the accent and has to read as "on" in all of them. */
-  --c-knob: #FFFFFF;
-  /* Favourite star in the history list. */
-  --c-favorite: #EAB308;
-}
-
-/* ── Sakura (樱花) — dark ────────────────────────────────────────────────── */
-[data-theme="dark"][data-palette="sakura"] {
-  /* 草莓牛奶, deepened into a plum night canvas */
-  --c-bg: #2B1A23;
-  --c-surface: #37212C;
-  --c-surface-2: #432A36;
-  --c-hover: rgba(255, 255, 255, 0.06);
-  --c-active: rgba(255, 255, 255, 0.10);
-
-  --c-text: #FDEAF2;
-  --c-body: #E7CCD8;
-  --c-muted: #BC9DAD;
-  --c-placeholder: #96737F;
-  --c-text-secondary: #BC9DAD;
-
-  --c-border: rgba(255, 255, 255, 0.10);
-  --c-border-s: rgba(255, 255, 255, 0.06);
-  --c-border-i: rgba(255, 255, 255, 0.18);
-  --c-bg-secondary: #432A36;
-  /* 薄荷奶绿, washed over the dark canvas */
-  --c-code: rgba(223, 245, 234, 0.14);
-  /* 薰衣草紫, washed over the dark canvas */
-  --c-reason: rgba(237, 228, 255, 0.12);
-  --c-reason-b: rgba(255, 255, 255, 0.14);
-  --c-toolbar: rgba(55, 33, 44, 0.68);
-
-  /* 樱花粉, lifted so the pastel still reads on a dark ground */
-  --c-accent: #FFA6C2;
-  --c-accent-hover: #FFBBD1;
-  --c-accent-soft: rgba(255, 166, 194, 0.20);
-  --c-accent-text: #FFB6CD;
-  --c-on-accent: #2A1220;
-
-  /* coral, not pink: on a 樱花 canvas the accent is already pink, so the
-     error state has to keep its own hue to stay recognisable. */
-  --c-danger: #F4877F;
-  --c-danger-soft: rgba(244, 135, 127, 0.16);
-  --c-success: #7FCB9B;
-  --c-success-soft: rgba(127, 203, 155, 0.16);
-  --c-warning: #E8B45C;
-  --c-warning-soft: rgba(232, 180, 92, 0.16);
-
-  --c-bg-image: none;
-  --c-code-image: none;
-  --c-reason-image: none;
-  /* Toggle knob — the one fill that stays white on every palette: it sits
-     on the accent and has to read as "on" in all of them. */
-  --c-knob: #FFFFFF;
-  /* Favourite star in the history list. */
-  --c-favorite: #EAB308;
-  /* Dark code syntax. The bundled `github.css` is a light theme, so the
-     dark half restates it through tokens instead of literals in the chat
-     stylesheet. */
-  --c-syn-text: #E8EAED;
-  --c-syn-comment: #8A8A90;
-  --c-syn-keyword: #9DB7FF;
-  --c-syn-string: #C8E6A0;
-  --c-syn-title: #8EC5FF;
-  --c-syn-number: #F2C38F;
-  --c-syn-builtin: #9ADBB7;
-  --c-syn-deletion: #FFB4B4;
-}
 
 /* ── Cream (乳白) — light ────────────────────────────────────────────────── */
 [data-palette="cream"] {
@@ -516,6 +421,17 @@
   --c-success-soft: rgba(31, 138, 59, 0.10);
   --c-warning: #B07500;
   --c-warning-soft: rgba(176, 117, 0, 0.10);
+
+  /* Transcript card tints — warm neutral washes, accent / success stay the
+     same hue as the rest of this palette. */
+  --c-card-think: #F6EFF3;
+  --c-card-think-rule: #8A627F;
+  --c-card-tool: #F1EEDF;
+  --c-card-tool-rule: #6E6847;
+  --c-card-plan: var(--c-accent-soft);
+  --c-card-plan-rule: var(--c-accent-text);
+  --c-card-bg-task: var(--c-success-soft);
+  --c-card-bg-task-rule: var(--c-success);
 
   /* The adjacent group, washed in oklab instead of flat fills. */
   --c-bg-image: linear-gradient(90deg in oklab, #F9F1DB 0%, #FBF2E3 100%);
@@ -565,6 +481,16 @@
   --c-success-soft: rgba(59, 181, 92, 0.14);
   --c-warning: #E0A33C;
   --c-warning-soft: rgba(224, 163, 60, 0.14);
+
+  /* Transcript card tints — warm, low-alpha washes on the umber canvas. */
+  --c-card-think: rgba(222, 196, 214, 0.10);
+  --c-card-think-rule: #D9B8D0;
+  --c-card-tool: rgba(222, 210, 170, 0.10);
+  --c-card-tool-rule: #CFC3A0;
+  --c-card-plan: var(--c-accent-soft);
+  --c-card-plan-rule: var(--c-accent-text);
+  --c-card-bg-task: var(--c-success-soft);
+  --c-card-bg-task-rule: var(--c-success);
 
   --c-bg-image: none;
   --c-code-image: none;
@@ -1567,6 +1493,24 @@ body {
   background-image: var(--glass-transcript-image);
 }
 
+/* Optional personal photo behind the transcript only — the toolbar and the
+   composer keep their plain bar fills. The photo is the middle layer: the
+   palette-tinted scrim above it is what keeps 13px text readable, and the
+   glass / palette wash stays at the bottom. `background-color` is never
+   rewritten: under window vibrancy it is the translucent transcript floor.
+   `background-attachment` is left at `scroll`, so the picture stays put while
+   the conversation scrolls over it. Only the `data-chat-bg` attribute (written
+   together with `--chat-bg-photo` by the frontend) activates the layers. */
+html[data-chat-bg] .messages {
+  background-image:
+    linear-gradient(var(--chat-bg-scrim), var(--chat-bg-scrim)),
+    var(--chat-bg-photo),
+    var(--glass-transcript-image);
+  background-size: auto, cover, auto;
+  background-position: center, center, top left;
+  background-repeat: no-repeat, no-repeat, repeat;
+}
+
 .empty-state {
   margin: auto;
   text-align: center;
@@ -1590,10 +1534,11 @@ body {
   color: var(--c-muted);
 }
 
-/* Randomly rotating feature tip under the face. A quiet borderless surface —
-   no outline, no tail, no shadow, no accent — that slides down into place,
-   dwells, then slides further down and out before the next tip is mounted.
-   No hover/focus state: only the timer ever changes it. */
+/* Randomly rotating feature tip under the face. Transparent — no surface,
+   outline, tail, shadow or accent — so the particle field and the chat
+   background show through; the text sits directly on them. It slides down
+   into place, dwells, then slides further down and out before the next tip
+   is mounted. No hover/focus state: only the timer ever changes it. */
 .empty-tip {
   width: min(420px, calc(100vw - 48px));
   margin: 10px auto 0;
@@ -1606,9 +1551,7 @@ body {
   align-items: center;
   justify-content: center;
   min-height: calc(3.1em + 16px);
-  border-radius: var(--r-sm);
-  background: var(--c-surface);
-  color: var(--c-body);
+  color: var(--c-muted);
   font-size: 13px;
   line-height: 1.55;
   text-align: center;
