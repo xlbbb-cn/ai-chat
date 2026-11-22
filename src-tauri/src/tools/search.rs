@@ -4,6 +4,7 @@
 use ignore::WalkState;
 use std::ffi::OsStr;
 use std::fs;
+use std::io::Read;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -214,8 +215,13 @@ fn build_search_display_path(target: &Path, root: &Path) -> String {
     normalize_search_match_path(target, root)
 }
 
+/// Bytes inspected to decide whether a file is binary. Deciding after this much
+/// is what keeps a build tree full of `.rlib`/`.pdb` artifacts cheap to walk:
+/// the rest of such a file is never read.
+const BINARY_SNIFF_BYTES: usize = 1024;
+
 pub(super) fn is_probably_binary(bytes: &[u8]) -> bool {
-    bytes.iter().take(1024).any(|&byte| byte == 0)
+    bytes.iter().take(BINARY_SNIFF_BYTES).any(|&byte| byte == 0)
 }
 
 /// Result of inspecting one candidate file.
@@ -237,6 +243,7 @@ fn scan_entry(
     target_root: &Path,
     matcher: &SearchMatcher,
     glob_matcher: Option<&globset::GlobSet>,
+    buffer: &mut Vec<u8>,
 ) -> Result<FileScan, String> {
     if let Some(glob_matcher) = glob_matcher {
         let match_path = normalize_search_match_path(target, target_root);
@@ -245,22 +252,42 @@ fn scan_entry(
         }
     }
 
-    // Cheap `stat` first: a workspace full of multi-hundred-MB artifacts used
-    // to be slurped into memory just to be rejected as binary afterwards.
-    if let Ok(metadata) = fs::metadata(target) {
-        if metadata.len() > SEARCH_MAX_FILE_BYTES {
-            return Ok(FileScan::TooLarge);
-        }
+    // One open serves both the size check and the read. `fs::metadata(path)`
+    // resolved the path a second time, and on Windows that is its own
+    // `GetFileAttributesEx` call — a large part of the ~50 µs a file costs no
+    // matter how small it is.
+    let mut file = fs::File::open(target)
+        .map_err(|e| format!("Failed to read '{}': {}", target.display(), e))?;
+    if file
+        .metadata()
+        .is_ok_and(|metadata| metadata.len() > SEARCH_MAX_FILE_BYTES)
+    {
+        return Ok(FileScan::TooLarge);
     }
 
-    let bytes =
-        fs::read(target).map_err(|e| format!("Failed to read '{}': {}", target.display(), e))?;
-
-    if is_probably_binary(&bytes) {
+    // Sniff before slurping: a third of the bytes a broad search used to read
+    // here belonged to binary artifacts that were discarded only after the
+    // whole file had been read and copied. This is a second `read` on an open
+    // handle, not a second open.
+    buffer.clear();
+    (&mut file)
+        .take(BINARY_SNIFF_BYTES as u64)
+        .read_to_end(buffer)
+        .map_err(|e| format!("Failed to read '{}': {}", target.display(), e))?;
+    if is_probably_binary(&buffer[..]) {
         return Ok(FileScan::Binary);
     }
+    // The `+ 1` catches a file that grew after the metadata check: it is then
+    // reported as too large instead of being silently scanned truncated.
+    (&mut file)
+        .take(SEARCH_MAX_FILE_BYTES + 1 - buffer.len() as u64)
+        .read_to_end(buffer)
+        .map_err(|e| format!("Failed to read '{}': {}", target.display(), e))?;
+    if buffer.len() as u64 > SEARCH_MAX_FILE_BYTES {
+        return Ok(FileScan::TooLarge);
+    }
 
-    let text = String::from_utf8_lossy(&bytes);
+    let text = String::from_utf8_lossy(&buffer[..]);
     let display_path = build_search_display_path(target, target_root);
     let mut hits = Vec::new();
     for (index, line) in text.lines().enumerate() {
@@ -490,6 +517,10 @@ fn walk_tree(
     // it is fanned out across cores. `ignore` defaults to
     // `available_parallelism().min(12)` worker threads.
     walker.build_parallel().run(|| {
+        // One scratch buffer per worker thread, reused for every file it scans.
+        // `fs::read` handed out a fresh allocation per file — 20 000 of them over
+        // a build tree, each up to the 2 MiB cap.
+        let mut buffer: Vec<u8> = Vec::new();
         Box::new(move |entry| {
             if exhausted.load(Ordering::Relaxed)
                 || abort.is_some_and(|flag| flag.load(Ordering::Relaxed))
@@ -515,7 +546,13 @@ fn walk_tree(
             }
 
             // Read + match outside the lock; only the merge is serialised.
-            let scan = scan_entry(entry.path(), target_root, matcher, glob_matcher);
+            let scan = scan_entry(
+                entry.path(),
+                target_root,
+                matcher,
+                glob_matcher,
+                &mut buffer,
+            );
             let state = accumulate_scan(&mut acc.lock().unwrap_or_else(|p| p.into_inner()), scan);
             if state == WalkState::Quit {
                 exhausted.store(true, Ordering::Relaxed);
@@ -548,7 +585,14 @@ pub(super) fn run_integrated_search(
 
     if target.is_file() {
         let mut acc = SearchAccumulator::with_match_budget(max_matches);
-        let scan = scan_entry(target, target_root, &matcher, glob_matcher.as_ref());
+        let mut buffer = Vec::new();
+        let scan = scan_entry(
+            target,
+            target_root,
+            &matcher,
+            glob_matcher.as_ref(),
+            &mut buffer,
+        );
         accumulate_scan(&mut acc, scan);
         return Ok(render_search_output(&acc, max_matches));
     }
