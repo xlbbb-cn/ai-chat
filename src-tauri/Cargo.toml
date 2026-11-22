@@ -40,6 +40,7 @@ rust-stemmers = "1.2"
 ignore = "0.4"
 regex = "1"
 globset = "0.4"
+memchr = "2"
 chrono = "0.4"
 # Base64 payloads for `@file` mentions of image/binary files (composer popup).
 base64 = "0.22"

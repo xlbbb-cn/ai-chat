@@ -514,6 +514,49 @@ fn glob_filtered_files_do_not_consume_the_scan_budget() {
 }
 
 #[test]
+fn literal_matching_keeps_line_semantics() {
+    let root = make_temp_dir("search-line-semantics");
+    let file = root.join("sample.txt");
+    fs::write(&file, "first\r\nneedle and needle again\nlast needle").unwrap();
+
+    let output = run_integrated_search("needle", &file, &root, &SearchOptions::default()).unwrap();
+
+    // One row per line even with two hits on it, CRLF stripped, and the last
+    // line still counts without a trailing newline.
+    assert!(
+        output.contains("sample.txt:2:needle and needle again"),
+        "{output}"
+    );
+    assert!(output.contains("sample.txt:3:last needle"), "{output}");
+    assert_eq!(
+        output.matches("needle and needle again").count(),
+        1,
+        "{output}"
+    );
+
+    // A needle spanning a newline never matches: a line is the unit.
+    let spanning = run_integrated_search(
+        "first\r\nneedle",
+        &file,
+        &root,
+        &SearchOptions {
+            case_sensitive: true,
+            ..SearchOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(spanning.contains("(no matches)"), "{spanning}");
+
+    // Non-ASCII case folding still takes the Unicode path, and the row keeps
+    // the original text rather than the folded one.
+    fs::write(&file, "ÄÖÜ straße\n").unwrap();
+    let folded = run_integrated_search("STRAßE", &file, &root, &SearchOptions::default()).unwrap();
+    assert!(folded.contains("sample.txt:1:ÄÖÜ straße"), "{folded}");
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn case_insensitive_literal_search_avoids_regressions() {
     assert!(contains_ignore_case("Hello World", "hello"));
     assert!(contains_ignore_case("HELLO", "hello"));

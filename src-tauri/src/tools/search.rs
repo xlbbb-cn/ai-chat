@@ -14,41 +14,205 @@ enum SearchMatcher {
         needle: String,
         needle_lower: String,
         case_sensitive: bool,
+        /// Built once for the whole search. A finder per file would pay the
+        /// two-way setup 20 000 times for the same needle.
+        finder: memchr::memmem::Finder<'static>,
     },
-    Regex(regex::Regex),
+    /// Byte regex: matching no longer needs the file to be valid UTF-8, so the
+    /// validating `from_utf8_lossy` pass (and its copy) is gone.
+    Regex(regex::bytes::Regex),
 }
 
 impl SearchMatcher {
     fn build(query: &str, case_sensitive: bool, use_regex: bool) -> Result<Self, String> {
         if use_regex {
-            let regex = regex::RegexBuilder::new(query)
+            let regex = regex::bytes::RegexBuilder::new(query)
                 .case_insensitive(!case_sensitive)
                 .build()
                 .map_err(|e| format!("Invalid search regex: {}", e))?;
             Ok(Self::Regex(regex))
         } else {
+            let needle_lower = query.to_lowercase();
+            let finder = memchr::memmem::Finder::new(if case_sensitive {
+                query.as_bytes()
+            } else {
+                needle_lower.as_bytes()
+            })
+            .into_owned();
             Ok(Self::Literal {
                 needle: query.to_string(),
-                needle_lower: query.to_lowercase(),
+                needle_lower,
                 case_sensitive,
+                finder,
             })
         }
     }
 
-    fn is_match(&self, line: &str) -> bool {
+    /// Appends one `path:line:text` row per matching line. Rows are built only
+    /// when something matches, so a file without hits allocates nothing.
+    fn push_hits(&self, bytes: &[u8], target: &Path, target_root: &Path, hits: &mut Vec<String>) {
         match self {
-            SearchMatcher::Literal {
+            Self::Literal {
                 needle,
                 needle_lower,
                 case_sensitive,
+                finder,
             } => {
-                if *case_sensitive {
-                    line.contains(needle)
+                let (scanned, ignore_case) = if *case_sensitive {
+                    (needle.as_bytes(), false)
                 } else {
-                    contains_ignore_case(line, needle_lower)
+                    (needle_lower.as_bytes(), true)
+                };
+                if !scanned.is_empty()
+                    && !scanned.contains(&b'\n')
+                    && !(ignore_case && !scanned.is_ascii())
+                {
+                    push_scanned_hits(
+                        bytes,
+                        target,
+                        target_root,
+                        scanned,
+                        ignore_case,
+                        finder,
+                        hits,
+                    );
+                    return;
                 }
+                // An empty needle, a needle containing a newline (no line holds
+                // one) and non-ASCII case folding keep the line-oriented
+                // behaviour they always had.
+                push_line_hits(
+                    bytes,
+                    target,
+                    target_root,
+                    |line| {
+                        let line = String::from_utf8_lossy(line);
+                        if *case_sensitive {
+                            line.contains(needle.as_str())
+                        } else {
+                            contains_ignore_case(&line, needle_lower)
+                        }
+                    },
+                    hits,
+                );
             }
-            SearchMatcher::Regex(regex) => regex.is_match(line),
+            Self::Regex(regex) => push_line_hits(
+                bytes,
+                target,
+                target_root,
+                |line| regex.is_match(line),
+                hits,
+            ),
+        }
+    }
+}
+
+fn push_row(
+    hits: &mut Vec<String>,
+    target: &Path,
+    target_root: &Path,
+    line_no: usize,
+    line: &[u8],
+) {
+    hits.push(format!(
+        "{}:{}:{}",
+        build_search_display_path(target, target_root),
+        line_no,
+        String::from_utf8_lossy(line)
+    ));
+}
+
+/// Line-oriented scan, for the cases a byte scan cannot express exactly. It
+/// splits on `\n`, strips a trailing `\r` and drops the empty tail a trailing
+/// newline would otherwise produce, i.e. exactly what `str::lines` yielded.
+fn push_line_hits(
+    bytes: &[u8],
+    target: &Path,
+    target_root: &Path,
+    mut is_match: impl FnMut(&[u8]) -> bool,
+    hits: &mut Vec<String>,
+) {
+    let mut start = 0usize;
+    let mut index = 0usize;
+    while start < bytes.len() {
+        let line_end =
+            memchr::memchr(b'\n', &bytes[start..]).map_or(bytes.len(), |offset| start + offset);
+        let mut line = &bytes[start..line_end];
+        if line.last() == Some(&b'\r') {
+            line = &line[..line.len() - 1];
+        }
+        if is_match(line) {
+            push_row(hits, target, target_root, index + 1, line);
+        }
+        start = line_end + 1;
+        index += 1;
+    }
+}
+
+/// Whole-buffer scan for an ASCII literal. `memmem` (case-sensitive) and
+/// `memchr2` (case-insensitive first byte) run at SIMD speed over the file
+/// instead of comparing byte-by-byte on every line, and only the lines that
+/// match are formatted. Line numbers come from counting the newlines before a
+/// hit, which advances monotonically, so the whole file is still one pass.
+#[allow(clippy::too_many_arguments)]
+fn push_scanned_hits(
+    bytes: &[u8],
+    target: &Path,
+    target_root: &Path,
+    needle: &[u8],
+    ignore_case: bool,
+    finder: &memchr::memmem::Finder<'static>,
+    hits: &mut Vec<String>,
+) {
+    let mut line_no = 1usize;
+    let mut counted_upto = 0usize;
+    let mut last_row_line = 0usize;
+
+    let mut consider = |at: usize| {
+        line_no += memchr::memchr_iter(b'\n', &bytes[counted_upto..at]).count();
+        counted_upto = at;
+        // Two hits on one line are still one row.
+        if line_no == last_row_line {
+            return;
+        }
+        last_row_line = line_no;
+        let line_start = memchr::memrchr(b'\n', &bytes[..at]).map_or(0, |index| index + 1);
+        let line_end =
+            memchr::memchr(b'\n', &bytes[at..]).map_or(bytes.len(), |offset| at + offset);
+        let mut line = &bytes[line_start..line_end];
+        if line.last() == Some(&b'\r') {
+            line = &line[..line.len() - 1];
+        }
+        push_row(hits, target, target_root, line_no, line);
+    };
+
+    if ignore_case {
+        // Case-insensitive first byte finds the candidates; the needle compare
+        // then decides. With an absent needle this touches almost no byte.
+        let first_lower = needle[0].to_ascii_lowercase();
+        let first_upper = needle[0].to_ascii_uppercase();
+        let mut position = 0usize;
+        while position + needle.len() <= bytes.len() {
+            let Some(offset) = memchr::memchr2(first_lower, first_upper, &bytes[position..]) else {
+                break;
+            };
+            let at = position + offset;
+            if at + needle.len() > bytes.len() {
+                break;
+            }
+            if bytes[at..at + needle.len()].eq_ignore_ascii_case(needle) {
+                consider(at);
+                position = at + needle.len();
+            } else {
+                position = at + 1;
+            }
+        }
+    } else {
+        let mut position = 0usize;
+        while let Some(offset) = finder.find(&bytes[position..]) {
+            let at = position + offset;
+            consider(at);
+            position = at + needle.len();
         }
     }
 }
@@ -287,14 +451,8 @@ fn scan_entry(
         return Ok(FileScan::TooLarge);
     }
 
-    let text = String::from_utf8_lossy(&buffer[..]);
-    let display_path = build_search_display_path(target, target_root);
     let mut hits = Vec::new();
-    for (index, line) in text.lines().enumerate() {
-        if matcher.is_match(line) {
-            hits.push(format!("{}:{}:{}", display_path, index + 1, line));
-        }
-    }
+    matcher.push_hits(&buffer[..], target, target_root, &mut hits);
 
     if hits.is_empty() {
         Ok(FileScan::Empty)

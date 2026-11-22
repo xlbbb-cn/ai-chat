@@ -3895,6 +3895,7 @@ dependencies = [
  "jieba-rs",
  "libc",
  "lopdf",
+ "memchr",
  "model-catalog",
  "os_info",
  "pdf2md-rs",
