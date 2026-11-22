@@ -2,8 +2,9 @@
 //!
 //! Clicking the empty-state smiley starts a maintenance pass: one bounded LLM
 //! tool loop that tidies the workspace's long-term knowledge (self-evolution
-//! skills and the `evolution` memory scope). It is deliberately **not** a chat
-//! turn:
+//! skills, and memory across the `user`, `repo` and `evolution` scopes — noise
+//! out, one entry per fact, one skill per subject). It is deliberately **not**
+//! a chat turn:
 //!
 //! * it never writes chat history or a transcript row, so the empty state (and
 //!   the napping face) stays visible while it runs;
@@ -44,8 +45,11 @@ use crate::AppState;
 /// and is the dispatcher's guard for the maintenance-only `skill_merge` tool.
 pub(crate) const MISSION_ID: &str = "evolution-maintenance";
 
-const MAX_ROUNDS: u32 = 20;
-const MAX_TOOL_CALLS: u32 = 60;
+/// Round / tool-call ceiling of one pass. Each round is cheap and silent, so
+/// the ceiling is high; the 15-minute wall clock and the wrap-up notice are
+/// what actually end a pass, and a pass that runs out of them still reports.
+const MAX_ROUNDS: u32 = 100;
+const MAX_TOOL_CALLS: u32 = 300;
 const MAX_WALL_CLOCK: Duration = Duration::from_secs(15 * 60);
 const MAX_COMPLETION_TOKENS: u32 = 8_192;
 const MAX_SKILLS_IN_INVENTORY: usize = 40;
@@ -62,10 +66,14 @@ const BUDGET_FALLBACK: &str = "Evolution maintenance reached its round/tool budg
 /// exactly these; this list is the hard gate if it invents another name.
 const ALLOWED_TOOLS: [&str; 3] = ["memory", "file_actions", "skill_merge"];
 
-/// True when the next request must be the wrap-up request: the last round, or
-/// fewer than two tool calls left in the budget.
-fn budget_is_low(round: u32, tool_calls: u32) -> bool {
-    round >= MAX_ROUNDS || tool_calls.saturating_add(2) >= MAX_TOOL_CALLS
+/// True when the next request must be the wrap-up request: the last round,
+/// fewer than two tool calls left in the budget, or the wall clock nearly spent.
+/// The time clause matters because a pass has 15 minutes: without it, a long
+/// pass would end as a timeout error after saving work it never reported.
+fn budget_is_low(round: u32, tool_calls: u32, elapsed: Duration) -> bool {
+    round >= MAX_ROUNDS
+        || tool_calls.saturating_add(2) >= MAX_TOOL_CALLS
+        || elapsed >= MAX_WALL_CLOCK.mul_f32(0.8)
 }
 
 /// Status phase announced while a tool is running. `None` for a tool the
@@ -407,9 +415,32 @@ async fn run_inner(
     let app_data = app.path().app_data_dir().ok();
     let inventory = build_inventory(&workspace_dir, app_data.as_deref());
     let system_prompt = build_system_prompt(&workspace_dir);
-    let initial_user = format!(
-        "Run the maintenance pass now.\n\nInitial inventory:\n{inventory}"
-    );
+
+    // `session` notes live in `AppState` and this pass runs under its own
+    // session id, so the model can never reach them: the nap drops the progress
+    // ones here, deterministically, and says so in the opening inventory.
+    let pruned_session = crate::tools::memory::prune_session_noise(state);
+    if !pruned_session.is_empty() {
+        log(
+            state,
+            "INFO",
+            format!(
+                "evolution maintenance pruned {} session note(s): {}",
+                pruned_session.len(),
+                clip(&pruned_session.join(", "), 300)
+            ),
+        );
+    }
+    let session_line = if pruned_session.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n\nSession notes: the app already forgot {} progress note(s) in the session scope.",
+            pruned_session.len()
+        )
+    };
+    let initial_user =
+        format!("Run the maintenance pass now.\n\nInitial inventory:\n{inventory}{session_line}");
 
     let mut working_memory: Vec<Value> = vec![json!({
         "role": "user",
@@ -479,7 +510,7 @@ async fn run_inner(
         // budget is nearly spent, append the budget notice and force
         // `tool_choice: "none"`. The pass then ends with a summary (and any
         // work already saved) instead of a "failed after N rounds" error.
-        let budget_low = budget_is_low(round, tool_calls_count);
+        let budget_low = budget_is_low(round, tool_calls_count, started.elapsed());
         if budget_low {
             phase = "wrap_up";
         }
@@ -893,14 +924,44 @@ fn build_system_prompt(workspace_dir: &Path) -> String {
          Skill status: {status}\n\
          Evolution memory: {memory}\n\n\
          You have exactly three tools: `memory`, `file_actions` and `skill_merge`.\n\n\
-         GOAL: keep the workspace's long-term knowledge compact, non-duplicated and reusable.\n\n\
+         GOAL: keep the workspace's long-term knowledge compact, non-duplicated and reusable — \
+         noise out, one entry per fact, one skill per subject.\n\n\
          PROCEDURE\n\
          1. Inventory. Read the skill status file and list the skills root. For each skill note \
          its folder, frontmatter name, description, enabled state and source (`user` or \
-         `self-evolution`).\n\
-         2. Merge overlapping self-evolution skills. Two self-evolution skills that cover the \
+         `self-evolution`). Then read the inventory's \"Memory to forget\" and \"Memory to merge\" \
+         sections.\n\
+         2. Forget noise memory. \"Memory to forget\" lists entries whose name reports its own \
+         activity (\"报告已生成\", \"完成task1\", \"改完了 …\") instead of stating something a \
+         later turn can reuse. Judge every candidate yourself:\n\
+            - Delete it with `memory` action `delete`, using the scope printed on its line, when \
+              it only records what the last turn did, what was already delivered, or a finished \
+              step nobody will look up again. A per-task report is not knowledge.\n\
+            - Keep it — and say so in the report — when it carries a command, path, flag, \
+              version, error message, decision, constraint or measurement a later turn could \
+              need, and when it is a `user` / `repo` note that reads like a curated fact.\n\
+            - A line flagged \"auto note at importance 2\" is a distilled conclusion the \
+              recorder wrote on its own: keep it only when it states a fact a later turn can \
+              reuse, otherwise delete it.\n\
+            - Never delete `evolution-maintenance-progress`, a `pinned` entry, or an entry with \
+              `uses` >= 3. Delete at most 40 entries per pass.\n\
+         3. Merge duplicate memory. \"Memory to merge\" groups entries that state the same thing \
+         under different keys — two notes about the same interpreter or the same build command. \
+         For each group:\n\
+            - Read every member with `memory` action `get`.\n\
+            - Write ONE dense entry with `memory` action `add` in the scope that fits best: a \
+              fact about this machine or workspace → `repo`, a preference or general insight → \
+              `user`, a verified reusable fact → `evolution`. Keep every concrete command, path, \
+              flag and gotcha, and pass `importance` / `confidence` no higher than the most \
+              trusted source.\n\
+            - Delete the redundant keys (`memory action delete`, one call per key) only after \
+              the merged entry exists.\n\
+            - Handle at most 10 groups per pass and report the rest as deferred. Do not merge \
+              notes that merely share a topic but say different things. Use `memory` action \
+              `search` when you suspect a duplicate the inventory did not list.\n\
+         4. Merge overlapping self-evolution skills. Two self-evolution skills that cover the \
          same subject (same tool, same workflow, same project area) should become one focused \
-         skill. Handle at most 3 overlapping groups per pass; report any remaining overlaps as \
+         skill. Handle at most 10 overlapping groups per pass; report any remaining overlaps as \
          deferred instead of starting them:\n\
             - Read the source SKILL.md files.\n\
             - Choose an existing self-evolution folder as the target (prefer the broader or \
@@ -916,27 +977,28 @@ fn build_system_prompt(workspace_dir: &Path) -> String {
               folder as `<folder>.bak.N` before deleting it. Never delete a skill with \
               `file_actions`.\n\
             - Never merge unrelated skills just to reduce the count.\n\
-         3. Consolidate evolution memory. Call `memory` with action `consolidate`, scope \
-         `evolution`, phase `plan`. Handle at most 3 clusters per pass; if more are eligible, do \
-         the three largest and report the rest as deferred. For every cluster worth keeping:\n\
+         5. Consolidate evolution memory into skills. Call `memory` with action `consolidate`, \
+         scope `evolution`, phase `plan`. Handle at most 10 clusters per pass; if more are \
+         eligible, do the ten largest and report the rest as deferred. For every cluster worth \
+         keeping:\n\
             - Write one skill whose frontmatter `source-memory` lists every key in the cluster.\n\
             - Call `memory` action `consolidate`, scope `evolution`, phase `apply` with the same \
               `keys` and the full `skill_md`.\n\
             - One apply per cluster. Do not archive keys that are not in the plan. If the plan \
               says no cluster is large enough, skip this step.\n\
-         4. Merge duplicate evolution memory entries. Use `memory list` / `search` on the \
-         evolution scope. If several entries state the same fact, write one dense entry with \
-         `memory add` (upsert) and then delete the redundant keys with `memory delete`. Keep the \
-         highest-confidence wording and pass that source's `confidence` explicitly: a merge must \
-         never come out more trusted than its most trusted source. An entry with recorded \
-         conflicts (`contradictions` > 0) is stale — delete it rather than folding it into a \
-         trusted entry. Never invent facts. Never edit memory files with `file_actions`.\n\
-         5. Verify and report. List skills and evolution memory again. If you are running low on \
+         6. Prune stale evolution entries. An entry with recorded conflicts (`contradictions` > \
+         0) is stale: delete it instead of folding it into a trusted entry. Use `memory list` / \
+         `search` on the evolution scope for anything the inventory missed. Never invent facts. \
+         Never edit memory files with `file_actions`.\n\
+         7. Verify and report. List skills and evolution memory again. If you are running low on \
          rounds or tool calls, stop starting new work and report what is already saved. Report:\n\
-            - skills merged (old → new) or \"none\";\n\
+            - noise entries forgotten (scope/key), or \"none\", plus the candidates you kept and \
+              why;\n\
+            - duplicate memory merged (group → kept key) or \"none\";\n\
+            - stale or conflicting entries deleted or \"none\";\n\
             - clusters archived (keys → skill) or \"none\";\n\
-            - memory entries merged/deleted or \"none\";\n\
-            - anything skipped and why.\n\n\
+            - skills merged (old → new) or \"none\";\n\
+            - anything deferred and why.\n\n\
          RULES\n\
          - Only `memory`, `file_actions` and `skill_merge`. Never run commands, never touch \
            `.data/chat.db`, never edit files outside the workspace.\n\
@@ -948,6 +1010,9 @@ fn build_system_prompt(workspace_dir: &Path) -> String {
            of starting over.\n\
          - Never archive, delete or merge the `evolution-maintenance-progress` memory entry. It is \
            the resume note and is excluded from consolidation plans on purpose.\n\
+         - The `session` scope is not yours to tidy: the app already dropped this session's \
+           progress notes, and this pass runs under its own session id.\n\
+         - Never delete an entry just to reduce the count, and never delete one you did not read.\n\
          - Do not modify a skill whose status source is `user` (the Skills panel owns it) or whose \
            source is unknown. Refuse rather than guess.\n\
          - Do not change `skills.status` by hand; `skill_merge` and the memory tool manage it.\n\
@@ -1139,6 +1204,51 @@ fn build_inventory(workspace_dir: &Path, app_data: Option<&Path>) -> String {
         );
     }
 
+    // What the pass should forget and merge. Listing the candidates is the
+    // point: a model that has to search hundreds of rows spends its budget
+    // re-deriving keys it already received here, and the evidence guards in
+    // `memory::noise_candidates` are what keep a reusable fact off the list.
+    let noise = crate::tools::memory::noise_candidates(workspace_dir);
+    out.push_str(&format!(
+        "\nMemory to forget: {} candidate(s) — a progress report, not a fact (judge each before deleting).\n",
+        noise.len()
+    ));
+    if noise.is_empty() {
+        out.push_str("- (none)\n");
+    }
+    for candidate in &noise {
+        out.push_str(&format!(
+            "- scope: {} | key: {} | flagged: {} | title: {} | body: {}\n",
+            candidate.scope,
+            candidate.key,
+            candidate.reason,
+            clip(&candidate.title, 90),
+            clip(&candidate.body, 120)
+        ));
+    }
+
+    let groups = crate::tools::memory::duplicate_groups(workspace_dir);
+    out.push_str(&format!(
+        "\nMemory to merge: {} duplicate group(s) — same thing under different keys.\n",
+        groups.len()
+    ));
+    if groups.is_empty() {
+        out.push_str("- (none)\n");
+    }
+    for group in &groups {
+        let members: Vec<String> = group
+            .entries
+            .iter()
+            .map(|(scope, key, title)| format!("{}:{} ({})", scope, key, clip(title, 60)))
+            .collect();
+        out.push_str(&format!(
+            "- group {} [{}]: {}\n",
+            group.id,
+            clip(&group.subject, 60),
+            members.join(" | ")
+        ));
+    }
+
     // The previous pass' resume note is the first thing the next pass should
     // read: it names what was already saved and what was deferred.
     let progress = crate::tools::memory::load_evolution_entries(workspace_dir)
@@ -1212,10 +1322,63 @@ mod tests {
 
     #[test]
     fn budget_reserves_the_last_request_for_the_wrap_up() {
-        assert!(!budget_is_low(1, 0));
-        assert!(!budget_is_low(1, MAX_TOOL_CALLS - 3));
-        assert!(budget_is_low(1, MAX_TOOL_CALLS - 2));
-        assert!(budget_is_low(MAX_ROUNDS, 0));
+        assert!(!budget_is_low(1, 0, Duration::ZERO));
+        assert!(!budget_is_low(1, MAX_TOOL_CALLS - 3, Duration::ZERO));
+        assert!(budget_is_low(1, MAX_TOOL_CALLS - 2, Duration::ZERO));
+        assert!(budget_is_low(MAX_ROUNDS, 0, Duration::ZERO));
+        // The wall clock alone can force the report: a pass that spends its
+        // 15 minutes must still end with a summary, not a timeout error.
+        assert!(budget_is_low(1, 0, MAX_WALL_CLOCK.mul_f32(0.81)));
+        assert!(!budget_is_low(1, 0, MAX_WALL_CLOCK.mul_f32(0.5)));
+    }
+
+    #[test]
+    fn the_inventory_offers_noise_and_duplicates() {
+        let workspace = temp_workspace("sweep-inventory");
+        let evolution = crate::tools::memory::evolution_dir(&workspace);
+        fs::create_dir_all(&evolution).unwrap();
+
+        let entry = |key: &str, title: &str, body: &str| {
+            format!(
+                "---\nformat_version: 2\nkey: {key}\ntitle: {title}\nkind: fact\ntags: []\n---\n\n{body}\n"
+            )
+        };
+        // A per-task status line: noise.
+        fs::write(
+            evolution.join("report-generated.md"),
+            entry("报告已生成", "报告已生成", "报告已生成，放在临时目录。"),
+        )
+        .unwrap();
+        // Two notes about the same interpreter: a merge target.
+        fs::write(
+            evolution.join("python-default.md"),
+            entry(
+                "python-default",
+                "python 默认解释器",
+                "默认解释器是 python，python3 是 Store 桩，store 里没有可执行文件。",
+            ),
+        )
+        .unwrap();
+        fs::write(
+            evolution.join("python3-stub.md"),
+            entry(
+                "python3-stub",
+                "python3 不可用",
+                "python3 是 Store 桩，store 里没有可执行文件，改用 node。",
+            ),
+        )
+        .unwrap();
+
+        let inventory = build_inventory(&workspace, None);
+        assert!(inventory.contains("Memory to forget"));
+        assert!(inventory.contains("key: 报告已生成"), "{inventory}");
+        assert!(inventory.contains("Memory to merge"));
+        assert!(
+            inventory.contains("evolution:python-default") && inventory.contains("evolution:python3-stub"),
+            "{inventory}"
+        );
+
+        fs::remove_dir_all(&workspace).ok();
     }
 
     #[test]

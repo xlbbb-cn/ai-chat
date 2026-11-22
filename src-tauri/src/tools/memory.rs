@@ -1167,27 +1167,7 @@ fn hint_candidates(workspace_dir: &Path, include_evolution: bool) -> Vec<HintCan
     }
 
     for scope in MEMORY_HINT_SCOPES {
-        let dir = crate::workspace::memory_root(workspace_dir).join(scope);
-        let Ok(entries) = fs::read_dir(&dir) else {
-            continue;
-        };
-        // `read_dir` order is filesystem-dependent; sorting keeps the render
-        // byte-identical between two builds of the same memory set.
-        let mut paths: Vec<PathBuf> = entries
-            .flatten()
-            .map(|entry| entry.path())
-            .filter(|path| {
-                path.is_file()
-                    && path
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .map(|name| name.ends_with(".md") && !name.contains(".bak."))
-                        .unwrap_or(false)
-            })
-            .collect();
-        paths.sort();
-
-        for path in paths {
+        for path in scope_note_paths(workspace_dir, scope) {
             let Some((key, body, tags)) = read_scope_note(&path) else {
                 continue;
             };
@@ -1215,6 +1195,31 @@ fn hint_candidates(workspace_dir: &Path, include_evolution: bool) -> Vec<HintCan
 
     candidates.sort_by(|left, right| left.key.cmp(&right.key));
     candidates
+}
+
+/// Every `user` / `repo` note file of one scope, sorted.
+///
+/// `read_dir` order is filesystem-dependent; sorting keeps the rendered output
+/// byte-identical between two builds of the same memory set.
+fn scope_note_paths(workspace_dir: &Path, scope: &str) -> Vec<PathBuf> {
+    let dir = crate::workspace::memory_root(workspace_dir).join(scope);
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut paths: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_file()
+                && path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .map(|name| name.ends_with(".md") && !name.contains(".bak."))
+                    .unwrap_or(false)
+        })
+        .collect();
+    paths.sort();
+    paths
 }
 
 /// Read one `user` / `repo` note: `# key`, free text, optional `tags: a, b`.
@@ -2589,6 +2594,399 @@ pub fn wants_memory_consolidation(text: &str) -> bool {
         "memory cleanup",
     ];
     PHRASES.iter().any(|phrase| lower.contains(phrase))
+}
+
+// ─── Nap sweep: forget noise, merge duplicates ───────────────────────────────
+
+/// How many noise candidates the maintenance inventory lists. The sweep judges
+/// every entry itself; these caps only bound the prompt.
+pub const MAX_NOISE_CANDIDATES: usize = 40;
+/// How many duplicate groups the maintenance inventory lists per pass.
+pub const MAX_DUPLICATE_GROUPS: usize = 12;
+/// A group larger than this is a consolidation cluster, not a merge.
+const MAX_DUPLICATE_GROUP_SIZE: usize = 4;
+const SWEEP_TITLE_CLIP: usize = 90;
+const SWEEP_BODY_CLIP: usize = 120;
+
+/// Name fragments that make a note a status report instead of a fact.
+///
+/// A fact names its subject (`python-default`, `cargo-test-exe-locked`); a
+/// progress note names what just happened (`报告已生成`, `完成task1`). Chinese
+/// matches by substring, Latin by whole word (see `latin_words`), so
+/// `autocomplete` never matches `complete`.
+const NOISE_PHRASES_CJK: &[&str] = &[
+    "已生成",
+    "已写好",
+    "已写完",
+    "已改好",
+    "已改完",
+    "已完成",
+    "已提交",
+    "已推送",
+    "已发布",
+    "已修复",
+    "已合并",
+    "改完了",
+    "修好了",
+    "跑通了",
+    "测试全绿",
+    "验证全绿",
+    "全部通过",
+    "都通过了",
+    "看完了",
+    "看过了",
+    "查过了",
+    "查清了",
+    "定位到了",
+    "读完了",
+    "核对完毕",
+    "当前进度",
+    "当前状态",
+    "报告已",
+    "完成task",
+    "完成 task",
+    "任务完成",
+    "收尾完成",
+    "下一步",
+    "待办事项",
+];
+const NOISE_PHRASES_LATIN: &[&str] = &[
+    "next step",
+    "next up",
+    "all green",
+    "task complete",
+    "task done",
+    "tests pass",
+    "report written",
+];
+const NOISE_WORDS_LATIN: &[&str] = &["done", "finished", "completed", "todo", "wip"];
+
+fn latin_words(text: &str) -> HashSet<String> {
+    text.split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty() && word.is_ascii())
+        .map(str::to_string)
+        .collect()
+}
+
+/// Why a note looks like a progress report (`None` = it may be a fact).
+///
+/// `name` is the note's title (the `# key` heading for a `user` / `repo` note);
+/// `alias` is the sanitized file key, so a note whose heading was lost still
+/// matches. A caller that only has a body (a session note) passes it as
+/// `alias`.
+pub fn noise_reason(name: &str, alias: &str) -> Option<&'static str> {
+    let haystack = format!("{name} {alias}").to_lowercase();
+    for phrase in NOISE_PHRASES_CJK {
+        if haystack.contains(phrase) {
+            return Some(phrase);
+        }
+    }
+    for phrase in NOISE_PHRASES_LATIN {
+        if haystack.contains(phrase) {
+            return Some(phrase);
+        }
+    }
+    let words = latin_words(&haystack);
+    NOISE_WORDS_LATIN
+        .iter()
+        .copied()
+        .find(|word| words.contains(*word))
+}
+
+/// One memory entry the nap may forget, with the reason it was flagged.
+#[derive(Debug, Clone)]
+pub struct NoiseCandidate {
+    /// `evolution` | `user` | `repo`.
+    pub scope: &'static str,
+    pub key: String,
+    pub title: String,
+    pub body: String,
+    /// The progress phrase that made it a candidate.
+    pub reason: String,
+}
+
+/// One set of entries that state the same thing under different keys.
+#[derive(Debug, Clone)]
+pub struct DuplicateGroup {
+    pub id: String,
+    /// `(scope, key, title)` in listing order.
+    pub entries: Vec<(String, String, String)>,
+    /// The subject words every member shares.
+    pub subject: String,
+}
+
+/// True when deleting this evolution entry cannot destroy reusable knowledge.
+///
+/// Every guard here is about evidence, not wording: a fact that was confirmed,
+/// retrieved, pinned, marked as a recipe/pitfall/location, or written by the
+/// user outranks a progress report and is never offered to the sweep.
+fn forgettable(entry: &EvolutionEntry) -> bool {
+    let meta = &entry.meta;
+    meta.key != MAINTENANCE_PROGRESS_KEY
+        && !meta.pinned
+        && meta.source != "user"
+        && meta.importance < 4
+        && meta.confidence < 4
+        && meta.evidence < 3
+        // Three retrievals prove a fact earned its place; one or two are what a
+        // search over a noisy scope looks like, so they do not shield an entry.
+        && meta.uses < 3
+        && (meta.kind.is_empty() || meta.kind.eq_ignore_ascii_case("fact"))
+}
+
+/// Evolution and file-backed notes whose name reports progress.
+///
+/// Strong candidates (the name matches a progress phrase) come first, then the
+/// weak ones, each ordered by scope and key and capped at
+/// `MAX_NOISE_CANDIDATES`. The list is a hint, not a verdict: the maintenance
+/// pass still reads each entry before it deletes anything.
+pub fn noise_candidates(workspace_dir: &Path) -> Vec<NoiseCandidate> {
+    // `0` = the name matches a progress phrase (strong), `1` = an automatic
+    // note the recorder wrote at the lowest importance (weak, judge it
+    // yourself). Strong candidates are listed first: when the cap cuts the
+    // list short, the obvious noise must be the part that survives.
+    let mut out: Vec<(u8, NoiseCandidate)> = Vec::new();
+
+    for scored in ranked_evolution_entries(workspace_dir) {
+        let entry = &scored.entry;
+        if !forgettable(entry) {
+            continue;
+        }
+        let title = entry.display_title();
+        let (rank, reason) = match noise_reason(&title, &entry.meta.key) {
+            Some(reason) => (0u8, reason.to_string()),
+            // An `auto` note is a distilled conclusion the recorder wrote on
+            // its own at importance 2: the pass reads it and keeps it only when
+            // it holds something a later turn can reuse.
+            None if entry.meta.source == "auto" && entry.meta.importance <= 2 => (
+                1,
+                "auto note at importance 2 (no phrase match)".to_string(),
+            ),
+            None => continue,
+        };
+        out.push((
+            rank,
+            NoiseCandidate {
+                scope: EVOLUTION_SCOPE,
+                key: entry.meta.key.clone(),
+                title: truncate_with_ellipsis(&title, SWEEP_TITLE_CLIP),
+                body: one_line(&entry.body, SWEEP_BODY_CLIP),
+                reason,
+            },
+        ));
+    }
+
+    for scope in MEMORY_HINT_SCOPES {
+        for path in scope_note_paths(workspace_dir, scope) {
+            let Some((name, body, _tags)) = read_scope_note(&path) else {
+                continue;
+            };
+            let stem = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("");
+            let Some(reason) = noise_reason(&name, stem) else {
+                continue;
+            };
+            out.push((
+                0,
+                NoiseCandidate {
+                    scope,
+                    key: stem.to_string(),
+                    title: truncate_with_ellipsis(&name, SWEEP_TITLE_CLIP),
+                    body: one_line(&body, SWEEP_BODY_CLIP),
+                    reason: reason.to_string(),
+                },
+            ));
+        }
+    }
+
+    out.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then_with(|| left.1.scope.cmp(right.1.scope))
+            .then_with(|| left.1.key.cmp(&right.1.key))
+    });
+    out.truncate(MAX_NOISE_CANDIDATES);
+    out.into_iter().map(|(_, candidate)| candidate).collect()
+}
+
+/// Forget in-memory `session` notes that only report progress.
+///
+/// The session scope lives in `AppState`, not on disk, and the maintenance turn
+/// runs under its own session id — the model can neither see nor delete the
+/// user's session notes. This is therefore the one deterministic sweep: the nap
+/// drops status lines ("报告已生成", "完成task1") that no later turn can reuse.
+/// Returns `<session>:<key>` for every entry removed.
+pub fn prune_session_noise(state: &crate::AppState) -> Vec<String> {
+    let mut removed: Vec<String> = Vec::new();
+    let mut memories = state.session_memories.lock().unwrap();
+    for (session_id, entries) in memories.iter_mut() {
+        entries.retain(|key, value| {
+            let content = value
+                .get("content")
+                .and_then(|content| content.as_str())
+                .unwrap_or("");
+            if noise_reason(key, content).is_some() {
+                removed.push(format!("{session_id}:{key}"));
+                false
+            } else {
+                true
+            }
+        });
+    }
+    removed
+}
+
+/// One note as the merge sweep sees it: identity plus the token views that
+/// decide whether two notes state the same fact.
+struct SweepNote {
+    scope: &'static str,
+    key: String,
+    title: String,
+    /// `key` + `title` + tags — what the note is *about*.
+    name_tokens: HashSet<String>,
+    /// The whole note, body included.
+    tokens: HashSet<String>,
+}
+
+fn sweep_notes(workspace_dir: &Path) -> Vec<SweepNote> {
+    let mut notes: Vec<SweepNote> = Vec::new();
+
+    for scored in ranked_evolution_entries(workspace_dir) {
+        let entry = &scored.entry;
+        if entry.meta.key == MAINTENANCE_PROGRESS_KEY {
+            continue;
+        }
+        // A deletion target is not a merge target.
+        if forgettable(entry) && noise_reason(&entry.display_title(), &entry.meta.key).is_some() {
+            continue;
+        }
+        notes.push(SweepNote {
+            scope: EVOLUTION_SCOPE,
+            key: entry.meta.key.clone(),
+            title: truncate_with_ellipsis(&entry.display_title(), SWEEP_TITLE_CLIP),
+            name_tokens: tokenize(&format!(
+                "{} {} {}",
+                entry.meta.key,
+                entry.meta.title,
+                entry.meta.tags.join(" ")
+            ))
+            .into_iter()
+            .collect(),
+            tokens: tokenize(&format!("{} {}", entry.meta.title, entry.body))
+                .into_iter()
+                .collect(),
+        });
+    }
+
+    for scope in MEMORY_HINT_SCOPES {
+        for path in scope_note_paths(workspace_dir, scope) {
+            let Some((name, body, tags)) = read_scope_note(&path) else {
+                continue;
+            };
+            let stem = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("");
+            if noise_reason(&name, stem).is_some() {
+                continue;
+            }
+            notes.push(SweepNote {
+                scope,
+                key: stem.to_string(),
+                title: truncate_with_ellipsis(&name, SWEEP_TITLE_CLIP),
+                name_tokens: tokenize(&format!("{name} {}", tags.join(" ")))
+                    .into_iter()
+                    .collect(),
+                tokens: tokenize(&format!("{name} {body}")).into_iter().collect(),
+            });
+        }
+    }
+
+    notes
+}
+
+/// Share of the smaller set that both sides contain (1.0 = one is a subset).
+fn overlap(left: &HashSet<String>, right: &HashSet<String>) -> f64 {
+    let smaller = left.len().min(right.len());
+    if smaller == 0 {
+        return 0.0;
+    }
+    left.intersection(right).count() as f64 / smaller as f64
+}
+
+/// Do two notes state the same fact? Two notes about the same subject with a
+/// partly shared body qualify; two notes that merely share one word do not.
+fn same_fact(left: &SweepNote, right: &SweepNote) -> bool {
+    if left.key == right.key && left.scope == right.scope {
+        return false;
+    }
+    let name = overlap(&left.name_tokens, &right.name_tokens);
+    let body = overlap(&left.tokens, &right.tokens);
+    name >= 0.45 || body >= 0.5 || (name >= 0.3 && body >= 0.25)
+}
+
+fn shared_subject(notes: &[&SweepNote]) -> String {
+    let Some(first) = notes.first() else {
+        return String::new();
+    };
+    let mut shared: Vec<String> = first.name_tokens.iter().cloned().collect();
+    for note in notes.iter().skip(1) {
+        shared.retain(|token| note.name_tokens.contains(token));
+    }
+    shared.sort();
+    if shared.is_empty() {
+        return first.title.clone();
+    }
+    shared.truncate(4);
+    shared.join(" ")
+}
+
+/// Groups of notes that say the same thing under different keys, largest
+/// first. Deterministic and LLM-free: the maintenance pass reads each group and
+/// decides whether the members really are one fact.
+pub fn duplicate_groups(workspace_dir: &Path) -> Vec<DuplicateGroup> {
+    let notes = sweep_notes(workspace_dir);
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    for (index, note) in notes.iter().enumerate() {
+        if note.tokens.is_empty() && note.name_tokens.is_empty() {
+            continue;
+        }
+        let mut placed = false;
+        for group in groups.iter_mut() {
+            if group.len() >= MAX_DUPLICATE_GROUP_SIZE {
+                continue;
+            }
+            if group.iter().any(|&member| same_fact(&notes[member], note)) {
+                group.push(index);
+                placed = true;
+                break;
+            }
+        }
+        if !placed {
+            groups.push(vec![index]);
+        }
+    }
+
+    let mut out: Vec<DuplicateGroup> = Vec::new();
+    for (number, group) in groups.into_iter().enumerate() {
+        if group.len() < 2 {
+            continue;
+        }
+        let members: Vec<&SweepNote> = group.iter().map(|&index| &notes[index]).collect();
+        out.push(DuplicateGroup {
+            id: format!("dup-{}", number + 1),
+            subject: shared_subject(&members),
+            entries: members
+                .iter()
+                .map(|note| (note.scope.to_string(), note.key.clone(), note.title.clone()))
+                .collect(),
+        });
+    }
+    out.sort_by(|left, right| {
+        right
+            .entries
+            .len()
+            .cmp(&left.entries.len())
+            .then_with(|| left.entries[0].1.cmp(&right.entries[0].1))
+    });
+    out.truncate(MAX_DUPLICATE_GROUPS);
+    out
 }
 
 // ─── Memory tool handler ─────────────────────────────────────────────────────
@@ -4233,6 +4631,130 @@ mod tests {
         assert!(wants_memory_consolidation("帮我整理记忆"));
         assert!(wants_memory_consolidation("Please consolidate memory now"));
         assert!(!wants_memory_consolidation("explain how memory works"));
+    }
+
+    /// The sweep judge names the event, a reusable fact names its subject.
+    #[test]
+    fn noise_patterns_flag_progress_reports_only() {
+        assert_eq!(noise_reason("报告已生成", "report-generated"), Some("已生成"));
+        assert_eq!(noise_reason("完成task1", "task1"), Some("完成task"));
+        assert_eq!(noise_reason("Current progress", "wip"), Some("wip"));
+        // A fact names a subject, so it is never offered to the sweep.
+        assert_eq!(noise_reason("python-default", "python-default"), None);
+        assert_eq!(noise_reason("cargo-test-exe-locked", "cargo-test"), None);
+        // Latin words match whole, so a longer word cannot trip them.
+        assert_eq!(noise_reason("autocomplete", "autocomplete"), None);
+        assert_eq!(noise_reason("todos-tool", "todos-tool"), None);
+    }
+
+    fn write_sweep_entry(workspace: &TempWorkspace, key: &str, title: &str, body: &str) {
+        workspace.write(
+            key,
+            &format!(
+                "---\nformat_version: 2\nkey: {key}\ntitle: {title}\nkind: fact\ntags: []\n---\n\n{body}\n"
+            ),
+        );
+    }
+
+    #[test]
+    fn the_noise_sweep_skips_trusted_and_reusable_entries() {
+        let workspace = TempWorkspace::new("noise-guards");
+        // Importance 5: a fact worth keeping, even though its title reports
+        // progress — the guard is evidence, never wording.
+        workspace.write(
+            "kept-high",
+            "---\nformat_version: 2\nkey: kept-high\ntitle: 报告已生成\nkind: fact\ntags: []\nimportance: 5\n---\n\nkeep me\n",
+        );
+        // A recipe is reusable by definition.
+        workspace.write(
+            "kept-recipe",
+            "---\nformat_version: 2\nkey: kept-recipe\ntitle: 已完成\nkind: recipe\ntags: []\n---\n\nrun it\n",
+        );
+        write_sweep_entry(&workspace, "noise", "报告已生成", "报告已生成，放在临时目录。");
+        // The resume note is never a candidate.
+        write_sweep_entry(
+            &workspace,
+            MAINTENANCE_PROGRESS_KEY,
+            "已完成",
+            "Reason: stopped by user",
+        );
+
+        let keys: Vec<String> = noise_candidates(&workspace.dir)
+            .into_iter()
+            .map(|candidate| candidate.key)
+            .collect();
+        assert_eq!(keys, vec!["noise".to_string()]);
+    }
+
+    #[test]
+    fn duplicate_groups_pair_two_notes_about_the_same_subject() {
+        let workspace = TempWorkspace::new("duplicates");
+        write_sweep_entry(
+            &workspace,
+            "python-default",
+            "python 默认解释器",
+            "默认解释器是 python，python3 是 Store 桩，store 里没有可执行文件。",
+        );
+        write_sweep_entry(
+            &workspace,
+            "python3-stub",
+            "python3 不可用",
+            "python3 是 Store 桩，store 里没有可执行文件，改用 node。",
+        );
+        write_sweep_entry(
+            &workspace,
+            "mermaid-api",
+            "mermaid 渲染接口",
+            "mermaid.render 返回 promise，必须等它 resolve 再插入 SVG。",
+        );
+
+        let groups = duplicate_groups(&workspace.dir);
+        assert_eq!(groups.len(), 1, "{groups:?}");
+        let keys: Vec<String> = groups[0]
+            .entries
+            .iter()
+            .map(|(_, key, _)| key.clone())
+            .collect();
+        assert!(keys.contains(&"python-default".to_string()), "{keys:?}");
+        assert!(keys.contains(&"python3-stub".to_string()), "{keys:?}");
+    }
+
+    #[test]
+    fn a_progress_note_is_never_a_merge_target() {
+        let workspace = TempWorkspace::new("duplicates-noise");
+        write_sweep_entry(
+            &workspace,
+            "python-default",
+            "python 默认解释器",
+            "默认解释器是 python，store 里没有可执行文件。",
+        );
+        write_sweep_entry(
+            &workspace,
+            "python-report",
+            "报告已生成",
+            "报告已生成：默认解释器是 python，store 里没有可执行文件。",
+        );
+
+        assert!(duplicate_groups(&workspace.dir).iter().all(|group| group
+            .entries
+            .iter()
+            .all(|(_, key, _)| key != "python-report")));
+    }
+
+    #[test]
+    fn an_auto_note_at_low_importance_is_a_weak_candidate() {
+        let workspace = TempWorkspace::new("noise-auto");
+        workspace.write(
+            "looked-at-it",
+            "---\nformat_version: 2\nkey: looked-at-it\ntitle: I read the whole path\nkind: fact\ntags: []\nimportance: 2\nsource: auto\n---\n\nI read the whole path and split it into three parts.\n",
+        );
+        write_sweep_entry(&workspace, "noise", "报告已生成", "报告已生成，放在临时目录。");
+
+        let candidates = noise_candidates(&workspace.dir);
+        // The phrase match is strong, so it is listed before the auto note.
+        assert_eq!(candidates[0].key, "noise", "{candidates:?}");
+        assert_eq!(candidates.len(), 2, "{candidates:?}");
+        assert!(candidates[1].reason.contains("auto note"), "{candidates:?}");
     }
 
     /// Trust calibration: an explicit `confidence` overwrites (so trust can
