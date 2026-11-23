@@ -326,6 +326,13 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* A user turn is shown exactly as typed — no markdown rules — so line breaks
+   and runs of spaces survive verbatim. */
+.message-content .message-plain-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* An image a reply embedded (see `SAFE_IMAGE_SRC`): it must never widen the
    bubble past the transcript column. */
 .message-content img.message-image {

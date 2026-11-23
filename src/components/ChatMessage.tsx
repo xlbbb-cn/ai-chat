@@ -62,17 +62,14 @@ import { writeText as tauriWriteText } from "@tauri-apps/plugin-clipboard-manage
 const SAFE_IMAGE_SRC = /^(?:https?:\/\/|data:image\/(?:png|jpe?g|gif|webp|bmp);base64,)/i;
 
 /**
- * Build a markdown renderer.
+ * Build the reply renderer.
  *
- * Two profiles exist because the transcript hosts two different kinds of text:
- *
- * * a **reply** may draw (fenced code, KaTeX, a remote image inside the safe
- *   source list);
- * * what a **user typed** must stay literal, so image syntax is not a rule at
- *   all — typing `![a](b)` shows those characters instead of injecting an
- *   `<img>` into the user's own bubble. Raw HTML is off for both.
+ * Only a reply is markdown: it may draw (fenced code, KaTeX, a remote image
+ * inside the safe source list). What the user typed is not markdown at all —
+ * see `renderPlainText` — so `**bold**`, `# heading` or `![a](b)` stay exactly
+ * those characters in the user's own bubble. Raw HTML is off in both cases.
  */
-function createMarkdown(profile: { images: boolean }): MarkdownIt {
+function createMarkdown(): MarkdownIt {
   const instance = new MarkdownIt({
     // Disable raw HTML and auto-linking to prevent navigation vectors.
     html: false,
@@ -109,36 +106,27 @@ function createMarkdown(profile: { images: boolean }): MarkdownIt {
   instance.renderer.rules.link_open = () => "<span>";
   instance.renderer.rules.link_close = () => "</span>";
 
-  if (profile.images) {
-    // `image` is the one markdown rule that emits a live element from text, so
-    // its source is vetted here instead of relying on link validation.
-    instance.renderer.rules.image = (tokens, idx, options, _env, self) => {
-      const token = tokens[idx];
-      const src = token.attrGet("src") ?? "";
-      const alt = token.content ?? "";
-      if (!SAFE_IMAGE_SRC.test(src)) return escapeHtml(alt || src);
-      token.attrSet("alt", alt);
-      token.attrSet("loading", "lazy");
-      token.attrSet("referrerpolicy", "no-referrer");
-      token.attrJoin("class", "message-image");
-      return self.renderToken(tokens, idx, options);
-    };
-  } else {
-    instance.disable("image");
-  }
+  // `image` is the one markdown rule that emits a live element from text, so
+  // its source is vetted here instead of relying on link validation.
+  instance.renderer.rules.image = (tokens, idx, options, _env, self) => {
+    const token = tokens[idx];
+    const src = token.attrGet("src") ?? "";
+    const alt = token.content ?? "";
+    if (!SAFE_IMAGE_SRC.test(src)) return escapeHtml(alt || src);
+    token.attrSet("alt", alt);
+    token.attrSet("loading", "lazy");
+    token.attrSet("referrerpolicy", "no-referrer");
+    token.attrJoin("class", "message-image");
+    return self.renderToken(tokens, idx, options);
+  };
 
   // Render `$...$` / `$$...$$` formulas with KaTeX.
   instance.use(katexMathPlugin);
   return instance;
 }
 
-/** Reply body: may draw, may embed a vetted image. */
-const md = createMarkdown({ images: true });
-/**
- * User body: the same text rules without the one rule that manufactures HTML,
- * so a typed symbol can never become an element.
- */
-const mdLiteral = createMarkdown({ images: false });
+/** Reply body: only markdown-rendered text in the transcript. */
+const md = createMarkdown();
 
 /**
  * Flips once when the lazily loaded KaTeX module arrives (see
@@ -167,6 +155,19 @@ function renderMarkdown(instance: MarkdownIt, source: string): string {
     console.error("Markdown rendering failed", error);
     return `<pre class="markdown-fallback">${escapeHtml(source)}</pre>`;
   }
+}
+
+/**
+ * Render the user's own text exactly as typed.
+ *
+ * A user turn is not markdown: `# heading`, `**bold**`, `[a](b)` and a pasted
+ * `svg` snippet are all just characters the user wrote, so none of them may
+ * become structure or an element. The text is HTML-escaped and laid out by
+ * CSS (`white-space: pre-wrap`), which keeps line breaks and runs of spaces
+ * without a markdown parser in the middle.
+ */
+function renderPlainText(source: string): string {
+  return `<div class="message-plain-text">${escapeHtml(source)}</div>`;
 }
 
 /**
@@ -884,10 +885,10 @@ function ChatMessageRow({ message, showRetry = false, onRetry, onNotice, onDelet
   const replyStreaming = isAssistant && Boolean(message.streaming);
   const katexReady = useKatexReady();
   const rendered = useMemo<{ html: string; figures: FigureSpec[]; diagrams: DiagramSpec[] }>(() => {
-    // The user's own text is rendered by the literal profile: no image rule, so
-    // a typed `![a](b)` stays those characters instead of becoming an element.
+    // The user's own text is rendered literally: no markdown rules at all, so
+    // a typed `**bold**` or `![a](b)` stays those characters.
     if (!isAssistant) {
-      return { html: renderMarkdown(mdLiteral, streamedMainContent), figures: [], diagrams: [] };
+      return { html: renderPlainText(streamedMainContent), figures: [], diagrams: [] };
     }
     const extracted = extractFigures(streamedMainContent, { streaming: replyStreaming });
     // Mermaid runs second: an ordinary fence survives `extractFigures` verbatim,
