@@ -158,11 +158,14 @@ pub struct SkillLoaded {
     pub skill_name: String,
 }
 
-/// A risky command awaiting the user's confirmation.
+/// A risky command awaiting the user's confirmation. `session_id` routes the
+/// payload: a background conversation's ask must not pop the dialog over the
+/// chat the user is reading — it shows that session's waiting badge instead.
 #[derive(Debug, Clone, Serialize)]
 pub struct ConfirmRequired {
     pub request_id: String,
     pub call_id: Option<String>,
+    pub session_id: Option<String>,
     pub reason: String,
     pub cmd_type: String,
     pub code: String,

@@ -314,6 +314,7 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
     };
     let confirm = request_tool_confirmation(
         app,
+        session_id,
         reason,
         "direct".to_string(),
         command.clone(),

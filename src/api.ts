@@ -759,6 +759,12 @@ export async function chatCompletion(
    * turns pass nothing and read the snapshot instead.
    */
   embeddedAgentIds?: string[],
+  /**
+   * Set to the minted turn id when provided. The multi-session handoff needs
+   * the id BEFORE `chatCompletion` resolves: switching away must publish it
+   * into the background driver so the running turn can be re-attached later.
+   */
+  turnIdHolder?: { current: string | null },
 ): Promise<UnlistenFn> {
   const unlisteners: UnlistenFn[] = [];
 
@@ -766,6 +772,7 @@ export async function chatCompletion(
   // a turn that is still winding down after Stop (a foreground tool returning,
   // a sub-agent tearing down) can no longer drive *this* turn's transcript.
   const turnId = newTurnId();
+  if (turnIdHolder) turnIdHolder.current = turnId;
   /** Only a payload carrying our own id belongs to this turn. */
   const mine = (payload: { turn_id?: string } | null | undefined) =>
     payload?.turn_id === turnId;

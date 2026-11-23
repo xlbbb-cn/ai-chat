@@ -850,6 +850,10 @@ async fn ask_confirmation(
     };
     let outcome = request_tool_confirmation(
         app,
+        // The roster changes either from a chat turn or from the panel; the
+        // panel has no chat session, so `None` routes the dialog wherever the
+        // user is (its historical behaviour).
+        None,
         reason,
         "mcp_self".to_string(),
         preview,

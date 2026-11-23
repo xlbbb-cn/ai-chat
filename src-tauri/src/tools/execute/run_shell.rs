@@ -188,6 +188,9 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
     // ── L0-L3: require frontend confirmation (L4-L6 were auto-approved) ──
     let confirm = request_tool_confirmation(
         app,
+        // The session asking for confirmation, so the frontend routes the
+        // dialog to this conversation instead of whatever chat is visible.
+        session_id,
         format!(
             "Risk assessment: {} (score: {})\nDisposition: {}\n\nMatched rules:\n{}\n\nPenalty items:\n{}",
             report.risk_level,

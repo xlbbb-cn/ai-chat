@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, lazy, Suspense } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { listen } from "@tauri-apps/api/event";
+import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, listAgentMentions, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, deleteMessagesAfter, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState, setWindowVibrancy, savePastedFile, importWorkspacePaths, showNotifyCard, todoAskReply, getPendingTodoAsk, readChatBackground } from "./api";
+import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, listAgentMentions, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, deleteMessagesAfter, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState, setWindowVibrancy, savePastedFile, importWorkspacePaths, showNotifyCard, todoAskReply, getPendingTodoAsk, readChatBackground, listActiveTurns } from "./api";
 
 import { ChatMessageBoundary } from "./components/ChatMessageBoundary";
+import { stripControlMarkers, stripTrailingControlMarkers } from "./turnMarkers";
+import { BackgroundTurnDriver, type PendingConfirm } from "./backgroundTurns";
 import { TodoAskPanel } from "./components/TodoAskPanel";
 import { Dropdown } from "./components/Dropdown";
 import { ModelSelect } from "./components/ModelSelect";
@@ -597,59 +599,6 @@ const SIDEBAR_SPRING = { type: "spring" as const, stiffness: 320, damping: 32 };
 const SIDEBAR_SHOWN = { opacity: 1, x: 0, pointerEvents: "auto" as const };
 const SIDEBAR_HIDDEN = { opacity: 0, x: -20, pointerEvents: "none" as const };
 
-/**
- * The goal-loop end marker (`[goal:DONE]`) and the "waiting for an external
- * event" marker (`[WAIT_EVT: reason]`) are backend control signals: the main
- * loop reads them from the streamed answer to decide whether the turn may end,
- * but they must never reach the transcript bubble or the persisted row.
- * Keep in sync with `GOAL_DONE_MARKER` / `WAIT_EVT_PREFIX` in
- * `src-tauri/src/llm_complete.rs`.
- */
-const GOAL_DONE_MARKER = "[goal:DONE]";
-const WAIT_EVT_MARKER = "[WAIT_EVT:";
-
-/**
- * Remove every control marker and the blank tail it leaves behind.
- * `[WAIT_EVT: …]` is variable length, so each complete occurrence is cut up to
- * its closing bracket; an unterminated one (still streaming) stays in place.
- */
-function stripControlMarkers(text: string): string {
-  let next = text.includes(GOAL_DONE_MARKER)
-    ? text.split(GOAL_DONE_MARKER).join("")
-    : text;
-  let start = next.indexOf(WAIT_EVT_MARKER);
-  while (start !== -1) {
-    const close = next.indexOf("]", start + WAIT_EVT_MARKER.length);
-    if (close === -1) break;
-    next = next.slice(0, start) + next.slice(close + 1);
-    start = next.indexOf(WAIT_EVT_MARKER);
-  }
-  return next.trimEnd();
-}
-
-/**
- * Live-stream variant of {@link stripControlMarkers}: both markers are written
- * as the last thing in the answer, so only one that just completed at the tail
- * is trimmed. That keeps the per-token cost flat instead of rescanning the
- * whole accumulator on every token.
- */
-function stripTrailingControlMarkers(text: string): string {
-  let next = text;
-  if (next.endsWith(GOAL_DONE_MARKER)) {
-    next = next.slice(0, -GOAL_DONE_MARKER.length);
-  }
-  if (next.endsWith("]")) {
-    const start = next.lastIndexOf(WAIT_EVT_MARKER);
-    if (
-      start !== -1 &&
-      next.indexOf("]", start + WAIT_EVT_MARKER.length) === next.length - 1
-    ) {
-      next = next.slice(0, start).trimEnd();
-    }
-  }
-  return next;
-}
-
 export default function App() {
   const { t, locale, setLocale } = useI18n();
   /** Spring physics must be off when the OS asks for reduced motion. */
@@ -939,8 +888,10 @@ export default function App() {
     reason: string;
     cmd_type: string;
     code: string;
-    confirm_kind?: "dangerous" | "sudo" | "elevation" | "system_config" | "user_software" | "user_data" | "sensitive_read" | "general_query" | "external_agent";
-    requires_auth?: "none" | "sudo" | "elevation";
+    /** Where the ask came from (frontend payload typing only). */
+    session_id?: string | null;
+    confirm_kind?: string;
+    requires_auth?: string;
     risk_level?: string;
     risk_score?: number;
     disposition?: string;
@@ -1090,6 +1041,34 @@ export default function App() {
   const currentInjectionsRef = useRef<ChatInjection[]>([]);
   /** Latest active session for the timer listener (registered once). */
   const sessionIdRef = useRef(sessionId);
+  // ── Multi-session (background turns) ─────────────────────────────────────
+  /**
+   * Turn id the streaming request minted (`chatCompletion` publishes it) and
+   * the user row it answers. A handoff to a background driver needs both:
+   * events filter on the id, the seed carries the row.
+   */
+  const currentTurnIdRef = useRef<string | null>(null);
+  const currentUserMsgIdRef = useRef<string | null>(null);
+  /**
+   * Background turn drivers, keyed by session id. Each owns exactly one
+   * running turn of one conversation: it keeps listening after the user
+   * switched away and persists the row when the turn settles. A session is
+   * owned by the foreground OR a driver, never both.
+   */
+  const driversRef = useRef(new Map<string, BackgroundTurnDriver>());
+  /** Render copy of the driver map; bumped whenever ownership changes. */
+  const [driversVersion, setDriversVersion] = useState(0);
+  const bumpDrivers = useCallback(() => setDriversVersion((v) => v + 1), []);
+  /** Risky commands awaiting the user inside a background conversation. */
+  const [pendingDriverConfirms, setPendingDriverConfirms] = useState<
+    Record<string, PendingConfirm | null>
+  >({});
+  /**
+   * Sessions whose turn is running somewhere in this window, keyed by session
+   * id (from the backend `turn-state` event family). The History panel's
+   * running badges read this; composer gating reads it for the visible one.
+   */
+  const [runningSessions, setRunningSessions] = useState<Record<string, { turn_id: string; started_at_ms: number }>>({});
 
   /**
    * Load the workspace skill status and derive the enabled list.
@@ -1525,6 +1504,9 @@ export default function App() {
       // conversation the user already switched to. No session context (null)
       // passes — those callers have no leak surface.
       if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
+      // Multi-session: a background conversation's usage is accumulated by
+      // its driver for the stored row, never by the visible transcript.
+      if (e.payload.session_id && driversRef.current.has(e.payload.session_id)) return;
       // The reply footer's per-turn totals: only an active turn has a record
       // to add to (a late chunk of a winding-down turn is dropped with it).
       const turnStats = turnStatsRef.current;
@@ -1572,6 +1554,56 @@ export default function App() {
     });
     return () => {
       unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  // ── Multi-session: running-turn registry ─────────────────────────────────
+  // The backend publishes a session's turn start/finish (`turn-state`). The
+  // map is authoritative for the History panel's running badges and for
+  // whether the visible session's composer switches to its injection mode.
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+    let cancelled = false;
+    // Seed from the live registry, then subscribe: a turn that was already
+    // running before this effect mounts (a webview reload mid-turn) still
+    // shows its badge.
+    listActiveTurns()
+      .then((turns) => {
+        if (cancelled) return;
+        setRunningSessions(
+          Object.fromEntries(
+            turns.map((turn) => [
+              turn.session_id,
+              { turn_id: turn.turn_id, started_at_ms: turn.started_at_ms },
+            ])
+          )
+        );
+      })
+      .catch(console.error);
+    listen<{ session_id: string; turn_id: string; running: boolean; started_at_ms: number }>(
+      "turn-state",
+      (e) => {
+        const { session_id, turn_id, running, started_at_ms } = e.payload;
+        if (!session_id) return;
+        setRunningSessions((prev) => {
+          if (running) {
+            return { ...prev, [session_id]: { turn_id, started_at_ms } };
+          }
+          if (prev[session_id]?.turn_id !== turn_id) return prev;
+          const next = { ...prev };
+          delete next[session_id];
+          return next;
+        });
+      }
+    )
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      })
+      .catch(console.error);
+    return () => {
+      cancelled = true;
+      unlisten?.();
     };
   }, []);
 
@@ -1809,6 +1841,8 @@ export default function App() {
       request_id: string;
       /** `tool_call.id` of the call that is asking, when it has one. */
       call_id?: string | null;
+      /** Session the asking turn belongs to; routes the dialog per chat. */
+      session_id?: string | null;
       reason: string;
       cmd_type: string;
       code: string;
@@ -1823,6 +1857,9 @@ export default function App() {
       "confirm-required",
       (e) => {
         const { request_id, reason, cmd_type, code, confirm_kind, requires_auth, risk_level, risk_score, disposition, blacklist_hits, penalty_items } = e.payload;
+        // Multi-session: a background conversation's confirmation is collected
+        // by its driver (badge), never shown over the chat being read.
+        if (e.payload.session_id && driversRef.current.has(e.payload.session_id)) return;
         // The turn is blocked on the user either way — an inline allow/deny
         // row and the standalone dialog both wait — so the notification fires
         // for both paths (external-agent approvals included; they arrive on
@@ -1920,9 +1957,65 @@ export default function App() {
     if (!streaming) setTodoAsk(null);
   }, [streaming]);
 
+  // ── Multi-session: background confirmations ──────────────────────────────
+  // A background conversation waiting on a risky command shows its dialog only
+  // while that conversation is visible; the History badge marks it otherwise.
+  // The pending record is cleared by `respondToConfirm` (and by the driver's
+  // settle), so the effect cannot re-open an answered dialog.
+  useEffect(() => {
+    const pending = pendingDriverConfirms[sessionId];
+    const driver = driversRef.current.get(sessionId);
+    if (!pending || !driver || driver.isSettled()) return;
+    if (confirmDialog) return;
+    setConfirmDialog({ ...pending });
+    setConfirmUsername("");
+    setConfirmPassword("");
+  }, [sessionId, pendingDriverConfirms, driversVersion, confirmDialog]);
+
+  // ── Multi-session: driver-owned visible transcript ───────────────────────
+  // Switching back to a conversation whose turn runs in a background driver
+  // shows the driver's live transcript instead of the database snapshot; the
+  // subscription streams its updates into the visible state until the turn
+  // settles (the driver's `onSettled` handles the final commit).
+  useEffect(() => {
+    const driver = driversRef.current.get(sessionId);
+    if (!driver) return;
+    // Adopt the live transcript with the same foreground resets a history
+    // load performs: the driver owns this session's turn, so the foreground
+    // machinery must not fight it.
+    sessionIdRef.current = sessionId;
+    setMessages(driver.getMessages());
+    setStreaming(false);
+    setPendingRetryMessageId(null);
+    setAgentStatuses({});
+    hasRunningToolCallRef.current = false;
+    currentAssistantMessageIdRef.current = null;
+    currentToolCallsRef.current = [];
+    pendingAgentTokensRef.current.clear();
+    currentMbusIdRef.current = null;
+    currentInjectionsRef.current = [];
+    currentTurnIdRef.current = null;
+    currentUserMsgIdRef.current = null;
+    pendingTurnWriteRef.current = null;
+    turnStatsRef.current = null;
+    pendingInjectionsRef.current = driver.getPendingInjections();
+    setPendingInjections(driver.getPendingInjections());
+    followBottomRef.current = true;
+    const unlisten = driver.onTranscript((next) => setMessages(next));
+    return () => {
+      unlisten();
+    };
+  }, [sessionId, driversVersion]);
+
   const respondToConfirm = useCallback((confirmed: boolean) => {
     const requiresSudo = confirmDialog?.requires_auth === "sudo";
     confirmCommand(confirmDialog?.request_id ?? "", confirmed, requiresSudo ? { username: confirmUsername, password: confirmPassword } : undefined).catch(console.error);
+    // Multi-session: if the dialog answered a background conversation's ask,
+    // clear its badge so the pending-record effect does not re-open it.
+    const sid = sessionIdRef.current;
+    if (driversRef.current.has(sid)) {
+      setPendingDriverConfirms((prev) => ({ ...prev, [sid]: null }));
+    }
     setConfirmDialog(null);
     setConfirmUsername("");
     setConfirmPassword("");
@@ -2155,6 +2248,7 @@ export default function App() {
       listen<AgentTaskEvent>("agent-task-start", (e) => {
         const { agent_id, agent_name, description, task_id, cwd } = e.payload;
         if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
+        if (e.payload.session_id && driversRef.current.has(e.payload.session_id)) return;
         setAgentStatuses((prev) => ({
           ...prev,
           [agent_id]: { status: "running", description },
@@ -2175,6 +2269,7 @@ export default function App() {
       listen<AgentTaskEvent>("agent-task-done", (e) => {
         const { agent_id, summary, task_id, status } = e.payload;
         if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
+        if (e.payload.session_id && driversRef.current.has(e.payload.session_id)) return;
         // Flush the last buffered chunks first: the final tokens of a task must
         // not be dropped when the row settles.
         flushAgentTokenBuffers();
@@ -2203,6 +2298,7 @@ export default function App() {
       listen<AgentTaskEvent>("agent-task-error", (e) => {
         const { agent_id, error, task_id } = e.payload;
         if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
+        if (e.payload.session_id && driversRef.current.has(e.payload.session_id)) return;
         setAgentStatuses((prev) => ({
           ...prev,
           [agent_id]: { status: "error", error: error ?? "" },
@@ -2225,6 +2321,7 @@ export default function App() {
       listen<AgentTaskEvent>("agent-task-skipped", (e) => {
         const { agent_id, agent_name, task_id, reason } = e.payload;
         if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
+        if (e.payload.session_id && driversRef.current.has(e.payload.session_id)) return;
         const text = reason ?? "";
         setAgentStatuses((prev) => ({
           ...prev,
@@ -2257,6 +2354,7 @@ export default function App() {
       listen<AgentSelectionEvent>("agent-selection", (e) => {
         const { delegate, agents } = e.payload;
         if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
+        if (e.payload.session_id && driversRef.current.has(e.payload.session_id)) return;
         if (!delegate || !agents?.length) return;
         const entry: ToolCallEntry = {
           task_id: `selection-${Date.now()}`,
@@ -2280,6 +2378,7 @@ export default function App() {
         "agent-plan-start",
         (e) => {
           if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
+        if (e.payload.session_id && driversRef.current.has(e.payload.session_id)) return;
           if (e.payload.task_count <= 0) return;
           const mbus = e.payload.mbus === true;
           currentMbusIdRef.current = mbus ? (e.payload.bus_id ?? null) : null;
@@ -2437,6 +2536,7 @@ export default function App() {
         // the step is complete the moment it arrives — rendering it as
         // "running" would spin until the whole final answer is streamed.
         if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
+        if (e.payload.session_id && driversRef.current.has(e.payload.session_id)) return;
         currentToolCallsRef.current = currentToolCallsRef.current.map((entry) =>
           entry.task_id === "planner" && entry.status === "running"
             ? { ...entry, status: "done" as const }
@@ -2466,6 +2566,7 @@ export default function App() {
         // rows or appear inside the chat the user already switched to. No
         // session context (null) passes — those callers have no leak surface.
         if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
+        if (e.payload.session_id && driversRef.current.has(e.payload.session_id)) return;
         const text = e.payload.text ?? "";
         // Parse label from *italics* and optional code block detail
         const firstLine = text.split('\n')[0];
@@ -2573,6 +2674,7 @@ export default function App() {
         // task is applied immediately: it is the row's first visible text.
         const { task_id, token } = e.payload;
         if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
+        if (e.payload.session_id && driversRef.current.has(e.payload.session_id)) return;
         if (!task_id || !token) return;
         appendAgentBuffer(task_id, { text: token });
       }),
@@ -2582,6 +2684,7 @@ export default function App() {
         // "thinking" within a second instead of waiting for the answer.
         const { task_id, token } = e.payload;
         if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
+        if (e.payload.session_id && driversRef.current.has(e.payload.session_id)) return;
         if (!task_id || !token) return;
         appendAgentBuffer(task_id, { reasoning: token.length });
       }),
@@ -2591,6 +2694,7 @@ export default function App() {
         // `agent-task-error` owns that).
         const { task_id, phase, tool, detail, text, duration_ms } = e.payload;
         if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
+        if (e.payload.session_id && driversRef.current.has(e.payload.session_id)) return;
         if (!task_id) return;
         currentToolCallsRef.current = currentToolCallsRef.current.map((entry) => {
           if (entry.task_id !== task_id || entry.kind !== "agent") return entry;
@@ -2623,6 +2727,7 @@ export default function App() {
           // is what later turns send back as `loaded_skills`. Session-routed: a
           // winding-down turn must not record its skill in another chat.
           if (e.payload.session_id && e.payload.session_id !== sessionIdRef.current) return;
+        if (e.payload.session_id && driversRef.current.has(e.payload.session_id)) return;
           const skillName = e.payload.skill_name;
           if (!skillName) return;
           const description = t("app.agents.loadingSkill", { name: skillName });
@@ -2952,6 +3057,105 @@ export default function App() {
     ]);
   }, []);
 
+  // ── Multi-session: foreground → background turn handoff ──────────────────
+  // The user opens a new chat (or switches history) while a reply streams:
+  // instead of blocking the switch (the old behaviour), the running turn is
+  // published into a background driver that keeps listening to its events and
+  // persists the assistant row when the turn settles. Ownership is exclusive:
+  // after the handoff the global listeners skip this session and the composer
+  // serves the new conversation.
+  const handoffForegroundTurn = useCallback(async (): Promise<boolean> => {
+    if (!streaming) return false;
+    const sessionId = sessionIdRef.current;
+    const turnId = currentTurnIdRef.current
+      ?? runningSessions[sessionId]?.turn_id
+      ?? null;
+    if (!turnId) {
+      // No turn id (an old relay without turn ids): the old safe behaviour.
+      setError(t("app.sessionSwitchBlocked"), "warning");
+      return false;
+    }
+
+    const assistantId = currentAssistantMessageIdRef.current;
+    const assistantRow = messagesDataRef.current.find((m) => m.id === assistantId);
+    const seedStats = turnStatsRef.current
+      ? { ...turnStatsRef.current }
+      : null;
+    const seedContent = typeof assistantRow?.content === "string" ? assistantRow.content : "";
+    const seedReasoning = assistantRow?.reasoning_content ?? "";
+
+    const driver = new BackgroundTurnDriver(
+      {
+        translate: (key, vars) => t(key as never, vars as never),
+        notifySettled: (ok, body) => {
+          notifyTurnSettled(ok, body, notifyWhenHiddenRef.current);
+        },
+        notifyBlocked: (title, body, kind) => {
+          notifyTurnBlocked(title, body, kind, notifyWhenHiddenRef.current);
+        },
+        onUndelivered: (sid, items) => {
+          setPendingAutoPrompts((prev) => [
+            ...prev,
+            ...items.map((item) => ({ text: item.text, session_id: sid })),
+          ]);
+        },
+        onConfirm: (sid, payload) => {
+          setPendingDriverConfirms((prev) => ({ ...prev, [sid]: payload }));
+        },
+      },
+      sessionId,
+      turnId
+    );
+    // Subscribe first (unarmed): the listeners ignore everything until `arm`,
+    // so no event can be lost or double-processed across the boundary.
+    await driver.subscribe();
+
+    // Arm + tear down the foreground machinery in one synchronous step.
+    driver.arm({
+      sessionId,
+      turnId,
+      assistantId: assistantId ?? "",
+      userMsgId: currentUserMsgIdRef.current ?? "",
+      messages: messagesDataRef.current,
+      content: seedContent,
+      reasoning: seedReasoning,
+      toolCalls: currentToolCallsRef.current,
+      injections: currentInjectionsRef.current,
+      pendingInjections: pendingInjectionsRef.current,
+      stats: seedStats,
+    });
+    if (cleanupRef.current) {
+      cleanupRef.current();
+      cleanupRef.current = null;
+    }
+    driversRef.current.set(sessionId, driver);
+    driver.onSettled(() => {
+      driversRef.current.delete(sessionId);
+      setPendingDriverConfirms((prev) => ({ ...prev, [sessionId]: null }));
+      bumpDrivers();
+    });
+    driver.onTranscript(() => bumpDrivers());
+    bumpDrivers();
+
+    // Reset the foreground for the next conversation, like `clearChat`.
+    currentAssistantMessageIdRef.current = null;
+    currentToolCallsRef.current = [];
+    pendingAgentTokensRef.current.clear();
+    currentMbusIdRef.current = null;
+    currentInjectionsRef.current = [];
+    hasRunningToolCallRef.current = false;
+    currentTurnIdRef.current = null;
+    currentUserMsgIdRef.current = null;
+    turnStatsRef.current = null;
+    pendingInjectionsRef.current = [];
+    setPendingInjections([]);
+    pendingTurnWriteRef.current = null;
+    setAgentStatuses({});
+    setStreaming(false);
+    setConfirmDialog(null);
+    return true;
+  }, [streaming, runningSessions, bumpDrivers, t]);
+
   const sendMessage = useCallback(async (overrideText?: string) => {
     if (backupExporting) return;
 
@@ -3039,6 +3243,11 @@ export default function App() {
     hasRunningToolCallRef.current = false;
     setBackgroundTasks([]);
     setBackgroundWaiting(0);
+    // Multi-session: the turn's own id, published when the request fires, is
+    // what a handoff uses to publish the running turn into a background
+    // driver (and what re-attachment later keys on).
+    currentTurnIdRef.current = null;
+    currentUserMsgIdRef.current = userMsg.id;
 
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
     // An auto-resume must not discard a draft the user is still composing.
@@ -3106,8 +3315,7 @@ export default function App() {
     let accumulatedContent = "";
     let accumulatedReasoning = "";
 
-    const cleanup = await chatCompletion(history, activeSkillIds, sessionId, selectedModel, {
-      onToken(token) {
+    const cleanup = await chatCompletion(history, activeSkillIds, sessionId, selectedModel, {      onToken(token) {
         accumulatedContent += token;
         // Never surface a control marker: both are the last thing the model
         // writes, so trimming one the moment it completes keeps the live
@@ -3335,7 +3543,7 @@ export default function App() {
         setStreaming(false);
         cleanupRef.current = null;
       },
-    }, useAgentsEnabled, autoPlanEnabled, embeddedAgentIds);
+    }, useAgentsEnabled, autoPlanEnabled, embeddedAgentIds, currentTurnIdRef);
 
     cleanupRef.current = cleanup;
   }, [input, messages, streaming, backupExporting, activeSkillIds, sessionId, selectedModel, selectedMetadata, useAgentsEnabled, autoPlanEnabled, embeddedAgents, t, flushUndeliveredInjections, beginTurnStats, settleTurnStats]);
@@ -3447,7 +3655,13 @@ export default function App() {
     // rest keep their place in the queue and fire when their session is
     // active again.
     const index = pendingAutoPrompts.findIndex(
-      (prompt) => prompt.session_id === sessionId
+      (prompt) =>
+        prompt.session_id === sessionId &&
+        // Multi-session: a prompt for a conversation whose turn runs in a
+        // background driver waits until the driver settles — sending now
+        // would open a second turn in the same session and supersede the
+        // running one (the registry stops it).
+        !driversRef.current.has(prompt.session_id)
     );
     if (index < 0) return;
     const next = pendingAutoPrompts[index];
@@ -3513,6 +3727,10 @@ export default function App() {
     hasRunningToolCallRef.current = false;
     setBackgroundTasks([]);
     setBackgroundWaiting(0);
+    // Multi-session: same rule as `sendMessage` — the minted turn id feeds a
+    // later handoff to a background driver.
+    currentTurnIdRef.current = null;
+    currentUserMsgIdRef.current = retriedUser.id;
 
     followBottomRef.current = true;
     // Atomic replacement: the failed rows are already gone from the database,
@@ -3770,7 +3988,7 @@ export default function App() {
         setStreaming(false);
         cleanupRef.current = null;
       },
-    }, useAgentsEnabled, autoPlanEnabled);
+    }, useAgentsEnabled, autoPlanEnabled, undefined, currentTurnIdRef);
 
     cleanupRef.current = cleanup;
   }, [messages, streaming, pendingRetryMessageId, activeSkillIds, sessionId, selectedModel, useAgentsEnabled, autoPlanEnabled, t, flushUndeliveredInjections, beginTurnStats, settleTurnStats]);
@@ -3879,9 +4097,16 @@ export default function App() {
       e.preventDefault();
       // While a turn is running the composer is an injection channel, not a
       // new-message channel: the text joins the running turn at its next
-      // request boundary instead of starting a second turn.
+      // request boundary instead of starting a second turn. The same holds
+      // for a session whose turn runs in a background driver.
       if (streaming) {
         void appendInjection();
+      } else if (driverVisible && visibleDriver) {
+        const text = input.trim();
+        if (text) {
+          setInput("");
+          void visibleDriver.inject(text);
+        }
       } else {
         sendMessage();
       }
@@ -3946,11 +4171,24 @@ export default function App() {
   }
 
   async function clearChat() {
+    // Multi-session: opening a new chat keeps a running reply alive — the
+    // turn is handed to its background driver instead of being stopped, and
+    // the badge in History shows it until it settles.
     if (streaming) {
-      await stopStreaming();
+      const handed = await handoffForegroundTurn();
+      if (!handed) return;
     }
     resetConversation();
   }
+
+  // ── Multi-session: visible-session gating ────────────────────────────────
+  // The composer serves whichever conversation is visible. A session whose
+  // turn runs in a background driver keeps its injection channel (Enter) and
+  // its Stop button; both route through the driver instead of the foreground
+  // machinery. `driversVersion` is what re-renders this on ownership changes.
+  const visibleDriver = driversRef.current.get(sessionId);
+  const driverVisible = !!visibleDriver && !visibleDriver.isSettled();
+  const composerBusy = streaming || driverVisible;
 
   const renderConfirmDialog = () => {
     if (!confirmDialog) {
@@ -5083,25 +5321,33 @@ export default function App() {
               <HistoryPanel
                 currentSessionId={sessionId}
                 refreshKey={historyRefreshKey}
-                disableSessionSwitch={streaming}
-                onLoad={(sid, msgs) => {
+                runningSessionIds={Object.keys(runningSessions)}
+                onLoad={async (sid, msgs) => {
+                  // Multi-session: switching is always allowed. A running
+                  // reply of the CURRENT conversation is handed to its
+                  // background driver first; a session whose turn already
+                  // runs in a driver shows its live transcript (the
+                  // driver-visible effect owns `messages`).
                   if (streaming) {
-                    setError(t("app.sessionSwitchBlocked"), "warning");
-                    return;
+                    const handed = await handoffForegroundTurn();
+                    if (!handed) return;
                   }
-                  if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null; }
-                  setStreaming(false);
-                  // The loaded transcript is another conversation: turn-scoped
-                  // leftovers (queued injection chips above the input) must not
-                  // surface over it, and the session guard reads `sessionIdRef`,
-                  // so sync it in the same step as the id swap.
-                  pendingInjectionsRef.current = [];
-                  setPendingInjections([]);
-                  currentInjectionsRef.current = [];
-                  sessionIdRef.current = sid;
+                  const driver = driversRef.current.get(sid);
+                  if (!driver) {
+                    if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null; }
+                    setStreaming(false);
+                    // The loaded transcript is another conversation: turn-scoped
+                    // leftovers (queued injection chips above the input) must not
+                    // surface over it, and the session guard reads `sessionIdRef`,
+                    // so sync it in the same step as the id swap.
+                    pendingInjectionsRef.current = [];
+                    setPendingInjections([]);
+                    currentInjectionsRef.current = [];
+                    setMessages(msgs);
+                  }
                   // A loaded transcript starts pinned to its newest turn.
                   followBottomRef.current = true;
-                  setMessages(msgs);
+                  sessionIdRef.current = sid;
                   setSessionId(sid);
                   resetEmbeddedAgents();
 
@@ -5650,7 +5896,7 @@ export default function App() {
                 closeSlash();
                 closeAgentMention();
               }}
-              placeholder={streaming ? t("app.injections.placeholder") : t("app.inputPlaceholder")}
+              placeholder={composerBusy ? t("app.injections.placeholder") : t("app.inputPlaceholder")}
               // Stays usable while a reply streams: Enter then adds the text to
               // the running turn instead of starting a new one.
               disabled={backupExporting}
@@ -5688,10 +5934,20 @@ export default function App() {
               )}
               <button
                 className="send-btn"
-                onClick={() => (streaming ? void stopStreaming() : void sendMessage())}
-                disabled={backupExporting || (!streaming && !input.trim())}
+                onClick={() => {
+                  if (streaming) {
+                    void stopStreaming();
+                    return;
+                  }
+                  if (visibleDriver && !visibleDriver.isSettled()) {
+                    void visibleDriver.stop();
+                    return;
+                  }
+                  void sendMessage();
+                }}
+                disabled={backupExporting || (!composerBusy && !input.trim())}
               >
-                {streaming ? t("app.stop") : t("app.send")}
+                {composerBusy ? t("app.stop") : t("app.send")}
               </button>
             </motion.div>
           </div>

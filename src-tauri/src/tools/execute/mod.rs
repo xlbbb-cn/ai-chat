@@ -73,6 +73,9 @@ pub(crate) fn split_command_line(code: &str) -> Vec<String> {
 
 pub(crate) async fn request_tool_confirmation(
     app: &AppHandle,
+    // The chat session whose turn is asking. Emitted on the payload so the
+    // frontend can route the dialog to the right conversation.
+    session_id: Option<&str>,
     reason: String,
     cmd_type: String,
     code: String,
@@ -147,6 +150,7 @@ pub(crate) async fn request_tool_confirmation(
         crate::events::ConfirmRequired {
             request_id: request_id.clone(),
             call_id: call_id.map(str::to_string),
+            session_id: session_id.map(str::to_string),
             reason: reason.clone(),
             cmd_type: cmd_type.clone(),
             code: code.clone(),

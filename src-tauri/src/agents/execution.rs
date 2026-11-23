@@ -1019,6 +1019,7 @@ pub(crate) async fn request_external_agent_approval(
 
     let confirm = crate::tools::request_tool_confirmation(
         app,
+        None,
         format!(
             "The {} agent '{}' is about to run.\n\n{}",
             backend.label(),

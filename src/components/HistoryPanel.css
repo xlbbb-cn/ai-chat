@@ -219,15 +219,6 @@
   min-width: 0;
 }
 
-.history-item.disabled {
-  cursor: not-allowed;
-  opacity: 0.65;
-}
-
-.history-item.disabled:hover {
-  background: transparent;
-}
-
 /* Session messages are fetched on click; dim the row until they arrive. */
 .history-item.loading {
   opacity: 0.6;
@@ -381,6 +372,36 @@
   font-size: 12px;
   color: var(--c-muted);
   font-variant-numeric: tabular-nums;
+}
+
+/* A conversation whose turn is still running (foreground or background).
+   Status, not decoration: accent as a label, hairline outline, 4px radius. */
+.history-running-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: normal;
+  color: var(--c-accent-text);
+  border: 1px solid var(--c-border-i);
+  border-radius: 4px;
+  padding: 1px 7px;
+}
+
+.history-running-badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--c-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .history-running-badge::before {
+    background: var(--c-accent-text);
+  }
 }
 
 .history-created {

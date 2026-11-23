@@ -28,7 +28,12 @@ interface Props {
    * sidebar must re-query instead of showing the previous workspace's sessions.
    */
   refreshKey?: number;
-  disableSessionSwitch?: boolean;
+  /**
+   * Sessions whose turn is currently running (foreground or background).
+   * Rendered as a small badge per row; switching is always allowed — the app
+   * hands a running foreground turn to its background driver on the way out.
+   */
+  runningSessionIds?: string[];
   onClose: () => void;
 }
 
@@ -185,7 +190,7 @@ function recordsToMessages(sessionRecords: HistoryRecord[]): Message[] {
   return messages;
 }
 
-export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, disableSessionSwitch = false, onClose }: Props) {
+export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, runningSessionIds, onClose }: Props) {
   const { t, locale } = useI18n();
   const [summaries, setSummaries] = useState<HistorySessionSummary[]>([]);
   const [searchKeyword, setSearchKeyword] = useState("");
@@ -379,7 +384,7 @@ export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, disable
 
   /** Fetch one session's complete message list and hand it to the app. */
   async function handleLoad(sessionId: string) {
-    if (disableSessionSwitch || loadingSessionId) return;
+    if (loadingSessionId) return;
 
     setLoadingSessionId(sessionId);
     try {
@@ -394,7 +399,6 @@ export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, disable
 
   async function handleDelete(e: React.MouseEvent, sessionId: string) {
     e.stopPropagation();
-    if (disableSessionSwitch) return;
 
     const currentSessions = filteredSessions;
     const deletedIndex = currentSessions.findIndex((s) => s.session_id === sessionId);
@@ -506,9 +510,6 @@ export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, disable
             </button>
           )}
         </div>
-        {disableSessionSwitch && (
-          <p className="history-switch-hint">{t("history.switchHint")}</p>
-        )}
         <div className="history-tabs" role="tablist" ref={tabsRef}>
           {tabIndicator && (
             <span
@@ -576,6 +577,7 @@ export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, disable
             const createdAt = formatHistoryTimestamp(summary.created_at, locale);
             const isRenaming = renamingSessionId === sid;
             const title = getSessionTitle(summary);
+            const isRunning = runningSessionIds?.includes(sid) ?? false;
             return (
               <div
                 key={sid}
@@ -583,8 +585,8 @@ export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, disable
                   if (el) itemRefs.current.set(sid, el);
                   else itemRefs.current.delete(sid);
                 }}
-                className={`history-item ${isCurrent ? "active" : ""} ${disableSessionSwitch ? "disabled" : ""} ${isArchived ? "archived" : ""} ${isLoading ? "loading" : ""}`}
-                tabIndex={disableSessionSwitch ? -1 : 0}
+                className={`history-item ${isCurrent ? "active" : ""} ${isArchived ? "archived" : ""} ${isLoading ? "loading" : ""}`}
+                tabIndex={0}
                 aria-current={isCurrent ? "true" : undefined}
                 onClick={() => void handleLoad(sid)}
                 onKeyDown={(event) => handleSessionKeyDown(event, index, sid)}
@@ -655,6 +657,11 @@ export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, disable
                     {isLoading ? t("history.loading") : t("history.messageCount", { count: summary.message_count })}
                     {isCurrent ? t("history.current") : ""}{isArchived ? t("history.archived") : ""}
                   </span>
+                  {isRunning && (
+                    <span className="history-running-badge" title={t("history.runningTitle")}>
+                      {t("history.running")}
+                    </span>
+                  )}
                   <span
                     className="history-created"
                     title={formatHistoryTimestampFull(summary.created_at, locale)}
