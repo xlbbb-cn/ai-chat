@@ -2,7 +2,8 @@ import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, laz
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, listAgentMentions, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, deleteMessagesAfter, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState, setWindowVibrancy, savePastedFile, importWorkspacePaths, showNotifyCard, todoAskReply, getPendingTodoAsk, readChatBackground, listActiveTurns } from "./api";
+import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, listAgentMentions, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, deleteMessagesAfter, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState, setWindowVibrancy, savePastedFile, importWorkspacePaths, showNotifyCard, todoAskReply, getPendingTodoAsk, readChatBackground, listActiveTurns, getTurnSnapshot, loadSessionMessages } from "./api";
+import { recordsToMessages } from "./historyRows";
 
 import { ChatMessageBoundary } from "./components/ChatMessageBoundary";
 import { stripControlMarkers, stripTrailingControlMarkers } from "./turnMarkers";
@@ -741,6 +742,11 @@ export default function App() {
     // in an effect after the commit — an event landing in that window would
     // pass the session guard against the OLD id.
     const nextSessionId = crypto.randomUUID();
+    // Per-session draft: a fresh conversation starts with an empty composer.
+    // The text being replaced was already stored under the OLD session's key
+    // by the render-sync, so switching back restores it.
+    setInput("");
+    composerDraftRef.current.set(nextSessionId, "");
     sessionIdRef.current = nextSessionId;
     setSessionId(nextSessionId);
   }, [resetEmbeddedAgents]);
@@ -973,12 +979,14 @@ export default function App() {
    *  height transition intact). */
   const measureRef = useRef<HTMLTextAreaElement>(null);
   /**
-   * The draft as it exists *now*. A paste or a drop resolves its insertion
-   * point from an event callback, which may run before React has committed the
-   * last keystroke — reading `input` there would splice into a stale string.
+   * The draft as it exists *now*, keyed by session: a paste or a drop resolves
+   * its insertion point from an event callback, which may run before React has
+   * committed the last keystroke — reading `input` there would splice into a
+   * stale string. Per-session: switching conversations restores that
+   * conversation's draft instead of carrying the text across.
    */
-  const composerDraftRef = useRef(input);
-  composerDraftRef.current = input;
+  const composerDraftRef = useRef(new Map<string, string>());
+  composerDraftRef.current.set(sessionId, input);
   /** True while a file is dragged over the window (native drag-drop). */
   const [dropActive, setDropActive] = useState(false);
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -1561,6 +1569,29 @@ export default function App() {
   // The backend publishes a session's turn start/finish (`turn-state`). The
   // map is authoritative for the History panel's running badges and for
   // whether the visible session's composer switches to its injection mode.
+  //
+  // The driver host is shared by the handoff path and the reload re-attach
+  // path below; the hooks close over refs and setters, never stale state.
+  const driverHost = useMemo(() => ({
+    translate: (key: string, vars?: Record<string, unknown>) =>
+      t(key as never, vars as never),
+    notifySettled: (ok: boolean, body: string) => {
+      notifyTurnSettled(ok, body, notifyWhenHiddenRef.current);
+    },
+    notifyBlocked: (title: string, body: string, kind: string) => {
+      notifyTurnBlocked(title, body, kind, notifyWhenHiddenRef.current);
+    },
+    onUndelivered: (sid: string, items: { text: string }[]) => {
+      setPendingAutoPrompts((prev) => [
+        ...prev,
+        ...items.map((item) => ({ text: item.text, session_id: sid })),
+      ]);
+    },
+    onConfirm: (sid: string, payload: PendingConfirm | null) => {
+      setPendingDriverConfirms((prev) => ({ ...prev, [sid]: payload }));
+    },
+  }), [t]);
+
   useEffect(() => {
     let unlisten: UnlistenFn | null = null;
     let cancelled = false;
@@ -1568,7 +1599,7 @@ export default function App() {
     // running before this effect mounts (a webview reload mid-turn) still
     // shows its badge.
     listActiveTurns()
-      .then((turns) => {
+      .then(async (turns) => {
         if (cancelled) return;
         setRunningSessions(
           Object.fromEntries(
@@ -1578,6 +1609,89 @@ export default function App() {
             ])
           )
         );
+        // ── Reload re-attach ─────────────────────────────────────────────
+        // A reload dropped every listener and every seed: without this, a
+        // turn that kept running in the background lost its reply forever
+        // (nobody persisted the assistant row when it settled). Rebuild a
+        // driver per still-running session from the backend snapshot plus
+        // the persisted rows — the turn keeps streaming and its row lands
+        // in the database exactly like a live foreground turn.
+        for (const turn of turns) {
+          if (cancelled || driversRef.current.has(turn.session_id)) continue;
+          const snapshot = await getTurnSnapshot(turn.session_id).catch(() => null);
+          // `null` = the turn settled in the gap between the two calls.
+          // Its row was never persisted (the reload killed the foreground
+          // machinery before it could); this is the narrow window the
+          // re-attach cannot close.
+          if (!snapshot) continue;
+          try {
+            const rows = await loadSessionMessages(turn.session_id);
+            const assistantId = crypto.randomUUID();
+            const toolCalls = snapshot.tool_calls.map((tc) => ({
+              task_id: tc.call_id,
+              agent_name: tc.name,
+              kind: "tool" as const,
+              description: tc.name,
+              status: (tc.ok ? "done" : "error") as "done" | "error",
+              summary: tc.text,
+            }));
+            const injections = snapshot.injections.map((item) => ({
+              id: item.id,
+              text: item.text,
+              created_at_ms: item.created_at_ms,
+              // Only the shape the transcript knows: `background_result`.
+              ...(item.kind === "background_result"
+                ? { kind: "background_result" as const }
+                : {}),
+            }));
+            const assistantRow: Message = {
+              id: assistantId,
+              role: "assistant",
+              content: snapshot.content,
+              streaming: true,
+              ...(snapshot.reasoning ? { reasoning_content: snapshot.reasoning } : {}),
+              ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
+              ...(injections.length ? { injections } : {}),
+            };
+            const driver = new BackgroundTurnDriver(
+              driverHost,
+              turn.session_id,
+              snapshot.turn_id
+            );
+            await driver.subscribe();
+            driver.arm({
+              sessionId: turn.session_id,
+              turnId: snapshot.turn_id,
+              assistantId,
+              userMsgId: "",
+              messages: [...recordsToMessages(rows), assistantRow],
+              content: snapshot.content,
+              reasoning: snapshot.reasoning,
+              toolCalls,
+              injections,
+              pendingInjections: [],
+              stats: {
+                started_at: snapshot.started_at_ms,
+                prompt: snapshot.usage.prompt_tokens,
+                completion: snapshot.usage.completion_tokens,
+                total:
+                  snapshot.usage.prompt_tokens + snapshot.usage.completion_tokens,
+                cached: snapshot.usage.cached_tokens,
+                cache_reported: snapshot.usage.cache_reported,
+              },
+            });
+            driversRef.current.set(turn.session_id, driver);
+            driver.onSettled(() => {
+              driversRef.current.delete(turn.session_id);
+              setPendingDriverConfirms((prev) => ({ ...prev, [turn.session_id]: null }));
+              bumpDrivers();
+            });
+            driver.onTranscript(() => bumpDrivers());
+            bumpDrivers();
+          } catch (err) {
+            console.error("Failed to re-attach to a running turn", err);
+          }
+        }
       })
       .catch(console.error);
     listen<{ session_id: string; turn_id: string; running: boolean; started_at_ms: number }>(
@@ -1605,7 +1719,7 @@ export default function App() {
       cancelled = true;
       unlisten?.();
     };
-  }, []);
+  }, [driverHost, bumpDrivers]);
 
   // Context menu is now allowed so users can right-click to copy/paste.
 
@@ -2000,6 +2114,9 @@ export default function App() {
     turnStatsRef.current = null;
     pendingInjectionsRef.current = driver.getPendingInjections();
     setPendingInjections(driver.getPendingInjections());
+    // Per-session draft: the composer resumes what this conversation was
+    // holding, not whatever the previous chat left in the box.
+    setInput(composerDraftRef.current.get(sessionId) ?? "");
     followBottomRef.current = true;
     const unlisten = driver.onTranscript((next) => setMessages(next));
     return () => {
@@ -3085,24 +3202,7 @@ export default function App() {
     const seedReasoning = assistantRow?.reasoning_content ?? "";
 
     const driver = new BackgroundTurnDriver(
-      {
-        translate: (key, vars) => t(key as never, vars as never),
-        notifySettled: (ok, body) => {
-          notifyTurnSettled(ok, body, notifyWhenHiddenRef.current);
-        },
-        notifyBlocked: (title, body, kind) => {
-          notifyTurnBlocked(title, body, kind, notifyWhenHiddenRef.current);
-        },
-        onUndelivered: (sid, items) => {
-          setPendingAutoPrompts((prev) => [
-            ...prev,
-            ...items.map((item) => ({ text: item.text, session_id: sid })),
-          ]);
-        },
-        onConfirm: (sid, payload) => {
-          setPendingDriverConfirms((prev) => ({ ...prev, [sid]: payload }));
-        },
-      },
+      driverHost,
       sessionId,
       turnId
     );
@@ -3154,7 +3254,7 @@ export default function App() {
     setStreaming(false);
     setConfirmDialog(null);
     return true;
-  }, [streaming, runningSessions, bumpDrivers, t]);
+  }, [streaming, runningSessions, driverHost, bumpDrivers]);
 
   const sendMessage = useCallback(async (overrideText?: string) => {
     if (backupExporting) return;
@@ -4911,7 +5011,7 @@ export default function App() {
       if (supported.length === 0) return;
 
       const el = textareaRef.current;
-      const draft = composerDraftRef.current;
+      const draft = composerDraftRef.current.get(sessionId) ?? "";
       const caret = el?.selectionStart ?? draft.length;
       const { value, caret: next } = insertMentionTokens(
         draft,
@@ -4920,7 +5020,7 @@ export default function App() {
       );
       // Mirror the new draft immediately: a second paste can land before React
       // commits this one, and it must splice into the text it just produced.
-      composerDraftRef.current = value;
+      composerDraftRef.current.set(sessionId, value);
       setInput(value);
       closeMention();
       closeSlash();
@@ -5344,6 +5444,9 @@ export default function App() {
                     setPendingInjections([]);
                     currentInjectionsRef.current = [];
                     setMessages(msgs);
+                    // Per-session draft: restore the text this conversation was
+                    // holding (empty for one never typed into).
+                    setInput(composerDraftRef.current.get(sid) ?? "");
                   }
                   // A loaded transcript starts pinned to its newest turn.
                   followBottomRef.current = true;
