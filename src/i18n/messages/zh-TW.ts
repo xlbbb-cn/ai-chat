@@ -461,6 +461,8 @@ const zhTW: Messages = {
             maxToolCallsHint: "一次對話中最多執行多少次工具呼叫。0 = 不限（硬上限 5000）。超出的呼叫只回覆提示而不執行。",
             toolFailureLimit: "工具連續失敗次數上限",
             toolFailureLimitHint: "同一個工具（含 MCP 工具）連續失敗達到此次數後，本工作階段內停用該工具並提示模型改用其他方案。0 = 不啟用（硬上限 50）。成功呼叫一次即歸零。",
+            maxConcurrentTurns: "最大並行工作階段數",
+            maxConcurrentTurnsHint: "同一視窗內允許同時處於回覆生成中的工作階段數量。0 = 不限制（硬上限 16）。新開工作階段不會打斷正在生成的回覆——舊回覆轉入背景繼續；此上限約束並行的 API 與工具負載。",
             dsFormat: "DS-Format（DeepSeek 格式）",
             dsFormatHint: "按 DeepSeek 系思考模式模型的要求，在回傳 assistant 訊息時攜帶 reasoning_content。DeepSeek 系模型會自動開啟；僅當其他供應商同樣需要時才手動開啟。",
             dsFormatAuto: "{model} 已自動開啟：DeepSeek 系模型一律使用 DS-Format，reasoning_content 會自動回傳。",

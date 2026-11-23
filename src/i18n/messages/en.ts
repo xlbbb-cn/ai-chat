@@ -511,6 +511,9 @@ const en = {
             toolFailureLimit: "Disable a tool after N failures",
             toolFailureLimitHint:
                 "A tool (MCP tools included) that fails this many times in a row is disabled for the rest of the session and the model is told to switch approach. 0 = never disable (hard cap 50). One successful call resets the count.",
+            maxConcurrentTurns: "Max concurrent sessions",
+            maxConcurrentTurnsHint:
+                "How many conversations may run a turn at the same time in one window. 0 = unlimited (hard cap 16). A new chat while a reply streams keeps the old turn running in the background; this bounds the parallel API and tool load.",
             dsFormat: "DS-Format (DeepSeek)",
             dsFormatHint: "Pass reasoning_content back on assistant messages as DeepSeek-family thinking models require. DeepSeek-family models enable this automatically; turn it on only for other endpoints that need the same pass-through.",
             dsFormatAuto: "Always on for {model}: DeepSeek-family models get DS-Format automatically, so reasoning_content is always passed back.",

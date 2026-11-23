@@ -465,6 +465,14 @@ export interface AppConfig {
    */
   tool_failure_limit?: number;
   /**
+   * How many conversations may run a turn at the same time in one window.
+   * `0` = unlimited; the backend clamps it to 16. A new chat while a reply
+   * streams keeps the old turn running in the background; this bounds the
+   * parallel API / tool load. Superseding turns of the SAME session do not
+   * count as new slots.
+   */
+  max_concurrent_turns?: number;
+  /**
    * Run independent tool calls of one assistant round at the same time.
    * Defaults to on; while it is off every round executes strictly in
    * `tool_calls` order (the behaviour before batching existed).

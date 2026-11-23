@@ -1114,6 +1114,28 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
                   </label>
                 </div>
 
+                <div className="settings-field-grid settings-field-grid-3">
+                  <label className="settings-field-row settings-field-row-stacked">
+                    <span className="settings-field-label">{t("settings.advanced.maxConcurrentTurns")}</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={config.max_concurrent_turns ?? ""}
+                      onChange={(e) =>
+                        setConfig((prev) => ({
+                          ...prev,
+                          max_concurrent_turns: parseLimitInput(e.target.value),
+                        }))
+                      }
+                      placeholder="0"
+                    />
+                    <small className="settings-field-hint">
+                      {t("settings.advanced.maxConcurrentTurnsHint")}
+                    </small>
+                  </label>
+                </div>
+
                 <label className="settings-checkbox">
                   <input
                     type="checkbox"
