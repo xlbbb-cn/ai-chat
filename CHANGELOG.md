@@ -9,6 +9,19 @@ npm run changelog -- --from <上一个 tag> --to <本次 tag> --details --write
 条目按 Conventional Commits 的类型分组，作用域加粗；工作区里提交标题是英文、正文是中文，
 所以带 `--details` 时是中英对照。
 
+## [v3.6.2](https://github.com/xlbbb-cn/ai-chat/releases/tag/v3.6.2) — 2026-11-23
+
+### 修复
+
+- **skills**: drop skill identities the panel cannot toggle from the badge ([`f2f5395`](https://github.com/xlbbb-cn/ai-chat/commit/f2f539584f693a1555596b701f5486a029b38d32))
+- **chat**: render user messages as plain text instead of markdown ([`5a753dc`](https://github.com/xlbbb-cn/ai-chat/commit/5a753dc308518873f4d9b60d3cc0aaf575b01004))
+
+### 杂项
+
+- bump version to 3.6.2 ([`a8bc6d5`](https://github.com/xlbbb-cn/ai-chat/commit/a8bc6d5c235762f03d40073216fa2dab1e2c29a8))
+
+**完整对比**：[v3.6.1...v3.6.2](https://github.com/xlbbb-cn/ai-chat/compare/v3.6.1...v3.6.2)
+
 ## [v3.3.2](https://github.com/xlbbb-cn/ai-chat/releases/tag/v3.3.2) — 2026-11-14
 
 ### 新增
