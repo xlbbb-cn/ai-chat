@@ -139,7 +139,7 @@ fn content_to_text_handles_null_and_other_types() {
 #[test]
 fn the_memory_hint_is_prefixed_to_a_string_message() {
     let content = json!("改一下 tauri build");
-    let hinted = turn::prepend_memory_hint(&content, "MEMORY (c5): tag first");
+    let hinted = engine::prepend_memory_hint(&content, "MEMORY (c5): tag first");
     assert_eq!(
         hinted,
         json!("MEMORY (c5): tag first\n\n改一下 tauri build")
@@ -154,7 +154,7 @@ fn the_memory_hint_goes_in_front_of_every_multimodal_part() {
         { "type": "text", "text": "describe this: " },
         { "type": "image_url", "image_url": { "url": "data:image/png;base64,XXX" } },
     ]);
-    let hinted = turn::prepend_memory_hint(&content, "MEMORY (c5): tag first");
+    let hinted = engine::prepend_memory_hint(&content, "MEMORY (c5): tag first");
     let parts = hinted.as_array().unwrap();
     assert_eq!(parts.len(), 3);
     assert_eq!(
@@ -168,8 +168,8 @@ fn the_memory_hint_goes_in_front_of_every_multimodal_part() {
 /// A shape the request cannot carry a hint in is left untouched.
 #[test]
 fn the_memory_hint_leaves_other_content_shapes_untouched() {
-    assert_eq!(turn::prepend_memory_hint(&json!(null), "x"), json!(null));
-    assert_eq!(turn::prepend_memory_hint(&json!(42), "x"), json!(42));
+    assert_eq!(engine::prepend_memory_hint(&json!(null), "x"), json!(null));
+    assert_eq!(engine::prepend_memory_hint(&json!(42), "x"), json!(42));
 }
 
 #[test]

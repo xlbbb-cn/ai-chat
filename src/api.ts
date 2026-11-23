@@ -541,12 +541,14 @@ export interface TurnSnapshot {
   phase: string;
   content: string;
   reasoning: string;
+  /** Settled tool rows in the same `ToolCallEntry` shape the transcript uses. */
   tool_calls: Array<{
-    call_id: string;
-    name: string;
-    args: string;
-    ok: boolean;
-    text: string;
+    task_id: string;
+    agent_name: string;
+    kind?: "tool";
+    description: string;
+    status: "done" | "error";
+    summary: string;
   }>;
   injections: Array<{
     id: string;

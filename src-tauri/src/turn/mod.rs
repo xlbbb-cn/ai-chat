@@ -15,6 +15,8 @@
 //! * [`registry`] — [`TurnRegistry`], the session → base map with concurrency
 //!   admission and same-session supersede.
 //! * [`guard`] — [`guard::TurnBudget`] / [`guard::ToolFailureGuard`].
+//! * `lifecycle` — turn-end teardown (background tasks, serve processes, the
+//!   private MCP pool), keyed on the registry's supersede check.
 //! * [`commands`] — the IPC-facing turn operations (stop / inject / list /
 //!   snapshot).
 //!
@@ -29,10 +31,14 @@
 
 pub mod commands;
 pub mod guard;
+pub(crate) mod lifecycle;
 pub mod progress;
 pub mod registry;
 
-pub use progress::{now_ms, TurnInboxItem, TurnProgress, TurnSnapshot, TurnUsageSnapshot};
+pub(crate) use lifecycle::end_turn_cleanup;
+pub use progress::{
+    now_ms, TurnInboxItem, TurnProgress, TurnProgressSink, TurnSnapshot, TurnUsageSnapshot,
+};
 pub use registry::{
     default_max_concurrent_turns, ActiveTurnInfo, TurnRegistry, DEFAULT_MAX_CONCURRENT_TURNS,
     MAX_CONCURRENT_TURNS,
@@ -53,10 +59,11 @@ use guard::{BudgetStop, TurnBudget};
 pub struct LlmTurn {
     // ── Identity ────────────────────────────────────────────────────────────
     pub session_id: String,
-    /// Monotonic injection-window id (`AppState::turn_seq`).
-    pub turn_id: u64,
+    /// Monotonic window id used by the registry (`AppState::turn_seq`) to
+    /// supersede a winding-down turn without removing a newer one.
+    pub window_id: u64,
     /// Id the frontend minted for this turn; echoed on every `chat-*` event.
-    pub ui_turn_id: String,
+    pub turn_id: String,
     pub model: String,
     pub started_at_ms: i64,
     // ── The base's configuration: frozen at construction ───────────────────
@@ -108,8 +115,8 @@ impl LlmTurn {
     pub(crate) fn new(
         app: AppHandle,
         session_id: &str,
-        turn_id: u64,
-        ui_turn_id: &str,
+        window_id: u64,
+        turn_id: &str,
         model: &str,
         config: AppConfig,
     ) -> Self {
@@ -119,8 +126,8 @@ impl LlmTurn {
         );
         Self {
             session_id: session_id.to_string(),
-            turn_id,
-            ui_turn_id: ui_turn_id.to_string(),
+            window_id,
+            turn_id: turn_id.to_string(),
             model: model.to_string(),
             started_at_ms: now_ms(),
             config,
@@ -184,51 +191,77 @@ impl LlmTurn {
 
     // ── Live progress ───────────────────────────────────────────────────────
 
-    /// Shared handle for the streaming tap (`StreamOptions::progress`).
-    pub fn progress_handle(&self) -> Arc<Mutex<TurnProgress>> {
-        self.progress.clone()
-    }
-
     pub fn set_phase(&self, phase: &str) {
         if let Ok(mut progress) = self.progress.lock() {
             progress.phase = phase.to_string();
         }
     }
 
+    /// One settled tool row for a re-attaching webview. The row shape matches
+    /// the frontend's `ToolCallEntry`; it is written here, not by the loop
+    /// reaching into the snapshot.
+    pub fn record_tool_row(&self, row: serde_json::Value) {
+        if let Ok(mut progress) = self.progress.lock() {
+            progress.tool_calls.push(row);
+        }
+    }
+
+    /// One delivered injection (`chat-injected`) for the snapshot.
+    pub fn record_injection(&self, item: serde_json::Value) {
+        if let Ok(mut progress) = self.progress.lock() {
+            progress.injections.push(item);
+        }
+    }
+
+    /// Accumulate one request's usage totals into the snapshot.
+    pub fn record_usage(&self, prompt: u64, completion: u64, cached: Option<u64>) {
+        if let Ok(mut progress) = self.progress.lock() {
+            progress.usage.requests = progress.usage.requests.saturating_add(1);
+            progress.usage.prompt_tokens += prompt;
+            progress.usage.completion_tokens += completion;
+            if let Some(cached) = cached {
+                progress.usage.cached_tokens += cached;
+                progress.usage.cache_reported = true;
+            }
+        }
+    }
+
     // ── Turn-scoped emission ────────────────────────────────────────────────
 
     /// Emit a `chat-token` delta, accumulating it into the live snapshot on
-    /// the way out (the transcript's assistant row sees the same text, so a
-    /// re-attaching webview rebuilds the identical content).
+    /// the way out (system notices take this path; streamed model tokens go
+    /// through [`TurnProgressSink`] so there is one writer).
     pub fn emit_token(&self, text: String) {
-        if let Ok(mut progress) = self.progress.lock() {
-            progress.content.push_str(&text);
-        }
+        self.append_content(&text);
         let _ = self.app.emit(
             events::CHAT_TOKEN,
             events::ChatToken {
-                turn_id: Some(self.ui_turn_id.clone()),
+                turn_id: Some(self.turn_id.clone()),
                 text,
             },
         );
     }
 
-    /// Emit `chat-done` for this turn.
+    /// Emit `chat-done` for this turn. The inbox closes first: nothing
+    /// accepted after this point could reach another request.
     pub fn emit_done(&self) {
+        self.close_inbox();
         let _ = self.app.emit(
             events::CHAT_DONE,
             events::ChatTurn {
-                turn_id: self.ui_turn_id.clone(),
+                turn_id: self.turn_id.clone(),
             },
         );
     }
 
-    /// Emit `chat-error` for this turn.
+    /// Emit `chat-error` for this turn. Like `emit_done`, this is an end-of-turn
+    /// announcement, so the inbox closes before the UI drops the row.
     pub fn emit_error(&self, error: &str) {
+        self.close_inbox();
         let _ = self.app.emit(
             events::CHAT_ERROR,
             events::ChatError {
-                turn_id: Some(self.ui_turn_id.clone()),
+                turn_id: Some(self.turn_id.clone()),
                 error: error.to_string(),
             },
         );
@@ -266,7 +299,7 @@ impl LlmTurn {
     pub fn info(&self) -> ActiveTurnInfo {
         ActiveTurnInfo {
             session_id: self.session_id.clone(),
-            turn_id: self.ui_turn_id.clone(),
+            turn_id: self.turn_id.clone(),
             model: self.model.clone(),
             started_at_ms: self.started_at_ms,
             phase: self
@@ -305,7 +338,7 @@ impl LlmTurn {
         };
         TurnSnapshot {
             session_id: self.session_id.clone(),
-            turn_id: self.ui_turn_id.clone(),
+            turn_id: self.turn_id.clone(),
             model: self.model.clone(),
             started_at_ms: self.started_at_ms,
             phase,
@@ -315,6 +348,51 @@ impl LlmTurn {
             injections,
             usage,
         }
+    }
+}
+
+impl TurnProgressSink for LlmTurn {
+    fn append_content(&self, text: &str) {
+        if let Ok(mut progress) = self.progress.lock() {
+            progress.content.push_str(text);
+        }
+    }
+
+    fn append_reasoning(&self, text: &str) {
+        if let Ok(mut progress) = self.progress.lock() {
+            progress.reasoning.push_str(text);
+        }
+    }
+
+    fn rewind_attempt(&self, content: &str, reasoning: &str) {
+        if let Ok(mut progress) = self.progress.lock() {
+            if !content.is_empty() && progress.content.ends_with(content) {
+                let keep = progress.content.len() - content.len();
+                progress.content.truncate(keep);
+            }
+            if !reasoning.is_empty() && progress.reasoning.ends_with(reasoning) {
+                let keep = progress.reasoning.len() - reasoning.len();
+                progress.reasoning.truncate(keep);
+            }
+        }
+    }
+}
+
+/// Closes a turn's injection inbox on drop, on EVERY exit path: final answer,
+/// upstream error, Stop, or an unwind. The explicit `emit_done` / `emit_error`
+/// close still runs first so the window shuts before the end is announced;
+/// this guard is the backstop for paths that announce nothing.
+pub(crate) struct InboxGuard<'a>(&'a LlmTurn);
+
+impl<'a> InboxGuard<'a> {
+    pub(crate) fn new(turn: &'a LlmTurn) -> Self {
+        InboxGuard(turn)
+    }
+}
+
+impl Drop for InboxGuard<'_> {
+    fn drop(&mut self) {
+        self.0.close_inbox();
     }
 }
 

@@ -1626,60 +1626,14 @@ export default function App() {
           if (!snapshot) continue;
           try {
             const rows = await loadSessionMessages(turn.session_id);
-            const assistantId = crypto.randomUUID();
-            const toolCalls = snapshot.tool_calls.map((tc) => ({
-              task_id: tc.call_id,
-              agent_name: tc.name,
-              kind: "tool" as const,
-              description: tc.name,
-              status: (tc.ok ? "done" : "error") as "done" | "error",
-              summary: tc.text,
-            }));
-            const injections = snapshot.injections.map((item) => ({
-              id: item.id,
-              text: item.text,
-              created_at_ms: item.created_at_ms,
-              // Only the shape the transcript knows: `background_result`.
-              ...(item.kind === "background_result"
-                ? { kind: "background_result" as const }
-                : {}),
-            }));
-            const assistantRow: Message = {
-              id: assistantId,
-              role: "assistant",
-              content: snapshot.content,
-              streaming: true,
-              ...(snapshot.reasoning ? { reasoning_content: snapshot.reasoning } : {}),
-              ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
-              ...(injections.length ? { injections } : {}),
-            };
-            const driver = new BackgroundTurnDriver(
+            // The driver owns the snapshot → transcript mapping; the effect
+            // only attaches it and wires up its own UI callbacks.
+            const driver = await BackgroundTurnDriver.attach(
               driverHost,
               turn.session_id,
-              snapshot.turn_id
+              snapshot,
+              recordsToMessages(rows)
             );
-            await driver.subscribe();
-            driver.arm({
-              sessionId: turn.session_id,
-              turnId: snapshot.turn_id,
-              assistantId,
-              userMsgId: "",
-              messages: [...recordsToMessages(rows), assistantRow],
-              content: snapshot.content,
-              reasoning: snapshot.reasoning,
-              toolCalls,
-              injections,
-              pendingInjections: [],
-              stats: {
-                started_at: snapshot.started_at_ms,
-                prompt: snapshot.usage.prompt_tokens,
-                completion: snapshot.usage.completion_tokens,
-                total:
-                  snapshot.usage.prompt_tokens + snapshot.usage.completion_tokens,
-                cached: snapshot.usage.cached_tokens,
-                cache_reported: snapshot.usage.cache_reported,
-              },
-            });
             driversRef.current.set(turn.session_id, driver);
             driver.onSettled(() => {
               driversRef.current.delete(turn.session_id);
@@ -3215,7 +3169,6 @@ export default function App() {
       sessionId,
       turnId,
       assistantId: assistantId ?? "",
-      userMsgId: currentUserMsgIdRef.current ?? "",
       messages: messagesDataRef.current,
       content: seedContent,
       reasoning: seedReasoning,

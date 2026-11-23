@@ -1169,7 +1169,6 @@ async fn run_tool_round(round: ToolRound<'_>, sr: &StreamResult, all_messages: &
         memory_tool_called,
         budget_stop,
     } = round;
-    let progress = turn.progress_handle();
     let mut pending_skill_context_messages: Vec<Value> = vec![];
     struct PlannedCall {
         id: String,
@@ -1435,15 +1434,14 @@ async fn run_tool_round(round: ToolRound<'_>, sr: &StreamResult, all_messages: &
         // `tool-call` events; sub-agent / background calls own their own rows
         // and are skipped here for the same reason as above.
         if !backgrounded && call.name != "call_subagent" {
-            if let Ok(mut progress) = progress.lock() {
-                progress.tool_calls.push(json!({
-                    "call_id": &call.id,
-                    "name": &call.name,
-                    "args": crate::util::truncate_with_trailing_ellipsis(&call.args, 200),
-                    "ok": settled_ok,
-                    "text": crate::util::truncate_with_trailing_ellipsis(&result, 400),
-                }));
-            }
+            turn.record_tool_row(json!({
+                "task_id": &call.id,
+                "agent_name": &call.name,
+                "kind": "tool",
+                "description": &call.name,
+                "status": if settled_ok { "done" } else { "error" },
+                "summary": crate::util::truncate_with_trailing_ellipsis(&result, 400),
+            }));
         }
 
         all_messages.push(json!({
@@ -1530,11 +1528,13 @@ pub(crate) async fn run_chat_turn(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let session_id = turn.session_id.clone();
-    let turn_id = turn.ui_turn_id.clone();
+    let turn_id = turn.turn_id.clone();
     // A turn that is still winding down keeps polling its own flag —
     // permanently `true` once superseded — so it exits instead of resurrecting.
     let turn_cancelled = turn.cancel_flag();
-    let turn_progress = turn.progress_handle();
+    // Backstop: the inbox closes on EVERY exit path, including an upstream
+    // error or an unwind that never announces an end.
+    let _inbox_guard = crate::turn::InboxGuard::new(&turn);
 
     // From here on the user may push new information into this turn; the
     // inbox is closed (and all undelivered items dropped for the UI to
@@ -1601,9 +1601,8 @@ pub(crate) async fn run_chat_turn(
                         session_id
                     ),
                 );
-                // Close the injection window before announcing the end of the
-                // turn, so nothing accepted after this point can be stranded.
-                turn.close_inbox();
+                // `emit_done` closes the injection window before announcing
+                // the end, so nothing accepted after this point is stranded.
                 turn.emit_done();
                 return Ok(());
             }
@@ -1870,14 +1869,12 @@ pub(crate) async fn run_chat_turn(
             );
             // The live snapshot keeps the same deliveries: a re-attaching
             // webview stores them on the assistant row when the turn settles.
-            if let Ok(mut progress) = turn_progress.lock() {
-                for item in &injections {
-                    progress.injections.push(json!({
-                        "id": item.id,
-                        "text": item.text,
-                        "created_at_ms": item.created_at_ms,
-                    }));
-                }
+            for item in &injections {
+                turn.record_injection(json!({
+                    "id": item.id,
+                    "text": item.text,
+                    "created_at_ms": item.created_at_ms,
+                }));
             }
         }
 
@@ -1916,15 +1913,13 @@ pub(crate) async fn run_chat_turn(
                     background_results.len()
                 ),
             );
-            if let Ok(mut progress) = turn_progress.lock() {
-                for item in &items {
-                    progress.injections.push(json!({
-                        "id": item.id,
-                        "text": item.text,
-                        "created_at_ms": item.created_at_ms,
-                        "kind": item.kind,
-                    }));
-                }
+            for item in &items {
+                turn.record_injection(json!({
+                    "id": item.id,
+                    "text": item.text,
+                    "created_at_ms": item.created_at_ms,
+                    "kind": item.kind,
+                }));
             }
             let _ = app.emit(
                 crate::events::CHAT_INJECTED,
@@ -2090,7 +2085,7 @@ still missing."
             &request_headers,
             Some(&session_id),
             Some(&turn_id),
-            Some(&turn_progress),
+            Some(turn.as_ref()),
         )
         .await;
 
@@ -2201,15 +2196,11 @@ still missing."
         // Turn-scoped usage totals for the live snapshot (the footer the
         // frontend sums from `chat-usage`); a re-attaching webview seeds the
         // same figures instead of restarting from zero.
-        if let Ok(mut progress) = turn_progress.lock() {
-            progress.usage.requests = progress.usage.requests.saturating_add(1);
-            progress.usage.prompt_tokens += sr.prompt_tokens as u64;
-            progress.usage.completion_tokens += sr.completion_tokens as u64;
-            if let Some(cached) = sr.cached_tokens {
-                progress.usage.cached_tokens += cached as u64;
-                progress.usage.cache_reported = true;
-            }
-        }
+        turn.record_usage(
+            sr.prompt_tokens as u64,
+            sr.completion_tokens as u64,
+            sr.cached_tokens.map(|cached| cached as u64),
+        );
 
         let total_tokens = sr.prompt_tokens.saturating_add(sr.completion_tokens);
         let ratio = total_tokens as f32 / effective_max_tokens as f32;
@@ -2672,9 +2663,8 @@ only when every item is done, or when you are blocked and need the user.\n\n{wai
         "INFO",
         format!("chat_completion finished: session_id={}", session_id),
     );
-    // Close the injection window before announcing the end of the turn. The
-    // guard also runs on the error path, where `chat-done` is never emitted.
-    turn.close_inbox();
+    // `emit_done` closes the inbox before announcing the end; the InboxGuard
+    // covers the error path, where `chat-done` is never emitted.
     turn.emit_done();
     Ok(())
 }
@@ -2761,97 +2751,4 @@ fn load_skill_for_call(
         ),
         Some(json!({ "role": "user", "content": skill_context })),
     )
-}
-
-/// Turn-end cleanup for one [`crate::turn::LlmTurn`] base: stop this session's
-/// serve processes (verifying the killed trees are gone), shut down its
-/// background tasks and kill its private MCP pool. Serve verification runs in
-/// a blocking thread — it polls for up to a few seconds in the pathological
-/// case, which must not stall the async runtime. Silent when nothing existed.
-pub(crate) async fn end_turn_cleanup(app: &AppHandle, turn: &crate::turn::LlmTurn) {
-    let session_id = turn.session_id.as_str();
-    let turn_id = turn.turn_id;
-    // The user may press Stop and send the next message before this turn has
-    // finished unwinding. That newer turn owns the session by then, and its
-    // background tasks and waiting chip belong to it — tearing them down here
-    // killed exactly the work the user had just asked for. The newer turn runs
-    // this cleanup of its own when it ends. Turns of OTHER sessions are never
-    // a reason to skip: their state is keyed by their own session id.
-    let superseded = app.state::<AppState>().turns.superseded(session_id, turn_id);
-    if superseded {
-        log_event(
-            &app.state::<AppState>(),
-            "INFO",
-            format!(
-                "turn ended (session {session_id}): a newer turn owns it now, leaving its state alone"
-            ),
-        );
-        return;
-    }
-
-    // Background tool tasks are turn-scoped, exactly like serve processes: a
-    // turn that ends (final answer, error or Stop) must not leave a runner
-    // alive. `shutdown_session` sets every cancel flag — each runner then kills
-    // its process tree — and drops the entries so nothing is injected into the
-    // next turn.
-    let removed = app
-        .state::<AppState>()
-        .background_tasks
-        .shutdown_session(session_id);
-    let removed_count = removed.len();
-    // Broadcast a terminal snapshot for every dropped task *before*
-    // `chat_completion` returns. The runner that dies now finds no entry to
-    // report into, so this is the only thing that can flip the UI: without it
-    // the panel keeps rendering the last `running` state forever and the
-    // transcript row keeps offering a cancel button for a task that is gone.
-    for snapshot in removed {
-        let _ = app.emit(crate::events::BACKGROUND_TASK_STATE, snapshot);
-    }
-    // The waiting chip is driven by `background-waiting`; zero it on every turn
-    // end so a hold that was cut short (Stop, error, budget) cannot leave it
-    // counting down a turn that no longer exists.
-    let _ = app.emit(
-        crate::events::BACKGROUND_WAITING,
-        crate::events::BackgroundWaiting {
-            session_id: session_id.to_string(),
-            pending: 0,
-            round: None,
-        },
-    );
-    if removed_count > 0 {
-        log_event(
-            &app.state::<AppState>(),
-            "INFO",
-            format!(
-                "turn ended (session {session_id}): shut down {removed_count} background task(s)"
-            ),
-        );
-    }
-
-    let session_id = session_id.to_string();
-    // Only THIS session's serve processes: another conversation may still be
-    // running and its servers belong to its own turn.
-    let summary = tauri::async_runtime::spawn_blocking({
-        let app = app.clone();
-        let session_id = session_id.clone();
-        move || {
-            app.state::<AppState>()
-                .serve_processes
-                .shutdown_session(&session_id)
-        }
-    })
-    .await
-    .unwrap_or_else(|err| format!("Error: serve cleanup task failed: {err}"));
-
-    if !summary.contains("No background serve processes") {
-        log_event(
-            &app.state::<AppState>(),
-            "INFO",
-            format!("turn ended (session {session_id}): {summary}"),
-        );
-    }
-
-    // The base's private MCP pool: this turn's server processes die with it.
-    // `McpSession::Drop` remains the safety net for unwind paths.
-    turn.shutdown_mcp(&app.state::<AppState>()).await;
 }

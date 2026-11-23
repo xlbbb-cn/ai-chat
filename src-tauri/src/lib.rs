@@ -1057,19 +1057,19 @@ impl AppState {
         &self,
         app: AppHandle,
         session_id: &str,
-        ui_turn_id: &str,
+        turn_id: &str,
         model: &str,
         config: AppConfig,
     ) -> Result<Arc<turn::LlmTurn>, String> {
-        let turn_id = self
+        let window_id = self
             .turn_seq
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let max_concurrent = config.max_concurrent_turns;
         self.turns.begin(
             app,
             session_id,
+            window_id,
             turn_id,
-            ui_turn_id,
             model,
             config,
             max_concurrent,

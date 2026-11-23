@@ -70,8 +70,8 @@ impl TurnRegistry {
         &self,
         app: AppHandle,
         session_id: &str,
-        turn_id: u64,
-        ui_turn_id: &str,
+        window_id: u64,
+        turn_id: &str,
         model: &str,
         config: AppConfig,
         max_concurrent: u32,
@@ -79,8 +79,8 @@ impl TurnRegistry {
         let turn = Arc::new(LlmTurn::new(
             app,
             session_id,
+            window_id,
             turn_id,
-            ui_turn_id,
             model,
             config,
         ));
@@ -111,14 +111,14 @@ impl TurnRegistry {
         }
     }
 
-    /// Remove the entry whose window id is `turn_id`, if it is still the
+    /// Remove the entry whose window id is `window_id`, if it is still the
     /// published one. A winding-down turn must never remove a newer turn that
     /// already took the session over. Returns the removed base.
-    pub fn remove_if(&self, turn_id: u64) -> Option<Arc<LlmTurn>> {
+    pub fn remove_if(&self, window_id: u64) -> Option<Arc<LlmTurn>> {
         let mut map = self.inner.lock().ok()?;
         let session = map
             .iter()
-            .find(|(_, turn)| turn.turn_id == turn_id)
+            .find(|(_, turn)| turn.window_id == window_id)
             .map(|(session, _)| session.clone())?;
         map.remove(&session)
     }
@@ -144,11 +144,11 @@ impl TurnRegistry {
     /// Whether a newer turn already owns `session_id` — the winding-down turn
     /// must then leave the session's background tasks and serve processes
     /// alone (they belong to the newer turn).
-    pub fn superseded(&self, session_id: &str, turn_id: u64) -> bool {
+    pub fn superseded(&self, session_id: &str, window_id: u64) -> bool {
         self.inner
             .lock()
             .ok()
-            .and_then(|map| map.get(session_id).map(|turn| turn.turn_id > turn_id))
+            .and_then(|map| map.get(session_id).map(|turn| turn.window_id > window_id))
             .unwrap_or(false)
     }
 

@@ -548,7 +548,7 @@ function highlightAgentMentions(root: HTMLElement, known: Set<string>) {
  *
  * Compression, output-token continuation and todo suspension are notes *about*
  * the turn, not model output, so they must not break up the prose. The
- * backend writes each one as `\n\n{notice}\n\n` (`llm_complete/turn.rs`); that
+ * backend writes each one as `\n\n{notice}\n\n` (`llm_complete/engine.rs`); that
  * paragraph shape is the wire format parsed here, which also catches a notice
  * that landed inside a code fence because a `length` cut left it open.
  *

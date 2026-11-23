@@ -74,6 +74,20 @@ pub struct TurnSnapshot {
     pub usage: TurnUsageSnapshot,
 }
 
+/// Write side of a turn's live progress snapshot.
+///
+/// The streaming transport holds a `&dyn TurnProgressSink` instead of the raw
+/// `Arc<Mutex<TurnProgress>>`, so every mutation of the snapshot goes through
+/// the turn that owns it. `LlmTurn` is the only implementation; callers without
+/// a chat turn (sub-agents, planner, summarizer, maintenance) pass `None`.
+pub trait TurnProgressSink: Send + Sync {
+    fn append_content(&self, text: &str);
+    fn append_reasoning(&self, text: &str);
+    /// Drop the failed attempt's tail so a retry re-streams cleanly. Same
+    /// suffix match the frontend's `onRetry` uses; never truncates a prefix.
+    fn rewind_attempt(&self, content: &str, reasoning: &str);
+}
+
 /// Unix milliseconds, the turn family's timestamp unit.
 pub fn now_ms() -> i64 {
     std::time::SystemTime::now()

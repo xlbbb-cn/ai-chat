@@ -126,15 +126,15 @@ mod tests;
 mod background;
 mod conclusion;
 mod context;
+mod engine;
 mod tool_call;
-mod turn;
 
 pub(crate) use self::background::*;
 pub(crate) use self::conclusion::*;
 pub(crate) use self::context::*;
+pub(crate) use self::engine::*;
 pub(crate) use crate::llm_client::*;
 pub(crate) use self::tool_call::*;
-pub(crate) use self::turn::*;
 
 
 const CONTEXT_COMPRESSION_THRESHOLD: f32 = 0.8;
@@ -280,7 +280,7 @@ pub(crate) async fn chat_completion(
         .unwrap_or(&config.model)
         .to_string();
     let turn = state.begin_turn(app.clone(), &session_id, &turn_id, &model, config)?;
-    let window_turn_id = turn.turn_id;
+    let window_turn_id = turn.window_id;
 
     // The user's own turn always wins over the background evolution
     // maintenance pass: stop it before this turn starts working. The
@@ -373,7 +373,7 @@ pub(crate) async fn chat_completion(
     )
     .await;
 
-    end_turn_cleanup(&app, &turn).await;
+    crate::turn::end_turn_cleanup(&app, &turn).await;
     // Unpublish the base only after cleanup: a newer turn of the same session
     // may already have superseded it, and `remove_if` is guarded by window id.
     app.state::<AppState>().turns.remove_if(window_turn_id);

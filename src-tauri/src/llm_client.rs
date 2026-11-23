@@ -7,7 +7,6 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
@@ -413,12 +412,12 @@ pub struct StreamOptions<'a> {
     /// `x-conversation-id`) plus the user-configured custom headers. Built once
     /// per call with `upstream_request_headers`.
     pub headers: &'a [(String, String)],
-    /// Live progress snapshot of the user's own chat turn (see
-    /// `turn_registry`). When set, every content/reasoning delta is appended
-    /// to it as it streams, so a webview that re-attaches to a background
-    /// session rebuilds the identical transcript. `None` for every other
-    /// caller (sub-agents, planner, summarizer, maintenance).
-    pub progress: Option<&'a Arc<std::sync::Mutex<crate::turn::TurnProgress>>>,
+    /// Write side of the user's own chat turn's live progress snapshot (see
+    /// `crate::turn`). When set, every content/reasoning delta and retry rewind
+    /// goes through the turn that owns it, so a re-attaching webview rebuilds
+    /// the identical transcript. `None` for every other caller (sub-agents,
+    /// planner, summarizer, maintenance).
+    pub progress: Option<&'a dyn crate::turn::TurnProgressSink>,
 }
 
 
@@ -778,10 +777,8 @@ pub(crate) fn process_stream_chunk(
             meter.mark_reasoning();
         }
         reasoning_content.push_str(reasoning);
-        if let Some(progress) = opts.progress {
-            if let Ok(mut progress) = progress.lock() {
-                progress.reasoning.push_str(reasoning);
-            }
+        if let Some(sink) = opts.progress {
+            sink.append_reasoning(reasoning);
         }
         if let Some(event) = opts.reasoning_event {
             if let Some(task_id) = opts.task_id {
@@ -836,10 +833,8 @@ pub(crate) fn process_stream_chunk(
             meter.mark_content();
         }
         content.push_str(token);
-        if let Some(progress) = opts.progress {
-            if let Ok(mut progress) = progress.lock() {
-                progress.content.push_str(token);
-            }
+        if let Some(sink) = opts.progress {
+            sink.append_content(token);
         }
         if opts.emit_tokens {
             if let Some(task_id) = opts.task_id {
@@ -1137,17 +1132,8 @@ pub(crate) fn announce_stream_retry(
         // same content the retry re-streams. The snapshot accumulates across
         // rounds, so only the failed attempt's TAIL is stripped (the same
         // suffix match the frontend's onRetry does), never a truncation.
-        if let Some(progress) = opts.progress {
-            if let Ok(mut progress) = progress.lock() {
-                if !content.is_empty() && progress.content.ends_with(content) {
-                    let keep = progress.content.len() - content.len();
-                    progress.content.truncate(keep);
-                }
-                if !reasoning.is_empty() && progress.reasoning.ends_with(reasoning) {
-                    let keep = progress.reasoning.len() - reasoning.len();
-                    progress.reasoning.truncate(keep);
-                }
-            }
+        if let Some(sink) = opts.progress {
+            sink.rewind_attempt(content, reasoning);
         }
         let _ = app.emit(
             crate::events::CHAT_RETRY,
@@ -1477,7 +1463,7 @@ pub(crate) async fn stream_request(
     headers: &[(String, String)],
     session_id: Option<&str>,
     turn_id: Option<&str>,
-    progress: Option<&Arc<std::sync::Mutex<crate::turn::TurnProgress>>>,
+    progress: Option<&dyn crate::turn::TurnProgressSink>,
 ) -> Result<StreamResult, String> {
     stream_llm_request(
         app,

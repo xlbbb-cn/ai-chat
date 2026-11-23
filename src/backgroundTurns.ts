@@ -23,6 +23,7 @@ import {
   saveHistory,
   stopChatCompletion,
 } from "./api";
+import type { TurnSnapshot } from "./api";
 import type {
   ChatInjection,
   Message,
@@ -45,7 +46,6 @@ export interface TurnSeed {
   sessionId: string;
   turnId: string;
   assistantId: string;
-  userMsgId: string;
   messages: Message[];
   content: string;
   reasoning: string;
@@ -108,6 +108,70 @@ export class BackgroundTurnDriver {
     this.host = host;
     this.sessionId = sessionId;
     this.turnId = turnId;
+  }
+
+  /**
+   * Re-attach to a turn that kept running through a webview reload: rebuild the
+   * live assistant row from the backend snapshot plus the persisted messages,
+   * subscribe unarmed, then arm in one step. The caller only wires up its own
+   * transcript/settled callbacks — the snapshot → transcript mapping lives
+   * here, next to the driver that consumes it.
+   */
+  static async attach(
+    host: DriverHost,
+    sessionId: string,
+    snapshot: TurnSnapshot,
+    persisted: Message[],
+  ): Promise<BackgroundTurnDriver> {
+    const assistantId = crypto.randomUUID();
+    const toolCalls: ToolCallEntry[] = snapshot.tool_calls.map((tc) => ({
+      task_id: tc.task_id,
+      agent_name: host.translate("app.agents.tool"),
+      ...(tc.kind ? { kind: tc.kind } : { kind: "tool" as const }),
+      description: tc.description,
+      status: tc.status,
+      summary: tc.summary,
+      started_at: snapshot.started_at_ms,
+    }));
+    const injections: ChatInjection[] = snapshot.injections.map((item) => ({
+      id: item.id,
+      text: item.text,
+      created_at_ms: item.created_at_ms,
+      ...(item.kind === "background_result"
+        ? { kind: "background_result" as const }
+        : {}),
+    }));
+    const assistantRow: Message = {
+      id: assistantId,
+      role: "assistant",
+      content: snapshot.content,
+      streaming: true,
+      ...(snapshot.reasoning ? { reasoning_content: snapshot.reasoning } : {}),
+      ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
+      ...(injections.length ? { injections } : {}),
+    };
+    const driver = new BackgroundTurnDriver(host, sessionId, snapshot.turn_id);
+    await driver.subscribe();
+    driver.arm({
+      sessionId,
+      turnId: snapshot.turn_id,
+      assistantId,
+      messages: [...persisted, assistantRow],
+      content: snapshot.content,
+      reasoning: snapshot.reasoning,
+      toolCalls,
+      injections,
+      pendingInjections: [],
+      stats: {
+        started_at: snapshot.started_at_ms,
+        prompt: snapshot.usage.prompt_tokens,
+        completion: snapshot.usage.completion_tokens,
+        total: snapshot.usage.prompt_tokens + snapshot.usage.completion_tokens,
+        cached: snapshot.usage.cached_tokens,
+        cache_reported: snapshot.usage.cache_reported,
+      },
+    });
+    return driver;
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
