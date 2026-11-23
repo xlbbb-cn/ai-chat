@@ -5,8 +5,8 @@
 use crate::llm_client::ChatMessage;
 use crate::tools;
 use crate::tools::todos;
+use crate::turn::commands::InjectUserMessageResult;
 use crate::AppState;
-use crate::InjectUserMessageResult;
 use tauri::AppHandle;
 use tauri::State;
 
@@ -39,8 +39,25 @@ pub(crate) async fn chat_completion(
 }
 
 #[tauri::command]
-pub(crate) fn stop_chat_completion(app: AppHandle, state: State<'_, AppState>) {
-    crate::stop_chat_completion(app, state)
+pub(crate) fn stop_chat_completion(
+    app: AppHandle,
+    session_id: String,
+    state: State<'_, AppState>,
+) {
+    crate::turn::commands::stop_chat_completion(app, state, session_id)
+}
+
+#[tauri::command]
+pub(crate) fn list_active_turns(state: State<'_, AppState>) -> Vec<crate::turn::ActiveTurnInfo> {
+    crate::turn::commands::list_active_turns(state)
+}
+
+#[tauri::command]
+pub(crate) fn get_turn_snapshot(
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Option<crate::turn::TurnSnapshot> {
+    crate::turn::commands::get_turn_snapshot(session_id, state)
 }
 
 #[tauri::command]
@@ -50,7 +67,7 @@ pub(crate) fn inject_user_message(
     text: String,
     state: State<'_, AppState>,
 ) -> InjectUserMessageResult {
-    crate::inject_user_message(session_id, id, text, state)
+    crate::turn::commands::inject_user_message(session_id, id, text, state)
 }
 
 #[tauri::command]

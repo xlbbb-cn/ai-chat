@@ -47,6 +47,7 @@ struct ServeStatus {
     output: String,
 }
 
+#[derive(Clone)]
 pub struct ServeProcess {
     pub id: String,
     pub pid: u32,
@@ -54,6 +55,10 @@ pub struct ServeProcess {
     pub code: String,
     pub cwd: PathBuf,
     pub started_at: Instant,
+    /// The chat session whose turn spawned this process. Turn-end cleanup
+    /// stops only its own session's entries — another conversation may still
+    /// be running and its servers belong to its own turn.
+    pub session_id: String,
     status: Arc<Mutex<ServeStatus>>,
 }
 
@@ -127,8 +132,24 @@ impl ServeRegistry {
     }
 
     fn stop_all(&self) -> String {
+        self.stop_where(&|_| true)
+    }
+
+    /// Remove and stop the entries matching `filter`, leaving the rest alone.
+    fn stop_where(&self, filter: &impl Fn(&ServeProcess) -> bool) -> String {
         let processes: Vec<ServeProcess> = match self.processes.lock() {
-            Ok(mut processes) => processes.drain().map(|(_, process)| process).collect(),
+            Ok(mut processes) => {
+                let mut taken = Vec::new();
+                processes.retain(|_, process| {
+                    if filter(process) {
+                        taken.push(process.clone());
+                        false
+                    } else {
+                        true
+                    }
+                });
+                taken
+            }
             Err(err) => return format!("Error: serve registry is unavailable: {err}"),
         };
 
@@ -155,15 +176,25 @@ impl ServeRegistry {
         }
     }
 
-    /// Turn-end shutdown: stop every serve process and then VERIFY that each
-    /// killed tree is actually gone before returning. Escalates (re-kill of
-    /// the whole tree) once for stragglers and reports anything that could
-    /// still not be confirmed. The returned summary is app-log material.
+    /// Turn-end shutdown for ONE session: stop its serve processes and then
+    /// VERIFY that each killed tree is actually gone before returning.
+    /// Escalates (re-kill of the whole tree) once for stragglers and reports
+    /// anything that could still not be confirmed. The returned summary is
+    /// app-log material.
     ///
     /// Synchronous by design and blocking up to
     /// [`SHUTDOWN_VERIFY_DEADLINE`] in the pathological case; call it through
     /// `spawn_blocking` from async command contexts.
+    pub fn shutdown_session(&self, session_id: &str) -> String {
+        self.shutdown_where(|process| process.session_id == session_id)
+    }
+
+    /// Stop every serve process regardless of owner (app-level teardown).
     pub fn shutdown_all(&self) -> String {
+        self.shutdown_where(|_| true)
+    }
+
+    fn shutdown_where(&self, filter: impl Fn(&ServeProcess) -> bool) -> String {
         // Which entries are still running (and thus need post-kill
         // verification)? Finished entries are just registry bookkeeping.
         let running: Vec<(String, u32)> = {
@@ -173,6 +204,7 @@ impl ServeRegistry {
             };
             processes
                 .values()
+                .filter(|process| filter(process))
                 .filter(|process| {
                     process
                         .status
@@ -185,7 +217,7 @@ impl ServeRegistry {
                 .collect()
         };
 
-        let stopped = self.stop_all();
+        let stopped = self.stop_where(&filter);
         if running.is_empty() {
             return stopped;
         }
@@ -418,12 +450,15 @@ fn verify_trees_exited(targets: &[(String, u32)]) -> Vec<String> {
 }
 
 /// Start a long-lived child for `code` and return the tool result immediately.
+/// `session_id` marks the owning turn: turn-end cleanup stops only that
+/// session's processes.
 pub async fn start(
     app: &AppHandle,
     shell_type: &str,
     code: &str,
     scoped_code: String,
     cwd: PathBuf,
+    session_id: &str,
 ) -> String {
     let mut command = match build_command(shell_type, &scoped_code, Some(cwd.clone())) {
         Ok(command) => command,
@@ -503,6 +538,7 @@ pub async fn start(
         code: code.to_string(),
         cwd,
         started_at: Instant::now(),
+        session_id: session_id.to_string(),
         status,
     });
 
@@ -603,6 +639,7 @@ mod tests {
             code: "echo hi".to_string(),
             cwd: PathBuf::from("."),
             started_at: Instant::now(),
+            session_id: "test-session".to_string(),
             status: Arc::new(Mutex::new(ServeStatus {
                 state: "exited".to_string(),
                 exit_code: Some(0),
@@ -717,6 +754,7 @@ mod tests {
             code: sleep_code.to_string(),
             cwd: PathBuf::from("."),
             started_at: Instant::now(),
+            session_id: "test-session".to_string(),
             status: Arc::new(Mutex::new(ServeStatus {
                 state: "running".to_string(),
                 exit_code: None,

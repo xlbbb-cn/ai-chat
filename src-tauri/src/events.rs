@@ -27,6 +27,10 @@ pub const CHAT_RETRY: &str = "chat-retry";
 pub const CHAT_USAGE: &str = "chat-usage";
 pub const CHAT_NOTICE: &str = "chat-notice";
 pub const CHAT_INJECTED: &str = "chat-injected";
+/// A session's turn started or finished — drives the History panel's running
+/// badge without polling. `running: false` is emitted after the turn's
+/// cleanup, so a badge never outlives the work it marks.
+pub const TURN_STATE: &str = "turn-state";
 pub const TOOL_CALL: &str = "tool-call";
 pub const SKILL_LOADED: &str = "skill-loaded";
 pub const CONFIRM_REQUIRED: &str = "confirm-required";
@@ -119,6 +123,18 @@ pub struct ChatInjectedItem {
 pub struct ChatInjected {
     pub session_id: String,
     pub items: Vec<ChatInjectedItem>,
+}
+
+/// Payload of [`TURN_STATE`]: one session's turn started (`running: true`)
+/// or settled (`running: false`).
+#[derive(Debug, Clone, Serialize)]
+pub struct TurnState {
+    pub session_id: String,
+    /// The id the frontend minted for the turn (same as `chat-*` payloads).
+    pub turn_id: String,
+    pub running: bool,
+    pub started_at_ms: i64,
+    pub model: String,
 }
 
 /// One tool-progress line. `call_id` / `phase` / `ok` are absent on the legacy

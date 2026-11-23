@@ -278,12 +278,7 @@ pub(crate) fn start_evolution_maintenance(
                 .to_string(),
         );
     }
-    if state
-        .active_turn
-        .lock()
-        .map(|turn| turn.is_some())
-        .unwrap_or(false)
-    {
+    if state.turns.any() {
         return Err(
             "A chat turn is running. Finish or stop it before consolidating memory.".to_string(),
         );
@@ -591,6 +586,7 @@ async fn run_inner(
                 usage_max_tokens: None,
                 ds_format: config.ds_format_for(&model),
                 headers: &headers,
+                progress: None,
             },
         )
         .await;

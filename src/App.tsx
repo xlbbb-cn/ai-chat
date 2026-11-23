@@ -4102,7 +4102,7 @@ export default function App() {
 
   async function stopStreaming() {
     try {
-      await stopChatCompletion();
+      await stopChatCompletion(sessionId);
     } catch (err) {
       setError(String(err));
     }

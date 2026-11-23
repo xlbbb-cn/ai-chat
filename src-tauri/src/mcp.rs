@@ -129,17 +129,21 @@ pub struct StdioProcessHandle {
     pub tracked: crate::process_guard::TrackedProcess,
 }
 
-/// Per-task stdio pool for an `llm` sub-agent.
+/// Private stdio pool for one owner: an `llm` sub-agent task or a chat
+/// [`crate::turn::LlmTurn`] base.
 ///
-/// The main agent's processes live in `AppState.mcp_children` and are shared
-/// across chat turns. A sub-agent must never share those: each task owns its
-/// own server processes and kills them when the task ends (success, error,
-/// max iterations or Stop). `Drop` is the safety net for unwinding paths.
-pub struct AgentMcpSession {
+/// The panel's warmup processes live in `AppState.mcp_children`; a turn or
+/// task must never share those — each owns its own server processes and kills
+/// them when it ends (success, error, max iterations or Stop). `Drop` is the
+/// safety net for unwinding paths.
+pub struct McpSession {
     pub(crate) children: HashMap<String, StdioProcessHandle>,
 }
 
-impl Default for AgentMcpSession {
+/// Historical name: the pool was first built for sub-agent tasks.
+pub type AgentMcpSession = McpSession;
+
+impl Default for McpSession {
     fn default() -> Self {
         Self {
             children: HashMap::new(),
@@ -147,12 +151,12 @@ impl Default for AgentMcpSession {
     }
 }
 
-impl AgentMcpSession {
+impl McpSession {
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Stop every process still running for this task.
+    /// Stop every process still running for this owner.
     pub fn shutdown(&mut self, state: &AppState) {
         let children = std::mem::take(&mut self.children);
         for (server_id, handle) in children {
@@ -161,13 +165,13 @@ impl AgentMcpSession {
                 state,
                 &server_id,
                 McpLogLevel::Info,
-                "Sub-agent stdio process stopped".to_string(),
+                "Private stdio process stopped (turn/task ended)".to_string(),
             );
         }
     }
 }
 
-impl Drop for AgentMcpSession {
+impl Drop for McpSession {
     fn drop(&mut self) {
         for (_, handle) in self.children.drain() {
             kill_stdio_handle(handle);
@@ -1859,11 +1863,12 @@ pub async fn get_server_tools(
     result
 }
 
-/// `get_server_tools` for an `llm` sub-agent task: stdio servers use the
-/// task's private pool, so the main agent's processes are never shared.
-pub async fn get_server_tools_for_agent(
+/// `get_server_tools` through a private pool (a chat turn's base or an `llm`
+/// sub-agent task): stdio servers use the owner's own processes, so the
+/// panel's warmup pool and other turns are never shared.
+pub async fn get_server_tools_in(
     state: &AppState,
-    session: &mut AgentMcpSession,
+    session: &mut McpSession,
     server: &McpServer,
     owner: &str,
 ) -> Result<Vec<serde_json::Value>, String> {
@@ -2256,11 +2261,11 @@ async fn wait_cancelled(flag: &std::sync::atomic::AtomicBool) {
     }
 }
 
-/// `invoke_mcp_tool` for an `llm` sub-agent task: stdio calls go through the
-/// task's private process pool.
-pub async fn invoke_mcp_tool_for_agent(
+/// `invoke_mcp_tool` through a private pool (a chat turn's base or an `llm`
+/// sub-agent task): stdio calls go through the owner's own process pool.
+pub async fn invoke_mcp_tool_in(
     state: &AppState,
-    session: &mut AgentMcpSession,
+    session: &mut McpSession,
     server: &McpServer,
     tool_name: &str,
     arguments: serde_json::Value,

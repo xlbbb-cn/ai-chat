@@ -519,8 +519,56 @@ export async function onUpdateDownloadProgress(
   return listen<UpdateDownloadProgress>("update-download-progress", (e) => cb(e.payload));
 }
 
-export async function stopChatCompletion(): Promise<void> {
-  return invoke("stop_chat_completion");
+export async function stopChatCompletion(sessionId: string): Promise<void> {
+  return invoke("stop_chat_completion", { sessionId });
+}
+
+/** One running turn of this window — the History panel's "running" badge. */
+export interface ActiveTurnInfo {
+  session_id: string;
+  turn_id: string;
+  model: string;
+  started_at_ms: number;
+  phase: string;
+}
+
+/** Live snapshot of a running turn, used to re-attach after a session switch. */
+export interface TurnSnapshot {
+  session_id: string;
+  turn_id: string;
+  model: string;
+  started_at_ms: number;
+  phase: string;
+  content: string;
+  reasoning: string;
+  tool_calls: Array<{
+    call_id: string;
+    name: string;
+    args: string;
+    ok: boolean;
+    text: string;
+  }>;
+  injections: Array<{
+    id: string;
+    text: string;
+    created_at_ms: number;
+    kind?: string | null;
+  }>;
+  usage: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    cached_tokens: number;
+    requests: number;
+    cache_reported: boolean;
+  };
+}
+
+export async function listActiveTurns(): Promise<ActiveTurnInfo[]> {
+  return invoke("list_active_turns");
+}
+
+export async function getTurnSnapshot(sessionId: string): Promise<TurnSnapshot | null> {
+  return invoke("get_turn_snapshot", { sessionId });
 }
 
 // ─── Evolution maintenance (the empty-state "nap face") ─────────────────────

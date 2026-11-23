@@ -171,7 +171,7 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
             .clamp(1, 3600) as u64;
 
         if run_type == "serve" {
-            return serve::start(app, &shell_type, &code, scoped_code, command_cwd).await;
+            return serve::start(app, &shell_type, &code, scoped_code, command_cwd, session_id.unwrap_or("")).await;
         }
 
         return process::run_command_timed(
@@ -243,7 +243,7 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
         .clamp(1, 3600) as u64;
 
     if run_type == "serve" {
-        return serve::start(app, &shell_type, &code, scoped_code, command_cwd).await;
+        return serve::start(app, &shell_type, &code, scoped_code, command_cwd, session_id.unwrap_or("")).await;
     }
 
     process::run_command_timed(

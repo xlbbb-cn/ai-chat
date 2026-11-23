@@ -244,9 +244,9 @@ const BACKGROUND_RESULT_PREFIX: &str =
     "[BACKGROUND TASK RESULT — delivered automatically. This is the output of a tool you started earlier, NOT a new user request.]";
 
 /// Thin command wrapper: the turn itself plus turn-end cleanup that must run
-/// on EVERY path — serve processes are stopped and their whole process trees
-/// are verified dead, so a `run_shell` serve child never outlives the turn
-/// that spawned it (see `ServeRegistry::shutdown_all`).
+/// on EVERY path — serve processes of THIS session are stopped and their
+/// whole process trees verified dead, so a `run_shell` serve child never
+/// outlives the turn that spawned it (see `ServeRegistry::shutdown_session`).
 pub(crate) async fn chat_completion(
     app: AppHandle,
     messages: Vec<ChatMessage>,
@@ -264,17 +264,36 @@ pub(crate) async fn chat_completion(
     turn_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    let turn_id = turn_id.unwrap_or_default();
+
+    // Publish the turn base BEFORE any side effect: this supersedes a previous
+    // turn of the SAME session (its cancel flag goes permanently true) and
+    // enforces the concurrency limit. A refused turn must not cancel the
+    // maintenance pass or claim the sleep lock. Turns of OTHER sessions are
+    // never touched — they keep running in the background. The configuration
+    // is frozen into the base here; the turn never re-reads live config.
+    let config = state.config.lock().unwrap().clone();
+    let model = model_override
+        .as_deref()
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .unwrap_or(&config.model)
+        .to_string();
+    let turn = state.begin_turn(app.clone(), &session_id, &turn_id, &model, config)?;
+    let window_turn_id = turn.turn_id;
+
     // The user's own turn always wins over the background evolution
-    // maintenance pass: stop it before this turn installs its own cancel flag.
-    // The maintenance turn uses a separate slot, so this is an explicit
-    // hand-off rather than the shared `chat_cancelled` supersede rule.
+    // maintenance pass: stop it before this turn starts working. The
+    // maintenance turn uses a separate slot, so this is an explicit hand-off
+    // rather than the registry's same-session supersede rule.
     crate::evolution_maintenance::cancel(&state);
 
     // This turn keeps the system awake (a long streaming answer or a slow
     // sub-agent mission is exactly the kind of idle-looking stretch during
     // which Windows/macOS would suspend the machine). RAII: released on every
     // exit path — final answer, upstream error, Stop — and only after the
-    // turn-end cleanup below finished.
+    // turn-end cleanup below finished. Ref-counted, so parallel sessions each
+    // hold their own claim.
     let sleep_guard = app.state::<crate::timer::SleepLock>().acquire();
 
     // `+agent` roles are frozen on the session's FIRST request. The composer
@@ -330,29 +349,46 @@ pub(crate) async fn chat_completion(
         }
     }
 
-    let turn_id = turn_id.unwrap_or_default();
-
-    // The injection window is opened here, not inside the turn, so turn-end
-    // cleanup can tell this turn apart from a newer one the user already
-    // started in the same session.
-    let injection_window = InjectionWindow::open(&app, &state, &session_id);
-    let window_turn_id = injection_window.turn_id;
+    let started_at_ms = turn.started_at_ms;
+    let _ = app.emit(
+        crate::events::TURN_STATE,
+        crate::events::TurnState {
+            session_id: session_id.clone(),
+            turn_id: turn_id.clone(),
+            running: true,
+            started_at_ms,
+            model: model.clone(),
+        },
+    );
 
     let result = run_chat_turn(
         app.clone(),
         messages,
         skill_ids,
-        session_id.clone(),
         model_override,
         use_agents,
         auto_plan,
-        turn_id,
-        injection_window,
+        turn.clone(),
         state,
     )
     .await;
 
-    end_turn_cleanup(&app, &session_id, window_turn_id).await;
+    end_turn_cleanup(&app, &turn).await;
+    // Unpublish the base only after cleanup: a newer turn of the same session
+    // may already have superseded it, and `remove_if` is guarded by window id.
+    app.state::<AppState>().turns.remove_if(window_turn_id);
+    // The badge must not outlive the work: emit the terminal state only after
+    // the session's background tasks and serve processes are torn down.
+    let _ = app.emit(
+        crate::events::TURN_STATE,
+        crate::events::TurnState {
+            session_id: session_id.clone(),
+            turn_id,
+            running: false,
+            started_at_ms,
+            model,
+        },
+    );
     drop(sleep_guard);
     result
 }

@@ -1,74 +1,11 @@
 //! One chat turn: tool assembly, the agent loop and the `chat_completion`
-//! command.
+//! command. The engine runs on the [`crate::turn::LlmTurn`] base — identity,
+//! config, cancellation, progress, injections, budget and the private MCP
+//! pool all come from it; turn-scoped emission is `turn.emit_*`.
 
 use super::*;
 
 // ─── Chat command ─────────────────────────────────────────────────────────────
-
-/// Closes the mid-turn injection window when a turn ends — on EVERY path,
-/// including the `?` early return after an upstream error (that path emits
-/// `chat-error` and never reaches `chat-done`).
-///
-/// The window is keyed by turn id, so a turn that is still winding down after
-/// `chat-done` can neither close a newer turn's window nor drop its items.
-pub(crate) struct InjectionWindow {
-    pub(crate) app: AppHandle,
-    pub(crate) turn_id: u64,
-}
-
-impl InjectionWindow {
-    pub(crate) fn open(app: &AppHandle, state: &AppState, session_id: &str) -> Self {
-        Self {
-            app: app.clone(),
-            turn_id: state.open_turn_window(session_id),
-        }
-    }
-}
-
-impl Drop for InjectionWindow {
-    fn drop(&mut self) {
-        if let Some(state) = self.app.try_state::<AppState>() {
-            state.close_turn_window(self.turn_id);
-        }
-    }
-}
-
-/// Emit a `chat-token` notice for one turn.
-///
-/// Every payload carries the turn id the UI minted: a turn the user already
-/// stopped can still be unwinding (a foreground tool returning, a sub-agent
-/// tearing down, a background hold expiring) and must not append its notices
-/// to the transcript of the turn that replaced it.
-fn emit_turn_token(app: &AppHandle, turn_id: &str, text: String) {
-    let _ = app.emit(
-        crate::events::CHAT_TOKEN,
-        crate::events::ChatToken {
-            turn_id: Some(turn_id.to_string()),
-            text,
-        },
-    );
-}
-
-/// Emit `chat-done` for one turn. See [`emit_turn_token`].
-fn emit_turn_done(app: &AppHandle, turn_id: &str) {
-    let _ = app.emit(
-        crate::events::CHAT_DONE,
-        crate::events::ChatTurn {
-            turn_id: turn_id.to_string(),
-        },
-    );
-}
-
-/// Emit `chat-error` for one turn. See [`emit_turn_token`].
-fn emit_turn_error(app: &AppHandle, turn_id: &str, error: &str) {
-    let _ = app.emit(
-        crate::events::CHAT_ERROR,
-        crate::events::ChatError {
-            turn_id: Some(turn_id.to_string()),
-            error: error.to_string(),
-        },
-    );
-}
 
 /// Same as [`log_event`], for helpers that hold `&AppState` instead of the
 /// Tauri `State` wrapper.
@@ -806,6 +743,10 @@ pub(crate) async fn build_turn_tools(
     has_skills: bool,
     evolution_root: Option<&Path>,
     enabled_agents: &[agents::SubAgent],
+    // The turn base's private MCP pool: stdio servers are spawned into it, so
+    // two concurrent turns never share a server process.
+    mcp_pool: &tokio::sync::Mutex<crate::mcp::McpSession>,
+    mcp_owner: &str,
 ) -> (
     Vec<Value>,
     std::collections::HashMap<String, (mcp::McpServer, String)>,
@@ -840,7 +781,11 @@ pub(crate) async fn build_turn_tools(
         let mcp_tools_start = tools_list.len();
 
         for server in enabled_servers.iter() {
-            match mcp::get_server_tools(&state, server).await {
+            let listed = {
+                let mut pool = mcp_pool.lock().await;
+                mcp::get_server_tools_in(state, &mut pool, server, mcp_owner).await
+            };
+            match listed {
                 Ok(server_tools) => {
                     for tool in server_tools {
                         // Stable `mcp_<server-hash>_<name>` function name and
@@ -1191,7 +1136,7 @@ struct ToolRound<'a> {
     loaded_this_turn: &'a mut std::collections::HashSet<String>,
     skill_allowed_commands: &'a mut Vec<String>,
     active_skill_dirs: &'a mut Vec<(String, PathBuf)>,
-    budget: &'a mut turn_guard::TurnBudget,
+    turn: &'a crate::turn::LlmTurn,
     guard: &'a turn_guard::ToolFailureGuard,
     failure_limit: u32,
     memory_tool_called: &'a mut bool,
@@ -1218,12 +1163,13 @@ async fn run_tool_round(round: ToolRound<'_>, sr: &StreamResult, all_messages: &
         loaded_this_turn,
         skill_allowed_commands,
         active_skill_dirs,
-        budget,
+        turn,
         guard,
         failure_limit,
         memory_tool_called,
         budget_stop,
     } = round;
+    let progress = turn.progress_handle();
     let mut pending_skill_context_messages: Vec<Value> = vec![];
     struct PlannedCall {
         id: String,
@@ -1247,7 +1193,7 @@ async fn run_tool_round(round: ToolRound<'_>, sr: &StreamResult, all_messages: &
 
         let blocked = match guard.blocked_notice(&session_id, name, failure_limit) {
             Some(notice) => Some(notice),
-            None => match budget.record_tool_call() {
+            None => match turn.record_tool_call() {
                 Some(stop) => {
                     *budget_stop = Some(stop);
                     Some(turn_guard::budget_notice(name))
@@ -1380,6 +1326,7 @@ async fn run_tool_round(round: ToolRound<'_>, sr: &StreamResult, all_messages: &
                         &enabled_agents,
                         subagents_enabled,
                         &turn_cancelled,
+                        turn,
                     )
                     .await
                 };
@@ -1410,6 +1357,7 @@ async fn run_tool_round(round: ToolRound<'_>, sr: &StreamResult, all_messages: &
                     &enabled_agents,
                     subagents_enabled,
                     &turn_cancelled,
+                    turn,
                 )
             });
             let finished = futures_util::future::join_all(futures).await;
@@ -1432,12 +1380,21 @@ async fn run_tool_round(round: ToolRound<'_>, sr: &StreamResult, all_messages: &
             break;
         };
 
+        let mut settled_ok = call.blocked.is_none();
+        // A sub-agent owns its own task row (`agent-task-*`); a generic
+        // tool row next to it would be a second, empty step. A
+        // background-routed call owns one too — the `background-task-state`
+        // row — so it must not gain a settled "tool" twin.
+        let backgrounded = config.background_tools
+            && background_requested(&call.parsed)
+            && call.name != "call_subagent";
         if call.blocked.is_none() {
             // A cancelled turn's tool results read like failures
             // ("cancelled by the user"), but the tool did nothing wrong:
             // see `turn_guard::counts_as_failure`.
             let failed =
                 turn_guard::counts_as_failure(&result, turn_cancelled.load(Ordering::SeqCst));
+            settled_ok = !failed;
             if let Some(trip) = guard.record(&session_id, &call.name, failed, failure_limit) {
                 result.push_str("\n\n");
                 result.push_str(&turn_guard::disabled_notice(
@@ -1468,11 +1425,24 @@ async fn run_tool_round(round: ToolRound<'_>, sr: &StreamResult, all_messages: &
             // tool row next to it would be a second, empty step. A
             // background-routed call owns one too — the `background-task-state`
             // row — so it must not gain a settled "tool" twin.
-            let backgrounded = config.background_tools
-                && background_requested(&call.parsed)
-                && call.name != "call_subagent";
             if !backgrounded && call.name != "call_subagent" {
                 tools::emit_tool_call_done(&app, Some(&session_id), &call.id, &call.name, !failed);
+            }
+        }
+
+        // Live snapshot row for a webview re-attaching to this turn (see
+        // `crate::turn`). Mirrors the rows the transcript settles from
+        // `tool-call` events; sub-agent / background calls own their own rows
+        // and are skipped here for the same reason as above.
+        if !backgrounded && call.name != "call_subagent" {
+            if let Ok(mut progress) = progress.lock() {
+                progress.tool_calls.push(json!({
+                    "call_id": &call.id,
+                    "name": &call.name,
+                    "args": crate::util::truncate_with_trailing_ellipsis(&call.args, 200),
+                    "ok": settled_ok,
+                    "text": crate::util::truncate_with_trailing_ellipsis(&result, 400),
+                }));
             }
         }
 
@@ -1538,48 +1508,40 @@ pub(crate) fn drop_tool_round(messages: &mut Vec<Value>, focus: Option<usize>) -
     true
 }
 
-/// The whole chat turn: orchestration, the main-agent tool loop, and the
-/// final answer. Extracted from `chat_completion` so the command wrapper can
-/// run turn-end cleanup on every exit path (final answer, upstream error,
-/// or Stop pressed) while holding the shared sleep lock.
+/// The whole chat turn, running on the [`crate::turn::LlmTurn`] base:
+/// orchestration, the main-agent tool loop, and the final answer. Extracted
+/// from `chat_completion` so the command wrapper can run turn-end cleanup on
+/// every exit path (final answer, upstream error, or Stop pressed) while
+/// holding the shared sleep lock.
 pub(crate) async fn run_chat_turn(
     app: AppHandle,
     messages: Vec<ChatMessage>,
     skill_ids: Vec<String>,
-    session_id: String,
     model_override: Option<String>,
     use_agents: Option<bool>,
     // Automatic planning switch, independent of `use_agents`: with it off the
     // main agent answers directly but `call_subagent` stays available.
     auto_plan: Option<bool>,
-    // Id the UI minted for this turn. Every `chat-*` event carries it back, so
-    // the frontend can drop anything a superseded turn still emits.
-    turn_id: String,
-    // Opened by the caller, so turn-end cleanup can tell this turn apart from
-    // a newer one that already took the session over.
-    injection_window: InjectionWindow,
+    // The base this turn runs on: identity, frozen config, cancel flag,
+    // progress snapshot, injection inbox, budget, private MCP pool. Published
+    // by `chat_completion`, which also superseded any previous turn of this
+    // session.
+    turn: Arc<crate::turn::LlmTurn>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    // A fresh cancel flag belongs to this turn. Any previous turn that is still
-    // winding down keeps polling its own flag — which just became permanently
-    // `true` — so it exits instead of resurrecting when this turn runs. Stop
-    // pressed while idle can also never leak into the next turn.
-    let turn_cancelled = {
-        let turn_flag = Arc::new(AtomicBool::new(false));
-        let previous = {
-            let mut slot = state.chat_cancelled.lock().unwrap();
-            std::mem::replace(&mut *slot, turn_flag.clone())
-        };
-        previous.store(true, Ordering::SeqCst);
-        turn_flag
-    };
+    let session_id = turn.session_id.clone();
+    let turn_id = turn.ui_turn_id.clone();
+    // A turn that is still winding down keeps polling its own flag —
+    // permanently `true` once superseded — so it exits instead of resurrecting.
+    let turn_cancelled = turn.cancel_flag();
+    let turn_progress = turn.progress_handle();
 
     // From here on the user may push new information into this turn; the
-    // window is closed (and all undelivered items dropped for the UI to
-    // re-send) by the guard's `Drop`, whatever path the turn takes. It was
-    // opened by the caller (see `chat_completion`).
+    // inbox is closed (and all undelivered items dropped for the UI to
+    // re-send) before the turn announces its end, on every path.
 
-    let config = state.config.lock().unwrap().clone();
+    // The base's configuration: frozen at construction, never re-read live.
+    let config = turn.config.clone();
     let subagents_enabled = use_agents.unwrap_or(false);
     // Two separate switches: the sub-agent system gates `call_subagent`, the
     // planning switch gates the automatic selection + task plan that runs
@@ -1606,6 +1568,7 @@ pub(crate) async fn run_chat_turn(
         let agents_cfg = agents::load_configured_agents(&state.agents_config_path);
         let has_enabled = agents_cfg.agents.iter().any(|a| a.enabled);
         if has_enabled {
+            turn.set_phase("planning");
             match agents::orchestrate(
                 &app,
                 &state,
@@ -1640,8 +1603,8 @@ pub(crate) async fn run_chat_turn(
                 );
                 // Close the injection window before announcing the end of the
                 // turn, so nothing accepted after this point can be stranded.
-                drop(injection_window);
-                emit_turn_done(&app, &turn_id);
+                turn.close_inbox();
+                turn.emit_done();
                 return Ok(());
             }
             log_event(
@@ -1729,6 +1692,8 @@ pub(crate) async fn run_chat_turn(
         !skill_ids.is_empty(),
         skill_evolution_root.as_deref(),
         &enabled_agents,
+        &turn.mcp,
+        &session_id,
     )
     .await;
 
@@ -1757,14 +1722,10 @@ pub(crate) async fn run_chat_turn(
 
     // ── Turn budget & tool failure guard ────────────────────────────────────
     // The loop below is model-driven: it repeats for as long as the reply
-    // carries tool calls. `TurnBudget` bounds that (rounds + tool calls) and
-    // `ToolFailureGuard` disables a tool for the rest of the session after
-    // repeated failures. Both limits come from Settings → Advanced; `0` means
-    // "no limit". See `turn_guard`.
-    let mut budget = turn_guard::TurnBudget::new(
-        config.main_agent_max_rounds,
-        config.main_agent_max_tool_calls,
-    );
+    // carries tool calls. The base's `TurnBudget` bounds that (rounds + tool
+    // calls) and `ToolFailureGuard` disables a tool for the rest of the
+    // session after repeated failures. Both limits come from the base's
+    // frozen config (Settings → Advanced); `0` means "no limit".
     let failure_limit = config
         .tool_failure_limit
         .min(turn_guard::MAX_TOOL_FAILURE_LIMIT);
@@ -1827,6 +1788,8 @@ pub(crate) async fn run_chat_turn(
                 !skill_ids.is_empty(),
                 skill_evolution_root.as_deref(),
                 &enabled_agents,
+                &turn.mcp,
+                &session_id,
             )
             .await;
             tools_list = rebuilt.0;
@@ -1864,7 +1827,7 @@ pub(crate) async fn run_chat_turn(
         // A turn whose last request was the final answer never reaches another
         // boundary — those items stay in the inbox, the window closes with the
         // turn, and the UI sends the text as a normal next-turn message.
-        let injections = state.drain_turn_injections(injection_window.turn_id);
+        let injections = turn.drain_injections();
         if !injections.is_empty() {
             for item in &injections {
                 all_messages.push(json!({
@@ -1905,6 +1868,17 @@ pub(crate) async fn run_chat_turn(
                         .collect(),
                 },
             );
+            // The live snapshot keeps the same deliveries: a re-attaching
+            // webview stores them on the assistant row when the turn settles.
+            if let Ok(mut progress) = turn_progress.lock() {
+                for item in &injections {
+                    progress.injections.push(json!({
+                        "id": item.id,
+                        "text": item.text,
+                        "created_at_ms": item.created_at_ms,
+                    }));
+                }
+            }
         }
 
         // ── Background task results ──────────────────────────────────────────
@@ -1942,6 +1916,16 @@ pub(crate) async fn run_chat_turn(
                     background_results.len()
                 ),
             );
+            if let Ok(mut progress) = turn_progress.lock() {
+                for item in &items {
+                    progress.injections.push(json!({
+                        "id": item.id,
+                        "text": item.text,
+                        "created_at_ms": item.created_at_ms,
+                        "kind": item.kind,
+                    }));
+                }
+            }
             let _ = app.emit(
                 crate::events::CHAT_INJECTED,
                 crate::events::ChatInjected {
@@ -1957,12 +1941,12 @@ pub(crate) async fn run_chat_turn(
         // request goes out with `tool_choice: "none"`, so the model has to
         // answer with what it already collected instead of asking for more.
         if budget_stop.is_none() {
-            budget_stop = budget.begin_round();
+            budget_stop = turn.begin_round();
         }
         if let Some(stop) = budget_stop {
             if !wrap_up {
                 wrap_up = true;
-                let (rounds, tool_calls) = budget.snapshot();
+                let (rounds, tool_calls) = turn.budget_snapshot();
                 let reason = if stop == turn_guard::BudgetStop::ToolCalls {
                     "the tool-call limit was reached"
                 } else {
@@ -2093,6 +2077,7 @@ still missing."
         let started_at = std::time::Instant::now();
         let request_snapshot = req_body.clone();
 
+        turn.set_phase("answering");
         let result = stream_request(
             &app,
             &client,
@@ -2105,6 +2090,7 @@ still missing."
             &request_headers,
             Some(&session_id),
             Some(&turn_id),
+            Some(&turn_progress),
         )
         .await;
 
@@ -2212,6 +2198,19 @@ still missing."
             }
         };
 
+        // Turn-scoped usage totals for the live snapshot (the footer the
+        // frontend sums from `chat-usage`); a re-attaching webview seeds the
+        // same figures instead of restarting from zero.
+        if let Ok(mut progress) = turn_progress.lock() {
+            progress.usage.requests = progress.usage.requests.saturating_add(1);
+            progress.usage.prompt_tokens += sr.prompt_tokens as u64;
+            progress.usage.completion_tokens += sr.completion_tokens as u64;
+            if let Some(cached) = sr.cached_tokens {
+                progress.usage.cached_tokens += cached as u64;
+                progress.usage.cache_reported = true;
+            }
+        }
+
         let total_tokens = sr.prompt_tokens.saturating_add(sr.completion_tokens);
         let ratio = total_tokens as f32 / effective_max_tokens as f32;
         let mut compressed_this_turn = false;
@@ -2233,12 +2232,8 @@ still missing."
                         session_id, total_tokens, effective_max_tokens, ratio, outcome.covered_messages
                     ),
                 );
-                emit_turn_token(
-                    &app,
-                    &turn_id,
-                    "\n\n[System] Context compressed (older messages summarized) and persisted for next turns.\n\n"
-                        .to_string(),
-                );
+                turn.emit_token("\n\n[System] Context compressed (older messages summarized) and persisted for next turns.\n\n"
+                        .to_string());
                 compressed_this_turn = true;
             }
         }
@@ -2324,13 +2319,9 @@ still missing."
                         }
                     ),
                 }));
-                emit_turn_token(
-                    &app,
-                    &turn_id,
-                    format!(
+                turn.emit_token(format!(
                         "\n\n[System] Output hit the token limit (continuation {length_continues}/{MAX_LENGTH_CONTINUES}) — continuing.\n\n"
-                    ),
-                );
+                    ));
                 log_event(
                     &state,
                     "WARN",
@@ -2342,12 +2333,8 @@ still missing."
                 );
                 continue;
             }
-            emit_turn_token(
-                &app,
-                &turn_id,
-                "\n\n[System] Output hit the token limit again — ending the turn with the truncated answer.\n\n"
-                    .to_string(),
-            );
+            turn.emit_token("\n\n[System] Output hit the token limit again — ending the turn with the truncated answer.\n\n"
+                    .to_string());
             log_event(
                 &state,
                 "WARN",
@@ -2514,7 +2501,7 @@ The plan resumes on the next turn."
                     };
 
                     if let Some(notice) = suspension {
-                        emit_turn_token(&app, &turn_id, format!("\n\n{notice}\n\n"));
+                        turn.emit_token(format!("\n\n{notice}\n\n"));
                         log_event(
                             &state,
                             "INFO",
@@ -2564,13 +2551,9 @@ and update the list (pending → in_progress → completed) as you go. End your 
 only when every item is done, or when you are blocked and need the user.\n\n{wait_hint}"
                             ),
                         }));
-                        emit_turn_token(
-                            &app,
-                            &turn_id,
-                            format!(
-                                "\n\n[System] Todo list still has unfinished items (continuation {goal_nudges}/{GOAL_LOOP_MAX_NUDGES}) — continuing.\n\n"
-                            ),
-                        );
+                        turn.emit_token(format!(
+                            "\n\n[System] Todo list still has unfinished items (continuation {goal_nudges}/{GOAL_LOOP_MAX_NUDGES}) — continuing.\n\n"
+                        ));
                         log_event(
                             &state,
                             "INFO",
@@ -2608,7 +2591,7 @@ only when every item is done, or when you are blocked and need the user.\n\n{wai
                         sr.content.chars().count()
                     ),
                 );
-                emit_turn_error(&app, &turn_id, &err);
+                turn.emit_error(&err);
                 return Err(err);
             }
 
@@ -2647,6 +2630,7 @@ only when every item is done, or when you are blocked and need the user.\n\n{wai
         // Batching changes one thing about the guard: a call that trips the
         // limit no longer stops the calls beside it, because those are already
         // running. The verdict applies from the next round on.
+        turn.set_phase("tools");
         run_tool_round(
             ToolRound {
                 app: &app,
@@ -2663,7 +2647,7 @@ only when every item is done, or when you are blocked and need the user.\n\n{wai
                 loaded_this_turn: &mut loaded_this_turn,
                 skill_allowed_commands: &mut skill_allowed_commands,
                 active_skill_dirs: &mut active_skill_dirs,
-                budget: &mut budget,
+                turn: &turn,
                 guard,
                 failure_limit,
                 memory_tool_called: &mut memory_tool_called,
@@ -2690,8 +2674,8 @@ only when every item is done, or when you are blocked and need the user.\n\n{wai
     );
     // Close the injection window before announcing the end of the turn. The
     // guard also runs on the error path, where `chat-done` is never emitted.
-    drop(injection_window);
-    emit_turn_done(&app, &turn_id);
+    turn.close_inbox();
+    turn.emit_done();
     Ok(())
 }
 
@@ -2779,27 +2763,21 @@ fn load_skill_for_call(
     )
 }
 
-/// Turn-end cleanup: stop every serve process and verify that the killed
-/// trees are actually gone. Runs in a blocking thread — verification polls
-/// for up to a few seconds in the pathological case, which must not stall the
-/// async runtime. Silent when no serve process ever existed.
-pub(crate) async fn end_turn_cleanup(app: &AppHandle, session_id: &str, turn_id: u64) {
+/// Turn-end cleanup for one [`crate::turn::LlmTurn`] base: stop this session's
+/// serve processes (verifying the killed trees are gone), shut down its
+/// background tasks and kill its private MCP pool. Serve verification runs in
+/// a blocking thread — it polls for up to a few seconds in the pathological
+/// case, which must not stall the async runtime. Silent when nothing existed.
+pub(crate) async fn end_turn_cleanup(app: &AppHandle, turn: &crate::turn::LlmTurn) {
+    let session_id = turn.session_id.as_str();
+    let turn_id = turn.turn_id;
     // The user may press Stop and send the next message before this turn has
     // finished unwinding. That newer turn owns the session by then, and its
     // background tasks and waiting chip belong to it — tearing them down here
     // killed exactly the work the user had just asked for. The newer turn runs
-    // this cleanup of its own when it ends.
-    let superseded = app
-        .state::<AppState>()
-        .active_turn
-        .lock()
-        .ok()
-        .and_then(|active| {
-            active
-                .as_ref()
-                .map(|(id, session)| *id > turn_id && session == session_id)
-        })
-        .unwrap_or(false);
+    // this cleanup of its own when it ends. Turns of OTHER sessions are never
+    // a reason to skip: their state is keyed by their own session id.
+    let superseded = app.state::<AppState>().turns.superseded(session_id, turn_id);
     if superseded {
         log_event(
             &app.state::<AppState>(),
@@ -2851,9 +2829,16 @@ pub(crate) async fn end_turn_cleanup(app: &AppHandle, session_id: &str, turn_id:
     }
 
     let session_id = session_id.to_string();
+    // Only THIS session's serve processes: another conversation may still be
+    // running and its servers belong to its own turn.
     let summary = tauri::async_runtime::spawn_blocking({
         let app = app.clone();
-        move || app.state::<AppState>().serve_processes.shutdown_all()
+        let session_id = session_id.clone();
+        move || {
+            app.state::<AppState>()
+                .serve_processes
+                .shutdown_session(&session_id)
+        }
     })
     .await
     .unwrap_or_else(|err| format!("Error: serve cleanup task failed: {err}"));
@@ -2865,4 +2850,8 @@ pub(crate) async fn end_turn_cleanup(app: &AppHandle, session_id: &str, turn_id:
             format!("turn ended (session {session_id}): {summary}"),
         );
     }
+
+    // The base's private MCP pool: this turn's server processes die with it.
+    // `McpSession::Drop` remains the safety net for unwind paths.
+    turn.shutdown_mcp(&app.state::<AppState>()).await;
 }

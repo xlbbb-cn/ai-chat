@@ -554,6 +554,7 @@ impl ContextCompressor<'_> {
                 usage_max_tokens: None,
                 ds_format: self.ds_format,
                 headers: self.headers,
+                progress: None,
             },
         )
         .await;

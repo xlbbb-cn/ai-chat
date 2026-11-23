@@ -366,6 +366,7 @@ async fn run_activation(
                 usage_max_tokens: None,
                 ds_format: config.ds_format_for(model),
                 headers,
+                progress: None,
                 emit_tokens: false,
                 emit_errors: false,
             },

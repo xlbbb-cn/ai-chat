@@ -64,7 +64,7 @@ pub(crate) async fn load_enabled_mcp_tools(
         .collect();
 
     for server in enabled_servers {
-        match mcp::get_server_tools_for_agent(&state, session, &server, owner).await {
+        match mcp::get_server_tools_in(&state, session, &server, owner).await {
             Ok(server_tools) => {
                 for tool in server_tools {
                     if let Some((fn_name, actual_name, openai_tool)) =
@@ -917,6 +917,7 @@ pub(crate) async fn run_llm_agent_body(
                 usage_max_tokens: None,
                 ds_format: config.ds_format_for(model),
                 headers: &headers,
+                progress: None,
             },
         )
         .await
@@ -1256,7 +1257,7 @@ pub(crate) async fn run_llm_agent_body(
                                 let arguments: Value =
                                     serde_json::from_str(&call.args).unwrap_or_else(|_| json!({}));
                                 let owner = format!("agent:{}", agent.name);
-                                match mcp::invoke_mcp_tool_for_agent(
+                                match mcp::invoke_mcp_tool_in(
                                     &state,
                                     mcp_session,
                                     mcp_server,

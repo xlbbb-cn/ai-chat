@@ -449,6 +449,15 @@ pub(crate) fn delete_history(
     session_id: String,
     state: tauri::State<'_, crate::AppState>,
 ) -> Result<(), String> {
+    // A running turn still writes this session's rows (and owns its
+    // deliverables directory); deleting underneath it would race the
+    // persistence and pull the ground out from under its tools.
+    if state.turns.is_active(&session_id) {
+        return Err(
+            "This conversation is still running. Stop it (or wait for it to finish) before deleting it."
+                .to_string(),
+        );
+    }
     {
         let db = state.db.lock().unwrap();
         db.execute(

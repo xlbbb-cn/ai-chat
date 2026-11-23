@@ -45,6 +45,9 @@ pub(crate) async fn run_tool_call(
     enabled_agents: &[agents::SubAgent],
     subagents_enabled: bool,
     turn_cancelled: &Arc<AtomicBool>,
+    // The turn base: MCP calls go through its PRIVATE stdio pool, never the
+    // shared panel pool or another turn's processes.
+    turn: &crate::turn::LlmTurn,
 ) -> String {
     let ToolCall {
         id,
@@ -166,8 +169,18 @@ pub(crate) async fn run_tool_call(
             ),
         );
         let start_time = std::time::Instant::now();
-        let mcp_result = mcp::invoke_mcp_tool(state, mcp_server, actual_tool_name, args_json.clone())
-            .await;
+        let mcp_result = {
+            let mut pool = turn.mcp.lock().await;
+            mcp::invoke_mcp_tool_in(
+                state,
+                &mut pool,
+                mcp_server,
+                actual_tool_name,
+                args_json.clone(),
+                session_id,
+            )
+            .await
+        };
         let duration_ms = start_time.elapsed().as_millis() as i64;
         return match &mcp_result {
             Ok(result) => {
