@@ -130,7 +130,7 @@ impl FileLockRegistry {
         // Collect the locks in sorted order. Holding the map lock only while
         // looking up / inserting keeps contention off the actions; the Arcs
         // outlive their guards, so the guards can be held across the action.
-        let mut pending: Vec<Arc<tokio::sync::Mutex<()>>> = {
+        let pending: Vec<Arc<tokio::sync::Mutex<()>>> = {
             let mut map = self
                 .locks
                 .lock()
