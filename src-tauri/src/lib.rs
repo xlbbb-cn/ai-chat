@@ -998,6 +998,11 @@ pub struct AppState {
     /// Long-lived background children started by `run_shell run_type="serve"`.
     /// Killed on demand by the tool and automatically at app exit.
     pub serve_processes: tools::serve::ServeRegistry,
+    /// Cross-conversation file race protection for `file_actions`: per-path
+    /// write locks plus stale-write detection (another conversation modified
+    /// a file after this session last read it → the write is refused with a
+    /// re-read instruction). In-memory, cleared on restart.
+    pub file_locks: tools::file_locks::FileLockRegistry,
     /// Turn-scoped background tool tasks (`run_in_background: true`). Their
     /// finished results are injected into the conversation at the next request
     /// boundary; the whole session is torn down when the turn ends.
@@ -2060,6 +2065,7 @@ pub fn run() {
                 mcp_children: std::sync::Arc::new(tokio::sync::Mutex::new(Default::default())),
                 mcp_revision: AtomicU64::new(1),
                 serve_processes: Default::default(),
+                file_locks: Default::default(),
                 background_tasks: Default::default(),
                 session_memories: Mutex::new(Default::default()),
                 tool_guard: Default::default(),

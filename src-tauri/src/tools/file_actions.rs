@@ -7,6 +7,7 @@ use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use tauri::AppHandle;
+use tauri::Manager;
 
 use super::emit_tool_progress;
 use super::patch::apply_unified_patch;
@@ -47,6 +48,11 @@ pub(super) async fn handle_file_actions(
     // a permission — the writable root stays mode-dependent.
     let skills_root = crate::workspace::skills_root(workspace_dir);
     let backup_root = Some(skills_root.as_path());
+    // Cross-conversation race protection: per-path write locks plus
+    // stale-write detection. `session_id` scopes the staleness verdict, so
+    // two sessions editing the same file are serialised and the second one
+    // is told to re-read instead of silently overwriting.
+    let locks = &app.state::<crate::AppState>().file_locks;
     match action {
         "read" => {
             let _ = emit_tool_progress(app, mission_id, session_id, call_id, format!("*Reading {}*\n\n", path_str));
@@ -63,6 +69,9 @@ pub(super) async fn handle_file_actions(
                         }
                         _ => {}
                     }
+                    // The session has now seen the file's current content;
+                    // later writes compare against this stamp.
+                    locks.record_read(session_id, &p);
 
                     if start_line.is_none() && end_line.is_none() {
                         return match fs::read_to_string(&p) {
@@ -139,32 +148,44 @@ pub(super) async fn handle_file_actions(
                     ) {
                         return format_file_action_error(e);
                     }
-                    let backup = match backup_protected_path(&p, backup_root) {
-                        Ok(backup) => backup,
-                        Err(e) => return format!("Error: {}", e),
-                    };
-                    if let Some(parent) = p.parent() {
-                        if let Err(e) = fs::create_dir_all(parent) {
-                            return format!(
-                                "Error creating parent directory '{}': {}",
-                                parent.display(),
-                                e
-                            );
-                        }
-                    }
-                    match fs::write(&p, content_str) {
-                        Ok(_) => {
-                            if let Some(backup) = backup {
-                                format!(
-                                    "Successfully backed up to {} and wrote to {}",
-                                    backup.display(),
-                                    path_str
-                                )
-                            } else {
-                                format!("Successfully wrote to {}", path_str)
+                    // Backup + write run inside the path lock: two
+                    // conversations writing the same file are serialised, and
+                    // the second one is refused unless it re-read the file
+                    // after the first one's change.
+                    match locks
+                        .with_write_guard(session_id, std::slice::from_ref(&p), || {
+                            let backup = match backup_protected_path(&p, backup_root) {
+                                Ok(backup) => backup,
+                                Err(e) => return format!("Error: {}", e),
+                            };
+                            if let Some(parent) = p.parent() {
+                                if let Err(e) = fs::create_dir_all(parent) {
+                                    return format!(
+                                        "Error creating parent directory '{}': {}",
+                                        parent.display(),
+                                        e
+                                    );
+                                }
                             }
-                        }
-                        Err(e) => format!("Error writing file: {}", e),
+                            match fs::write(&p, content_str) {
+                                Ok(_) => {
+                                    if let Some(backup) = backup {
+                                        format!(
+                                            "Successfully backed up to {} and wrote to {}",
+                                            backup.display(),
+                                            path_str
+                                        )
+                                    } else {
+                                        format!("Successfully wrote to {}", path_str)
+                                    }
+                                }
+                                Err(e) => format!("Error writing file: {}", e),
+                            }
+                        })
+                        .await
+                    {
+                        Ok(result) => result,
+                        Err(reason) => reason,
                     }
                 }
                 Err(e) => format_file_action_error(e),
@@ -312,43 +333,62 @@ pub(super) async fn handle_file_actions(
                             ) {
                                 return format_file_action_error(e);
                             }
-                            let backup = match backup_protected_path(&src, backup_root) {
-                                Ok(backup) => backup,
-                                Err(e) => return format!("Error: {}", e),
-                            };
-                            // If the destination already exists and is a
-                            // protected file, back it up before overwriting.
-                            let dst_backup =
-                                match backup_protected_path(&dst, backup_root) {
-                                    Ok(backup) => backup,
-                                    Err(e) => return format!("Error: {}", e),
-                                };
-                            if let Some(parent) = dst.parent() {
-                                if let Err(e) = fs::create_dir_all(parent) {
-                                    return format!("Error creating destination directory: {}", e);
-                                }
-                            }
-                            match move_path(&src, &dst) {
-                                Ok(_) => {
-                                    let backup_note = match (backup, dst_backup) {
-                                        (Some(b), _) => {
-                                            format!(" (source backed up to {})", b.display())
-                                        }
-                                        (None, Some(b)) => format!(
-                                            " (destination backed up to {})",
-                                            b.display()
-                                        ),
-                                        (None, None) => String::new(),
+                            // Both paths are locked together (sorted order in
+                            // the guard, so opposite-direction moves cannot
+                            // deadlock); the move is refused when another
+                            // conversation changed either path since this
+                            // session last read it.
+                            match locks
+                                .with_write_guard(session_id, &[src.clone(), dst.clone()], || {
+                                    let backup = match backup_protected_path(&src, backup_root) {
+                                        Ok(backup) => backup,
+                                        Err(e) => return format!("Error: {}", e),
                                     };
-                                    format!(
-                                        "Successfully moved {} to {}{}",
-                                        path_str, new_path, backup_note
-                                    )
+                                    // If the destination already exists and is a
+                                    // protected file, back it up before overwriting.
+                                    let dst_backup =
+                                        match backup_protected_path(&dst, backup_root) {
+                                            Ok(backup) => backup,
+                                            Err(e) => return format!("Error: {}", e),
+                                        };
+                                    if let Some(parent) = dst.parent() {
+                                        if let Err(e) = fs::create_dir_all(parent) {
+                                            return format!("Error creating destination directory: {}", e);
+                                        }
+                                    }
+                                    match move_path(&src, &dst) {
+                                        Ok(_) => {
+                                            let backup_note = match (backup, dst_backup) {
+                                                (Some(b), _) => {
+                                                    format!(" (source backed up to {})", b.display())
+                                                }
+                                                (None, Some(b)) => format!(
+                                                    " (destination backed up to {})",
+                                                    b.display()
+                                                ),
+                                                (None, None) => String::new(),
+                                            };
+                                            format!(
+                                                "Successfully moved {} to {}{}",
+                                                path_str, new_path, backup_note
+                                            )
+                                        }
+                                        Err(e) => format!(
+                                            "Error moving {} to {}: {}",
+                                            path_str, new_path, e
+                                        ),
+                                    }
+                                })
+                                .await
+                            {
+                                Ok(result) => {
+                                    // The source no longer exists: its history
+                                    // is gone, so a recreated file starts clean
+                                    // (the destination's record is the fresh one).
+                                    locks.forget(&src);
+                                    result
                                 }
-                                Err(e) => format!(
-                                    "Error moving {} to {}: {}",
-                                    path_str, new_path, e
-                                ),
+                                Err(reason) => reason,
                             }
                         }
                         Err(e) => format_file_action_error(e),
@@ -384,45 +424,56 @@ pub(super) async fn handle_file_actions(
                     ) {
                         return format_file_action_error(e);
                     }
-                    let backup = match backup_protected_path(&p, backup_root) {
-                        Ok(backup) => backup,
-                        Err(e) => return format!("Error: {}", e),
-                    };
-                    match fs::read_to_string(&p) {
-                        Ok(original) => match apply_unified_patch(&original, &patch_str) {
-                            Ok((patched, notes)) => match fs::write(&p, &patched) {
-                                Ok(_) => {
-                                    let notes = if notes.is_empty() {
-                                        String::new()
-                                    } else {
-                                        format!(
-                                            "\n\nPatch notes:\n{}",
-                                            notes
-                                                .iter()
-                                                .map(|note| format!("- {note}"))
-                                                .collect::<Vec<_>>()
-                                                .join("\n")
-                                        )
-                                    };
-                                    if let Some(backup) = backup {
-                                        format!(
-                                            "Successfully backed up to {} and patched {}{}",
-                                            backup.display(),
-                                            path_str,
-                                            notes
-                                        )
-                                    } else {
-                                        format!("Successfully patched {}{}", path_str, notes)
-                                    }
-                                }
-                                Err(e) => format!("Error writing patched file: {}", e),
-                            },
-                            Err(report) => format!(
-                                "Error: applying patch to {}:\n{}",
-                                path_str, report
-                            ),
-                        },
-                        Err(e) => format!("Error reading file: {}", e),
+                    // Backup + apply run inside the path lock: the patch is
+                    // refused when another conversation changed the file
+                    // after this session last read it.
+                    match locks
+                        .with_write_guard(session_id, std::slice::from_ref(&p), || {
+                            let backup = match backup_protected_path(&p, backup_root) {
+                                Ok(backup) => backup,
+                                Err(e) => return format!("Error: {}", e),
+                            };
+                            match fs::read_to_string(&p) {
+                                Ok(original) => match apply_unified_patch(&original, &patch_str) {
+                                    Ok((patched, notes)) => match fs::write(&p, &patched) {
+                                        Ok(_) => {
+                                            let notes = if notes.is_empty() {
+                                                String::new()
+                                            } else {
+                                                format!(
+                                                    "\n\nPatch notes:\n{}",
+                                                    notes
+                                                        .iter()
+                                                        .map(|note| format!("- {note}"))
+                                                        .collect::<Vec<_>>()
+                                                        .join("\n")
+                                                )
+                                            };
+                                            if let Some(backup) = backup {
+                                                format!(
+                                                    "Successfully backed up to {} and patched {}{}",
+                                                    backup.display(),
+                                                    path_str,
+                                                    notes
+                                                )
+                                            } else {
+                                                format!("Successfully patched {}{}", path_str, notes)
+                                            }
+                                        }
+                                        Err(e) => format!("Error writing patched file: {}", e),
+                                    },
+                                    Err(report) => format!(
+                                        "Error: applying patch to {}:\n{}",
+                                        path_str, report
+                                    ),
+                                },
+                                Err(e) => format!("Error reading file: {}", e),
+                            }
+                        })
+                        .await
+                    {
+                        Ok(result) => result,
+                        Err(reason) => reason,
                     }
                 }
                 Err(e) => format_file_action_error(e),
@@ -525,30 +576,43 @@ pub(super) async fn handle_file_actions(
                     ) {
                         return format_file_action_error(e);
                     }
-                    let backup = match backup_protected_path(&p, backup_root) {
-                        Ok(backup) => backup,
-                        Err(e) => return format!("Error: {}", e),
-                    };
-                    if p.is_dir() {
-                        match fs::remove_dir_all(&p) {
-                            Ok(_) => format!("Successfully deleted directory {}", path_str),
-                            Err(e) => format!("Error deleting directory: {}", e),
-                        }
-                    } else {
-                        match fs::remove_file(&p) {
-                            Ok(_) => {
-                                if let Some(backup) = backup {
-                                    format!(
-                                        "Successfully backed up to {} and deleted file {}",
-                                        backup.display(),
-                                        path_str
-                                    )
-                                } else {
-                                    format!("Successfully deleted file {}", path_str)
+                    match locks
+                        .with_write_guard(session_id, std::slice::from_ref(&p), || {
+                            let backup = match backup_protected_path(&p, backup_root) {
+                                Ok(backup) => backup,
+                                Err(e) => return format!("Error: {}", e),
+                            };
+                            if p.is_dir() {
+                                match fs::remove_dir_all(&p) {
+                                    Ok(_) => format!("Successfully deleted directory {}", path_str),
+                                    Err(e) => format!("Error deleting directory: {}", e),
+                                }
+                            } else {
+                                match fs::remove_file(&p) {
+                                    Ok(_) => {
+                                        if let Some(backup) = backup {
+                                            format!(
+                                                "Successfully backed up to {} and deleted file {}",
+                                                backup.display(),
+                                                path_str
+                                            )
+                                        } else {
+                                            format!("Successfully deleted file {}", path_str)
+                                        }
+                                    }
+                                    Err(e) => format!("Error deleting file: {}", e),
                                 }
                             }
-                            Err(e) => format!("Error deleting file: {}", e),
+                        })
+                        .await
+                    {
+                        Ok(result) => {
+                            // The path no longer exists: its write history is
+                            // gone, so a recreated file starts clean.
+                            locks.forget(&p);
+                            result
                         }
+                        Err(reason) => reason,
                     }
                 }
                 Err(e) => format_file_action_error(e),
