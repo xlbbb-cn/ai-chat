@@ -572,7 +572,9 @@ fn skill_md_mtime(skill_file: &Path) -> Option<String> {
 /// Skills panel toggles and the chat deliverable (`use_skill`,
 /// `filter_existing_skills`) resolves — not by the folder name, which may
 /// differ (zip downloads, renamed folders). A skill file that fails to parse
-/// falls back to the folder name so its metadata is still tracked.
+/// falls back to the folder name so its metadata is still tracked; once it
+/// parses, that fallback entry is folded into the declared name (enablement is
+/// carried over, nothing is dropped) instead of lingering as a second identity.
 fn refresh_skill_status(status: &mut SkillsStatus, skills_root: &Path) -> bool {
     let mut changed = false;
     let observed_at = now_rfc3339();
@@ -584,8 +586,43 @@ fn refresh_skill_status(status: &mut SkillsStatus, skills_root: &Path) -> bool {
             .and_then(|content| parse_skill_md(&content).ok())
             .map(|skill| skill.name)
             .filter(|name| !name.trim().is_empty())
-            .unwrap_or(folder);
+            .unwrap_or_else(|| folder.clone());
         let name = name.trim().to_string();
+
+        // A folder first scanned while its skill file did not parse left an
+        // entry under the folder name. Once the file parses that entry is a
+        // second identity for the same skill: the panel only lists frontmatter
+        // names, so it is invisible there while `filter_existing_skills` still
+        // counts it — a badge no switch in the panel can clear. Fold it into
+        // the declared name (keeping the selection) and drop the stale key.
+        if name != folder {
+            if let Some(legacy) = status.skills.remove(&folder) {
+                let entry = status
+                    .skills
+                    .entry(name.clone())
+                    .or_insert_with(|| SkillStatusEntry {
+                        enabled: false,
+                        source: SKILL_SOURCE_SELF_EVOLUTION.to_string(),
+                        enabled_at: None,
+                        updated_at: Some(observed_at.clone()),
+                        last_seen_at: Some(observed_at.clone()),
+                        file_mtime: mtime.clone(),
+                    });
+                if legacy.enabled && !entry.enabled {
+                    entry.enabled = true;
+                    entry.enabled_at = legacy
+                        .enabled_at
+                        .clone()
+                        .or_else(|| Some(observed_at.clone()));
+                    entry.updated_at = Some(observed_at.clone());
+                }
+                if entry.enabled_at.is_none() {
+                    entry.enabled_at = legacy.enabled_at;
+                }
+                changed = true;
+            }
+        }
+
         match status.skills.get_mut(&name) {
             Some(entry) => {
                 if entry.file_mtime != mtime {
@@ -873,9 +910,21 @@ pub(crate) fn delete_skill(state: State<'_, AppState>, name: String) -> Result<(
 /// Read-only helper for the UI: the persisted selection keeps names whose
 /// folder has gone missing, and this decides which of them can actually be
 /// sent to the model right now. Resolution mirrors the chat runtime
-/// (`resolve_skill_by_name`), so the returned names always load. It never
+/// (`resolve_skill_by_name`), so the returned names always load. A name must
+/// also *be* the skill it resolves to: `resolve_skill_by_name` accepts a folder
+/// name as an alias (zip imports), but an alias is not an identity the panel
+/// can toggle, so counting one leaves a badge the user cannot clear. It never
 /// writes, so a temporarily absent skill is never dropped from the status
 /// file.
+fn resolves_to_name(skills_dir: &Path, name: &str) -> bool {
+    let Ok(resolved) = resolve_skill_by_name(skills_dir, name) else {
+        return false;
+    };
+    let declared = resolved.skill.name.trim();
+    // A skill without a frontmatter name is identified by its folder.
+    declared.is_empty() || declared.eq_ignore_ascii_case(name.trim())
+}
+
 pub(crate) fn filter_existing_skills(state: State<'_, AppState>, names: Vec<String>) -> Vec<String> {
     if names.is_empty() {
         return names;
@@ -886,7 +935,7 @@ pub(crate) fn filter_existing_skills(state: State<'_, AppState>, names: Vec<Stri
 
     names
         .into_iter()
-        .filter(|name| resolve_skill_by_name(&skills_root, name).is_ok())
+        .filter(|name| resolves_to_name(&skills_root, name))
         .collect()
 }
 
@@ -984,6 +1033,61 @@ mod tests {
 
         // No second entry under the folder name is created for the same skill.
         assert!(!status.skills.contains_key("gracker-writing-main"));
+    }
+
+    /// A folder first scanned while its skill file did not parse left a status
+    /// entry under the folder name. Once the file parses, that entry must be
+    /// folded into the frontmatter name: the panel only lists frontmatter
+    /// names, so the leftover made the skills badge show a count that no
+    /// switch in the panel could clear.
+    #[test]
+    fn refresh_folds_legacy_folder_entry_into_declared_name() {
+        let root = TempSkillsRoot::new("legacy-folder-key");
+        write_skill(
+            &root.0,
+            "windows-shell-gotchas",
+            "windows-environment",
+            "skill.md",
+        );
+
+        let mut status = SkillsStatus::default();
+        status.skills.insert(
+            "windows-shell-gotchas".to_string(),
+            SkillStatusEntry {
+                enabled: true,
+                source: SKILL_SOURCE_SELF_EVOLUTION.to_string(),
+                enabled_at: Some("2026-11-22T12:01:02Z".to_string()),
+                ..SkillStatusEntry::default()
+            },
+        );
+
+        refresh_skill_status(&mut status, &root.0);
+
+        assert!(
+            !status.skills.contains_key("windows-shell-gotchas"),
+            "the folder-keyed legacy entry must be gone"
+        );
+        let entry = status
+            .skills
+            .get("windows-environment")
+            .expect("declared entry");
+        assert!(entry.enabled, "enablement must survive the migration");
+        assert!(entry.enabled_at.is_some());
+        assert!(entry.file_mtime.is_some(), "mtime must be refreshed");
+    }
+
+    /// The folder alias still resolves for an explicit `use_skill` call, but it
+    /// is not a status identity: only names the panel can show are counted.
+    #[test]
+    fn filter_identity_rejects_folder_alias_of_another_name() {
+        let root = TempSkillsRoot::new("identity");
+        write_skill(&root.0, "gracker-writing-main", "gracker-writing", "SKILL.md");
+        write_skill(&root.0, "code-reviewer", "code-reviewer", "skill.md");
+
+        assert!(resolves_to_name(&root.0, "gracker-writing"));
+        assert!(!resolves_to_name(&root.0, "gracker-writing-main"));
+        assert!(resolves_to_name(&root.0, "code-reviewer"));
+        assert!(!resolves_to_name(&root.0, "missing"));
     }
 
     /// Workspace skills written by the app itself keep resolving exactly as
