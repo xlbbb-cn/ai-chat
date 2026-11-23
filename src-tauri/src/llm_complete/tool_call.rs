@@ -125,6 +125,19 @@ pub(crate) async fn run_tool_call(
         return call_subagent(app, config, session_id, workspace_dir, parsed, enabled_agents, subagents_enabled, skill_evolution_root, turn_cancelled).await;
     }
 
+    // ── Explicit sub-agent creation (self-evolution) ────────────────────────
+    // The tool is only advertised to the main chat (the sub-agent helper never
+    // adds it), but the dispatcher refuses it anyway so a crafted call from a
+    // sub-agent mission cannot mutate the roster.
+    if name == "agent_admin" {
+        if !subagents_enabled || !config.self_evolution_mode {
+            return "Error: `agent_admin` is only available while the sub-agent system and \
+                    self-evolution mode are both enabled."
+                .to_string();
+        }
+        return tools::agent_admin::handle(app, state, Some(id), parsed).await;
+    }
+
     // ── MCP tool ────────────────────────────────────────────────────────────
     if let Some((mcp_server, actual_tool_name)) = mcp_tool_map.get(name) {
         let mut args_json = parsed.clone();

@@ -245,6 +245,24 @@ fn build_prompt_bundle(
                  `apply` with the full `skill_md` and the same `keys`. Never delete entries by hand.",
             );
         }
+
+        // ── Manuals pointer (self-evolution) ────────────────────────────────
+        // Creation references (skill / MCP server, plus explicit sub-agent
+        // creation when the roster is reachable) are announced, not injected:
+        // the pointer block lists the workspace files and the model reads one
+        // right before performing the action (`manuals.rs`).
+        let mut manuals = vec![
+            crate::manuals::Manual::CreateSkill,
+            crate::manuals::Manual::CreateMcpServer,
+        ];
+        if subagents_enabled {
+            manuals.push(crate::manuals::Manual::CreateSubagent);
+        }
+        let manuals_pointer = crate::manuals::pointer_for(&workspace_dir_for_roots, &manuals);
+        if !manuals_pointer.is_empty() {
+            system_content.push_str("\n\n");
+            system_content.push_str(&manuals_pointer);
+        }
     }
 
     // ── Workspace script library ────────────────────────────────────────────
@@ -270,7 +288,18 @@ fn build_prompt_bundle(
     // (Settings → Advanced, on by default) picks the hand-drawn SVG path; with
     // it off the model writes Mermaid instead. Static text either way, so it
     // stays a stable prefix.
-    let figures_context = crate::figures::prompt_block_for(config.enhanced_figures);
+    // Enhanced mode follows the manuals design (`manuals.rs`): the system
+    // prompt only announces the draw-syntax manual; the model reads
+    // `.data/manuals/enhanced-figures.md` before its first figure. Plain
+    // Mermaid mode keeps its short inline block — it needs no manual.
+    let figures_context = if config.enhanced_figures {
+        crate::manuals::pointer_for(
+            &workspace_dir_for_roots,
+            &[crate::manuals::Manual::EnhancedFigures],
+        )
+    } else {
+        crate::figures::mermaid_prompt_block()
+    };
     if !figures_context.is_empty() {
         if !system_content.is_empty() {
             system_content.push_str("\n\n");
@@ -896,6 +925,15 @@ pub(crate) async fn build_turn_tools(
             });
         }
         tools_list.push(subagent_tool);
+    }
+
+    // ── Explicit sub-agent creation ─────────────────────────────────────────
+    // Only while sub-agents are reachable AND self-evolution mode is on: the
+    // main agent may create roster entries itself (manual-pointer injection —
+    // see `manuals.rs` / the recorded design note). Never advertised to a
+    // sub-agent: the sub-agent helper builds its list from `get_all_tools`.
+    if !enabled_agents.is_empty() && config.self_evolution_mode {
+        tools_list.push(tools::agent_admin::definition());
     }
 
     (tools_list, mcp_tool_map, state.mcp_revision())

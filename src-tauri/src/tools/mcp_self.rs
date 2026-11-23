@@ -729,7 +729,11 @@ fn unique_rel_dir(workspace_dir: &Path, name: &str) -> String {
 /// second `write` then created a second folder and `remove` left the first one
 /// behind.
 fn parent_dir(definition_path: &str) -> Option<String> {
-    let normalized = super::paths::normalize_input_path(definition_path);
+    // Legacy roster entries (and hand-edited YAML) may carry `\` separators.
+    // Windows folds them to `/` inside `normalize_input_path`; everywhere else
+    // the fold happens here, because a roster `definition_path` is a
+    // tool-internal spelling where `\` never means "part of a file name".
+    let normalized = super::paths::normalize_input_path(&definition_path.replace('\\', "/"));
     let slash = normalized.rfind('/')?;
     let dir = normalized[..slash].trim_end_matches('/');
     if dir.is_empty() {

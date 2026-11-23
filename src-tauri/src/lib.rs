@@ -30,12 +30,14 @@ mod ipc;
 mod llm_client;
 mod llm_complete;
 mod logger;
+mod manuals;
 // `src/utils/` is a plain folder holding standalone crates (workspace members
 // `pdf2md-rs` and `knowledge-graph`), not a module: nothing here declares it.
 pub mod mcp;
 pub mod model_metadata;
 mod notify;
 mod pdf_mentions;
+mod prompt;
 mod process_guard;
 mod skills;
 mod system_locale;

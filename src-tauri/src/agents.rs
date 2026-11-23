@@ -423,7 +423,12 @@ pub(crate) fn refresh_agent_index(state: State<'_, AppState>) -> Result<Vec<SubA
 }
 
 pub(crate) fn save_sub_agent(state: State<'_, AppState>, agent: SubAgent) -> Result<SubAgent, String> {
-    let path = state.agents_config_path.clone();
+    save_sub_agent_core(&state.agents_config_path, agent)
+}
+
+/// The roster-writing core behind [`save_sub_agent`], shared with the main
+/// agent's `agent_admin` tool (self-evolution explicit creation).
+pub(crate) fn save_sub_agent_core(path: &Path, agent: SubAgent) -> Result<SubAgent, String> {
     let mut config = load_agents_config(&path);
     let mut a = agent;
     if a.name.trim().is_empty() {
@@ -554,13 +559,17 @@ pub(crate) fn save_sub_agent(state: State<'_, AppState>, agent: SubAgent) -> Res
 }
 
 pub(crate) fn delete_sub_agent(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    let path = state.agents_config_path.clone();
+    delete_sub_agent_core(&state.agents_config_path, &id)
+}
+
+/// The roster-deleting core behind [`delete_sub_agent`], shared with the main
+/// agent's `agent_admin` tool.
+pub(crate) fn delete_sub_agent_core(path: &Path, id: &str) -> Result<(), String> {
     // Resolve first: a discovered (virtual) custom agent has no config entry
     // but still owns a file the user may want to remove. The panel list includes
     // index.yaml entries, so the same merged view is used here.
-    let resolved = load_sub_agent_list(&path);
+    let resolved = load_sub_agent_list(path);
     let found = resolved.iter().find(|agent| agent.id == id).cloned();
-
     if let Some(agent) = found {
         if agent.agent_type == AGENT_TYPE_LLM {
             if let Some(relative) = agent.file.clone() {

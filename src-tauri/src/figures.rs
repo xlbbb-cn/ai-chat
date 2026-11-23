@@ -308,18 +308,6 @@ pub fn mermaid_prompt_block() -> String {
         .to_string()
 }
 
-/// The drawing block for the configured mode.
-///
-/// `enhanced` (on by default) hands the model the `svg` / `carve` markup the
-/// transcript can rasterise and save; `false` keeps it on Mermaid.
-pub fn prompt_block_for(enhanced: bool) -> String {
-    if enhanced {
-        prompt_block()
-    } else {
-        mermaid_prompt_block()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -461,9 +449,7 @@ mod tests {
     }
 
     #[test]
-    fn prompt_block_for_switches_on_the_toggle() {
-        assert_eq!(prompt_block_for(true), prompt_block());
-        assert_eq!(prompt_block_for(false), mermaid_prompt_block());
+    fn prompt_blocks_differ() {
         assert_ne!(prompt_block(), mermaid_prompt_block());
     }
 }

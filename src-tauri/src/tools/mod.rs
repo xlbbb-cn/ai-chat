@@ -8,6 +8,7 @@ use self::paths::{build_workspace_scoped_shell_code, with_root_header};
 use self::risk::{generate_risk_report, score_to_risk_level};
 use self::search::{run_integrated_search, SearchOptions, SEARCH_MAX_MATCHES};
 
+pub(crate) mod agent_admin;
 pub(crate) mod batch;
 pub(crate) mod calculator;
 mod execute;
