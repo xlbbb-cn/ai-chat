@@ -144,7 +144,6 @@ const SETTINGS_SECTIONS: { id: string; labelKey: MessageKey }[] = [
   { id: "advanced", labelKey: "settings.sections.advanced" },
   { id: "run", labelKey: "settings.sections.run" },
   { id: "debug", labelKey: "settings.sections.debug" },
-  { id: "plugins", labelKey: "settings.sections.plugins" },
   { id: "about", labelKey: "settings.sections.about" },
 ];
 
@@ -1283,6 +1282,36 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
                   <small>{t("settings.run.selfEvolutionHint")}</small>
                 </div>
               </label>
+
+              <div className="settings-divider" />
+
+              <label className="settings-checkbox">
+                <input
+                  type="checkbox"
+                  checked={config.plugins_enabled ?? false}
+                  onChange={(e) =>
+                    setConfig((prev) => ({ ...prev, plugins_enabled: e.target.checked }))
+                  }
+                />
+                <div className="settings-checkbox-copy">
+                  <span>{t("settings.plugins.enable")}</span>
+                  <small>{t("settings.plugins.enableHint")}</small>
+                </div>
+              </label>
+              {/* The manager only makes sense for an enabled plugin system:
+                  with it off nothing can be started or called. */}
+              {config.plugins_enabled && (
+                <div className="settings-field-row">
+                  <span className="settings-field-label">{t("settings.plugins.manager")}</span>
+                  <button
+                    type="button"
+                    className="settings-btn"
+                    onClick={() => void openPluginManager().catch(console.error)}
+                  >
+                    {t("plugins.openManager")}
+                  </button>
+                </div>
+              )}
             </div>
           </section>
 
@@ -1380,39 +1409,6 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
               {!sessionId && !config.self_evolution_mode && (
                 <small className="settings-field-hint">{t("settings.debug.monitorsEmpty")}</small>
               )}
-            </div>
-          </section>
-
-          <section id="settings-section-plugins" className="settings-section">
-            <div className="settings-section-head">
-              <h3>{t("settings.sections.plugins")}</h3>
-              <p>{t("plugins.subtitle")}</p>
-            </div>
-            <div className="settings-section-body">
-              <label className="settings-checkbox">
-                <input
-                  type="checkbox"
-                  checked={config.plugins_enabled ?? false}
-                  onChange={(e) =>
-                    setConfig((prev) => ({ ...prev, plugins_enabled: e.target.checked }))
-                  }
-                />
-                <div className="settings-checkbox-copy">
-                  <span>{t("settings.plugins.enable")}</span>
-                  <small>{t("settings.plugins.enableHint")}</small>
-                </div>
-              </label>
-
-              <div className="settings-divider" />
-
-              <p className="settings-plugins-hint">{t("plugins.sectionHint")}</p>
-              <button
-                type="button"
-                className="settings-btn settings-btn-primary"
-                onClick={() => void openPluginManager().catch(console.error)}
-              >
-                {t("plugins.openManager")}
-              </button>
             </div>
           </section>
 

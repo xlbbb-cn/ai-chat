@@ -364,14 +364,14 @@ const zhCN: Messages = {
             advanced: "高级",
             run: "运行",
             debug: "调试",
-            plugins: "插件",
             about: "关于与更新",
         },
 
         plugins: {
             enable: "启用插件系统",
             enableHint:
-                "启用后模型会拿到 plugin 工具，以及每个插件能力对应的独立工具；关闭时插件仍在此列出，但模型无法调用。",
+                "启用后模型会拿到 plugin 工具，以及每个插件能力对应的独立工具；关闭时隐藏插件管理器，模型无法调用任何插件。",
+            manager: "插件管理器",
         },
         appearance: {
             title: "外观",
@@ -1044,7 +1044,6 @@ const zhCN: Messages = {
         refresh: "刷新",
         reload: "重新加载清单",
         openManager: "打开插件管理",
-        sectionHint: "在独立窗口中管理已安装的插件、它们的设置和运行中的实例。",
         endpoint: "服务接入点",
         endpointHint:
             "服务型插件（Rust、Node、Python 等）连接该地址并出示令牌即可接入总线，每条连接就是一个实例。",

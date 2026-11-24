@@ -410,14 +410,14 @@ const en = {
             advanced: "Advanced",
             run: "Run",
             debug: "Debug",
-            plugins: "Plugins",
             about: "About & Updates",
         },
 
         plugins: {
             enable: "Enable the plugin system",
             enableHint:
-                "Gives the model the plugin tool and one tool per plugin capability. Off: plugins stay listed here, but the model cannot call them.",
+                "Gives the model the plugin tool and one tool per plugin capability. Off: the plugin manager is hidden and the model cannot call any plugin.",
+            manager: "Plugin manager",
         },
         appearance: {
             title: "Appearance",
@@ -1119,8 +1119,6 @@ const en = {
         refresh: "Refresh",
         reload: "Reload manifests",
         openManager: "Open plugin manager",
-        sectionHint:
-            "Manage installed plugins, their settings and their running instances in a separate window.",
         endpoint: "Service endpoint",
         endpointHint:
             "A service plugin (Rust, Node, Python, …) dials this address and presents the token to join the bus. Every connection becomes one instance.",

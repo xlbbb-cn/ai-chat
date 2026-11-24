@@ -1,5 +1,5 @@
 /**
- * The plugin manager window — Settings → Plugins → "Open plugin manager".
+ * The plugin manager window — Settings → Run → Plugin manager → "Open plugin manager".
  *
  * A separate webview (`plugin-manager.html` → this entry, see
  * `src-tauri/src/plugins/manager.rs`), created on demand by the

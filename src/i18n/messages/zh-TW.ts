@@ -364,14 +364,14 @@ const zhTW: Messages = {
             advanced: "進階",
             run: "執行",
             debug: "偵錯",
-            plugins: "外掛",
             about: "關於與更新",
         },
 
         plugins: {
             enable: "啟用外掛系統",
             enableHint:
-                "啟用後模型會拿到 plugin 工具，以及每個外掛能力對應的獨立工具；關閉時外掛仍在此列出，但模型無法呼叫。",
+                "啟用後模型會拿到 plugin 工具，以及每個外掛能力對應的獨立工具；關閉時隱藏外掛管理員，模型無法呼叫任何外掛。",
+            manager: "外掛管理員",
         },
         appearance: {
             title: "外觀",
@@ -1044,7 +1044,6 @@ const zhTW: Messages = {
         refresh: "重新整理",
         reload: "重新載入清單",
         openManager: "開啟外掛管理",
-        sectionHint: "在獨立視窗中管理已安裝的外掛、它們的設定與執行中的實例。",
         endpoint: "服務接入點",
         endpointHint:
             "服務型外掛（Rust、Node、Python 等）連線此位址並出示權杖即可接入匯流排，每條連線就是一個實例。",

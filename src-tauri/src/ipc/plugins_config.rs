@@ -1,5 +1,5 @@
-//! IPC behind the plugin manager window (Settings → Plugins opens it as its
-//! own webview). Everything here forwards to `plugins::manager`, which owns
+//! IPC behind the plugin manager window (Settings → Run → Plugin manager opens
+//! it as its own webview). Everything here forwards to `plugins::manager`, which owns
 //! the bus endpoint, the instance pool and the settings files.
 
 use serde_json::Value;

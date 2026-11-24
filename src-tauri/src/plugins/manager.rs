@@ -3,7 +3,7 @@
 //!
 //! This is the backend half of the plugin panel. The window itself is a
 //! separate webview (`plugin-manager`, capability `plugin-manager.json`) opened
-//! from Settings → Plugins; it only ever talks to the commands in
+//! from Settings → Run; it only ever talks to the commands in
 //! `ipc/plugins.rs`, which forward to the methods below.
 
 use serde::Serialize;

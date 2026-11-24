@@ -255,8 +255,8 @@ stderr, which the panel keeps in the plugin's log ring.
 ## Service plugins (attach to the bus)
 
 `"transport": "service"` (or `both`) means the process is started by its own supervisor, not
-by the app. It dials the endpoint shown in the plugin manager (Settings → Plugins → service
-endpoint, `127.0.0.1:<port>`) and sends this as its first line:
+by the app. It dials the endpoint shown in the plugin manager (Settings → Run → Plugin
+manager → service endpoint, `127.0.0.1:<port>`) and sends this as its first line:
 
 ```json
 {"type":"hello","plugin":"clock","token":"<token from the panel>"}
@@ -283,8 +283,8 @@ to its own HTML. Values reach the plugin in `welcome.config` and again as
    events.
 3. In chat the model calls `plugin_<id>_<tool>` directly, or `plugin` action `call` with
    `{"plugin":"<id>","tool":"<name>","args":{…}}`.
-4. The system must be enabled first (`plugins_enabled`, Settings → Plugins), otherwise no
-   plugin tool reaches the model.
+4. The system must be enabled first (`plugins_enabled`, Settings → Run), otherwise no plugin
+   tool reaches the model.
 
 ## Rules
 

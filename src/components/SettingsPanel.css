@@ -531,14 +531,6 @@ body:has(> .settings-overlay) .sidebar {
   cursor: not-allowed;
 }
 
-.settings-plugins-hint {
-  margin-bottom: 12px;
-  max-width: 62ch;
-  font-size: 12.5px;
-  line-height: 1.6;
-  color: var(--c-muted);
-}
-
 .settings-btn-primary {
   background: var(--t-accent);
   color: var(--c-on-accent);
