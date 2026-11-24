@@ -9,6 +9,84 @@ npm run changelog -- --from <上一个 tag> --to <本次 tag> --details --write
 条目按 Conventional Commits 的类型分组，作用域加粗；工作区里提交标题是英文、正文是中文，
 所以带 `--details` 时是中英对照。
 
+## [v3.7.0](https://github.com/xlbbb-cn/ai-chat/releases/tag/v3.7.0) — 2026-11-24
+
+### 新增
+
+- **history**: running badge shows this turn's elapsed time ([`12533be`](https://github.com/xlbbb-cn/ai-chat/commit/12533be386c03e0816388210f8ad6456a6ecd9d7))
+  - App.tsx hands the whole `runningSessions` registry to HistoryPanel instead of just the ids, so the badge can read the turn's real `started_at_ms` (a reload mid-turn keeps counting instead of restarting at zero).
+  - HistoryPanel ticks `nowMs` once a second, and only while a turn runs; the duration renders through `formatUptime`, tabular-nums so the badge does not twitch as the counter advances.
+  - The badge is retoned to the success family (soft wash + 6px dot + 11px label), matching the state chips of the other panels. New token `--c-success-text` (#17702E light) is the text twin of `--c-success`, which only reaches 3.9:1 on its own wash an 11px label needs 5:1.
+  - DESIGN.md documents the fill/label split for success; `--c-success-text` is defined in every palette block, light and dark, in App.css.
+  - Drop the "· current" marker from the row footer — the active row already carries the highlight and the aria-current — plus `history.current` in en / zh-CN / zh-TW.
+- **settings**: configurable max concurrent sessions ([`4e51a13`](https://github.com/xlbbb-cn/ai-chat/commit/4e51a13f2c6a8018682d6d89c6ccdd85b9531787))
+  - types.ts: AppConfig.max_concurrent_turns (0 = unlimited, backend clamps to 16; same-session supersede never counts as a new slot).
+  - SettingsPanel → Advanced: 'Max concurrent sessions' number input next to the turn-limit fields, same parseLimitInput semantics ('0' = unlimited, blank = backend default); handleSave's {...config} spread carries it.
+  - i18n en / zh-CN / zh-TW keys + hint explaining the background-continuation behaviour the limit bounds.
+- **multi-session**: reload re-attach for background turns, per-session drafts ([`ea3f2aa`](https://github.com/xlbbb-cn/ai-chat/commit/ea3f2aaa2c166bb241e8c8aa240e55d2240fe993))
+  - Reload re-attach: on mount, the running-turn registry effect now rebuilds a BackgroundTurnDriver per still-running session from get_turn_snapshot (content, reasoning, settled tool rows, delivered injections, usage totals) plus the persisted DB rows, so a turn that kept running through a webview reload keeps streaming and its assistant row lands in the database — previously every listener died with the reload and nobody persisted the reply. A turn that settles in the gap between the two calls remains the known narrow window.
+  - historyRows.ts: recordsToMessages / parseStoredContent / parseStoredAttachments moved out of the lazy HistoryPanel into a leaf module shared with the re-attach path (the boot graph stays main+App).
+  - Shared driverHost (useMemo): one hook object feeds both the foreground handoff and the reload re-attach; notifications, undelivered-injection requeue and confirm records live in one place.
+  - Per-session composer drafts: composerDraftRef is a Map keyed by session; switching conversations restores that conversation's draft (history load and driver-visible sessions), paste/mention splicing stays inside its own session, and resetConversation starts the fresh chat empty.
+- **files**: cross-conversation race protection for file_actions ([`b3b4f31`](https://github.com/xlbbb-cn/ai-chat/commit/b3b4f31aaff22b6bf743e3fef1d75db410a89980))
+  - tools/file_locks.rs: FileLockRegistry — per-path async write locks plus stale-write detection. A session writing a file that ANOTHER conversation modified after this session's last read is refused with an explicit 'STALE WRITE — re-read and retry' error instead of silently clobbering the other conversation's change. A session's own writes never count as stale; a fresh read clears the verdict; deleting/moving forgets the history so a recreated file starts clean; anonymous (panel) callers are never blocked.
+  - Locks are taken in sorted path order (opposite-direction moves cannot deadlock) and the backup + write + record sequence runs entirely inside the guards, so two writers of the same path are serialised and the second one always sees the first one's change. Failed actions (Error-prefixed results, the tool_output_is_error convention) publish no 'last write'.
+  - file_actions integration: read records the session's read stamp; write / patch / delete / move run backup+apply inside with_write_guard; a move locks src+dst together and forgets the source on success, a delete forgets the path.
+  - Known boundary (documented): run_shell/run_cmd bypass the registry by design; patch's own context matching remains the second line of defence.
+  - 5 unit tests: stale refusal + fresh-read recovery, own-writes never stale, delete/anonymous semantics, concurrent writes serialise (exactly one wins, guards never overlap), opposite moves lock in sorted order.
+- **multi-session**: background turn driver, free session switching, per-chat confirm routing ([`b018bcf`](https://github.com/xlbbb-cn/ai-chat/commit/b018bcf28a0d123d63f9939e8adc8a58008fee17))
+  - src/backgroundTurns.ts: BackgroundTurnDriver, the frontend mirror of the LlmTurn base. Handing off a streaming turn keeps it listening to its own chat-* / tool-call / agent-* / confirm-required events, accumulates the transcript (control markers stripped, retry tails rewound), tracks usage like settleTurnStats, settles running tool rows and persists the assistant row (done/error/stopped with the same saveHistory semantics; stopped notifies nothing, empty failures persist nothing).
+  - App.tsx: handoffForegroundTurn publishes the minted turn id (chatCompletion exposes it via turnIdHolder) plus content/reasoning/tool rows/injections/ turn stats into a driver in one synchronous arm step, then resets the foreground; driver-owned visible sessions adopt the live transcript and route Enter/Stop through the driver; clearChat and History switching no longer stop a running reply — they hand it off.
+  - Global listeners skip any session owned by a driver (chat-usage, tool-call, agent-*, chat-injected, confirm-required...), so foreground and driver never double-process.
+  - HistoryPanel: disableSessionSwitch removed — switching is always allowed; running conversations show an accent 'Running' badge (turn-state event + list_active_turns seed, i18n en/zh-CN/zh-TW, tokens-only CSS, reduced-motion safe); the old switch-hint block is gone.
+  - Per-chat confirmations: ConfirmRequired payloads carry session_id (request_tool_confirmation signature + run_shell/run_cmd callers); background conversations surface a waiting badge and their dialog opens only when that chat is visible; answered dialogs clear the pending record.
+  - pendingAutoPrompts wait for a driver-owned session to settle before auto-sending, so a resume cannot open a second turn in the same session.
+  - turnMarkers.ts: goal-loop / WAIT_EVT marker stripping shared by the foreground transcript and the driver.
+- **agents**: pointer-style manuals and explicit sub-agent creation ([`0a0e47b`](https://github.com/xlbbb-cn/ai-chat/commit/0a0e47b5c495c3681db74e6b87d9a70acced2601))
+  - centralize all concrete prompt/manual texts in new prompt.rs
+  - manuals.rs seeds reference manuals into <workspace>/.data/manuals (never overwrites user edits) and builds the pointer block
+  - enhanced figures: full syntax moves into the enhanced-figures manual; the prompt now only announces the manual until a figure is drawn
+  - self-evolution: skill/mcp/sub-agent creation guidance becomes a pointer; full text is read on demand via file_actions before the action
+  - new agent_admin tool (list/save/delete) lets the main agent explicitly create cli/llm/cloud sub-agents, reusing save/delete core functions extracted from agents.rs; only injected when multi-agent + self-evolution
+  - fix mcp_self parent_dir legacy separator normalization (cfg(windows) -> always, restores failing test on Linux)
+
+### 重构
+
+- **turn**: funnel progress writes through LlmTurn, close inbox on every path ([`265aa29`](https://github.com/xlbbb-cn/ai-chat/commit/265aa290fbdbbe502e555d6bc990565890581052))
+  - StreamOptions now holds &dyn turn::TurnProgressSink, implemented only by LlmTurn (append_content / append_reasoning / rewind_attempt). Engine writes go through record_tool_row / record_injection / record_usage; no public progress_handle remains.
+  - emit_done / emit_error close the inbox before announcing the end, and an InboxGuard in the engine covers error and unwind paths that announce nothing.
+  - Move end_turn_cleanup into turn/lifecycle.rs, next to the class it tears down; chat_completion calls it from the crate-level turn module.
+  - Rename LlmTurn.turn_id: u64 to window_id and ui_turn_id to turn_id, so the registry/supersede id and the UI event id no longer share one name.
+  - Snapshot tool rows use the frontend's ToolCallEntry shape; move the re-attach mapping into BackgroundTurnDriver.attach() and drop TurnSeed.userMsgId.
+  - Rename llm_complete/turn.rs to engine.rs to avoid colliding with crate::turn.
+- **turn**: LlmTurn base + class-organized turn tree, per-session turns ([`245601a`](https://github.com/xlbbb-cn/ai-chat/commit/245601a638b37f20589c7e08154dc7e79a51c44e))
+  - New turn/ class family: LlmTurn base (identity, frozen config snapshot, cancel flag, live progress, injection inbox, budget, turn-scoped emission, private MCP pool), TurnRegistry (session -> base, concurrency admission, same-session supersede), progress DTOs, guard (ex turn_guard), commands.
+  - AppState: single chat_cancelled/active_turn/turn_inbox slots retired; several sessions can now run a turn at once (max_concurrent_turns config, default 4, 0 = unlimited, clamped to 16).
+  - chat_completion publishes the base before any side effect; stop/inject/ list/snapshot are session-addressed; turn-state event + list_active_turns/ get_turn_snapshot commands back the History running badge and re-attach.
+  - Engine (llm_complete) runs on the base: config/cancel/injections/budget/ emission come from it; progress snapshot accumulates tokens (retry rewinds the failed attempt's tail), settled tool rows, deliveries and usage totals.
+  - MCP independence: AgentMcpSession -> McpSession; chat turns list/call through their OWN stdio pool (get_server_tools_in / invoke_mcp_tool_in), killed at turn-end cleanup; panel warmup pool untouched.
+  - Serve processes are session-scoped (shutdown_session); turn-end cleanup no longer kills another conversation's servers; delete_history and workspace switch guarded against running turns.
+  - Frontend: stopChatCompletion(sessionId); ActiveTurnInfo/TurnSnapshot API.
+
+### 文档
+
+- **agents**: sync architecture notes with the multi-session turn base ([`57249c3`](https://github.com/xlbbb-cn/ai-chat/commit/57249c37d56cf8f8f8765d40e8a8fc50423b61f9))
+  - Turn family: LlmTurn base (turn/ class tree: mod/progress/registry/ guard/commands) owns identity, frozen config, cancel flag, live TurnProgress, injection inbox, budget, turn-scoped emission and its private MCP pool; TurnRegistry is session-keyed with same-session supersede and concurrency admission.
+  - Multi-session: max_concurrent_turns, begin_turn-before-side-effects, turn-state event + list_active_turns/get_turn_snapshot, delete_history and workspace-switch guards while ANY turn runs.
+  - Injection inbox moved onto the base (close_inbox); confirm-required payloads carry session_id; Stop is session-addressed.
+  - Serve processes are session-scoped (shutdown_session); turn-end cleanup is end_turn_cleanup(app, turn) keyed on the registry's superseded check; the private MCP pool dies with the turn.
+  - MCP: AgentMcpSession -> McpSession (alias kept); chat turns and sub-agent tasks own per-owner pools via get_server_tools_in / invoke_mcp_tool_in; the panel warmup pool stays shared only for the panel.
+  - file_actions race protection: tools/file_locks.rs path locks + stale-write rejection, documented with its run_shell/run_cmd boundary.
+  - Frontend: backgroundTurns driver (handoff, re-attach after reload, per-session drafts, driver-owned listeners skip, per-chat confirms).
+  - Project-layout tree gains src/turn/.
+
+### 杂项
+
+- bump version to 3.7.0 ([`9231a3d`](https://github.com/xlbbb-cn/ai-chat/commit/9231a3d4505fddbdf595451e0aae3b035e60660d))
+- **files**: drop an unnecessary mut in file_locks ([`528b83d`](https://github.com/xlbbb-cn/ai-chat/commit/528b83dd44ce23b18958e95e8433e74d370e1d18))
+
+**完整对比**：[v3.6.2...v3.7.0](https://github.com/xlbbb-cn/ai-chat/compare/v3.6.2...v3.7.0)
+
 ## [v3.6.2](https://github.com/xlbbb-cn/ai-chat/releases/tag/v3.6.2) — 2026-11-23
 
 ### 修复
