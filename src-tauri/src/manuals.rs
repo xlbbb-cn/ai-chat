@@ -27,6 +27,8 @@ pub enum Manual {
     CreateMcpServer,
     /// Explicitly creating a sub-agent (`llm` / `cli` / `cloud`) with `agent_admin`.
     CreateSubagent,
+    /// Authoring a workspace plugin (manifest, stdio protocol, service attach).
+    CreatePlugin,
 }
 
 impl Manual {
@@ -37,6 +39,7 @@ impl Manual {
             Manual::CreateSkill => "create-skill",
             Manual::CreateMcpServer => "create-mcp-server",
             Manual::CreateSubagent => "create-subagent",
+            Manual::CreatePlugin => "create-plugin",
         }
     }
 
@@ -63,6 +66,11 @@ impl Manual {
                 "field shapes for explicitly creating an `llm` / `cli` / `cloud` agent with \
                  `agent_admin` — read before the first `save` of the session",
             ),
+            Manual::CreatePlugin => (
+                "Plugin creation",
+                "plugin folder + `plugin.json`, the stdio protocol, service attach and \
+                 `config.schema.yaml` — read before writing a plugin",
+            ),
         }
     }
 
@@ -73,6 +81,7 @@ impl Manual {
             Manual::CreateSkill => prompt::skill_manual(),
             Manual::CreateMcpServer => prompt::mcp_manual(),
             Manual::CreateSubagent => prompt::subagent_manual(),
+            Manual::CreatePlugin => prompt::plugin_manual(),
         }
     }
 }
@@ -141,6 +150,7 @@ mod tests {
             Manual::CreateSkill,
             Manual::CreateMcpServer,
             Manual::CreateSubagent,
+            Manual::CreatePlugin,
         ] {
             let line = {
                 let (title, description) = manual.title_and_description();

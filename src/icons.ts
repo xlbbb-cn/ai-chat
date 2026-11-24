@@ -19,6 +19,7 @@ export type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
 export {
     faAnglesLeft,
     faBolt,
+    faBookOpen,
     faBoxArchive,
     faBoxOpen,
     faBrain,

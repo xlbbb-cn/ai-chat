@@ -8,14 +8,17 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react()],
 
-  // Two entry points: the app and the desktop notification card window
-  // (`notify.html` → `src/notify.tsx`, see `src-tauri/src/notify.rs`). Without
-  // the explicit input list rollup would only see `index.html`.
+  // Three entry points: the app, the desktop notification card window
+  // (`notify.html` → `src/notify.tsx`, see `src-tauri/src/notify.rs`) and the
+  // plugin manager window (`plugin-manager.html` → `src/plugin-manager.tsx`,
+  // see `src-tauri/src/plugins/manager.rs`). Without the explicit input list
+  // rollup would only see `index.html`.
   build: {
     rollupOptions: {
       input: {
         main: "index.html",
         notify: "notify.html",
+        "plugin-manager": "plugin-manager.html",
       },
     },
   },

@@ -28,7 +28,7 @@
 
 ## 后台工具任务
 
-开启**设置 → 运行时与调试 → 后台执行**（`config.background_tools`）后，慢工具可以接受 `run_in_background: true`：
+开启**设置 → 运行 → 后台执行**（`config.background_tools`）后，慢工具可以接受 `run_in_background: true`：
 
 | 工具 | 后台形式 | 行为 |
 | --- | --- | --- |
@@ -84,7 +84,7 @@
 | `mcp_self` | 自我进化模式开着——搭建/注册/启动助手自己的 MCP 服务器 |
 | `todos` | 待办工具已启用 |
 | `timer_*` | 定时器工具已启用 |
-| `background_task` | **设置 → 运行时与调试 → 后台执行**开着（管理 `run_in_background` 任务） |
+| `background_task` | **设置 → 运行 → 后台执行**开着（管理 `run_in_background` 任务） |
 
 子智能体拿到的是它 `allowed_tools` 授予的工具，减去 `timer`（那是稍后恢复对话的会话工具）。每个 `llm` 子智能体一开始就带共享的 `memory` 工具（面板里提供，可以按智能体取消勾选）：`session` 作用域以主对话的 session id 为键，`user` / `repo` 是工作区文件，所以任务能查主智能体已经学到的东西。自我进化模式下子智能体还会被强制打开 `file_actions` 与 `memory`——它可能要进化技能，也必须记得自己学过什么。`mcp_self` 从不交给子智能体。
 

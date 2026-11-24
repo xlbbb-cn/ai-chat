@@ -44,7 +44,7 @@ Error: the 'evolution' memory scope is only available while self-evolution mode 
 
 重复添加同一个 key 是 **upsert**（`evidence += 1`），标题相近会合并，内容完全相同的在读取时折叠。老格式文件（`# key` + 自由文本）按需升级；提示词构建器从不写文件。
 
-结果可在 **设置 → 运行时与调试 → 记忆** 里查看（该行只在模式开启时出现）。
+结果可在 **设置 → 调试 → 记忆** 里查看（该行只在模式开启时出现）。
 
 #### 把记忆归档成技能
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { clearChatBackground, fetchModels, fetchModelMetadata, getAppVersion, getConfig, saveConfig, setChatBackground, useDefaultChatBackground } from "../api";
+import { clearChatBackground, fetchModels, fetchModelMetadata, getAppVersion, getConfig, isDebugBuild, saveConfig, setChatBackground, useDefaultChatBackground, openPluginManager } from "../api";
 import type { AppConfig, GlassEffect, ModelMetadata, ModelSettings, Palette, RequestHeader } from "../types";
 import { LOCALE_LABELS, LOCALES, useI18n, type Locale, type MessageKey } from "../i18n";
 import { matchModelCatalog, isDeepSeekModel } from "../utils/modelMetadata";
@@ -142,7 +142,9 @@ const SETTINGS_SECTIONS: { id: string; labelKey: MessageKey }[] = [
   { id: "api", labelKey: "settings.sections.api" },
   { id: "system", labelKey: "settings.sections.system" },
   { id: "advanced", labelKey: "settings.sections.advanced" },
-  { id: "runtime", labelKey: "settings.sections.runtime" },
+  { id: "run", labelKey: "settings.sections.run" },
+  { id: "debug", labelKey: "settings.sections.debug" },
+  { id: "plugins", labelKey: "settings.sections.plugins" },
   { id: "about", labelKey: "settings.sections.about" },
 ];
 
@@ -201,6 +203,7 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
   const [showExperiences, setShowExperiences] = useState(false);
   const [showUpdatePanel, setShowUpdatePanel] = useState(false);
   const [appVersion, setAppVersion] = useState("");
+  const [debugBuild, setDebugBuild] = useState(false);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const [activeSection, setActiveSection] = useState<string>(SETTINGS_SECTIONS[0].id);
 
@@ -224,6 +227,11 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
 
   useEffect(() => {
     getAppVersion().then(setAppVersion).catch(console.error);
+  }, []);
+
+  // The log-output switch is only meaningful where the logger runs at all.
+  useEffect(() => {
+    isDebugBuild().then(setDebugBuild).catch(console.error);
   }, []);
 
   useEffect(() => {
@@ -1195,10 +1203,10 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
             )}
           </section>
 
-          <section id="settings-section-runtime" className="settings-section">
+          <section id="settings-section-run" className="settings-section">
             <div className="settings-section-head">
-              <h3>{t("settings.runtime.title")}</h3>
-              <p>{t("settings.runtime.subtitle")}</p>
+              <h3>{t("settings.run.title")}</h3>
+              <p>{t("settings.run.subtitle")}</p>
             </div>
             <div className="settings-section-body">
               <label className="settings-checkbox">
@@ -1213,8 +1221,8 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
                   }
                 />
                 <div className="settings-checkbox-copy">
-                  <span>{t("settings.runtime.backgroundTools")}</span>
-                  <small>{t("settings.runtime.backgroundToolsHint")}</small>
+                  <span>{t("settings.run.backgroundTools")}</span>
+                  <small>{t("settings.run.backgroundToolsHint")}</small>
                 </div>
               </label>
               <label className="settings-checkbox">
@@ -1229,8 +1237,8 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
                   }
                 />
                 <div className="settings-checkbox-copy">
-                  <span>{t("settings.runtime.allowNotifications")}</span>
-                  <small>{t("settings.runtime.allowNotificationsHint")}</small>
+                  <span>{t("settings.run.allowNotifications")}</span>
+                  <small>{t("settings.run.allowNotificationsHint")}</small>
                 </div>
               </label>
               <label className="settings-checkbox">
@@ -1245,50 +1253,9 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
                   }
                 />
                 <div className="settings-checkbox-copy">
-                  <span>{t("settings.runtime.singleInstance")}</span>
-                  <small>{t("settings.runtime.singleInstanceHint")}</small>
+                  <span>{t("settings.run.singleInstance")}</span>
+                  <small>{t("settings.run.singleInstanceHint")}</small>
                 </div>
-              </label>
-
-              <div className="settings-divider" />
-
-              <label className="settings-field-row settings-field-row-stacked">
-                <span className="settings-field-label">{t("settings.runtime.loggerOutput")}</span>
-                <Dropdown
-                  label={t("settings.runtime.loggerOutput")}
-                  compact
-                  value={config.logger_output ?? "file"}
-                  onChange={(logger_output) =>
-                    setConfig((prev) => ({
-                      ...prev,
-                      logger_output: logger_output as "file" | "println",
-                    }))
-                  }
-                  options={[
-                    { value: "file", label: t("settings.runtime.loggerFile") },
-                    { value: "println", label: t("settings.runtime.loggerPrintln") },
-                  ]}
-                />
-              </label>
-              <label className="settings-field-row settings-field-row-stacked">
-                <span className="settings-field-label">{t("settings.runtime.retention")}</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={3650}
-                  step={1}
-                  value={config.log_retention_days ?? 90}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setConfig((prev) => ({
-                      ...prev,
-                      log_retention_days: v === "" ? 90 : Math.max(0, Math.floor(Number(v)) || 0),
-                    }));
-                  }}
-                />
-                <small className="settings-field-hint">
-                  {t("settings.runtime.retentionHint")}
-                </small>
               </label>
 
               <div className="settings-divider" />
@@ -1312,45 +1279,140 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
                   }
                 />
                 <div className="settings-checkbox-copy">
-                  <span>{t("settings.runtime.selfEvolution")}</span>
-                  <small>{t("settings.runtime.selfEvolutionHint")}</small>
+                  <span>{t("settings.run.selfEvolution")}</span>
+                  <small>{t("settings.run.selfEvolutionHint")}</small>
                 </div>
               </label>
+            </div>
+          </section>
 
-              {(sessionId || config.self_evolution_mode) && <div className="settings-divider" />}
+          <section id="settings-section-debug" className="settings-section">
+            <div className="settings-section-head">
+              <h3>{t("settings.debug.title")}</h3>
+              <p>{t("settings.debug.subtitle")}</p>
+            </div>
+            <div className="settings-section-body">
+              {/* A release build writes no log lines at all (logger.rs), so
+                  the switch only exists where it can do something. */}
+              {debugBuild && (
+                <label className="settings-field-row settings-field-row-stacked">
+                  <span className="settings-field-label">{t("settings.debug.loggerOutput")}</span>
+                  <Dropdown
+                    label={t("settings.debug.loggerOutput")}
+                    compact
+                    value={config.logger_output ?? "file"}
+                    onChange={(logger_output) =>
+                      setConfig((prev) => ({
+                        ...prev,
+                        logger_output: logger_output as "file" | "println",
+                      }))
+                    }
+                    options={[
+                      { value: "file", label: t("settings.debug.loggerFile") },
+                      { value: "println", label: t("settings.debug.loggerPrintln") },
+                    ]}
+                  />
+                  <small className="settings-field-hint">
+                    {t("settings.debug.loggerOutputHint")}
+                  </small>
+                </label>
+              )}
+              <label className="settings-field-row settings-field-row-stacked">
+                <span className="settings-field-label">{t("settings.debug.retention")}</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={3650}
+                  step={1}
+                  value={config.log_retention_days ?? 90}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setConfig((prev) => ({
+                      ...prev,
+                      log_retention_days: v === "" ? 90 : Math.max(0, Math.floor(Number(v)) || 0),
+                    }));
+                  }}
+                />
+                <small className="settings-field-hint">
+                  {t("settings.debug.retentionHint")}
+                </small>
+              </label>
+
+              <div className="settings-divider" />
+
+              <div className="settings-field-row settings-field-row-stacked">
+                <span className="settings-field-label">{t("settings.debug.monitors")}</span>
+                <small className="settings-field-hint">{t("settings.debug.monitorsHint")}</small>
+              </div>
 
               {sessionId && (
                 <>
                   <div className="settings-field-row">
-                    <span className="settings-field-label">{t("settings.runtime.interactionMonitor")}</span>
+                    <span className="settings-field-label">{t("settings.debug.interactionMonitor")}</span>
                     <button type="button" className="settings-btn" onClick={() => setShowMonitor(true)}>
-                      {t("settings.runtime.launchMonitor")}
+                      {t("settings.debug.launchMonitor")}
                     </button>
                   </div>
                   <div className="settings-field-row">
-                    <span className="settings-field-label">{t("settings.runtime.agentMissions")}</span>
+                    <span className="settings-field-label">{t("settings.debug.agentMissions")}</span>
                     <button type="button" className="settings-btn" onClick={() => setShowAgentMonitor(true)}>
-                      {t("settings.runtime.launchMonitor")}
+                      {t("settings.debug.launchMonitor")}
                     </button>
                   </div>
                 </>
               )}
               {config.self_evolution_mode && (
                 <div className="settings-field-row">
-                  <span className="settings-field-label">{t("settings.runtime.evolutionMemory")}</span>
+                  <span className="settings-field-label">{t("settings.debug.evolutionMemory")}</span>
                   <button type="button" className="settings-btn" onClick={() => setShowMemoryMonitor(true)}>
-                    {t("settings.runtime.launchMonitor")}
+                    {t("settings.debug.launchMonitor")}
                   </button>
                 </div>
               )}
               {config.self_evolution_mode && (
                 <div className="settings-field-row">
-                  <span className="settings-field-label">{t("settings.runtime.experiences")}</span>
+                  <span className="settings-field-label">{t("settings.debug.experiences")}</span>
                   <button type="button" className="settings-btn" onClick={() => setShowExperiences(true)}>
-                    {t("settings.runtime.launchMonitor")}
+                    {t("settings.debug.launchMonitor")}
                   </button>
                 </div>
               )}
+              {!sessionId && !config.self_evolution_mode && (
+                <small className="settings-field-hint">{t("settings.debug.monitorsEmpty")}</small>
+              )}
+            </div>
+          </section>
+
+          <section id="settings-section-plugins" className="settings-section">
+            <div className="settings-section-head">
+              <h3>{t("settings.sections.plugins")}</h3>
+              <p>{t("plugins.subtitle")}</p>
+            </div>
+            <div className="settings-section-body">
+              <label className="settings-checkbox">
+                <input
+                  type="checkbox"
+                  checked={config.plugins_enabled ?? false}
+                  onChange={(e) =>
+                    setConfig((prev) => ({ ...prev, plugins_enabled: e.target.checked }))
+                  }
+                />
+                <div className="settings-checkbox-copy">
+                  <span>{t("settings.plugins.enable")}</span>
+                  <small>{t("settings.plugins.enableHint")}</small>
+                </div>
+              </label>
+
+              <div className="settings-divider" />
+
+              <p className="settings-plugins-hint">{t("plugins.sectionHint")}</p>
+              <button
+                type="button"
+                className="settings-btn settings-btn-primary"
+                onClick={() => void openPluginManager().catch(console.error)}
+              >
+                {t("plugins.openManager")}
+              </button>
             </div>
           </section>
 

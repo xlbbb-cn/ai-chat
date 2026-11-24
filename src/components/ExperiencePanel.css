@@ -7,7 +7,7 @@
   color: var(--c-body);
 }
 
-/* Opened from Settings → Runtime & Debug, next to the evolution memory
+/* Opened from Settings → Debug, next to the evolution memory
    monitor. The base modal shell is the shared `.mission-monitor-modal`; this
    only narrows it to a list. */
 .mission-monitor-modal.experience-monitor-modal {

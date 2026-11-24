@@ -84,7 +84,7 @@ const zhTW: Messages = {
 
         tip: {
             organizeMemory:
-                "用「記憶」工具記下可重複使用的事實，再到「設定 → 執行與偵錯」整理與合併記憶。",
+                "用「記憶」工具記下可重複使用的事實，再到「設定 → 偵錯」整理與合併記憶。",
             archiveExperience:
                 "開啟「自我進化模式」後，請助手把成熟的流程打包成經驗，就能在其他工作區一鍵安裝。",
             skills: "在「技能」面板啟用技能後，在輸入框輸入 /skill 即可按需載入。",
@@ -362,10 +362,17 @@ const zhTW: Messages = {
             api: "API 與模型",
             system: "系統訊息",
             advanced: "進階",
-            runtime: "執行與偵錯",
+            run: "執行",
+            debug: "偵錯",
+            plugins: "外掛",
             about: "關於與更新",
         },
 
+        plugins: {
+            enable: "啟用外掛系統",
+            enableHint:
+                "啟用後模型會拿到 plugin 工具，以及每個外掛能力對應的獨立工具；關閉時外掛仍在此列出，但模型無法呼叫。",
+        },
         appearance: {
             title: "外觀",
             subtitle: "選擇介面如何跟隨系統主題。",
@@ -474,31 +481,40 @@ const zhTW: Messages = {
                 "在最新的使用者訊息最前面加一行提示（不足 200 字元），列出關鍵字比對到的記憶，依置信度排序。它只是線索而不是全文：助理仍需檢索對應作用域才能取得完整條目。提示只存在於送給模型的請求裡，存下來的訊息仍是使用者原話。",
         },
 
-        runtime: {
-            title: "執行與偵錯",
-            subtitle: "執行行為、日誌寫入位置與保留時間，以及請求的監控方式。",
-            loggerOutput: "日誌輸出（僅偵錯組建）",
-            loggerFile: "寫入 app-日期.log",
-            loggerPrintln: "輸出到終端機（println）",
-            retention: "日誌保留天數",
-            retentionHint:
-                "早於此期限的請求日誌與互動日誌會在啟動時以及由互動監視器執行「壓縮資料庫」時刪除。0 表示永久保留。聊天歷史不會被清理。修改後請按儲存以生效。",
-            singleInstance: "單實例執行",
-            singleInstanceHint:
-                "再次啟動時聚焦已執行的視窗，而不是開啟第二個實例。關閉此選項後，每次啟動都會開啟獨立視窗，並使用本設定的臨時副本。重新啟動應用程式後生效。",
+        run: {
+            title: "執行",
+            subtitle: "回合如何執行：背景工具、通知、視窗行為與自我演化模式。",
             backgroundTools: "背景執行",
             backgroundToolsHint:
                 "允許助手把耗時工具放到背景執行（`run_in_background: true`）：`run_cmd`、`run_shell`、`file_actions` 搜尋、所有 MCP 工具和 `call_subagent`。結果會在下一個請求前自動送達，本輪保持開啟直到結果到齊；子代理不會收到該參數。",
             allowNotifications: "允許通知",
             allowNotificationsHint:
                 "回合結束時播放提示音：失敗為訊息音，成功為會話結束音；視窗最小化或焦點在其他應用時，同時彈出桌面通知卡片，顯示回覆首行（或錯誤訊息）。使用者主動停止的回合不會通知。",
+            singleInstance: "單實例執行",
+            singleInstanceHint:
+                "再次啟動時聚焦已執行的視窗，而不是開啟第二個實例。關閉此選項後，每次啟動都會開啟獨立視窗，並使用本設定的臨時副本。重新啟動應用程式後生效。",
             selfEvolution: "啟用自我演化模式",
             selfEvolutionHint: "允許助理在工作區內自行演化技能。開啟期間「檔案操作」與「記憶」工具會強制啟用並鎖定，助理還會把已驗證的關鍵事實（執行環境、正確的工具用法、常用檔案位置）記錄到專屬的自我演化記憶區。助理也可以自建 MCP 伺服器（`mcp_self`）：腳本存放在 .data/mcp，經你確認後作為本機行程啟動。",
+        },
+
+        debug: {
+            title: "偵錯",
+            subtitle: "日誌寫到何處、保留多久，以及讀取這些日誌的監視器。",
+            loggerOutput: "日誌輸出",
+            loggerFile: "寫入 app-日期.log",
+            loggerPrintln: "輸出到終端機（println）",
+            loggerOutputHint: "僅偵錯組建會寫入日誌，正式組建下此選項不生效。",
+            retention: "日誌保留天數",
+            retentionHint:
+                "早於此期限的請求日誌與互動日誌會在啟動時以及由互動監視器執行「壓縮資料庫」時刪除。0 表示永久保留。聊天歷史不會被清理。修改後請按儲存以生效。",
+            monitors: "監視器",
+            monitorsHint: "每一列都會在設定頁上開啟一個唯讀對話框；正在執行的回合要等結束後才會被讀取。",
             interactionMonitor: "互動監視器",
             agentMissions: "代理任務監視器",
             evolutionMemory: "自我演化記憶",
             experiences: "全域經驗包",
             launchMonitor: "開啟監視器",
+            monitorsEmpty: "目前沒有可用的監視器：互動監視器與代理任務監視器需要先開啟一個工作階段，自我演化相關的監視器需要在「執行」裡開啟自我演化模式。",
         },
 
         about: {
@@ -967,7 +983,7 @@ const zhTW: Messages = {
         compacting: "壓縮中…",
         compactTitle: "刪除超過 90 天的日誌並回收磁碟空間",
         compactConfirm:
-            "壓縮資料庫？超過保留期限（設定 → 執行與偵錯）的日誌將被刪除，並重寫檔案以回收空間。聊天歷史會保留。",
+            "壓縮資料庫？超過保留期限（設定 → 偵錯）的日誌將被刪除，並重寫檔案以回收空間。聊天歷史會保留。",
         compacting2: "正在壓縮…可能需要幾秒鐘",
         interactions: "互動記錄（{count}）",
         cacheChip: "快取 {percent}%",
@@ -1018,6 +1034,82 @@ const zhTW: Messages = {
             noTools: "本工作階段沒有工具呼叫",
             toolRow: "{count} 次",
             toolFailures: "失敗 {count}",
+        },
+    },
+
+    plugins: {
+        windowTitle: "外掛",
+        subtitle:
+            "外掛透過訊息匯流排提供工具：模型呼叫工具，工具向匯流排發布訊息，由外掛的某個實例應答。",
+        refresh: "重新整理",
+        reload: "重新載入清單",
+        openManager: "開啟外掛管理",
+        sectionHint: "在獨立視窗中管理已安裝的外掛、它們的設定與執行中的實例。",
+        endpoint: "服務接入點",
+        endpointHint:
+            "服務型外掛（Rust、Node、Python 等）連線此位址並出示權杖即可接入匯流排，每條連線就是一個實例。",
+        token: "權杖",
+        copy: "複製",
+        copied: "已複製",
+        issues: "無法載入的清單",
+        empty: "尚未安裝外掛",
+        emptyHint: "在 .data/plugins 下放入含 plugin.json 的資料夾，然後重新載入清單。",
+        transportSpawn: "子行程",
+        transportService: "服務",
+        transportBoth: "子行程或服務",
+        running: "執行中",
+        stopped: "未執行",
+        start: "啟動",
+        stop: "停止",
+        instances: "實例",
+        state: "狀態",
+        inflight: "處理中",
+        noInstances: "目前沒有執行中的實例。啟動外掛，或啟動它的服務讓它接入。",
+        stateStarting: "啟動中",
+        stateReady: "就緒",
+        stateFailed: "失敗",
+        stateStopped: "已停止",
+        instanceInflight: "處理中 {count}",
+        instanceRestarts: "重啟 {count} 次",
+        settings: "設定",
+        save: "儲存",
+        saving: "儲存中…",
+        saved: "已儲存",
+        reset: "還原預設",
+        advanced: "進階",
+        schemaMissing: "此外掛沒有宣告任何設定。",
+        pageHint: "此外掛自帶設定頁面（{page}）。",
+        pagePending: "該頁面尚未託管，請先直接編輯 config.yaml。",
+        configModeSchema: "表單",
+        configModePage: "自訂頁面",
+        secretStored: "已儲存 — 輸入新值可取代",
+        secretEmpty: "未設定",
+        logs: "日誌",
+        noLogs: "尚無日誌。",
+        bus: "匯流排流量",
+        noBus: "尚無訊息。",
+        help: {
+            open: "如何建立一個外掛",
+            title: "建立外掛",
+            close: "關閉",
+            intro:
+                "外掛是工作區裡的一個資料夾，它變成模型可以呼叫的工具：工具向訊息匯流排發佈，由外掛的某個實例應答。",
+            folder: "1 · 目錄結構",
+            folderBody: "資料夾名稱就是外掛 id，外掛需要的一切都放在這個資料夾裡。",
+            manifest: "2 · 清單",
+            manifestBody:
+                "plugin.json 宣告執行環境、入口和工具；每個宣告的工具都會以 plugin_<id>_<tool> 出現在模型手上。",
+            protocol: "3 · 協定",
+            protocolBody:
+                "stdin / stdout 上的逐行 JSON：收到 hello 回 ready，之後每個 request 用同一個 id 回 reply。",
+            service: "4 · 或以服務方式接入",
+            serviceBody:
+                "transport: \"service\" 表示行程由別處啟動，用權杖連線上面的接入點；一條連線就是一個實例。",
+            settings: "5 · 設定頁面",
+            settingsBody:
+                "config.schema.yaml 會在本視窗渲染成表單，值儲存到 config.yaml 並熱推給執行中的實例。",
+            agent:
+                "也可以讓 agent 代勞：自我演化模式下它會讀 .data/manuals/create-plugin.md，把整個資料夾寫好。",
         },
     },
 

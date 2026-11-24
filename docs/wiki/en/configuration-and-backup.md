@@ -79,7 +79,7 @@ Rules worth knowing:
 | --- | --- | --- | --- |
 | `selected_tools` | string[] | `[]` | Enabled tool ids |
 | `self_evolution_mode` | boolean | `false` | Let the assistant evolve its own skills; forces `file_actions` + `memory` on |
-| `background_tools` | boolean | `false` | Advertise `run_in_background` on `run_cmd` / `run_shell` / `file_actions` search / MCP tools / `call_subagent` (Settings → Runtime & Debug → Background execution) |
+| `background_tools` | boolean | `false` | Advertise `run_in_background` on `run_cmd` / `run_shell` / `file_actions` search / MCP tools / `call_subagent` (Settings → Run → Background execution) |
 | `parallel_tools` | boolean | `true` | Run the independent tool calls of one round at the same time (Tools sidebar → Parallel tool calls, at the bottom); `false` = strictly one call at a time |
 | `max_parallel_tools` | number | `4` | How many calls of one round may run at once, clamped to 1–8; `1` behaves like `parallel_tools: false` |
 | `workspace_dir` | string? | empty | Absolute workspace path; empty = default |

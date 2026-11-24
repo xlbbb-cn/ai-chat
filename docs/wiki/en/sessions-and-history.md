@@ -88,7 +88,7 @@ When a turn runs sub-agents or other background work, the files they produce are
 ## Data retention
 
 - **Chat history is never pruned automatically.**
-- Request/interaction logs follow **Settings → Runtime & Debug → Log retention days** (default 90; `0` keeps them forever).
+- Request/interaction logs follow **Settings → Debug → Log retention days** (default 90; `0` keeps them forever).
 - The Interaction Monitor's **Compact database** removes expired logs and runs `VACUUM`, but never touches chat history.
 
 See [Monitoring and Logs](Monitoring-and-Logs).

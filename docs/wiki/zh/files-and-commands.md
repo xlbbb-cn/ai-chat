@@ -226,7 +226,7 @@
 
 `run_shell` 的 serve 是*为这一轮*保住一个进程；后台任务正相反——它让**模型继续干活**，同时一个调用在后面跑完。
 
-打开 **设置 → 运行时与调试 → 后台执行**后，下列调用接受 `run_in_background: true`：
+打开 **设置 → 运行 → 后台执行**后，下列调用接受 `run_in_background: true`：
 
 ```json
 { "action": "run", "command": "cargo test", "run_in_background": true }
@@ -334,7 +334,7 @@ file_actions search path="." query="fn main" glob="**/*.rs" respect_gitignore=tr
 | 命令超时 | 调大 `timeout_seconds`（最大 3600），或改用 serve |
 | `run_cmd` 里管道不生效 | 用 `run_shell` |
 | serve 进程下一轮就没了 | 设计如此：serve 进程树在轮末被杀 |
-| 工具 schema 里没有 `run_in_background` | 打开 **设置 → 运行时与调试 → 后台执行** |
+| 工具 schema 里没有 `run_in_background` | 打开 **设置 → 运行 → 后台执行** |
 | 后台任务一直没送结果 | 它被取消了，或这一轮结束了；在当前轮重新启动 |
 | 这一轮一直等待 | 还有任务在跑：等它，或从后台卡片 / `background_task action="cancel"` 取消 |
 | 输出被截断 | 工具结果保留前 6,000 + 后 2,000 字符；缩小查询范围或分段读 |

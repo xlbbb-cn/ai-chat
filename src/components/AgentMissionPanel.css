@@ -6,7 +6,7 @@
     background: var(--c-bg);
 }
 
-/* Opened from Settings → Runtime & Debug: the panel normally fills the
+/* Opened from Settings → Debug: the panel normally fills the
    sidebar, so wrap it in a sized modal when shown as an overlay. */
 .mission-monitor-overlay {
     position: fixed;

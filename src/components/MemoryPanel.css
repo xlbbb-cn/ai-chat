@@ -7,7 +7,7 @@
   color: var(--c-body);
 }
 
-/* Opened from Settings → Runtime & Debug, directly below the agent missions
+/* Opened from Settings → Debug, directly below the agent missions
    monitor. The base modal shell is the shared `.mission-monitor-modal`; this
    only narrows it to a list. */
 .mission-monitor-modal.memory-monitor-modal {

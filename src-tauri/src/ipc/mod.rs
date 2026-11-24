@@ -14,6 +14,8 @@ pub(crate) mod figures;
 pub(crate) mod history;
 pub(crate) mod mcp;
 pub(crate) mod notify;
+pub(crate) mod plugins;
+pub(crate) mod plugins_config;
 pub(crate) mod skills;
 pub(crate) mod tools;
 pub(crate) mod update;

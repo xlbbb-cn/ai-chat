@@ -195,6 +195,9 @@ fn build_prompt_bundle(
         if subagents_enabled {
             manuals.push(crate::manuals::Manual::CreateSubagent);
         }
+        if config.plugins_enabled {
+            manuals.push(crate::manuals::Manual::CreatePlugin);
+        }
         let manuals_pointer = crate::manuals::pointer_for(&workspace_dir_for_roots, &manuals);
         if !manuals_pointer.is_empty() {
             system_content.push_str("\n\n");
@@ -750,7 +753,11 @@ pub(crate) async fn build_turn_tools(
 ) -> (
     Vec<Value>,
     std::collections::HashMap<String, (mcp::McpServer, String)>,
-    u64,
+    // `(mcp_revision, plugin_revision)` — either one changing rebuilds the
+    // payload at the next request boundary, so a server the `mcp_self` tool
+    // built or a plugin the `plugin` tool reloaded is callable in the *same*
+    // turn.
+    (u64, u64),
 ) {
     let mut tools_list = tools::get_all_tools(
         &config.effective_tools(),
@@ -817,6 +824,17 @@ pub(crate) async fn build_turn_tools(
         mcp::sort_adapted_tools(&mut tools_list[mcp_tools_start..]);
     }
 
+    // One function per manifest-declared plugin tool (`plugin_<id>_<tool>`);
+    // the `plugin` control tool itself comes from `get_all_tools`. Both routes
+    // end on the plugin message bus. `adapted_tools` sorts by function name —
+    // this segment sits in the cached request prefix, so its order must not
+    // depend on directory enumeration.
+    if config.plugins_enabled {
+        let workspace = state.workspace_dir.lock().unwrap().clone();
+        let registry = crate::plugins::load_plugins(&workspace);
+        tools_list.extend(crate::plugins::tool::adapted_tools(&registry));
+    }
+
     // `use_skill` is advertised when the user has at least one enabled skill —
     // and always in self-evolution mode, where the assistant may have just written
     // a new skill that is not enabled yet but must still be loadable.
@@ -881,7 +899,11 @@ pub(crate) async fn build_turn_tools(
         tools_list.push(tools::agent_admin::definition());
     }
 
-    (tools_list, mcp_tool_map, state.mcp_revision())
+    (
+        tools_list,
+        mcp_tool_map,
+        (state.mcp_revision(), state.plugins.revision()),
+    )
 }
 
 /// Render the session's embedded sub-agent roles (`+agent` in the composer) as
@@ -1772,13 +1794,14 @@ pub(crate) async fn run_chat_turn(
             break;
         }
 
-        // ── MCP registry changed during this turn? ───────────────────────────
-        // `mcp_self` can create and enable a server while the turn is running.
+        // ── Tool registry changed during this turn? ──────────────────────────
+        // `mcp_self` can create and enable a server while the turn is running,
+        // and `plugin` action "reload" re-reads the plugin manifests.
         // Rebuilding the payload before the next request is what makes the new
         // tools callable *now*; without it the model would have to wait for the
         // next conversation turn, which reads like "the server was created but
         // its tools do not exist".
-        let registry_revision = state.mcp_revision();
+        let registry_revision = (state.mcp_revision(), state.plugins.revision());
         if registry_revision != tools_revision {
             let rebuilt = build_turn_tools(
                 &state,
@@ -1801,7 +1824,7 @@ pub(crate) async fn run_chat_turn(
                 &state,
                 "INFO",
                 format!(
-                    "MCP tool payload rebuilt mid-turn: session_id={}, revision={tools_revision}, tools={}",
+                    "Tool payload rebuilt mid-turn: session_id={}, revision={registry_revision:?}, tools={}",
                     session_id,
                     tools_list.len()
                 ),

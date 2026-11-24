@@ -44,7 +44,7 @@ Entries are not listed alphabetically. Each one carries YAML front matter (`key`
 
 Re-adding an existing key is an **upsert** (`evidence += 1`), a similar title merges into the existing entry, and identical bodies are collapsed at read time. Legacy files (`# key` + free text) are upgraded lazily; the prompt builder never writes.
 
-Inspect the result in **Settings → Runtime & Debug → Memory** (the row only appears while the mode is on): it shows the same ranking and marks the top tier.
+Inspect the result in **Settings → Debug → Memory** (the row only appears while the mode is on): it shows the same ranking and marks the top tier.
 
 #### Consolidating memory into a skill
 

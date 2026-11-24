@@ -22,6 +22,14 @@ pub fn get_all_tools(
     let want_run_cmd = selected_tools.iter().any(|t| t == "run_cmd");
     let want_run_shell = selected_tools.iter().any(|t| t == "run_shell");
 
+    // The plugin control tool. The per-plugin functions
+    // (`plugin_<id>_<tool>`) are appended by `build_turn_tools`, because they
+    // depend on the manifests of the active workspace rather than on the
+    // selection alone.
+    if selected_tools.iter().any(|t| t == "plugin") {
+        tools.push(crate::plugins::tool::tool_definition());
+    }
+
     if want_run_cmd {
         tools.push(json!({
             "type": "function",

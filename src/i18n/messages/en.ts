@@ -94,7 +94,7 @@ const en = {
 
         tip: {
             organizeMemory:
-                "Use the Memory tool to save reusable facts, then open Settings → Runtime & Debug to review and consolidate them.",
+                "Use the Memory tool to save reusable facts, then open Settings → Debug to review and consolidate them.",
             archiveExperience:
                 "In Self-evolution mode, ask the assistant to pack a finished workflow into an experience you can install in any workspace.",
             skills:
@@ -408,10 +408,17 @@ const en = {
             api: "API & Model",
             system: "System Message",
             advanced: "Advanced",
-            runtime: "Runtime & Debug",
+            run: "Run",
+            debug: "Debug",
+            plugins: "Plugins",
             about: "About & Updates",
         },
 
+        plugins: {
+            enable: "Enable the plugin system",
+            enableHint:
+                "Gives the model the plugin tool and one tool per plugin capability. Off: plugins stay listed here, but the model cannot call them.",
+        },
         appearance: {
             title: "Appearance",
             subtitle: "Pick how the interface follows your system theme.",
@@ -525,32 +532,41 @@ const en = {
                 "Prefix the newest user message with a hint (under 200 characters) of the memories whose keywords match it, ranked by confidence. It is a pointer, not the full record: the assistant still searches a scope for the whole entry. The hint exists only in the request — the stored message keeps the user's own text.",
         },
 
-        runtime: {
-            title: "Runtime & Debug",
-            subtitle: "Execution behavior, where logs are written, how long they are kept, and how requests are monitored.",
-            loggerOutput: "Logger Output (debug build only)",
-            loggerFile: "Write to app-<date>.log",
-            loggerPrintln: "Print to terminal (println)",
-            retention: "Log retention (days)",
-            retentionHint:
-                "Request and interaction logs older than this are deleted at startup and by the Interaction Monitor's “Compact DB”. 0 keeps logs forever. Chat history is never pruned. Change it and press Save to apply.",
-            singleInstance: "Run a single instance",
-            singleInstanceHint:
-                "Launching Rabbit Chat Studio again brings the running window to the front instead of opening a second copy. When off, every launch gets its own window on a temporary copy of this configuration. Applies after restarting the app.",
+        run: {
+            title: "Run",
+            subtitle: "How turns execute: background tools, notifications, window behavior and the self-evolution mode.",
             backgroundTools: "Background execution",
             backgroundToolsHint:
                 "Let the assistant run slow tools as background tasks (`run_in_background: true`): `run_cmd`, `run_shell`, `file_actions` search, every MCP tool and `call_subagent`. The result is delivered automatically before the next request and the turn stays open until it arrives. Sub-agents never receive the flag.",
             allowNotifications: "Allow notifications",
             allowNotificationsHint:
                 "Play a sound cue when a turn settles — the message sound for a failure, the session-finished sound for a success — and, while the window is minimized or another application holds the focus, show the desktop notification card with the reply's first line (or the error text). A turn the user stopped never notifies.",
+            singleInstance: "Run a single instance",
+            singleInstanceHint:
+                "Launching Rabbit Chat Studio again brings the running window to the front instead of opening a second copy. When off, every launch gets its own window on a temporary copy of this configuration. Applies after restarting the app.",
             selfEvolution: "Enable Self-Evolution Mode",
             selfEvolutionHint:
                 "Let the assistant evolve its own skills inside the workspace. The file actions and memory tools stay enabled while the mode is on, and the assistant keeps verified facts (runtime environment, correct tool usage, file locations) in a dedicated evolution memory. The assistant may also build its own MCP servers (`mcp_self`) — scripts under .data/mcp, started as local processes after your confirmation.",
+        },
+
+        debug: {
+            title: "Debug",
+            subtitle: "Where log lines go and how long they are kept, plus the monitors that read them.",
+            loggerOutput: "Logger output",
+            loggerFile: "Write to app-<date>.log",
+            loggerPrintln: "Print to terminal (println)",
+            loggerOutputHint: "Only a debug build writes log lines; a release build ignores this choice.",
+            retention: "Log retention (days)",
+            retentionHint:
+                "Request and interaction logs older than this are deleted at startup and by the Interaction Monitor's “Compact DB”. 0 keeps logs forever. Chat history is never pruned. Change it and press Save to apply.",
+            monitors: "Monitors",
+            monitorsHint: "Each row opens a read-only dialog over this sheet. A running turn is read only after it ends.",
             interactionMonitor: "Interaction monitor",
             agentMissions: "Agent missions monitor",
             evolutionMemory: "Evolution memory",
             experiences: "Experience packages",
             launchMonitor: "Launch Monitor",
+            monitorsEmpty: "No monitor is available here: the interaction and agent-missions monitors need an open session, and the evolution monitors need Self-Evolution Mode (in Run).",
         },
 
         about: {
@@ -1039,7 +1055,7 @@ const en = {
         compacting: "Compacting…",
         compactTitle: "Delete logs older than 90 days and reclaim disk space",
         compactConfirm:
-            "Compact the database? Logs older than the retention window (Settings → Runtime & Debug) are deleted and the file is rewritten to reclaim space. Chat history is kept.",
+            "Compact the database? Logs older than the retention window (Settings → Debug) are deleted and the file is rewritten to reclaim space. Chat history is kept.",
         compacting2: "Compacting… this can take a few seconds",
         interactions: "Interactions ({count})",
         cacheChip: "Cache {percent}%",
@@ -1093,6 +1109,86 @@ const en = {
             noTools: "No tool calls in this session",
             toolRow: "{count} calls",
             toolFailures: "{count} failed",
+        },
+    },
+
+    plugins: {
+        windowTitle: "Plugins",
+        subtitle:
+            "Plugins add tools served over a message bus: the model calls a tool, the tool publishes on the bus, and one of the plugin's instances answers.",
+        refresh: "Refresh",
+        reload: "Reload manifests",
+        openManager: "Open plugin manager",
+        sectionHint:
+            "Manage installed plugins, their settings and their running instances in a separate window.",
+        endpoint: "Service endpoint",
+        endpointHint:
+            "A service plugin (Rust, Node, Python, …) dials this address and presents the token to join the bus. Every connection becomes one instance.",
+        token: "Token",
+        copy: "Copy",
+        copied: "Copied",
+        issues: "Manifests that could not be loaded",
+        empty: "No plugins installed",
+        emptyHint:
+            "Add a folder with a plugin.json under .data/plugins and reload the manifests.",
+        transportSpawn: "Spawned",
+        transportService: "Service",
+        transportBoth: "Spawned or service",
+        running: "Running",
+        stopped: "Stopped",
+        start: "Start",
+        stop: "Stop",
+        instances: "Instances",
+        state: "State",
+        inflight: "In flight",
+        noInstances:
+            "No instance is running. Start the plugin, or start its service so it attaches.",
+        stateStarting: "Starting",
+        stateReady: "Ready",
+        stateFailed: "Failed",
+        stateStopped: "Stopped",
+        instanceInflight: "{count} in flight",
+        instanceRestarts: "{count} restarts",
+        settings: "Settings",
+        save: "Save",
+        saving: "Saving…",
+        saved: "Saved",
+        reset: "Reset to defaults",
+        advanced: "Advanced",
+        schemaMissing: "This plugin declares no settings.",
+        pageHint: "This plugin ships its own settings page ({page}).",
+        pagePending: "That page is not hosted yet — edit config.yaml for now.",
+        configModeSchema: "Form",
+        configModePage: "Custom page",
+        secretStored: "Stored — type a new value to replace it",
+        secretEmpty: "Not set",
+        logs: "Logs",
+        noLogs: "Nothing logged yet.",
+        bus: "Bus traffic",
+        noBus: "No messages yet.",
+        help: {
+            open: "How to create a plugin",
+            title: "Creating a plugin",
+            close: "Close",
+            intro:
+                "A plugin is a workspace folder that becomes tools the model can call: the tool publishes on the message bus, and one of the plugin's instances answers.",
+            folder: "1 · Folder shape",
+            folderBody:
+                "The folder name is the plugin id. Everything the plugin needs lives inside it.",
+            manifest: "2 · Manifest",
+            manifestBody:
+                "plugin.json declares the runtime, the entry and the tools; each declared tool reaches the model as plugin_<id>_<tool>.",
+            protocol: "3 · Protocol",
+            protocolBody:
+                "Line-delimited JSON over stdin and stdout: answer hello with ready, then reply to every request with the same id.",
+            service: "4 · Or attach as a service",
+            serviceBody:
+                'transport: "service" means the process is started elsewhere and dials the endpoint above with the token. One connection = one instance.',
+            settings: "5 · Settings page",
+            settingsBody:
+                "config.schema.yaml becomes a form in this window; the values are saved to config.yaml and pushed to the running instances.",
+            agent:
+                "Let the agent build one: in self-evolution mode it reads .data/manuals/create-plugin.md and writes the whole folder for you.",
         },
     },
 

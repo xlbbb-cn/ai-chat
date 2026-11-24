@@ -156,7 +156,7 @@ Main sources:
 
 Controls:
 
-- **Settings → Runtime & Debug → Log retention days** (30/90 days; `0` = forever);
+- **Settings → Debug → Log retention days** (30/90 days; `0` = forever);
 - Interaction Monitor → **Compact database** prunes expired logs and runs `VACUUM`;
 - delete unneeded history sessions.
 

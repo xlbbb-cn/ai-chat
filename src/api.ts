@@ -42,6 +42,11 @@ import type {
   WorkspaceFileRange,
   WorkspaceHistoryEntry,
   RequestHeader,
+  PluginView,
+  PluginManagerState,
+  PluginConfigView,
+  PluginLogEntry,
+  PluginBusRecord,
 } from "./types";
 
 export async function getConfig(): Promise<AppConfig> {
@@ -88,6 +93,15 @@ export async function readChatBackground(): Promise<string | null> {
  */
 export async function getInstanceInfo(): Promise<InstanceInfo> {
   return invoke("get_instance_info");
+}
+
+/**
+ * Whether the running binary is a debug build (`debug_assertions`). The backend
+ * logger writes nothing in a release build, so Settings → Debug hides the
+ * log-output switch there (`is_debug_build` in `src-tauri/src/logger.rs`).
+ */
+export async function isDebugBuild(): Promise<boolean> {
+  return invoke("is_debug_build");
 }
 
 export async function confirmCommand(
@@ -1086,6 +1100,79 @@ export async function onMcpServersChanged(
   return listen<McpServersChanged>("mcp-servers-changed", (e) => cb(e.payload));
 }
 
+// ─── Plugins ─────────────────────────────────────────────────────────────────
+
+/** Everything the plugin manager window needs to draw its first frame. */
+export async function getPluginManagerState(): Promise<PluginManagerState> {
+  return invoke("get_plugin_manager_state");
+}
+
+/** The plugin list alone (no bus endpoint, no instances). */
+export async function listPlugins(): Promise<PluginView[]> {
+  return invoke("list_plugins");
+}
+
+export async function getPluginConfig(pluginId: string): Promise<PluginConfigView> {
+  return invoke("get_plugin_config", { pluginId });
+}
+
+/**
+ * Validate and persist one plugin's settings, hot-pushing them to the running
+ * instances. Validation failures reject with `[{ key, message }]` rather than
+ * a string, so callers must handle both shapes.
+ */
+export async function savePluginConfig(
+  pluginId: string,
+  values: Record<string, unknown>,
+): Promise<PluginConfigView> {
+  return invoke("save_plugin_config", { pluginId, values });
+}
+
+export async function resetPluginConfig(pluginId: string): Promise<PluginConfigView> {
+  return invoke("reset_plugin_config", { pluginId });
+}
+
+/** Top the instance pool up; resolves with the number of ready instances. */
+export async function startPlugin(id: string): Promise<number> {
+  return invoke("start_plugin", { id });
+}
+
+export async function stopPlugin(id: string): Promise<number> {
+  return invoke("stop_plugin", { id });
+}
+
+export async function reloadPlugins(): Promise<void> {
+  await invoke("reload_plugins");
+}
+
+export async function getPluginLogs(
+  pluginId: string,
+  limit = 120,
+): Promise<PluginLogEntry[]> {
+  return invoke("get_plugin_logs", { pluginId, limit });
+}
+
+export async function getPluginBusRecords(limit = 24): Promise<PluginBusRecord[]> {
+  return invoke("get_plugin_bus_records", { limit });
+}
+
+/** Open (or focus) the plugin manager window; `pluginId` preselects a plugin. */
+export async function openPluginManager(pluginId?: string): Promise<void> {
+  await invoke("open_plugin_manager", { pluginId: pluginId ?? null });
+}
+
+/** Instance state changed (started, ready, failed, exited). */
+export async function onPluginState(cb: () => void): Promise<UnlistenFn> {
+  return listen("plugin-state", () => cb());
+}
+
+/** One line of bus traffic, emitted live. */
+export async function onPluginBus(
+  cb: (record: PluginBusRecord) => void,
+): Promise<UnlistenFn> {
+  return listen<PluginBusRecord>("plugin-bus", (e) => cb(e.payload));
+}
+
 /** Result of a database compaction run. */
 export interface CompactDbResult {
   /** Expired log rows dropped by the retention policy during this run. */
@@ -1106,7 +1193,7 @@ export async function clearLogs(): Promise<number> {
 }
 
 /**
- * Apply the configured log retention window (Settings → Runtime & Debug) and
+ * Apply the configured log retention window (Settings → Debug) and
  * `VACUUM` the database file so deleted rows actually free disk space.
  */
 export async function compactDatabase(): Promise<CompactDbResult> {

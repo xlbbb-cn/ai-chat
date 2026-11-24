@@ -251,7 +251,7 @@ Rules:
 - Sub-agents **do not see the current conversation**; `task_description` must be self-contained.
 - `context` is appended to the task description; use it for file paths, findings and constraints.
 - The main agent waits for the result.
-- With **Settings → Runtime & Debug → Background execution** on, `run_in_background: true` returns a `bg-…` id immediately: the sub-agent keeps running, the main agent continues, and the report is delivered before its next request (the turn stays open until then). Sub-agents themselves never receive the flag.
+- With **Settings → Run → Background execution** on, `run_in_background: true` returns a `bg-…` id immediately: the sub-agent keeps running, the main agent continues, and the report is delivered before its next request (the turn stays open until then). Sub-agents themselves never receive the flag.
 - Every call (and every planner mission) gets a **deliverable exchange directory**: `<workspace>/.data/deliver/<session-id>/<batch-id>/` with a `shared/` folder plus one folder per task. The sub-agent's prompt names its own and the shared folder; large outputs should be written there instead of being squeezed into the answer, and a dependent task is told to read `<exchange-root>/<task-id>/<file>`. The mission report and the `call_subagent` result list the produced files with sizes, so the main agent can open them with `file_actions`.
 - The exchange area is **permanent** — nothing cleans it automatically. Open it via the title-bar **`⋯` menu → Open deliverables folder**, the button next to the mission monitor's refresh, or the mission panel's deliverables list, which reveals the files a finished mission left behind. It is part of the profile backup and is deleted together with its session. `cloud` agents cannot reach the local workspace and return deliverables inline; `llm` and `cli` agents use the folders.
 - The final answer is still written by the main agent; sub-agents never reply to the user directly.
@@ -267,7 +267,7 @@ Sub-agents can use the task tools:
 - `get_active_tasks`
 - `mark_mission_accomplished`
 
-Open **Settings → Runtime & Debug → Agent Missions Monitor** to inspect:
+Open **Settings → Debug → Agent Missions Monitor** to inspect:
 
 - mission status, root task description, context;
 - active tasks and their statuses;
@@ -322,6 +322,6 @@ External agents run outside the app: CLI agents run with your user permissions, 
 | A new `agents/*.md` file is missing from the panel | Press **Refresh**; the panel reads `agents/index.yaml`, not the folder |
 | A discovered agent is greyed out | It has no entry in `sub_agents.json` yet: enable or edit it once |
 | Cannot delete a library agent | Only `agents/custom/**` is deletable; disable the agent instead |
-| `run_in_background` is not offered | Background execution is off in Settings → Runtime & Debug |
+| `run_in_background` is not offered | Background execution is off in Settings → Run |
 | Processes remain after Stop | Normally trees are killed; check Task Manager and logs |
 | Mission monitor is empty | No sub-agent ran in this session; did the workspace DB switch? |

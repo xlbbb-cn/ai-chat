@@ -79,7 +79,7 @@ Rabbit Chat Studio 的配置分两层：
 | --- | --- | --- | --- |
 | `selected_tools` | string[] | `[]` | 启用的工具 id |
 | `self_evolution_mode` | boolean | `false` | 允许助手演进自己的技能；强制开启 `file_actions` + `memory` |
-| `background_tools` | boolean | `false` | 为 `run_cmd` / `run_shell` / `file_actions` 搜索 / MCP 工具 / `call_subagent` 下发 `run_in_background`（设置 → 运行时与调试 → 后台执行） |
+| `background_tools` | boolean | `false` | 为 `run_cmd` / `run_shell` / `file_actions` 搜索 / MCP 工具 / `call_subagent` 下发 `run_in_background`（设置 → 运行 → 后台执行） |
 | `parallel_tools` | boolean | `true` | 同一轮回复里的独立工具调用同时执行（工具侧边栏底部的“并行工具调用”）；`false` = 严格逐个执行 |
 | `max_parallel_tools` | number | `4` | 单轮最多同时跑几个调用，限制在 1–8；`1` 等同关闭 `parallel_tools` |
 | `workspace_dir` | string? | 空 | 工作区绝对路径；空 = 默认 |

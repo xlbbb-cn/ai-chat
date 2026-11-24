@@ -113,3 +113,10 @@ pub(crate) fn set_window_vibrancy(
 pub(crate) fn get_instance_info(state: State<'_, AppState>) -> instance::InstanceInfo {
     crate::get_instance_info(state)
 }
+
+/// Whether this binary is a debug build (`debug_assertions`), which is also
+/// what decides if the logger writes anything at all.
+#[tauri::command]
+pub(crate) fn is_debug_build() -> bool {
+    crate::logger::is_debug_build()
+}

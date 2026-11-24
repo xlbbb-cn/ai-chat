@@ -37,6 +37,7 @@ pub mod mcp;
 pub mod model_metadata;
 mod notify;
 mod pdf_mentions;
+mod plugins;
 mod prompt;
 mod process_guard;
 mod skills;
@@ -467,6 +468,16 @@ pub(crate) fn apply_config(
             }
         });
 
+        // Plugin instances are rooted in the workspace they were started in
+        // (their `PLUGIN_WORKSPACE` and their folder), so a switch retires
+        // them; the first plugin call in the new workspace spawns its own.
+        let app_handle = app.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Some(state) = app_handle.try_state::<AppState>() {
+                state.plugins.stop_all().await;
+            }
+        });
+
         reopen_workspace_db(state, &new_workspace_path)?;
 
         // Timers resume a chat session that lives in this workspace's
@@ -585,6 +596,13 @@ pub struct AppConfig {
     pub selected_tools: Vec<String>,
     #[serde(default)]
     pub self_evolution_mode: bool,
+    /// Plugin system: the built-in `plugin` tool plus one `plugin_<id>_<tool>`
+    /// function per manifest-declared plugin tool. Off by default — plugins are
+    /// workspace code the user opted into (`.data/plugins/<id>/`). While it is
+    /// on, `effective_tools` keeps `plugin` selected, so a stale config cannot
+    /// leave the system half-on.
+    #[serde(default)]
+    pub plugins_enabled: bool,
     /// Allow the model to run `run_cmd` / `run_shell` / `file_actions search`
     /// as background tasks (`run_in_background: true`). The turn stays open
     /// until a started task delivers its result or is cancelled.
@@ -619,7 +637,7 @@ pub struct AppConfig {
     #[serde(default = "turn_guard::default_tool_failure_limit")]
     pub tool_failure_limit: u32,
     /// Run independent tool calls of one assistant round at the same time
-    /// (Settings → Runtime & Debug, on by default). Off means every round
+    /// (Settings → Run, on by default). Off means every round
     /// executes strictly in `tool_calls` order, exactly as before batching
     /// existed.
     #[serde(default = "update::default_true")]
@@ -694,7 +712,7 @@ pub struct AppConfig {
     pub single_instance: bool,
     /// Show a desktop notification card when a chat turn settles (done or
     /// failed) while the window is minimized or not focused, and play the two
-    /// bundled sound cues alongside it (Settings → Runtime & Debug, "Allow
+    /// bundled sound cues alongside it (Settings → Run, "Allow
     /// notifications"). The card is the app's own `notify` window (see
     /// `notify.rs`), never an OS toast, so it follows the app's glass look.
     #[serde(default = "update::default_true")]
@@ -718,6 +736,7 @@ impl Default for AppConfig {
             system_message: String::new(),
             selected_tools: vec![],
             self_evolution_mode: false,
+            plugins_enabled: false,
             background_tools: true,
             enhanced_figures: true,
             memory_hint: true,
@@ -881,6 +900,13 @@ impl AppConfig {
                 }
             }
         }
+        // The plugin system is one switch: the owning tool must be in the
+        // payload whenever the mode is on, exactly like the self-evolution
+        // tools, or the per-plugin functions would be advertised next to a
+        // `plugin` control tool that cannot be called.
+        if self.plugins_enabled && !tools.iter().any(|existing| existing == "plugin") {
+            tools.push("plugin".to_string());
+        }
         // Tool dependencies as the last line of defence for a stale in-memory
         // selection: the calculator's prompt advertises `run_cmd` as its
         // fallback, so the pair must reach the request payload together.
@@ -998,6 +1024,10 @@ pub struct AppState {
     /// Long-lived background children started by `run_shell run_type="serve"`.
     /// Killed on demand by the tool and automatically at app exit.
     pub serve_processes: tools::serve::ServeRegistry,
+    /// Plugin system: the message bus, the per-plugin instance pools and the
+    /// per-plugin log / event rings. Workspace-scoped: a switch stops every
+    /// instance and the next call re-spawns it rooted in the new tree.
+    pub plugins: plugins::PluginHost,
     /// Cross-conversation file race protection for `file_actions`: per-path
     /// write locks plus stale-write detection (another conversation modified
     /// a file after this session last read it → the write is refused with a
@@ -2013,8 +2043,8 @@ pub fn run() {
             }
 
             // Log retention: request/interaction rows are debugging data, so
-            // drop anything past the retention window (Settings → Runtime &
-            // Debug) on startup. Conversations in `history` are never touched.
+            // drop anything past the retention window (Settings → Debug) on
+            // startup. Conversations in `history` are never touched.
             match db::prune_old_logs(&db, config.log_retention_days as i64) {
                 Ok(0) => {}
                 Ok(removed) => app_logger.log(
@@ -2065,6 +2095,10 @@ pub fn run() {
                 mcp_children: std::sync::Arc::new(tokio::sync::Mutex::new(Default::default())),
                 mcp_revision: AtomicU64::new(1),
                 serve_processes: Default::default(),
+                // The host keeps an `AppHandle` for its `plugin-*` events; the
+                // bus and the instance pools start empty and are filled on
+                // demand (first call / `plugin` action "start").
+                plugins: plugins::PluginHost::new(Some(app.handle().clone())),
                 file_locks: Default::default(),
                 background_tasks: Default::default(),
                 session_memories: Mutex::new(Default::default()),
@@ -2262,6 +2296,12 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            ipc::plugins_config::open_plugin_manager,
+        ipc::plugins_config::plugin_window_report,
+        ipc::plugins_config::get_plugin_manager_state,
+        ipc::plugins_config::get_plugin_config,
+        ipc::plugins_config::save_plugin_config,
+        ipc::plugins_config::reset_plugin_config,
             // App shell: folders, backups, PDF export, window/instance actions.
             ipc::app::app_open_data_dir,
             ipc::app::app_open_workspace_dir,
@@ -2277,6 +2317,7 @@ pub fn run() {
             ipc::app::save_markdown_file,
             ipc::app::set_window_vibrancy,
             ipc::app::get_instance_info,
+            ipc::app::is_debug_build,
             // Chat background photo (app-data `backgrounds/`).
             ipc::app::set_chat_background,
             ipc::app::use_default_chat_background,
@@ -2342,6 +2383,18 @@ pub fn run() {
             ipc::mcp::clear_mcp_logs,
             ipc::mcp::mcp_start_stdio,
             ipc::mcp::mcp_stop_stdio,
+            // Plugin system (manifest panel + instance diagnostics).
+            ipc::plugins::list_plugins,
+            ipc::plugins::get_plugin_diagnostics,
+            ipc::plugins::reload_plugins,
+            ipc::plugins::start_plugin,
+            ipc::plugins::stop_plugin,
+            ipc::plugins::save_plugin_manifest,
+            ipc::plugins::delete_plugin,
+            ipc::plugins::get_plugin_logs,
+            ipc::plugins::clear_plugin_logs,
+            ipc::plugins::get_plugin_bus_records,
+            ipc::plugins::get_plugin_events,
             // Sub-agents and missions.
             ipc::agents::list_sub_agents,
             ipc::agents::list_agent_mentions,

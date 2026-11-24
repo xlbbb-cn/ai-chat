@@ -29,6 +29,14 @@ pub struct AppLogger {
     prefix: String,
 }
 
+/// True when this binary carries `debug_assertions` (`tauri dev`, `cargo build`).
+/// The logger is gated on exactly this flag (`AppLogger::new(cfg!(debug_assertions), …)`),
+/// so a release build writes no log lines at all — Settings → Debug hides the
+/// log-output switch there instead of offering one that would do nothing.
+pub fn is_debug_build() -> bool {
+    cfg!(debug_assertions)
+}
+
 impl AppLogger {
     pub fn new(enabled: bool, output: LoggerOutput, dir: PathBuf, prefix: String) -> Self {
         Self {

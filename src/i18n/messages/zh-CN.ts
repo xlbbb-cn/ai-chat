@@ -84,7 +84,7 @@ const zhCN: Messages = {
 
         tip: {
             organizeMemory:
-                "用「记忆」工具记下可复用的事实，再到「设置 → 运行与调试」里整理与合并记忆。",
+                "用「记忆」工具记下可复用的事实，再到「设置 → 调试」里整理与合并记忆。",
             archiveExperience:
                 "开启「自我进化模式」后，让助手把成熟的流程打包成经验，就能在其他工作区一键安装。",
             skills: "在「技能」面板启用技能后，在输入框输入 /skill 即可按需加载。",
@@ -362,10 +362,17 @@ const zhCN: Messages = {
             api: "API 与模型",
             system: "系统消息",
             advanced: "高级",
-            runtime: "运行与调试",
+            run: "运行",
+            debug: "调试",
+            plugins: "插件",
             about: "关于与更新",
         },
 
+        plugins: {
+            enable: "启用插件系统",
+            enableHint:
+                "启用后模型会拿到 plugin 工具，以及每个插件能力对应的独立工具；关闭时插件仍在此列出，但模型无法调用。",
+        },
         appearance: {
             title: "外观",
             subtitle: "选择界面如何跟随系统主题。",
@@ -474,31 +481,40 @@ const zhCN: Messages = {
                 "在最新的用户消息最前面加一行提示（不足 200 字符），列出关键词匹配到的记忆，按置信度排序。它只是线索而不是全文：助手仍需检索对应作用域才能拿到完整条目。提示只存在于发给模型的请求里，存下来的消息仍是用户原话。",
         },
 
-        runtime: {
-            title: "运行与调试",
-            subtitle: "执行行为、日志写入位置与保留时长，以及请求的监控方式。",
-            loggerOutput: "日志输出（仅调试构建）",
-            loggerFile: "写入 app-日期.log",
-            loggerPrintln: "输出到终端（println）",
-            retention: "日志保留天数",
-            retentionHint:
-                "早于该时限的请求日志与交互日志会在启动时以及由交互监视器执行“压缩数据库”时删除。0 表示永久保留。聊天历史不会被清理。修改后请点击保存生效。",
-            singleInstance: "单实例运行",
-            singleInstanceHint:
-                "再次启动时聚焦已运行的窗口，而不是打开第二个实例。关闭该选项后，每次启动都会打开独立窗口，并使用本配置的临时副本。重启应用后生效。",
+        run: {
+            title: "运行",
+            subtitle: "回合如何执行：后台工具、通知、窗口行为与自我进化模式。",
             backgroundTools: "后台执行",
             backgroundToolsHint:
                 "允许助手把耗时工具放到后台运行（`run_in_background: true`）：`run_cmd`、`run_shell`、`file_actions` 搜索、所有 MCP 工具和 `call_subagent`。结果会在下一个请求前自动送达，本轮保持开启直到结果到齐；子代理不会收到该参数。",
             allowNotifications: "允许通知",
             allowNotificationsHint:
                 "回合结束时播放提示音：失败为信息音，成功为会话结束音；窗口最小化或焦点在其他应用时，同时弹出桌面通知卡片，显示回复首行（或错误信息）。用户主动停止的回合不会通知。",
+            singleInstance: "单实例运行",
+            singleInstanceHint:
+                "再次启动时聚焦已运行的窗口，而不是打开第二个实例。关闭该选项后，每次启动都会打开独立窗口，并使用本配置的临时副本。重启应用后生效。",
             selfEvolution: "启用自我进化模式",
             selfEvolutionHint: "允许助手在工作区内自行演进技能。开启期间“文件操作”和“记忆”工具会强制启用并锁定，助手还会把已验证的关键事实（运行环境、正确的工具用法、常用文件位置）记录到专属的自进化记忆区。助手还可以自建 MCP 服务器（`mcp_self`）：脚本存放在 .data/mcp，经你确认后作为本地进程启动。",
+        },
+
+        debug: {
+            title: "调试",
+            subtitle: "日志写到何处、保留多久，以及读取这些日志的监视器。",
+            loggerOutput: "日志输出",
+            loggerFile: "写入 app-日期.log",
+            loggerPrintln: "输出到终端（println）",
+            loggerOutputHint: "仅调试构建会写入日志，正式构建下该选项不生效。",
+            retention: "日志保留天数",
+            retentionHint:
+                "早于该时限的请求日志与交互日志会在启动时以及由交互监视器执行“压缩数据库”时删除。0 表示永久保留。聊天历史不会被清理。修改后请点击保存生效。",
+            monitors: "监视器",
+            monitorsHint: "每行都会在设置页上打开一个只读对话框；正在运行的回合要等结束后才会被读取。",
             interactionMonitor: "交互监视器",
             agentMissions: "智能体任务监视器",
             evolutionMemory: "自进化记忆",
             experiences: "全局经验包",
             launchMonitor: "打开监视器",
+            monitorsEmpty: "当前没有可用的监视器：交互监视器与智能体任务监视器需要先打开一个会话，自进化相关的监视器需要在「运行」里开启自我进化模式。",
         },
 
         about: {
@@ -967,7 +983,7 @@ const zhCN: Messages = {
         compacting: "压缩中…",
         compactTitle: "删除超过 90 天的日志并回收磁盘空间",
         compactConfirm:
-            "压缩数据库？超过保留时限（设置 → 运行与调试）的日志将被删除，并重写文件以回收空间。聊天历史会保留。",
+            "压缩数据库？超过保留时限（设置 → 调试）的日志将被删除，并重写文件以回收空间。聊天历史会保留。",
         compacting2: "正在压缩…可能需要几秒钟",
         interactions: "交互记录（{count}）",
         cacheChip: "缓存 {percent}%",
@@ -1018,6 +1034,82 @@ const zhCN: Messages = {
             noTools: "本会话没有工具调用",
             toolRow: "{count} 次",
             toolFailures: "失败 {count}",
+        },
+    },
+
+    plugins: {
+        windowTitle: "插件",
+        subtitle:
+            "插件通过消息总线提供工具：模型调用工具，工具向总线发布消息，由插件的某个实例应答。",
+        refresh: "刷新",
+        reload: "重新加载清单",
+        openManager: "打开插件管理",
+        sectionHint: "在独立窗口中管理已安装的插件、它们的设置和运行中的实例。",
+        endpoint: "服务接入点",
+        endpointHint:
+            "服务型插件（Rust、Node、Python 等）连接该地址并出示令牌即可接入总线，每条连接就是一个实例。",
+        token: "令牌",
+        copy: "复制",
+        copied: "已复制",
+        issues: "无法加载的清单",
+        empty: "尚未安装插件",
+        emptyHint: "在 .data/plugins 下放入含 plugin.json 的文件夹，然后重新加载清单。",
+        transportSpawn: "子进程",
+        transportService: "服务",
+        transportBoth: "子进程或服务",
+        running: "运行中",
+        stopped: "未运行",
+        start: "启动",
+        stop: "停止",
+        instances: "实例",
+        state: "状态",
+        inflight: "处理中",
+        noInstances: "当前没有运行中的实例。启动插件，或启动它的服务让它接入。",
+        stateStarting: "启动中",
+        stateReady: "就绪",
+        stateFailed: "失败",
+        stateStopped: "已停止",
+        instanceInflight: "处理中 {count}",
+        instanceRestarts: "重启 {count} 次",
+        settings: "设置",
+        save: "保存",
+        saving: "保存中…",
+        saved: "已保存",
+        reset: "恢复默认",
+        advanced: "高级",
+        schemaMissing: "该插件没有声明任何设置。",
+        pageHint: "该插件自带设置页面（{page}）。",
+        pagePending: "该页面暂未托管，请先直接编辑 config.yaml。",
+        configModeSchema: "表单",
+        configModePage: "自定义页面",
+        secretStored: "已保存 — 输入新值可替换",
+        secretEmpty: "未设置",
+        logs: "日志",
+        noLogs: "暂无日志。",
+        bus: "总线流量",
+        noBus: "暂无消息。",
+        help: {
+            open: "如何创建一个插件",
+            title: "创建插件",
+            close: "关闭",
+            intro:
+                "插件是工作区里的一个文件夹，它变成模型可以调用的工具：工具向消息总线发布，由插件的某个实例应答。",
+            folder: "1 · 目录结构",
+            folderBody: "文件夹名就是插件 id，插件需要的一切都放在这个文件夹里。",
+            manifest: "2 · 清单",
+            manifestBody:
+                "plugin.json 声明运行时、入口和工具；每个声明的工具都会以 plugin_<id>_<tool> 出现在模型手里。",
+            protocol: "3 · 协议",
+            protocolBody:
+                "stdin / stdout 上的逐行 JSON：收到 hello 回 ready，之后每个 request 用同一个 id 回 reply。",
+            service: "4 · 或者以服务方式接入",
+            serviceBody:
+                "transport: \"service\" 表示进程由别处启动，用令牌连接上面的接入点；一条连接就是一个实例。",
+            settings: "5 · 设置页面",
+            settingsBody:
+                "config.schema.yaml 会在本窗口渲染成表单，值保存到 config.yaml 并热推给运行中的实例。",
+            agent:
+                "也可以让 agent 代劳：自进化模式下它会读 .data/manuals/create-plugin.md，把整个文件夹写好。",
         },
     },
 

@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "plugin-manager",
+  "description": "The plugin manager window (plugins/manager.rs) — reads plugin state, instances, logs and bus traffic, edits per-plugin settings. Every window action runs through app commands; the webview itself gets no fs/shell capability.",
+  "windows": [
+    "plugin-manager"
+  ],
+  "permissions": [
+    "core:default"
+  ]
+}

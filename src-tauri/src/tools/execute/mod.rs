@@ -487,6 +487,17 @@ pub async fn execute_tool(
             )
             .await
         }
+        // Plugin system: the control tool and every manifest-declared
+        // `plugin_<id>_<tool>` function. Marketing a plugin's own tools needs no
+        // second dispatcher — `plugins::tool::handle` resolves the function name
+        // against the workspace manifests and sends the request over the plugin
+        // message bus.
+        "plugin" => {
+            crate::plugins::tool::handle(app, name, &args, mission_id, session_id, call_id).await
+        }
+        other if other.starts_with("plugin_") => {
+            crate::plugins::tool::handle(app, other, &args, mission_id, session_id, call_id).await
+        }
         _ => format!("Unknown tool: {}", name),
     };
 

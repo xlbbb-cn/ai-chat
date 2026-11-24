@@ -37,6 +37,18 @@ pub const CONFIRM_REQUIRED: &str = "confirm-required";
 pub const RISK_ASSESSMENT: &str = "risk-assessment";
 pub const SYNTAX_ERROR: &str = "syntax-error";
 
+// ─── Plugins ─────────────────────────────────────────────────────────────────
+
+/// One plugin instance changed state (`starting` / `ready` / `failed` /
+/// `stopped`). Payload: `{plugin_id, instance, state, pid}`.
+pub const PLUGIN_STATE: &str = "plugin-state";
+/// One message crossed the plugin bus (request / reply / event / timeout /
+/// rejected). Payload is `plugins::bus::BusRecord`.
+pub const PLUGIN_BUS: &str = "plugin-bus";
+/// One line for a plugin's own log ring. Payload:
+/// `{plugin_id, ts_ms, level, message}`.
+pub const PLUGIN_LOG: &str = "plugin-log";
+
 /// One streamed content delta of the user's own chat turn.
 #[derive(Debug, Clone, Serialize)]
 pub struct ChatToken {

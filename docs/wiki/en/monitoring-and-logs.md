@@ -2,7 +2,7 @@ Rabbit Chat Studio records model requests and tool calls locally, so you can ans
 
 ## Interaction Monitor
 
-Open **Settings → Runtime & Debug → Interaction Monitor**.
+Open **Settings → Debug → Interaction Monitor**.
 
 > The entry appears when a chat session exists; it queries the current `session_id`.
 
@@ -55,7 +55,7 @@ Top controls:
 
 ### Retention
 
-**Settings → Runtime & Debug → Log retention days**:
+**Settings → Debug → Log retention days**:
 
 - default 90 days;
 - `0` = keep forever;
@@ -69,7 +69,7 @@ Top controls:
 
 ## Agent Mission Monitor
 
-Open **Settings → Runtime & Debug → Agent Missions Monitor**.
+Open **Settings → Debug → Agent Missions Monitor**.
 
 It shows the current session's mission records:
 
@@ -120,7 +120,7 @@ Notes:
 
 - Under the Microsoft Store (MSIX) build, Windows redirects this path to `%LOCALAPPDATA%\Packages\XLBBB.RabbitChatStudio\LocalCache\Roaming\com.leonard.aichat\app-<date>.log`.
 - Only **debug builds** (`cargo` / `tauri dev`) write it; release builds disable it by default.
-- **Settings → Runtime & Debug → Log output** selects file vs terminal (`println`); debug builds only.
+- **Settings → Debug → Log output** selects file vs terminal (`println`); debug builds only.
 - It contains startup, config apply, workspace switch, MCP start, auto-accept, context compression, goal-loop continuations and request success/failure.
 - Every line carries a process tag (`[primary-<pid>]` / `[shadow-<pid>]`), so several app windows (multi-instance) writing the same file stay attributable.
 - The date is resolved per log line, so a window running across midnight starts the next day's file automatically.

@@ -226,7 +226,7 @@ Running serve processes are shown in the transcript's **Background** card (pid, 
 
 `run_shell` serve keeps a process alive *for the turn*; a background task does the opposite — it lets the **model keep working** while one call finishes.
 
-With **Settings → Runtime & Debug → Background execution** on, these accept `run_in_background: true`:
+With **Settings → Run → Background execution** on, these accept `run_in_background: true`:
 
 ```json
 { "action": "run", "command": "cargo test", "run_in_background": true }
@@ -334,7 +334,7 @@ For multi-page scraping or article extraction, prefer the MCP fetch server (see 
 | Command timed out | Raise `timeout_seconds` (max 3600) or switch to serve |
 | Pipes do not work in `run_cmd` | Use `run_shell` |
 | serve process is gone next turn | By design: serve trees are killed at turn end |
-| `run_in_background` is not in the tool schema | Turn on **Settings → Runtime & Debug → Background execution** |
+| `run_in_background` is not in the tool schema | Turn on **Settings → Run → Background execution** |
 | A background task never delivers a result | It was cancelled, or the turn ended; start it again in the current turn |
 | The turn keeps waiting | A task is still running: wait for it, or cancel it from the Background card / `background_task action="cancel"` |
 | Output is truncated | Tool results keep head 6,000 + tail 2,000 characters; narrow the query or read in ranges |

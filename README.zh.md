@@ -132,7 +132,7 @@ Rabbit Chat Studio 是一个桌面端 AI 助手应用，支持接入任意 OpenA
 - run_cmd：只运行由系统通过 `PATH` 解析的程序（`python`、`python3`、`git` 等），绝对路径与相对路径一律拒绝
 - run_shell：完全自由——脚本可以 `cd` 到任何地方执行任何内容，但每个脚本执行前都会经过风险引擎审计
 - run_shell serve：当前回合的后台进程；回合结束时整棵进程树会被停止并核验退出
-- **后台工具任务**：`run_cmd`、`run_shell`（`direct`）、`file_actions` 搜索、所有 MCP 工具与 `call_subagent` 都支持 `run_in_background: true`——调用立即返回 `bg-…` 任务 id，模型继续工作，真实结果会在其下一次请求前以 user 消息送达。回合会一直保持到所有任务结束；输入框上方的任务条显示进度并可取消，模型侧用 `background_task`（`list` / `wait` / `get` / `cancel`）管理。任务属于当前回合：Stop 或回合结束会杀掉它们的进程树。总开关：设置 → 运行时与调试 → 后台执行（子智能体不会收到该参数）
+- **后台工具任务**：`run_cmd`、`run_shell`（`direct`）、`file_actions` 搜索、所有 MCP 工具与 `call_subagent` 都支持 `run_in_background: true`——调用立即返回 `bg-…` 任务 id，模型继续工作，真实结果会在其下一次请求前以 user 消息送达。回合会一直保持到所有任务结束；输入框上方的任务条显示进度并可取消，模型侧用 `background_task`（`list` / `wait` / `get` / `cancel`）管理。任务属于当前回合：Stop 或回合结束会杀掉它们的进程树。总开关：设置 → 运行 → 后台执行（子智能体不会收到该参数）
 - file_actions：文件读写、编辑、补丁、比对（diff），支持 mkdir / rename / move / delete；严格限制在工作区内（包含隐藏的 `.data` 状态目录，工作区数据库受保护）
 - memory：`session` / `user` / `repo` / `evolution` 四级记忆，可检索与沉淀结论
 - todos：按会话维护任务清单，模型可规划、更新与关闭

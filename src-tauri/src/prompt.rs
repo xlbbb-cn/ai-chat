@@ -195,6 +195,109 @@ pub fn subagent_manual() -> String {
         .to_string()
 }
 
+/// `create-plugin` manual: a workspace plugin and the message bus behind it.
+pub fn plugin_manual() -> String {
+    r#"# Creating a plugin (plugin message bus)
+
+A plugin is a workspace folder that becomes tools the model can call: the tool publishes on
+the plugin message bus, the bus routes the message to one of the plugin's instances, and the
+instance's reply returns through the same request id. `./.data/plugins/echo/` is a working
+example (Node, 2 instances, settings form).
+
+## Shape
+
+```
+./.data/plugins/<id>/plugin.json          # manifest; <id> MUST equal the folder name
+./.data/plugins/<id>/<entry>              # entry script (server.mjs / server.py / …)
+./.data/plugins/<id>/config.schema.yaml   # optional settings form
+```
+
+```json
+{
+  "name": "Clock",
+  "version": "1.0.0",
+  "description": "One line for the panel.",
+  "runtime": "node",
+  "entry": "server.mjs",
+  "instances": 2,
+  "enabled": true,
+  "call_timeout_ms": 30000,
+  "transport": "spawn",
+  "subscriptions": ["clock/#"],
+  "tools": [
+    { "name": "now", "description": "Current time.", "parameters": { "type": "object", "properties": {} } }
+  ]
+}
+```
+
+`runtime` is `auto` | `python` | `node` | `shell` | `exec` (derived from `entry` when `auto`);
+`command` + `args` replace the interpreter for a compiled binary. `instances` is 1-8.
+`transport` is `spawn` (default) | `service` | `both`. Every declared tool reaches the model
+as `plugin_<id>_<tool>`; the `plugin` control tool has `list` / `call` / `publish` / `events` /
+`status` / `logs` / `start` / `stop` / `reload`.
+
+## Protocol (stdio, one JSON object per line)
+
+```
+host -> {"type":"hello","plugin":"clock","instance":0,"instances":2,"workspace":"…","data_dir":"…"}
+node -> {"type":"ready","version":"1.0.0"}
+host -> {"type":"request","id":"r1","topic":"clock","tool":"now","args":{},"session_id":"…","timeout_ms":30000}
+node -> {"type":"reply","id":"r1","ok":true,"result":{"time":"12:00"}}
+node -> {"type":"reply","id":"r1","ok":false,"error":"why it failed"}
+```
+
+`ready` must arrive within 15 s or the instance is failed. The host also sends `event`
+(`{"type":"event","topic":"…","payload":{…}}`), `ping` and `shutdown`; an instance may send
+`event` (audited, visible in the panel), `log` (`{"level":"info","message":"…"}`) and `pong`.
+Write ONLY protocol lines to stdout — anything else is logged and ignored. Diagnostics go to
+stderr, which the panel keeps in the plugin's log ring.
+
+## Service plugins (attach to the bus)
+
+`"transport": "service"` (or `both`) means the process is started by its own supervisor, not
+by the app. It dials the endpoint shown in the plugin manager (Settings → Plugins → service
+endpoint, `127.0.0.1:<port>`) and sends this as its first line:
+
+```json
+{"type":"hello","plugin":"clock","token":"<token from the panel>"}
+```
+
+Every connection becomes one instance — connect N times for N workers, and a dropped socket
+only removes that instance. The app answers `{"type":"welcome","instance":"clock#link0",
+"config":{…}}`, then speaks the same protocol as above.
+
+## Settings
+
+`config.schema.yaml` (`sections[]` → `fields[]`; types `text` / `multiline` / `number` /
+`integer` / `boolean` / `enum` / `path` / `secret` / `json`; `default`, `required`, `min`,
+`max`, `max_length`, `options`, `advanced`, `reveal_when`) makes the manager render a generic
+form; values live in `config.yaml` beside it. A plugin needing a bespoke UI sets `config_page`
+to its own HTML. Values reach the plugin in `welcome.config` and again as
+`{"type":"config","config":{…}}` on every save — hot reload, no restart.
+
+## Workflow
+
+1. Create the folder and files with `file_actions` (`./.data/plugins/<id>/…`).
+2. `plugin` action `reload` re-reads the roster, `list` confirms the new plugin, `start`
+   spawns the pool, `call` invokes a tool, `logs` shows the ring, `events` drains instance
+   events.
+3. In chat the model calls `plugin_<id>_<tool>` directly, or `plugin` action `call` with
+   `{"plugin":"<id>","tool":"<name>","args":{…}}`.
+4. The system must be enabled first (`plugins_enabled`, Settings → Plugins), otherwise no
+   plugin tool reaches the model.
+
+## Rules
+
+- The child starts in the plugin folder with its own interpreter — never a shell string.
+- Never put credentials in the plugin folder; read them from the settings values.
+- A `.js` entry inside a `"type": "module"` workspace is ESM: name it `server.mjs`, or use
+  CommonJS with `.cjs`.
+- One plugin, one purpose. Its tools share the instance pool and the settings page.
+- A reply is text the model reads: keep it small, structured, free of ANSI noise.
+"#
+        .to_string()
+}
+
 // ─── Tool description ────────────────────────────────────────────────────────
 
 /// The `agent_admin` tool schema description. Short on purpose — the full

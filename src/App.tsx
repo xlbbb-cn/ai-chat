@@ -433,8 +433,7 @@ function isCancelError(err: string): boolean {
 
 /**
  * Settle a chat turn the user may not be watching, in two channels, both
- * gated by the single "Allow notifications" switch (Settings → Runtime &
- * Debug):
+ * gated by the single "Allow notifications" switch (Settings → Run):
  *
  * - **Foreground** (`visibilityState === "visible"` and focused): no card —
  *   the transcript already carries the news. A failed turn cues with the
@@ -996,7 +995,7 @@ export default function App() {
   const [chatBackgroundUrl, setChatBackgroundUrl] = useState<string | null>(null);
   /** The config names a photo, but its file could not be read back. */
   const [chatBackgroundMissing, setChatBackgroundMissing] = useState(false);
-  /** Settings → Runtime & Debug: notify when minimized / unfocused. Read into
+  /** Settings → Run: notify when minimized / unfocused. Read into
    * an argument by `notifyTurnSettled` call sites, never captured live. */
   const notifyWhenHiddenRef = useRef(true);
   const currentAssistantMessageIdRef = useRef<string | null>(null);

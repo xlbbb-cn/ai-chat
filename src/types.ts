@@ -428,6 +428,13 @@ export interface AppConfig {
   selected_tools?: string[];
   self_evolution_mode?: boolean;
   /**
+   * Plugin system (`<workspace>/.data/plugins/<id>/`): the `plugin` tool plus
+   * one `plugin_<id>_<tool>` function per manifest-declared tool. Off by
+   * default; the backend keeps `plugin` in `effective_tools()` while it is on.
+   * Carried through a Settings save so a hand-enabled workspace keeps it.
+   */
+  plugins_enabled?: boolean;
+  /**
    * Allow `run_cmd` / `run_shell` / `file_actions search` to run as background
    * tasks (`run_in_background: true`). The turn stays open until their results
    * are delivered or the tasks are cancelled. Defaults to on.
@@ -771,6 +778,179 @@ export interface McpLogEntry {
   ts: number;
   level: McpLogLevel;
   message: string;
+}
+
+// ─── Plugins ─────────────────────────────────────────────────────────────────
+
+/** How a plugin provides its instances (mirrors `PluginTransport`). */
+export type PluginTransport = "spawn" | "service" | "both";
+
+/**
+ * One installed plugin, as `plugin.json` and the loader describe it.
+ * `id` is always the folder name under `.data/plugins/`.
+ */
+export interface PluginView {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  /** Resolved runtime: `python` / `node` / `shell` / `exec` / `auto`. */
+  runtime: string;
+  entry: string;
+  /** Explicit interpreter override; empty when the runtime decides. */
+  command: string;
+  enabled: boolean;
+  auto_start: boolean;
+  instances: number;
+  tools: string[];
+  subscriptions: string[];
+  /** `""` / `"user"`, or `"self-evolution"` for a plugin the model wrote. */
+  source: string;
+  dir: string;
+}
+
+/** A plugin plus the manager-only columns (transport, settings mode, liveness). */
+export interface PluginEntry extends PluginView {
+  transport: PluginTransport;
+  /** `schema` (generic form), `page` (plugin-supplied HTML) or `none`. */
+  config_mode: "schema" | "page" | "none";
+  config_page: string | null;
+  /** Instances ready to take a request right now. */
+  running: number;
+}
+
+export type PluginInstanceState = "starting" | "ready" | "failed" | "stopped";
+
+/** One long-lived plugin instance (a spawned child or an attached service). */
+export interface PluginInstanceView {
+  plugin_id: string;
+  /** `"<plugin>#<index>"`, the id the bus routes on. */
+  label: string;
+  index: number;
+  generation: number;
+  state: PluginInstanceState;
+  pid: number | null;
+  inflight: number;
+  restarts: number;
+  started_at_ms: number;
+  last_error: string | null;
+}
+
+/** A `plugin.json` that could not be loaded; the rest still work. */
+export interface PluginIssue {
+  dir: string;
+  error: string;
+}
+
+/** What a service plugin dials to attach to the bus. */
+export interface PluginLinkEndpoint {
+  protocol: string;
+  host: string;
+  port: number;
+  /** `host:port`, ready to paste into a client. */
+  address: string;
+  /** Workspace secret every attach must present. */
+  token: string;
+}
+
+/** Everything the plugin manager window renders in one shot. */
+export interface PluginManagerState {
+  plugins: PluginEntry[];
+  instances: PluginInstanceView[];
+  endpoint: PluginLinkEndpoint | null;
+  issues: PluginIssue[];
+  /** Bumped whenever the registry or the settings change. */
+  revision: number;
+}
+
+export type PluginFieldKind =
+  | "text"
+  | "multiline"
+  | "number"
+  | "integer"
+  | "boolean"
+  | "enum"
+  | "path"
+  | "secret"
+  | "json";
+
+export interface PluginFieldOption {
+  value: string;
+  label: string;
+}
+
+/** One settings field: schema plus its current value. */
+export interface PluginConfigField {
+  key: string;
+  /** Wire name is `type` (the Rust field is renamed for that reason). */
+  type: PluginFieldKind;
+  title: string;
+  description: string;
+  placeholder: string;
+  unit: string;
+  value: unknown;
+  /** `secret` fields never carry the value: `true` means one is stored. */
+  has_value: boolean;
+  required: boolean;
+  min: number | null;
+  max: number | null;
+  step: number | null;
+  max_length: number | null;
+  options: PluginFieldOption[];
+  /** Folded into the "advanced" disclosure. */
+  advanced: boolean;
+  reveal_when: { key: string; equals: unknown } | null;
+}
+
+export interface PluginConfigSection {
+  key: string;
+  title: string;
+  description: string;
+  fields: PluginConfigField[];
+}
+
+export interface PluginConfigForm {
+  title: string;
+  description: string;
+  sections: PluginConfigSection[];
+}
+
+/** One validation failure; an empty `key` means the page, not a field. */
+export interface PluginFieldError {
+  key: string;
+  message: string;
+}
+
+/** One plugin's settings page, as the window draws it. */
+export interface PluginConfigView {
+  plugin_id: string;
+  mode: "schema" | "page" | "none";
+  page: string | null;
+  form: PluginConfigForm | null;
+  errors: PluginFieldError[];
+  /** The schema file exists but could not be parsed. */
+  schema_error: string | null;
+}
+
+export interface PluginLogEntry {
+  ts_ms: number;
+  level: string;
+  message: string;
+}
+
+/** One line of the plugin message bus audit ring. */
+export interface PluginBusRecord {
+  seq: number;
+  ts_ms: number;
+  kind: "request" | "reply" | "event" | "timeout" | "rejected";
+  plugin: string;
+  instance?: string;
+  topic: string;
+  tool?: string;
+  ok?: boolean;
+  duration_ms?: number;
+  recipients: string[];
+  detail: string;
 }
 
 export interface SubAgent {

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Plugins — Rabbit Chat Studio</title>
+    <!-- First paint before any module runs: a themed surface instead of the
+         white void a fresh webview shows while it is still loading. -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #f6f6f7;
+      }
+      @media (prefers-color-scheme: dark) {
+        html,
+        body {
+          background: #17181b;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="plugin-manager-root"></div>
+    <script type="module" src="/src/plugin-manager.tsx"></script>
+  </body>
+</html>

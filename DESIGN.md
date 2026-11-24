@@ -1201,7 +1201,7 @@ on the right.
 
 ### Interaction monitor
 
-The log dialog opened from Settings → Runtime & Debug. Chrome is the shared
+The log dialog opened from Settings → Debug. Chrome is the shared
 dialog recipe — `--glass-backdrop` header with one hairline, `--c-surface` content,
 4px radius, no elevation — and it carries **no literal colour**: the dark box it
 used to be was the last hardcoded surface in the system.

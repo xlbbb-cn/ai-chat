@@ -28,7 +28,7 @@ See [Files and Commands](Files-and-Commands) and [Security and Boundaries](Secur
 
 ## Background tool tasks
 
-With **Settings → Runtime & Debug → Background execution** on (`config.background_tools`), slow tools accept `run_in_background: true`:
+With **Settings → Run → Background execution** on (`config.background_tools`), slow tools accept `run_in_background: true`:
 
 | Tool | Background form | What happens |
 | --- | --- | --- |
@@ -84,7 +84,7 @@ These are not controlled by the Tools panel; they depend on context:
 | `mcp_self` | Self-evolution mode is on — build/register/start the assistant's own MCP servers |
 | `todos` | The Todos tool is enabled |
 | `timer_*` | The Timer tool is enabled |
-| `background_task` | **Settings → Runtime & Debug → Background execution** is on (manages `run_in_background` tasks) |
+| `background_task` | **Settings → Run → Background execution** is on (manages `run_in_background` tasks) |
 
 Sub-agents get the tools their `allowed_tools` list grants, minus `timer` (a chat-session tool that would resume a conversation later). Every `llm` sub-agent starts with the shared `memory` tool (the panel offers it and you can uncheck it per agent): `session` scope is keyed by the main chat's session id and `user` / `repo` are workspace files, so a task can search what the main agent already learned. In self-evolution mode a sub-agent additionally receives `file_actions` and `memory` forced on — it may evolve skills and must be able to remember what it learned. `mcp_self` is never handed to a sub-agent.
 
