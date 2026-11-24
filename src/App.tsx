@@ -5374,7 +5374,7 @@ export default function App() {
               <HistoryPanel
                 currentSessionId={sessionId}
                 refreshKey={historyRefreshKey}
-                runningSessionIds={Object.keys(runningSessions)}
+                runningSessions={runningSessions}
                 onLoad={async (sid, msgs) => {
                   // Multi-session: switching is always allowed. A running
                   // reply of the CURRENT conversation is handed to its

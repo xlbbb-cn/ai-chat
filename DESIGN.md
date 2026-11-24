@@ -401,6 +401,7 @@ Rules that follow:
 | `--c-on-accent` | `#FFFFFF` | `#FFFFFF` | The label colour that sits **on** an accent fill (dark on a pastel accent) |
 | `--c-danger` / `--c-danger-soft` | `#C0392B` / `rgba(192,57,43,.10)` | `#E5655C` / `rgba(229,101,92,.14)` | Errors, destructive actions |
 | `--c-success` / `--c-success-soft` | `#1F8A3B` / `rgba(31,138,59,.10)` | `#3BB55C` / `rgba(59,181,92,.14)` | Success, running/done state |
+| `--c-success-text` | `#17702E` | = `--c-success` | The success hue as **text**: the darker twin an 11px state label needs on `--c-success-soft` (the fill colour alone lands at 3.9:1 on the light wash) |
 | `--c-warning` / `--c-warning-soft` | `#B07500` / `rgba(176,117,0,.10)` | `#E0A33C` / `rgba(224,163,60,.14)` | Warnings, elevated risk |
 
 Semantic colours are functional (status, risk level, attachment kind) and are the
@@ -409,6 +410,10 @@ only sanctioned exception to "one accent". Never use them decoratively.
 > **Split rule:** a rule that paints an accent **fill** uses `--c-accent`; a rule
 > that paints an accent **line or label** uses `--c-accent-text`. Mixing them up
 > is what makes a pastel palette unreadable.
+
+> **The same split applies to success:** a green **dot, rule or fill** uses
+> `--c-success`; a green **label** uses `--c-success-text`. The History panel's
+> running badge (`.history-running-badge`) is the reference case.
 
 **The desktop notification card's title** (`.notify-card-title`, the `notify`
 window) carries one of four semantic kinds: `done` stays plain `--c-text`,

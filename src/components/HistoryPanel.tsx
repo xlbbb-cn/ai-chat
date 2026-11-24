@@ -18,6 +18,7 @@ import {
   faXmark,
   type IconDefinition,
 } from "../icons";
+import { formatUptime } from "../utils/time";
 import "./HistoryPanel.css";
 
 interface Props {
@@ -30,11 +31,12 @@ interface Props {
    */
   refreshKey?: number;
   /**
-   * Sessions whose turn is currently running (foreground or background).
-   * Rendered as a small badge per row; switching is always allowed — the app
-   * hands a running foreground turn to its background driver on the way out.
+   * Sessions whose turn is currently running (foreground or background), with
+   * the turn's start time so the row can show this turn's elapsed duration.
+   * Switching is always allowed — the app hands a running foreground turn to
+   * its background driver on the way out.
    */
-  runningSessionIds?: string[];
+  runningSessions?: Record<string, { started_at_ms: number }>;
   onClose: () => void;
 }
 
@@ -93,7 +95,7 @@ function formatHistoryTimestampFull(timestamp: string, locale: Locale): string {
  * Shared with the reload re-attach path (`src/historyRows.ts`).
  */
 
-export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, runningSessionIds, onClose }: Props) {
+export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, runningSessions, onClose }: Props) {
   const { t, locale } = useI18n();
   const [summaries, setSummaries] = useState<HistorySessionSummary[]>([]);
   const [searchKeyword, setSearchKeyword] = useState("");
@@ -105,6 +107,8 @@ export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, running
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
+  /** Wall clock behind the running badge's live duration (see the tick below). */
+  const [nowMs, setNowMs] = useState(() => Date.now());
   /** Measured geometry of the sliding tab fill (see the layout effect below). */
   const [tabIndicator, setTabIndicator] = useState<{ left: number; width: number } | null>(null);
   /** Measured geometry of the session-list highlight, in list content space. */
@@ -152,6 +156,19 @@ export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, running
       window.clearTimeout(timer);
     };
   }, [searchKeyword]);
+
+  const anyRunning = !!runningSessions && Object.keys(runningSessions).length > 0;
+
+  // The running badge counts this turn's duration, so the panel ticks once a
+  // second — and only while a turn is actually running. The start time itself
+  // comes from the backend turn registry, so a reload mid-turn keeps counting
+  // from the real start instead of restarting at zero.
+  useEffect(() => {
+    if (!anyRunning) return;
+    setNowMs(Date.now());
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [anyRunning]);
 
   const tabFilteredSessions = useMemo(() => {
     if (activeTab === "all") return summaries;
@@ -480,7 +497,11 @@ export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, running
             const createdAt = formatHistoryTimestamp(summary.created_at, locale);
             const isRenaming = renamingSessionId === sid;
             const title = getSessionTitle(summary);
-            const isRunning = runningSessionIds?.includes(sid) ?? false;
+            const runningStartedAt = runningSessions?.[sid]?.started_at_ms;
+            const isRunning = runningStartedAt !== undefined;
+            const runningSeconds = runningStartedAt === undefined
+              ? 0
+              : Math.max(0, Math.floor((nowMs - runningStartedAt) / 1000));
             return (
               <div
                 key={sid}
@@ -558,11 +579,12 @@ export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, running
                 <div className="history-footer">
                   <span className="history-meta">
                     {isLoading ? t("history.loading") : t("history.messageCount", { count: summary.message_count })}
-                    {isCurrent ? t("history.current") : ""}{isArchived ? t("history.archived") : ""}
+                    {isArchived ? t("history.archived") : ""}
                   </span>
                   {isRunning && (
                     <span className="history-running-badge" title={t("history.runningTitle")}>
                       {t("history.running")}
+                      <span className="history-running-time">{formatUptime(runningSeconds)}</span>
                     </span>
                   )}
                   <span

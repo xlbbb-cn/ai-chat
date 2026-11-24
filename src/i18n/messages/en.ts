@@ -986,7 +986,6 @@ const en = {
         noArchived: "No archived sessions.",
         renameAria: "Rename session",
         messageCount: { one: "{count} message", other: "{count} messages" },
-        current: " · current",
         archived: " · archived",
         loading: "Loading…",
 

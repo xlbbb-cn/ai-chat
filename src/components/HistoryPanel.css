@@ -375,33 +375,39 @@
 }
 
 /* A conversation whose turn is still running (foreground or background).
-   Status, not decoration: accent as a label, hairline outline, 4px radius. */
+   Status, not decoration: the success tone rides a soft wash (like the
+   `.agent-status-badge.done` / `.mcp-test-result.ok` state chips of the other
+   panels), and the figure beside it is this turn's elapsed time — tabular, so
+   the badge does not twitch as the counter advances. */
 .history-running-badge {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: var(--c-success-soft);
   font-size: 11px;
   font-weight: 500;
   letter-spacing: normal;
-  color: var(--c-accent-text);
-  border: 1px solid var(--c-border-i);
-  border-radius: 4px;
-  padding: 1px 7px;
+  /* The darker twin: an 11px label does not reach 4.5:1 on the light wash
+     with `--c-success` itself. */
+  color: var(--c-success-text);
+  font-variant-numeric: tabular-nums;
 }
 
 .history-running-badge::before {
   content: "";
+  flex: none;
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--c-accent);
+  background: var(--c-success);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .history-running-badge::before {
-    background: var(--c-accent-text);
-  }
+/* The state reads first, the number second — same tone, lighter weight. */
+.history-running-time {
+  font-weight: 400;
 }
 
 .history-created {

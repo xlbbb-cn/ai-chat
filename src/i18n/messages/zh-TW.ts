@@ -915,7 +915,6 @@ const zhTW: Messages = {
         noArchived: "沒有已封存的工作階段。",
         renameAria: "重新命名工作階段",
         messageCount: "{count} 則訊息",
-        current: " · 目前",
         archived: " · 已封存",
         loading: "載入中…",
 

@@ -915,7 +915,6 @@ const zhCN: Messages = {
         noArchived: "没有已归档的会话。",
         renameAria: "重命名会话",
         messageCount: "{count} 条消息",
-        current: " · 当前",
         archived: " · 已归档",
         loading: "加载中…",
 

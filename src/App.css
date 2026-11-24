@@ -103,6 +103,10 @@
   --c-danger-soft: rgba(192, 57, 43, 0.10);
   --c-success: #1F8A3B;
   --c-success-soft: rgba(31, 138, 59, 0.10);
+  /* The success hue as legible text — the same split `--c-accent-text` makes
+     for the accent: the state colour cannot carry an 11px label on a light
+     wash (3.9:1), its darker twin can (5:1). */
+  --c-success-text: #17702E;
   --c-warning: #B07500;
   --c-warning-soft: rgba(176, 117, 0, 0.10);
 
@@ -322,6 +326,7 @@
   --c-danger-soft: rgba(229, 101, 92, 0.14);
   --c-success: #3BB55C;
   --c-success-soft: rgba(59, 181, 92, 0.14);
+  --c-success-text: var(--c-success);
   --c-warning: #E0A33C;
   --c-warning-soft: rgba(224, 163, 60, 0.14);
 
@@ -429,6 +434,7 @@
   --c-danger-soft: rgba(192, 57, 43, 0.10);
   --c-success: #1F8A3B;
   --c-success-soft: rgba(31, 138, 59, 0.10);
+  --c-success-text: #17702E;
   --c-warning: #B07500;
   --c-warning-soft: rgba(176, 117, 0, 0.10);
 
@@ -489,6 +495,7 @@
   --c-danger-soft: rgba(229, 101, 92, 0.14);
   --c-success: #3BB55C;
   --c-success-soft: rgba(59, 181, 92, 0.14);
+  --c-success-text: var(--c-success);
   --c-warning: #E0A33C;
   --c-warning-soft: rgba(224, 163, 60, 0.14);
 
@@ -565,6 +572,7 @@
   --c-danger-soft: rgba(192, 57, 43, 0.10);
   --c-success: #1F8A3B;
   --c-success-soft: rgba(31, 138, 59, 0.10);
+  --c-success-text: #17702E;
   --c-warning: #B07500;
   --c-warning-soft: rgba(176, 117, 0, 0.10);
 
@@ -627,6 +635,7 @@
   --c-danger-soft: rgba(229, 101, 92, 0.14);
   --c-success: #3BB55C;
   --c-success-soft: rgba(59, 181, 92, 0.14);
+  --c-success-text: var(--c-success);
   --c-warning: #E0A33C;
   --c-warning-soft: rgba(224, 163, 60, 0.14);
 
