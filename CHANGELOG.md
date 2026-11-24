@@ -9,6 +9,31 @@ npm run changelog -- --from <上一个 tag> --to <本次 tag> --details --write
 条目按 Conventional Commits 的类型分组，作用域加粗；工作区里提交标题是英文、正文是中文，
 所以带 `--details` 时是中英对照。
 
+## [v3.8.0](https://github.com/xlbbb-cn/ai-chat/releases/tag/v3.8.0) — 2026-11-24
+
+### 新增
+
+- **settings**: fold the plugin switch into Run, hide its manager when off ([`de8073d`](https://github.com/xlbbb-cn/ai-chat/commit/de8073da4926139b3ef6bcc5a245b82af946a197))
+  - the "enable the plugin system" toggle moves to the end of the Run section, and the plugin-manager row only renders while it is on
+  - drop the Plugins section entirely: nav entry, section markup, `settings.sections.plugins`, the now unused `plugins.sectionHint` and its `.settings-plugins-hint` rule — the sheet is seven sections again
+  - `settings.plugins.manager` label added in en / zh-CN / zh-TW; the enable hint says the manager is hidden instead of "plugins stay listed here", which no longer held once the section went away
+  - comment and embedded-manual paths follow the move to `Settings → Run` (`prompt.rs` manual, `create-plugin.md`, `plugins_config`, `manager.rs` and the plugin-manager window header)
+- **plugins**: plugin system on a message bus, manager window and creation manual ([`cf23b3c`](https://github.com/xlbbb-cn/ai-chat/commit/cf23b3c33abef8fef2a871c30e5e370d8a59ef26))
+  - manifest + registry under `.data/plugins/<id>/`, the folder name is the id
+  - plugin message bus: request/reply correlation, MQTT-style topics, bounded audit ring, expiry so a late reply is dropped instead of delivered
+  - instances: spawned children (python/node/shell/exec, never a shell string) plus services that attach over the loopback link endpoint with a workspace token; one connection becomes one instance
+  - per-plugin settings: `config.schema.yaml` drives a generic form, values live in `config.yaml`, validation returns field errors, secrets are masked on read and hot-pushed to the running instances on save
+  - `plugin` control tool plus one `plugin_<id>_<tool>` per declared tool, gated on `plugins_enabled`; the payload is rebuilt with `mcp_revision` in the turn loop so a plugin created mid-turn is callable in the same turn
+  - separate `plugin-manager` webview opened from Settings → Plugins, with its own capability; created on a blocking thread so WebView2 does not deadlock the main loop
+  - plugin list, instance table, settings form, logs and a bus audit strip; the book icon next to the title opens the "creating a plugin" guide
+  - `create-plugin` manual (prompt body + `Manual` registration) announced when the plugin system is enabled, seeded to `.data/manuals/create-plugin.md`
+
+### 杂项
+
+- bump version to 3.8.0 ([`89406db`](https://github.com/xlbbb-cn/ai-chat/commit/89406dbeea42bff64615a3dec2d5a4f653e0cdda))
+
+**完整对比**：[v3.7.0...v3.8.0](https://github.com/xlbbb-cn/ai-chat/compare/v3.7.0...v3.8.0)
+
 ## [v3.7.0](https://github.com/xlbbb-cn/ai-chat/releases/tag/v3.7.0) — 2026-11-24
 
 ### 新增
