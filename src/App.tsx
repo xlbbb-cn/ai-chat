@@ -58,6 +58,7 @@ import type { MentionProgress, MentionResolution } from "./fileMention";
 import { partsForContent } from "./messageParts";
 import {
   canonicalTmpMentions,
+  handoffNote,
   insertMentionTokens,
   mentionTokenForPath,
   partitionByModelSupport,
@@ -3232,13 +3233,12 @@ export default function App() {
     //
     // Resolving a PDF mention is a real conversion, so its progress is shown
     // while this await runs — the turn only appears once everything is read.
-    let mentionResult: MentionResolution = { attachments: [], problems: [] };
+    let mentionResult: MentionResolution = { attachments: [], problems: [], handoff: [] };
     if (!autoResume) {
       try {
         mentionResult = await resolveFileMentions(
           rawText,
           selectedMetadata,
-          selectedModel,
           setMentionProgress,
         );
       } finally {
@@ -3266,11 +3266,21 @@ export default function App() {
             .map((agent) => agent.id)
         : undefined;
 
+    // A mention the model cannot read arrives as a path only (see
+    // `resolveFileMentions`): the token alone would invite a guess, so the
+    // hand-off paragraph tells the assistant to parse the file with a tool and
+    // carry on. It belongs to the user turn, so a later request replays it
+    // together with the message.
+    const sentText =
+      mentionResult.handoff.length > 0
+        ? `${messageText}\n\n${handoffNote(mentionResult.handoff)}`
+        : messageText;
+
     // The message's `content` is built in one place (`messageParts.ts`), which
     // decides the part type from the payload and never emits a `file` part — a
     // gateway that reads text and images only answers one with an upstream
     // `invalid_request_error` and fails the whole turn.
-    const apiContent = partsForContent(messageText, messageAttachments);
+    const apiContent = partsForContent(sentText, messageAttachments);
     const userAttachments = messageAttachments.length > 0 ? messageAttachments : undefined;
     setPendingRetryMessageId(null);
 
@@ -4944,23 +4954,25 @@ export default function App() {
    * A pasted or dropped file has no attachment channel of its own: it becomes a
    * workspace file in `.data/tmp/` and is then referenced like any other
    * mention, so the model sees both the token and the content. Files the
-   * selected model cannot consume are reported instead of being silently
-   * attached.
+   * selected model cannot consume are inserted the same way — the file stays in
+   * the workspace and the send step hands its path to the assistant with an
+   * instruction to parse it itself (`handoffNote`) — so nothing is dropped
+   * silently; the notice below only tells the user that the bytes will not be
+   * inlined into the request.
    */
   const insertMentionPaths = useCallback(
     (paths: string[]) => {
       if (paths.length === 0) return;
-      const { supported, unsupported } = partitionByModelSupport(paths, selectedMetadata);
+      const { unsupported } = partitionByModelSupport(paths, selectedMetadata);
       if (unsupported.length > 0) {
         setError(
           t("app.attachmentUnsupported", {
-            names: unsupported.join(", "),
+            names: unsupported.map(mentionTokenForPath).join(", "),
             model: selectedModel,
           }),
           "warning",
         );
       }
-      if (supported.length === 0) return;
 
       const el = textareaRef.current;
       const draft = composerDraftRef.current.get(sessionId) ?? "";
@@ -4968,7 +4980,7 @@ export default function App() {
       const { value, caret: next } = insertMentionTokens(
         draft,
         caret,
-        supported.map(mentionTokenForPath),
+        paths.map(mentionTokenForPath),
       );
       // Mirror the new draft immediately: a second paste can land before React
       // commits this one, and it must splice into the text it just produced.

@@ -147,6 +147,8 @@ const zhTW: Messages = {
             pdfFailed: "無法轉換 PDF {name}：{error}",
             pdfConverting: "正在把 {name} 轉成 Markdown…",
             pdfConvertingPage: "第 {page} / {total} 頁",
+            handoffNote:
+                "【附件轉交——目前模型無法直接讀取這些格式，本訊息裡沒有它們的位元組內容】{files}。路徑是唯一的線索，不要猜測內容：先檢查並解析每個檔案（例如用 `run_shell` 呼叫對應格式的解析器：xlsx 用 python/pandas、docx 解壓 OOXML、pdf 用 pdftotext、壓縮檔用 tar/7z；機器上沒有就先裝一個轉換工具），再用解析結果繼續完成工作。",
         },
         slashMention: {
             title: "插入技能參照",
@@ -163,7 +165,8 @@ const zhTW: Messages = {
             noSelectable: "沒有已啟用且帶系統提示詞的 llm 子 agent，請先在子 agent 面板啟用。",
             listFailed: "無法列出子 agent：{error}",
         },
-        attachmentUnsupported: "已略過 {names}：該檔案類型無法作為附件傳送，可讓模型用工具讀取。",
+        attachmentUnsupported:
+            "{names}：{model} 無法直接讀取該格式，檔案保留在工作區，只會把路徑交給助手，由它用工具解析。",
         composer: {
             dropHint: "放開即可加入對話（檔案存入 .data/tmp 並插入 @ 引用）",
             busy: "助理正在回覆：等這一輪結束再加入檔案。",

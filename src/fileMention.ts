@@ -151,6 +151,15 @@ export interface MentionResolution {
   attachments: Attachment[];
   /** Human-readable problems to surface in the error banner. */
   problems: string[];
+  /**
+   * Workspace-relative paths the selected model cannot be *given* the bytes of
+   * (an image without vision, an audio clip without audio support, a binary
+   * document at all, or a file that turned out to decode as binary). They are
+   * deliberately not attached: the token already names the file, so the caller
+   * hands the path to the assistant and asks it to parse the file with a tool
+   * instead of dropping it silently.
+   */
+  handoff: string[];
 }
 
 /**
@@ -208,6 +217,12 @@ function pdfLabel(path: string, result: PdfMentionResult): string {
  * (missing file, unsupported type, out-of-range lines) must not swallow the
  * message the user typed.
  *
+ * A mention whose kind the model cannot consume is neither attached nor
+ * reported as a problem: it lands in {@link MentionResolution.handoff}, so the
+ * composer can tell the assistant the path is there and let it parse the file
+ * itself (`run_shell` / a converter) — the dropped-file behaviour that made a
+ * pasted `.xlsx` vanish is exactly what this replaces.
+ *
  * `onProgress` receives the conversion ticks of every PDF in the text, tagged
  * with the path it belongs to: resolving happens before the turn starts, so
  * without it a long document is a silent pause.
@@ -215,12 +230,12 @@ function pdfLabel(path: string, result: PdfMentionResult): string {
 export async function resolveFileMentions(
   text: string,
   metadata: ModelMetadata | undefined,
-  modelLabel: string,
   onProgress?: (progress: MentionProgress) => void,
 ): Promise<MentionResolution> {
   const tokens = parseFileMentions(text);
   const attachments: Attachment[] = [];
   const problems: string[] = [];
+  const handoff: string[] = [];
   const seen = new Set<string>();
 
   for (const token of tokens) {
@@ -259,7 +274,9 @@ export async function resolveFileMentions(
 
     const kind = classifyName(token.path);
     if (!supportsAttachmentKind(metadata, kind)) {
-      problems.push(t("app.attachmentUnsupported", { names: token.path, model: modelLabel }));
+      // Not a failure: the file stays where it is and the assistant gets the
+      // path plus an instruction to parse it (see `handoffNote`).
+      if (!handoff.includes(token.path)) handoff.push(token.path);
       continue;
     }
 
@@ -275,6 +292,9 @@ export async function resolveFileMentions(
         // out of a `file` part, which is what a gateway rejects outright.
         if (looksLikeBinaryText(range.text)) {
           problems.push(t("app.fileMention.binaryRefused", { name: token.path }));
+          // Same hand-off as an unsupported extension: the file cannot be
+          // inlined, so the path travels instead of nothing at all.
+          if (!handoff.includes(token.path)) handoff.push(token.path);
           continue;
         }
         const label =
@@ -308,5 +328,5 @@ export async function resolveFileMentions(
     }
   }
 
-  return { attachments, problems };
+  return { attachments, problems, handoff };
 }

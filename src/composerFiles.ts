@@ -11,8 +11,15 @@
  * This module owns the parts that do not need Tauri: naming a clipboard blob,
  * reading it as base64, and splicing the tokens into the draft without breaking
  * the mention grammar (`@` must start a word, a token ends at whitespace).
+ *
+ * A file whose format the selected model cannot consume is NOT dropped: it
+ * stays in `.data/tmp`, its `@@<name>` token goes into the draft like any
+ * other, and {@link handoffNote} gives the send step the instruction that
+ * tells the assistant the path exists and that it has to parse the file
+ * itself (see `resolveFileMentions`'s `handoff` list).
  */
 import { extensionOf, supportsMentionName } from "./attachments";
+import { t } from "./i18n";
 import type { ModelMetadata } from "./types";
 
 /**
@@ -143,6 +150,10 @@ export async function preparePastedFiles(
  *
  * The mention pipeline classifies by extension, so the check is the same one
  * the `@` popup applies: an image needs vision, a binary document is never offered.
+ *
+ * Only the *notice* depends on this split — every path is inserted as a
+ * mention regardless, because an unsupported file is handed to the assistant
+ * by path instead of being dropped from the draft.
  */
 export function partitionByModelSupport(
   paths: string[],
@@ -225,6 +236,24 @@ export function canonicalTmpMentions(text: string): string {
 export function mentionTokenForPath(path: string): string {
   if (!isTmpPath(path) || path === TMP_REL) return `@${path}`;
   return `@@${path.slice(TMP_REL.length + 1)}`;
+}
+
+/**
+ * The instruction appended to a message for mentions the model cannot read.
+ *
+ * `resolveFileMentions` never attaches such a file: there is no content part a
+ * gateway would accept, and inlining decoded bytes would be mojibake. The token
+ * alone would leave the assistant guessing, so the send step appends this note
+ * — the token the user sees, the workspace-relative path a tool can open, and
+ * the order to parse the file before answering (a pasted `.xlsx` has to be read
+ * with `run_shell`, not imagined). It is part of the user turn, so a later
+ * request replays it with the transcript.
+ */
+export function handoffNote(paths: string[]): string {
+  const files = Array.from(new Set(paths))
+    .map((path) => `\`${mentionTokenForPath(path)}\` → \`${path}\``)
+    .join("\n");
+  return t("app.fileMention.handoffNote", { files });
 }
 
 /**

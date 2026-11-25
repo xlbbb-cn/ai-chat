@@ -465,6 +465,27 @@ fn build_prompt_bundle(
         system_content.push_str(&todo_guidance);
     }
 
+    // ── Deliverables guidance ───────────────────────────────────────────────
+    // Everything the user is meant to keep has to outlive the scratch clock:
+    // every plain file directly in `.data/tmp` is swept after a day, so a
+    // report left there is a report lost. The tool description of
+    // `file_actions` carries the same rule; this states it as policy.
+    if config.effective_tools().iter().any(|t| t == "file_actions") {
+        let deliverables_guidance = "\
+        DELIVERABLES: every report, document and file you hand to the user belongs in the \
+        project folder of the workspace — `./<project>/…` (use the folder the task is about, \
+        or the folder the user named; create one when neither exists) — and NEVER in \
+        `.data/tmp`, which is the scratch area and is swept after a day. Scratch work in \
+        between can stay in `.data/tmp`; the final artifact must not. A deliverable a \
+        sub-agent left under `.data/deliver/…` is scratch as well: copy what the user is \
+        meant to keep into the project folder before calling the task done. End the turn by \
+        naming the workspace-relative paths you wrote.";
+        if !system_content.is_empty() {
+            system_content.push_str("\n\n");
+        }
+        system_content.push_str(deliverables_guidance);
+    }
+
     // ── Embedded sub-agent roles (`+agent` in the composer) ─────────────────
     // A snapshot written when the session's first message was sent. It is
     // appended at the END of the stable system prefix, so it stays

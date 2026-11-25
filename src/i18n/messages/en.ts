@@ -173,6 +173,8 @@ const en = {
             pdfFailed: "Could not convert the PDF {name}: {error}",
             pdfConverting: "Converting {name} to Markdown…",
             pdfConvertingPage: "page {page} / {total}",
+            handoffNote:
+                "[Attachment handoff — the current model cannot read these formats directly, so this message carries no bytes of them] {files}. Those paths are all you have: never guess the content. Inspect and parse each file first (e.g. `run_shell` with a parser for the format: python/pandas for xlsx, `unzip` for docx/ooxml, `pdftotext` for pdf, `tar`/`7z` for archives — install a converter when the machine has none), then continue the task with what you extracted.",
         },
         slashMention: {
             title: "Insert skill reference",
@@ -191,7 +193,7 @@ const en = {
             listFailed: "Could not list sub-agents: {error}",
         },
         attachmentUnsupported:
-            "Skipped {names}: that file type cannot be sent as an attachment — let the model read it with a tool.",
+            "{names}: {model} cannot read this format directly — the file stays in the workspace and only its path is handed to the assistant, which parses it with tools.",
         composer: {
             dropHint: "Drop to attach — copied to .data/tmp (or referenced in place) and inserted as @",
             busy: "The assistant is replying: add files once this turn ends.",

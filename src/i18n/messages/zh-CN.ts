@@ -147,6 +147,8 @@ const zhCN: Messages = {
             pdfFailed: "无法转换 PDF {name}：{error}",
             pdfConverting: "正在把 {name} 转成 Markdown…",
             pdfConvertingPage: "第 {page} / {total} 页",
+            handoffNote:
+                "【附件转交——当前模型无法直接读取这些格式，本条消息里没有它们的字节内容】{files}。路径是唯一的线索，不要猜测内容：先检查并解析每个文件（例如用 `run_shell` 调用对应格式的解析器：xlsx 用 python/pandas、docx 解压 OOXML、pdf 用 pdftotext、压缩包用 tar/7z；机器上没有就先装一个转换工具），再用解析结果继续完成工作。",
         },
         slashMention: {
             title: "插入技能引用",
@@ -163,7 +165,8 @@ const zhCN: Messages = {
             noSelectable: "没有已启用且带系统提示词的 llm 子 agent，请先在子 agent 面板启用。",
             listFailed: "无法列出子 agent：{error}",
         },
-        attachmentUnsupported: "已跳过 {names}：该文件类型无法作为附件发送，可让模型用工具读取。",
+        attachmentUnsupported:
+            "{names}：{model} 无法直接读取该格式，文件保留在工作区，只会把路径交给助手，由它用工具解析。",
         composer: {
             dropHint: "松开即可加入对话（文件存入 .data/tmp 并插入 @ 引用）",
             busy: "助手正在回复：等这一轮结束再添加文件。",
