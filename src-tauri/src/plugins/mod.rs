@@ -1,6 +1,6 @@
 //! Plugin system: manifests, instances and the plugin message bus.
 //!
-//! ```
+//! ```text
 //! LLM  ->  tool ("plugin" / "plugin_<slug>_<tool>")
 //!       ->  Plugin message bus        (ids, topics, audit, correlation)
 //!       ->  plugin instance x N       (long-lived child processes, line JSON)
