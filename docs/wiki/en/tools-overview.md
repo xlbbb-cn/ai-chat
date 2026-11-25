@@ -54,7 +54,7 @@ Background tasks keep every normal check: risk assessment and confirmation still
 One assistant round can carry several tool calls. **Tools sidebar → Parallel tool calls** (`config.parallel_tools`, at the bottom of the panel, on by default) decides whether they run at the same time:
 
 - **Concurrent**: `file_actions` `read` / `list` / `search` / `diff`, `run_cmd`, `run_shell`, `calculator`, `skill_read`, `call_subagent` and every MCP tool. A batch costs the slowest call instead of the sum.
-- **Alone, in order** (and they split the round into segments): `use_skill` (it changes the allowed commands and skill directories the rest of the round sees), `memory` / `todos` / `timer_*` (read-modify-write on a session file), mutating `file_actions` actions (write / patch / rename / move / mkdir / delete), `background_task`, `mcp_self`, `skill_merge`, `experience`, the mission-board tools, and any tool the app does not know.
+- **Alone, in order** (and they split the round into segments): `use_skill` (it changes the allowed commands and skill directories the rest of the round sees), `memory` / `todos` / `timer_*` (read-modify-write on a session file), mutating `file_actions` actions (write / patch / rename / move / mkdir / delete), `background_task`, `mcp_self`, `skill_merge`, `experience`, the plugin tools (`plugin` and `plugin_<id>_<tool>`), the mission-board tools, and any tool the app does not know.
 - **Calls per round** (`config.max_parallel_tools`, default 4, range 1–8): how many independent calls may run at once. `1` behaves like the switch being off — strictly one call at a time.
 - **Sub-agents** follow the same rules, with `mbus` and every MCP call as extra barriers (an MCP call owns that task's `AgentMcpSession`).
 - **Order never changes**: tool results, failure counting and the transcript rows always follow the model's order, whatever order the calls finished in. Stop still exits after the current batch returns.
@@ -62,12 +62,12 @@ One assistant round can carry several tool calls. **Tools sidebar → Parallel t
 
 ## Self-evolution mode forces two tools on
 
-**Settings → Workspace & Profiles → Enable Self-evolution Mode** does not only unlock the skill folder — it also **forces `file_actions` and `memory` on**:
+**Settings → Run → Enable Self-evolution Mode** does not only unlock the skill folder — it also **forces `file_actions` and `memory` on**:
 
 - the two switches in the Tools panel are shown locked (checked, greyed out, marked *Required*);
-- the backend enforces the same invariant (`AppConfig::effective_tools()`), so the Tools panel, a profile, a backup restore or a hand-edited `config.json` cannot switch them off;
+- the backend enforces the same invariant (`AppConfig::effective_tools()`), so the Tools panel, a backup restore or a hand-edited `config.json` cannot switch them off;
 - `use_skill` is advertised even when no skill is enabled yet, so a skill the assistant just wrote can be loaded in the same turn;
-- the model also receives `mcp_self` (see [MCP Servers](MCP-Servers)) and the dedicated `evolution` memory scope.
+- the model also receives `mcp_self` (see [MCP Servers](MCP-Servers)), `experience` (see [Skills](Skills#experience-packages-cross-workspace)) and the dedicated `evolution` memory scope.
 
 Turning the mode off leaves the selection alone — the tools simply become optional again.
 
@@ -82,6 +82,8 @@ These are not controlled by the Tools panel; they depend on context:
 | `call_subagent` | **Agents → Sub-agent system** is on and at least one sub-agent is enabled (automatic planning is a separate switch) |
 | MCP tools | At least one MCP server is enabled under **MCP**; names come from the server |
 | `mcp_self` | Self-evolution mode is on — build/register/start the assistant's own MCP servers |
+| `experience` | Self-evolution mode is on — global experience packages: search, read the method, install into the workspace |
+| `plugin` / `plugin_<id>_<tool>` | **Settings → Run → Enable the plugin system** is on (`config.plugins_enabled`): one control tool plus one per plugin capability, rebuilt inside a round whenever a manifest changes. See [Plugins](Plugins) |
 | `todos` | The Todos tool is enabled |
 | `timer_*` | The Timer tool is enabled |
 | `background_task` | **Settings → Run → Background execution** is on (manages `run_in_background` tasks) |

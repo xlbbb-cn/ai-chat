@@ -139,13 +139,13 @@ allowed-commands:
 
 ## 自我进化模式
 
-**设置 → 工作区与配置 → 启用自我进化模式**：
+**设置 → 运行 → 启用自我进化模式**：
 
 - 让助手通过 `file_actions` **自行安装、扩展、编辑、删除技能**——`mkdir` 建目录，`write` / `patch` 写 `skill.md`，`move` 重组，`delete` 删除；
 - 唯一的技能根目录是 `<workspace>/.data/skills`——没有第二个技能位置，助手被告知这一点；
 - 修改或删除该根目录下的任何内容前，会创建 `<文件名>.bak.N` 备份（整个目录则是 `demo.bak.1`）；
 - 在 `skills.status` 里把来源标记为 `self-evolution`；
-- **强制打开 `file_actions` 与 `memory` 工具**——它们在工具面板里被锁定，无法关闭：面板关不掉、配置方案关不掉、手改 `config.json` 也关不掉；
+- **强制打开 `file_actions` 与 `memory` 工具**——它们在工具面板里被锁定，无法关闭：面板关不掉、备份关不掉、手改 `config.json` 也关不掉；
 - 打开专用的 `evolution` 记忆作用域存放已验证事实（见 [记忆待办与定时器](记忆待办与定时器)）；
 - 助手可以用 `use_skill` 加载自己刚写的技能，不必先在面板里启用；
 - 模型还会拿到 `mcp_self` 工具，可以搭建自己的 MCP 服务器（见 [MCP服务器](MCP服务器)）；
@@ -153,10 +153,37 @@ allowed-commands:
 
 这是高风险开关：模型能改写自己的指令。请只在受控工作区、短时使用，事后检查 `.bak` 文件与 `git diff`。
 
+### 体验包（跨工作区）
+
+技能属于一个工作区（`.data/skills`），**体验包**属于整个应用——它存在应用数据目录的 `experiences/<slug>/`，切换工作区不会丢。一个包就是一个可移植目录：
+
+```text
+experiences/<slug>/
+  guide.md      方法：怎么用、要注意什么
+  skill/        可选的技能部件（装进工作区后 use_skill 可用）
+  scripts/      可选脚本（装进 .data/scripts 后 run_cmd 按裸名解析）
+  mcp/          可选 MCP 服务器（装进 .data/mcp 后由 mcp_self 托管）
+```
+
+`experience` 工具（只在自我进化模式下出现）负责它，且**从不执行任何东西**：
+
+| 动作 | 作用 |
+| --- | --- |
+| `search` | 按标题与 matchers（`ext:docx`、`mime:…`、`magic:…`、`name:*.pdf`、`tag:…`）搜索，先搜再动手 |
+| `load` | 读 `guide.md`——方法本身，不含任何执行 |
+| `install` | 把部件复制进当前工作区的 `.data/{skills,scripts,mcp}`（同名覆盖时旧副本留 `.bak.n`），之后由 `use_skill` / `run_cmd` / `run_shell` / `mcp_self` 照常运行 |
+| `pack` | 把工作区里已有的技能 / 脚本 / MCP 服务器快照成一个包 |
+| `distill` | 把几个包折成一个（默认归档源包，`keep_sources` 可保留） |
+| `forget` | 归档一个包 |
+
+面板在 **设置 → 调试 → 监视器 → 全局经验包**（只在自我进化模式开着时出现）。每行给出部件（skill / scripts / mcp）、matchers、工具数、来源工作区、`requires`（打包那台机器的快照）以及「本机」检查：缺依赖时显示差几项，而依赖装不装是你的活——包自己从不跑检查。这里也能**归档**一个包。
+
+与技能的关系：包可以**包含**技能，但两者不是一回事——技能没有跨工作区的位置，经验包才有。
+
 ## 导入、导出与迁移
 
 - **手动导入**：把技能目录复制进 `<workspace>/.data/skills/`，重开技能面板。
-- **完整备份**：标题栏 `⋯` → **导出配置方案…** 包含 `workspace/skills/` 与 `workspace/skills.status`；恢复时写回当前工作区。
+- **完整备份**：标题栏 `⋯` → **导出备份…** 包含 `workspace/skills/` 与 `workspace/skills.status`；恢复时写回当前工作区。
 - **搬到别的工作区**：复制 `.data/skills` 与 `skills.status`，或重新启用这些技能。
 - **版本管理**：把技能源放在 Git 仓库里再复制进 `.data/skills`；`.data` 本身应加进 `.gitignore`。
 

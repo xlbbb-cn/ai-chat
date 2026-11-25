@@ -7,7 +7,7 @@ The app uses a frameless window with a custom title bar:
 - The left side shows the current workspace folder name with a thin red underline.
 - The middle is the drag region (`data-tauri-drag-region`); double-click maximizes/restores.
 - The right side has the `⋯` menu and window controls (left on macOS, right on Windows/Linux).
-- The `⋯` menu contains: open app data directory, open workspace directory, open deliverables folder (the sub-agent exchange area `.data/deliver`), export profile, restore profile, Markdown editor, report an issue, About Rabbit Chat Studio.
+- The `⋯` menu contains: open app data directory, open workspace directory, open deliverables folder (the sub-agent exchange area `.data/deliver`), export backup, restore backup, Markdown editor, report an issue, About Rabbit Chat Studio.
 - On macOS the app additionally shows the native menu bar (File / Edit / Tools / About). On Windows and Linux no native menu bar is drawn — the title-bar `⋯` menu above is the only menu, and the webview handles the clipboard shortcuts natively.
 - With the glass appearance enabled, the window is transparent and the desktop behind it is blurred by the system (Acrylic, with Mica as the fallback); only the chrome turns translucent, `.messages` keeps the opaque canvas so reading is unaffected. Settings → Appearance drives the level live, and hosts without a backdrop keep the opaque canvas.
 - An empty chat (no messages yet) shows a hopping smiley face; while the self-evolution "nap" pass runs it is replaced by its progress line (phase, round, tool calls), and a finished pass leaves a clickable result bubble.
@@ -22,9 +22,29 @@ Top toolbar:
 | MCP | MCP server management |
 | Tools | Built-in tool toggles, auto-accept |
 | History | Search, favorite, archive, rename, delete sessions |
-| Settings | Appearance, workspace, API, system message, advanced, runtime, about |
+| Settings | Appearance, API & Model, System Message, Advanced, Run, Debug, About & Updates |
 
 The small number next to a button is the number of enabled items (skills, MCP servers, tools, agents). The side-panel lists share one row language: transparent rows, inset hairlines, a hover fill, relative timestamps, and the orchestration rows folded behind a single disclosure — only **Enable mode** stays visible.
+
+## Appearance and chat background
+
+Every choice in Settings → Appearance **previews immediately**: palette, glass and language apply the moment you pick them and are written to `config.json` on **Save Changes**; a chosen chat background is copied into the app data directory and shown right away, and is persisted the same way.
+
+- **Color mode**: follow the system, or force light / dark.
+- **Palette**: `default`, `cream`, `macaron` (pink-and-white macaron tints with a rose accent). All three carry light and dark token sets; only a palette tints the chat area with a faint same-family wash and retints every nested card (the running card, reply nesting, footer, composer top edge) — it paints the surfaces inside its own scope, so it works without the glass effect.
+- **Glass**: `off` / `subtle` / `standard` / `strong`. With glass on the window frame turns transparent — the system backdrop shows the blurred desktop when it provides one (Acrylic on Windows, Mica as the fallback), other platforms show the app's own soft wash; `.messages` keeps the opaque canvas by default and only takes the photo when a background is set. At `off` the title bar, toolbar and panel headers become opaque, which is lighter on a weak GPU or a remote desktop.
+- **Chat background**: lays only over the message area, never the toolbar or composer. The chosen photo is copied into the app data directory (`backgrounds/chat-background-<id>.<ext>`), so moving or deleting the original afterwards changes nothing; **Use the default wallpaper** brings back the built-in one (copied into `backgrounds/` on first use too). The photo is cover-cropped under a thin white veil that holds the contrast down; if the file is missing the UI simply has no background and offers to pick another. The background travels with configuration backups.
+
+## The notification card
+
+When a turn settles (success or failure), the assistant asks a question, or the app waits for an approval — and the main window is minimized or unfocused — a card slides into the bottom-right corner:
+
+- It is the app's own frameless **webview window** (fixed 348 × 112), floating at the bottom-right of the work area. It **never takes focus**: your current application stays in front, and the card hides as soon as the main window gains focus.
+- It dismisses after 6 s, paused while the pointer is over it; if the card's webview never answers it is force-hidden after 30 s.
+- Its one interaction is a click: hide the card and bring the main window back (un-minimized, focused).
+- The body is the first reply line or the error text, squashed to one line and capped at 160 characters; `done` / `error` / `ask` / `confirm` only color the title.
+- Sound is a separate channel: success plays the *session finished* sound, failure and asks play the *message* sound. With the window in front a success is silent and a failure only sounds (no card); a turn the user stopped sends nothing at all.
+- The master switch is **Settings → Run → Allow notifications** (`config.notify_when_hidden`, default on). The card window is prewarmed a few seconds after startup, so a very early notification waits for it to mount instead of showing blank.
 
 ## Model configuration
 
@@ -92,7 +112,7 @@ The choice is stored per model in `config.model_reasoning_effort[model]` and sen
 - Stop cancels the turn: the main agent stops, sub-agent process trees are killed, and remaining tasks are marked as skipped.
 - Reasoning models may show a collapsible **Thought Process** block; during streaming it previews the last few lines.
 - Code blocks have a copy button; math is rendered with KaTeX.
-- You cannot switch history sessions while generating; stop first.
+- You **can switch away while generating**: starting a new chat or opening another history session hands the turn to a background driver — its history row shows a **Running** badge with elapsed time, switching back re-attaches the live transcript, **Stop** stops only that turn, and each conversation keeps its own draft. See [Sessions and History](Sessions-and-History#a-reply-keeps-running-in-the-background).
 
 ### When the stream breaks
 
@@ -241,7 +261,7 @@ What you write is what the model sees as the base. The exact order is in [Prompt
 
 | Symptom | Check |
 | --- | --- |
-| Send button is greyed out | Input is empty and there are no attachments, or a profile export is running |
+| Send button is greyed out | Input is empty and there are no attachments, or a backup export is running |
 | `@` popup shows "No file matches" | The popup only lists files the model could be shown (hidden and `.gitignore`-excluded paths are skipped) — type more of the path, or check the workspace |
 | A `@` reference warns "cannot be sliced by lines" | Binary/image mentions attach the whole file; `#` line ranges only work on text files (a PDF's `#` counts pages) |
 | A `@paper.pdf` mention fails | Encrypted or scanned PDFs cannot be converted; the message still sends, just without the attachment |

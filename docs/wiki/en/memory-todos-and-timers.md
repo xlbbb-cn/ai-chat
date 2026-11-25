@@ -59,6 +59,34 @@ When the notebook grows, `memory action="consolidate"` folds a hot cluster into 
 
 `apply` is a single transaction in that order. The archive is excluded from `list` and `search`, while `memory get` still resolves an archived key. A consolidated skill is enabled automatically so its one-line description reaches the prompt; its body is loaded on demand with `use_skill`.
 
+### The memory hint on a request
+
+The model does not read the whole memory area up front. Every **new user message** carries one very short hint, assembled by the app while it builds the request (the whole block including the header is ≤200 characters; each title is capped at 80):
+
+```text
+MEMORY (confidence-ranked; verify before relying): build-tag-first · python-default
+```
+
+- **Only titles are rendered**, never bodies — a title is the pointer, the payload is fetched with `memory search` / `get`. The keys it placed are logged in the request log (titles are not), so the placement can be traced.
+- **Three hit tiers**: the title (the entry key's own words) scores 3, a tag 2, a word buried in the body 1; the best tier wins. Keywords are taken longest-first, at most 32, English without stopwords, and single-character CJK tokens are dropped (they match everything).
+- **Ranking**: confidence → hit tier → `importance` → a denser (shorter) title → key. `user` / `repo` `.md` notes carry no trust metadata of their own, so they enter as a neutral c3/i3 and therefore sort below a confirmed c4/c5.
+- **Scopes**: `user` and `repo` always participate; `evolution` is included only while self-evolution mode is on, and entries at `confidence ≤ 2` plus the nap's progress note are skipped there (a fact that must be re-verified is not worth the budget). `session` never participates — that is this turn's workbench.
+- A repeated title keeps the better-evidenced entry; when the budget cuts entries off, the header adds `, +N more` so the model knows it is a sample, not the whole memory.
+- It runs on the request path and is **read-only**: no migration, no `uses` bump, no `confidence` change (otherwise an entry would rank itself up merely by being mentioned).
+- Turn it off with **Settings → Advanced → Attach a memory hint to user input** (`config.memory_hint`, default on). The hint exists only in the request sent to the model; the stored message remains exactly what the user typed.
+
+### Trust calibration (`evolution`)
+
+A retrieved fact is a **claim**, not the truth. That is why this scope carries calibration rules:
+
+| How you write it | Effect on `confidence` |
+| --- | --- |
+| A plain re-add of the same key (`memory add`) | +1, capped at 5; `evidence` rises by one too (the "the result matched" confirmation) |
+| An explicit `confidence: 1–5` | Overwrites the stored value — the only manual way to lower trust; `importance` is different and always keeps its `max` |
+| `conflict: true` + an optional `note` | Drops it straight to **1**, `contradictions` +1, `last_conflict` keeps that sentence, and the body can be rewritten in the same call with `content` |
+
+So the moment the real environment contradicts an entry, rewrite that same entry instead of leaving a known-wrong sentence ranked on top; an entry at `confidence ≤ 2` or one with recorded conflicts is re-verified against the environment before you rely on it. The self-evolution "nap" merges duplicate entries, quiets `session` noise and leaves a resume note for unfinished work so the next pass continues instead of starting over.
+
 ### Actions
 
 | Action | Parameters | Description |

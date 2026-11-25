@@ -4,7 +4,7 @@
 
 Rabbit Chat Studio is a Tauri 2 + Rust + React desktop client. It is not tied to a model vendor: any endpoint that speaks the OpenAI Chat Completions API can be used. Beyond chat, it gives the agent a real workspace: skills, files, commands, memory, todos, timers, MCP servers and sub-agents all operate inside one directory boundary, and every request and tool call is recorded locally.
 
-> These pages document **Rabbit Chat Studio v3.3.3**. Every English page has a Simplified Chinese counterpart; tool names, file names and config keys stay in English in both languages.
+> These pages document **Rabbit Chat Studio v3.8.0**. Every English page has a Simplified Chinese counterpart; tool names, file names and config keys stay in English in both languages.
 
 Typical use cases:
 
@@ -17,7 +17,7 @@ Typical use cases:
 
 1. **Install and launch**: on Windows, the [Microsoft Store listing](https://apps.microsoft.com/detail/9MV82J9G95GS) installs and updates it for you; otherwise download the installer for your platform from [Latest release](https://github.com/xlbbb-cn/ai-chat/releases/latest). On macOS, right-click the app → Open the first time.
 2. **Configure a model**: open **Settings → API & Model**, enter the base URL and API key, click **Fetch Models From API**, pick a model and save.
-3. **Choose a workspace**: open **Settings → Workspace & Profiles** and select your project directory. Rabbit Chat Studio creates a hidden `.data/` folder there for chats, skills, memory and todos.
+3. **Choose a workspace**: click the workspace name in the title bar → **Choose another folder…** and pick your project directory. Rabbit Chat Studio creates a hidden `.data/` folder there for chats, skills, memory and todos.
 4. **Start chatting**: type a message and press Enter; Shift+Enter inserts a newline. Enable tools from the **Tools** panel when you want the model to act on local files or run commands.
 
 See [Quick Start](Quick-Start) for the full first-run walkthrough.
@@ -30,6 +30,7 @@ See [Quick Start](Quick-Start) for the full first-run walkthrough.
 | Build from source, package, publish | [Installation and Build](Installation-and-Build) |
 | Chat, model parameters, `@file` / `/skill` mentions, reasoning, context, drawings, PDF export | [Interface and Chat](Interface-and-Chat) |
 | New/search/favorite/archive/fork sessions | [Sessions and History](Sessions-and-History) |
+| Switch away while a reply is still streaming, then come back to that turn | [Sessions and History](Sessions-and-History#a-reply-keeps-running-in-the-background) |
 | Switch workspaces, understand `.data` and app data | [Workspace and Data](Workspace-and-Data) |
 | Write a skill, restrict its tools and commands | [Skills](Skills) |
 | Enable tools, understand risk levels and confirmations | [Tools Overview](Tools-Overview) |
@@ -37,9 +38,12 @@ See [Quick Start](Quick-Start) for the full first-run walkthrough.
 | Run slow tools, MCP calls or sub-agents in the background | [Files and Commands](Files-and-Commands#background-tasks-run_in_background), [Tools Overview](Tools-Overview#background-tool-tasks) |
 | Memory, todos, delayed timers | [Memory, Todos and Timers](Memory-Todos-and-Timers) |
 | Add MCP servers | [MCP Servers](MCP-Servers) |
+| Install a plugin so a local long-running program becomes a model tool | [Plugins](Plugins) |
+| Reuse methods and scripts across workspaces (global experience packages) | [Skills](Skills#experience-packages-cross-workspace) |
 | Configure LLM / CLI / cloud sub-agents, mission bus and planner takeover | [Sub-Agents](Sub-Agents) |
 | System prompt, context compression, reasoning | [Prompts and Context](Prompts-and-Context) |
-| `config.json`, profiles, export/import | [Configuration and Backup](Configuration-and-Backup) |
+| Palette, chat background, glass, notification card | [Interface and Chat](Interface-and-Chat) |
+| `config.json`, backup and restore | [Configuration and Backup](Configuration-and-Backup) |
 | Request monitor, tool logs, mission monitor | [Monitoring and Logs](Monitoring-and-Logs) |
 | In-app updates and manual upgrades | [Updates](Updates) |
 | Path boundaries, permissions, key safety | [Security and Boundaries](Security-and-Boundaries) |
@@ -108,6 +112,7 @@ In one sentence: **the model handles cognition and planning, local tools handle 
 ## Keeping these pages current
 
 These docs live in the repository under `docs/wiki/` and are rendered to this site by `scripts/gen-wiki.mjs` — this site is the only maintained copy. The GitHub Wiki now holds forwarding pages that point here. Version numbers in the pages follow `package.json` (`v3.3.3` today) and the per-release entries in `CHANGELOG.md`.
+These docs live in the repository under `docs/wiki/` and are rendered to this site by `scripts/gen-wiki.mjs` — this site is the only maintained copy. The GitHub Wiki now holds forwarding pages that point here. Version numbers in the pages follow `package.json` (`v3.8.0` today) and the per-release entries in `CHANGELOG.md`.
 
 ## Links
 

@@ -67,7 +67,7 @@ Notes:
 - sub-agents' panel only offers the three execution tools; `timer` is always filtered;
 - MCP tools are not controlled by `selected_tools`; only the server enable switch controls them;
 - **background execution** (`config.background_tools`) does not add a new permission: it only lets an already-enabled tool run asynchronously, and the same risk assessment, confirmation, path checks and allowlists apply before the task starts;
-- **self-evolution mode overrides the first layer**: `file_actions` and `memory` are forced on and cannot be switched off, by the panel, a profile, a backup restore or a hand-edited `config.json`.
+- **self-evolution mode overrides the first layer**: `file_actions` and `memory` are forced on and cannot be switched off, by the panel, a backup restore or a hand-edited `config.json`.
 
 ## Risk levels and confirmations
 

@@ -13,11 +13,13 @@ The workspace is Rabbit Chat Studio's core boundary: skills, memory, todos, chat
 | Case | Path |
 | --- | --- |
 | `workspace_dir` unset | `<app data>/workspace/` |
-| Custom | **Settings → Workspace & Profiles → Workspace Directory** |
+| Custom | click the **workspace name in the title bar** → **Choose another folder…** |
 
-The directory field is next to a picker of recently used workspaces (`workspace_history`, newest first, max 10). Picking one only stages it — **Save Changes** applies the switch. Entries are recorded on every applied change and travel with a profile backup.
+The workspace name in the title bar *is* the switcher: it opens a dropdown of recently used workspaces (`workspace_history`, newest first, max 10). The current one is marked **Current**, a missing folder is marked **Not found** and can be **removed from the list (the folder is not deleted)**; picking an entry switches immediately — Settings has no workspace directory field and there is no **Save Changes** step. Every switch is recorded in `workspace_history`, which travels with a backup.
 
-If the saved path no longer exists when the app starts (the directory was moved, renamed or unmounted), the app falls back to `<app data>/workspace/` instead of failing to start; the title bar then shows that folder, and you can pick the real directory again from Settings.
+While a reply is still streaming the entries are greyed out and the menu says "A reply is still streaming — switch when the turn ends." A turn owns the workspace it started in.
+
+If the saved path no longer exists when the app starts (the directory was moved, renamed or unmounted), the app falls back to `<app data>/workspace/` instead of failing to start; the title bar then shows that folder, and clicking it lets you pick the real directory again.
 
 App data directories:
 
@@ -33,17 +35,17 @@ App data directories:
 
 ### What happens on switch
 
-After saving a new workspace:
+After a switch:
 
 1. The app closes the current SQLite connection and opens `<new workspace>/.data/chat.db`.
 2. History, request monitor, interaction logs and agent missions switch to the new database.
 3. Skills and their enablement switch to the new workspace's `.data/skills` and `skills.status`.
 4. Memory and todos switch to the new workspace's `.data/memory` and `.data/todos`.
 5. Pending timers are flushed back to the old workspace's `.data/timers.json` and the new workspace's set is armed; overdue ones fire immediately.
-6. Running stdio MCP children are stopped; the next tool call respawns them in the new workspace.
+6. Running stdio MCP children and plugin instances are stopped; the next tool call or plugin request respawns them in the new workspace.
 7. The history panel re-queries, the title bar updates, and the app lands on a fresh conversation — a new workspace never opens onto the previous transcript.
 
-> Switching does not move the old `.data` folder. To migrate, copy it or use **Export Profile / Restore Profile**.
+> Switching does not move the old `.data` folder. To migrate, copy it or use **Export backup… / Restore backup…**.
 
 ## `.data` layout
 
@@ -67,13 +69,19 @@ After saving a new workspace:
     mcp/
       <slug>/server.*          self-built MCP server scripts (self-evolution mode)
     mcp.conf                   roster of those servers (merged with the app-data mcp_servers.json)
+    plugins/
+      <id>/plugin.json         plugin manifest (you place it here; visible once Settings → Run → plugin system is on)
+      <id>/server.*            the plugin's own long-running program (stdio or service)
+      <id>/config.yaml         that plugin's setting values (edited in the manager)
+      <id>/config.schema.yaml  optional settings-form definition
+      .link-token              one-time connection token for service plugins
     deliver/
       <session-id>/<batch-id>/ sub-agent deliverable exchange: shared/ + one folder per task
     tmp/
       pdf/<stem>-<digest>.md   cached @-mention PDF→Markdown conversions
 ```
 
-`scripts/`, `tmp/` and `deliver/` are created at startup. `deliver/` lives as long as its session — it is part of the profile backup and disappears when the session is deleted; open it via the title-bar `⋯` menu (**Open deliverables folder**) or the button next to the mission monitor's refresh. `tmp/` is pure scratch: a plain file sitting directly in it expires after a day. The script library is listed to the model and included in profile backups.
+`scripts/`, `tmp/` and `deliver/` are created at startup. `deliver/` lives as long as its session — it is part of a backup and disappears when the session is deleted; open it via the title-bar `⋯` menu (**Open deliverables folder**) or the button next to the mission monitor's refresh. `tmp/` is pure scratch: a plain file sitting directly in it expires after a day. The script library is listed to the model and included in backups. `plugins/` is never created for you: it only holds what you (or the assistant) put in it — see [Plugins](Plugins).
 
 On Windows the folder has the hidden attribute; on macOS/Linux the dot prefix hides it.
 
@@ -96,8 +104,9 @@ Application-level files do not live in the workspace:
 | `config.json` | Model, API, tools, workspace, appearance, log retention |
 | `mcp_servers.json` | MCP server definitions |
 | `sub_agents.json` | Sub-agents + orchestration |
-| `profiles.json` | In-app **Profiles** |
 | `agents/` | `llm` agent definitions (Markdown) + the `index.yaml` discovery manifest |
+| `backgrounds/` | Chat background photo (copied in from your original file, named `chat-background-<id>`; the built-in wallpaper lives here too) |
+| `experiences/` | Global experience packages `experiences/<slug>/`: `guide.md` plus optional skill / scripts / mcp parts, kept across workspaces |
 | `shadow/` | Primary-instance lock + one forked config per extra window |
 | `app-<date>.log` | Debug-build logs, one file per day (release builds do not write them by default) |
 | `workspace/` | Default workspace |
@@ -112,26 +121,25 @@ If the workspace is a Git repository:
 .data/
 ```
 
-`.data` holds the chat database, memory, todos and skill enablement — local state that should not be committed. If you want to share skill sources, keep them in the repository and copy them into `.data/skills`, or distribute them through a profile export.
+`.data` holds the chat database, memory, todos and skill enablement — local state that should not be committed. If you want to share skill sources, keep them in the repository and copy them into `.data/skills`, or hand the whole `.data/skills` folder to someone else.
 
-## Workspace vs. profiles vs. backup
+## Workspace vs. backup
 
 | Mechanism | Scope | Includes skills? | Use |
 | --- | --- | --- | --- |
 | Workspace | One directory | Yes (`.data/skills`) | Daily project isolation |
-| Profiles | App-level `profiles.json` | **No** | Quickly switch tools, sub-agents, MCP |
 | Export zip | App + current workspace | Yes | Move machines, full backup |
 
-Profiles store `selected_tools`, sub-agents, orchestration and MCP servers. Skill selection is workspace state and is not part of a profile.
+App-level configuration (`selected_tools`, sub-agents, orchestration, MCP definitions) lives in `config.json` / `mcp_servers.json` / `sub_agents.json` and a backup packs it all, so there is no separate "profile" layer to switch. Skill selection is workspace state and follows `skills.status`.
 
 ## Migrating a workspace
 
 ### Option A: full export/import (recommended)
 
 1. Open the app in the old workspace.
-2. Title-bar `⋯` → **Export Profile…**, save the zip.
+2. Title-bar `⋯` → **Export backup…**, save the zip.
 3. Open the app on the new machine/workspace.
-4. `⋯` → **Restore Profile…**, choose the zip.
+4. `⋯` → **Restore backup…**, choose the zip.
 5. Import applies `config.json` first (which may switch the workspace), then restores `workspace/` state into the new workspace.
 
 See [Configuration and Backup](Configuration-and-Backup) for the zip contents and current import limitations.

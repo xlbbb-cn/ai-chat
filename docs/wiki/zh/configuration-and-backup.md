@@ -1,6 +1,6 @@
 Rabbit Chat Studio 的配置分两层：
 
-- **应用级**：操作系统应用数据目录里的 `config.json`、`mcp_servers.json`、`sub_agents.json`、`profiles.json`。
+- **应用级**：操作系统应用数据目录里的 `config.json`、`mcp_servers.json`、`sub_agents.json`。
 - **工作区级**：`<工作区>/.data/`，含聊天数据库、技能、记忆、待办、定时器、技能状态、`run_cmd` 脚本库与工作区 MCP 清单。
 
 ## 应用数据目录
@@ -19,7 +19,6 @@ Rabbit Chat Studio 的配置分两层：
 | `config.json` | 模型、API、工具、工作区、外观、日志保留、更新开关 |
 | `mcp_servers.json` | MCP 服务器定义 |
 | `sub_agents.json` | 子智能体 + 编排 |
-| `profiles.json` | 应用内 **配置档** |
 | `agents/` | `llm` 智能体定义（Markdown）与 `index.yaml` 发现清单 |
 | `model_metadata.json` | 合并后的模型目录（约 2900 条、约 1.2 MB），最多每周刷新一次 |
 | `shadow/` | 单实例锁 + 每个额外窗口一份 `config-<时间戳>-<id>/`（见[多窗口](#多窗口)） |
@@ -79,9 +78,12 @@ Rabbit Chat Studio 的配置分两层：
 | --- | --- | --- | --- |
 | `selected_tools` | string[] | `[]` | 启用的工具 id |
 | `self_evolution_mode` | boolean | `false` | 允许助手演进自己的技能；强制开启 `file_actions` + `memory` |
+| `plugins_enabled` | boolean | `false` | 插件系统（设置 → 运行）。开启后强制把 `plugin` 工具放进本次生效的工具集，并为每个插件声明挂上 `plugin_<id>_<tool>`；关闭时插件管理器入口也隐藏。见 [插件](插件) |
 | `background_tools` | boolean | `false` | 为 `run_cmd` / `run_shell` / `file_actions` 搜索 / MCP 工具 / `call_subagent` 下发 `run_in_background`（设置 → 运行 → 后台执行） |
 | `parallel_tools` | boolean | `true` | 同一轮回复里的独立工具调用同时执行（工具侧边栏底部的“并行工具调用”）；`false` = 严格逐个执行 |
 | `max_parallel_tools` | number | `4` | 单轮最多同时跑几个调用，限制在 1–8；`1` 等同关闭 `parallel_tools` |
+| `max_concurrent_turns` | number | `4` | 同一窗口内允许同时生成回复的会话数（设置 → 高级 → 最大并发会话数）；`0` = 不限，硬上限 16。同一会话里的新回合会顶替旧的，不占新名额 |
+| `memory_hint` | boolean | `true` | 在新用户消息前附一条按置信度排序的记忆提示（≤200 字符，只有标题）；`false` = 不注入。见 [记忆待办与定时器](记忆待办与定时器#请求时的记忆提示) |
 | `workspace_dir` | string? | 空 | 工作区绝对路径；空 = 默认 |
 | `workspace_history` | string[] | `[]` | 最近用过的工作区（新的在前，最多 10 个），在 设置 → 工作区 里作为选择器 |
 | `main_agent_max_rounds` | number | `40` | 主智能体每轮可用请求数（设置 → 高级）；`0` 不限，上限 1000 |
@@ -97,7 +99,7 @@ file_actions, run_cmd, run_shell, memory, todo_list, timer
 
 别名 `todo`。`todo_list` 以 `todos` 名义暴露给模型。已废弃 id（例如 `knowledge_graph`）在加载与保存时会被剔除。
 
-> `self_evolution_mode: true` 会**强制**把 `file_actions` 与 `memory` 写进 `selected_tools`。每次保存与启动都会重写选择，因此工具面板、配置档、备份恢复或手改 `config.json` 都无法在模式开启时关掉它们。它同时解锁 `evolution` 记忆作用域，并允许助手在 `<工作区>/.data/skills` 下安装、编辑、删除技能。
+> `self_evolution_mode: true` 会**强制**把 `file_actions` 与 `memory` 写进 `selected_tools`。每次保存与启动都会重写选择，因此工具面板、备份恢复或手改 `config.json` 都无法在模式开启时关掉它们。它同时解锁 `evolution` 记忆作用域，并允许助手在 `<工作区>/.data/skills` 下安装、编辑、删除技能。
 
 `auto_accept_confirm_kinds` 取值：
 
@@ -113,7 +115,9 @@ dangerous, system_config, user_software, user_data, external_agent, *
 | --- | --- | --- | --- |
 | `theme` | string? | `auto` | `auto` / `light` / `dark` |
 | `palette` | string? | `default` | 配色：`default` / `cream` / `macaron`（马卡龙，粉白马卡龙色系，玫瑰粉强调色）；各有浅色与深色两套 token。旧配置中的 `sakura` 会在加载时迁移为 `default` |
+| `glass_effect` | string? | `standard` | 毛玻璃强度：`off` / `subtle` / `standard` / `strong`（设置 → 外观 → 毛玻璃）；缺省按 `standard`，`off` 时标题栏、工具栏与面板头改为不透明 |
 | `chat_background` | string? | 无 | 可选的聊天区背景照片，保存为应用数据目录下的相对路径，例如 `backgrounds/chat-background-<id>.png`。在「设置 → 外观 → 聊天区背景」选择后立即把文件复制到 `<应用数据目录>/backgrounds/` |
+| `notify_when_hidden` | boolean | `true` | 窗口最小化或失去焦点时，回合结束（成功/失败）弹桌面通知卡并播放提示音（设置 → 运行 → 允许通知）；被用户停止的回合不通知。见 [界面与聊天](界面与聊天#通知卡) |
 | `single_instance` | boolean | `false` | 仅发布版。开：第二次启动只聚焦已有窗口。关：每次启动都是一个窗口（见[多窗口](#多窗口)）。下次启动生效 |
 | `language` | string? | 自动 | `en` / `zh-CN` / `zh-TW` |
 | `logger_output` | string | `file` | `file` / `println`；仅调试版 |
@@ -156,39 +160,21 @@ dangerous, system_config, user_software, user_data, external_agent, *
 
 > 改 `config.json` 前请完全退出应用，否则设置面板可能用内存里的值把它覆盖掉。
 
-## 配置档（Profiles）
+## 配置档去哪了
 
-**设置 → 工作区与配置档 → 配置档** 保存的是一套**能力集**：
+旧版的**命名配置档（Profiles）**已经移除（`profiles.json` 不再写入，也不再读）。它当年只是"一套能力集"的快捷切换：`selected_tools` + 子智能体 + 编排 + MCP 服务器。现在这些都在 `config.json` 与 `mcp_servers.json` 里，需要多套组合时：
 
-| 包含 | 不包含 |
-| --- | --- |
-| `selected_tools` | API 地址/密钥 |
-| 子智能体列表 | 默认模型 |
-| 编排设置 | 系统提示 |
-| MCP 服务器 | 工作区目录 |
-| — | 技能启用状态 |
-
-适合：
-
-- 在"只读分析""全量编码""启用 MCP 的工作流"之间切换；
-- 为不同项目准备不同的智能体/MCP 组合；
-- 备份 MCP 与子智能体配置。
-
-操作：
-
-- 输入名字 → **保存当前**；
-- **应用** → 覆盖当前的工具/智能体/MCP/编排；
-- 删除 → 从 `profiles.json` 移除。
-
-技能启用状态属于工作区（`.data/skills.status`），配置档不碰它。这是有意为之。
+- 换**工作区**——每个工作区各有独立的 `.data`（技能、记忆、待办、脚本库），标题栏的工作区名称就能切；
+- 或者**导出备份**留一份当前配置，想回到那套组合时恢复（见下）；
+- 也可以直接把 `config.json`、`mcp_servers.json`、`sub_agents.json` 复制成几个文件，切换时覆盖——改之前请完全退出应用。
 
 ## 完整导出与恢复
 
 入口：
 
-- 标题栏 `⋯` → **导出配置…** / **恢复配置…**；
+- 标题栏 `⋯` → **导出备份…** / **恢复备份…**；
 - macOS 原生文件菜单；
-- 命令 `app_export_profile` / `app_import_profile`。
+- 命令 `app_export_backup` / `app_import_backup`。
 
 导出期间会锁住发送按钮并显示进度，保证快照期间数据库不被写入。
 
@@ -196,11 +182,11 @@ dangerous, system_config, user_software, user_data, external_agent, *
 
 ```text
 config.json             AppConfig
-profiles.json           命名配置档
 mcp_servers.json        MCP 服务器
 sub_agents.json         子智能体 + 编排
 agents/...              `llm` 智能体定义（应用级，Markdown）
 backgrounds/...         聊天区背景照片（应用级）
+experiences/...         全局经验包（应用级，`guide.md` + 可选的 skill/scripts/mcp 部件）
 workspace/memory/...    当前工作区记忆
 workspace/todos/...     当前工作区待办
 workspace/skills/...    当前工作区技能
@@ -216,14 +202,16 @@ chat.db                 SQLite 快照（VACUUM INTO）
 
 `chat.db` 是一致性的 `VACUUM INTO` 快照；生成期间应用会短暂禁止发送。
 
+**不在压缩包里**：`.data/plugins`（插件目录）与 `.data/timers.json`（待触发的延时定时器）。插件要迁移就手动复制整个 `plugins/` 目录；定时器属于本机的一次性等待，不值得带走。
+
 ### 导入行为
 
 导入会：
 
 1. 读取并应用 `config.json`（可能切换工作区）；
 2. 写入 `sub_agents.json`；
-3. 写入 `profiles.json`（仅当它确实是配置档文件）；
-4. **合并 `agents/**/*.md`** 到应用级 `agents/` 库（完全相同的文件不动）；
+3. **合并 `agents/**/*.md`** 到应用级 `agents/` 库（完全相同的文件不动）；
+4. 合并 `experiences/`（应用级全局经验包，同名 slug 覆盖，旧副本留 `.bak.n`）；
 5. 恢复 `backgrounds/`（替换整个目录），让 `config.json` 里的背景路径继续有效；
 6. 把 `workspace/memory`、`workspace/todos`、`workspace/skills`、`workspace/scripts`、`workspace/mcp`、`workspace/mcp.conf` 恢复到**当前**工作区的 `.data`；
 7. 恢复 `workspace/skills.status`。
@@ -244,10 +232,10 @@ chat.db                 SQLite 快照（VACUUM INTO）
 
 ```text
 <应用数据>/                    → config.json、mcp_servers.json、sub_agents.json、
-                                 profiles.json、agents/、backgrounds/、
+                                 agents/、backgrounds/、experiences/、
                                  model_metadata.json、shadow/
 <工作区>/.data/                → chat.db、memory/、todos/、skills/、skills.status、
-                                 timers.json、scripts/、mcp/、mcp.conf
+                                 timers.json、scripts/、mcp/、mcp.conf、plugins/
 ```
 
 先退出，避免 SQLite 还有未落盘的 WAL。
@@ -298,7 +286,6 @@ chat.db                 SQLite 快照（VACUUM INTO）
 | 导入后 MCP 服务器没了 | 手动复制 `mcp_servers.json`，或用当前版本重新导出 |
 | 导入后历史没了 | `chat.db` 不会自动恢复；手动复制 |
 | 导入后技能开关不对 | 压缩包里有 `skills.status` 吗？恢复到了正确的工作区吗？ |
-| 应用配置档后模型没变 | 配置档不含模型/API，只切换工具、智能体、MCP 与编排 |
 | 导出的包很大 | `chat.db` 含请求体与日志；先压缩或调低保留天数 |
-| 配置档里没有技能 | 设计如此；技能是工作区状态 |
+| 插件没跟着备份走 | 压缩包不含 `.data/plugins`；手动复制整个 `plugins/` 目录 |
 | 模型能力信息缺失 | `model_metadata.json` 可能早于该模型；缓存每周刷新——再"获取模型"一次强制合并 |

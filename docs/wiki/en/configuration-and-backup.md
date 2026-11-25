@@ -1,6 +1,6 @@
 Rabbit Chat Studio configuration has two layers:
 
-- **Application-level**: `config.json`, `mcp_servers.json`, `sub_agents.json`, `profiles.json` in the OS app data directory.
+- **Application-level**: `config.json`, `mcp_servers.json`, `sub_agents.json` in the OS app data directory.
 - **Workspace-level**: `<workspace>/.data/` with the chat database, skills, memory, todos, timers, skill status, the `run_cmd` script library and the workspace MCP roster.
 
 ## App data directory
@@ -19,7 +19,6 @@ Rabbit Chat Studio configuration has two layers:
 | `config.json` | Model, API, tools, workspace, appearance, log retention, update toggles |
 | `mcp_servers.json` | MCP server definitions |
 | `sub_agents.json` | Sub-agents + orchestration |
-| `profiles.json` | In-app **Profiles** |
 | `agents/` | `llm` agent definitions (Markdown) + the `index.yaml` discovery manifest |
 | `model_metadata.json` | Merged model catalogue (~2 900 entries, ~1.2 MB); refreshed at most weekly |
 | `shadow/` | Primary-instance lock + one forked `config-<timestamp>-<id>/` per extra window (see [Multiple windows](#multiple-windows)) |
@@ -79,9 +78,12 @@ Rules worth knowing:
 | --- | --- | --- | --- |
 | `selected_tools` | string[] | `[]` | Enabled tool ids |
 | `self_evolution_mode` | boolean | `false` | Let the assistant evolve its own skills; forces `file_actions` + `memory` on |
+| `plugins_enabled` | boolean | `false` | The plugin system (Settings → Run). On, it forces the `plugin` tool into the effective tool set and advertises each declared `plugin_<id>_<tool>`; off, the plugin-manager row is hidden too. See [Plugins](Plugins) |
 | `background_tools` | boolean | `false` | Advertise `run_in_background` on `run_cmd` / `run_shell` / `file_actions` search / MCP tools / `call_subagent` (Settings → Run → Background execution) |
 | `parallel_tools` | boolean | `true` | Run the independent tool calls of one round at the same time (Tools sidebar → Parallel tool calls, at the bottom); `false` = strictly one call at a time |
 | `max_parallel_tools` | number | `4` | How many calls of one round may run at once, clamped to 1–8; `1` behaves like `parallel_tools: false` |
+| `max_concurrent_turns` | number | `4` | How many conversations may stream a reply at once in one window (Settings → Advanced → Max concurrent sessions); `0` = unlimited, hard cap 16. A new turn in the same session supersedes the old one and takes no extra slot |
+| `memory_hint` | boolean | `true` | Prefix the newest user message with a confidence-ranked hint of matching memories (≤ 200 chars, titles only); `false` = inject nothing. See [Memory, Todos and Timers](Memory-Todos-and-Timers#the-memory-hint-on-a-request) |
 | `workspace_dir` | string? | empty | Absolute workspace path; empty = default |
 | `workspace_history` | string[] | `[]` | Recently used workspaces (newest first, max 10); rendered as a picker in Settings → Workspace |
 | `main_agent_max_rounds` | number | `40` | Requests the main agent may spend per turn (Settings → Advanced); `0` = unlimited, clamped to ≤ 1000 |
@@ -97,7 +99,7 @@ file_actions, run_cmd, run_shell, memory, todo_list, timer
 
 Alias: `todo`. `todo_list` is exposed to the model as `todos`. Retired ids (for example `knowledge_graph`) are dropped from `selected_tools` on load and on save.
 
-> `self_evolution_mode: true` **forces** `file_actions` and `memory` into `selected_tools`. The app rewrites the selection on every save and on startup, so the Tools panel, a profile, a backup restore or a hand-edited `config.json` cannot switch them off while the mode is on. It also unlocks the `evolution` memory scope and lets the assistant install, edit and delete skills under `<workspace>/.data/skills`.
+> `self_evolution_mode: true` **forces** `file_actions` and `memory` into `selected_tools`. The app rewrites the selection on every save and on startup, so the Tools panel, a backup restore or a hand-edited `config.json` cannot switch them off while the mode is on. It also unlocks the `evolution` memory scope and lets the assistant install, edit and delete skills under `<workspace>/.data/skills`.
 
 `auto_accept_confirm_kinds` values:
 
@@ -113,7 +115,9 @@ A built-in command at risk level L0–L3 asks before it runs; auto-accepting its
 | --- | --- | --- | --- |
 | `theme` | string? | `auto` | `auto` / `light` / `dark` |
 | `palette` | string? | `default` | Colour scheme: `default` / `cream` / `macaron` (马卡龙, pink / white pastels with a rose-pink accent); each ships a light and a dark token set. Older values of `sakura` are migrated to `default` on load |
+| `glass_effect` | string? | `standard` | Frosted-glass strength: `off` / `subtle` / `standard` / `strong` (Settings → Appearance → Frosted glass); missing means `standard`, and `off` makes the titlebar, toolbar and panel headers opaque |
 | `chat_background` | string? | none | Optional chat background photo, stored as an app-data-relative path such as `backgrounds/chat-background-<id>.png`. Set by Settings → Appearance → Chat background, which copies the file into `<app data>/backgrounds/` immediately |
+| `notify_when_hidden` | boolean | `true` | While the window is minimized or unfocused, show the desktop notification card and play a sound cue when a turn settles (done or failed); a turn the user stopped never notifies (Settings → Run → Allow notifications). See [Interface and Chat](Interface-and-Chat#the-notification-card) |
 | `single_instance` | boolean | `false` | Release builds only. On: a second launch focuses the running window. Off: every launch becomes a window (see [Multiple windows](#multiple-windows)). Applies on next launch |
 | `language` | string? | auto | `en` / `zh-CN` / `zh-TW` |
 | `logger_output` | string | `file` | `file` / `println`; debug builds only |
@@ -156,39 +160,21 @@ A built-in command at risk level L0–L3 asks before it runs; auto-accepting its
 
 > Fully quit the app before editing `config.json`; otherwise the Settings panel may overwrite the file with its in-memory values.
 
-## Profiles
+## Where profiles went
 
-**Settings → Workspace & Profiles → Profiles** stores a **capability set**:
+The old **named profiles** feature is gone (`profiles.json` is neither written nor read any more). It was a shortcut for switching one **capability set**: `selected_tools` + sub-agents + orchestration + MCP servers. Those all live in `config.json` and `mcp_servers.json` now, so when you need several sets:
 
-| Included | Not included |
-| --- | --- |
-| `selected_tools` | API URL/key |
-| Sub-agent list | Default model |
-| Orchestration | System prompt |
-| MCP servers | Workspace directory |
-| — | Skill enablement |
-
-Good for:
-
-- switching between "read-only analysis", "full coding" and "MCP-enabled workflow";
-- preparing different agent/MCP sets for different projects;
-- backing up MCP and sub-agent configuration.
-
-Actions:
-
-- enter a name → **Save Current**;
-- **Apply** → overwrite the current tools/agents/MCP/orchestration;
-- delete → remove from `profiles.json`.
-
-Skill enablement is per workspace (`.data/skills.status`) and is not touched by profiles. This is intentional.
+- switch **workspace** — each workspace keeps its own `.data` (skills, memory, todos, script library), and the title-bar workspace name is the switcher;
+- or **export a backup** of the current configuration and restore it when you want that set back (see below);
+- or simply copy `config.json`, `mcp_servers.json` and `sub_agents.json` into a few files and overwrite them when switching — quit the app completely first.
 
 ## Full export and restore
 
 Entry points:
 
-- title-bar `⋯` → **Export Profile…** / **Restore Profile…**;
+- title-bar `⋯` → **Export backup…** / **Restore backup…**;
 - macOS native File menu;
-- commands `app_export_profile` / `app_import_profile`.
+- commands `app_export_backup` / `app_import_backup`.
 
 Exporting locks the send button and shows progress, so the database is not written during the snapshot.
 
@@ -196,11 +182,11 @@ Exporting locks the send button and shows progress, so the database is not writt
 
 ```text
 config.json             AppConfig
-profiles.json           named profiles
 mcp_servers.json        MCP servers
 sub_agents.json         sub-agents + orchestration
 agents/...              `llm` agent definitions (app-wide, Markdown)
 backgrounds/...         chat background photo (app-wide)
+experiences/...         global experience packages (app-wide: `guide.md` + optional skill/scripts/mcp parts)
 workspace/memory/...    current workspace memory
 workspace/todos/...     current workspace todos
 workspace/skills/...    current workspace skills
@@ -216,14 +202,16 @@ The sub-agent deliverable exchange area (`<workspace>/.data/deliver/<session-id>
 
 `chat.db` is a consistent `VACUUM INTO` snapshot; the app briefly blocks sending while it is created.
 
+**Not in the zip**: `.data/plugins` (the plugin folder) and `.data/timers.json` (pending delay timers). To move plugins, copy the whole `plugins/` directory by hand; a timer is a one-off wait bound to this machine and not worth carrying.
+
 ### Import behavior
 
 Import:
 
 1. reads and applies `config.json` (which may switch the workspace);
 2. writes `sub_agents.json`;
-3. writes `profiles.json` (only if it is a real profiles file);
-4. **merges `agents/**/*.md`** into the app-global `agents/` store (an identical file is left untouched);
+3. **merges `agents/**/*.md`** into the app-global `agents/` store (an identical file is left untouched);
+4. merges `experiences/` (app-wide packages; a same-slug folder is replaced, the old copy kept as `.bak.n`);
 5. restores `backgrounds/` (replacing the folder) so the background path in `config.json` still resolves;
 6. restores `workspace/memory`, `workspace/todos`, `workspace/skills`, `workspace/scripts`, `workspace/mcp` and `workspace/mcp.conf` into the **current** workspace's `.data`;
 7. restores `workspace/skills.status`.
@@ -244,10 +232,10 @@ The most reliable method is to quit the app and copy both locations:
 
 ```text
 <app data>/                     → config.json, mcp_servers.json, sub_agents.json,
-                                  profiles.json, agents/, backgrounds/,
+                                  agents/, backgrounds/, experiences/,
                                   model_metadata.json, shadow/
 <workspace>/.data/              → chat.db, memory/, todos/, skills/, skills.status,
-                                  timers.json, scripts/, mcp/, mcp.conf
+                                  timers.json, scripts/, mcp/, mcp.conf, plugins/
 ```
 
 Quit first so SQLite has no unflushed WAL.
@@ -298,7 +286,7 @@ If the workspace path changed, select it again in Settings or edit `config.works
 | MCP servers disappeared after import | Copy `mcp_servers.json` manually or re-export with a current build |
 | History disappeared after import | `chat.db` is not restored automatically; copy it manually |
 | Skill toggles are wrong after import | Is `skills.status` in the zip? Was it restored into the right workspace? |
-| Applying a profile does not change the model | Profiles do not include model/API; they only switch tools, agents, MCP and orchestration |
 | The exported zip is large | `chat.db` contains request bodies and logs; compact or lower retention first |
+| Plugins did not come back with a restore | The zip has no `.data/plugins`; copy the whole `plugins/` folder by hand |
 | Profiles have no skills | By design; skills are workspace state |
 | Model capabilities are missing | `model_metadata.json` may predate the model; the cache refreshes weekly — fetch models again to force a merge |

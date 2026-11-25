@@ -154,7 +154,7 @@ Good for: `git`, `npm`, `node`, `cargo`, `python`, `curl`.
 - `list` shows every library script with its interpreter, the `@description` / `@usage` header comments and its use count. Metadata is read only from header comments (`#`, `//`, `REM` or `::`).
 - The library is listed in the system prompt, so the model reuses an existing script instead of retyping a long command. Convention: save a multi-step command as a script once it has succeeded at least twice, or whenever you ask to keep it; prefer `.ps1` on Windows and `.sh` on Linux/macOS; keep it argument-driven and self-contained; never store credentials in it.
 - A script whose body contains destructive or sensitive patterns asks for confirmation once; the approval is remembered for that exact content until the file changes.
-- Scripts are ordinary files: manage them with `file_actions`, keep them in version control; profile backups include `workspace/scripts/`.
+- Scripts are ordinary files: manage them with `file_actions`, keep them in version control; backups include `workspace/scripts/`.
 
 ## `run_shell`
 

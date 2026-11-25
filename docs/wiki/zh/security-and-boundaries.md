@@ -67,7 +67,7 @@ Rabbit Chat Studio 的工具拥有真实的系统权限。边界设计的目标�
 - 子智能体面板只提供这三个执行工具，`timer` 永远被过滤；
 - MCP 工具不受 `selected_tools` 控制，只受服务器开关控制；
 - **后台执行**（`config.background_tools`）不增加新权限：它只是让已启用的工具异步运行，同样的风险评估、确认、路径检查与白名单在任务开始前照常执行；
-- **自我进化模式会覆盖第一层**：`file_actions` 与 `memory` 被强制开启，面板、配置档、备份恢复、手改 `config.json` 都关不掉。
+- **自我进化模式会覆盖第一层**：`file_actions` 与 `memory` 被强制开启，面板、备份恢复、手改 `config.json` 都关不掉。
 
 ## 风险等级与确认
 

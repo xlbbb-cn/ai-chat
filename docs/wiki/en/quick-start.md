@@ -105,7 +105,7 @@ More detail: [Interface and Chat](Interface-and-Chat).
 
 ## 4. Choose a workspace
 
-Open **Settings → Workspace & Profiles** and click **Browse…** next to **Workspace Directory**.
+Click the **workspace name in the title bar** → **Choose another folder…** and pick a directory. Picking one switches immediately, and the recently used workspaces are in that same dropdown.
 
 - If unset, the default workspace is `workspace/` inside the app data directory.
 - Once selected, the app creates a hidden `.data/` folder there and stores the chat database, skills, memory and todos inside it.
@@ -129,7 +129,7 @@ None of these is required for the first chat:
 
 ## 6. Where the data lives
 
-Application-level files (config, MCP, sub-agents, profiles, logs) live in the OS app data directory:
+Application-level files (config, MCP, sub-agents, agents, logs) live in the OS app data directory:
 
 | Platform | Path |
 | --- | --- |

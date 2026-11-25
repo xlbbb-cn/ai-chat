@@ -36,7 +36,7 @@ Look up the symptom. Each entry gives the most likely cause first, then the next
 
 | Symptom | Cause / fix |
 | --- | --- |
-| Send button is greyed out | Empty input and no attachments; profile export running; generation in progress |
+| Send button is greyed out | Empty input and no attachments; backup export running; generation in progress |
 | Cannot switch sessions while generating | By design; click **Stop** first |
 | Content remains after Stop | Stop only interrupts the stream; generated content stays |
 | History is empty | History is per workspace; check the active workspace |
@@ -63,7 +63,6 @@ Look up the symptom. Each entry gives the most likely cause first, then the next
 | Database is locked | Close other processes using `chat.db`; the app waits for its own connection |
 | Disk usage is high | Lower log retention; compact the database; delete old sessions |
 | MCP/history missing after import | Imports restore `mcp_servers.json`; `chat.db` is still manual — copy it while the app is closed |
-| Applying a profile does not change the model | Profiles only contain tools/agents/MCP/orchestration |
 | `config.json` edits do not apply | Fully quit the app first; the Settings panel may overwrite |
 | Second window lost my settings changes | With `single_instance` off, an extra window is a shadow on a forked config; only `workspace_history` is merged back — change settings in the primary window |
 | The saved workspace path no longer exists | The app falls back to the default workspace under app data instead of refusing to start |

@@ -54,7 +54,7 @@
 一轮回复里模型可以给出多个工具调用。**工具侧边栏底部的“并行工具调用”**（`config.parallel_tools`，默认开启）决定它们是否同时执行：
 
 - **同时执行**：`file_actions` 的 `read` / `list` / `search` / `diff`、`run_cmd`、`run_shell`、`calculator`、`skill_read`、`call_subagent`，以及所有 MCP 工具。它们的执行时间从"逐个相加"变成"取最慢的那个"。
-- **独占执行**（按模型给出的顺序，并把这一轮切成若干段）：`use_skill`（会改变本轮后续调用看到的允许命令与技能目录）、`memory` / `todos` / `timer_*`（会话文件的读改写）、写/改/删/重命名类的 `file_actions`、`background_task`、`mcp_self`、`skill_merge`、`experience`、任务板工具，以及任何本应用不认识的工具。
+- **独占执行**（按模型给出的顺序，并把这一轮切成若干段）：`use_skill`（会改变本轮后续调用看到的允许命令与技能目录）、`memory` / `todos` / `timer_*`（会话文件的读改写）、写/改/删/重命名类的 `file_actions`、`background_task`、`mcp_self`、`skill_merge`、`experience`、插件工具（`plugin` 与 `plugin_<id>_<tool>`）、任务板工具，以及任何本应用不认识的工具。
 - **单轮并发数**（`config.max_parallel_tools`，默认 4，范围 1–8）：一次最多同时跑几个独立调用。设为 1 等于关闭该开关，回到严格逐个执行。
 - **子智能体**用同一套规则，另外把 `mbus` 和所有 MCP 调用作为独占段（MCP 会独占该任务的 `AgentMcpSession`）。
 - **顺序不变**：工具结果、失败计数和记录里的行始终按模型给出的顺序排列，与完成先后无关。停止按钮仍等当前批次结束后退出。
@@ -62,12 +62,12 @@
 
 ## 自我进化模式强制打开两个工具
 
-**设置 → 工作区与配置 → 启用自我进化模式**不只是解锁技能目录——它还**强制打开 `file_actions` 与 `memory`**：
+**设置 → 运行 → 启用自我进化模式**不只是解锁技能目录——它还**强制打开 `file_actions` 与 `memory`**：
 
 - 工具面板里这两个开关显示为锁定状态（勾选、变灰、标记为*必需*）；
-- 后端强制同一不变式（`AppConfig::effective_tools()`），所以工具面板、配置方案、备份恢复或手改 `config.json` 都关不掉；
+- 后端强制同一不变式（`AppConfig::effective_tools()`），所以工具面板、备份恢复或手改 `config.json` 都关不掉；
 - 即使还没有启用任何技能也会提供 `use_skill`，助手刚写好的技能可以在同一轮内加载；
-- 模型还会拿到 `mcp_self`（见 [MCP服务器](MCP服务器)）和专用的 `evolution` 记忆作用域。
+- 模型还会拿到 `mcp_self`（见 [MCP服务器](MCP服务器)）、`experience`（见 [技能](技能#体验包跨工作区)）和专用的 `evolution` 记忆作用域。
 
 关闭该模式不会改动选择——这两个工具只是重新变回可选。
 
@@ -82,6 +82,8 @@
 | `call_subagent` | **智能体 → 子智能体系统**开着且至少启用一个子智能体（自动规划另有开关） |
 | MCP 工具 | **MCP** 里至少启用一个服务器；名字来自服务器 |
 | `mcp_self` | 自我进化模式开着——搭建/注册/启动助手自己的 MCP 服务器 |
+| `experience` | 自我进化模式开着——全局经验包：检索、读取方法、安装进工作区 |
+| `plugin` / `plugin_<id>_<tool>` | **设置 → 运行 → 启用插件系统**开着（`config.plugins_enabled`）：一个是控制工具，其余每个插件能力一个，都在本轮内随清单变化重建。见 [插件](插件) |
 | `todos` | 待办工具已启用 |
 | `timer_*` | 定时器工具已启用 |
 | `background_task` | **设置 → 运行 → 后台执行**开着（管理 `run_in_background` 任务） |

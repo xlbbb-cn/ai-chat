@@ -1,5 +1,5 @@
 {
-  "docsVersion": "3.3.3",
+  "docsVersion": "3.8.0",
   "repo": "xlbbb-cn/ai-chat",
   "groups": [
     {
@@ -21,6 +21,7 @@
         "files-and-commands",
         "memory-todos-and-timers",
         "mcp-servers",
+        "plugins",
         "sub-agents"
       ]
     },
@@ -109,6 +110,12 @@
       "zh": "MCP 服务器",
       "wiki": "MCP-Servers",
       "aliases": ["MCP-Servers", "MCP服务器", "MCP 服务器"]
+    },
+    "plugins": {
+      "en": "Plugins",
+      "zh": "插件",
+      "wiki": "Plugins",
+      "aliases": ["Plugins", "插件"]
     },
     "sub-agents": {
       "en": "Sub-Agents",

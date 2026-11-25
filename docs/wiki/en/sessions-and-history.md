@@ -46,9 +46,20 @@ The menu/buttons on each session:
 | Archive / Unarchive | Add/remove from the Archived tab |
 | Delete | Delete the session's messages and metadata; the adjacent session is loaded afterwards |
 
-### Switching is blocked while generating
+### A reply keeps running in the background
 
-While a reply is streaming, history items become unclickable with the hint "Stop generating before switching history sessions". This prevents the previous turn's stream events from being written into the new session: every turn-scoped event carries the `session_id` that emitted it, and the frontend drops a payload addressed to another session.
+While a reply streams you can **switch conversations freely or start a new chat**: the running turn is handed to a background turn driver that keeps listening to its own session's events, keeps streaming and persists the assistant row when it settles, while the composer belongs to the new conversation immediately.
+
+- The history row shows a **Running** badge with this turn's **elapsed time** (it ticks once a second; a reload mid-turn keeps counting from the turn's real start instead of restarting at zero).
+- Switching back re-attaches the live transcript — content, reasoning, settled tool rows — and **Stop** stops that conversation's own turn.
+- **Each conversation keeps its own input draft**, so unsent text is still there after switching back and forth.
+- Confirmation dialogs and ask forms belong to the conversation that raised them, not to the one you are looking at.
+- A webview reload re-attaches from the turn snapshot, so a reply that kept running still lands in the database. The one narrow window is a turn that settles between the snapshot and the re-attach.
+- **Deleting** a running conversation is refused (stop it or wait for it to finish): the turn is still writing that session's rows and owns its deliverables directory.
+- **Switching the workspace** is refused while any turn runs: a turn resolves tool paths against the workspace it started in and writes through that database handle.
+- How many conversations may run at once is set by **Settings → Advanced → Max concurrent sessions** (`max_concurrent_turns`, default 4, `0` = unlimited, hard cap 16). A new turn inside the same session supersedes the old one and takes no extra slot.
+
+Every turn-scoped event carries the `session_id` that emitted it and the frontend drops a payload addressed to another session, so parallel replies never bleed into each other.
 
 ## Message-level actions
 
@@ -81,7 +92,7 @@ When a turn runs sub-agents or other background work, the files they produce are
 
 - The history database is **workspace-scoped**: `<workspace>/.data/chat.db`.
 - After switching workspaces the panel re-queries and does not show the previous workspace's sessions.
-- The default workspace is `workspace/` in the app data directory; a custom workspace is selected under **Settings → Workspace & Profiles**.
+- The default workspace is `workspace/` in the app data directory; a custom workspace is selected from the **workspace name in the title bar**.
 - If the saved workspace path is gone (moved, renamed, unmounted), the app falls back to the app-data workspace instead of failing; pick the directory again from Settings.
 - Deleting the workspace directory deletes history, memory, todos and skills together. Export a backup first.
 
@@ -97,7 +108,7 @@ See [Monitoring and Logs](Monitoring-and-Logs).
 
 Two options:
 
-1. **Full export**: title-bar `⋯` → **Export Profile…**. The zip contains a `chat.db` snapshot, config, MCP, sub-agents, skills, memory and todos. Best for moving machines or a full restore.
+1. **Full export**: title-bar `⋯` → **Export backup…**. The zip contains a `chat.db` snapshot, config, MCP, sub-agents, skills, memory and todos. Best for moving machines or a full restore.
 2. **Manual copy**: close the app and copy `<workspace>/.data/chat.db`. Enough for history only, but not for config or skills.
 
 Full details: [Configuration and Backup](Configuration-and-Backup).
@@ -109,6 +120,7 @@ Full details: [Configuration and Backup](Configuration-and-Backup).
 | History is empty after switching workspaces | History is per workspace; switch back |
 | Only titles, no content | The list stores a lightweight first-message summary; open the session for full messages |
 | Deleted sessions still take disk space | SQLite does not shrink immediately; use **Compact database** |
+| A workspace switch was refused | A turn is still running — wait for it or stop it; switching requires every running turn to end |
 | Forking changes the original session | Fork should only copy; if it does not, check `session_id` and the database |
 | Retry button does not appear | It only appears when the last message is an unfinished user message |
 | A reply from another session showed up | It should not: turn events are session-scoped — report it with the request id from [Monitoring and Logs](Monitoring-and-Logs) |

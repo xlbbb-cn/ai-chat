@@ -139,13 +139,13 @@ allowed-commands:
 
 ## Self-evolution mode
 
-**Settings → Workspace & Profiles → Enable Self-Evolution Mode**:
+**Settings → Run → Enable Self-Evolution Mode**:
 
 - lets the assistant **install, extend, edit and delete skills itself** through `file_actions` — `mkdir` a folder, `write` / `patch` its `skill.md`, `move` to reorganise, `delete` to remove;
 - the one skill root is `<workspace>/.data/skills` — there is no second skills location, and the assistant is told so;
 - creates `<filename>.bak.N` backups before modifying or deleting anything under that root (`demo.bak.1` for a whole folder);
 - marks the source as `self-evolution` in `skills.status`;
-- **forces the `file_actions` and `memory` tools on** — they are locked in the Tools panel and cannot be switched off, not by the panel, not by a profile, not by a hand-edited `config.json`;
+- **forces the `file_actions` and `memory` tools on** — they are locked in the Tools panel and cannot be switched off, not by the panel, not by a backup restore, not by a hand-edited `config.json`;
 - opens a dedicated `evolution` memory scope for verified facts (see [Memory, Todos and Timers](Memory-Todos-and-Timers));
 - the assistant can load a skill it just wrote with `use_skill`, even before you enable it in the panel;
 - the model also receives the `mcp_self` tool and can build its own MCP servers (see [MCP Servers](MCP-Servers));
@@ -153,10 +153,37 @@ allowed-commands:
 
 This is a high-risk switch: the model can change its own instructions. Use it briefly in a controlled workspace and inspect the `.bak` files and `git diff` afterwards.
 
+### Experience packages (cross-workspace)
+
+A skill belongs to one workspace (`.data/skills`); an **experience package** belongs to the whole app — it lives in the app data directory's `experiences/<slug>/` and survives every workspace switch. A package is one portable folder:
+
+```text
+experiences/<slug>/
+  guide.md      the method: how to use it, what to watch for
+  skill/        optional skill part (usable with use_skill once installed)
+  scripts/      optional scripts (resolved by bare name through run_cmd once in .data/scripts)
+  mcp/          optional MCP server (served by mcp_self once in .data/mcp)
+```
+
+The `experience` tool (self-evolution mode only) drives it and **never executes anything**:
+
+| Action | What it does |
+| --- | --- |
+| `search` | Match titles and matchers (`ext:docx`, `mime:…`, `magic:…`, `name:*.pdf`, `tag:…`) — search before solving from scratch |
+| `load` | Read `guide.md` — the method itself, no execution |
+| `install` | Copy the parts into the current workspace's `.data/{skills,scripts,mcp}` (a same-name part is replaced and the old copy kept as `.bak.n`); `use_skill` / `run_cmd` / `run_shell` / `mcp_self` then run them like any other workspace artifact |
+| `pack` | Snapshot workspace skills / scripts / an MCP server into a package |
+| `distill` | Fold several packages into one (sources are archived unless `keep_sources`) |
+| `forget` | Archive a package |
+
+The panel is **Settings → Debug → Monitors → Experience packages** (it exists only while self-evolution mode is on). Each row shows the parts (skill / scripts / mcp), matchers, tool count, source workspace, `requires` (the packing machine's snapshot), and a **this-machine** check that reports how many dependencies are missing — installing them is your job, because a package never runs a check itself. Packages can also be **archived** here.
+
+Relation to skills: a package may **contain** a skill, but the two are not the same thing — a skill has no cross-workspace location, a package does.
+
 ## Import, export and migration
 
 - **Manual import**: copy a skill folder into `<workspace>/.data/skills/`; reopen the Skills panel.
-- **Full backup**: title-bar `⋯` → **Export Profile…** includes `workspace/skills/` and `workspace/skills.status`; restore writes them into the current workspace.
+- **Full backup**: title-bar `⋯` → **Export backup…** includes `workspace/skills/` and `workspace/skills.status`; restore writes them into the current workspace.
 - **Move to another workspace**: copy `.data/skills` and `skills.status`, or enable the skills again.
 - **Version control**: keep skill sources in a Git repository and copy them into `.data/skills`; `.data` itself should be gitignored.
 
