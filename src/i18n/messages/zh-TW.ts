@@ -1059,6 +1059,7 @@ const zhTW: Messages = {
         running: "執行中",
         stopped: "未執行",
         start: "啟動",
+        restart: "重新啟動",
         stop: "停止",
         instances: "實例",
         state: "狀態",

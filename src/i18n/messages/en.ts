@@ -1135,6 +1135,7 @@ const en = {
         running: "Running",
         stopped: "Stopped",
         start: "Start",
+        restart: "Restart",
         stop: "Stop",
         instances: "Instances",
         state: "State",

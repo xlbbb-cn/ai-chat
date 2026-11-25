@@ -390,13 +390,17 @@ export function PluginManagerPanel() {
                                     {plugin.description || <code>{plugin.id}</code>}
                                 </p>
                                 <div className="pm-plugin-actions">
+                                    {/* `start` retires the pool first (`PluginHost::start`),
+                                        so a live plugin says what the click actually does. */}
                                     <button
                                         type="button"
                                         className="pm-button pm-button-primary"
                                         onClick={() => void handleLifecycle("start")}
                                         disabled={busy !== null || !plugin.enabled}
                                     >
-                                        {t("plugins.start")}
+                                        {plugin.running > 0
+                                            ? t("plugins.restart")
+                                            : t("plugins.start")}
                                     </button>
                                     <button
                                         type="button"

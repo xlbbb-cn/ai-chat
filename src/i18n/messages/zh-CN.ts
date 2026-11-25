@@ -1059,6 +1059,7 @@ const zhCN: Messages = {
         running: "运行中",
         stopped: "未运行",
         start: "启动",
+        restart: "重启",
         stop: "停止",
         instances: "实例",
         state: "状态",
