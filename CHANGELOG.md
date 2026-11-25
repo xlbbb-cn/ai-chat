@@ -9,6 +9,37 @@ npm run changelog -- --from <上一个 tag> --to <本次 tag> --details --write
 条目按 Conventional Commits 的类型分组，作用域加粗；工作区里提交标题是英文、正文是中文，
 所以带 `--details` 时是中英对照。
 
+## [v3.8.1](https://github.com/xlbbb-cn/ai-chat/releases/tag/v3.8.1) — 2026-11-26
+
+### 新增
+
+- hand unreadable formats to the assistant, keep deliverables out of .data/tmp ([`84ab0d1`](https://github.com/xlbbb-cn/ai-chat/commit/84ab0d11a1b63731cdc49322576e04d7c0d01a18))
+- **plugins**: label the start button "Restart" while a plugin runs ([`1b38c24`](https://github.com/xlbbb-cn/ai-chat/commit/1b38c246debe0b8b454fd4d90e9b3e8354acec4f))
+
+### 修复
+
+- **docs**: fence the plugin bus diagram as text ([`1dad3d0`](https://github.com/xlbbb-cn/ai-chat/commit/1dad3d03738ce284e9969f7650d4441d869ca4d4))
+
+### 文档
+
+- **wiki**: sync the pages with v3.3.4..v3.8.0 ([`84dc9f2`](https://github.com/xlbbb-cn/ai-chat/commit/84dc9f2c080dff2a91af07e200db02f463721d2e))
+  - add Plugins, Appearance/chat background, notification card, memory hint, trust calibration and cross-workspace experience packages
+  - document background turns in sessions/history and the turn guards
+  - document plugin instances/tools, .data/plugins and backup exclusions
+  - drop the removed Profiles feature and its profiles.json entries
+  - rename export/restore to the current 'export backup'/'restore backup'
+  - switch workspace selection to the title-bar switcher (Settings → Run for the self-evolution mode), bump the documented version to v3.8.0
+
+### 杂项
+
+- bump version to 3.8.1 ([`7c0f963`](https://github.com/xlbbb-cn/ai-chat/commit/7c0f963c9c1161009c2da6f62be60140ad0b6754))
+
+### 其它
+
+- update： icon ([`90e2dae`](https://github.com/xlbbb-cn/ai-chat/commit/90e2dae4179a2ab4d85046dedb0fc1761b7f7222))
+
+**完整对比**：[v3.8.0...v3.8.1](https://github.com/xlbbb-cn/ai-chat/compare/v3.8.0...v3.8.1)
+
 ## [v3.8.0](https://github.com/xlbbb-cn/ai-chat/releases/tag/v3.8.0) — 2026-11-24
 
 ### 新增
