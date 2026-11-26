@@ -185,10 +185,11 @@ ai-chat/
 │  ├─ wiki/                     wiki source: nav.json + en/ + zh/
 │  ├─ site/                     GitHub Pages (static, no build step)
 │  ├─ gen.py                    generates site/architecture.html in CI
-│  └─ store/                    Store listing assets
+│  ├─ store/                    Store listing assets
+│  └─ agents/                   developer docs: architecture / tech stack / modules / interface / workflow
 ├─ .github/workflows/           pages.yml / release.yml / store.yml / winget.yml
 ├─ DESIGN.md                    UI design spec
-├─ AGENTS.md                    development conventions
+├─ AGENTS.md                    docs index — the rules live in docs/agents/
 └─ CHANGELOG.md                 generated, do not hand-edit
 ```
 
@@ -296,7 +297,8 @@ From the README:
 ## Related documents
 
 - `README.md` / `README.zh.md`: project introduction and quick start
-- `AGENTS.md`: development conventions, architecture and commands
+- `AGENTS.md`: the docs index — which file to read for architecture, stack, modules, interface and workflow
+- `docs/agents/`: the developer docs themselves (architecture, tech stack, modules, interface design, workflow)
 - `DESIGN.md`: UI design spec
 - `config.example.md`: config field examples
 - `CHANGELOG.md`: generated release notes
