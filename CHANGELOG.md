@@ -9,6 +9,17 @@ npm run changelog -- --from <上一个 tag> --to <本次 tag> --details --write
 条目按 Conventional Commits 的类型分组，作用域加粗；工作区里提交标题是英文、正文是中文，
 所以带 `--details` 时是中英对照。
 
+## [v3.8.2](https://github.com/xlbbb-cn/ai-chat/releases/tag/v3.8.2) — 2026-11-26
+
+### CI
+
+- **workflows**: pin node and rust to the local toolchain ([`4b425fe`](https://github.com/xlbbb-cn/ai-chat/commit/4b425fe8bf06c5fba9bcbae7c48392d9b9547efa))
+  - Node 24.20.0 and Rust 1.99.0 in all three build workflows, matching the development machine instead of lts/*, stable and the stale 22.
+  - Checkout, setup-node, upload-artifact, configure-pages, upload-pages-artifact, deploy-pages and microsoft-store-apppublisher on their newest major, so no step still runs on the deprecated Node 20 runtime.
+  - winget-releaser pinned to v2 instead of the floating main branch.
+
+**完整对比**：[v3.8.1...v3.8.2](https://github.com/xlbbb-cn/ai-chat/compare/v3.8.1...v3.8.2)
+
 ## [v3.8.1](https://github.com/xlbbb-cn/ai-chat/releases/tag/v3.8.1) — 2026-11-26
 
 ### 新增
