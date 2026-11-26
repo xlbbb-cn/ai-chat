@@ -70,7 +70,7 @@ jobs:
           exit 1
 
       - name: Submit to winget-pkgs
-        uses: vedantmgoyal9/winget-releaser@main
+        uses: vedantmgoyal9/winget-releaser@v2
         with:
           identifier: XLBBB.RabbitChatStudio
           version: ${{ steps.meta.outputs.version }}

@@ -92,13 +92,13 @@ jobs:
         run: rm -f .cargo/config.toml
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
-          node-version: lts/*
+          node-version: '24.20.0'
           cache: npm
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: ${{ matrix.rustTargets }}
 
@@ -209,7 +209,7 @@ jobs:
 
       - name: Upload MSIX
         if: matrix.slug == 'windows-x86_64'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Rabbit-Chat-Studio-MSIX
           path: src-tauri/target/msix/msix/*.msix

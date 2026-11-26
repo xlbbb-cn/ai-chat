@@ -42,7 +42,7 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # 仓库里的 .cargo/config.toml 把 crates-io 指向 rsproxy.cn（国内加速），
       # runner 上不可达，先移除（同 release.yml）。
@@ -57,7 +57,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.99.0
 
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
@@ -73,9 +73,9 @@ jobs:
 
       # 文档页由 docs/wiki/ 的 markdown 生成；CI 里只装 markdown-it
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: '24.20.0'
           cache: npm
 
       - name: Install the wiki generator dependency
@@ -85,13 +85,13 @@ jobs:
         run: node scripts/gen-wiki.mjs
 
       - name: Configure Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: docs/site
 
       - name: Deploy
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
