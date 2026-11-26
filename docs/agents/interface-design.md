@@ -1,4 +1,4 @@
-# Interface design — the DESIGN.md contract
+# Interface design — the docs/DESIGN.md contract
 
 > Part of the Rabbit Chat Studio developer docs. Read this when you change
 > anything the user can see.
@@ -7,7 +7,7 @@
 
 ## UI design — mandatory
 
-**Any change that affects the interface MUST follow [`DESIGN.md`](../../DESIGN.md).** It is the single source of truth for colours, typography, spacing, components, motion and both themes. Do not invent visual language and do not copy a style from another project — if a value is not in the spec, add it to the spec first.
+**Any change that affects the interface MUST follow [`docs/DESIGN.md`](../../docs/DESIGN.md).** It is the single source of truth for colours, typography, spacing, components, motion and both themes. Do not invent visual language and do not copy a style from another project — if a value is not in the spec, add it to the spec first.
 
 Non-negotiables, repeated here so they are impossible to miss:
 
@@ -20,7 +20,7 @@ Non-negotiables, repeated here so they are impossible to miss:
 - **Reuse the shared primitives.** `.close-btn`, `.btn-primary`, `.btn-secondary`, `.inline-edit-btn`, `.field-title-row` are defined once in `src/App.css` — never re-declare them in a component stylesheet (that is exactly how the Skills/MCP/Tools panels drifted apart).
 - **Compact zone = 34px controls** (chat input row, sidebar panels, Settings). Settings also uses 13px text. Do not introduce 40px inputs.
 - **Sentence case, weights 400/500 only, `letter-spacing: normal`.** No `text-transform: uppercase`, no negative tracking.
-- **Check light *and* dark** (`data-theme` is driven by `config.theme` via `applyTheme()` in `src/App.tsx`), plus `prefers-reduced-motion` for any animation. The colour scheme is a second, independent dimension: `data-palette` (`default` / `cream` / `macaron`) comes from `config.palette`, and every palette ships a light *and* a dark token set — check all six combinations of a change. An old config naming the removed `sakura` palette is normalized to `default` on load. Frosted glass is a third: `data-glass` (`off` / `subtle` / `standard` / `strong`) comes from `config.glass_effect` via `applyGlassEffect()`, and it changes the bar fill as well as the blur, so an `off`-level check is part of any surface change. On Windows the level also drives the *window* backdrop (`set_window_vibrancy` → DWM Acrylic, then `<html data-vibrancy>` + `--c-window`): the frame turns translucent over the desktop while the transcript keeps its opaque `--c-bg`, so a surface change has to be checked with the frame glassy too — and with `data-glass-fallback` set (`applyWindowVibrancy()` writes it whenever that native call reports nothing), which is what Linux and macOS look like: the same translucent frame, over a wash the app paints itself instead of a desktop (DESIGN.md, *Window-less backdrop*).
+- **Check light *and* dark** (`data-theme` is driven by `config.theme` via `applyTheme()` in `src/App.tsx`), plus `prefers-reduced-motion` for any animation. The colour scheme is a second, independent dimension: `data-palette` (`default` / `cream` / `macaron`) comes from `config.palette`, and every palette ships a light *and* a dark token set — check all six combinations of a change. An old config naming the removed `sakura` palette is normalized to `default` on load. Frosted glass is a third: `data-glass` (`off` / `subtle` / `standard` / `strong`) comes from `config.glass_effect` via `applyGlassEffect()`, and it changes the bar fill as well as the blur, so an `off`-level check is part of any surface change. On Windows the level also drives the *window* backdrop (`set_window_vibrancy` → DWM Acrylic, then `<html data-vibrancy>` + `--c-window`): the frame turns translucent over the desktop while the transcript keeps its opaque `--c-bg`, so a surface change has to be checked with the frame glassy too — and with `data-glass-fallback` set (`applyWindowVibrancy()` writes it whenever that native call reports nothing), which is what Linux and macOS look like: the same translucent frame, over a wash the app paints itself instead of a desktop (docs/DESIGN.md, *Window-less backdrop*).
 
 When a needed value has no token, **add a token** to `src/App.css` — do not hardcode it at the call site.
 

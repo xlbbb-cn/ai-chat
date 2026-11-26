@@ -29,7 +29,7 @@ interface NotifyPayload {
   title: string;
   body: string;
   /** `"done"` | `"error"` | `"ask"` | `"confirm"` — semantic status only
-   * (DESIGN.md): settled turn, failed turn, question waiting for an answer,
+   * (docs/DESIGN.md): settled turn, failed turn, question waiting for an answer,
    * approval waiting for the user. */
   kind: string;
 }

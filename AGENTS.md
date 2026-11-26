@@ -2,30 +2,31 @@
 
 Desktop AI chat client (Tauri 2 + React 19 + TS + Vite, Rust backend) that talks to any OpenAI-compatible API and adds **Skills**, **Tools**, and **Sub-Agents**.
 
-**This file is the index.** The reference material lives in five files under
-`docs/agents/`; open the matching one before the work it governs, not after.
-Everything in them is normative — the split is by topic, not by importance.
+**This file is the index.** The reference material lives in `docs/` — five
+topic files under `docs/agents/` plus the visual spec in `docs/DESIGN.md`; open
+the matching one before the work it governs, not after. Everything in them is
+normative — the split is by topic, not by importance.
 
 ## Docs map
 
 | Read this | Before you… | It holds |
 |---|---|---|
-| [`docs/agents/interface-design.md`](docs/agents/interface-design.md) | change anything the user draws | the mandatory `DESIGN.md` contract and its non-negotiables: tokens only, one accent, no elevation, 4px radius, one motion curve, hairlines, the shared primitives, the 34px compact zone, sentence case, and the theme × palette × glass check matrix |
+| [`docs/agents/interface-design.md`](docs/agents/interface-design.md) | change anything the user draws | the mandatory `docs/DESIGN.md` contract and its non-negotiables: tokens only, one accent, no elevation, 4px radius, one motion curve, hairlines, the shared primitives, the 34px compact zone, sentence case, and the theme × palette × glass check matrix |
 | [`docs/agents/tech-stack.md`](docs/agents/tech-stack.md) | build, check or test anything | dev / build / verify / test commands, per-crate `cargo test -p …`, version sync, and the Cargo mirror override for restricted networks |
 | [`docs/agents/architecture.md`](docs/agents/architecture.md) | need the shape of the system | the frontend ↔ Rust split and the message path, the plugin bus (LLM → tool → bus → instance × N), services and the manager window, every runtime file (`%APPDATA%`, `.data`, sqlite), the sub-agent prompt files (`llm/`), and the Tauri 2 specifics of this repo |
 | [`docs/agents/modules.md`](docs/agents/modules.md) | touch a feature and need its files | `src/` and `src-tauri/` file by file, the skills path-isolation rule, the tool family and dangerous commands, turn guards / parallel calls / turn identity, composer attachments |
 | [`docs/agents/workflow.md`](docs/agents/workflow.md) | ship, publish or debug a trap | the release pipeline and its git-tag rule, Microsoft Store (MSIX), the GitHub Pages site (including `docs/site/assets/site.css`, which mirrors the tokens), and the gotcha list |
-| [`DESIGN.md`](DESIGN.md) | make any visual decision | colours, typography, spacing, components, motion, both themes — the single source of truth |
+| [`docs/DESIGN.md`](docs/DESIGN.md) | make any visual decision | colours, typography, spacing, components, motion, both themes — the single source of truth |
 
-`docs/agents/` is developer documentation; only `docs/site/` is published to
-Pages (`.github/workflows/pages.yml`).
+`docs/agents/` and `docs/DESIGN.md` are developer documentation; only
+`docs/site/` is published to Pages (`.github/workflows/pages.yml`).
 
 ## Always true
 
 These apply to every change, so they stay here instead of hiding in a file you
 might not open.
 
-- **The interface follows [`DESIGN.md`](DESIGN.md).** Tokens only — a literal hex,
+- **The interface follows [`docs/DESIGN.md`](docs/DESIGN.md).** Tokens only — a literal hex,
   or a literal `blur(20px)` / `saturate(180%)`, outside the token blocks in
   `src/App.css` is a bug; when a value has no token, add the token, do not
   hardcode it at the call site. One accent colour, no elevation, 4px radii, one

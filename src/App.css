@@ -22,7 +22,7 @@
   color-scheme: light;
 
   /* ══════════════════════════════════════════════════════════════════
-     Design tokens (light) — see DESIGN.md for the full contract.
+     Design tokens (light) — see docs/DESIGN.md for the full contract.
      A monochrome-plus-one system: Pure White canvas, three shades of
      Carbon Dark for the text hierarchy, and Electric Blue as the only
      chromatic colour — reserved for primary actions. No gradients, no
@@ -215,7 +215,7 @@
      has to declare anything: a light theme darkens its canvas, a dark one
      lightens it. 10% is the measured ceiling for light (Cream's `--c-muted` on
      a band is the binding pair, at 4.7:1) and 6% for dark, where a light ink
-     eats `--c-muted`'s headroom much faster. See DESIGN.md,
+     eats `--c-muted`'s headroom much faster. See docs/DESIGN.md,
      "Window-less backdrop". */
   --c-ambient: color-mix(in srgb, var(--c-text) 10%, transparent);
   --glass-ambient: none;
@@ -713,7 +713,7 @@
    a wall of 13px text and it scrolls — so it takes a floor of its own
    (`--glass-transcript`, see below). The page sheets (`--c-sheet`) and the side
    panel (`--c-panel`) are not glass at all: they hold the same 13px text and
-   stay opaque over any backdrop (DESIGN.md, "Control fills").
+   stay opaque over any backdrop (docs/DESIGN.md, "Control fills").
    ══════════════════════════════════════════════════════════════════════════ */
 html[data-vibrancy],
 html[data-glass-fallback]:not([data-glass="off"]) {
@@ -734,7 +734,7 @@ html[data-glass-fallback]:not([data-glass="off"]) {
   /* The page and the side panel stay opaque here too — `--c-sheet` and
      `--c-panel` are not re-pointed at a tint, unlike `--c-field` / `--c-btn` /
      `--c-popup`. A window backdrop is allowed to reach the frame bands; it
-     never reaches a surface that holds a wall of text (DESIGN.md, "Control
+     never reaches a surface that holds a wall of text (docs/DESIGN.md, "Control
      fills"). */
   /* Floating cards sit over the reading column, not over the desktop: they keep
      most of their body and blur what is behind them. */
@@ -745,7 +745,7 @@ html[data-glass-fallback]:not([data-glass="off"]) {
      against a busy desktop. It paints no `backdrop-filter` — a webview cannot
      filter the desktop, and DWM has already blurred it (under the fallback
      there is nothing to blur: the wash behind it is soft by construction).
-     Measured worst cases live in DESIGN.md ("PATCH v1.4" and "Window-less
+     Measured worst cases live in docs/DESIGN.md ("PATCH v1.4" and "Window-less
      backdrop"). */
   --glass-transcript: color-mix(in srgb, var(--c-bg) 94%, transparent);
   --glass-transcript-image: none;
@@ -803,14 +803,14 @@ html[data-vibrancy] .dropdown-popup {
    middle of the reading column. The bands therefore sit on a falloff instead of
    a flat fill, which is real `backdrop-filter` work a flat canvas never gave
    them. The side panel is the one surface the wash cannot reach: it is an
-   opaque sheet, so it filters nothing (DESIGN.md, "Control fills"). The window
+   opaque sheet, so it filters nothing (docs/DESIGN.md, "Control fills"). The window
    itself stays opaque: there is no desktop to show, so turning `html` / `body`
    transparent here would only punch a hole in the window.
 
    The wash is not a wallpaper and must not look like one: it is the smallest
    thing that gives the frame a backdrop, and what limits it is readability, not
    taste. `--c-ambient` is the largest ink that keeps `--c-muted` ≥ 4.5:1 on a
-   band (10% light, 6% dark; the measurements are in DESIGN.md, "Window-less
+   band (10% light, 6% dark; the measurements are in docs/DESIGN.md, "Window-less
    backdrop"), so light themes get a visible falloff across the chrome while
    dark themes get a hint — where the material is carried by the frame's
    translucency instead. `off` is excluded from every rule: with no blur the
@@ -844,7 +844,7 @@ html[data-glass-fallback]:not([data-glass="off"]) .chat-area {
 
 /* Popups keep their scrim blur: they open over the transcript, which is opaque
    enough to blur. The page sheets (`--c-sheet`: Settings, the prompt editor)
-   are not in this list — they are opaque at every level (DESIGN.md, "Control
+   are not in this list — they are opaque at every level (docs/DESIGN.md, "Control
    fills"), so a `backdrop-filter` on one would only re-blur a fill that already
    hides everything behind it. */
 html[data-glass-fallback]:not([data-glass="off"]) .file-mention-popup,
@@ -887,7 +887,7 @@ body {
 /* ── Window chrome ──────────────────────────────────────────────────────────
    The window is frameless (`decorations: false`), so this bar replaces the OS
    titlebar. It stays fixed above every overlay so the window controls remain
-   reachable while Settings / the Markdown editor are open. See DESIGN.md. */
+   reachable while Settings / the Markdown editor are open. See docs/DESIGN.md. */
 .titlebar {
   position: fixed;
   top: 0;
@@ -929,7 +929,7 @@ body {
 
 /* The only elastic item in the title cluster: when the window narrows, the
    workspace name ellipsizes while the title and the sleep badge stay intact.
-   The red hairline marks the active workspace — see DESIGN.md → Window chrome.
+   The red hairline marks the active workspace — see docs/DESIGN.md → Window chrome.
 
    The indicator is also the picker: clicking it opens the recorded workspaces.
    It keeps the label's typography (12px, hairline underline) and only gains a
@@ -1113,7 +1113,7 @@ body {
   max-height: min(320px, 60vh);
   overflow-y: auto;
   /* A menu is not the transcript: it caps its height and hides the native bar
-     (DESIGN.md → Scrollbars). */
+     (docs/DESIGN.md → Scrollbars). */
   scrollbar-width: none;
 }
 
@@ -1243,7 +1243,7 @@ body {
   overflow: hidden;
   /* An opaque sheet, wash included — the panel is the second page of the
      window, not a pane of glass, so the transcript never reads through it
-     (DESIGN.md, "Control fills"). It paints the palette's own canvas pair
+     (docs/DESIGN.md, "Control fills"). It paints the palette's own canvas pair
      instead of the frosted band tint, and the wash is laid out at viewport
      width so Cream's gradient runs straight out of the titlebar beside it. No
      `backdrop-filter`: there is nothing left behind an opaque fill to blur. */
@@ -2112,7 +2112,7 @@ button.rabbit-hop-bunny:focus-visible {
    request). The strip is a zero-height anchor rendered directly above the
    transcript (below the toolbar and its optional bars), so the notice needs no
    measured offset and reserves no space.
-   Behaviour lives in `components/ChatNotice.tsx`; see DESIGN.md. */
+   Behaviour lives in `components/ChatNotice.tsx`; see docs/DESIGN.md. */
 .chat-notices {
   position: relative;
   height: 0;
@@ -2363,7 +2363,7 @@ button.rabbit-hop-bunny:focus-visible {
 /* Expanded composer: the textarea owns the first line inside a hairline field,
    the controls sit in a right-aligned strip at its bottom. The textarea keeps
    its padding in both states so the measured height stays valid across the
-   switch; its focus border moves to the frame, per DESIGN.md. */
+   switch; its focus border moves to the frame, per docs/DESIGN.md. */
 .input-row.composer-multiline {
   flex-wrap: wrap;
   padding: 6px;
@@ -3913,7 +3913,7 @@ button.rabbit-hop-bunny:focus-visible {
 }
 
 /* The filterable variant stacks a compact field above the list. Everything it
-   wears is borrowed from the field anatomy in DESIGN.md: 1px hairline, 4px
+   wears is borrowed from the field anatomy in docs/DESIGN.md: 1px hairline, 4px
    radius, `--c-field` fill, accent border on focus. No new colour, no shadow. */
 .dropdown-popup--searchable {
   flex-direction: column;

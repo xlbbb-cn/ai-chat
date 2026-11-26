@@ -49,7 +49,7 @@ pub struct SubAgent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub emoji: Option<String>,
     /// Author color from the md frontmatter. Stored, never painted as a second
-    /// accent (see DESIGN.md).
+    /// accent (see docs/DESIGN.md).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
     /// Relative path under `<app_data>/agents` that holds this agent's

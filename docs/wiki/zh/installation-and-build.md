@@ -97,7 +97,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-改界面时要同时检查浅色/深色主题和 `prefers-reduced-motion`。视觉规范在 `DESIGN.md`：颜色、圆角、阴影与动效必须用 `src/App.css` 里的 token。
+改界面时要同时检查浅色/深色主题和 `prefers-reduced-motion`。视觉规范在 `docs/DESIGN.md`：颜色、圆角、阴影与动效必须用 `src/App.css` 里的 token。
 
 ### 文档与站点
 

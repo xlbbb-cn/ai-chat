@@ -186,9 +186,9 @@ ai-chat/
 │  ├─ site/                     GitHub Pages (static, no build step)
 │  ├─ gen.py                    generates site/architecture.html in CI
 │  ├─ store/                    Store listing assets
+│  ├─ DESIGN.md                 UI design spec
 │  └─ agents/                   developer docs: architecture / tech stack / modules / interface / workflow
 ├─ .github/workflows/           pages.yml / release.yml / store.yml / winget.yml
-├─ DESIGN.md                    UI design spec
 ├─ AGENTS.md                    docs index — the rules live in docs/agents/
 └─ CHANGELOG.md                 generated, do not hand-edit
 ```
@@ -283,7 +283,7 @@ From the README:
 
 ## Contributing
 
-- Read `DESIGN.md` before changing UI: use only the tokens in `src/App.css`; 4px radii, a single Electric Blue accent, no shadows, one motion curve.
+- Read `docs/DESIGN.md` before changing UI: use only the tokens in `src/App.css`; 4px radii, a single Electric Blue accent, no shadows, one motion curve.
 - Update the schema and tests when changing Rust tools.
 - When adding a Tauri plugin, add the crate, register `.plugin(...)`, and add the permission to `capabilities/default.json` (Tauri 2 denies by default).
 - Wiki pages live in `docs/wiki/{en,zh}/*.md`; the HTML under `docs/site/wiki/` is generated and must not be committed. Run `node scripts/gen-wiki.mjs` after editing.
@@ -299,6 +299,6 @@ From the README:
 - `README.md` / `README.zh.md`: project introduction and quick start
 - `AGENTS.md`: the docs index — which file to read for architecture, stack, modules, interface and workflow
 - `docs/agents/`: the developer docs themselves (architecture, tech stack, modules, interface design, workflow)
-- `DESIGN.md`: UI design spec
+- `docs/DESIGN.md`: UI design spec
 - `config.example.md`: config field examples
 - `CHANGELOG.md`: generated release notes

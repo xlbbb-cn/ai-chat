@@ -140,7 +140,7 @@ function reportStartupTiming(): void {
  * `MarkdownPreview` is only the Markdown editor's preview column (titlebar
  * `⋯` menu). The mention popups stay eager: they must open inside a
  * keystroke. The fallback is `null` — each container paints its own shell, so
- * no invented loading UI (DESIGN.md).
+ * no invented loading UI (docs/DESIGN.md).
  */
 const SettingsPanel = lazy(() =>
   import("./components/SettingsPanel").then((m) => ({ default: m.SettingsPanel })),

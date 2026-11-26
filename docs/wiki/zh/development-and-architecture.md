@@ -186,9 +186,9 @@ ai-chat/
 │  ├─ site/                     GitHub Pages（纯静态，无构建步骤）
 │  ├─ gen.py                    CI 里生成 site/architecture.html
 │  ├─ store/                    商店上架素材
+│  ├─ DESIGN.md                 界面设计规范
 │  └─ agents/                   开发文档：架构 / 技术栈 / 模块 / 界面设计 / 工作流
 ├─ .github/workflows/           pages.yml / release.yml / store.yml / winget.yml
-├─ DESIGN.md                    界面设计规范
 ├─ AGENTS.md                    文档索引（规则在 docs/agents/）
 └─ CHANGELOG.md                 自动生成，勿手改
 ```
@@ -283,7 +283,7 @@ npm run sync-version:bump-patch
 
 ## 贡献
 
-- 改界面前先读 `DESIGN.md`：只用 `src/App.css` 里的 token；4px 圆角、单一电光蓝强调色、无阴影、一条动效曲线。
+- 改界面前先读 `docs/DESIGN.md`：只用 `src/App.css` 里的 token；4px 圆角、单一电光蓝强调色、无阴影、一条动效曲线。
 - 改 Rust 工具时同步更新 schema 与测试。
 - 新增 Tauri 插件时：加 crate、注册 `.plugin(...)`、把权限写进 `capabilities/default.json`（Tauri 2 默认拒绝）。
 - Wiki 页在 `docs/wiki/{en,zh}/*.md`；`docs/site/wiki/` 下的 HTML 是生成产物，不要提交。改完跑 `node scripts/gen-wiki.mjs`。
@@ -299,6 +299,6 @@ npm run sync-version:bump-patch
 - `README.md` / `README.zh.md`：项目介绍与快速开始
 - `AGENTS.md`：开发文档索引（架构、技术栈、模块、界面设计、工作流）
 - `docs/agents/`：开发文档本体（架构、技术栈、模块、界面设计、工作流）
-- `DESIGN.md`：界面设计规范
+- `docs/DESIGN.md`：界面设计规范
 - `config.example.md`：配置字段示例
 - `CHANGELOG.md`：自动生成的更新记录

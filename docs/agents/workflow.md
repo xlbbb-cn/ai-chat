@@ -62,7 +62,7 @@ Live URL: `https://xlbbb-cn.github.io/ai-chat/` — the repository needs Pages s
 - **No build step, relative paths only.** The page is served from a project sub-path, so every asset
   reference is `./assets/…`. The only absolute links are in `404.html`, because GitHub serves it for
   unknown paths at any depth and relative assets would break there.
-- **`DESIGN.md` still applies.** Tokens are copied into `docs/site/assets/site.css` (light + dark). The
+- **`docs/DESIGN.md` still applies.** Tokens are copied into `docs/site/assets/site.css` (light + dark). The
   accent is the primary CTA only, radius is 4px, there are no shadows, and hairlines do the
   separating. Change a token in `src/App.css`? Mirror it in the site stylesheet.
 - **Copy comes from the READMEs.** Feature and boundary claims are `README.zh.md` / `README.md`
