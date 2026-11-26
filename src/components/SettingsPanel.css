@@ -58,14 +58,12 @@
   overflow: hidden;
 }
 
-/* A page on a translucent sheet shows what is behind it, and behind this one is
-   a stack of different fills: the chat toolbar ends ~50px below the titlebar —
-   *inside* this page's header band — so its hairline used to cut the title
-   background in two, with the opaque transcript below it. The page replaces the
-   chat outright, so the chat fades out while it is open and the only thing left
-   behind is the window backdrop, which is uniform.
+/* The sheet is opaque (`--c-sheet`), so nothing behind this page is visible once
+   it is open. The replaced surfaces still drop out, because a pointer that
+   lands beside the page — or during its 0.2s fade-in, while the sheet is only
+   partly painted — must not reach a chat that is no longer on screen.
    `:has()` is a progressive enhancement: a browser without it keeps the old
-   two-tone header, never a broken layout. */
+   behaviour, never a broken layout. */
 body:has(> .settings-overlay) .chat-area,
 body:has(> .settings-overlay) .sidebar {
   opacity: 0;

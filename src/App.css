@@ -189,16 +189,6 @@
   --glass-blur: 20px;
   --glass-blur-scrim: 8px;
   --glass-saturate: 180%;
-  /* The side panel is the one surface that frosts harder than its band: it
-     floats over the reading column, so its whole backdrop is 6% of an already
-     blurred transcript and the recipe has to work that small. Derived from
-     `--glass-blur` rather than fixed — `off` still zeroes it (0px × 1.5) and
-     `subtle` / `strong` keep driving it (18 / 30 / 48px against the 12 / 20 /
-     32 elsewhere). Saturation carries most of the frost: at 6% read-through
-     there is very little luminance for extra radius to work on, but the ghost's
-     own colour still shows up stronger. */
-  --glass-blur-panel: calc(var(--glass-blur) * 1.5);
-  --glass-saturate-panel: 220%;
   --glass-backdrop: var(--c-toolbar);
   /* The reading column. It keeps its own fill instead of `--glass-backdrop`
      because it is the one surface that must also *be* the page: it holds a wall
@@ -207,10 +197,10 @@
      only the vibrancy block turns it into glass. */
   --glass-transcript: var(--c-bg);
   --glass-transcript-image: var(--c-bg-image);
-  /* Canvas of a panel mounted inside the glass sidebar. Panels must not paint
-     an opaque sheet here or the sidebar's tint and blur are covered and the
-     transcript underneath is never faintly visible; their cards keep
-     `--c-surface`, so content stays legible. */
+  /* Canvas of a panel mounted inside the sidebar. The shell is an opaque sheet,
+     so a panel must still not paint a canvas of its own: it would be a second
+     fill deciding the same colour, and a palette change would have to land
+     twice. Their cards keep `--c-surface`, so content stays legible. */
   --glass-canvas: transparent;
   /* Specular edge — a 1px inner highlight along the window's top edge:
      light on glass, not depth. It casts nothing outward and lifts nothing,
@@ -243,9 +233,12 @@
   --c-field: var(--c-surface);
   --c-btn: var(--c-surface-2);
   --c-sheet: var(--c-surface);
-  /* Follows the glass level, so the panel keeps today's fill wherever there is
-     no window backdrop. */
-  --c-panel: var(--glass-backdrop);
+  /* The page and the side panel are the two surfaces large enough to hold a
+     wall of text, and both are opaque at every glass level and on every
+     platform: a sheet that a glyph of the conversation can be seen through is
+     a readability constraint, not a material. Mixed from `--c-bg` (not
+     `--c-surface`), so a panel's cards still sit a shade above its shell. */
+  --c-panel: var(--c-bg);
   --c-popup: var(--c-surface);
 
   /* Palette swatch samples — the Settings palette picker shows each
@@ -686,7 +679,6 @@
   --glass-blur: 0px;
   --glass-blur-scrim: 0px;
   --glass-saturate: 100%;
-  --glass-saturate-panel: 100%;
   --glass-backdrop: var(--c-surface);
 }
 
@@ -715,11 +707,13 @@
    section after this one), which is how a platform with no backdrop still gets
    a translucent frame — it just has to paint what sits behind it.
 
-   The window frame is the thinnest glass: the titlebar, sidebar, toolbar,
-   input area and panel headers read `--c-window` through `--glass-backdrop`
-   and let the blurred desktop through. The transcript is glass too, but it
-   cannot use that tint — it holds a wall of 13px text and it scrolls — so it
-   takes a floor of its own (`--glass-transcript`, see below).
+   The window frame is the thinnest glass: the titlebar, toolbar and input area
+   read `--c-window` through `--glass-backdrop` and let the blurred desktop
+   through. The transcript is glass too, but it cannot use that tint — it holds
+   a wall of 13px text and it scrolls — so it takes a floor of its own
+   (`--glass-transcript`, see below). The page sheets (`--c-sheet`) and the side
+   panel (`--c-panel`) are not glass at all: they hold the same 13px text and
+   stay opaque over any backdrop (DESIGN.md, "Control fills").
    ══════════════════════════════════════════════════════════════════════════ */
 html[data-vibrancy],
 html[data-glass-fallback]:not([data-glass="off"]) {
@@ -737,38 +731,22 @@ html[data-glass-fallback]:not([data-glass="off"]) {
   /* A tonal fill stays one step off the band: denser, so it reads as a patch
      rather than as a hairline. */
   --c-btn: color-mix(in srgb, var(--c-surface) 55%, transparent);
-  /* The Settings page replaces the transcript and holds 13px labels on every
-     row, so it is the densest glass in the app: opaque enough that the chat
-     behind it never reads through, blurred enough to stay frosted. */
-  --c-sheet: color-mix(in srgb, var(--c-surface) 94%, transparent);
-  /* The side panel floats over the reading column, so it is the one surface
-     whose fill decides how much of the transcript survives: 94% of the canvas,
-     i.e. **6% read-through** — enough that the panel sits *on* the
-     conversation (those 6% are what the frost is filtering), never enough to
-     compete with it. It is the density the panel needs to stay legible: a
-     `--c-muted` session title holds 4.6–6.0:1 where a blurred glyph of the
-     transcript passes beneath, against 1.9–3.1:1 at two thirds, which is below
-     the floor the palette promises. This is the floor too: 92% measures 4.3 on
-     the dark default, so the read-through stops at 6%. One value for both
-     themes, no dark override — `--c-bg` is already theme-aware. Mixed from
-     `--c-bg` (not `--c-surface`), so a panel's cards (opaque `--c-surface`)
-     still sit a shade above the shell, the way the opaque design did. The frost
-     itself is not this token: `--glass-blur-panel` and
-     `--glass-saturate-panel` do that on `.sidebar` and `.panel-header`, and
-     this fill is how much blur survives.
-     Measured pairs: DESIGN.md ("Control fills"). */
-  --c-panel: color-mix(in srgb, var(--c-bg) 94%, transparent);
+  /* The page and the side panel stay opaque here too — `--c-sheet` and
+     `--c-panel` are not re-pointed at a tint, unlike `--c-field` / `--c-btn` /
+     `--c-popup`. A window backdrop is allowed to reach the frame bands; it
+     never reaches a surface that holds a wall of text (DESIGN.md, "Control
+     fills"). */
   /* Floating cards sit over the reading column, not over the desktop: they keep
      most of their body and blur what is behind them. */
   --c-popup: color-mix(in srgb, var(--c-surface) 84%, transparent);
 
   /* The transcript's floor. It cannot borrow `--c-window`: 24–58% of the
      surface under a wall of 13px text loses the palette's contrast guarantee
-     against a busy desktop. It sits at the density of the Settings sheet (94%)
-     and paints no `backdrop-filter` — a webview cannot filter the desktop, and
-     DWM has already blurred it (under the fallback there is nothing to blur:
-     the wash behind it is soft by construction). Measured worst cases live in
-     DESIGN.md ("PATCH v1.4" and "Window-less backdrop"). */
+     against a busy desktop. It paints no `backdrop-filter` — a webview cannot
+     filter the desktop, and DWM has already blurred it (under the fallback
+     there is nothing to blur: the wash behind it is soft by construction).
+     Measured worst cases live in DESIGN.md ("PATCH v1.4" and "Window-less
+     backdrop"). */
   --glass-transcript: color-mix(in srgb, var(--c-bg) 94%, transparent);
   --glass-transcript-image: none;
 }
@@ -806,15 +784,6 @@ html[data-vibrancy] .dropdown-popup {
   backdrop-filter: blur(var(--glass-blur-scrim));
 }
 
-/* The Settings page and the prompt editor replace the transcript, and the chat
-   behind them is an opaque sheet — blur it so the translucent sheet reads as
-   glass instead of as a ghost of the conversation. */
-html[data-vibrancy] .settings-page,
-html[data-vibrancy] .prompt-editor-overlay {
-  -webkit-backdrop-filter: blur(var(--glass-blur-scrim));
-  backdrop-filter: blur(var(--glass-blur-scrim));
-}
-
 /* ══════════════════════════════════════════════════════════════════════════
    Glass without a window backdrop — the app paints its own
 
@@ -833,9 +802,10 @@ html[data-vibrancy] .prompt-editor-overlay {
    toolbar, bottom-left behind the input area — and faded out well before the
    middle of the reading column. The bands therefore sit on a falloff instead of
    a flat fill, which is real `backdrop-filter` work a flat canvas never gave
-   them, and the sidebar keeps blurring the transcript that runs beneath it. The
-   window itself stays opaque: there is no desktop to show, so turning `html` /
-   `body` transparent here would only punch a hole in the window.
+   them. The side panel is the one surface the wash cannot reach: it is an
+   opaque sheet, so it filters nothing (DESIGN.md, "Control fills"). The window
+   itself stays opaque: there is no desktop to show, so turning `html` / `body`
+   transparent here would only punch a hole in the window.
 
    The wash is not a wallpaper and must not look like one: it is the smallest
    thing that gives the frame a backdrop, and what limits it is readability, not
@@ -872,12 +842,13 @@ html[data-glass-fallback]:not([data-glass="off"]) .chat-area {
   background: transparent;
 }
 
-/* Popups, the Settings page and the prompt editor keep their scrim blur: they
-   open over the transcript, which is opaque enough to blur. */
+/* Popups keep their scrim blur: they open over the transcript, which is opaque
+   enough to blur. The page sheets (`--c-sheet`: Settings, the prompt editor)
+   are not in this list — they are opaque at every level (DESIGN.md, "Control
+   fills"), so a `backdrop-filter` on one would only re-blur a fill that already
+   hides everything behind it. */
 html[data-glass-fallback]:not([data-glass="off"]) .file-mention-popup,
-html[data-glass-fallback]:not([data-glass="off"]) .dropdown-popup,
-html[data-glass-fallback]:not([data-glass="off"]) .settings-page,
-html[data-glass-fallback]:not([data-glass="off"]) .prompt-editor-overlay {
+html[data-glass-fallback]:not([data-glass="off"]) .dropdown-popup {
   -webkit-backdrop-filter: blur(var(--glass-blur-scrim));
   backdrop-filter: blur(var(--glass-blur-scrim));
 }
@@ -1270,14 +1241,19 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--c-panel);
+  /* An opaque sheet, wash included — the panel is the second page of the
+     window, not a pane of glass, so the transcript never reads through it
+     (DESIGN.md, "Control fills"). It paints the palette's own canvas pair
+     instead of the frosted band tint, and the wash is laid out at viewport
+     width so Cream's gradient runs straight out of the titlebar beside it. No
+     `backdrop-filter`: there is nothing left behind an opaque fill to blur. */
+  background-color: var(--c-panel);
+  background-image: var(--c-bg-image);
   background-size: 100vw 100%;
   background-repeat: no-repeat;
-  -webkit-backdrop-filter: blur(var(--glass-blur-panel)) saturate(var(--glass-saturate-panel));
-  backdrop-filter: blur(var(--glass-blur-panel)) saturate(var(--glass-saturate-panel));
-  /* GPU hints: the entrance spring animates `transform`, and a frosted panel
-     that moves has to stay on its own compositor layer instead of repainting
-     the chat underneath on every frame. */
+  /* GPU hints: the entrance spring animates `transform`, so the panel stays on
+     its own compositor layer instead of repainting the chat beside it on every
+     frame of the glide. */
   will-change: transform;
   backface-visibility: hidden;
   z-index: 900;
@@ -1285,9 +1261,9 @@ body {
 
 /* Divider between the panel and the chat area. It starts *below* the panel
    header: inside the header's own band it is deliberately absent, because the
-   header and the chat toolbar carry the same `--c-toolbar` glass — a 1px
-   vertical line there cuts the window's chrome band in two and makes the
-   header read as a board glued to the left edge. */
+   header and the chat toolbar share one height and one hairline — a 1px
+   vertical line there cuts that band in two and makes the header read as a
+   board glued to the left edge. */
 .sidebar::after {
   content: '';
   position: absolute;
@@ -3436,14 +3412,13 @@ button.rabbit-hop-bunny:focus-visible {
 
 /* Header bar of a sidebar panel: title left, dismiss right.
 
-   It carries the window chrome's frosted `--c-toolbar`, exactly like the
-   titlebar above it and the chat toolbar beside it, so the whole top of the
-   window reads as one band and the only division is the hairline underneath.
-   `--panel-header-h` puts that hairline on the same row as the chat toolbar's,
-   which is what keeps the left column from looking like a separate block glued
-   under the chrome. In the gradient palette (Cream) the token is pinned to the
-   viewport width so the header continues the titlebar's gradient instead of
-   restarting it inside a 400px box. */
+   It paints the panel's own fill, so the header and the shell below it are one
+   sheet and the only division is the hairline underneath. `--panel-header-h`
+   puts that hairline on the same row as the chat toolbar's, which is what keeps
+   the left column from looking like a separate block glued under the chrome.
+   In the gradient palette (Cream) the wash is pinned to the viewport width so
+   the header continues the titlebar's gradient instead of restarting it inside
+   a 400px box. */
 .panel-header {
   display: flex;
   align-items: center;
@@ -3453,11 +3428,10 @@ button.rabbit-hop-bunny:focus-visible {
   min-height: var(--panel-header-h);
   padding: 6px 12px;
   border-bottom: 1px solid var(--c-border);
-  background: var(--c-panel);
+  background-color: var(--c-panel);
+  background-image: var(--c-bg-image);
   background-size: 100vw 100%;
   background-repeat: no-repeat;
-  -webkit-backdrop-filter: blur(var(--glass-blur-panel)) saturate(var(--glass-saturate-panel));
-  backdrop-filter: blur(var(--glass-blur-panel)) saturate(var(--glass-saturate-panel));
   flex-shrink: 0;
   position: sticky;
   top: 0;
