@@ -101,3 +101,69 @@ pub(crate) async fn end_turn_cleanup(app: &AppHandle, turn: &LlmTurn) {
     // `McpSession::Drop` remains the safety net for unwind paths.
     turn.shutdown_mcp(&app.state::<AppState>()).await;
 }
+
+/// Unpublishes a turn's base and announces its end — on EVERY exit path.
+///
+/// `chat_completion` calls [`TurnEndGuard::finish`] once [`end_turn_cleanup`]
+/// has returned. The `Drop` body is the backstop for a path that never reaches
+/// it: a panic inside the turn (a tool's `unwrap`, an assertion, an index) or a
+/// task aborted while it awaited. Without that backstop the registry kept a
+/// dead base forever — the History panel showed a permanent Running badge,
+/// Stop set a cancel flag nobody read any more, and the conversation produced
+/// no output at all until the app restarted.
+pub(crate) struct TurnEndGuard {
+    app: AppHandle,
+    session_id: String,
+    turn_id: String,
+    started_at_ms: i64,
+    model: String,
+    window_id: u64,
+    finished: bool,
+}
+
+impl TurnEndGuard {
+    pub(crate) fn new(
+        app: AppHandle,
+        session_id: &str,
+        turn_id: &str,
+        started_at_ms: i64,
+        model: &str,
+        window_id: u64,
+    ) -> Self {
+        Self {
+            app,
+            session_id: session_id.to_string(),
+            turn_id: turn_id.to_string(),
+            started_at_ms,
+            model: model.to_string(),
+            window_id,
+            finished: false,
+        }
+    }
+
+    /// Unpublish the base, then announce the end. Idempotent, and safe to call
+    /// from `Drop` (the emit is best effort).
+    pub(crate) fn finish(&mut self) {
+        if self.finished {
+            return;
+        }
+        self.finished = true;
+        self.app.state::<AppState>().turns.remove_if(self.window_id);
+        let _ = self.app.emit(
+            events::TURN_STATE,
+            events::TurnState {
+                session_id: self.session_id.clone(),
+                turn_id: self.turn_id.clone(),
+                running: false,
+                started_at_ms: self.started_at_ms,
+                model: self.model.clone(),
+            },
+        );
+    }
+}
+
+impl Drop for TurnEndGuard {
+    fn drop(&mut self) {
+        self.finish();
+    }
+}

@@ -1077,6 +1077,17 @@ export default function App() {
    * running badges read this; composer gating reads it for the visible one.
    */
   const [runningSessions, setRunningSessions] = useState<Record<string, { turn_id: string; started_at_ms: number }>>({});
+  /**
+   * `streaming` as a ref, for the driver bookkeeping callbacks: they must not
+   * re-create themselves (and re-subscribe every listener) each time a turn
+   * starts or ends.
+   */
+  const streamingRef = useRef(false);
+  useEffect(() => {
+    streamingRef.current = streaming;
+  }, [streaming]);
+  /** Serialises reconcile sweeps (focus + mount + switch can overlap). */
+  const reconcilingRef = useRef(false);
 
   /**
    * Load the workspace skill status and derive the enabled list.
@@ -1592,62 +1603,152 @@ export default function App() {
     },
   }), [t]);
 
+  /** Drop one session's "running" bookkeeping (the turn behind it is gone). */
+  const dropRunningSession = useCallback((sid: string) => {
+    setRunningSessions((prev) => {
+      if (!prev[sid]) return prev;
+      const next = { ...prev };
+      delete next[sid];
+      return next;
+    });
+  }, []);
+
+  /** Make `driver` the owner of `sid`'s turn for the rest of its life. */
+  const wireDriver = useCallback(
+    (sid: string, driver: BackgroundTurnDriver) => {
+      driversRef.current.set(sid, driver);
+      driver.onSettled(() => {
+        driversRef.current.delete(sid);
+        setPendingDriverConfirms((prev) => ({ ...prev, [sid]: null }));
+        // The turn is over, so the badge must not wait for an event that may
+        // already have been missed. A newer turn of the same session keeps its
+        // own entry: the ids have to agree.
+        setRunningSessions((prev) => {
+          if (prev[sid]?.turn_id !== driver.turnId) return prev;
+          const next = { ...prev };
+          delete next[sid];
+          return next;
+        });
+        bumpDrivers();
+      });
+      driver.onTranscript(() => bumpDrivers());
+      bumpDrivers();
+    },
+    [bumpDrivers]
+  );
+
+  /** In-flight attaches, so a switch and a sweep never build two drivers. */
+  const attachingRef = useRef(new Map<string, Promise<BackgroundTurnDriver | null>>());
+
+  /**
+   * Give `sid`'s running turn an owner in this webview, or report that it is
+   * over.
+   *
+   * `null` means the backend runs no turn for that session any more — the
+   * caller shows the persisted transcript and the stale badge is dropped here.
+   * A turn the foreground still streams is never taken over: its ownership wins.
+   */
+  const ensureDriverFor = useCallback(
+    (sid: string): Promise<BackgroundTurnDriver | null> => {
+      const inFlight = attachingRef.current.get(sid);
+      if (inFlight) return inFlight;
+      const task = (async () => {
+        const existing = driversRef.current.get(sid);
+        if (existing && !existing.isSettled()) return existing;
+        if (sid === sessionIdRef.current && streamingRef.current) return null;
+        const snapshot = await getTurnSnapshot(sid).catch(() => null);
+        if (!snapshot) {
+          dropRunningSession(sid);
+          return null;
+        }
+        try {
+          const rows = await loadSessionMessages(sid).catch(
+            () => [] as Awaited<ReturnType<typeof loadSessionMessages>>
+          );
+          const driver = await BackgroundTurnDriver.attach(
+            driverHost,
+            sid,
+            snapshot,
+            recordsToMessages(rows)
+          );
+          wireDriver(sid, driver);
+          return driver;
+        } catch (err) {
+          console.error("Failed to attach to a running turn", err);
+          return null;
+        }
+      })();
+      attachingRef.current.set(sid, task);
+      void task.finally(() => attachingRef.current.delete(sid)).catch(() => {});
+      return task;
+    },
+    [driverHost, wireDriver, dropRunningSession]
+  );
+
+  /**
+   * Make the local turn bookkeeping agree with the backend, the only authority
+   * on what still runs.
+   *
+   * A `turn-state` event can be missed — the listener registers
+   * asynchronously, a webview reload drops it, a driver was subscribed after
+   * the turn had ended — and nothing else ever cleared the entry. The session
+   * then stayed "running" forever: a badge in History, no output, and a Stop
+   * that cancelled a turn nobody was listening to.
+   */
+  const reconcileTurns = useCallback(async () => {
+    if (reconcilingRef.current) return;
+    reconcilingRef.current = true;
+    // A turn that starts while the list is in flight must survive the merge.
+    const askedAt = Date.now();
+    try {
+      const turns = await listActiveTurns();
+      const live = new Map(turns.map((turn) => [turn.session_id, turn]));
+      setRunningSessions((prev) => {
+        const next: typeof prev = {};
+        for (const [sid, entry] of Object.entries(prev)) {
+          if (!live.has(sid) && entry.started_at_ms < askedAt) continue;
+          next[sid] = entry;
+        }
+        for (const turn of turns) {
+          if (!next[turn.session_id]) {
+            next[turn.session_id] = {
+              turn_id: turn.turn_id,
+              started_at_ms: turn.started_at_ms,
+            };
+          }
+        }
+        return next;
+      });
+      // A driver whose turn the backend no longer runs can never receive its
+      // terminal event: settle it so its reply is persisted and the composer
+      // returns from Stop to Send. A driver that just heard from its turn is
+      // left alone — a turn waiting on a tool is quiet for a while.
+      for (const [sid, driver] of [...driversRef.current]) {
+        const info = live.get(sid);
+        if (info && info.turn_id === driver.turnId) continue;
+        if (driver.idleFor() < 8000) continue;
+        driver.settleExternally("stopped");
+      }
+      // …and a running turn nobody drives gets a driver, so switching to it
+      // shows the live output with a working Stop.
+      for (const turn of turns) {
+        if (driversRef.current.has(turn.session_id)) continue;
+        await ensureDriverFor(turn.session_id);
+      }
+    } catch (err) {
+      console.error("Failed to reconcile running turns", err);
+    } finally {
+      reconcilingRef.current = false;
+    }
+  }, [ensureDriverFor]);
+
+  // The registry seed and the reload re-attach used to run in their own effect,
+  // racing their own listener: a turn that ended between the snapshot and the
+  // subscription lost its terminal event and kept its badge forever. Subscribe
+  // first, then let the backend correct the bookkeeping (`reconcileTurns`).
   useEffect(() => {
     let unlisten: UnlistenFn | null = null;
     let cancelled = false;
-    // Seed from the live registry, then subscribe: a turn that was already
-    // running before this effect mounts (a webview reload mid-turn) still
-    // shows its badge.
-    listActiveTurns()
-      .then(async (turns) => {
-        if (cancelled) return;
-        setRunningSessions(
-          Object.fromEntries(
-            turns.map((turn) => [
-              turn.session_id,
-              { turn_id: turn.turn_id, started_at_ms: turn.started_at_ms },
-            ])
-          )
-        );
-        // ── Reload re-attach ─────────────────────────────────────────────
-        // A reload dropped every listener and every seed: without this, a
-        // turn that kept running in the background lost its reply forever
-        // (nobody persisted the assistant row when it settled). Rebuild a
-        // driver per still-running session from the backend snapshot plus
-        // the persisted rows — the turn keeps streaming and its row lands
-        // in the database exactly like a live foreground turn.
-        for (const turn of turns) {
-          if (cancelled || driversRef.current.has(turn.session_id)) continue;
-          const snapshot = await getTurnSnapshot(turn.session_id).catch(() => null);
-          // `null` = the turn settled in the gap between the two calls.
-          // Its row was never persisted (the reload killed the foreground
-          // machinery before it could); this is the narrow window the
-          // re-attach cannot close.
-          if (!snapshot) continue;
-          try {
-            const rows = await loadSessionMessages(turn.session_id);
-            // The driver owns the snapshot → transcript mapping; the effect
-            // only attaches it and wires up its own UI callbacks.
-            const driver = await BackgroundTurnDriver.attach(
-              driverHost,
-              turn.session_id,
-              snapshot,
-              recordsToMessages(rows)
-            );
-            driversRef.current.set(turn.session_id, driver);
-            driver.onSettled(() => {
-              driversRef.current.delete(turn.session_id);
-              setPendingDriverConfirms((prev) => ({ ...prev, [turn.session_id]: null }));
-              bumpDrivers();
-            });
-            driver.onTranscript(() => bumpDrivers());
-            bumpDrivers();
-          } catch (err) {
-            console.error("Failed to re-attach to a running turn", err);
-          }
-        }
-      })
-      .catch(console.error);
     listen<{ session_id: string; turn_id: string; running: boolean; started_at_ms: number }>(
       "turn-state",
       (e) => {
@@ -1665,15 +1766,37 @@ export default function App() {
       }
     )
       .then((fn) => {
-        if (cancelled) fn();
-        else unlisten = fn;
+        if (cancelled) {
+          fn();
+          return;
+        }
+        unlisten = fn;
+        // No end can slip by now: take the authoritative list and re-attach
+        // whatever kept running through the reload.
+        void reconcileTurns();
       })
       .catch(console.error);
     return () => {
       cancelled = true;
       unlisten?.();
     };
-  }, [driverHost, bumpDrivers]);
+  }, [reconcileTurns]);
+
+  // Coming back to the window is the cheapest moment to re-check: everything
+  // that happened while the webview was throttled (or the machine asleep) is in
+  // that snapshot.
+  useEffect(() => {
+    const sweep = () => void reconcileTurns();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") sweep();
+    };
+    window.addEventListener("focus", sweep);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("focus", sweep);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [reconcileTurns]);
 
   // Context menu is now allowed so users can right-click to copy/paste.
 
@@ -3164,6 +3287,21 @@ export default function App() {
     // so no event can be lost or double-processed across the boundary.
     await driver.subscribe();
 
+    // …but that round trip is not atomic with the arm below: the turn can end
+    // while it runs, and the foreground listeners (still live until the
+    // teardown) settle it. Arming then would hand this session a driver that
+    // waits for an end which already happened — Stop cancels nothing and no
+    // output ever arrives again. The backend, asked right here, decides.
+    const backendTurn = await getTurnSnapshot(sessionId).catch(() => null);
+    if (
+      !backendTurn ||
+      backendTurn.turn_id !== turnId ||
+      currentAssistantMessageIdRef.current !== assistantId
+    ) {
+      driver.dispose();
+      return true;
+    }
+
     // Arm + tear down the foreground machinery in one synchronous step.
     driver.arm({
       sessionId,
@@ -4402,7 +4540,10 @@ export default function App() {
 
   async function stopStreaming() {
     try {
-      await stopChatCompletion(sessionId);
+      const found = await stopChatCompletion(sessionId);
+      // No turn published for this session: nothing will ever arrive for it, so
+      // the Running badge must not outlive the click.
+      if (!found) dropRunningSession(sessionId);
     } catch (err) {
       setError(String(err));
     }
@@ -5396,7 +5537,19 @@ export default function App() {
                     const handed = await handoffForegroundTurn();
                     if (!handed) return;
                   }
-                  const driver = driversRef.current.get(sid);
+                  // A conversation whose turn kept running (it carries a
+                  // Running badge) must be re-attached before it is shown:
+                  // loading the persisted rows instead looks like a dead chat
+                  // with no output and no Stop. `ensureDriverFor` returns null
+                  // when the turn is over — then the badge is dropped and the
+                  // rows below are the truth.
+                  const existingDriver = driversRef.current.get(sid);
+                  const driver =
+                    existingDriver && !existingDriver.isSettled()
+                      ? existingDriver
+                      : runningSessions[sid]
+                        ? await ensureDriverFor(sid)
+                        : null;
                   if (!driver) {
                     if (cleanupRef.current) { cleanupRef.current(); cleanupRef.current = null; }
                     setStreaming(false);

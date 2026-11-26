@@ -43,7 +43,7 @@ pub(crate) fn stop_chat_completion(
     app: AppHandle,
     session_id: String,
     state: State<'_, AppState>,
-) {
+) -> bool {
     crate::turn::commands::stop_chat_completion(app, state, session_id)
 }
 

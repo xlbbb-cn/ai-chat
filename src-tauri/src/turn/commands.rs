@@ -25,8 +25,12 @@ pub(crate) fn stop_chat_completion(
     app: AppHandle,
     state: State<'_, AppState>,
     session_id: String,
-) {
-    state.turns.cancel(&session_id);
+) -> bool {
+    // `false` = no turn was published for this session. The UI uses that to
+    // drop a badge whose turn is already gone instead of pressing Stop into an
+    // empty registry forever. The teardown below still runs: whatever a dying
+    // turn left behind (background tasks, a hold, a half-done plan) must go.
+    let found = state.turns.cancel(&session_id);
     // Background tasks must die immediately, not at the next loop iteration:
     // a foreground tool may still be blocking the turn. Only this session's
     // tasks are touched.
@@ -85,6 +89,7 @@ pub(crate) fn stop_chat_completion(
             });
         }
     }
+    found
 }
 
 /// Push a message into the turn that is currently running for this session,

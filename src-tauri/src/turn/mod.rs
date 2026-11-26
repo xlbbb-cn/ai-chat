@@ -36,6 +36,7 @@ pub mod progress;
 pub mod registry;
 
 pub(crate) use lifecycle::end_turn_cleanup;
+pub(crate) use lifecycle::TurnEndGuard;
 pub use progress::{
     now_ms, TurnInboxItem, TurnProgress, TurnProgressSink, TurnSnapshot, TurnUsageSnapshot,
 };

@@ -361,6 +361,18 @@ pub(crate) async fn chat_completion(
         },
     );
 
+    // Backstop for the unpublish + terminal emit below: a panic in the turn
+    // unwinds past them, and the registry entry would outlive its work forever
+    // (permanent Running badge, Stop into the void, no output).
+    let mut end_guard = crate::turn::TurnEndGuard::new(
+        app.clone(),
+        &session_id,
+        &turn_id,
+        started_at_ms,
+        &model,
+        window_turn_id,
+    );
+
     let result = run_chat_turn(
         app.clone(),
         messages,
@@ -376,19 +388,9 @@ pub(crate) async fn chat_completion(
     crate::turn::end_turn_cleanup(&app, &turn).await;
     // Unpublish the base only after cleanup: a newer turn of the same session
     // may already have superseded it, and `remove_if` is guarded by window id.
-    app.state::<AppState>().turns.remove_if(window_turn_id);
-    // The badge must not outlive the work: emit the terminal state only after
-    // the session's background tasks and serve processes are torn down.
-    let _ = app.emit(
-        crate::events::TURN_STATE,
-        crate::events::TurnState {
-            session_id: session_id.clone(),
-            turn_id,
-            running: false,
-            started_at_ms,
-            model,
-        },
-    );
+    // The badge must not outlive the work either, so the terminal `turn-state`
+    // is emitted in the same step (`TurnEndGuard::finish`).
+    end_guard.finish();
     drop(sleep_guard);
     result
 }

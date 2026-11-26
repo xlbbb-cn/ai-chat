@@ -19,6 +19,7 @@
  */
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import {
+  getTurnSnapshot,
   injectUserMessage,
   saveHistory,
   stopChatCompletion,
@@ -99,6 +100,10 @@ export class BackgroundTurnDriver {
   private stats: TurnStats | null = null;
   private hasRunningTool = false;
   private pendingConfirm: PendingConfirm | null = null;
+  /** A terminal event that arrived before `arm` — kept, never dropped. */
+  private pendingTerminal: { status: "done" | "error" | "stopped"; err?: string } | null = null;
+  /** When this driver last consumed an event of its turn (0 = never). */
+  private lastEventAt = 0;
 
   private unlisteners: UnlistenFn[] = [];
   private transcriptListeners = new Set<TranscriptListener>();
@@ -182,7 +187,14 @@ export class BackgroundTurnDriver {
       payload?.turn_id === this.turnId;
     const forSession = (payload: { session_id?: string | null }) =>
       !payload.session_id || payload.session_id === this.sessionId;
-    const guard = () => this.armed && !this.settled;
+    // Every consumed event stamps `lastEventAt`: a driver that hears nothing
+    // for a while may still be waiting on a tool, and only the reconcile sweep
+    // (which knows the backend's authoritative list) may settle it.
+    const guard = () => {
+      if (!this.armed || this.settled) return false;
+      this.lastEventAt = Date.now();
+      return true;
+    };
 
     const un = await Promise.all([
       listen<{ turn_id?: string; text: string }>("chat-token", (e) => {
@@ -199,14 +211,26 @@ export class BackgroundTurnDriver {
         this.onRetry(e.payload.content, e.payload.reasoning);
       }),
       listen<{ turn_id?: string }>("chat-done", (e) => {
-        if (!mine(e.payload)) return;
-        if (!this.armed || this.settled) return;
+        if (!mine(e.payload) || this.settled) return;
+        // Between `subscribe()` and `arm()` the driver is deliberately deaf to
+        // tokens, but a terminal event is not a token: dropping it left the
+        // driver waiting for an end that had already happened (a Stop button
+        // that cancelled nothing, and no output ever again). Keep it and let
+        // `arm` replay it.
+        if (!this.armed) {
+          this.pendingTerminal = { status: this.stopping ? "stopped" : "done" };
+          return;
+        }
         this.settle(this.stopping ? "stopped" : "done");
       }),
       listen<{ turn_id?: string; error: string }>("chat-error", (e) => {
-        if (!mine(e.payload)) return;
-        if (!this.armed || this.settled) return;
-        this.settle("error", e.payload.error || "the turn failed");
+        if (!mine(e.payload) || this.settled) return;
+        const err = e.payload.error || "the turn failed";
+        if (!this.armed) {
+          this.pendingTerminal = { status: "error", err };
+          return;
+        }
+        this.settle("error", err);
       }),
       listen<{
         prompt_tokens: number;
@@ -332,16 +356,46 @@ export class BackgroundTurnDriver {
     );
     this.armed = true;
     this.emit();
+    // Replay a terminal event that arrived before we were armed.
+    const terminal = this.pendingTerminal;
+    if (terminal) {
+      this.pendingTerminal = null;
+      this.settle(terminal.status, terminal.err);
+    }
   }
 
   /** Stop this turn (the backend cancels; the terminal event settles it). */
   async stop(): Promise<void> {
     this.stopping = true;
     try {
-      await stopChatCompletion(this.sessionId);
+      const found = await stopChatCompletion(this.sessionId);
+      // No turn is published for this session any more: the badge came from an
+      // end this driver never heard, and waiting for it would keep the Stop
+      // button (and the reply) hanging forever. Confirm with the snapshot — a
+      // turn that finished a moment ago is gone there too — then settle here so
+      // the partial reply is persisted and the composer returns to Send.
+      if (!found && !this.settled) {
+        const snapshot = await getTurnSnapshot(this.sessionId).catch(() => null);
+        if (!snapshot && !this.settled) this.settle("stopped");
+      }
     } catch {
       // The turn may have already settled; the terminal event still arrives.
     }
+  }
+
+  /** How long this driver has been without an event from its turn. */
+  idleFor(): number {
+    return this.lastEventAt === 0 ? Number.POSITIVE_INFINITY : Date.now() - this.lastEventAt;
+  }
+
+  /**
+   * Settle a driver whose turn the backend no longer runs (the reconcile sweep
+   * proved it): its terminal event can never arrive, so the reply is persisted
+   * from what the driver accumulated instead of being lost with the badge.
+   */
+  settleExternally(status: "stopped" | "error" = "stopped", err?: string): void {
+    if (this.settled) return;
+    this.settle(status, err);
   }
 
   /** Push a user message into the running turn (the composer's Enter path). */

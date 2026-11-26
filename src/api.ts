@@ -533,7 +533,14 @@ export async function onUpdateDownloadProgress(
   return listen<UpdateDownloadProgress>("update-download-progress", (e) => cb(e.payload));
 }
 
-export async function stopChatCompletion(sessionId: string): Promise<void> {
+/**
+ * Stop the session's running turn.
+ *
+ * Resolves `false` when the backend had no turn published for that session:
+ * the caller must then drop its own bookkeeping (a badge whose turn is already
+ * gone) instead of waiting for a terminal event that can never arrive.
+ */
+export async function stopChatCompletion(sessionId: string): Promise<boolean> {
   return invoke("stop_chat_completion", { sessionId });
 }
 
