@@ -482,7 +482,7 @@ pub fn get_all_tools(
         };
         let description = concat!(
             "Evaluate a mathematical expression and return the numeric result.\n\n",
-            "MANDATORY: every computation-related result you report — multi-step arithmetic, powers, roots, large numbers, unit conversions, percentages, statistics, date arithmetic, any numeric conclusion — MUST come from a tool execution. Use this tool for it; NEVER do arithmetic in your head, guess, or report a number from memory. When exactness matters this is not optional.\n\n",
+            "Use this tool for any computation whose result you report: multi-step arithmetic, powers, roots, unit conversions, percentages, statistics, date arithmetic, and any figure that must be exact. A single obvious mental step (e.g. `12*3`) may be stated directly. NEVER guess a number or recall one from memory — when in doubt, call the tool.\n\n",
             "Operators (lowest to highest precedence): `|` (bitwise OR), `^^` or `xor` (bitwise XOR), `&` or `and` (bitwise AND), `<<` / `>>` (shifts), `+` / `-`, `*` / `/` / `%`, unary `+` / `-` / `~`, `^` or `**` (exponentiation, right-associative: `2^3^2 = 512`; `^-2` and `^0.5` work), postfix `!` (factorial, max 20!). Parentheses nest and implicit multiplication is accepted: `2(3+4)`, `2pi`, `(1+2)(3+4)`.\n\n",
             "Numbers: decimal and scientific (`1.5e3`), hex `0xFF`, binary `0b1010`, octal `0o17`, `_` separators. Constants: `pi`, `e`, `tau`.\n\n",
             "Functions: `sqrt abs exp ln log log10 log2 sin cos tan asin acos atan atan2 sinh cosh tanh floor ceil round trunc sign min max pow hypot fact factorial not and or xor shl shr`.\n\n",
@@ -679,7 +679,7 @@ pub fn get_agent_task_tools() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "add_task",
-                "description": "Add a new task to the current autonomous mission. Use this instead of relying on chat history to remember future work.",
+                "description": "Add a new task to the current autonomous mission. Use this instead of relying on chat history to remember future work. This is a mission task, not the user-visible todo list.",
                 "parameters": {
                     "type": "object",
                     "properties": {

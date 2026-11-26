@@ -169,8 +169,8 @@ fn calculator_is_advertised_only_when_selected() {
     );
 }
 
-/// The calculator's description carries the mandatory "compute with a tool"
-/// policy and the `run_cmd` fallback. `run_cmd` is pulled in by the
+/// The calculator's description carries the "compute with a tool" policy and
+/// the `run_cmd` fallback. `run_cmd` is pulled in by the
 /// calculator's dependency (`AppConfig::enforce_tool_dependencies`), so the
 /// sentence names it unconditionally; `run_shell` is named only when selected.
 #[test]
@@ -188,8 +188,12 @@ fn calculator_description_mandates_tool_computation_with_run_cmd_fallback() {
 
     let bare = description(&["calculator".to_string()]);
     assert!(
-        bare.contains("MUST come from a tool execution"),
-        "the mandatory policy must open the description"
+        bare.contains("Use this tool for any computation whose result you report"),
+        "the computation policy must open the description"
+    );
+    assert!(
+        bare.contains("NEVER guess a number"),
+        "recalling a number from memory must stay forbidden"
     );
     assert!(
         bare.contains("`run_cmd`"),

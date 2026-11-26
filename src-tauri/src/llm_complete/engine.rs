@@ -5,6 +5,17 @@
 
 use super::*;
 
+/// The external-wait branch, worded once so the turn-start policy block and
+/// the goal-loop continuation message cannot describe the same rule twice.
+const WAIT_EVT_TIMER: &str = "When the remaining work waits on an external event, arm a \
+delay with the `timer` tool — a pending timer suspends the goal loop and its message resumes \
+the plan; if the wait cannot be scheduled, write [WAIT_EVT: what you are waiting for] in your \
+final answer instead. Either one ends the turn and the plan resumes on the next turn.";
+
+const WAIT_EVT_PLAIN: &str = "When the remaining work waits on an external event, write \
+[WAIT_EVT: what you are waiting for] in your final answer — that ends the turn without forcing \
+the goal, and the plan resumes on the next turn.";
+
 // ─── Chat command ─────────────────────────────────────────────────────────────
 
 /// Same as [`log_event`], for helpers that hold `&AppState` instead of the
@@ -440,6 +451,9 @@ fn build_prompt_bundle(
         until the user submits and returns their answers as JSON — never ask what the \
         conversation already answers, and proceed on your own when the form comes back \
         dismissed or timed out. \
+        PLAN CONFIRMATION: when a plan you presented awaits the user's confirmation, call \
+        `ask` and keep the items `pending` — while the question form is open the goal loop \
+        stays suspended, so nothing is executed before the user answers. \
         GOAL LOOP: while the list has unfinished items, a final answer does NOT end the \
         turn — it is continued automatically so you keep working; do not write a final \
         summary with goals open. End the turn explicitly by writing [goal:DONE] in your \
@@ -448,17 +462,13 @@ fn build_prompt_bundle(
         WAITING: when the unfinished items are waiting on an external event rather than \
         on your own work, do not force them."
             .to_string();
-        if config.selected_tools.iter().any(|t| t == "timer") {
-            todo_guidance.push_str(
-                " Arm a delay with the `timer` tool for a time-based wait — while a timer \
-                 is pending, the goal loop stays suspended and the timer's message resumes \
-                 the plan.",
-            );
-        }
-        todo_guidance.push_str(
-            " Otherwise write [WAIT_EVT: what you are waiting for] in your final answer — \
-             the turn ends and the plan resumes on the next turn.",
-        );
+        let has_timer = config.selected_tools.iter().any(|t| t == "timer");
+        todo_guidance.push(' ');
+        todo_guidance.push_str(if has_timer {
+            WAIT_EVT_TIMER
+        } else {
+            WAIT_EVT_PLAIN
+        });
         if !system_content.is_empty() {
             system_content.push_str("\n\n");
         }
@@ -2568,14 +2578,9 @@ pending_timers={pending_timers}, wait_evt={}",
                                 "The active todo list still has unfinished items.".to_string()
                             });
                         let wait_hint = if timer_tool_enabled {
-                            "If the remaining items are waiting on an external event instead, \
-arm a delay with the `timer` tool (a pending timer suspends this loop) — or write \
-[WAIT_EVT: what you are waiting for] when the wait cannot be scheduled. Either one ends \
-the turn; the plan resumes on the next turn."
+                            WAIT_EVT_TIMER
                         } else {
-                            "If the remaining items are waiting on an external event instead of \
-on your own work, write [WAIT_EVT: what you are waiting for] — that ends the turn \
-without forcing the goal, and the plan resumes on the next turn."
+                            WAIT_EVT_PLAIN
                         };
                         all_messages.push(json!({
                             "role": "user",

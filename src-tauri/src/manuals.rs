@@ -12,6 +12,7 @@
 //! workspace file layout and the seeding.
 
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use crate::prompt;
@@ -100,20 +101,59 @@ fn manual_display_path(manual: Manual) -> String {
     format!("{}/{}.md", prompt::MANUALS_DIR, manual.name())
 }
 
-/// Make sure the given manuals exist as files. A missing manual is seeded from
-/// its static body; an existing file is left alone so user edits survive, and
-/// a re-seed is always one `file_actions` delete away.
+/// Content fingerprint of a static manual body. An edit in `prompt.rs` changes
+/// it, so a seeded file carrying an older value is refreshed instead of
+/// silently staying stale.
+fn body_fingerprint(body: &str) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    body.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// First line of a seeded manual: `<!-- manual: <name> fingerprint: <hex> -->`.
+fn header_line(manual: Manual, fingerprint: u64) -> String {
+    format!(
+        "<!-- manual: {} fingerprint: {:016x} -->\n",
+        manual.name(),
+        fingerprint
+    )
+}
+
+/// `<file>.bak.N` with the first free `N`, so successive refreshes keep every
+/// earlier copy instead of overwriting the same backup.
+fn backup_path(path: &Path) -> PathBuf {
+    for n in 1..=99 {
+        let candidate = PathBuf::from(format!("{}.bak.{n}", path.display()));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    PathBuf::from(format!("{}.bak.1", path.display()))
+}
+
+/// Make sure the given manuals exist as files, and refresh a file whose body
+/// went stale in `prompt.rs`.
+///
+/// Rules, in order: a missing file is seeded; a file whose header carries the
+/// current fingerprint is left alone; a file marked `<!-- pinned -->` is never
+/// touched (the escape hatch for hand edits); anything else — a pre-header file
+/// or an outdated fingerprint — is backed up as `.bak.N` and rewritten.
 pub(crate) fn seed_manuals(workspace: &Path, manuals: &[Manual]) {
+    let dir = manuals_root(workspace);
     for manual in manuals {
         let path = manual_path(workspace, *manual);
-        if path.exists() {
-            continue;
+        let body = manual.body();
+        let desired = format!("{}{}", header_line(*manual, body_fingerprint(&body)), body);
+        if let Ok(existing) = fs::read_to_string(&path) {
+            if existing.contains("<!-- pinned -->") || existing == desired {
+                continue;
+            }
+            let _ = fs::rename(&path, backup_path(&path));
         }
-        let dir = manuals_root(workspace);
         if fs::create_dir_all(&dir).is_err() {
             continue;
         }
-        let _ = fs::write(&path, manual.body());
+        let _ = fs::write(&path, desired);
     }
 }
 
@@ -176,7 +216,7 @@ mod tests {
     }
 
     #[test]
-    fn seeding_writes_missing_files_only() {
+    fn seeding_writes_missing_files_with_header() {
         let tmp = std::env::temp_dir().join(format!(
             "ai-chat-manuals-seed-{}",
             std::process::id()
@@ -186,13 +226,63 @@ mod tests {
         let path = manual_path(&tmp, Manual::CreateSkill);
         assert!(path.exists());
         let body = fs::read_to_string(&path).unwrap();
+        assert!(body.starts_with("<!-- manual: create-skill fingerprint: "));
         assert!(body.contains(".data/skills.status"));
+        assert!(!manual_path(&tmp, Manual::CreateSubagent).exists());
+        let _ = fs::remove_dir_all(&tmp);
+    }
 
-        // An edited manual is never overwritten by a later seed.
+    #[test]
+    fn seeding_is_idempotent() {
+        let tmp = std::env::temp_dir().join(format!(
+            "ai-chat-manuals-idem-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&tmp);
+        pointer_for(&tmp, &[Manual::CreateSkill]);
+        let path = manual_path(&tmp, Manual::CreateSkill);
+        let first = fs::read_to_string(&path).unwrap();
+        pointer_for(&tmp, &[Manual::CreateSkill]);
+        assert_eq!(fs::read_to_string(&path).unwrap(), first);
+        assert!(!PathBuf::from(format!("{}.bak.1", path.display())).exists());
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn seeding_refreshes_drifted_body_and_keeps_backup() {
+        let tmp = std::env::temp_dir().join(format!(
+            "ai-chat-manuals-drift-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&tmp);
+        pointer_for(&tmp, &[Manual::CreateSkill]);
+        let path = manual_path(&tmp, Manual::CreateSkill);
+
+        // A hand edit without the pin marker is treated as a stale body.
         fs::write(&path, "user edit").unwrap();
-        pointer_for(&tmp, &[Manual::CreateSkill, Manual::CreateSubagent]);
-        assert_eq!(fs::read_to_string(&path).unwrap(), "user edit");
-        assert!(manual_path(&tmp, Manual::CreateSubagent).exists());
+        pointer_for(&tmp, &[Manual::CreateSkill]);
+        let refreshed = fs::read_to_string(&path).unwrap();
+        assert!(refreshed.contains("<!-- manual: create-skill fingerprint: "));
+        let backup = PathBuf::from(format!("{}.bak.1", path.display()));
+        assert_eq!(fs::read_to_string(&backup).unwrap(), "user edit");
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn seeding_respects_pinned_manual() {
+        let tmp = std::env::temp_dir().join(format!(
+            "ai-chat-manuals-pin-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&tmp);
+        pointer_for(&tmp, &[Manual::CreateSkill]);
+        let path = manual_path(&tmp, Manual::CreateSkill);
+        fs::write(&path, "<!-- pinned -->\nmy edit").unwrap();
+        pointer_for(&tmp, &[Manual::CreateSkill]);
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "<!-- pinned -->\nmy edit"
+        );
         let _ = fs::remove_dir_all(&tmp);
     }
 }

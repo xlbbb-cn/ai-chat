@@ -407,16 +407,10 @@ pub fn self_evolution_prompt(root: Option<&Path>, for_sub_agent: bool, memory_hi
          {hint_clause} (`memory list` / `get` / `search`) when you need the \
          full entry or a problem needs earlier experience instead of guessing or rediscovering it, \
          and `memory add` as soon as you confirm a fact; never store guesses.\n\n\
-         TRUST CALIBRATION: a retrieved fact is a claim, not the truth. The moment the real result \
-         disagrees with it, rewrite that same entry — `memory add` with the same `key`, \
-         `conflict: true`, the corrected `content` if you know it, and a one-line `note`. That \
-         call drops its `confidence` to 1 and records the contradiction, so a stale fact cannot \
-         keep ranking itself on top just by being old. When the result matches, a plain re-add \
-         raises `confidence` by one: trust is cheap to lose and expensive to regain. Pass \
-         `confidence` 1-5 explicitly only when you truly know how strong the evidence is — it \
-         overwrites, whereas `importance` only ever grows. Never leave a known-wrong entry at its \
-         old wording, and never rely on an entry at `confidence` 2 or below, or one with recorded \
-         conflicts, before re-verifying it against the real environment.\n\n\
+         TRUST CALIBRATION: a retrieved fact is a claim, not the truth — on a mismatch re-add \
+         the same `key` with `conflict: true` (plus the corrected `content` when you know it); \
+         on a match a plain re-add raises its confidence. The `memory` tool description carries \
+         the exact contract.\n\n\
          {archiving}",
     ));
 

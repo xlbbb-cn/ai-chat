@@ -3,6 +3,12 @@
 
 use super::*;
 
+/// One wording for the `skills=` clarification shared by the selection prompt
+/// and the planning prompt, so the two entry points cannot drift apart.
+const SKILLS_CLAUSE: &str = "`skills=` is configuration metadata (the agent's allowed-skill \
+list) — no skill content is auto-injected for a sub-agent; it reaches skill files only through \
+its `tools=` (e.g. `file_actions`). Match on `tools=` and `mcp=` first.";
+
 // ─── LLM helpers ──────────────────────────────────────────────────────────────
 
 /// Non-streaming LLM call; returns the raw text content.
@@ -918,9 +924,7 @@ pub(crate) async fn select_agents(
     let system = format!(
         "You are an AI orchestrator. Decide which sub-agents should work on the user's request.\n\
          Existing agents:\n{catalogue}\n\n\
-         Note: `skills=` is configuration metadata (the agent's allowed-skill list) — no skill \
-         content is auto-injected for a sub-agent; it reaches skill files only through its \
-         `tools=` (e.g. `file_actions`). Match on `tools=` and `mcp=` first.\n\n\
+         Note: {SKILLS_CLAUSE}\n\n\
          Rules:\n\
          - Smallest set that can do the job: 0 to {MAX_SELECTED_AGENTS} agents.\n\
          - `llm` for reasoning, analysis and writing; `cli` for large code changes in the workspace; `cloud` for long remote jobs.\n\
@@ -1106,8 +1110,7 @@ pub(crate) async fn plan_tasks(
         task. A single task is a valid plan.\n\n\
         Step 2 — only for delegate:true, plan the tasks.\n\
         Available agents:\n{agents_desc}\n\
-        (`skills=` is configuration metadata only — no skill content is auto-injected for a \
-        sub-agent; it reaches skill files only through its `tools=`.)\n\n\
+        ({SKILLS_CLAUSE})\n\n\
         Workspace root: {workspace_root}\n\
         Deliverable exchange area: {exchange_root} — every task gets a directory named after its id, \
         shared files go to {exchange_root}/shared. In `context`, name a dependency artifact as \

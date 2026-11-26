@@ -294,7 +294,8 @@ impl ExchangeArea {
              task directory; use the shared directory for inputs/outputs meant for every task. \
              Reference files by path in your answer instead of pasting their contents. This \
              area is the handoff, not the delivered copy: the main agent promotes whatever the \
-             user should keep into the project folder (`./<project>/...`).\n"
+             user should keep into the project folder (`./<project>/...`). Name the one file \
+             that matters most in your answer — the main agent promotes it.\n"
         } else {
             "You have no file or shell tool, so you cannot write to this area. Return the \
              deliverable inline and mention that it was not written to the exchange area.\n"
