@@ -18,6 +18,14 @@ pub(crate) use crate::http::{build_http_client, build_stream_client};
 const STREAM_MAX_RETRIES: usize = 3;
 const STREAM_RETRY_BACKOFF_MS: [u64; 2] = [300, 900];
 
+/// Length of one wait slice while the transport waits for upstream bytes.
+///
+/// The stop flag is an `AtomicBool`, so a task parked in `next().await` cannot
+/// be woken by it: the wait is cut into slices and every slice boundary re-reads
+/// the flag (see [`poll_chunk`]). 200 ms is short enough that a Stop looks
+/// instant and long enough that the timer churn stays noise.
+const CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(200);
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: String,
@@ -1146,6 +1154,78 @@ pub(crate) fn announce_stream_retry(
     }
 }
 
+/// One slice of waiting for the next item of an SSE byte stream.
+enum ChunkPoll<T> {
+    /// The stream produced an item.
+    Item(T),
+    /// Nothing arrived within [`CANCEL_POLL_INTERVAL`]: the caller must re-read
+    /// the stop flag before waiting again.
+    Idle,
+    /// The stream ended.
+    End,
+}
+
+/// Waits at most [`CANCEL_POLL_INTERVAL`] for the next item of `stream`.
+///
+/// Deliberately not `stream.next().await`: that parks the task until bytes
+/// arrive, and a stopped turn then stays blocked exactly while the upstream is
+/// silent — llama.cpp sends no byte at all during prompt evaluation, so Stop
+/// went unnoticed for the whole prefill and the slot stayed busy. Polling in
+/// slices keeps the flag observable without a `Notify` and without `tokio-util`;
+/// dropping `Next` between polls is safe because the body keeps its own state.
+async fn poll_chunk<S, T>(stream: &mut S) -> ChunkPoll<T>
+where
+    S: futures_util::Stream<Item = T> + Unpin,
+{
+    match tokio::time::timeout(CANCEL_POLL_INTERVAL, stream.next()).await {
+        Err(_elapsed) => ChunkPoll::Idle,
+        Ok(Some(item)) => ChunkPoll::Item(item),
+        Ok(None) => ChunkPoll::End,
+    }
+}
+
+/// The one shape of "stopped by the user": every cancellation point returns the
+/// partial round, so the turn ends on what the user already saw instead of an
+/// error. A function (not a macro) because macro hygiene keeps a macro from
+/// reaching the caller's accumulators.
+fn cancelled_result(
+    content: &str,
+    reasoning_content: &str,
+    prompt_tokens: u32,
+    completion_tokens: u32,
+    cached_tokens: Option<u32>,
+    timing: StreamTiming,
+) -> StreamResult {
+    StreamResult {
+        finish_reason: "cancelled".into(),
+        tool_calls: vec![],
+        content: content.to_string(),
+        reasoning_content: reasoning_content.to_string(),
+        prompt_tokens,
+        completion_tokens,
+        cached_tokens,
+        timing,
+    }
+}
+
+/// Sleep in [`CANCEL_POLL_INTERVAL`] slices so a Stop is noticed during a
+/// backoff instead of only after it; returns `true` when the flag fired, in
+/// which case the caller returns the partial round.
+async fn cancellable_sleep(duration: Duration, cancelled: &AtomicBool) -> bool {
+    let deadline = tokio::time::Instant::now() + duration;
+    loop {
+        if cancelled.load(Ordering::SeqCst) {
+            return true;
+        }
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return false;
+        }
+        let slice = (deadline - now).min(CANCEL_POLL_INTERVAL);
+        tokio::time::sleep(slice).await;
+    }
+}
+
 /// Stream one completion request according to `opts`.
 /// Returns StreamResult with finish_reason, accumulated tool_calls, content, and token counts.
 pub async fn stream_llm_request(
@@ -1171,6 +1251,16 @@ pub async fn stream_llm_request(
         // includes the upstream round trip (that wait is what "thinking time"
         // feels like to the user).
         let mut meter = StreamMeter::new();
+        // Round accumulators, declared out here so every cancellation point —
+        // including the one that fires while the response headers are still
+        // pending — can return the partial round.
+        let mut finish_reason = String::new();
+        let mut tool_calls: Vec<(String, String, String)> = Vec::new();
+        let mut content = String::new();
+        let mut reasoning_content = String::new();
+        let mut prompt_tokens: u32 = 0;
+        let mut completion_tokens: u32 = 0;
+        let mut cached_tokens: Option<u32> = None;
         let mut request = client
             .post(url)
             .header(reqwest::header::ACCEPT, "text/event-stream");
@@ -1178,14 +1268,58 @@ pub async fn stream_llm_request(
             request = request.bearer_auth(api_key);
         }
         request = apply_request_headers(request, opts.headers);
-        let res = match request.json(&req_body).send().await {
+        // Waiting for the response headers is a silent window too: a request
+        // queued behind a busy slot (llama.cpp `-np 1`, a full relay) sends
+        // nothing at all until the slot frees, and a plain `await` here ignored
+        // Stop until it did — then started the generation anyway. Polling the
+        // send future keeps the flag observable; dropping it closes the socket.
+        let send = request.json(&req_body).send();
+        tokio::pin!(send);
+        let send_result = loop {
+            if cancelled.load(Ordering::SeqCst) {
+                return Ok(cancelled_result(
+                    &content,
+                    &reasoning_content,
+                    prompt_tokens,
+                    completion_tokens,
+                    cached_tokens,
+                    meter.timing,
+                ));
+            }
+            match tokio::time::timeout(CANCEL_POLL_INTERVAL, &mut send).await {
+                // Sliced out: back to the top, which re-reads the flag.
+                Err(_elapsed) => continue,
+                Ok(res) => break res.map_err(|e| e.to_string()),
+            }
+        };
+        let res = match send_result {
             Ok(res) => res,
             Err(err) => {
-                let err = err.to_string();
                 let retryable = is_retryable_network_error(&err) && attempt < STREAM_MAX_RETRIES;
                 last_err = Some(err.clone());
                 if retryable {
-                    tokio::time::sleep(Duration::from_millis(retry_backoff_ms(attempt))).await;
+                    // A stop during the wait must not be turned into a retry.
+                    if cancelled.load(Ordering::SeqCst) {
+                        return Ok(cancelled_result(
+                            &content,
+                            &reasoning_content,
+                            prompt_tokens,
+                            completion_tokens,
+                            cached_tokens,
+                            meter.timing,
+                        ));
+                    }
+                    if cancellable_sleep(Duration::from_millis(retry_backoff_ms(attempt)), cancelled).await
+                    {
+                        return Ok(cancelled_result(
+                            &content,
+                            &reasoning_content,
+                            prompt_tokens,
+                            completion_tokens,
+                            cached_tokens,
+                            meter.timing,
+                        ));
+                    }
                     continue;
                 }
                 return Err(err);
@@ -1195,16 +1329,64 @@ pub async fn stream_llm_request(
         if !res.status().is_success() {
             let status = res.status();
             let retry_after = parse_retry_after_header(res.headers());
-            let err_body = res.text().await.unwrap_or_default();
+            // The error body is read in slices for the same reason the response
+            // is: an upstream that stalls mid-error-body must not hold the turn
+            // (and the socket) past a Stop.
+            let err_body = {
+                let mut bytes = Vec::new();
+                let mut stream = res.bytes_stream();
+                loop {
+                    if cancelled.load(Ordering::SeqCst) {
+                        return Ok(cancelled_result(
+                            &content,
+                            &reasoning_content,
+                            prompt_tokens,
+                            completion_tokens,
+                            cached_tokens,
+                            meter.timing,
+                        ));
+                    }
+                    match poll_chunk(&mut stream).await {
+                        ChunkPoll::Idle => continue,
+                        ChunkPoll::End => break,
+                        ChunkPoll::Item(Ok(chunk)) => bytes.extend_from_slice(&chunk),
+                        ChunkPoll::Item(Err(_)) => break,
+                    }
+                }
+                String::from_utf8_lossy(&bytes).to_string()
+            };
             let err = extract_upstream_error_message(&err_body);
             let retryable = (is_retryable_http_error_body(&err_body) || is_retryable_status(status))
                 && attempt < STREAM_MAX_RETRIES;
             last_err = Some(err.clone());
             if retryable {
-                tokio::time::sleep(
+                // Same guard as the network-error branch: the status was read
+                // for nothing when the user already stopped the turn.
+                if cancelled.load(Ordering::SeqCst) {
+                    return Ok(cancelled_result(
+                        &content,
+                        &reasoning_content,
+                        prompt_tokens,
+                        completion_tokens,
+                        cached_tokens,
+                        meter.timing,
+                    ));
+                }
+                if cancellable_sleep(
                     retry_after.unwrap_or_else(|| Duration::from_millis(retry_backoff_ms(attempt))),
+                    cancelled,
                 )
-                .await;
+                .await
+                {
+                    return Ok(cancelled_result(
+                        &content,
+                        &reasoning_content,
+                        prompt_tokens,
+                        completion_tokens,
+                        cached_tokens,
+                        meter.timing,
+                    ));
+                }
                 continue;
             }
             if opts.emit_errors {
@@ -1219,13 +1401,6 @@ pub async fn stream_llm_request(
             return Err(err);
         }
 
-        let mut finish_reason = String::new();
-        let mut tool_calls: Vec<(String, String, String)> = Vec::new();
-        let mut content = String::new();
-        let mut reasoning_content = String::new();
-        let mut prompt_tokens: u32 = 0;
-        let mut completion_tokens: u32 = 0;
-        let mut cached_tokens: Option<u32> = None;
         let mut got_tool_calls = false;
         let mut saw_done = false;
         let mut stream_error: Option<String> = None;
@@ -1233,19 +1408,26 @@ pub async fn stream_llm_request(
         let mut stream = res.bytes_stream();
         let mut buffer = String::new();
 
-        'stream_loop: while let Some(chunk) = stream.next().await {
+        'stream_loop: loop {
             if cancelled.load(Ordering::SeqCst) {
-                return Ok(StreamResult {
-                    finish_reason: "cancelled".into(),
-                    tool_calls: vec![],
-                    content,
-                    reasoning_content,
+                return Ok(cancelled_result(
+                    &content,
+                    &reasoning_content,
                     prompt_tokens,
                     completion_tokens,
                     cached_tokens,
-                    timing: meter.timing,
-                });
+                    meter.timing,
+                ));
             }
+            // Sliced wait instead of `stream.next().await`: `ChunkPoll::Idle`
+            // loops back to the check above, which returns the partial round,
+            // drops the body and lets the OS close the socket — so a Stop
+            // reaches the upstream even while it streams nothing.
+            let chunk = match poll_chunk(&mut stream).await {
+                ChunkPoll::Idle => continue,
+                ChunkPoll::End => break 'stream_loop,
+                ChunkPoll::Item(chunk) => chunk,
+            };
             let bytes = match chunk {
                 Ok(bytes) => bytes,
                 Err(err) => {
@@ -1275,16 +1457,14 @@ pub async fn stream_llm_request(
                 buffer.drain(..=idx);
 
                 if cancelled.load(Ordering::SeqCst) {
-                    return Ok(StreamResult {
-                        finish_reason: "cancelled".into(),
-                        tool_calls: vec![],
-                        content,
-                        reasoning_content,
+                    return Ok(cancelled_result(
+                        &content,
+                        &reasoning_content,
                         prompt_tokens,
                         completion_tokens,
                         cached_tokens,
-                        timing: meter.timing,
-                    });
+                        meter.timing,
+                    ));
                 }
                 let line = line.trim();
                 if line.is_empty() {
@@ -1350,12 +1530,35 @@ pub async fn stream_llm_request(
         }
 
         if let Some(err) = stream_error {
+            // The return below closes the socket; a stopped turn must not reopen
+            // it as a retry (this is the window where a `timed out` read was
+            // re-sent as a whole new request after Stop).
+            if cancelled.load(Ordering::SeqCst) {
+                return Ok(cancelled_result(
+                    &content,
+                    &reasoning_content,
+                    prompt_tokens,
+                    completion_tokens,
+                    cached_tokens,
+                    meter.timing,
+                ));
+            }
             // Announce AFTER the trailing-line processing above, so the
             // payload covers everything this attempt streamed (a chunk
             // boundary can split the error from a complete final line).
             announce_stream_retry(app, &opts, &content, &reasoning_content);
             last_err = Some(err);
-            tokio::time::sleep(Duration::from_millis(retry_backoff_ms(attempt))).await;
+            if cancellable_sleep(Duration::from_millis(retry_backoff_ms(attempt)), cancelled).await
+            {
+                return Ok(cancelled_result(
+                    &content,
+                    &reasoning_content,
+                    prompt_tokens,
+                    completion_tokens,
+                    cached_tokens,
+                    meter.timing,
+                ));
+            }
             continue;
         }
 
@@ -1366,6 +1569,18 @@ pub async fn stream_llm_request(
         // turn there silently truncated the reply, so treat it as an error:
         // retryable when nothing usable arrived, a visible failure otherwise.
         if finish_reason.is_empty() && !saw_done {
+            // An upstream that ends the stream because the client went away is
+            // a stop, not a truncation: retrying here would re-ask the model.
+            if cancelled.load(Ordering::SeqCst) {
+                return Ok(cancelled_result(
+                    &content,
+                    &reasoning_content,
+                    prompt_tokens,
+                    completion_tokens,
+                    cached_tokens,
+                    meter.timing,
+                ));
+            }
             let err = format!(
                 "stream closed without finish_reason/[DONE] (received {} chars, {} tool call(s))",
                 content.chars().count(),
@@ -1377,7 +1592,17 @@ pub async fn stream_llm_request(
             last_err = Some(err.clone());
             if can_retry {
                 announce_stream_retry(app, &opts, &content, &reasoning_content);
-                tokio::time::sleep(Duration::from_millis(retry_backoff_ms(attempt))).await;
+                if cancellable_sleep(Duration::from_millis(retry_backoff_ms(attempt)), cancelled).await
+                {
+                    return Ok(cancelled_result(
+                        &content,
+                        &reasoning_content,
+                        prompt_tokens,
+                        completion_tokens,
+                        cached_tokens,
+                        meter.timing,
+                    ));
+                }
                 continue;
             }
             if opts.emit_errors {
@@ -1399,6 +1624,16 @@ pub async fn stream_llm_request(
         // is not an answer — retry while attempts remain, then fail loudly
         // instead of letting the turn end on an empty reply.
         if is_empty_completion(&content, &tool_calls) {
+            if cancelled.load(Ordering::SeqCst) {
+                return Ok(cancelled_result(
+                    &content,
+                    &reasoning_content,
+                    prompt_tokens,
+                    completion_tokens,
+                    cached_tokens,
+                    meter.timing,
+                ));
+            }
             let err = format!(
                 "empty completion: no content and no tool call (finish_reason: {}, {} reasoning char(s))",
                 if finish_reason.is_empty() {
@@ -1411,7 +1646,17 @@ pub async fn stream_llm_request(
             last_err = Some(err.clone());
             if attempt < STREAM_MAX_RETRIES {
                 announce_stream_retry(app, &opts, &content, &reasoning_content);
-                tokio::time::sleep(Duration::from_millis(retry_backoff_ms(attempt))).await;
+                if cancellable_sleep(Duration::from_millis(retry_backoff_ms(attempt)), cancelled).await
+                {
+                    return Ok(cancelled_result(
+                        &content,
+                        &reasoning_content,
+                        prompt_tokens,
+                        completion_tokens,
+                        cached_tokens,
+                        meter.timing,
+                    ));
+                }
                 continue;
             }
             if opts.emit_errors {
@@ -1515,4 +1760,143 @@ pub(crate) fn log_interaction(
         duration_ms,
         metadata.as_deref(),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::time::Instant;
+
+    /// A stream that never yields must hand control back after one slice, which
+    /// is what lets the driver re-read the stop flag. `pending()` is exactly the
+    /// llama.cpp prefill situation: headers received, no SSE byte for the whole
+    /// prompt evaluation.
+    #[tokio::test]
+    async fn silent_stream_yields_after_one_slice() {
+        let mut silent = futures_util::stream::pending::<u8>();
+        let started = Instant::now();
+        assert!(matches!(poll_chunk(&mut silent).await, ChunkPoll::Idle));
+        assert!(started.elapsed() >= CANCEL_POLL_INTERVAL);
+    }
+
+    /// The slicing must not swallow items or hide the end of the stream.
+    #[tokio::test]
+    async fn items_and_end_still_pass_through() {
+        let mut items = futures_util::stream::iter(vec![b'a', b'b']);
+        assert!(matches!(
+            poll_chunk(&mut items).await,
+            ChunkPoll::Item(b'a')
+        ));
+        assert!(matches!(
+            poll_chunk(&mut items).await,
+            ChunkPoll::Item(b'b')
+        ));
+        assert!(matches!(poll_chunk(&mut items).await, ChunkPoll::End));
+    }
+
+    /// The driver pattern of `stream_llm_request`: a Stop set while the upstream
+    /// is silent ends the wait within a few slices instead of at the next byte.
+    #[tokio::test]
+    async fn stop_is_noticed_while_the_stream_is_silent() {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let stop_flag = cancelled.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            stop_flag.store(true, Ordering::SeqCst);
+        });
+
+        let mut stream = futures_util::stream::pending::<u8>();
+        let started = Instant::now();
+        loop {
+            if cancelled.load(Ordering::SeqCst) {
+                break;
+            }
+            if let ChunkPoll::End = poll_chunk(&mut stream).await {
+                break;
+            }
+        }
+        // 30 ms plus at most one slice of overshoot; before this change the
+        // loop never left the wait at all.
+        assert!(started.elapsed() < CANCEL_POLL_INTERVAL * 3);
+    }
+
+    /// The transport claim behind the fix, against a real socket: an upstream
+    /// that sends its headers and then nothing (llama.cpp during prompt
+    /// evaluation) must still lose the connection when the turn is stopped —
+    /// the server has to see EOF instead of the client waiting for a token.
+    #[tokio::test]
+    async fn stop_closes_the_socket_while_the_upstream_is_silent() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind loopback");
+        let url = format!(
+            "http://{}/v1/chat/completions",
+            listener.local_addr().expect("local addr")
+        );
+        let (close_tx, close_rx) = tokio::sync::oneshot::channel::<bool>();
+
+        tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.expect("accept");
+            // Drain the request first (`{}` is two bytes), so the probe below
+            // observes the client's close and not our own request bytes.
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 64];
+            loop {
+                let n = sock.read(&mut chunk).await.unwrap_or(0);
+                if n == 0 {
+                    return;
+                }
+                buf.extend_from_slice(&chunk[..n]);
+                if let Some(head) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                    if buf.len() >= head + 4 + 2 {
+                        break;
+                    }
+                }
+            }
+            let _ = sock
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\r\n")
+                .await;
+            // A read that returns 0 is the client having closed the socket.
+            let mut probe = [0u8; 1];
+            let eof = matches!(sock.read(&mut probe).await, Ok(0) | Err(_));
+            let _ = close_tx.send(eof);
+        });
+
+        let client = build_stream_client().expect("stream client");
+        let res = client
+            .post(&url)
+            .body("{}")
+            .send()
+            .await
+            .expect("headers arrive before the body");
+        let mut stream = res.bytes_stream();
+
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let stop_flag = cancelled.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            stop_flag.store(true, Ordering::SeqCst);
+        });
+
+        let started = Instant::now();
+        loop {
+            if cancelled.load(Ordering::SeqCst) {
+                break;
+            }
+            if let ChunkPoll::End = poll_chunk(&mut stream).await {
+                break;
+            }
+        }
+        drop(stream);
+        assert!(started.elapsed() < CANCEL_POLL_INTERVAL * 3);
+
+        let eof = tokio::time::timeout(Duration::from_secs(2), close_rx)
+            .await
+            .expect("the server noticed the close")
+            .expect("probe result");
+        assert!(eof, "the socket stayed open after Stop");
+    }
 }
