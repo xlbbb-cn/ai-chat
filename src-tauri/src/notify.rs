@@ -124,7 +124,7 @@ pub fn ensure_notify_window(app: &AppHandle) -> Result<WebviewWindow, String> {
 /// Show the notification card with `title` / `body`.
 ///
 /// `kind` is `"done"` or `"error"` — the card UI colours the title from it
-/// (semantic status only, per DESIGN.md).
+/// (semantic status only, per docs/DESIGN.md).
 pub(crate) async fn show_notify_card(
     app: AppHandle,
     title: String,

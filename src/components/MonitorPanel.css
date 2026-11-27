@@ -1,7 +1,7 @@
 /* Interaction monitor: two-pane log view (list + detail) over a session
    report strip that fills the bottom third of the dialog.
 
-   Every colour comes from the palette tokens in `src/App.css` (DESIGN.md), so
+   Every colour comes from the palette tokens in `src/App.css` (docs/DESIGN.md), so
    the panel wears the same light/dark surfaces as the rest of the app instead
    of the hardcoded dark box it used to be. No literal hex lives here. */
 
@@ -15,7 +15,7 @@
     justify-content: center;
     padding: 12px;
     z-index: 1000;
-    /* Modal backdrop (DESIGN.md → Overlays and popups). */
+    /* Modal backdrop (docs/DESIGN.md → Overlays and popups). */
     background: rgba(128, 128, 128, 0.65);
     -webkit-backdrop-filter: blur(var(--glass-blur-scrim));
     backdrop-filter: blur(var(--glass-blur-scrim));

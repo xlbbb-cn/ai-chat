@@ -81,7 +81,7 @@
 }
 
 /* A round blocked on a background result is the attention state of the two
-   badges — semantic warning, not the view's accent (DESIGN.md: the accent is
+   badges — semantic warning, not the view's accent (docs/DESIGN.md: the accent is
    reserved for the primary action). */
 .background-group-badge.waiting {
     color: var(--c-warning);

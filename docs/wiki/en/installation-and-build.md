@@ -97,7 +97,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-When changing UI, check both light and dark themes and `prefers-reduced-motion`. The visual spec is `DESIGN.md`: colors, radii, shadows and motion must use the tokens in `src/App.css`.
+When changing UI, check both light and dark themes and `prefers-reduced-motion`. The visual spec is `docs/DESIGN.md`: colors, radii, shadows and motion must use the tokens in `src/App.css`.
 
 ### Documentation and the website
 

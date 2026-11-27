@@ -17,8 +17,9 @@ import type { Attachment, ModelMetadata } from "./types";
  *   content part, so any model can consume it;
  * - images become `image_url` parts → need `supports_vision`;
  * - binaries have no sendable form at all — the app never emits a `file` part, so
- *   they are refused here (see the `file`-part gotcha in AGENTS.md: a gateway
- *   rejects that part whatever the catalogue advertises);
+ *   they are refused here (see the `file`-part gotcha in
+ *   `docs/agents/workflow.md`: a gateway rejects that part whatever the
+ *   catalogue advertises);
  * - audio becomes an `input_audio` part → needs `supports_audio`, and only the
  *   two formats the Chat Completions schema allows (`wav`, `mp3`).
  */

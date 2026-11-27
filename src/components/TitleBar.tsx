@@ -37,7 +37,7 @@ import type { SleepLockState, WorkspaceHistoryEntry } from "../types";
 /**
  * The app ships frameless (`decorations: false`), so the drag region and the
  * window controls are ours. The bar sits above every overlay and uses the same
- * tokens as the rest of the chrome — see DESIGN.md → Window chrome.
+ * tokens as the rest of the chrome — see docs/DESIGN.md → Window chrome.
  */
 
 /** `null` when the UI is opened in a plain browser (Vite preview). */

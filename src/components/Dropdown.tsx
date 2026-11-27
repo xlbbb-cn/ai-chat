@@ -77,7 +77,7 @@ type Anchor = {
  * Every native `<select>` was replaced by this, because the list a `<select>`
  * opens is drawn by the platform — GTK on Linux, a menu on macOS, Windows'
  * own popup — so "one design system" and "the OS decides how the list looks"
- * cannot both be true. The trigger keeps the field anatomy of `DESIGN.md`
+ * cannot both be true. The trigger keeps the field anatomy of `docs/DESIGN.md`
  * (34px, 1px `--c-border-i`, 4px radius, `--c-field` fill, the `--icon-chevron`
  * glyph token, accent border on focus/open); the popup keeps the popup
  * anatomy (`--c-popup`, 4px padding, rows at `--c-accent-soft` when active).
