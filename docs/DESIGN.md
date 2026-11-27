@@ -799,11 +799,20 @@ zero-height anchor strip in `App.tsx` directly above the transcript (below the
 toolbar and its optional bars), so a notice needs no measured offset and
 reserves no space.
 
-- **Placement:** absolute, `top: 8px; left: 12px`, `width: min(420px, calc(100% - 24px))`
-  — the chat window's top-left corner, never over the toolbar's controls.
-- **Surface:** `--c-surface` + 1px `--c-border-i` + 4px radius, **no shadow**, with
-  a 2px semantic rule on the left (`--c-danger` for errors, `--c-warning` for
-  warnings) and the glyph in the same colour. Body is `--c-body` 13px / 1.55.
+- **Placement:** absolute, `top: 8px; left: 16px; right: 16px` — **the full
+  width of the reading column**, echoing `.messages`' 16px gutters, so a long
+  failure reads as one band across the conversation instead of a card parked in
+  a corner. It starts below the toolbar, so it never covers its controls.
+- **Surface:** `--c-popup` (the floating-card fill) washed with the notice's own
+  tone — `color-mix(in srgb, var(--notice-tone) 10%, var(--c-popup))`, deepening
+  to 17% on hover — plus a 1px hairline mixed 34% from that same tone and a 3px
+  solid rule on the left; 4px radius, **no shadow** (elevation is a z-index
+  concern in this system). `--notice-tone` is declared once on `.chat-notice`
+  (`--c-danger`) and re-pointed by `[data-tone="warning"]` (`--c-warning`); the
+  fill, the borders, the glyph and the action button all read from it. A plain
+  `--c-surface` card was invisible here: under vibrancy it sat on a translucent
+  transcript of the same colour, and the Cream palettes give surface and canvas
+  the same cream. Body is `--c-body` 13px / 1.55.
 - **One dismiss target:** `.chat-notice-body` (glyph + text) is the `<button>` —
   click, `Enter` or `Space` closes the notice. Long text clamps to three lines
   with an ellipsis; the full message rides along as the accessible name and in

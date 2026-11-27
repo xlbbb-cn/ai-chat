@@ -2199,12 +2199,21 @@ button.rabbit-hop-bunny:focus-visible {
   }
 }
 
-/* Transient notices — warnings and errors float over the chat window's
-   top-left corner instead of living in the transcript (a bar inside the
-   message flow pushed the conversation around and stayed until the next
-   request). The strip is a zero-height anchor rendered directly above the
-   transcript (below the toolbar and its optional bars), so the notice needs no
-   measured offset and reserves no space.
+/* Transient notices — warnings and errors float over the top of the chat
+   window instead of living in the transcript (a bar inside the message flow
+   pushed the conversation around and stayed until the next request). The strip
+   is a zero-height anchor rendered directly above the transcript (below the
+   toolbar and its optional bars), so the notice needs no measured offset and
+   reserves no space.
+   The bar spans the reading column edge to edge — the same 16px gutters
+   `.messages` carries — so a long failure reads as one band across the
+   conversation rather than as a card parked in a corner.
+   Colour is what makes it a layer: the floor is `--c-popup` (the floating-card
+   fill, the one fill reserved for a card over readable text), washed with the
+   notice's own tone and edged by a hairline mixed from that same tone. A plain
+   `--c-surface` card could not be told apart from the transcript under
+   vibrancy (`--glass-transcript`) and disappeared outright in the Cream
+   palettes, where surface and canvas are the same cream.
    Behaviour lives in `components/ChatNotice.tsx`; see docs/DESIGN.md. */
 .chat-notices {
   position: relative;
@@ -2216,18 +2225,25 @@ button.rabbit-hop-bunny:focus-visible {
 }
 
 .chat-notice {
+  /* One tone drives fill, borders, glyph and action — a warning re-points
+     this alone. */
+  --notice-tone: var(--c-danger);
   position: absolute;
   top: 8px;
-  left: 12px;
-  width: min(420px, calc(100% - 24px));
+  left: 16px;
+  right: 16px;
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  padding: 8px 10px;
+  gap: 10px;
+  padding: 9px 12px 9px 11px;
+  /* Fallbacks first: a webview without `color-mix` keeps the flat card rather
+     than losing the fill. */
   border: 1px solid var(--c-border-i);
-  border-left: 2px solid var(--c-danger);
+  border: 1px solid color-mix(in srgb, var(--notice-tone) 34%, var(--c-border-i));
+  border-left: 3px solid var(--notice-tone);
   border-radius: var(--r-sm);
-  background: var(--c-surface);
+  background-color: var(--c-popup);
+  background-color: color-mix(in srgb, var(--notice-tone) 10%, var(--c-popup));
   color: var(--c-body);
   font-size: 13px;
   line-height: 1.55;
@@ -2237,7 +2253,8 @@ button.rabbit-hop-bunny:focus-visible {
 }
 
 .chat-notice:hover {
-  background: var(--c-surface-2);
+  background-color: var(--c-surface-2);
+  background-color: color-mix(in srgb, var(--notice-tone) 17%, var(--c-popup));
 }
 
 /* The body is the dismiss target: one click clears the notice, and the whole
@@ -2263,13 +2280,23 @@ button.rabbit-hop-bunny:focus-visible {
    sheets, so a single-class override would lose the size tie. */
 .inline-edit-btn.chat-notice-action {
   flex-shrink: 0;
-  min-height: 24px;
-  padding: 2px 10px;
+  min-height: 26px;
+  padding: 2px 12px;
+  border-color: var(--c-border-i);
+  border-color: color-mix(in srgb, var(--notice-tone) 45%, var(--c-border-i));
+  background: var(--c-popup);
+  color: var(--notice-tone);
   font-size: 12px;
 }
 
+.inline-edit-btn.chat-notice-action:hover {
+  border-color: var(--notice-tone);
+  background: color-mix(in srgb, var(--notice-tone) 13%, var(--c-popup));
+  color: var(--notice-tone);
+}
+
 .chat-notice[data-tone="warning"] {
-  border-left-color: var(--c-warning);
+  --notice-tone: var(--c-warning);
 }
 
 /* Leaving: the fade runs on the shared curve, then the parent drops it. */
@@ -2279,13 +2306,9 @@ button.rabbit-hop-bunny:focus-visible {
 
 .chat-notice-icon {
   flex-shrink: 0;
-  margin-top: 3px;
-  font-size: 12px;
-  color: var(--c-danger);
-}
-
-.chat-notice[data-tone="warning"] .chat-notice-icon {
-  color: var(--c-warning);
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--notice-tone);
 }
 
 /* Three lines, then an ellipsis. The bar is transient by design; the whole
