@@ -802,7 +802,9 @@ reserves no space.
 - **Placement:** absolute, `top: 8px; left: 16px; right: 16px` — **the full
   width of the reading column**, echoing `.messages`' 16px gutters, so a long
   failure reads as one band across the conversation instead of a card parked in
-  a corner. It starts below the toolbar, so it never covers its controls.
+  a corner. It starts below the toolbar, so it never covers its controls, and
+  the strip sits at `z-index: 9` — one step under the toolbar's 10 — so its
+  travel (below) passes behind that band instead of across its buttons.
 - **Surface:** `--c-popup` (the floating-card fill) washed with the notice's own
   tone — `color-mix(in srgb, var(--notice-tone) 10%, var(--c-popup))`, deepening
   to 17% on hover — plus a 1px hairline mixed 34% from that same tone and a 3px
@@ -817,14 +819,19 @@ reserves no space.
   click, `Enter` or `Space` closes the notice. Long text clamps to three lines
   with an ellipsis; the full message rides along as the accessible name and in
   `title`.
-- **Timing:** leaves on click and on its own after **5 s** — `opacity` → 0 on
-  `--t-dur` / `--t-ease`, then unmounts. One notice at a time; a new one replaces
-  the old and restarts the dwell. `prefers-reduced-motion` collapses the fade to
-  a single frame, it does not remove the disappearance.
+- **Motion:** a slide, not a fade in place. `chat-notice-in` brings the bar down
+  from `translateY(calc(-100% - 8px))` — its own height above the strip, i.e. out
+  of the toolbar band — into place, and `chat-notice-out` reverses it, both on
+  `--t-dur` / `--t-ease`. The exit animation runs `forwards` and unmounts after
+  `EXIT_MS` (200 ms in `ChatNotice.tsx`, mirroring `--t-dur`).
+- **Timing:** leaves on click and on its own after **20 s**, action or not: a bar
+  that waits for a manual dismissal is the thing this component replaced. One
+  notice at a time; a new one replaces the old and restarts the dwell.
+  `prefers-reduced-motion` drops the travel — the bar arrives in place and goes
+  out in one frame; the disappearance itself is never removed.
 - **At most one action**, as a compact `.inline-edit-btn` at the end of the bar
-  (today: "Continue" for a turn that died half-way). A notice that carries an
-  action **does not** fade on its own — a button disappearing from under the
-  pointer that is reaching for it is worse than a bar that waits to be read.
+  (today: "Continue" for a turn that died half-way). Pressing it runs the action
+  and dismisses the bar on the same exit.
 - Nothing about a failure is rendered in the transcript: no error row, no
   failure bubble. The turn stays on disk with its `status: "error"` for history
   and for the retry path, but the user-facing report is the notice alone.
