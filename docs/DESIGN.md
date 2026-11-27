@@ -999,7 +999,7 @@ This is the one place with a deliberate asymmetry:
   `background-image: var(--glass-transcript-image)`. Both resolve to the canvas
   (`--c-bg` + `--c-bg-image`, the pair `.chat-area` paints) at every glass
   level, so a palette with a canvas wash (Cream) runs behind the transcript and
-  behind both frosted bars instead of stopping at the toolbar hairline; under
+  behind both frosted bars instead of stopping at the column's edge; under
   `data-vibrancy` the fill becomes a 94% sheet of the canvas and lets the
   desktop tint the column. The longhands are required: the `background`
   shorthand resets the image. The transcript draws it *itself* rather than
@@ -1205,9 +1205,10 @@ used to be was the last hardcoded surface in the system.
   requests, thinking per round, tool calls — each `--c-surface` + hairline:
   label 11px `--c-muted`, value 15px/500 with tabular numerals, detail 11px.
   Hit / miss / context add a 2px track (`--c-accent`, `--c-danger` from 85 %
-  context), the same weight the composer's usage bar uses. The ranking column
-  beside them lists the busiest tools (≤ 8 rows, failures in `--c-danger`) and
-  scrolls on its own; below 900px the report stacks under the tiles.
+  context) — a tile read-out, heavier than the composer's 1px edge bar. The
+  ranking column beside them lists the busiest tools (≤ 8 rows, failures in
+  `--c-danger`) and scrolls on its own; below 900px the report stacks under the
+  tiles.
 - **Data** comes from `get_session_stats` (`src-tauri/src/db.rs`), aggregated in
   SQL: tokens / cache / context from `api_requests`, tool traffic from
   `interaction_log` (`mcp_call` is the *failure* row, `mcp_response` the success
@@ -1250,7 +1251,7 @@ Nothing in between.
 | Chat transcript (`.messages`) | `padding: 18px 16px 20px`, `gap: 16px` |
 | Chat input area | `padding: 10px 12px 12px`, `gap: 8px`; control row `gap: 6px` |
 | Sidebar | `width: 400px`; 1px right hairline drawn by `.sidebar::after`, starting `--panel-header-h` down so it never crosses the header band |
-| Panel header | `.panel-header` (shared, `App.css`): `min-height: var(--panel-header-h)` = 49px so its hairline lands on the chat toolbar's, `padding: 6px 12px`, the panel's own opaque `--c-panel` + `--c-bg-image`, 1px hairline, title + one `faAnglesLeft` collapse chevron and nothing else |
+| Panel header | `.panel-header` (shared, `App.css`): `min-height: var(--panel-header-h)` = 49px so its hairline lands on the row where the chat toolbar's band ends, `padding: 6px 12px`, the panel's own opaque `--c-panel` + `--c-bg-image`, 1px hairline, title + one `faAnglesLeft` collapse chevron and nothing else |
 | Panel row | `padding: 9px 10px`, `gap: 4px`, transparent on the panel's sheet, `--r-sm`; hover/focus-within `--c-hover` |
 | Panel footer | `padding: 10px 12px`, 1px hairline |
 | Panel list | `padding: 4px 8px 10px`; the rows sit flush, separated by a 1px inset hairline (no `gap`) |
@@ -1261,7 +1262,7 @@ Nothing in between.
 
 ### Context-usage bar
 
-The 2px bar pinned to the input area's top border has two states:
+The 1px bar pinned to the input area's top edge has two states:
 
 - **Streaming, usage unknown** — a soft `--c-accent` gradient dash sweeps across
   the track, so a long think shows activity before the provider reports token
@@ -1271,8 +1272,9 @@ The 2px bar pinned to the input area's top border has two states:
   fill, switching to `--c-danger` at 90 % and above.
 
 `prefers-reduced-motion` replaces the sweep with a dim static line. The bar is
-absolutely positioned over the input area's top border, so it never causes
-layout shift.
+absolutely positioned over the input area's top edge — the band's border is a
+transparent 1px track, so this is the only line the composer draws — and it
+never causes layout shift.
 
 ### Mention progress strip
 
@@ -1280,8 +1282,9 @@ A PDF mention (`@paper.pdf#2`) is converted to Markdown *before* the turn
 starts, so the input area grows one status row while it runs:
 
 - one muted 12px row (`--c-muted`): spinner + "converting `paper.pdf`…", the
-  page counter in 11px `--c-placeholder` with tabular numerals, then the same
-  2px `--c-accent` track the context bar uses (no gradient, no fill);
+  page counter in 11px `--c-placeholder` with tabular numerals, then a 2px
+  `--c-accent` track inside the row — a bar in the stack, where the composer's
+  own context bar is the 1px line on the band's edge (no gradient, no fill);
 - it is **in flow**, unlike the usage bar: it shares `.injection-bar`'s recipe,
   so a transient row enters and leaves the stack the same way and needs no
   reserved height;
@@ -1347,10 +1350,14 @@ too. True modal dialogs (9999 layer) still cover the titlebar on purpose.
 The sidebar panel header (`.panel-header`) paints the panel's own opaque fill and
 the chat toolbar's height, so the whole top of the window reads as one band: the
 titlebar above it is frosted, the panel and its header are the sheet, and the
-only divisions are the hairlines under the titlebar and under the panel header.
-That shared height is what lands the panel's hairline on the toolbar's own row,
-so the top of the window shows one horizontal line rather than two lines 7px
-apart. The header carries the title and the collapse control and nothing else.
+only divisions are the hairline under the titlebar and the one under the panel
+header. The toolbar and the composer draw no line of their own — they are
+divided from the reading column by their frosted fill alone, and each keeps a
+1px transparent border so the band still measures `--panel-header-h`. That
+shared height is what lands the panel's hairline on the row where the toolbar's
+band ends, so the top of the window shows one horizontal line rather than two
+lines 7px apart. The header carries the title and the collapse control and
+nothing else.
 
 The 1px divider between the sidebar and the chat area is drawn by
 `.sidebar::after` and starts `--panel-header-h` below the top of the panel: in
@@ -1602,7 +1609,7 @@ page.
 | Tempting | Here, and why |
 |---|---|
 | keep 6% for the panel because the conversation behind it is the effect | **refused.** The panel carries `--c-muted` 13px session titles on a wall of them, and a blurred glyph of the transcript underneath costs the pairing 0.4–2.6 of its contrast: 4.6–6.0:1 with the 94% fill, 1.9–3.1:1 at two thirds. A palette promises 4.5:1; the sheet either keeps that promise or it does not |
-| keep `--c-sheet` translucent so the chat behind Settings stays faintly visible | **refused, same rule.** The page replaces the transcript outright; a ghost of the conversation under a wall of settings labels is noise, not orientation. It also made the header band two-tone — the chat toolbar ended inside it, so its hairline cut the title background in half |
+| keep `--c-sheet` translucent so the chat behind Settings stays faintly visible | **refused, same rule.** The page replaces the transcript outright; a ghost of the conversation under a wall of settings labels is noise, not orientation. It also made the header band two-tone — the chat toolbar ended inside it, so its fill cut the title background in half |
 | give the opaque panel `--c-surface` so it reads a shade above the canvas | **refused.** Cards inside the panel are `--c-surface`; the shell has to stay `--c-bg` or every row would dissolve into its own container. The panel is the second page of the window, so it keeps the canvas the transcript already painted |
 | drop the wash with the transparency and let Cream go flat inside the panel | **refused.** The panel and `.panel-header` paint `--c-bg` + `--c-bg-image` at viewport width, the same pair `.chat-area` paints, so the palette's gradient runs continuously out of the titlebar beside it instead of restarting inside a 400px box |
 | keep `backdrop-filter` on the opaque surfaces "in case" | **removed.** A blur behind an opaque fill is paint that cannot show, and the panel animates its transform, so it would be paid for on every frame of the entrance. `.sidebar`, `.panel-header`, `.settings-page` and `.prompt-editor-overlay` carry no filter at any level |

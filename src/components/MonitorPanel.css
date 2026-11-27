@@ -483,7 +483,7 @@
     font-variant-numeric: tabular-nums;
 }
 
-/* 2px usage track — the same weight as the chat input's context bar. */
+/* 2px usage track — a tile read-out, heavier than the composer's 1px edge bar. */
 .report-tile-meter {
     display: block;
     height: 2px;

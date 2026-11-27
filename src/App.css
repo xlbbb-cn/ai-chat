@@ -187,8 +187,9 @@
      sidebar start below it so the drag region stays reachable. */
   --titlebar-h: 32px;
   /* Height of a sidebar panel's header bar. Equal to the chat toolbar's
-     rendered height so the left column's hairline and the toolbar's hairline
-     land on the same row — the window chrome reads as one band across it. */
+     rendered height — its 48px row plus the 1px transparent border under it —
+     so the left column's hairline lands on the row where the toolbar's band
+     ends and the window chrome reads as one band across it. */
   --panel-header-h: 49px;
 
   /* Frosted glass — one blur recipe for every translucent surface, scaled
@@ -1348,7 +1349,7 @@ body {
 
 /* Divider between the panel and the chat area. It starts *below* the panel
    header: inside the header's own band it is deliberately absent, because the
-   header and the chat toolbar share one height and one hairline — a 1px
+   header and the chat toolbar share one height and one bottom row — a 1px
    vertical line there cuts that band in two and makes the header read as a
    board glued to the left edge. */
 .sidebar::after {
@@ -1388,17 +1389,22 @@ body {
   z-index: 1;
 }
 
-/* Toolbar — the site nav: a transparent bar that floats over the content
-   with a single hairline underneath. The only shadow it ever carries is the
-   scroll-edge shade below, which appears while the transcript continues
-   past it — a stored-scroll cue, not elevation. */
+/* Toolbar — the site nav: a frosted bar that floats over the content and draws
+   no line of its own. The band is held apart by its fill alone; the only
+   shadow it ever carries is the scroll-edge shade below, which appears while
+   the transcript continues past it — a stored-scroll cue, not elevation. The
+   border is transparent rather than gone: its 1px is part of the 49px height
+   `--panel-header-h` is measured against. */
 .toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 8px 12px;
-  border-bottom: 1px solid var(--c-border);
+  border-bottom: 1px solid transparent;
   background: var(--glass-backdrop);
+  /* Origin after the shorthand: Cream's gradient runs under the transparent
+     border too, so the 1px track is painted rather than left blank. */
+  background-origin: border-box;
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   flex-shrink: 0;
@@ -1697,7 +1703,7 @@ body {
    separated by whitespace, not by containers. The fill is the one thing that
    changes between worlds: normally it is the palette canvas — colour first,
    `--c-bg-image` after, so Cream's wash runs behind the column instead of
-   stopping at the toolbar hairline — and under `data-vibrancy` it becomes the
+   stopping at the frosted bars — and under `data-vibrancy` it becomes the
    glass sheet (`--glass-transcript`, see that block). Painting it *here* rather
    than inheriting `.chat-area` is what keeps the column solid where that one
    drops its canvas. The longhands are deliberate: the `background` shorthand
@@ -2301,15 +2307,17 @@ button.rabbit-hop-bunny:focus-visible {
   }
 }
 
-/* Input area — frosted like the nav, separated from the transcript by one
-   hairline. The 2px context-usage bar sits flush on top of that hairline. */
+/* Input area — frosted like the nav, and divided from the transcript the same
+   way, by its fill alone. Its 1px transparent border keeps the band's height;
+   the only line along that edge is the context-usage bar, which paints it. */
 .input-area {
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 10px 12px 12px;
-  border-top: 1px solid var(--c-border);
+  border-top: 1px solid transparent;
   background: var(--glass-backdrop);
+  background-origin: border-box;
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   flex-shrink: 0;
@@ -2344,14 +2352,15 @@ button.rabbit-hop-bunny:focus-visible {
   pointer-events: none;
 }
 
-/* 2px context-usage bar, pinned flush to the input area's top border
-   (absolutely positioned over it — no layout shift, always touching the
-   border line). Solid fill once the request's usage is known; a moving accent
-   sweep while a reply is still streaming and `chat-usage` has not arrived.
-   Numbers live in the aria-label. */
+/* Context-usage bar, pinned flush to the input area's top edge: absolutely
+   positioned over the band's transparent 1px border (`top: -1px`), so it is
+   the 1px line the composer ever draws and it never causes layout shift. Solid
+   fill once the request's usage is known; a moving accent sweep while a reply
+   is still streaming and `chat-usage` has not arrived. Numbers live in the
+   aria-label. */
 .usage-panel {
   position: absolute;
-  top: 0;
+  top: -1px;
   left: 0;
   right: 0;
   height: 1px;
@@ -2534,7 +2543,8 @@ button.rabbit-hop-bunny:focus-visible {
 /* PDF mention conversion: `sendMessage` waits for the backend while a page range
    is rendered, so the composer shows which page it is on and how far the whole
    conversion got. Same recipe as `.injection-bar` — one muted 12px row, no fill,
-   no border — with the 2px accent track the usage bar already uses. */
+   no border — carrying a 2px accent track inside the row: the composer's usage
+   bar is the 1px line on the band's edge, this one is a bar in the stack. */
 .mention-progress {
   display: flex;
   align-items: center;
@@ -3501,8 +3511,9 @@ button.rabbit-hop-bunny:focus-visible {
 
    It paints the panel's own fill, so the header and the shell below it are one
    sheet and the only division is the hairline underneath. `--panel-header-h`
-   puts that hairline on the same row as the chat toolbar's, which is what keeps
-   the left column from looking like a separate block glued under the chrome.
+   lands that hairline on the row where the chat toolbar's band ends, which is
+   what keeps the left column from looking like a separate block glued under the
+   chrome.
    In the gradient palette (Cream) the wash is pinned to the viewport width so
    the header continues the titlebar's gradient instead of restarting it inside
    a 400px box. */
