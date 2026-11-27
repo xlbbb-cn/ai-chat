@@ -1322,14 +1322,22 @@ every other surface — no shadow, one hairline, one accent.
 |---|---|
 | Bar | `--titlebar-h` (32px), `--glass-backdrop` + `blur(var(--glass-blur))`, 1px `--c-border` bottom, `user-select: none` |
 | Drag region | The bar **and** its filler carry `data-tauri-drag-region` (the attribute does not inherit); buttons never do |
-| Window buttons | 34×28, 4px radius, `--c-muted` glyph at 12px; hover `--c-hover` + `--c-text`; active `--c-active` |
-| Close button | Destructive variant: hover is `--c-danger-soft` fill + `--c-danger` glyph |
+| Window buttons | Windows/Linux: 34×28, 4px radius, `--c-muted` glyph at 12px; hover `--c-hover` + `--c-text`; active `--c-active`. macOS: traffic lights — 12px dots on an 8px gap, `50%` radius (the shape, not a radius token), colours fixed by the platform in `--c-traffic-close` / `--c-traffic-minimize` / `--c-traffic-maximize` with a `--c-traffic-edge` hairline; a dot carries no hover fill, no ring and no size change — `:active` is `brightness(.88)` |
+| Window button glyphs, macOS | The native drawing inside the dot in `--c-traffic-glyph`: `×`, `−`, and the green dot's two solid triangles. Invisible until `.titlebar-lights:hover` or `:focus-visible` |
+| Close button | Windows/Linux only: destructive variant — hover is `--c-danger-soft` fill + `--c-danger` glyph. On macOS the red dot *is* the close button |
 | App menu (`⋯`) | `--c-surface`, 1px `--c-border-i`, 4px radius, no shadow; rows 32px, 13px/400, hover `--c-hover` |
 | Workspace indicator | 12px `--c-muted`, ellipsized; 1px `--c-danger` underline at a 2px offset marks the active workspace |
 | Workspace indicator, control | 22px tall, `0 6px` padding, 4px radius; hover / open / focus is a colour change only — `--c-hover` fill, `--c-text` label, no ring, no size change; the underline stays (it marks, it does not interact). 55% opacity for an inert row |
 | Workspace switcher popup | The app menu's frame and rows (32px, 13px), anchored left under the indicator; `min-width: 260px`, `max-width: min(480px, calc(100vw - 96px))`, `max-height` with the native bar hidden (it is a menu, not a panel list). A row is the **whole** folder name — the name is the identity and never truncates — then the 11px `--c-muted` parent path, which is the only part allowed to ellipsize, plus an 11px note: `--c-muted` for the current workspace, `--c-warning` for a folder that is gone. Choosing a row closes every sidebar before the swap, so no panel repaints against the workspace being replaced |
 | Workspace row, remove action | 24px trailing icon button, the same hover-reveal pattern as `.history-action-btn`: invisible and out of the pointer's way until the row is hovered or focused within, then `--c-hover` fill and a `--c-danger` glyph on its own hover. Shown only on non-current rows while idle — the active workspace cannot be removed and is never offered. It removes the **list entry only**: no confirmation, no filesystem change, no data deletion; the folder can be added back with the picker |
 | Placement | Windows/Linux: minimize / maximize / close on the right; macOS: close / minimize / maximize on the left |
+
+The traffic lights exist on macOS only, and they are the one place in the chrome
+that is not neutral: the three dots *are* the affordance, so their hues are the
+platform's and no theme, palette or glass block re-points them. Everything
+around them still follows the contract — the bar stays frosted, the dots cast
+nothing, and Windows/Linux keep the neutral icon-button recipe
+(`.titlebar-controls` / `.titlebar-btn`), which the `⋯` menu shares.
 
 The titlebar is `position: fixed` at `z-index: 2000`, above every overlay, so the
 window controls stay reachable while Settings or the Markdown editor is open.

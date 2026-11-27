@@ -332,7 +332,54 @@ export function TitleBar({
     /** GitHub's new-issue page — the bug-report entry. */
     const handleReportIssue = () => run(openIssuePage);
 
-    const controls = (
+    /** macOS traffic lights — 12px dots in the native order (close / minimize /
+     *  maximize), each carrying the platform's own glyph. A dot is its own
+     *  affordance: no hover fill, no ring, no size change (App.css →
+     *  `.titlebar-lights`). */
+    const macControls = (
+        <div className="titlebar-lights">
+            <button
+                type="button"
+                className="titlebar-light is-close"
+                onClick={() => void APP_WINDOW?.close()}
+                title={t("app.windowClose")}
+                aria-label={t("app.windowClose")}
+                disabled={!APP_WINDOW}
+            >
+                <svg viewBox="0 0 12 12" aria-hidden="true">
+                    <path d="M3.5 3.5 8.5 8.5M8.5 3.5 3.5 8.5" />
+                </svg>
+            </button>
+            <button
+                type="button"
+                className="titlebar-light is-minimize"
+                onClick={() => void APP_WINDOW?.minimize()}
+                title={t("app.windowMinimize")}
+                aria-label={t("app.windowMinimize")}
+                disabled={!APP_WINDOW}
+            >
+                <svg viewBox="0 0 12 12" aria-hidden="true">
+                    <path d="M3.4 6h5.2" />
+                </svg>
+            </button>
+            <button
+                type="button"
+                className="titlebar-light is-maximize"
+                onClick={() => void APP_WINDOW?.toggleMaximize()}
+                title={maximized ? t("app.windowRestore") : t("app.windowMaximize")}
+                aria-label={maximized ? t("app.windowRestore") : t("app.windowMaximize")}
+                disabled={!APP_WINDOW}
+            >
+                <svg viewBox="0 0 12 12" aria-hidden="true">
+                    <path className="solid" d="M3.9 3.9h3.5L3.9 7.4zM8.1 8.1H4.6l3.5-3.5z" />
+                </svg>
+            </button>
+        </div>
+    );
+
+    /** The neutral icon buttons Windows and Linux keep: 34×28, muted glyph,
+     *  hover fill — the OS convention on those platforms. */
+    const winControls = (
         <div className="titlebar-controls">
             <button
                 type="button"
@@ -369,7 +416,7 @@ export function TitleBar({
 
     return (
         <header className="titlebar" data-tauri-drag-region>
-            {IS_MAC && controls}
+            {IS_MAC && macControls}
             <div className="titlebar-drag" data-tauri-drag-region>
                 <span className="titlebar-title" data-tauri-drag-region>
                     Rabbit Chat Studio
@@ -566,7 +613,7 @@ export function TitleBar({
                     </div>
                 )}
             </div>
-            {!IS_MAC && controls}
+            {!IS_MAC && winControls}
         </header>
     );
 }

@@ -110,6 +110,18 @@
   --c-warning: #B07500;
   --c-warning-soft: rgba(176, 117, 0, 0.10);
 
+  /* Window controls — the traffic lights are the one chrome element that is
+     not neutral: the three dots *are* the affordance, so their hues come from
+     the macOS platform instead of the palette, and no theme / palette / glass
+     block re-points them (macOS keeps the same three colours in both
+     appearances). Without vibrancy, over a window frame that is light, the
+     hairline and the glyph read as the dots' own shading. */
+  --c-traffic-close: #FF5F57;
+  --c-traffic-minimize: #FEBC2E;
+  --c-traffic-maximize: #28C840;
+  --c-traffic-edge: inset 0 0 0 0.5px rgba(0, 0, 0, 0.14);
+  --c-traffic-glyph: rgba(0, 0, 0, 0.55);
+
   /* Transcript card tints — one soft surface + one leading rule per card kind.
      The tints stay low-saturation and the rules are legible ink, so thinking /
      tool / plan / background cards read apart without becoming a second
@@ -1007,6 +1019,81 @@ body {
   font-size: 10px;
 }
 
+/* macOS traffic lights — the window buttons (docs/DESIGN.md → Window chrome).
+   12px dots on an 8px gap, exactly the native pitch, so the group reads as one
+   row of colours rather than three buttons. The glyph inside each dot is
+   invisible until the pointer or the keyboard enters the group: the colour is
+   the affordance, the glyph only confirms which dot does what. */
+.titlebar-lights {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.titlebar-light {
+  position: relative;
+  width: 12px;
+  height: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  /* The dot is a dot, not a rounded square: 50% is the shape, not a radius
+     token, and it is the only circular control in the chrome. */
+  border-radius: 50%;
+  box-shadow: var(--c-traffic-edge);
+  cursor: pointer;
+  transition: filter var(--t-dur) var(--t-ease), opacity var(--t-dur) var(--t-ease);
+}
+
+.titlebar-light.is-close {
+  background: var(--c-traffic-close);
+}
+
+.titlebar-light.is-minimize {
+  background: var(--c-traffic-minimize);
+}
+
+.titlebar-light.is-maximize {
+  background: var(--c-traffic-maximize);
+}
+
+.titlebar-light svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+  fill: none;
+  stroke: var(--c-traffic-glyph);
+  stroke-width: 1.1;
+  stroke-linecap: round;
+  opacity: 0;
+  transition: opacity var(--t-dur) var(--t-ease);
+}
+
+/* The green dot's zoom glyph is two solid triangles, the macOS drawing. */
+.titlebar-light svg .solid {
+  fill: var(--c-traffic-glyph);
+  stroke: none;
+}
+
+.titlebar-lights:hover .titlebar-light svg,
+.titlebar-light:focus-visible svg {
+  opacity: 1;
+}
+
+.titlebar-light:active {
+  filter: brightness(0.88);
+}
+
+.titlebar-light:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Windows / Linux window buttons — the neutral icon-button recipe. 34×28,
+   muted glyph, hover fill; the `⋯` app-menu trigger shares it. */
 .titlebar-controls {
   display: flex;
   align-items: center;

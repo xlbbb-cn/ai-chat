@@ -6,7 +6,7 @@ The app uses a frameless window with a custom title bar:
 
 - The left side shows the current workspace folder name with a thin red underline.
 - The middle is the drag region (`data-tauri-drag-region`); double-click maximizes/restores.
-- The right side has the `⋯` menu and window controls (left on macOS, right on Windows/Linux).
+- On macOS the window buttons are the platform's traffic lights — 12px red / amber / green dots in close / minimize / maximize order, with the native `×`, `−` and zoom-triangle glyphs appearing only on hover or keyboard focus — and they sit on the left. Windows and Linux keep the neutral minimize / maximize / close icon buttons on the right.
 - The `⋯` menu contains: open app data directory, open workspace directory, open deliverables folder (the sub-agent exchange area `.data/deliver`), export backup, restore backup, Markdown editor, report an issue, About Rabbit Chat Studio.
 - On macOS the app additionally shows the native menu bar (File / Edit / Tools / About). On Windows and Linux no native menu bar is drawn — the title-bar `⋯` menu above is the only menu, and the webview handles the clipboard shortcuts natively.
 - With the glass appearance enabled, the window is transparent and the desktop behind it is blurred by the system (Acrylic, with Mica as the fallback); only the chrome turns translucent, `.messages` keeps the opaque canvas so reading is unaffected. Settings → Appearance drives the level live, and hosts without a backdrop keep the opaque canvas.
