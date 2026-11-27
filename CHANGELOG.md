@@ -9,6 +9,53 @@ npm run changelog -- --from <上一个 tag> --to <本次 tag> --details --write
 条目按 Conventional Commits 的类型分组，作用域加粗；工作区里提交标题是英文、正文是中文，
 所以带 `--details` 时是中英对照。
 
+## [v3.8.3](https://github.com/xlbbb-cn/ai-chat/releases/tag/v3.8.3) — 2026-11-27
+
+### 新增
+
+- **appearance**: make the side panel and the page sheets opaque ([`dce343c`](https://github.com/xlbbb-cn/ai-chat/commit/dce343c1fb0704dcd65fba96074f94e43213db76))
+  - 侧栏面板与设置页不再是半透明：`--c-panel` = `--c-bg`、`--c-sheet` = `--c-surface`，在任何毛玻璃档位、任何平台上都是实底，13px 正文下面再也 透不出对话的字影（6% 透出时 `--c-muted` 只剩 4.6–6.0:1，三分之二只有 1.9–3.1:1，低于配色承诺的 4.5:1）。
+  - `.sidebar` / `.panel-header` 改画画布对（`--c-panel` + `--c-bg-image`， 按 100vw 铺），Cream 的渐变仍从标题栏连续延伸，不会在 400px 盒子里重开。
+  - 实底不需要滤镜：面板与其头部去掉 `backdrop-filter`，`--glass-blur-panel` / `--glass-saturate-panel` 一并删除；设置页与提示词编辑器也不再吃 scrim blur（`body:has()` 的淡出只为指针保留）。
+  - `DESIGN.md` 补 PATCH v1.9 与所有受影响的 token/表格段落；wiki 的外观说明 同步（`off` 只让标题栏和工具栏变实，面板一直是实底）。
+
+### 修复
+
+- **llm**: release the upstream connection deterministically on Stop ([`1c450fd`](https://github.com/xlbbb-cn/ai-chat/commit/1c450fd8ce743d06d3297073e08dd3a2e5b1d474))
+- **turns**: keep the Running badge tied to the turn that owns it ([`5ba6fa0`](https://github.com/xlbbb-cn/ai-chat/commit/5ba6fa0f1a117e8968d04a0e96cf296bfe880010))
+  - the mount path seeded from list_active_turns() and subscribed to turn-state as two parallel IPC calls, so a turn that ended in between kept its badge forever;
+  - a driver dropped a chat-done/chat-error that arrived between subscribe() and arm(), leaving it unsettled for the rest of the run;
+  - the registry entry and its terminal event were cleaned up only after run_chat_turn() returned, so a panic leaked them (and release builds write no log, so the leak left no trace).
+  - App: reconcileTurns() compares the local map with list_active_turns on mount (after the listener is registered, never before), on focus/visibilitychange and when a driver settles; ensureDriverFor() re-attaches a running turn that has no driver, and drops the badge plus loads the rows when the backend no longer has that turn.
+  - App: handoffForegroundTurn() re-asks the backend right before arming, so a turn that ended during the subscribe round trip is never armed.
+  - App: stopStreaming() clears the entry when the stop found no turn.
+  - backgroundTurns: terminal events seen before arm() are replayed by arm(); idleFor()/settleExternally() let the sweep end a driver whose turn is gone instead of waiting for an event that will never arrive; stop() settles locally when the backend holds no turn.
+  - turn: stop_chat_completion() returns whether it hit a turn, and TurnEndGuard publishes the terminal turn-state from Drop as well.
+
+### 重构
+
+- **prompts**: tighten P1/P2 prompt wording and manual seeding ([`ceced8d`](https://github.com/xlbbb-cn/ai-chat/commit/ceced8dcb7af2527a74cd3d585e79f79e72cecb4))
+  - engine: add plan-confirmation rule and one shared WAIT_EVT wording; - planning: share the skills= clause between both prompts; - exchange: tell sub-agents to name the file the main agent should promote; - schema: soften the calculator mandate and clarify mission tasks; - skills: shorten the duplicated TRUST CALIBRATION block; - manuals: refresh seeded manuals on body drift, honour the pinned marker
+
+### 文档
+
+- move DESIGN.md into docs/ and repoint every reference ([`fe853e9`](https://github.com/xlbbb-cn/ai-chat/commit/fe853e92e8a7952c19df57a41b1a6441fe593dca))
+  - `DESIGN.md` → `docs/DESIGN.md`（git mv，正文未改）：视觉规范与 docs/agents 五份开发文档同处 docs/，仓库根只剩 AGENTS.md（索引）与两个 README。
+  - 引用同步 23 处代码注释（src/App.css、App.tsx、components、notify、src-tauri/src）、AGENTS.md 的文档地图与硬规则行、docs/agents 四份正文与 `../DESIGN.md` 相对链接、docs/site/assets/site.css 头注释。
+  - wiki en/zh：仓库树把 DESIGN.md 挪进 docs/ 分支，贡献指南与相关文档改用 docs/DESIGN.md；gen-wiki 40 页无断链。
+  - 校验：npx tsc --noEmit ✅ / npx vite build ✅。
+- **agents**: split AGENTS.md into docs/agents/ and keep it as the index ([`080d55f`](https://github.com/xlbbb-cn/ai-chat/commit/080d55fe2622aa2c585201dedc011da5faba1d8f))
+  - AGENTS.md 从 162KB 收成索引：文档地图表（什么活读哪份）+ 永远适用的硬规则（DESIGN.md 契约、tsc/vite 校验、技能路径隔离、CHANGELOG 由脚本生成），外加「怎么加新规则」的维护条款。
+  - 正文按主题搬到 docs/agents/：architecture.md（进程分工、插件总线、服务与管理器窗口、运行时文件、子 Agent 提示词、Tauri 2 特性）、tech-stack.md（命令与工具链、Cargo 镜像）、modules.md（src 与 src-tauri 文件地图、技能路径隔离、工具族与危险命令、回合守卫/并行/身份、附件）、interface-design.md（界面硬规则与 theme×palette×glass 检查矩阵）、workflow.md（发布、MSIX、站点、坑）。
+  - 搬运逐行原样：463 行非空内容全部落地、无重复，只把 DESIGN.md 的相对链接补一级，每份文件带标题和指回索引的说明。
+  - 引用同步：src/attachments.ts 的 file-part 注释指向 docs/agents/workflow.md，wiki en/zh 的仓库树与文档清单列出 docs/agents/，coding-plan 技能改为按任务查五份文档。
+
+### 杂项
+
+- bump version to 3.8.3 ([`66b8b6d`](https://github.com/xlbbb-cn/ai-chat/commit/66b8b6db1eb020a693a640bfe2d7cc8c391cd3e2))
+
+**完整对比**：[v3.8.2...v3.8.3](https://github.com/xlbbb-cn/ai-chat/compare/v3.8.2...v3.8.3)
+
 ## [v3.8.2](https://github.com/xlbbb-cn/ai-chat/releases/tag/v3.8.2) — 2026-11-26
 
 ### CI
