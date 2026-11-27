@@ -9,6 +9,26 @@ npm run changelog -- --from <上一个 tag> --to <本次 tag> --details --write
 条目按 Conventional Commits 的类型分组，作用域加粗；工作区里提交标题是英文、正文是中文，
 所以带 `--details` 时是中英对照。
 
+## [v3.9.0](https://github.com/xlbbb-cn/ai-chat/releases/tag/v3.9.0) — 2026-11-27
+
+### 新增
+
+- **chat-notice**: slide the bar in and out of the toolbar band ([`f25a95e`](https://github.com/xlbbb-cn/ai-chat/commit/f25a95eb4b4e60355b1a483c0ba0c92574a14d2c))
+- **chat-notice**: span the reading column and tone the bar ([`ca85b00`](https://github.com/xlbbb-cn/ai-chat/commit/ca85b00fcb171e1f99c3b0c865bcdc819500544b))
+- **appearance**: drop the toolbar and composer hairlines ([`d9dad78`](https://github.com/xlbbb-cn/ai-chat/commit/d9dad78eee26d3b8102e65be3b7d15fb7ebfb921))
+- **titlebar**: draw macOS traffic lights on macOS only ([`fe7b91b`](https://github.com/xlbbb-cn/ai-chat/commit/fe7b91b7e833494a991f90c4c7ba18e02af683e2))
+  - macOS 的关闭 / 最小化 / 最大化换成系统交通灯：12px 圆点、8px 间距（原生 的 20px 节拍），颜色走 `--c-traffic-close` / `--c-traffic-minimize` / `--c-traffic-maximize`，另加 0.5px 的 `--c-traffic-edge` 内描边；圆点 不加深色填充、不加描边环、不放大，`:active` 只是 `brightness(.88)`。
+  - 圆点里的符号（`×`、`−`、绿点的两个实心三角，`--c-traffic-glyph`）默认 `opacity: 0`：颜色本身就是提示，符号只在鼠标移入 `.titlebar-lights` 或 键盘 `:focus-visible` 时确认「哪个点做什么」，与 macOS 一致。
+  - Windows / Linux 不动：仍是右侧 34×28 的 `.titlebar-btn` 图标按钮， `is-close` 的破坏性 hover 保留，`⋯` 菜单继续共用这套中性配方。 `TitleBar` 因此把控件拆成 `macControls` / `winControls` 两支。
+  - 三个交通灯颜色写在 `:root` 的 token 块里，主题、调色板、毛玻璃档位都不 重指（macOS 明暗两种外观下就是这三个色）；圆点的 `50%` 是形状而不是 半径 token，这也是 chrome 里唯一的圆形控件。
+  - `docs/DESIGN.md` 的 Window chrome 表格按平台拆行并补一段说明；中英文 wiki 的标题栏条目同步，不再说「窗口按钮在 macOS 在左、别处在右」。
+
+### 杂项
+
+- bump version to 3.9.0 ([`7e139e8`](https://github.com/xlbbb-cn/ai-chat/commit/7e139e8fae1af9710e43559cff0635069ff05392))
+
+**完整对比**：[v3.8.3...v3.9.0](https://github.com/xlbbb-cn/ai-chat/compare/v3.8.3...v3.9.0)
+
 ## [v3.8.3](https://github.com/xlbbb-cn/ai-chat/releases/tag/v3.8.3) — 2026-11-27
 
 ### 新增
