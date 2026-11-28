@@ -174,13 +174,15 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
             return serve::start(app, &shell_type, &code, scoped_code, command_cwd, session_id.unwrap_or("")).await;
         }
 
+        // No `Mounts`: an arbitrary shell script keeps the host interpreter —
+        // `run_cmd` is the tool that mounts the script library and the venv.
         return process::run_command_timed(
             shell_type,
             scoped_code,
             Some(command_cwd),
             timeout_secs,
             cancel.cloned(),
-            None,
+            process::Mounts::default(),
         )
         .await;
     }
@@ -255,7 +257,7 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
         Some(command_cwd),
         timeout_secs,
         cancel.cloned(),
-        None,
+        process::Mounts::default(),
     )
     .await
 }

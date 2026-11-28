@@ -783,7 +783,9 @@ pub(crate) fn prompt_block(workspace_dir: &Path, self_evolution: bool) -> String
     if self_evolution {
         out.push_str(
             "SCRIPT LIBRARY: `./.data/scripts` is prepended to `run_cmd`'s PATH, so a script runs by \
-             bare name (extension optional); `run_cmd {\"action\":\"list\"}` shows interpreter, \
+             bare name (extension optional); every `run_cmd` child also gets the host Python 3.13 \
+             venv (app data) on `PATH` with `VIRTUAL_ENV` set, so a `.py` script runs under 3.13 \
+             and sees its installed packages; `run_cmd {\"action\":\"list\"}` shows interpreter, \
              description, usage and use count.\n\
              When a multi-step command has succeeded at least twice, or the user asks to keep/reuse \
              it, save it there with `file_actions`: prefer `.ps1` on Windows and `.sh` elsewhere \

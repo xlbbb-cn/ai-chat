@@ -25,6 +25,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Manager};
 
 use crate::manuals::{self, Manual};
 use crate::prompt;
@@ -63,6 +64,13 @@ pub enum Status {
     Ready(Ready),
 }
 
+impl Status {
+    /// True when the environment counts as prepared.
+    pub fn is_ready(&self) -> bool {
+        matches!(self, Status::Ready(_))
+    }
+}
+
 /// `<app_data>/env`.
 pub fn root(data_dir: &Path) -> PathBuf {
     data_dir.join(ENV_DIR)
@@ -78,14 +86,85 @@ pub fn ready_path(root: &Path) -> PathBuf {
     root.join(READY_FILE)
 }
 
-/// The interpreter a venv exposes on this platform.
-pub fn venv_python(root: &Path) -> PathBuf {
-    let dir = venv_dir(root);
+/// The `bin/` (`Scripts/` on Windows) directory of a venv — the one that goes
+/// on a child's `PATH` when the venv is mounted.
+pub fn venv_bin_dir(venv: &Path) -> PathBuf {
     if cfg!(windows) {
-        dir.join("Scripts").join("python.exe")
+        venv.join("Scripts")
     } else {
-        dir.join("bin").join("python")
+        venv.join("bin")
     }
+}
+
+/// The interpreter a venv exposes on this platform.
+pub fn venv_python(env_root: &Path) -> PathBuf {
+    let name = if cfg!(windows) { "python.exe" } else { "python" };
+    venv_bin_dir(&venv_dir(env_root)).join(name)
+}
+
+/// The version recorded in the venv's `pyvenv.cfg` (`version_info = 3.13.13`).
+///
+/// A cheap file read instead of spawning the interpreter. It decides whether
+/// the venv may be mounted into `run_cmd` children and whether [`auto_flag`]
+/// may vouch for it: a venv whose base Python is not 3.13 must not silently
+/// become the `python` of every `run_cmd` child.
+pub fn venv_version(env_root: &Path) -> Option<String> {
+    let cfg = fs::read_to_string(venv_dir(env_root).join("pyvenv.cfg")).ok()?;
+    let mut version = None;
+    for line in cfg.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        match key.trim() {
+            // `version_info` is the precise one; `version` is the fallback that
+            // older virtualenv writers produce without the dotted `final` tag.
+            "version_info" => return Some(value.trim().to_string()),
+            "version" => version = Some(value.trim().to_string()),
+            _ => {}
+        }
+    }
+    version
+}
+
+/// Ask the interpreter directly — for a venv whose `pyvenv.cfg` is unreadable.
+fn probe_version(python: &Path) -> Option<String> {
+    let out = Command::new(python).arg("-V").output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+    text.push_str(&String::from_utf8_lossy(&out.stderr));
+    let version = text.trim().trim_start_matches("Python ").trim().to_string();
+    (!version.is_empty()).then_some(version)
+}
+
+/// The venv `run_cmd` mounts into its children, when this host has a usable
+/// 3.13 environment: the interpreter exists and `pyvenv.cfg` reports 3.13.
+///
+/// The completion flag is deliberately **not** required here — a workspace that
+/// just gained a venv should already get it inside `run_cmd`, before the flag
+/// (and with it the prompt note) is written. The version check keeps a stray
+/// 3.14 venv from quietly taking over every `run_cmd` child's `python`.
+pub fn mounted_venv(data_dir: &Path) -> Option<PathBuf> {
+    let env_root = root(data_dir);
+    if !venv_python(&env_root).is_file() {
+        return None;
+    }
+    let version = venv_version(&env_root)?;
+    version.starts_with("3.13").then(|| venv_dir(&env_root))
+}
+
+/// The app-data directory as a tool sees it: `app.path().app_data_dir()`, with
+/// the state's config path as the fallback when Tauri cannot resolve it. One
+/// helper so the venv mount and the experience store agree on the location.
+pub fn data_dir_from_app(app: &AppHandle) -> Option<PathBuf> {
+    if let Ok(dir) = app.path().app_data_dir() {
+        return Some(dir);
+    }
+    app.state::<crate::AppState>()
+        .config_path
+        .parent()
+        .map(Path::to_path_buf)
 }
 
 /// Read the flag and decide whether the environment counts as complete.
@@ -123,8 +202,9 @@ pub fn publish(data_dir: &Path) {
     std::env::set_var(ENV_ROOT_VAR, root(data_dir).as_os_str());
 }
 
-/// Self-check: when the venv is there and its interpreter reports 3.13, write
-/// the completion flag instead of insisting on a manual step.
+/// Self-check: when the venv is there and reports 3.13 (`pyvenv.cfg`, or `-V`
+/// as a fallback), write the completion flag instead of insisting on a manual
+/// step.
 ///
 /// Called from [`prompt_block`], so it costs one `-V` spawn at most — and only
 /// while the environment is pending **and** the interpreter file exists. An
@@ -132,7 +212,7 @@ pub fn publish(data_dir: &Path) {
 /// wrapper) leaves the flag alone, which keeps the `setup-env` manual in the
 /// prompt instead of silently answering "ready" to a mismatch.
 pub fn auto_flag(data_dir: &Path) -> bool {
-    if matches!(status(data_dir), Status::Ready(_)) {
+    if status(data_dir).is_ready() {
         return false;
     }
     let root = root(data_dir);
@@ -140,13 +220,9 @@ pub fn auto_flag(data_dir: &Path) -> bool {
     if !python.is_file() {
         return false;
     }
-    let out = match Command::new(&python).arg("-V").output() {
-        Ok(out) if out.status.success() => out,
-        _ => return false,
+    let Some(version) = venv_version(&root).or_else(|| probe_version(&python)) else {
+        return false;
     };
-    let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
-    text.push_str(&String::from_utf8_lossy(&out.stderr));
-    let version = text.trim().trim_start_matches("Python ").trim().to_string();
     if !version.starts_with("3.13") {
         return false;
     }
@@ -336,6 +412,63 @@ mod tests {
 
         assert!(!auto_flag(&data), "3.14 must not be flagged as the 3.13 env");
         assert!(matches!(status(&data), Status::Pending(_)));
+        let _ = fs::remove_dir_all(&data);
+    }
+
+    /// `pyvenv.cfg` is the cheap source of truth for the venv's base version.
+    #[test]
+    fn pyvenv_cfg_reports_the_version() {
+        let data = scratch("cfg");
+        let env_root = root(&data);
+        let venv = venv_dir(&env_root);
+        fs::create_dir_all(&venv).unwrap();
+        fs::write(
+            venv.join("pyvenv.cfg"),
+            "home = /uv/python/bin\nimplementation = CPython\nversion_info = 3.13.13\n",
+        )
+        .unwrap();
+        assert_eq!(venv_version(&env_root).as_deref(), Some("3.13.13"));
+
+        fs::write(venv.join("pyvenv.cfg"), "version = 3.12.9\n").unwrap();
+        assert_eq!(venv_version(&env_root).as_deref(), Some("3.12.9"));
+        let _ = fs::remove_dir_all(&data);
+    }
+
+    /// `run_cmd` mounts the venv only when it is a 3.13 one: a stray 3.14 venv
+    /// must not become every `run_cmd` child's `python`.
+    #[test]
+    fn only_a_3_13_venv_is_mounted() {
+        let data = scratch("mount");
+        let env_root = root(&data);
+        let venv = venv_dir(&env_root);
+        fs::create_dir_all(venv_bin_dir(&venv)).unwrap();
+        fs::write(venv_python(&env_root), "").unwrap();
+        fs::write(venv.join("pyvenv.cfg"), "version_info = 3.13.13\n").unwrap();
+        assert_eq!(mounted_venv(&data).as_deref(), Some(venv.as_path()));
+
+        fs::write(venv.join("pyvenv.cfg"), "version_info = 3.14.1\n").unwrap();
+        assert_eq!(mounted_venv(&data), None);
+
+        fs::remove_file(venv_python(&env_root)).unwrap();
+        assert_eq!(mounted_venv(&data), None);
+        let _ = fs::remove_dir_all(&data);
+    }
+
+    /// The self-check prefers `pyvenv.cfg` over spawning the interpreter.
+    #[test]
+    fn self_check_reads_the_config_first() {
+        let data = scratch("cfgflag");
+        let env_root = root(&data);
+        let venv = venv_dir(&env_root);
+        fs::create_dir_all(venv_bin_dir(&venv)).unwrap();
+        fs::write(venv_python(&env_root), "").unwrap();
+        fs::write(venv.join("pyvenv.cfg"), "version_info = 3.13.13\n").unwrap();
+
+        assert!(auto_flag(&data));
+        match status(&data) {
+            Status::Ready(ready) => assert_eq!(ready.version, "3.13.13"),
+            Status::Pending(reason) => panic!("the flag should be ready: {reason}"),
+        }
         let _ = fs::remove_dir_all(&data);
     }
 }

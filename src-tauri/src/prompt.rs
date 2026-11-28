@@ -88,6 +88,10 @@ injects a one-line environment note instead — that switch is the whole point o
 - Flag: `<env root>/ready.json`.
 - Children inherit `AI_CHAT_ENV_ROOT=<env root>` from the app, so code can find the venv at
   runtime without any baked-in path.
+- `run_cmd` mounts the venv itself: every child it launches gets the venv's `bin/` (`Scripts`
+  on Windows) on `PATH` plus `VIRTUAL_ENV` naming it, so `run_cmd {"command":"python …"}` and
+  a `.py` library script already run under 3.13. `run_shell` mounts neither — an arbitrary
+  shell script sees the host `python`.
 
 ## Build it
 
@@ -193,6 +197,10 @@ host's `python3` is 3.14 — reach for the 3.13 venv when a package's wheels lag
 
 - The absolute path is printed in the `ENVIRONMENT` block of the system prompt and exported to
   every child process as **`AI_CHAT_ENV_ROOT`** — never write either into an artifact.
+- `run_cmd` children get it without asking: the venv's `bin/` (`Scripts/` on Windows) joins the
+  child's `PATH` behind the script library and `VIRTUAL_ENV` names it, so `python`, `python3`
+  and a `.py` library script already run under 3.13. `run_shell` keeps the host interpreter on
+  purpose.
 - A uv venv seeds no `pip`: inside it `python -m pip …` fails. Install with
   `uv pip install --python "<venv python>" <pkg>`, inspect with `uv pip list --python …`.
 - Creating or repairing the environment, and writing the flag, is the job of the `setup-env`

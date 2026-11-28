@@ -53,6 +53,13 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
     }
 
     let scripts_dir = crate::workspace::scripts_root(&workspace_dir);
+    // The host Python venv rides along in every `run_cmd` child: its `bin/`
+    // joins the child's `PATH` right behind the script library and
+    // `VIRTUAL_ENV` names it, so `python` / `python3` — including the
+    // interpreter of a `.py` library script — is the 3.13 one. `run_shell`
+    // keeps the host interpreter on purpose.
+    let mounted_venv = crate::env::data_dir_from_app(app)
+        .and_then(|data_dir| crate::env::mounted_venv(&data_dir));
     let resolved = match scripts::resolve(&workspace_dir, program) {
         Ok(resolved) => resolved,
         Err(err) => return format!("Error: {err}"),
@@ -260,6 +267,7 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
             command_cwd,
             timeout_secs,
             cancel.cloned(),
+            mounted_venv.as_deref(),
         )
         .await;
     }
@@ -386,6 +394,7 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
         command_cwd,
         timeout_secs,
         cancel.cloned(),
+        mounted_venv.as_deref(),
     )
     .await
 }
@@ -395,8 +404,9 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
 ///
 /// A library script runs as interpreter + path + arguments, so the path is one
 /// `Command` argument and never re-parsed as shell syntax. Anything else goes
-/// through the historical `direct` command path, now with the script library
-/// prepended to `PATH`.
+/// through the historical `direct` command path. Both get the same
+/// [`process::Mounts`]: the script library and, when this host has one, the
+/// Python 3.13 venv.
 #[allow(clippy::too_many_arguments)]
 async fn run_run_cmd(
     workspace_dir: &Path,
@@ -407,7 +417,12 @@ async fn run_run_cmd(
     cwd: PathBuf,
     timeout_secs: u64,
     cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    venv: Option<&Path>,
 ) -> String {
+    let mounts = process::Mounts {
+        scripts: Some(scripts_dir),
+        venv,
+    };
     match resolved {
         Some(script) => {
             let (program, args) = script.command_parts(&parts[1..]);
@@ -417,7 +432,7 @@ async fn run_run_cmd(
                 Some(cwd),
                 timeout_secs,
                 cancel,
-                Some(scripts_dir),
+                mounts,
             )
             .await;
             scripts::record_use(workspace_dir, &script.entry.file_name, &output);
@@ -430,7 +445,7 @@ async fn run_run_cmd(
                 Some(cwd),
                 timeout_secs,
                 cancel,
-                Some(scripts_dir),
+                mounts,
             )
             .await
         }

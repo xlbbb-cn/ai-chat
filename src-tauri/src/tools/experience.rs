@@ -10,7 +10,7 @@
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use crate::experience::{self, Experience};
 use crate::AppConfig;
@@ -94,13 +94,9 @@ pub(crate) fn tool_definition() -> Value {
 }
 
 fn app_data_root(app: &AppHandle) -> Option<PathBuf> {
-    if let Ok(dir) = app.path().app_data_dir() {
-        return Some(dir);
-    }
-    app.state::<crate::AppState>()
-        .config_path
-        .parent()
-        .map(Path::to_path_buf)
+    // One resolver for the whole app: the experience store and the Python venv
+    // mount must agree on where app data is (`env::data_dir_from_app`).
+    crate::env::data_dir_from_app(app)
 }
 
 fn store_root(app: &AppHandle) -> Option<PathBuf> {

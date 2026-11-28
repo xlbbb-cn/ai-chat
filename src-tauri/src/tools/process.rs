@@ -327,6 +327,24 @@ pub(crate) fn looks_like_windows_path(value: &str) -> bool {
     bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
 }
 
+/// Extra environment mounted into a child this module launches.
+///
+/// Both entries are optional and independent:
+///
+/// - `scripts` — the workspace script library; prepended to the child's `PATH`
+///   so `run_cmd` resolves library scripts (and programs they spawn) there.
+/// - `venv` — the host Python venv (`<app data>/env/py313`); its `bin/`
+///   (`Scripts/` on Windows) joins the child's `PATH` right behind the script
+///   library, and `VIRTUAL_ENV` names it, so `python` / `python3` inside a
+///   `run_cmd` child is the 3.13 interpreter and `sys.prefix` points at the
+///   venv. `run_shell` deliberately passes `Mounts::default()`: an arbitrary
+///   shell script keeps the host interpreter.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Mounts<'a> {
+    pub scripts: Option<&'a Path>,
+    pub venv: Option<&'a Path>,
+}
+
 /// Build a command for `cmd_type` rooted at `cwd`, without running it.
 /// Used by `run_command` (synchronous) and by `serve` (long-lived children).
 pub(crate) fn build_command(
@@ -334,17 +352,17 @@ pub(crate) fn build_command(
     code: &str,
     cwd: Option<PathBuf>,
 ) -> Result<tokio::process::Command, String> {
-    build_command_with_path(cmd_type, code, cwd, None)
+    build_command_with_path(cmd_type, code, cwd, Mounts::default())
 }
 
-/// Like [`build_command`], but optionally prepends a directory to the child's
-/// `PATH`. `run_cmd` uses this to put `<workspace>/.data/scripts` first, so
-/// library scripts (and programs they spawn) resolve there.
+/// Like [`build_command`], but with the [`Mounts`] the caller wants in the
+/// child's environment. `run_cmd` mounts the script library and the host venv;
+/// every other caller passes `Mounts::default()`.
 pub(crate) fn build_command_with_path(
     cmd_type: &str,
     code: &str,
     cwd: Option<PathBuf>,
-    scripts_dir: Option<&Path>,
+    mounts: Mounts<'_>,
 ) -> Result<tokio::process::Command, String> {
     let mut cmd = match cmd_type {
         "direct" => {
@@ -424,17 +442,17 @@ pub(crate) fn build_command_with_path(
         _ => return Err(format!("Unsupported command type: {}", cmd_type)),
     };
 
-    finish_command(&mut cmd, cwd, scripts_dir);
+    finish_command(&mut cmd, cwd, mounts);
     Ok(cmd)
 }
 
 /// Apply the process-wide launch options shared by every child this module
-/// starts: working directory, `PWD`, the script-library `PATH` entry, and the
+/// starts: working directory, `PWD`, the [`Mounts`] `PATH` entries, and the
 /// platform-specific process-group/console settings.
 fn finish_command(
     cmd: &mut tokio::process::Command,
     cwd: Option<PathBuf>,
-    scripts_dir: Option<&Path>,
+    mounts: Mounts<'_>,
 ) {
     if let Some(dir) = cwd {
         cmd.current_dir(&dir);
@@ -445,8 +463,21 @@ fn finish_command(
         cmd.env("PWD", &dir);
     }
 
-    if let Some(dir) = scripts_dir {
-        cmd.env("PATH", prepend_to_path(dir));
+    // Mounted in order: the script library first (a library script beats a
+    // same-named program), then the venv's `bin/`, then the inherited `PATH`.
+    let mut mounted: Vec<PathBuf> = Vec::new();
+    if let Some(dir) = mounts.scripts {
+        mounted.push(dir.to_path_buf());
+    }
+    if let Some(venv) = mounts.venv {
+        mounted.push(crate::env::venv_bin_dir(venv));
+        // A venv on `PATH` without `VIRTUAL_ENV` is half an activation: tools
+        // that resolve their environment from it would still see the host.
+        cmd.env("VIRTUAL_ENV", venv);
+    }
+    if !mounted.is_empty() {
+        let dirs: Vec<&Path> = mounted.iter().map(PathBuf::as_path).collect();
+        cmd.env("PATH", prepend_to_path(&dirs));
     }
 
     #[cfg(windows)]
@@ -467,30 +498,41 @@ fn finish_command(
     cmd.kill_on_drop(true);
 }
 
-/// Prepend `dir` to the current `PATH` value.
+/// Prepend `dirs` to the current `PATH` value, in order, dropping duplicates.
 ///
 /// `split_paths` / `join_paths` handle the platform separator and quoting, so
 /// a directory containing `;` or spaces is passed through correctly.
-fn prepend_to_path(dir: &Path) -> std::ffi::OsString {
+fn prepend_to_path(dirs: &[&Path]) -> std::ffi::OsString {
     use std::ffi::OsString;
 
     let mut paths: Vec<PathBuf> = std::env::split_paths(
         &std::env::var_os("PATH").unwrap_or_else(OsString::new),
     )
     .collect();
-    paths.retain(|existing| existing != dir);
-    paths.insert(0, dir.to_path_buf());
-    std::env::join_paths(paths).unwrap_or_else(|_| dir.as_os_str().to_os_string())
+    paths.retain(|existing| !dirs.contains(&existing.as_path()));
+    for dir in dirs.iter().rev() {
+        paths.insert(0, dir.to_path_buf());
+    }
+    std::env::join_paths(paths).unwrap_or_else(|_| {
+        // A mounted directory holding the platform separator cannot be joined;
+        // fall back to the mounts alone instead of the inherited PATH.
+        let separator = if cfg!(windows) { ";" } else { ":" };
+        dirs.iter()
+            .map(|dir| dir.display().to_string())
+            .collect::<Vec<_>>()
+            .join(separator)
+            .into()
+    })
 }
 
 pub async fn run_command(
     cmd_type: String,
     code: String,
     cwd: Option<PathBuf>,
-    scripts_dir: Option<&Path>,
+    mounts: Mounts<'_>,
 ) -> Result<String, String> {
     let decode_hint = decode_hint_for_shell(&cmd_type);
-    let mut cmd = build_command_with_path(&cmd_type, &code, cwd, scripts_dir)?;
+    let mut cmd = build_command_with_path(&cmd_type, &code, cwd, mounts)?;
     let output = cmd.output().await.map_err(|e| e.to_string())?;
     Ok(format_process_output(output, decode_hint))
 }
@@ -506,23 +548,23 @@ pub async fn run_command(
 /// `process_guard::kill_process_tree`, which is also what the Stop button and
 /// app exit use.
 ///
-/// `scripts_dir`, when set, is prepended to the child's `PATH` (`run_cmd`
-/// passes `<workspace>/.data/scripts`; `run_shell` passes `None`).
+/// `mounts` is what `run_cmd` passes (the script library and the host venv);
+/// `run_shell` passes `Mounts::default()` and keeps the host interpreter.
 pub(crate) async fn run_command_timed(
     cmd_type: String,
     code: String,
     cwd: Option<PathBuf>,
     timeout_secs: u64,
     cancel: Option<Arc<AtomicBool>>,
-    scripts_dir: Option<&Path>,
+    mounts: Mounts<'_>,
 ) -> String {
     match cancel {
         Some(flag) => {
-            run_command_cancellable(cmd_type, code, cwd, timeout_secs, flag, scripts_dir).await
+            run_command_cancellable(cmd_type, code, cwd, timeout_secs, flag, mounts).await
         }
         None => tokio::time::timeout(
             Duration::from_secs(timeout_secs),
-            run_command(cmd_type, code, cwd, scripts_dir),
+            run_command(cmd_type, code, cwd, mounts),
         )
         .await
         .unwrap_or_else(|_| Ok(format!("Command timed out after {} seconds.", timeout_secs)))
@@ -542,12 +584,12 @@ pub(crate) async fn run_program_timed(
     cwd: Option<PathBuf>,
     timeout_secs: u64,
     cancel: Option<Arc<AtomicBool>>,
-    scripts_dir: Option<&Path>,
+    mounts: Mounts<'_>,
 ) -> String {
     let decode_hint = decode_hint_for_program(&program);
     let mut cmd = tokio::process::Command::new(&program);
     cmd.args(&args);
-    finish_command(&mut cmd, cwd, scripts_dir);
+    finish_command(&mut cmd, cwd, mounts);
 
     match cancel {
         Some(flag) => {
@@ -587,10 +629,10 @@ async fn run_command_cancellable(
     cwd: Option<PathBuf>,
     timeout_secs: u64,
     cancel: Arc<AtomicBool>,
-    scripts_dir: Option<&Path>,
+    mounts: Mounts<'_>,
 ) -> String {
     let decode_hint = decode_hint_for_shell(&cmd_type);
-    let cmd = match build_command_with_path(&cmd_type, &code, cwd, scripts_dir) {
+    let cmd = match build_command_with_path(&cmd_type, &code, cwd, mounts) {
         Ok(cmd) => cmd,
         Err(err) => return format!("Error: {err}"),
     };
@@ -734,7 +776,7 @@ mod tests {
             None,
             60,
             flag,
-            None,
+            super::Mounts::default(),
         )
         .await;
 
@@ -775,7 +817,10 @@ mod tests {
             Some(workspace.clone()),
             60,
             None,
-            Some(&scripts_dir),
+            super::Mounts {
+                scripts: Some(&scripts_dir),
+                venv: None,
+            },
         )
         .await;
 
@@ -783,6 +828,69 @@ mod tests {
         let _ = fs::remove_dir_all(&workspace);
     }
 
+    /// Mounted directories come first, in the order given, and an entry that
+    /// is already on `PATH` is not duplicated.
+    #[test]
+    fn mounted_dirs_go_first_in_order() {
+        let one = std::path::Path::new("/tmp/mount-one");
+        let two = std::path::Path::new("/tmp/mount-two");
+        let joined = super::prepend_to_path(&[one, two]);
+        let parts: Vec<String> = std::env::split_paths(&joined)
+            .map(|part| part.display().to_string())
+            .collect();
+
+        assert_eq!(parts[0], one.display().to_string());
+        assert_eq!(parts[1], two.display().to_string());
+        assert_eq!(
+            parts
+                .iter()
+                .filter(|part| **part == one.display().to_string())
+                .count(),
+            1,
+            "a mounted dir must appear once: {parts:?}"
+        );
+    }
+
+    /// The `run_cmd` contract: a mounted venv becomes the child's `python`,
+    /// with `VIRTUAL_ENV` pointing at it — so a library `.py` script (whose
+    /// interpreter is the bare name `python` / `python3`) runs under 3.13.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_mounted_venv_is_the_childs_python() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        let venv = std::env::temp_dir().join(format!(
+            "rabbit-chat-studio-venv-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let bin = venv.join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let fake = bin.join("python");
+        fs::write(&fake, "#!/bin/sh\nprintf 'fake-venv %s\\n' \"$VIRTUAL_ENV\"\n").unwrap();
+        let mut perms = fs::metadata(&fake).unwrap().permissions();
+        PermissionsExt::set_mode(&mut perms, 0o755);
+        fs::set_permissions(&fake, perms).unwrap();
+
+        let output = super::run_command(
+            "direct".to_string(),
+            "python -V".to_string(),
+            None,
+            super::Mounts {
+                scripts: None,
+                venv: Some(&venv),
+            },
+        )
+        .await
+        .expect("the mounted interpreter runs");
+
+        assert!(output.contains("fake-venv"), "unexpected output: {output}");
+        assert!(
+            output.contains(&venv.display().to_string()),
+            "VIRTUAL_ENV must name the mounted venv: {output}"
+        );
+        let _ = fs::remove_dir_all(&venv);
+    }
     /// An empty program name is not a program at all.
     #[test]
     fn an_empty_program_is_refused() {
