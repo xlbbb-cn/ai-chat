@@ -493,6 +493,20 @@ const zhTW: Messages = {
             allowNotifications: "允許通知",
             allowNotificationsHint:
                 "回合結束時播放提示音：失敗為訊息音，成功為會話結束音；視窗最小化或焦點在其他應用時，同時彈出桌面通知卡片，顯示回覆首行（或錯誤訊息）。使用者主動停止的回合不會通知。",
+            desktopPet: "桌面寵物",
+            desktopPetHint:
+                "主視窗不在前景時，在桌面上顯示一隻小傢伙：它是通知視窗的另一面，畫的是應用程式自己的那隻兔子。它跟著回合走（思考中、完成、失敗、等你回答），閒置幾分鐘後會打盹；單擊把它背後的主視窗叫回來，拖曳可以換位置。",
+            desktopPetNeedsSingleInstance:
+                "需要下方的「單實例執行」：否則第二個實例會在桌面同一角落再放一隻。",
+            desktopPetPinned: "主視窗聚焦時也留在螢幕上",
+            desktopPetPinnedHint:
+                "關閉（預設）：切到別的應用程式時寵物出現，主視窗一取得焦點就收起。開啟：寵物常駐桌面，也會蓋在主視窗上面。",
+            desktopPetSize: "寵物大小",
+            desktopPetSizeHint:
+                "96 / 120 / 160 像素。寵物是一個無邊框透明視窗；它在外時來了通知，卡片會蓋住它。",
+            petSizeS: "小",
+            petSizeM: "中",
+            petSizeL: "大",
             singleInstance: "單實例執行",
             singleInstanceHint:
                 "再次啟動時聚焦已執行的視窗，而不是開啟第二個實例。關閉此選項後，每次啟動都會開啟獨立視窗，並使用本設定的臨時副本。重新啟動應用程式後生效。",

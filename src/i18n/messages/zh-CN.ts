@@ -493,6 +493,20 @@ const zhCN: Messages = {
             allowNotifications: "允许通知",
             allowNotificationsHint:
                 "回合结束时播放提示音：失败为信息音，成功为会话结束音；窗口最小化或焦点在其他应用时，同时弹出桌面通知卡片，显示回复首行（或错误信息）。用户主动停止的回合不会通知。",
+            desktopPet: "桌面宠物",
+            desktopPetHint:
+                "主窗口不在前台时，在桌面上显示一只小家伙：它是通知窗口的另一面，画的是应用自己的那只兔子。它跟着回合走（思考中、完成、失败、等你回答），闲置几分钟后会打盹；单击把它背后的主窗口叫回来，拖动可以换位置。",
+            desktopPetNeedsSingleInstance:
+                "需要下方的「单实例运行」：否则第二个实例会在桌面同一角落再放一只。",
+            desktopPetPinned: "主窗口聚焦时也留在屏幕上",
+            desktopPetPinnedHint:
+                "关闭（默认）：切到别的应用时宠物出现，主窗口一获得焦点就收起。开启：宠物常驻桌面，也会盖在主窗口上面。",
+            desktopPetSize: "宠物大小",
+            desktopPetSizeHint:
+                "96 / 120 / 160 像素。宠物是一个无边框透明窗口；它在外时来了通知，卡片会盖住它。",
+            petSizeS: "小",
+            petSizeM: "中",
+            petSizeL: "大",
             singleInstance: "单实例运行",
             singleInstanceHint:
                 "再次启动时聚焦已运行的窗口，而不是打开第二个实例。关闭该选项后，每次启动都会打开独立窗口，并使用本配置的临时副本。重启应用后生效。",

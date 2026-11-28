@@ -503,6 +503,12 @@ pub(crate) fn apply_config(
         let _ = win.set_title(&title);
     }
 
+    // The pet is config, not a side effect of a turn: switching it on (or off,
+    // or changing its size) has to show / hide / resize the companion window on
+    // the spot. A card on screen is left alone — it dismisses into whatever the
+    // new config says (see `notify::dismiss_card`).
+    notify::sync_pet(app);
+
     let mut logger = state.logger.lock().unwrap();
     logger.set_output(logger_output);
     logger.log("INFO", "Configuration updated");
@@ -718,6 +724,27 @@ pub struct AppConfig {
     /// `notify.rs`), never an OS toast, so it follows the app's glass look.
     #[serde(default = "update::default_true")]
     pub notify_when_hidden: bool,
+    /// Show the desktop pet while the main window is not focused: the same
+    /// `notify` window, wearing its small transparent face (`notify.rs`). It
+    /// reflects what the app is doing — a turn in flight, a settled reply, a
+    /// build-up of idle time — and a click brings the main window back. Off by
+    /// default: it is the one piece of the UI that lives outside the app's own
+    /// window.
+    #[serde(default)]
+    pub desktop_pet: bool,
+    /// Hide the pet again as soon as the app has the focus (the default), or
+    /// keep it on screen — including on top of the app's own window.
+    #[serde(default = "update::default_true")]
+    pub desktop_pet_hide_when_focused: bool,
+    /// Pet edge: `s` (96 px), `m` (120 px, the default) or `l` (160 px).
+    /// Persisted like `palette`; the backend maps it to a logical size and an
+    /// unknown value falls back to `m`.
+    #[serde(default)]
+    pub desktop_pet_scale: Option<String>,
+    /// Physical bottom-right corner the user last dragged the pet to. Missing
+    /// means the default slot — the card's own bottom-right corner.
+    #[serde(default)]
+    pub desktop_pet_anchor: Option<[i32; 2]>,
 }
 
 impl Default for AppConfig {
@@ -761,6 +788,10 @@ impl Default for AppConfig {
             log_retention_days: db::default_log_retention_days(),
             single_instance: true,
             notify_when_hidden: true,
+            desktop_pet: false,
+            desktop_pet_hide_when_focused: true,
+            desktop_pet_scale: None,
+            desktop_pet_anchor: None,
         }
     }
 }
@@ -2204,28 +2235,45 @@ pub fn run() {
                 );
             }
 
-            // The notification card window is created here instead of
-            // `tauri.conf.json`, a few seconds after startup: its webview
-            // (renderer process + the 355 KB card artwork + the shared
-            // stylesheet) no longer competes with the main window's first
-            // paint. A toast that fires earlier creates it on demand
-            // (`show_notify_card`), so behaviour is unchanged — only the boot
-            // cost moves off the critical path.
+            // The companion window (notification card, and the pet when it is
+            // switched on) is created here instead of `tauri.conf.json`, a few
+            // seconds after startup: its webview (renderer process + the 355 KB
+            // card artwork + the shared stylesheet) no longer competes with the
+            // main window's first paint. A toast that fires earlier creates it
+            // on demand (`show_notify_card`), so behaviour is unchanged — only
+            // the boot cost moves off the critical path.
+            //
+            // A pet, on the other hand, is a visible part of the session rather
+            // than a fallback for a missed turn, so it is created as soon as the
+            // window is up instead of after the card's lazy delay.
             let notify_handle = app.handle().clone();
+            let pet_enabled = app
+                .try_state::<AppState>()
+                .map(|state| {
+                    let config = state.config.lock().unwrap();
+                    // Same gate as `notify::pet_settings`: no pet without
+                    // single-instance mode, so no early window either.
+                    config.desktop_pet && config.single_instance
+                })
+                .unwrap_or(false);
             tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                let _ = tauri::async_runtime::spawn_blocking(move || {
-                    if let Err(err) = notify::ensure_notify_window(&notify_handle) {
-                        if let Some(state) = notify_handle.try_state::<AppState>() {
-                            state
-                                .logger
-                                .lock()
-                                .unwrap()
-                                .log("WARN", &format!("Notify card prewarm failed: {err}"));
-                        }
-                    }
+                let delay = if pet_enabled { 1 } else { 5 };
+                tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                let builder_handle = notify_handle.clone();
+                let built = tauri::async_runtime::spawn_blocking(move || {
+                    notify::ensure_notify_window(&builder_handle)
                 })
                 .await;
+                if let Ok(Err(err)) = built {
+                    if let Some(state) = notify_handle.try_state::<AppState>() {
+                        state.logger.lock().unwrap().log(
+                            "WARN",
+                            &format!("Companion window prewarm failed: {err}"),
+                        );
+                    }
+                }
+                // Show the pet now if the config and the focus state want it.
+                notify::sync_pet(&notify_handle);
             });
 
             Ok(())
@@ -2278,26 +2326,30 @@ pub fn run() {
                             app.exit(0);
                         }
                     }
-                    // The card belongs to a background moment: the moment the
-                    // user looks at the main window again, it is gone.
-                    if let tauri::WindowEvent::Focused(true) = event {
-                        if let Some(notify) = window
-                            .app_handle()
-                            .get_webview_window(notify::NOTIFY_WINDOW)
-                        {
-                            let _ = notify.hide();
-                        }
+                    // Focus is the companion's clock: the card belongs to a
+                    // background moment (gone the moment the user looks back),
+                    // and the pet belongs to the moments the app is *not* the
+                    // foreground window (see `notify::on_main_focus`).
+                    if let tauri::WindowEvent::Focused(focused) = event {
+                        notify::on_main_focus(window.app_handle(), *focused);
                     }
                 }
                 // The card window must survive app-lifetime: a close (Alt+F4,
                 // a WM that cleans up hidden windows) hides it instead of
                 // destroying it.
-                notify::NOTIFY_WINDOW => {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                notify::NOTIFY_WINDOW => match event {
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
                         api.prevent_close();
-                        let _ = window.hide();
+                        notify::on_companion_closed(window.app_handle());
                     }
-                }
+                    // A drag of the pet: remember where the user dropped it.
+                    // The backend's own placement lands exactly on the stored
+                    // corner, so it is never mistaken for a drag.
+                    tauri::WindowEvent::Moved(position) => {
+                        notify::on_pet_moved(window.app_handle(), *position);
+                    }
+                    _ => {}
+                },
                 _ => {}
             }
         })
@@ -2334,6 +2386,9 @@ pub fn run() {
             ipc::notify::hide_notify_card,
             ipc::notify::focus_main_from_notify,
             ipc::notify::refresh_notify_backdrop,
+            // Desktop pet (the same window's other face).
+            ipc::notify::pet_begin_drag,
+            ipc::notify::set_companion_state,
             // Configuration and model catalogue.
             ipc::config::get_config,
             ipc::config::save_config,

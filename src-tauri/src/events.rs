@@ -335,6 +335,35 @@ pub const MARKDOWN_EDIT_OPEN: &str = "markdown-edit-open";
 pub const MARKDOWN_EDIT_ERROR: &str = "markdown-edit-error";
 pub const NOTIFY_SHOW: &str = "notify-show";
 pub const MCP_SERVERS_CHANGED: &str = "mcp-servers-changed";
+/// Which face the companion (`notify`) window wears right now — the desktop
+/// pet or the notification card. Emitted by `notify.rs` before the window
+/// changes geometry, so the document can play the pet's exit before the frame
+/// grows into the card.
+pub const COMPANION_MODE: &str = "companion-mode";
+/// The pet's mood (`idle` / `thinking` / `done` / `error` / `ask` /
+/// `dreaming`). Pushed by the main window through `set_companion_state`; the
+/// pet window owns the decay back to `idle`, so this event is a level, not a
+/// pulse.
+pub const COMPANION_STATE: &str = "companion-state";
+
+/// Payload of [`COMPANION_MODE`]: `mode` is `"pet"` or `"card"`.
+#[derive(Debug, Clone, Serialize)]
+pub struct CompanionModePayload {
+    pub mode: String,
+    /// The pet's logical edge in px (`96` / `120` / `160`), so the document
+    /// can size its artwork to the frame the backend just gave it.
+    pub pet_size: u32,
+    /// `false` on macOS: without the private `transparent` API the window
+    /// carries an opaque system background, so the document paints its own
+    /// surface instead of leaving a hole behind the pet.
+    pub transparent: bool,
+}
+
+/// Payload of [`COMPANION_STATE`]: one mood name (see the constant's docs).
+#[derive(Debug, Clone, Serialize)]
+pub struct CompanionStatePayload {
+    pub state: String,
+}
 
 /// Payload of `markdown-edit-open`: the file the OS opened (or the titlebar
 /// menu picked) and its full text.
@@ -415,10 +444,12 @@ mod tests {
             MARKDOWN_EDIT_ERROR,
             NOTIFY_SHOW,
             MCP_SERVERS_CHANGED,
+            COMPANION_MODE,
+            COMPANION_STATE,
         ];
         let unique: std::collections::HashSet<_> = names.iter().collect();
         assert_eq!(unique.len(), names.len(), "duplicate event name");
-        assert_eq!(names.len(), 50);
+        assert_eq!(names.len(), 52);
     }
 
     #[test]

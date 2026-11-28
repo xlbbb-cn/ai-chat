@@ -724,6 +724,18 @@ export async function showNotifyCard(title: string, body: string, kind: string):
   await invoke("show_notify_card", { title, body, kind });
 }
 
+/**
+ * Push the desktop pet's mood (`idle` / `thinking` / `done` / `error` / `ask` /
+ * `dreaming`) to the companion window (`notify.rs`).
+ *
+ * Fire and forget, like {@link showNotifyCard}: the pet is decoration, and a
+ * missing window (the feature is off) is an answer, not a failure — the backend
+ * never creates a window just to show a mood.
+ */
+export async function setCompanionState(state: string): Promise<void> {
+  await invoke("set_companion_state", { state });
+}
+
 export interface StreamCallbacks {
   onToken: (token: string) => void;
   onReasoningToken?: (token: string) => void;

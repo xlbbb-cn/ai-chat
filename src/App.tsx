@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, laz
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, listAgentMentions, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, deleteMessagesAfter, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState, setWindowVibrancy, savePastedFile, importWorkspacePaths, showNotifyCard, todoAskReply, getPendingTodoAsk, readChatBackground, listActiveTurns, getTurnSnapshot, loadSessionMessages } from "./api";
+import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, listAgentMentions, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, deleteMessagesAfter, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState, setWindowVibrancy, savePastedFile, importWorkspacePaths, showNotifyCard, setCompanionState, todoAskReply, getPendingTodoAsk, readChatBackground, listActiveTurns, getTurnSnapshot, loadSessionMessages } from "./api";
 import { recordsToMessages } from "./historyRows";
 
 import { ChatMessageBoundary } from "./components/ChatMessageBoundary";
@@ -451,6 +451,14 @@ function isCancelError(err: string): boolean {
  * whatever ref state existed at its creation.
  */
 function notifyTurnSettled(ok: boolean, body: string, enabled: boolean) {
+  // The pet's face mirrors the same moment, independently of the notification
+  // switch: the two features share a trigger but not a setting, and a cancelled
+  // turn clears the face instead of reporting news the user already knows.
+  if (!ok && isCancelError(body)) {
+    setCompanionState("idle").catch(() => {});
+  } else {
+    setCompanionState(ok ? "done" : "error").catch(() => {});
+  }
   if (!enabled) return;
   if (!ok && isCancelError(body)) return;
   const hidden = document.visibilityState === "hidden" || !document.hasFocus();
@@ -475,6 +483,9 @@ function notifyTurnSettled(ok: boolean, body: string, enabled: boolean) {
  * screen and nothing plays. Fire and forget, like every card show.
  */
 function notifyTurnBlocked(title: string, body: string, kind: string, enabled: boolean) {
+  // A question / approval waiting for the user is the one state worth showing
+  // even when the window is about to be looked at again.
+  setCompanionState("ask").catch(() => {});
   if (!enabled) return;
   if (document.visibilityState !== "hidden" && document.hasFocus()) return;
   playSound("info");
@@ -1754,6 +1765,11 @@ export default function App() {
       (e) => {
         const { session_id, turn_id, running, started_at_ms } = e.payload;
         if (!session_id) return;
+        // The pet's face follows the same registry, so a turn that runs while
+        // the app is in the background is visible from the desktop. `idle` here
+        // is the *quiet* level: the pet keeps a fresher mood (done / error /
+        // ask) until it decays on its own.
+        setCompanionState(running ? "thinking" : "idle").catch(() => {});
         setRunningSessions((prev) => {
           if (running) {
             return { ...prev, [session_id]: { turn_id, started_at_ms } };
@@ -1930,6 +1946,9 @@ export default function App() {
   useEffect(() => {
     const unlisten = onEvolutionMaintenanceState((state) => {
       dreamEventSeenRef.current = true;
+      // The silent maintenance pass is the pet's fourth mood: it naps while the
+      // app is busy behind the scenes, exactly like the empty-state face does.
+      setCompanionState(state.running ? "dreaming" : "idle").catch(() => {});
       if (state.running) {
         setDreamState("running");
         setDreamResult(null);

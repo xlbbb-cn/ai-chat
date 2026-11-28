@@ -4266,7 +4266,7 @@ button.rabbit-hop-bunny:focus-visible {
    rounded by the system and painted with the same corner. There is no
    shadow — over a glass backdrop separation comes from the backdrop itself.
    ════════════════════════════════════════════════════════════════════════════ */
-.notify-root {
+.companion-root {
   position: fixed;
   inset: 0;
   display: flex;
@@ -4370,6 +4370,292 @@ button.rabbit-hop-bunny:focus-visible {
 
 @media (prefers-reduced-motion: reduce) {
   .notify-card {
+    transition: none;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Desktop pet — the companion window's other face
+
+   The same window (`notify.rs`) is either the notification card or a small
+   transparent square with the app's rabbit in it. The face is one document
+   attribute (`data-companion`, written by `notify.tsx`): in `pet` the window
+   paints *nothing* behind itself — no page fill, no glass wash, and no backdrop
+   material (the backend clears it) — so only the silhouette sits on the
+   desktop. The character is the empty state's, grown up: head, ears and paws in
+   `--c-muted`, with the eyes cut *through* the silhouette by an SVG mask so the
+   wallpaper shows in them exactly like it shows around the body. (The
+   empty-state face fills its eyes with `--c-bg` because it sits on the app's own
+   page; a desktop pet has no page behind it.) The `opaque` surface variant is
+   macOS, where the window has no transparent background without the private
+   API: there the document paints the canvas and the pet gets a hairline square
+   instead of a hole.
+
+   Motion is the pet's whole point, and it is the one place in the interface
+   where a loop may travel: breathing, blinking, a hop when a reply lands, a
+   droop when a turn fails, a wave while the app waits for an answer, drifting
+   `z`s after a long idle stretch. Every one of them animates `transform` /
+   `opacity` only, so the compositor runs them while the webview is otherwise
+   idle; `prefers-reduced-motion` leaves the pet still.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Nothing but the animal on the desktop. */
+html[data-companion="pet"],
+html[data-companion="pet"] body {
+  background-color: transparent;
+  background-image: none;
+}
+
+/* The wash the app paints when no window backdrop exists would be a visible
+   rectangle here: a pet is not a window frame, and `--c-window` has no role on
+   a surface that is not one. */
+html[data-companion="pet"] body::before {
+  display: none;
+}
+
+/* macOS (no transparent window): the pet gets the canvas and a hairline square
+   of its own instead of a hole. */
+html[data-companion="pet"][data-companion-surface="opaque"] body {
+  background-color: var(--c-bg);
+}
+
+html[data-companion="pet"][data-companion-surface="opaque"] .pet-layer {
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-sm);
+}
+
+.pet-layer {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  cursor: grab;
+  color: var(--c-muted);
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  /* The duck-out before the frame grows into the card (the backend waits
+     `PET_DUCK_MS`, which is exactly `--t-dur`), and the fade back. */
+  transition: transform var(--t-dur) var(--t-ease), opacity var(--t-dur) var(--t-ease);
+  animation: pet-pop 0.32s var(--t-ease);
+}
+
+.pet-layer:active {
+  cursor: grabbing;
+}
+
+/* A card is taking the window: sink out of the rectangle it is about to
+   cover. */
+.pet-layer-leaving {
+  transform: translateY(30%);
+  opacity: 0;
+}
+
+/* Each face draws alone: the card owns the whole window, and the pet is only
+   there when no card is. */
+html[data-companion="card"] .pet-layer {
+  display: none;
+}
+
+html[data-companion="pet"] .notify-card {
+  display: none;
+}
+
+.pet-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
+}
+
+.pet-fill {
+  fill: currentColor;
+}
+
+/* Breathing squashes around the feet, never around the middle, so the animal
+   sits on the desktop instead of floating. */
+.pet-body {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: pet-breathe 3.6s var(--t-ease) infinite alternate;
+}
+
+/* Eyes are holes in the mask; the blink squashes the holes. */
+.pet-eye {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: pet-blink 4.6s linear infinite;
+}
+
+.pet-ear {
+  transform-box: fill-box;
+  transform-origin: 50% 90%;
+}
+
+.pet-dots,
+.pet-zzz {
+  position: absolute;
+  display: none;
+  color: var(--c-muted);
+  pointer-events: none;
+}
+
+/* Thinking dots, under the chin and inside the frame. */
+.pet-dots {
+  left: 50%;
+  bottom: 1px;
+  transform: translateX(-50%);
+  gap: 3px;
+}
+
+.pet-dots i {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pet-dots 1s var(--t-ease) infinite;
+}
+
+.pet-dots i:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.pet-dots i:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+/* Drifting `z`s, above the head. */
+.pet-zzz {
+  left: 62%;
+  top: 6%;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.pet-zzz i {
+  position: absolute;
+  font-style: normal;
+  animation: pet-zzz 2.6s linear infinite;
+}
+
+.pet-zzz i:nth-child(2) {
+  animation-delay: 0.8s;
+}
+
+.pet-zzz i:nth-child(3) {
+  animation-delay: 1.6s;
+}
+
+/* ── Moods ──────────────────────────────────────────────────────────────── */
+
+[data-mood="thinking"] .pet-dots {
+  display: flex;
+}
+
+[data-mood="thinking"] .pet-body {
+  animation: pet-bob 1.1s var(--t-ease) infinite;
+}
+
+[data-mood="done"] .pet-body {
+  animation: pet-hop 0.62s var(--t-ease) 2;
+}
+
+[data-mood="error"] .pet-body {
+  animation: none;
+  transform: translateY(3%) rotate(-5deg);
+}
+
+[data-mood="error"] .pet-eye {
+  animation: none;
+  transform: scaleY(0.12);
+}
+
+[data-mood="ask"] .pet-ear-l {
+  animation: pet-wave 0.9s var(--t-ease) infinite;
+}
+
+/* Dozing off: closed eyes, a slower breath, drifting `z`s. */
+[data-sleeping="true"] .pet-body {
+  animation: pet-breathe 5.2s var(--t-ease) infinite alternate;
+}
+
+[data-sleeping="true"] .pet-eye {
+  animation: none;
+  transform: scaleY(0.12);
+}
+
+[data-sleeping="true"] .pet-zzz,
+[data-mood="dreaming"] .pet-zzz {
+  display: block;
+}
+
+/* Dreaming (the silent maintenance pass) naps like sleeping, but keeps the
+   faster rhythm of work. */
+[data-mood="dreaming"] .pet-body {
+  animation: pet-breathe 2.4s var(--t-ease) infinite alternate;
+}
+
+[data-mood="dreaming"] .pet-eye {
+  animation: none;
+  transform: scaleY(0.12);
+}
+
+/* ── Keyframes ──────────────────────────────────────────────────────────── */
+
+@keyframes pet-breathe {
+  from { transform: scale(1.02, 0.98); }
+  to { transform: scale(0.98, 1.02); }
+}
+
+@keyframes pet-blink {
+  0%, 91%, 100% { transform: scaleY(1); }
+  94.5% { transform: scaleY(0.1); }
+  98% { transform: scaleY(1); }
+}
+
+@keyframes pet-pop {
+  from { transform: scale(0.9); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+@keyframes pet-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6%); }
+}
+
+@keyframes pet-hop {
+  0% { transform: translateY(0) scale(1); }
+  18% { transform: translateY(0) scale(1.04, 0.94); }
+  55% { transform: translateY(-16%) scale(0.96, 1.05); }
+  82% { transform: translateY(0) scale(1.05, 0.95); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+@keyframes pet-wave {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-16deg); }
+}
+
+@keyframes pet-dots {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 1; }
+}
+
+@keyframes pet-zzz {
+  0% { opacity: 0; transform: translate(0, 0) scale(0.85); }
+  20% { opacity: 0.85; }
+  100% { opacity: 0; transform: translate(6px, -18px) scale(1.1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pet-layer,
+  .pet-body,
+  .pet-eye,
+  .pet-ear,
+  .pet-dots i,
+  .pet-zzz i {
+    animation: none;
     transition: none;
   }
 }

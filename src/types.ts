@@ -545,6 +545,27 @@ export interface AppConfig {
    */
   notify_when_hidden?: boolean;
   /**
+   * Show the desktop pet while the main window is not focused: the same
+   * `notify` window in its small transparent face, with the app's rabbit in it.
+   * It reflects what the app is doing (a turn in flight, a settled reply, a
+   * question waiting, a long idle stretch) and a click brings the main window
+   * back. Off by default — it is the one part of the UI that lives outside the
+   * app's own window.
+   */
+  desktop_pet?: boolean;
+  /**
+   * Hide the pet again as soon as the app has the focus (the default), or keep
+   * it on screen — including on top of the app's own window.
+   */
+  desktop_pet_hide_when_focused?: boolean;
+  /** Pet edge: `s` (96 px), `m` (120 px, the default) or `l` (160 px). */
+  desktop_pet_scale?: "s" | "m" | "l" | null;
+  /**
+   * Physical bottom-right corner the user last dragged the pet to. Missing
+   * means the default slot — the card's own bottom-right corner.
+   */
+  desktop_pet_anchor?: [number, number] | null;
+  /**
    * Keep a single running instance: launching the app again focuses the
    * window that is already open instead of starting a second process.
    * Read from `config.json` at process start, so a change applies after the

@@ -58,6 +58,17 @@ const GLASS_LEVELS: { id: GlassEffect; labelKey: MessageKey }[] = [
   { id: "strong", labelKey: "settings.appearance.glassStrong" },
 ];
 
+/**
+ * Pet edges. The ids are the config's own values; the pixel sizes live in
+ * `src-tauri/src/notify.rs` (`PET_SMALL` / `PET_MEDIUM` / `PET_LARGE`), because
+ * the backend owns the window geometry.
+ */
+const PET_SIZES: { id: "s" | "m" | "l"; labelKey: MessageKey }[] = [
+  { id: "s", labelKey: "settings.run.petSizeS" },
+  { id: "m", labelKey: "settings.run.petSizeM" },
+  { id: "l", labelKey: "settings.run.petSizeL" },
+];
+
 const defaultConfig: AppConfig = {
   api_base_url: "https://api.openai.com/v1",
   api_key: "",
@@ -1240,6 +1251,77 @@ export function SettingsPanel({ onClose, onConfigSaved, onThemePreview, onPalett
                   <small>{t("settings.run.allowNotificationsHint")}</small>
                 </div>
               </label>
+              <label className="settings-checkbox">
+                <input
+                  type="checkbox"
+                  checked={config.desktop_pet ?? false}
+                  // One pet per desktop: a second instance would put a second
+                  // animal in the same corner, so the pet only exists under
+                  // single-instance mode. A missing field means enabled.
+                  disabled={config.single_instance === false}
+                  onChange={(e) =>
+                    setConfig((prev) => ({
+                      ...prev,
+                      desktop_pet: e.target.checked,
+                    }))
+                  }
+                />
+                <div className="settings-checkbox-copy">
+                  <span>{t("settings.run.desktopPet")}</span>
+                  <small>
+                    {config.single_instance === false
+                      ? t("settings.run.desktopPetNeedsSingleInstance")
+                      : t("settings.run.desktopPetHint")}
+                  </small>
+                </div>
+              </label>
+              {config.desktop_pet && config.single_instance !== false && (
+                <>
+                  {/* Stored as the negative (`hide_when_focused`, default true),
+                      shown as the positive the user actually chooses. */}
+                  <label className="settings-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={config.desktop_pet_hide_when_focused === false}
+                      onChange={(e) =>
+                        setConfig((prev) => ({
+                          ...prev,
+                          desktop_pet_hide_when_focused: !e.target.checked,
+                        }))
+                      }
+                    />
+                    <div className="settings-checkbox-copy">
+                      <span>{t("settings.run.desktopPetPinned")}</span>
+                      <small>{t("settings.run.desktopPetPinnedHint")}</small>
+                    </div>
+                  </label>
+                  <div className="settings-field-row settings-field-row-stacked">
+                    <span className="settings-field-label">
+                      {t("settings.run.desktopPetSize")}
+                    </span>
+                    <div className="theme-segmented">
+                      {PET_SIZES.map((size) => (
+                        <button
+                          key={size.id}
+                          type="button"
+                          className={`theme-seg-btn${(config.desktop_pet_scale ?? "m") === size.id ? " active" : ""}`}
+                          onClick={() =>
+                            setConfig((prev) => ({
+                              ...prev,
+                              desktop_pet_scale: size.id,
+                            }))
+                          }
+                        >
+                          {t(size.labelKey)}
+                        </button>
+                      ))}
+                    </div>
+                    <small className="settings-field-hint">
+                      {t("settings.run.desktopPetSizeHint")}
+                    </small>
+                  </div>
+                </>
+              )}
               <label className="settings-checkbox">
                 <input
                   type="checkbox"

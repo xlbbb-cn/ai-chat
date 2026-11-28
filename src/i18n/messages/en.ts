@@ -543,6 +543,20 @@ const en = {
             allowNotifications: "Allow notifications",
             allowNotificationsHint:
                 "Play a sound cue when a turn settles — the message sound for a failure, the session-finished sound for a success — and, while the window is minimized or another application holds the focus, show the desktop notification card with the reply's first line (or the error text). A turn the user stopped never notifies.",
+            desktopPet: "Desktop pet",
+            desktopPetHint:
+                "Show a small desktop companion while this window is not focused: the notification window's other face, drawn with the app's own rabbit. It follows the turn (thinking, done, failed, a question waiting) and dozes off after a few idle minutes. Click it to bring this window back, drag it to move it.",
+            desktopPetNeedsSingleInstance:
+                "Needs “Run a single instance” below: a second instance would put a second animal in the same corner of the desktop.",
+            desktopPetPinned: "Keep it on screen while this window is focused",
+            desktopPetPinnedHint:
+                "Off (default): the pet appears when you switch to another application and hides the moment this window has the focus again. On: it stays on the desktop, on top of this window too.",
+            desktopPetSize: "Pet size",
+            desktopPetSizeHint:
+                "96 / 120 / 160 px. The pet is a frameless transparent window; a notification that arrives while it is on screen covers it.",
+            petSizeS: "Small",
+            petSizeM: "Medium",
+            petSizeL: "Large",
             singleInstance: "Run a single instance",
             singleInstanceHint:
                 "Launching Rabbit Chat Studio again brings the running window to the front instead of opening a second copy. When off, every launch gets its own window on a temporary copy of this configuration. Applies after restarting the app.",
