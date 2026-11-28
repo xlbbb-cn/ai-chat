@@ -86,7 +86,7 @@ These are not controlled by the Tools panel; they depend on context:
 | `plugin` / `plugin_<id>_<tool>` | **Settings → Run → Enable the plugin system** is on (`config.plugins_enabled`): one control tool plus one per plugin capability, rebuilt inside a round whenever a manifest changes. See [Plugins](Plugins) |
 | `todos` | The Todos tool is enabled |
 | `timer_*` | The Timer tool is enabled |
-| `background_task` | **Settings → Run → Background execution** is on (manages `run_in_background` tasks) |
+| `background_task` | **Settings → Run → Background execution** is on *and* something in the payload accepts `run_in_background` (local tools, MCP tools or `call_subagent`) — with no such flag the control tool is pruned, since it would manage nothing |
 
 Sub-agents get the tools their `allowed_tools` list grants, minus `timer` (a chat-session tool that would resume a conversation later). Every `llm` sub-agent starts with the shared `memory` tool (the panel offers it and you can uncheck it per agent): `session` scope is keyed by the main chat's session id and `user` / `repo` are workspace files, so a task can search what the main agent already learned. In self-evolution mode a sub-agent additionally receives `file_actions` and `memory` forced on — it may evolve skills and must be able to remember what it learned. `mcp_self` is never handed to a sub-agent.
 

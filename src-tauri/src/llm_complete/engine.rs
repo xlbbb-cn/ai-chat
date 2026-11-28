@@ -954,6 +954,13 @@ pub(crate) async fn build_turn_tools(
         tools_list.push(tools::agent_admin::definition());
     }
 
+    // `background_task` is announced only while something in the payload can
+    // actually start one: the flag arrives from three paths (local tools, MCP
+    // tools, sub-agent delegation), so the assembled list decides, not the
+    // switch. A payload without a single `run_in_background` property would
+    // otherwise advertise a control tool with nothing to control.
+    tools::prune_unreachable_background_control(&mut tools_list);
+
     (
         tools_list,
         mcp_tool_map,

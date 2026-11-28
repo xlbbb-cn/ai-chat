@@ -2,6 +2,35 @@
 
 use super::*;
 
+// ─── Background control tool ────────────────────────────────────────────────
+
+/// True when at least one tool in `tools` carries the `run_in_background` flag.
+///
+/// The flag is added on three paths — the local backgroundable tools below,
+/// MCP tools (`mcp::adapt_tool_for_llm`) and sub-agent delegation
+/// (`build_turn_tools`) — so the `background_task` control tool is gated on the
+/// assembled payload, never on the settings switch alone.
+pub(crate) fn advertises_background(tools: &[Value]) -> bool {
+    tools.iter().any(|tool| {
+        tool["function"]["parameters"]["properties"]
+            .get("run_in_background")
+            .is_some()
+    })
+}
+
+/// Drop `background_task` from a payload in which no tool accepts the flag.
+///
+/// With background execution switched on but only non-backgroundable tools
+/// selected (calculator, memory, todos …) the control tool manages nothing —
+/// its description would be prompt noise naming a capability that is not
+/// offered.
+pub(crate) fn prune_unreachable_background_control(tools: &mut Vec<Value>) {
+    if advertises_background(tools) {
+        return;
+    }
+    tools.retain(|tool| tool["function"]["name"] != "background_task");
+}
+
 /// Build the tool list advertised to the model.
 ///
 /// `self_evolution` adds the dedicated `evolution` memory scope to the memory
@@ -518,9 +547,11 @@ pub fn get_all_tools(
     // ── Background execution ────────────────────────────────────────────────
     // Only the long-running, read-mostly tools accept the flag: a background
     // mutation could race an unrelated edit the model starts while it waits.
-    // The control tool is advertised whenever the feature is on — MCP tools and
+    // The control tool is pushed whenever the feature is on — MCP tools and
     // sub-agents can be backgrounded even when none of the local tools is
-    // selected.
+    // selected, and those two flags are added after this function returns.
+    // `prune_unreachable_background_control` then drops it again if no tool in
+    // the finished payload carries the flag.
     if background_tools {
         for tool in tools.iter_mut() {
             let name = tool["function"]["name"].as_str().unwrap_or("");

@@ -268,14 +268,24 @@ pub(crate) fn app_open_figures_dir(app: AppHandle) -> Result<(), String> {
 /// caching, and short: the conventions that matter are the ones a model gets
 /// wrong on its own — literal colours instead of tokens, raw HTML that the
 /// sanitizer strips, coordinates it cannot compute, and a `carve` scene that
-/// is prose instead of JSON.
+/// is prose instead of JSON. Mermaid is listed first as the cheap option, so a
+/// plain diagram does not turn into hand-written `<svg>` when the transcript
+/// can render the diagram source itself.
 pub fn prompt_block() -> String {
     "Figures: you can draw; users can save drawings.\n\
+     - `mermaid` (plain diagrams): a fenced `mermaid` block is rendered in the transcript and is \
+     the cheapest choice when a diagram only needs structure; the blocks below are for shape \
+     control, 3D or motion. \
+     Supported: `flowchart`, `sequenceDiagram`, `classDiagram`, `stateDiagram-v2`, `erDiagram`, \
+     `gantt`, `pie`, `mindmap`, `timeline`. Example: ```mermaid / `flowchart LR` / \
+     `  A[request] --> B[gateway]```. The fence title becomes the caption (e.g. `mermaid Request \
+     flow`); keep labels short and quote labels containing `()[]/`, e.g. \
+     `A[\"GET /v1/chat (stream)\"]`.\n\
      - `flow` (flowcharts): fenced JSON block with nodes/edges (no coordinates). \
      Example: `{\"direction\":\"LR\",\"anim\":\"flow\",\"nodes\":[{\"id\":\"a\",\"label\":\"Start\",\"shape\":\"start\"},{\"id\":\"b\",\"label\":\"OK?\",\"shape\":\"decision\"},{\"id\":\"c\",\"label\":\"Ship\",\"tone\":\"accent\"}],\"edges\":[{\"from\":\"a\",\"to\":\"b\"},{\"from\":\"b\",\"to\":\"c\",\"label\":\"yes\"}]}`. \
      Shapes: `process` (default), `start`/`end`, `decision`, `io`, `database`. \
      Tones: `default`,`accent`,`success`,`warning`,`danger`. Edge `label` optional. \
-     `anim`: `flow` (edge packets), `step` (node sequence), or omit (static); `speed` 0.5–3. No self-loops; short labels. Prefer `flow` for flowcharts.\n\
+     `anim`: `flow` (edge packets), `step` (node sequence), or omit (static); `speed` 0.5–3. No self-loops; short labels. Prefer `flow` over `mermaid` when the chart needs tones or edge animation.\n\
      - `svg` (2D): fenced `svg` block or inline `<svg>` with complete `<svg viewBox=\"0 0 W H\">`. \
      Use UI tokens, not hex: `var(--c-accent)`, `currentColor`, `var(--c-text)`, `var(--c-muted)`, `var(--c-border-i)`, `fill-opacity` for shades. \
      Scripts, `<foreignObject>`, `<image>`, `<a>`, handlers, and external `url()` are stripped.\n\
@@ -390,6 +400,11 @@ mod tests {
     #[test]
     fn prompt_block_names_every_markup() {
         let block = prompt_block();
+        // Mermaid renders in the transcript, so the enhanced mode announces it
+        // as the cheap option too — otherwise a plain diagram becomes
+        // hand-written SVG.
+        assert!(block.contains("mermaid"));
+        assert!(block.contains("caption"));
         assert!(block.contains("flow"));
         assert!(block.contains("svg"));
         assert!(block.contains("carve"));

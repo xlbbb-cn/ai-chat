@@ -1160,8 +1160,10 @@ complete page (`src/utils/htmlFigure.ts`) and handed to a sandboxed frame.
 #### Mermaid diagrams
 
 With `enhanced_figures` off (Settings → Advanced) the prompt asks for a fenced
-`mermaid` block instead of hand-written `svg` / `carve` / `html-fig`, and the
-transcript renders those diagrams too — as the same card.
+`mermaid` block instead of hand-written `svg` / `carve` / `html-fig`; with it on
+the enhanced manual lists `mermaid` first as the cheap option, so a diagram that
+only needs structure never turns into hand-written SVG. Either way the
+transcript renders those diagrams — as the same card.
 
 - **Same frame, no save action.** The card is `.chat-figure` *plus*
   `.chat-mermaid`: frame, caption bar, `Drawing…` and the invalid state are the

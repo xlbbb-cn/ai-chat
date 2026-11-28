@@ -20,7 +20,7 @@ use crate::prompt;
 /// One manual the pointer block can announce. `key` is also the file stem.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Manual {
-    /// Drawing with the enhanced figure blocks (`svg` / `carve` / `flow` / `html-fig`).
+    /// Drawing with the enhanced figure blocks (`mermaid` / `svg` / `carve` / `flow` / `html-fig`).
     EnhancedFigures,
     /// Authoring / editing workspace skills by hand.
     CreateSkill,
@@ -56,8 +56,8 @@ impl Manual {
         match self {
             Manual::EnhancedFigures => (
                 "Enhanced figures",
-                "draw syntax for `flow` / `svg` / `carve` / `html-fig` blocks — read before \
-                 drawing the first figure of the session",
+                "draw syntax for `mermaid` / `flow` / `svg` / `carve` / `html-fig` blocks — read \
+                 before drawing the first figure of the session",
             ),
             Manual::CreateSkill => (
                 "Skill creation",

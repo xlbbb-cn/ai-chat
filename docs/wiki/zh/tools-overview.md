@@ -86,7 +86,7 @@
 | `plugin` / `plugin_<id>_<tool>` | **设置 → 运行 → 启用插件系统**开着（`config.plugins_enabled`）：一个是控制工具，其余每个插件能力一个，都在本轮内随清单变化重建。见 [插件](插件) |
 | `todos` | 待办工具已启用 |
 | `timer_*` | 定时器工具已启用 |
-| `background_task` | **设置 → 运行 → 后台执行**开着（管理 `run_in_background` 任务） |
+| `background_task` | **设置 → 运行 → 后台执行**开着，且这一轮的工具里确实有能接受 `run_in_background` 的（本地工具、MCP 工具或 `call_subagent`）——一个都没有时控制工具会被剪掉，否则它没有任何可管理的对象 |
 
 子智能体拿到的是它 `allowed_tools` 授予的工具，减去 `timer`（那是稍后恢复对话的会话工具）。每个 `llm` 子智能体一开始就带共享的 `memory` 工具（面板里提供，可以按智能体取消勾选）：`session` 作用域以主对话的 session id 为键，`user` / `repo` 是工作区文件，所以任务能查主智能体已经学到的东西。自我进化模式下子智能体还会被强制打开 `file_actions` 与 `memory`——它可能要进化技能，也必须记得自己学过什么。`mcp_self` 从不交给子智能体。
 

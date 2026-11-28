@@ -252,6 +252,36 @@ fn background_flag_and_control_tool_are_only_advertised_when_enabled() {
 }
 
 #[test]
+fn background_control_tool_needs_a_tool_that_accepts_the_flag() {
+    // Switched on, but nothing selected can be backgrounded: the control tool
+    // is pruned from the payload instead of naming a capability nothing offers.
+    let mut idle = super::get_all_tools(&["memory".to_string()], false, true, false);
+    assert!(
+        idle.iter()
+            .any(|tool| tool["function"]["name"] == "background_task"),
+        "the switch alone still pushes the control tool"
+    );
+    assert!(!super::advertises_background(&idle));
+    super::prune_unreachable_background_control(&mut idle);
+    assert!(
+        !idle
+            .iter()
+            .any(|tool| tool["function"]["name"] == "background_task"),
+        "no `run_in_background` in the payload means no control tool"
+    );
+
+    // One backgroundable tool is enough to keep it.
+    let mut runs = super::get_all_tools(&["run_cmd".to_string()], false, true, false);
+    assert!(super::advertises_background(&runs));
+    super::prune_unreachable_background_control(&mut runs);
+    assert!(
+        runs.iter()
+            .any(|tool| tool["function"]["name"] == "background_task"),
+        "a payload with the flag keeps the control tool"
+    );
+}
+
+#[test]
 fn decodes_utf8_bom_output() {
     let decoded = decode_process_bytes(
         &[0xEF, 0xBB, 0xBF, 0x54, 0x65, 0x73, 0x74],
