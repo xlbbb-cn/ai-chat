@@ -1527,24 +1527,41 @@ fn ensure_mutation_target_allowed_rejects_the_workspace_database() {
 }
 
 #[test]
-fn ensure_mutation_target_allowed_allows_the_workspace_state_folder() {
+fn ensure_mutation_target_allowed_guards_app_managed_state() {
     use super::ensure_mutation_target_allowed;
 
     let workspace_root = make_temp_dir("mutation-state");
     let data_root = workspace_root.join(".data");
-    let files = [
-        data_root.join("memory").join("repo").join("note.md"),
-        data_root.join("todos").join("sess").join("lists").join("list.json"),
-        data_root.join("skills.status"),
-    ];
-    for file in &files {
+
+    // App-managed memory and todo state is rejected: the `memory` / `todos`
+    // tools are the only writers.
+    let memory_file = data_root.join("memory").join("repo").join("note.md");
+    let todo_file = data_root
+        .join("todos")
+        .join("sess")
+        .join("lists")
+        .join("list.json");
+    for file in [&memory_file, &todo_file] {
         fs::create_dir_all(file.parent().unwrap()).unwrap();
         fs::write(file, "x").unwrap();
+        let err = ensure_mutation_target_allowed(file, &workspace_root, None, "write")
+            .unwrap_err();
+        assert!(
+            err.contains("app-managed"),
+            "expected {} to be rejected, got {err}",
+            file.display()
+        );
     }
 
-    // `.data` lives inside the workspace: it is part of the file tool's
-    // scope, so the assistant may read and manage its own state there.
-    for file in &files {
+    // State that belongs to the file tools stays reachable.
+    let allowed = [
+        data_root.join("scripts").join("build.ps1"),
+        data_root.join("skills.status"),
+        data_root.join("tmp").join("scratch.txt"),
+    ];
+    for file in &allowed {
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(file, "x").unwrap();
         assert!(
             ensure_mutation_target_allowed(file, &workspace_root, None, "write").is_ok(),
             "expected {} to be writable",

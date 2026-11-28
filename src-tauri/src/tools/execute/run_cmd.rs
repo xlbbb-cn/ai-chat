@@ -415,6 +415,19 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
 /// [`process::Mounts`]: the script library and, when this host has one, the
 /// app-data environment (its `bin/` and the 3.13 venv).
 #[allow(clippy::too_many_arguments)]
+/// After a non-library command succeeds twice, suggest saving it as a script.
+fn maybe_save_script_hint(workspace_dir: &Path, command: &str, output: String) -> String {
+    if crate::turn_guard::tool_output_is_error(&output) {
+        return output;
+    }
+    if scripts::note_successful_command(workspace_dir, command) == 2 {
+        return format!(
+            "{output}\n\nHint: this command has now succeeded twice — save it as a reusable script in `./.data/scripts/` (header `@description:` / `@usage:`) and run it by bare name."
+        );
+    }
+    output
+}
+
 async fn run_run_cmd(
     workspace_dir: &Path,
     scripts_dir: &Path,
@@ -448,7 +461,7 @@ async fn run_run_cmd(
             output
         }
         None => {
-            process::run_command_timed(
+            let output = process::run_command_timed(
                 "direct".to_string(),
                 command.to_string(),
                 Some(cwd),
@@ -456,7 +469,8 @@ async fn run_run_cmd(
                 cancel,
                 mounts,
             )
-            .await
+            .await;
+            maybe_save_script_hint(workspace_dir, command, output)
         }
     }
 }

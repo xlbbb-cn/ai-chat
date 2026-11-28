@@ -75,7 +75,7 @@ pub fn get_all_tools(
                         },
                         "command": {
                             "type": "string",
-                            "description": "Required for 'run'. Full command line (e.g. 'build-frontend --release', 'python -V', 'curl -s https://example.com'): the first word is a library script name or a bare PATH program (never a path and never a shell interpreter such as bash/sh/cmd/powershell), the rest are arguments."
+                            "description": "Required for 'run'. Command line: the first word is a library script name or a PATH program, the rest are arguments (e.g. 'build-frontend --release', 'python -V')."
                         },
                         "timeout_seconds": {
                             "type": "integer",
@@ -144,7 +144,7 @@ pub fn get_all_tools(
             "type": "function",
             "function": {
                 "name": "file_actions",
-                "description": "File operations strictly inside the workspace: `read` / `write` / `list` / `search` / `mkdir` / `patch` / `diff` / `rename` / `move` / `delete`. Use `./...` paths, or `.` for the root; anything resolving outside is refused. `.data` is writable (skills, scripts, memory, todos) — everything except `.data/chat.db`. Keep scratch in `.data/tmp/`; files the user keeps go in `./<project>/...`.",
+                "description": "File operations inside the workspace: `read` / `write` / `list` / `search` / `mkdir` / `patch` / `diff` / `rename` / `move` / `delete`. Use `./...` paths, or `.` for the root. Keep scratch in `.data/tmp/`; files the user keeps go in `./<project>/...`.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -215,7 +215,7 @@ pub fn get_all_tools(
                         },
                         "patch": {
                             "type": "string",
-                            "description": "Unified diff to apply ('patch' only). Hunks are located by CONTENT, not line numbers, so stale numbers are tolerated — but context and changed lines must be real copies of the file.\n\nFormat (both header parts optional):\n@@ -<old_line>,<count> +<new_line>,<count> @@\n <unchanged context line>\n-<removed line>\n+<added line>\n <unchanged context line>\n\nTo apply on the first try: (1) read the file first and copy every context/removed/added line character-for-character — keep the leading space of context lines and the file's exact indentation, never retype or re-wrap; (2) give 3 unchanged context lines above and below each change (more when the text repeats); (3) copy line numbers from the read output when possible — they are hints, content decides; (4) one hunk per separated change, in file order, never merge distant edits. `---`/`+++`/`diff --git` headers are optional and ignored, LF and CRLF both work, `\\ No newline at end of file` is understood. Matching tolerates leading/trailing whitespace only; on failure the error shows the closest actual content — re-read, fix the context and retry, or use action 'write' for large rewrites."
+                            "description": "Unified diff to apply ('patch' only). Hunks are located by CONTENT, not line numbers — context and changed lines must be real copies of the file. Format:\n@@ -<old_line>,<count> +<new_line>,<count> @@\n <context line>\n-<removed line>\n+<added line>\n <context line>\n\nRe-read first; on failure the error gives the closest actual content and the next step."
                         },
                         "context_lines": {
                             "type": "integer",
@@ -255,7 +255,7 @@ pub fn get_all_tools(
             "type": "function",
             "function": {
                 "name": "memory",
-                "description": format!("Manage persistent memory:\n- `session`: in-memory, cleared at app restart — task context and in-progress notes.\n- `user`: file-backed, cross-session — preferences, patterns, insights.\n- `repo`: file-backed, repository-scoped — conventions, build commands, project facts.{evolution_scope}\n\n`scope: \"all\"` reads every scope at once; add/delete need one concrete scope. `user`/`repo` are app-managed files in `.data/memory` — never edit them with file tools.{hint_clause} Keep each entry to one dense fact. `consolidate` archives an evolution cluster into a skill: `plan` first, then `apply` with the full `skill_md` and the same `keys`.\n\nTRUST CALIBRATION (evolution): a retrieved fact is a claim, not the truth. When the real result disagrees, `add` the same key with `conflict: true` (plus the corrected `content`) — the entry is rewritten and its confidence drops to 1; a plain re-add raises it by one. Re-verify anything at confidence 2 or below before relying on it."),
+                "description": format!("Manage persistent memory:\n- `session`: in-memory, cleared at app restart — task context and in-progress notes.\n- `user`: file-backed, cross-session — preferences, patterns, insights.\n- `repo`: file-backed, repository-scoped — conventions, build commands, project facts.{evolution_scope}\n\n`scope: \"all\"` reads every scope at once. `user`/`repo` are app-managed files in `.data/memory` — never edit them with file tools.{hint_clause} Keep each entry to one dense fact. `consolidate` archives an evolution cluster into a skill: `plan` first, then `apply` with the full `skill_md` and the same `keys`.\n\nTRUST CALIBRATION (evolution): a retrieved fact is a claim, not the truth. When the real result disagrees, `add` the same key with `conflict: true` (plus the corrected `content`) — the entry is rewritten and its confidence drops to 1; a plain re-add raises it by one. Re-verify anything at confidence 2 or below before relying on it."),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -387,7 +387,7 @@ pub fn get_all_tools(
                         },
                         "todo_id": {
                             "type": "string",
-                            "description": "Id to update ('update_status' only) — copy it from a 'list' result, never invent one."
+                            "description": "Id to update ('update_status' only)."
                         },
                         "status": {
                             "type": "string",

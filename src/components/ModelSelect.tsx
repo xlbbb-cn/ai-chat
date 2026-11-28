@@ -19,6 +19,8 @@ interface Props {
     value: string;
     /** Capability metadata per model id, from the merged catalogue. */
     metadata: Record<string, ModelMetadata>;
+    /** Trigger tooltip; defaults to the field label. */
+    title?: string;
     disabled?: boolean;
     onChange: (model: string) => void;
 }
@@ -57,7 +59,7 @@ const MAX_POPUP_HEIGHT = 320;
  * wider floor and an upward popup — the composer row lives at the bottom of the
  * window, where there is no room below.
  */
-export function ModelSelect({ models, value, metadata, disabled, onChange }: Props) {
+export function ModelSelect({ models, value, metadata, title, disabled, onChange }: Props) {
     const { t } = useI18n();
 
     const options: DropdownOption[] = models.map((model) => {
@@ -87,6 +89,7 @@ export function ModelSelect({ models, value, metadata, disabled, onChange }: Pro
         <Dropdown
             className="model-select-trigger"
             label={t("app.selectModel")}
+            title={title}
             compact
             placement="up"
             minPopupWidth={MIN_POPUP_WIDTH}

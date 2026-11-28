@@ -313,6 +313,17 @@ impl LlmTurn {
 
     // ── Lifecycle ───────────────────────────────────────────────────────────
 
+    /// The thinking depth this turn actually runs with.
+    ///
+    /// The base freezes its `AppConfig` at construction, so this is the value
+    /// the request builder sends — not whatever the config says now. The
+    /// frontend shows it for a running turn (a turn cannot be re-parameterised)
+    /// and restores it with the model when the conversation returns to the
+    /// foreground.
+    pub fn reasoning_effort(&self) -> Option<String> {
+        crate::llm_client::resolve_reasoning_effort(&self.config, &self.model).map(str::to_string)
+    }
+
     /// Kill this turn's private MCP server processes. Called by turn-end
     /// cleanup; `McpSession::Drop` covers the unwind paths.
     pub async fn shutdown_mcp(&self, state: &crate::AppState) {
@@ -325,6 +336,7 @@ impl LlmTurn {
             session_id: self.session_id.clone(),
             turn_id: self.turn_id.clone(),
             model: self.model.clone(),
+            reasoning_effort: self.reasoning_effort(),
             started_at_ms: self.started_at_ms,
             phase: self
                 .progress
@@ -364,6 +376,7 @@ impl LlmTurn {
             session_id: self.session_id.clone(),
             turn_id: self.turn_id.clone(),
             model: self.model.clone(),
+            reasoning_effort: self.reasoning_effort(),
             started_at_ms: self.started_at_ms,
             phase,
             content,

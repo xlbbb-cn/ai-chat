@@ -341,6 +341,45 @@ fn collect_loaded_skills_ignores_legacy_marker_text() {
 }
 
 #[test]
+fn explicit_skill_invocations_reads_only_the_newest_user_message() {
+    let messages = vec![
+        ChatMessage {
+            role: "user".into(),
+            content: json!("use {skill:alpha} and {skill:beta}"),
+            reasoning_content: None,
+            loaded_skills: None,
+        },
+        ChatMessage {
+            role: "assistant".into(),
+            content: json!("ok"),
+            reasoning_content: None,
+            loaded_skills: None,
+        },
+        ChatMessage {
+            role: "user".into(),
+            content: json!("again {skill:beta} {skill: gamma } {skill:}"),
+            reasoning_content: None,
+            loaded_skills: None,
+        },
+    ];
+
+    // Only the newest user message counts, blanks are ignored, and the name is
+    // trimmed — so a repeated mention and a stray empty marker stay stable.
+    assert_eq!(
+        explicit_skill_invocations(&messages),
+        vec!["beta", "gamma"]
+    );
+
+    let none = vec![ChatMessage {
+        role: "user".into(),
+        content: json!("plain question"),
+        reasoning_content: None,
+        loaded_skills: None,
+    }];
+    assert!(explicit_skill_invocations(&none).is_empty());
+}
+
+#[test]
 fn ds_format_fills_missing_assistant_reasoning_and_preserves_originals() {
     // DS-Format on: assistant messages without a reasoning trace (tool-call
     // continuation rounds, legacy history) get an empty-string fallback;

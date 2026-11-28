@@ -193,6 +193,37 @@ impl FileLockRegistry {
             ),
         })
     }
+
+    /// Whether this session already knows the file's current content — either
+    /// because it read the path, or because it wrote it last (a write clears
+    /// that session's read stamp but leaves it owning the newest state).
+    ///
+    /// Anonymous callers are never tracked, so they report `true`; the guard
+    /// exists for model-driven calls, not panels.
+    pub fn has_read(&self, session: Option<&str>, path: &Path) -> bool {
+        let Some(session) = session else {
+            return true;
+        };
+        if session == ANONYMOUS_SESSION {
+            return true;
+        }
+        let key = lock_key(path);
+        if let Ok(reads) = self.reads.lock() {
+            if reads.contains_key(&(session.to_string(), key.clone())) {
+                return true;
+            }
+        }
+        if let Ok(records) = self.records.lock() {
+            if let Some(record) = records.get(&key) {
+                if let Some((writer, _)) = &record.last_write {
+                    if writer == session {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
 }
 
 #[cfg(test)]
@@ -201,6 +232,24 @@ mod tests {
 
     fn path(name: &str) -> PathBuf {
         PathBuf::from("/ws").join(name)
+    }
+
+    #[test]
+    fn has_read_is_scoped_to_the_reading_session_and_survives_its_write() {
+        let registry = FileLockRegistry::default();
+        let p = path("read-check");
+
+        assert!(!registry.has_read(Some("a"), &p));
+        registry.record_read(Some("a"), &p);
+        assert!(registry.has_read(Some("a"), &p));
+        // Another session has not read it.
+        assert!(!registry.has_read(Some("b"), &p));
+        // Anonymous callers are never tracked and stay allowed.
+        assert!(registry.has_read(None, &p));
+
+        // A write by the same session keeps patching allowed.
+        registry.note_write(Some("a"), &p);
+        assert!(registry.has_read(Some("a"), &p));
     }
 
     #[tokio::test]

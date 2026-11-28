@@ -19,11 +19,11 @@
 //! use counts, the last exit code and the approved content hash for scripts
 //! whose body scan found dangerous patterns.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
@@ -701,6 +701,31 @@ pub(crate) fn record_use(workspace_dir: &Path, file_name: &str, output: &str) {
     let _ = save_index(&root, &index);
 }
 
+/// Process-global count of successful `run_cmd` command lines per workspace.
+///
+/// A command that succeeds twice is worth turning into a library script; the
+/// hint is appended at that moment instead of living in the prompt.
+fn command_hits() -> &'static Mutex<HashMap<(String, String), u32>> {
+    static HITS: OnceLock<Mutex<HashMap<(String, String), u32>>> = OnceLock::new();
+    HITS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Record one successful run of `command` in `workspace_dir`, returning the new
+/// count. Bounded: the map is cleared past a few hundred distinct commands.
+pub(crate) fn note_successful_command(workspace_dir: &Path, command: &str) -> u32 {
+    let key = (
+        workspace_dir.to_string_lossy().to_string(),
+        command.trim().to_string(),
+    );
+    let mut hits = command_hits().lock().unwrap();
+    if hits.len() > 512 {
+        hits.clear();
+    }
+    let count = hits.entry(key).or_insert(0);
+    *count = count.saturating_add(1);
+    *count
+}
+
 /// Render the `action: "list"` response shown to the model.
 pub(crate) fn render_list(workspace_dir: &Path) -> String {
     let entries = list(workspace_dir);
@@ -782,18 +807,10 @@ pub(crate) fn prompt_block(workspace_dir: &Path, self_evolution: bool) -> String
 
     if self_evolution {
         out.push_str(
-            "SCRIPT LIBRARY: `./.data/scripts` is prepended to `run_cmd`'s PATH, so a script runs by \
-             bare name (extension optional); every `run_cmd` child also gets the host Python 3.13 \
-             venv (app data) on `PATH` with `VIRTUAL_ENV` set, so a `.py` script runs under 3.13 \
-             and sees its installed packages; `run_cmd {\"action\":\"list\"}` shows interpreter, \
-             description, usage and use count.\n\
-             When a multi-step command has succeeded at least twice, or the user asks to keep/reuse \
-             it, save it there with `file_actions`: prefer `.ps1` on Windows and `.sh` elsewhere \
-             (`.py`/`.js` only when the logic really needs it); add `@description:` and \
-             `@usage: name [args]` header comments in that language's comment prefix; keep it \
-             self-contained and argument-driven, with no hardcoded machine paths or secrets \
-             (`set -euo pipefail` in bash); run it once by name to verify it. Scripts are shared by \
-             the whole workspace and never hold credentials.",
+            "SCRIPT LIBRARY: `./.data/scripts` is prepended to `run_cmd`'s PATH (bare name, extension \
+             optional); every `run_cmd` child also gets the host Python 3.13 venv on `PATH` with \
+             `VIRTUAL_ENV` set. `run_cmd {\"action\":\"list\"}` shows interpreter, description, usage \
+             and use count, and flags a missing `@description:` / `@usage:` header.",
         );
     }
 

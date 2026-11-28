@@ -83,6 +83,7 @@ pub(crate) fn is_frontend_user_message(msg: &Value) -> bool {
         && !text.starts_with(CONTEXT_CONTINUE_MARKER)
         && !text.starts_with(CONTEXT_LENGTH_MARKER)
         && !text.starts_with(CONTEXT_GOAL_MARKER)
+        && !text.starts_with(CONTEXT_DELIVERABLE_MARKER)
 }
 
 /// Count the frontend (UI) messages inside a message slice — the coverage a

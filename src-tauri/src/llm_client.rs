@@ -1768,6 +1768,33 @@ mod tests {
     use std::sync::Arc;
     use std::time::Instant;
 
+    /// The depth a turn runs with is resolved per model first, then from the
+    /// legacy global switch, then left to the provider. A turn freezes this in
+    /// its config and publishes it (`TurnState` / `ActiveTurnInfo` /
+    /// `TurnSnapshot`), so this ordering is the contract the toolbar restores
+    /// from when a conversation comes back into front.
+    #[test]
+    fn reasoning_effort_resolution_order() {
+        let mut config = crate::AppConfig::default();
+        config.model_reasoning_effort.insert("m".into(), "high".into());
+        assert_eq!(resolve_reasoning_effort(&config, "m"), Some("high"));
+
+        // Every other model falls back to the legacy global value.
+        config.model_settings.reasoning_effort = "low".into();
+        assert_eq!(resolve_reasoning_effort(&config, "other"), Some("low"));
+        assert_eq!(resolve_reasoning_effort(&config, "m"), Some("high"));
+
+        // A value outside the whitelist is dropped, never forwarded.
+        config
+            .model_reasoning_effort
+            .insert("bad".into(), "thinking".into());
+        assert_eq!(resolve_reasoning_effort(&config, "bad"), None);
+
+        // Nothing configured: the provider applies its own default.
+        let empty = crate::AppConfig::default();
+        assert_eq!(resolve_reasoning_effort(&empty, "m"), None);
+    }
+
     /// A stream that never yields must hand control back after one slice, which
     /// is what lets the driver re-read the stop flag. `pending()` is exactly the
     /// llama.cpp prefill situation: headers received, no SSE byte for the whole

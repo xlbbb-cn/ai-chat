@@ -2390,10 +2390,137 @@ pub fn collect_archived_skills(workspace_dir: &Path) -> Vec<ArchivedSkill> {
     out
 }
 
-fn consolidate_report(args: &Value, workspace_dir: &Path) -> String {
+// ─── Consolidation plan → apply guard ────────────────────────────────────────
+
+/// The clusters a session was last shown by `consolidate` phase `plan`.
+///
+/// `apply` is refused unless every key it archives appeared in that plan, so a
+/// model cannot skip the plan (or archive keys it never inspected) and scatter
+/// the memory pool. The slot is keyed by chat session and clears on restart.
+#[derive(Default, Clone)]
+struct ConsolidationSlot {
+    keys: HashSet<String>,
+    clusters: Vec<(String, Vec<String>)>,
+    /// Whether the user had explicitly asked to tidy memory when this plan was
+    /// shown. `apply` requires it (or a fresh tidy request), because archiving
+    /// is destructive and must follow the user's own choice.
+    user_asked: bool,
+}
+
+fn consolidation_slots() -> &'static Mutex<HashMap<String, ConsolidationSlot>> {
+    static SLOTS: OnceLock<Mutex<HashMap<String, ConsolidationSlot>>> = OnceLock::new();
+    SLOTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn consolidation_slot_key(session: Option<&str>) -> String {
+    session.unwrap_or("(no session)").to_string()
+}
+
+// ─── Last user message per session ──────────────────────────────────────────
+
+/// Newest user message per chat session, recorded at prompt-build time. Lets
+/// `consolidate` `apply` verify the user actually asked to tidy memory.
+fn last_user_messages() -> &'static Mutex<HashMap<String, String>> {
+    static LAST: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    LAST.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Remember the newest user message of `session_id` (called once per turn).
+pub fn note_last_user_message(session_id: &str, text: &str) {
+    if let Ok(mut map) = last_user_messages().lock() {
+        if map.len() > 256 {
+            map.clear();
+        }
+        map.insert(session_id.to_string(), text.to_string());
+    }
+}
+
+fn last_user_message_for(session: Option<&str>) -> Option<String> {
+    let session = session?;
+    last_user_messages()
+        .lock()
+        .ok()
+        .and_then(|map| map.get(session).cloned())
+}
+
+fn record_consolidation_plan(session: Option<&str>, clusters: &[EvolutionCluster]) {
+    let mut slot = ConsolidationSlot::default();
+    slot.user_asked = last_user_message_for(session)
+        .map(|text| wants_memory_consolidation(&text))
+        .unwrap_or(true);
+    for cluster in clusters {
+        for key in &cluster.keys {
+            slot.keys.insert(key.clone());
+        }
+        slot.clusters.push((cluster.id.clone(), cluster.keys.clone()));
+    }
+    if let Ok(mut slots) = consolidation_slots().lock() {
+        slots.insert(consolidation_slot_key(session), slot);
+    }
+}
+
+/// Check `keys` against the plan the same session was shown. On a mismatch the
+/// error is self-contained and includes the current plan summary.
+fn check_apply_keys(
+    session: Option<&str>,
+    workspace_dir: &Path,
+    keys: &[String],
+) -> Result<(), String> {
+    let slot = consolidation_slots()
+        .lock()
+        .ok()
+        .and_then(|slots| slots.get(&consolidation_slot_key(session)).cloned());
+    let Some(slot) = slot else {
+        return Err(format!(
+            "No consolidation plan is on record for this session. Call the `memory` tool with action `consolidate`, phase `plan` first, then copy `keys` from that plan.\n\n{}",
+            plan_report(workspace_dir)
+        ));
+    };
+    let asked_now = last_user_message_for(session)
+        .map(|text| wants_memory_consolidation(&text))
+        .unwrap_or(true);
+    if !slot.user_asked && !asked_now {
+        return Err(format!(
+            "Refusing to apply: archiving is destructive and the user did not explicitly ask to tidy memory (e.g. 「整理记忆」 / \"consolidate memory\"). Present the plan and ask the user first.\n\n{}",
+            plan_report(workspace_dir)
+        ));
+    }
+    if slot.keys.is_empty() {
+        return Err(format!(
+            "The last `plan` found no cluster large enough to consolidate, so there is nothing to apply.\n\n{}",
+            plan_report(workspace_dir)
+        ));
+    }
+    let mut unknown: Vec<String> = keys
+        .iter()
+        .filter(|key| !slot.keys.contains(*key))
+        .cloned()
+        .collect();
+    if !unknown.is_empty() {
+        unknown.sort();
+        let known: Vec<String> = slot
+            .clusters
+            .iter()
+            .map(|(id, keys)| format!("- {id}: {}", keys.join(", ")))
+            .collect();
+        return Err(format!(
+            "Refusing to apply: key(s) not in the last `plan`: {}. Archive only keys the plan listed.\n\nPlanned clusters:\n{}",
+            unknown.join(", "),
+            known.join("\n")
+        ));
+    }
+    Ok(())
+}
+
+fn consolidate_report(args: &Value, workspace_dir: &Path, session_id: Option<&str>) -> String {
     let phase = args["phase"].as_str().unwrap_or("plan");
     match phase {
-        "plan" => plan_report(workspace_dir),
+        "plan" => {
+            let ranked = ranked_evolution_entries(workspace_dir);
+            let clusters = plan_clusters(&ranked, EVOLUTION_CONTEXT_BUDGET_CHARS);
+            record_consolidation_plan(session_id, &clusters);
+            plan_report(workspace_dir)
+        }
         "apply" => {
             let skill_md = args["skill_md"].as_str().unwrap_or("");
             if skill_md.trim().is_empty() {
@@ -2408,6 +2535,9 @@ fn consolidate_report(args: &Value, workspace_dir: &Path) -> String {
                         keys = cluster.keys;
                     }
                 }
+            }
+            if let Err(error) = check_apply_keys(session_id, workspace_dir, &keys) {
+                return format!("Error: {error}");
             }
             match apply_consolidation(workspace_dir, skill_md, &keys) {
                 Ok(message) => message,
@@ -3759,7 +3889,10 @@ fn handle_evolution_scope(
             }
         }
         "consolidate" => {
-            let report = consolidate_report(args, workspace_dir);
+            if mission_id.is_some() {
+                return "Error: memory consolidation is not available inside a sub-agent mission — run it in the main chat.".to_string();
+            }
+            let report = consolidate_report(args, workspace_dir, session_id);
             let _ = emit_tool_progress(
                 app,
                 mission_id,
@@ -4623,6 +4756,62 @@ mod tests {
             .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("md"))
             .count();
         assert_eq!(files, 1, "a repeated conclusion must not create a second file");
+    }
+
+    /// `apply` is refused unless this session was shown a plan and every key
+    /// belongs to it (B1).
+    #[test]
+    fn apply_is_refused_without_a_matching_plan() {
+        let workspace = TempWorkspace::new("consolidate-guard");
+        let session = Some("consolidate-guard-session");
+        let cluster = EvolutionCluster {
+            id: "c1".to_string(),
+            suggested_skill: "demo".to_string(),
+            keys: vec!["a".to_string(), "b".to_string()],
+            chars: 10,
+            titles: vec![("a".to_string(), "A".to_string())],
+        };
+
+        // No plan on record → refused, and the message asks for `plan`.
+        let err = check_apply_keys(session, &workspace.dir, &["a".to_string()]).unwrap_err();
+        assert!(err.contains("No consolidation plan"), "{err}");
+
+        // A recorded plan accepts its own keys.
+        record_consolidation_plan(session, &[cluster]);
+        assert!(check_apply_keys(session, &workspace.dir, &["a".to_string()]).is_ok());
+
+        // A key outside the plan is refused and named.
+        let err = check_apply_keys(
+            session,
+            &workspace.dir,
+            &["a".to_string(), "zzz".to_string()],
+        )
+        .unwrap_err();
+        assert!(err.contains("zzz"), "{err}");
+
+        if let Ok(mut slots) = consolidation_slots().lock() {
+            slots.remove(&consolidation_slot_key(session));
+        }
+    }
+
+    /// The newest user message is recorded per session and drives the
+    /// "only tidy when the user asked" guard on `apply`.
+    #[test]
+    fn last_user_message_is_tracked_per_session() {
+        note_last_user_message("last-user-guard-a", "帮我整理记忆");
+        assert_eq!(
+            last_user_message_for(Some("last-user-guard-a")).as_deref(),
+            Some("帮我整理记忆")
+        );
+        assert!(last_user_message_for(Some("last-user-guard-unknown")).is_none());
+        assert!(last_user_message_for(None).is_none());
+
+        note_last_user_message("last-user-guard-b", "what does this function do?");
+        assert!(
+            !last_user_message_for(Some("last-user-guard-b"))
+                .map(|text| wants_memory_consolidation(&text))
+                .unwrap_or(false)
+        );
     }
 
     /// The explicit "tidy my memory" trigger is recognised in EN and ZH.

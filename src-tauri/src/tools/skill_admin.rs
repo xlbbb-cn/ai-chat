@@ -34,7 +34,7 @@ pub(crate) fn merge_tool_definition() -> Value {
         "type": "function",
         "function": {
             "name": "skill_merge",
-            "description": "Merge one or more self-evolution skills into a target skill folder: writes the merged SKILL.md (old file kept as .bak.N), enables the target in the workspace skill status, then backs up and deletes every source folder. Only skills whose status source is 'self-evolution' are accepted; this is the only supported way to rewrite or merge skills during evolution maintenance.",
+            "description": "Merge one or more self-evolution skills into a target skill folder: writes the merged SKILL.md (old file kept as .bak.N), enables the target in the workspace skill status, then backs up and deletes every source folder. This is the only supported way to rewrite or merge skills during evolution maintenance.",
             "parameters": {
                 "type": "object",
                 "properties": {

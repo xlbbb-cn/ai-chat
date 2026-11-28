@@ -147,6 +147,11 @@ pub struct TurnState {
     pub running: bool,
     pub started_at_ms: i64,
     pub model: String,
+    /// Thinking depth the turn runs with (frozen with its config); absent =
+    /// the provider default. Lets the toolbar show what a background turn
+    /// really uses, and restore it when the conversation comes back into front.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
 }
 
 /// One tool-progress line. `call_id` / `phase` / `ok` are absent on the legacy
@@ -491,11 +496,57 @@ mod tests {
             call_id: None,
             phase: None,
             ok: None,
+            outcome: None,
             text: "done".into(),
         };
         assert_eq!(
             serde_json::to_value(legacy).unwrap(),
             json!({ "session_id": "s", "text": "done" })
+        );
+    }
+
+    /// The toolbar restores the depth a turn runs with from this payload, so it
+    /// must travel when set and disappear (not become `null`) when the provider
+    /// default applies.
+    #[test]
+    fn turn_state_carries_the_frozen_depth_only_when_set() {
+        let running = TurnState {
+            session_id: "s".into(),
+            turn_id: "t".into(),
+            running: true,
+            started_at_ms: 7,
+            model: "m".into(),
+            reasoning_effort: Some("high".into()),
+        };
+        assert_eq!(
+            serde_json::to_value(running).unwrap(),
+            json!({
+                "session_id": "s",
+                "turn_id": "t",
+                "running": true,
+                "started_at_ms": 7,
+                "model": "m",
+                "reasoning_effort": "high",
+            })
+        );
+
+        let settled = TurnState {
+            session_id: "s".into(),
+            turn_id: "t".into(),
+            running: false,
+            started_at_ms: 7,
+            model: "m".into(),
+            reasoning_effort: None,
+        };
+        assert_eq!(
+            serde_json::to_value(settled).unwrap(),
+            json!({
+                "session_id": "s",
+                "turn_id": "t",
+                "running": false,
+                "started_at_ms": 7,
+                "model": "m",
+            })
         );
     }
 }

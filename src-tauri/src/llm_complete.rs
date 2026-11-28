@@ -87,6 +87,29 @@ fn last_user_text(messages: &[ChatMessage]) -> String {
         .unwrap_or_default()
 }
 
+/// Skill names the newest user message invokes explicitly as `{skill:<name>}`,
+/// in first-seen order. Auto-loading them makes the skill active (full
+/// instructions + its tools) before the round runs, instead of waiting for a
+/// `use_skill` call.
+fn explicit_skill_invocations(messages: &[ChatMessage]) -> Vec<String> {
+    let text = last_user_text(messages);
+    let mut names: Vec<String> = Vec::new();
+    let mut cursor = 0;
+    while let Some(rel) = text[cursor..].find("{skill:") {
+        let body_start = cursor + rel + "{skill:".len();
+        let Some(end_rel) = text[body_start..].find('}') else {
+            break;
+        };
+        let end = body_start + end_rel;
+        let name = text[body_start..end].trim();
+        if !name.is_empty() && !names.iter().any(|existing| existing == name) {
+            names.push(name.to_string());
+        }
+        cursor = end + 1;
+    }
+    names
+}
+
 /// The reason carried by a `[WAIT_EVT: …]` marker, when the model declared
 /// that the unfinished goals are waiting on an external event instead of being
 /// blocked. An empty body degrades to a generic phrase, so the suspension
@@ -168,6 +191,9 @@ const BUDGET_FALLBACK_ANSWER: &str =
 /// the session's todo list still has unfinished items (goal loop). A user-role
 /// message excluded from frontend-history counting like the other notices.
 const CONTEXT_GOAL_MARKER: &str = "INTERNAL CONTEXT - GOAL LOOP";
+/// Marks the backend nudge pushed when a turn wrote only scratch files under
+/// `.data/tmp` and no deliverable in a project folder.
+const CONTEXT_DELIVERABLE_MARKER: &str = "INTERNAL CONTEXT - DELIVERABLE";
 /// Marks the backend nudge pushed when the response hit the provider's output
 /// token cap (`finish_reason: "length"`) mid-answer.
 const CONTEXT_LENGTH_MARKER: &str = "INTERNAL CONTEXT - OUTPUT TRUNCATED";
@@ -357,6 +383,7 @@ pub(crate) async fn chat_completion(
             running: true,
             started_at_ms,
             model: model.clone(),
+            reasoning_effort: turn.reasoning_effort(),
         },
     );
 

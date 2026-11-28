@@ -4,6 +4,7 @@ import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { chatCompletion, checkUpdate, getConfig, getSkillsStatus, getAgentOrchestration, injectUserMessage, listMcpServers, listSubAgents, listAgentMentions, saveSkillsStatus, saveConfig, saveHistory, stopChatCompletion, confirmCommand, saveMarkdownFile, deleteMessage, deleteMessagesAfter, forkSession, filterExistingSkills, listTimers, cancelTimer, getSleepLockState, listBackgroundTasks, cancelBackgroundTask, listWorkspaceFiles, listSkills, startEvolutionMaintenance, stopEvolutionMaintenance, getEvolutionMaintenanceState, onEvolutionMaintenanceState, setWindowVibrancy, savePastedFile, importWorkspacePaths, showNotifyCard, todoAskReply, getPendingTodoAsk, readChatBackground, listActiveTurns, getTurnSnapshot, loadSessionMessages } from "./api";
 import { recordsToMessages } from "./historyRows";
+import { pickTurnSettings, type TurnSettings } from "./turnSettings";
 
 import { ChatMessageBoundary } from "./components/ChatMessageBoundary";
 import { stripControlMarkers, stripTrailingControlMarkers } from "./turnMarkers";
@@ -1013,6 +1014,14 @@ export default function App() {
    */
   const composerDraftRef = useRef(new Map<string, string>());
   composerDraftRef.current.set(sessionId, input);
+  /**
+   * What each conversation is (or was last) driven with — model and thinking
+   * depth. Switching away and back must restore it: the turn keeps running
+   * with its own model in the background, and a turn that ended there still
+   * belongs to a conversation that was using it. In-memory only, like the
+   * toolbar's model choice itself (see `turnSettings.ts`).
+   */
+  const sessionSettingsRef = useRef(new Map<string, TurnSettings>());
   /** True while a file is dragged over the window (native drag-drop). */
   const [dropActive, setDropActive] = useState(false);
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -1110,7 +1119,21 @@ export default function App() {
    * id (from the backend `turn-state` event family). The History panel's
    * running badges read this; composer gating reads it for the visible one.
    */
-  const [runningSessions, setRunningSessions] = useState<Record<string, { turn_id: string; started_at_ms: number }>>({});
+  const [runningSessions, setRunningSessions] = useState<
+    Record<
+      string,
+      {
+        turn_id: string;
+        started_at_ms: number;
+        /** Model this turn runs with (the backend freezes it); absent until a
+         *  `turn-state` carrying it arrives. */
+        model?: string;
+        /** Thinking depth it actually runs with; absent before the backend
+         *  publishes it (and when the provider default applies). */
+        effort?: string;
+      }
+    >
+  >({});
   /**
    * `streaming` as a ref, for the driver bookkeeping callbacks: they must not
    * re-create themselves (and re-subscribe every listener) each time a turn
@@ -1697,6 +1720,17 @@ export default function App() {
           dropRunningSession(sid);
           return null;
         }
+        // Re-attaching after a reload is the only place this webview learns
+        // what the turn runs with — no foreground write preceded it.
+        if (snapshot.model) {
+          sessionSettingsRef.current.set(sid, {
+            model: snapshot.model,
+            effort:
+              snapshot.reasoning_effort ??
+              sessionSettingsRef.current.get(sid)?.effort ??
+              "",
+          });
+        }
         try {
           const rows = await loadSessionMessages(sid).catch(
             () => [] as Awaited<ReturnType<typeof loadSessionMessages>>
@@ -1779,6 +1813,19 @@ export default function App() {
     try {
       const turns = await listActiveTurns();
       const live = new Map(turns.map((turn) => [turn.session_id, turn]));
+      // Whatever still runs is authoritative for its session's settings — this
+      // is the path that recovers them after a webview reload, when neither the
+      // foreground write nor the `turn-state` listener saw the turn start.
+      for (const turn of turns) {
+        if (!turn.model) continue;
+        sessionSettingsRef.current.set(turn.session_id, {
+          model: turn.model,
+          effort:
+            turn.reasoning_effort ??
+            sessionSettingsRef.current.get(turn.session_id)?.effort ??
+            "",
+        });
+      }
       setRunningSessions((prev) => {
         const next: typeof prev = {};
         for (const [sid, entry] of Object.entries(prev)) {
@@ -1790,6 +1837,8 @@ export default function App() {
             next[turn.session_id] = {
               turn_id: turn.turn_id,
               started_at_ms: turn.started_at_ms,
+              model: turn.model,
+              effort: turn.reasoning_effort ?? undefined,
             };
           }
         }
@@ -1838,22 +1887,48 @@ export default function App() {
   useEffect(() => {
     let unlisten: UnlistenFn | null = null;
     let cancelled = false;
-    listen<{ session_id: string; turn_id: string; running: boolean; started_at_ms: number }>(
-      "turn-state",
-      (e) => {
-        const { session_id, turn_id, running, started_at_ms } = e.payload;
-        if (!session_id) return;
-        setRunningSessions((prev) => {
-          if (running) {
-            return { ...prev, [session_id]: { turn_id, started_at_ms } };
-          }
-          if (prev[session_id]?.turn_id !== turn_id) return prev;
-          const next = { ...prev };
-          delete next[session_id];
-          return next;
-        });
+    listen<{
+      session_id: string;
+      turn_id: string;
+      running: boolean;
+      started_at_ms: number;
+      /** Model this turn was started with (frozen by the backend). */
+      model?: string;
+      /** Thinking depth it actually runs with; absent = provider default. */
+      reasoning_effort?: string | null;
+    }>("turn-state", (e) => {
+      const { session_id, turn_id, running, started_at_ms, model, reasoning_effort } = e.payload;
+      if (!session_id) return;
+      if (running) {
+        // The backend owns this turn's identity, so its model wins over
+        // whatever this webview has selected: remember it for the switch back
+        // (the foreground wrote the same pair at send time; this refines it
+        // with the frozen depth, which the per-model config cannot know).
+        const previous = sessionSettingsRef.current.get(session_id);
+        if (model) {
+          sessionSettingsRef.current.set(session_id, {
+            model,
+            effort: reasoning_effort ?? previous?.effort ?? "",
+          });
+        }
+        setRunningSessions((prev) => ({
+          ...prev,
+          [session_id]: {
+            turn_id,
+            started_at_ms,
+            model: model ?? prev[session_id]?.model,
+            effort: reasoning_effort ?? prev[session_id]?.effort,
+          },
+        }));
+        return;
       }
-    )
+      setRunningSessions((prev) => {
+        if (prev[session_id]?.turn_id !== turn_id) return prev;
+        const next = { ...prev };
+        delete next[session_id];
+        return next;
+      });
+    })
       .then((fn) => {
         if (cancelled) {
           fn();
@@ -2302,6 +2377,25 @@ export default function App() {
       unlisten();
     };
   }, [sessionId, driversVersion]);
+
+  // ── Multi-session: the visible conversation's own model settings ─────────
+  // `selectedModel` is one value for the whole window, so a conversation whose
+  // turn keeps running in the background used to be handed the model of
+  // whichever conversation was edited last. Restore it on switch, and again
+  // whenever a turn is published for the visible session (the reload path has
+  // no other way to learn it). Functional update on purpose: the effect must
+  // not re-fire on the user's own pick, so `selectedModel` stays out of the
+  // dependency list. Precedence: `turnSettings.ts`.
+  useEffect(() => {
+    const live = runningSessions[sessionId];
+    const target = pickTurnSettings(
+      live?.model ? { model: live.model, effort: live.effort ?? "" } : undefined,
+      sessionSettingsRef.current.get(sessionId),
+      { model: "", effort: "" }
+    );
+    if (!target.model) return;
+    setSelectedModel((prev) => (prev === target.model ? prev : target.model));
+  }, [sessionId, runningSessions]);
 
   const respondToConfirm = useCallback((confirmed: boolean) => {
     const requiresSudo = confirmDialog?.requires_auth === "sudo";
@@ -3630,6 +3724,14 @@ export default function App() {
       );
     }).catch(console.error);
 
+    // This conversation now runs with this pair: remember it, so leaving and
+    // coming back (with the turn still running, or already over) restores it
+    // instead of the model the other conversation picked.
+    sessionSettingsRef.current.set(sessionId, {
+      model: selectedModel,
+      effort: reasoningEfforts[selectedModel] ?? "",
+    });
+
     let accumulatedContent = "";
     let accumulatedReasoning = "";
 
@@ -3865,7 +3967,7 @@ export default function App() {
 
     cleanupRef.current = cleanup;
     abandonTurnRef.current = cleanup.abandon;
-  }, [input, messages, streaming, backupExporting, activeSkillIds, sessionId, selectedModel, selectedMetadata, useAgentsEnabled, autoPlanEnabled, embeddedAgents, t, flushUndeliveredInjections, beginTurnStats, settleTurnStats]);
+  }, [input, messages, streaming, backupExporting, activeSkillIds, sessionId, selectedModel, reasoningEfforts, selectedMetadata, useAgentsEnabled, autoPlanEnabled, embeddedAgents, t, flushUndeliveredInjections, beginTurnStats, settleTurnStats]);
 
   /**
    * Start the silent evolution-maintenance pass from the empty-state face.
@@ -4061,6 +4163,13 @@ export default function App() {
     setUsageReady(false);
     // A retry is a new turn: its own duration and token totals.
     beginTurnStats();
+
+    // Same rule as `sendMessage`: the retried turn belongs to this
+    // conversation with this pair.
+    sessionSettingsRef.current.set(sessionId, {
+      model: selectedModel,
+      effort: reasoningEfforts[selectedModel] ?? "",
+    });
 
     const history = retryBase
       .filter((m) => !m.streaming && m.role !== "tool_group" && hasContextContent(m))
@@ -4311,7 +4420,7 @@ export default function App() {
 
     cleanupRef.current = cleanup;
     abandonTurnRef.current = cleanup.abandon;
-  }, [messages, streaming, pendingRetryMessageId, activeSkillIds, sessionId, selectedModel, useAgentsEnabled, autoPlanEnabled, t, flushUndeliveredInjections, beginTurnStats, settleTurnStats]);
+  }, [messages, streaming, pendingRetryMessageId, activeSkillIds, sessionId, selectedModel, reasoningEfforts, useAgentsEnabled, autoPlanEnabled, t, flushUndeliveredInjections, beginTurnStats, settleTurnStats]);
 
   const handleDeleteMessage = useCallback(async (messageId: string) => {
     const msg = messagesDataRef.current.find((m) => m.id === messageId);
@@ -4461,6 +4570,22 @@ export default function App() {
   }
 
   /**
+   * Pick the model for the visible conversation. The choice is also that
+   * conversation's memory of it: `sessionSettingsRef` is what a later switch
+   * back restores (a new chat inherits it through `selectedModel` itself).
+   */
+  const handleModelChange = useCallback(
+    (model: string) => {
+      setSelectedModel(model);
+      sessionSettingsRef.current.set(sessionId, {
+        model,
+        effort: reasoningEfforts[model] ?? "",
+      });
+    },
+    [sessionId, reasoningEfforts]
+  );
+
+  /**
    * Store the thinking depth of the selected model and persist it right away:
    * it is a per-model preference that must apply to the very next request, so
    * it must not wait for "Save Changes" in Settings.
@@ -4476,6 +4601,9 @@ export default function App() {
         else delete next[selectedModel];
         return next;
       });
+      // This conversation's own depth for this model: a switch back restores
+      // the pair together (see `turnSettings.ts`).
+      sessionSettingsRef.current.set(sessionId, { model: selectedModel, effort });
 
       try {
         const cfg = await getConfig();
@@ -4487,7 +4615,7 @@ export default function App() {
         console.error("Failed to persist the reasoning effort", err);
       }
     },
-    [selectedModel],
+    [selectedModel, sessionId],
   );
 
   function toggleSidebar(panel: Sidebar) {
@@ -4866,8 +4994,14 @@ export default function App() {
     }
   }
 
+  /**
+   * The depth the visible turn was frozen with. A turn cannot be
+   * re-parameterised, and the per-model config may have moved since it began,
+   * so while one runs its own value is what the control must show.
+   */
+  const liveEffort = composerBusy ? runningSessions[sessionId]?.effort : undefined;
   /** The thinking-depth control only makes sense for reasoning-capable models. */
-  const reasoningEffort = reasoningEfforts[selectedModel] ?? "";
+  const reasoningEffort = liveEffort ?? reasoningEfforts[selectedModel] ?? "";
   // Shown for catalogue-matched reasoning models, and kept for any model that
   // already has a depth configured (e.g. an unmatched model set by hand).
   const reasoningSupported = selectedMetadata?.supports_reasoning === true || reasoningEffort !== "";
@@ -6388,22 +6522,35 @@ export default function App() {
               transition={{ duration: 0.18, ease: [0.25, 1, 0.5, 1] }}
             >
               <ModelSelect
-                models={availableModels}
+                // A restored model can be missing from the catalogue (Settings
+                // edited it away); offering it keeps the trigger labelled
+                // instead of falling back to the placeholder.
+                models={
+                  availableModels.includes(selectedModel)
+                    ? availableModels
+                    : [selectedModel, ...availableModels]
+                }
                 value={selectedModel}
                 metadata={modelMetadata}
-                disabled={streaming || backupExporting}
-                onChange={setSelectedModel}
+                title={composerBusy ? t("app.modelSettingsLocked") : undefined}
+                // `composerBusy` covers a background turn too: it already runs
+                // with its own model, so letting this look editable would be a
+                // promise the request cannot keep.
+                disabled={composerBusy || backupExporting}
+                onChange={handleModelChange}
               />
               {reasoningSupported && (
                 <Dropdown
                   className="reasoning-select"
                   label={t("app.reasoningDepth")}
-                  title={t("app.reasoningDepthTitle")}
+                  title={
+                    composerBusy ? t("app.modelSettingsLocked") : t("app.reasoningDepthTitle")
+                  }
                   icon={faBrain}
                   compact
                   value={reasoningEffort}
                   onChange={(next) => void handleReasoningEffortChange(next)}
-                  disabled={streaming || backupExporting}
+                  disabled={composerBusy || backupExporting}
                   options={[
                     { value: "", label: t("app.reasoningDefault") },
                     { value: "low", label: t("app.reasoningLow") },

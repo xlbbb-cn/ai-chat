@@ -163,6 +163,7 @@ impl TurnEndGuard {
                 running: false,
                 started_at_ms: self.turn.started_at_ms,
                 model: self.turn.model.clone(),
+                reasoning_effort: self.turn.reasoning_effort(),
             },
         );
     }

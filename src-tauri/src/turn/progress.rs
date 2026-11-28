@@ -65,6 +65,9 @@ pub struct TurnSnapshot {
     pub session_id: String,
     pub turn_id: String,
     pub model: String,
+    /// Thinking depth the turn runs with; absent = the provider default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
     pub started_at_ms: i64,
     pub phase: String,
     pub content: String,

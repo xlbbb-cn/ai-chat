@@ -786,6 +786,26 @@ impl TimerRegistry {
             .count()
     }
 
+    /// Existing pending timer in `session_id` with the same label and message,
+    /// so `timer_set` can be idempotent instead of stacking duplicates.
+    pub fn find_matching(
+        &self,
+        session_id: &str,
+        label: &str,
+        message: &str,
+    ) -> Option<TimerEntry> {
+        self.timers
+            .lock()
+            .unwrap()
+            .values()
+            .find(|entry| {
+                entry.session_id == session_id
+                    && entry.label == label
+                    && entry.message == message
+            })
+            .cloned()
+    }
+
     fn insert(&self, entry: TimerEntry) {
         let mut guard = self.timers.lock().unwrap();
         guard.insert(entry.id.clone(), entry);
@@ -902,18 +922,29 @@ pub fn schedule(
         );
     }
 
+    let label = {
+        let label = label.trim();
+        if label.is_empty() {
+            "timer".to_string()
+        } else {
+            label.to_string()
+        }
+    };
+
+    // Idempotent: re-arming the same wait in the same session returns the
+    // timer already scheduled instead of stacking a duplicate.
+    if let Some(existing) = app
+        .state::<TimerRegistry>()
+        .find_matching(session_id, &label, message)
+    {
+        return Ok(existing);
+    }
+
     let now = now_ms();
     let entry = TimerEntry {
         id: uuid::Uuid::new_v4().to_string(),
         session_id: session_id.to_string(),
-        label: {
-            let label = label.trim();
-            if label.is_empty() {
-                "timer".to_string()
-            } else {
-                label.to_string()
-            }
-        },
+        label,
         message: message.to_string(),
         created_at: now,
         fire_at: now + (delay_seconds as i64) * 1000,
@@ -1129,6 +1160,30 @@ mod tests {
                 .len(),
             1
         );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn find_matching_returns_the_pending_duplicate_in_the_same_session() {
+        let path = temp_path("match");
+        let _ = std::fs::remove_file(&path);
+        let registry =
+            TimerRegistry::load(path.clone(), SleepLock::for_tests(counting_backend().0));
+        registry.insert(entry("one", now_ms() + 60_000));
+
+        assert_eq!(
+            registry
+                .find_matching("session-a", "collect logs", "check the log file")
+                .map(|existing| existing.id),
+            Some("one".to_string())
+        );
+        assert!(registry
+            .find_matching("session-a", "collect logs", "other")
+            .is_none());
+        assert!(registry
+            .find_matching("session-b", "collect logs", "check the log file")
+            .is_none());
 
         let _ = std::fs::remove_file(&path);
     }

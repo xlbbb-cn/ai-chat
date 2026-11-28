@@ -33,6 +33,7 @@ pub(crate) mod background;
 
 // Re-exports for the agent runners (`crate::agents::cli` / `cloud`) and tests.
 pub(crate) use self::paths::resolve_safe_path;
+pub(crate) use self::file_actions::{reset_deliverable_turn, turn_needs_deliverable_reminder};
 pub(crate) use self::execute::*;
 pub(crate) use self::process::{decode_process_bytes, OutputDecodeHint};
 pub(crate) use self::schema::*;

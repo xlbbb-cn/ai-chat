@@ -6,6 +6,8 @@ use serde_json::Value;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use tauri::AppHandle;
 use tauri::Manager;
 
@@ -16,6 +18,88 @@ use super::search::{
     is_probably_binary, run_integrated_search, SearchOptions, SEARCH_MAX_MATCHES,
 };
 use super::truncate_tool_output;
+
+/// First `max_lines` lines of `path`, each prefixed with its 1-based number, so
+/// a refused blind patch hands back real context instead of just an error.
+fn head_preview(path: &Path, max_lines: usize) -> String {
+    match fs::File::open(path) {
+        Ok(file) => {
+            let mut out = String::new();
+            for (index, line) in BufReader::new(file).lines().enumerate() {
+                if index >= max_lines {
+                    break;
+                }
+                if let Ok(line) = line {
+                    out.push_str(&format!("{:>4}  {}\n", index + 1, line));
+                }
+            }
+            if out.is_empty() {
+                "(file is empty)".to_string()
+            } else {
+                out
+            }
+        }
+        Err(err) => format!("(could not read file: {err})"),
+    }
+}
+
+/// True when `path` lies inside the workspace scratch root (`.data/tmp`).
+fn is_scratch_path(workspace_dir: &Path, path: &Path) -> bool {
+    let root = crate::workspace::tmp_root(workspace_dir);
+    let root = root.canonicalize().unwrap_or(root);
+    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    path.starts_with(&root)
+}
+
+/// True when `path` lies inside the workspace `.data` state folder.
+fn is_under_data(workspace_dir: &Path, path: &Path) -> bool {
+    let root = workspace_dir.join(".data");
+    let root = root.canonicalize().unwrap_or(root);
+    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    path.starts_with(&root)
+}
+
+/// Per-session flags for the end-of-turn deliverable reminder.
+#[derive(Default)]
+struct DeliverableTurn {
+    scratch: bool,
+    deliverable: bool,
+}
+
+fn deliverable_turns() -> &'static Mutex<HashMap<String, DeliverableTurn>> {
+    static STATES: OnceLock<Mutex<HashMap<String, DeliverableTurn>>> = OnceLock::new();
+    STATES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Begin a new turn for `session_id`: forget the previous turn's scratch /
+/// deliverable flags so the reminder reflects this turn only.
+pub(crate) fn reset_deliverable_turn(session_id: &str) {
+    if let Ok(mut turns) = deliverable_turns().lock() {
+        turns.remove(session_id);
+    }
+}
+
+/// Record where a successful mutation wrote. `scratch` = under `.data/tmp`,
+/// `deliverable` = outside `.data` (a file in a project folder the user keeps).
+fn note_write_target(session_id: Option<&str>, scratch: bool, deliverable: bool) {
+    let Some(session_id) = session_id else {
+        return;
+    };
+    if let Ok(mut turns) = deliverable_turns().lock() {
+        let entry = turns.entry(session_id.to_string()).or_default();
+        entry.scratch |= scratch;
+        entry.deliverable |= deliverable;
+    }
+}
+
+/// True when this turn wrote to `.data/tmp` but never wrote a project file.
+pub(crate) fn turn_needs_deliverable_reminder(session_id: &str) -> bool {
+    deliverable_turns()
+        .lock()
+        .ok()
+        .and_then(|turns| turns.get(session_id).map(|t| t.scratch && !t.deliverable))
+        .unwrap_or(false)
+}
 
 pub(super) async fn handle_file_actions(
     app: &AppHandle,
@@ -196,7 +280,17 @@ pub(super) async fn handle_file_actions(
                         })
                         .await
                     {
-                        Ok(result) => result,
+                        Ok(result) => {
+                            let scratch = is_scratch_path(&root_dir, &p);
+                            note_write_target(session_id, scratch, !is_under_data(&root_dir, &p));
+                            if scratch {
+                                format!(
+                                    "{result}\n\nScratch area: plain files in `.data/tmp` are swept after a day — keep deliverables the user should keep in `./<project>/...`."
+                                )
+                            } else {
+                                result
+                            }
+                        }
                         Err(reason) => reason,
                     }
                 }
@@ -442,6 +536,18 @@ pub(super) async fn handle_file_actions(
                     ) {
                         return format_file_action_error(e);
                     }
+                    // A patch must follow a read of this file in the same
+                    // session: a blind patch cannot match its context. Show
+                    // the head so the retry is written against real lines and
+                    // record the read so that retry can pass.
+                    if p.is_file() && !locks.has_read(session_id, &p) {
+                        locks.record_read(session_id, &p);
+                        return format!(
+                            "Error: read {} before patching it — a blind patch cannot safely locate its context.\n\nFirst 40 lines:\n{}",
+                            path_str,
+                            head_preview(&p, 40)
+                        );
+                    }
                     // Backup + apply run inside the path lock: the patch is
                     // refused when another conversation changed the file
                     // after this session last read it.
@@ -490,7 +596,14 @@ pub(super) async fn handle_file_actions(
                         })
                         .await
                     {
-                        Ok(result) => result,
+                        Ok(result) => {
+                            note_write_target(
+                                session_id,
+                                is_scratch_path(&root_dir, &p),
+                                !is_under_data(&root_dir, &p),
+                            );
+                            result
+                        }
                         Err(reason) => reason,
                     }
                 }

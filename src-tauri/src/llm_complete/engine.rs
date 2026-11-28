@@ -57,7 +57,19 @@ fn build_prompt_bundle(
     // names explicitly on each message (`loaded_skills`) — explicit state
     // instead of scanning message text, which broke silently whenever the UI
     // event plumbing changed.
-    let activated_skills = collect_loaded_skills(&messages);
+    let mut activated_skills = collect_loaded_skills(&messages);
+    // `{skill:<name>}` in the newest user message is a direct request: load the
+    // skill up front (instructions + its tools) instead of waiting for a
+    // `use_skill` round.
+    for name in explicit_skill_invocations(&messages) {
+        if !activated_skills.iter().any(|existing| existing == &name) {
+            activated_skills.push(name);
+        }
+    }
+
+    // Remember the newest user message so `memory consolidate` `apply` can
+    // verify the user actually asked for a tidy-up (a destructive archive).
+    crate::tools::memory::note_last_user_message(session_id, &last_user_text(&messages));
 
     let mut system_content = config.system_message.clone(); //top-level system instructions from config
     let mut loaded_skills_content = String::new();
@@ -68,15 +80,24 @@ fn build_prompt_bundle(
     // The machine's OS name and version are advertised by the `run_shell` tool
     // schema itself (tools::get_all_tools), next to the fixed script language
     // they explain, instead of sitting in this system prompt.
-    if !system_content.is_empty() {
-        system_content.push_str("\n\n");
+    // Explicit invocation: only announce the `{tool:…}` / `{mcp:…}` / `{skill:…}`
+    // syntax when the newest user message actually uses it, instead of paying
+    // for it on every turn.
+    let newest_user_text = last_user_text(&messages);
+    let mentions_invocation = newest_user_text.contains("{tool:")
+        || newest_user_text.contains("{mcp:")
+        || newest_user_text.contains("{skill:");
+    if mentions_invocation {
+        if !system_content.is_empty() {
+            system_content.push_str("\n\n");
+        }
+        system_content.push_str(
+            "Explicit invocation: `{tool:<name>}`, `{mcp:<server>.<tool>}` and `{skill:<name>}` written \
+            in a user message are direct requests — call the tool or load the skill before answering, \
+            instead of asking the user for permission in chat. The ordinary risk-based confirmation \
+            dialogs still apply to whatever the call runs.",
+        );
     }
-    system_content.push_str(
-        "Explicit invocation: `{tool:<name>}`, `{mcp:<server>.<tool>}` and `{skill:<name>}` written \
-        in a user message are direct requests — call the tool or load the skill before answering, \
-        instead of asking the user for permission in chat. The ordinary risk-based confirmation \
-        dialogs still apply to whatever the call runs.",
-    ); //Add explicit invocation syntax to system prompt
 
     // Batching guidance. Only advertised while the switch can actually
     // parallelise: with `parallel_tools` off (or a concurrency of 1) the round
@@ -466,27 +487,11 @@ fn build_prompt_bundle(
         .any(|t| t == "todo_list" || t == "todo")
     {
         let mut todo_guidance = "\
-        TODOS: the `todos` tool holds this session's plan. Before planning or starting \
-        non-trivial work, `list` it — the active list is also injected as internal context \
-        while it has unfinished items. Continue from an existing list and move items \
-        `pending` → `in_progress` → `completed` as you work; `add` items when a new \
-        multi-step task begins. The UI mirrors every change live, so never leave stale \
-        items behind. \
-        ASKING: when a decision needs the user's own choice (approach, naming, trade-offs), \
-        use action `ask` with 1-8 short questions (options or free text); the call waits \
-        until the user submits and returns their answers as JSON — never ask what the \
-        conversation already answers, and proceed on your own when the form comes back \
-        dismissed or timed out. \
-        PLAN CONFIRMATION: when a plan you presented awaits the user's confirmation, call \
-        `ask` and keep the items `pending` — while the question form is open the goal loop \
-        stays suspended, so nothing is executed before the user answers. \
-        GOAL LOOP: while the list has unfinished items, a final answer does NOT end the \
-        turn — it is continued automatically so you keep working; do not write a final \
-        summary with goals open. End the turn explicitly by writing [goal:DONE] in your \
-        final answer, either when the goal is fully reached or when you are blocked and \
-        need the user (state plainly what is blocking you). \
-        WAITING: when the unfinished items are waiting on an external event rather than \
-        on your own work, do not force them."
+        TODOS: `todos` holds this session's plan — `list` it before starting non-trivial work and \
+        continue the existing list (`pending` → `in_progress` → `completed`), `add` items when a \
+        multi-step task begins, and use action `ask` when a decision needs the user's choice. The \
+        goal loop keeps working while items are unfinished: end with [goal:DONE] when the goal is \
+        reached (or you are blocked and need the user), or wait for an external event instead."
             .to_string();
         let has_timer = config.selected_tools.iter().any(|t| t == "timer");
         todo_guidance.push(' ');
@@ -501,26 +506,9 @@ fn build_prompt_bundle(
         system_content.push_str(&todo_guidance);
     }
 
-    // ── Deliverables guidance ───────────────────────────────────────────────
-    // Everything the user is meant to keep has to outlive the scratch clock:
-    // every plain file directly in `.data/tmp` is swept after a day, so a
-    // report left there is a report lost. The tool description of
-    // `file_actions` carries the same rule; this states it as policy.
-    if config.effective_tools().iter().any(|t| t == "file_actions") {
-        let deliverables_guidance = "\
-        DELIVERABLES: every report, document and file you hand to the user belongs in the \
-        project folder of the workspace — `./<project>/…` (use the folder the task is about, \
-        or the folder the user named; create one when neither exists) — and NEVER in \
-        `.data/tmp`, which is the scratch area and is swept after a day. Scratch work in \
-        between can stay in `.data/tmp`; the final artifact must not. A deliverable a \
-        sub-agent left under `.data/deliver/…` is scratch as well: copy what the user is \
-        meant to keep into the project folder before calling the task done. End the turn by \
-        naming the workspace-relative paths you wrote.";
-        if !system_content.is_empty() {
-            system_content.push_str("\n\n");
-        }
-        system_content.push_str(deliverables_guidance);
-    }
+    // Deliverables guidance is no longer a per-turn block: `file_actions write`
+    // appends the scratch-vs-deliverable reminder only when the target is the
+    // swept `.data/tmp` area, and the `file_actions` schema carries the rule.
 
     // ── Embedded sub-agent roles (`+agent` in the composer) ─────────────────
     // A snapshot written when the session's first message was sent. It is
@@ -1686,6 +1674,8 @@ pub(crate) async fn run_chat_turn(
 ) -> Result<(), String> {
     let session_id = turn.session_id.clone();
     let turn_id = turn.turn_id.clone();
+    // Fresh scratch/deliverable flags for this turn (end-of-turn reminder).
+    crate::tools::reset_deliverable_turn(&session_id);
     // A turn that is still winding down keeps polling its own flag —
     // permanently `true` once superseded — so it exits instead of resurrecting.
     let turn_cancelled = turn.cancel_flag();
@@ -1861,7 +1851,10 @@ pub(crate) async fn run_chat_turn(
         &state,
         &config,
         &active_skill_dirs,
-        !skill_ids.is_empty(),
+        // A `{skill:<name>}` mention auto-loads the skill, so it can make the
+        // skill tools (`skill_read` / `use_skill`) worth advertising even when
+        // no skill is selected in the UI.
+        !skill_ids.is_empty() || !activated_skills.is_empty(),
         skill_evolution_root.as_deref(),
         &enabled_agents,
         &turn.mcp,
@@ -1881,6 +1874,8 @@ pub(crate) async fn run_chat_turn(
     let mut background_hold_rounds: u32 = 0;
     // Goal-loop continuations this turn (todo list still unfinished).
     let mut goal_nudges: u32 = 0;
+    // Whether the one-shot end-of-turn deliverable reminder has fired.
+    let mut deliverable_hinted = false;
     // Continuations after a `finish_reason: "length"` truncation.
     let mut length_continues: u32 = 0;
     // The goal loop only applies while the todos tool is part of the payload
@@ -2619,6 +2614,7 @@ still missing."
             // explicitly by writing [goal:DONE] into its final answer —
             // either because the goal is fully reached, or because it is
             // blocked and needs the user.
+            let mut goal_suspended = false;
             if todos_tool_enabled
                 && !sr.content.contains(GOAL_DONE_MARKER)
                 && goal_nudges < GOAL_LOOP_MAX_NUDGES
@@ -2666,6 +2662,7 @@ The plan resumes on the next turn."
                     };
 
                     if let Some(notice) = suspension {
+                        goal_suspended = true;
                         turn.emit_token(format!("\n\n{notice}\n\n"));
                         log_event(
                             &state,
@@ -2725,6 +2722,28 @@ only when every item is done, or when you are blocked and need the user.\n\n{wai
                         continue;
                     }
                 }
+            }
+
+            // ── Deliverable reminder ────────────────────────────────────────
+            // A turn that wrote scratch files under `.data/tmp` (swept after a
+            // day) but never a project file is the "report left in the swept
+            // area" failure. Remind once; if the temp files were purely
+            // intermediate, the model just finishes and the turn ends.
+            if !goal_suspended
+                && !deliverable_hinted
+                && crate::tools::turn_needs_deliverable_reminder(&session_id)
+            {
+                deliverable_hinted = true;
+                all_messages.push(json!({
+                    "role": "user",
+                    "content": format!(
+                        "{CONTEXT_DELIVERABLE_MARKER}\nThis turn wrote files under `.data/tmp` (scratch, swept after a day) but never a file in a project folder. If the user asked for a file or report to keep, copy it to `./<project>/…` now; if the temp files were only intermediate, just finish your answer.\n"
+                    ),
+                }));
+                turn.emit_token(
+                    "\n\n[System] Deliverable reminder: scratch files in `.data/tmp` are swept after a day — copy anything the user should keep into a project folder.\n\n".to_string(),
+                );
+                continue;
             }
 
             // Control markers are signals, not answer text. A reply that held

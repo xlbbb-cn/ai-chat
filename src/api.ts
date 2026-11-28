@@ -552,6 +552,9 @@ export interface ActiveTurnInfo {
   session_id: string;
   turn_id: string;
   model: string;
+  /** Thinking depth the turn runs with (frozen at its start); absent =
+   *  provider default. */
+  reasoning_effort?: string | null;
   started_at_ms: number;
   phase: string;
 }
@@ -561,6 +564,9 @@ export interface TurnSnapshot {
   session_id: string;
   turn_id: string;
   model: string;
+  /** Thinking depth the turn runs with (frozen at its start); absent =
+   *  provider default. */
+  reasoning_effort?: string | null;
   started_at_ms: number;
   phase: string;
   content: string;

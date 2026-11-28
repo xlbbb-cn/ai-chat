@@ -227,6 +227,8 @@ const en = {
         reasoningLow: "Low",
         reasoningMedium: "Medium",
         reasoningHigh: "High",
+        modelSettingsLocked:
+            "This conversation's turn is still running — its model and thinking depth stay as they are until it ends.",
         send: "Send",
         stop: "Stop",
         contextUsage: "Context usage: {percent}%",
@@ -987,6 +989,7 @@ const en = {
         clearSearch: "Clear search",
         running: "Running",
         runningTitle: "A turn is still running in this conversation — it keeps working in the background",
+        runningTitleWithModel: "Running in the background — {model} · {depth}",
         tabAll: "All",
         tabFavorites: "Favorites",
         tabArchived: "Archived",

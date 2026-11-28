@@ -3,7 +3,7 @@ import { listHistorySessions, loadSessionMessages, deleteHistory, listSessionMet
 import type { HistorySessionSummary, SessionMeta } from "../api";
 import { recordsToMessages, parseStoredContent } from "../historyRows";
 import type { Message } from "../types";
-import { useI18n, type Locale } from "../i18n";
+import { useI18n, type Locale, type MessageKey } from "../i18n";
 import {
   FontAwesomeIcon,
   faAnglesLeft,
@@ -32,15 +32,30 @@ interface Props {
   refreshKey?: number;
   /**
    * Sessions whose turn is currently running (foreground or background), with
-   * the turn's start time so the row can show this turn's elapsed duration.
+   * the turn's start time so the row can show this turn's elapsed duration and
+   * the model it runs with (the backend publishes it with the turn: a session
+   * keeps its own model even when another conversation picked a different one).
    * Switching is always allowed — the app hands a running foreground turn to
    * its background driver on the way out.
    */
-  runningSessions?: Record<string, { started_at_ms: number }>;
+  runningSessions?: Record<
+    string,
+    { started_at_ms: number; model?: string; effort?: string }
+  >;
   onClose: () => void;
 }
 
 type HistoryTab = "all" | "favorites" | "archived";
+
+/**
+ * Depth labels reused from the composer's thinking-depth control: the badge and
+ * that control must never word the same state differently.
+ */
+const DEPTH_LABELS = {
+  low: "app.reasoningLow",
+  medium: "app.reasoningMedium",
+  high: "app.reasoningHigh",
+} as const satisfies Record<string, MessageKey>;
 
 const DAY_MS = 86_400_000;
 
@@ -497,11 +512,21 @@ export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, running
             const createdAt = formatHistoryTimestamp(summary.created_at, locale);
             const isRenaming = renamingSessionId === sid;
             const title = getSessionTitle(summary);
-            const runningStartedAt = runningSessions?.[sid]?.started_at_ms;
+            const runningEntry = runningSessions?.[sid];
+            const runningStartedAt = runningEntry?.started_at_ms;
             const isRunning = runningStartedAt !== undefined;
             const runningSeconds = runningStartedAt === undefined
               ? 0
               : Math.max(0, Math.floor((nowMs - runningStartedAt) / 1000));
+            const runningModel = runningEntry?.model;
+            // `minimal` is accepted by the backend but not offered by the
+            // composer's control: show it verbatim rather than mislabelling it.
+            const depthKey = runningEntry?.effort
+              ? DEPTH_LABELS[runningEntry.effort as keyof typeof DEPTH_LABELS]
+              : undefined;
+            const runningDepth = depthKey
+              ? t(depthKey)
+              : runningEntry?.effort || t("app.reasoningDefault");
             return (
               <div
                 key={sid}
@@ -582,7 +607,23 @@ export function HistoryPanel({ currentSessionId, onLoad, refreshKey = 0, running
                     {isArchived ? t("history.archived") : ""}
                   </span>
                   {isRunning && (
-                    <span className="history-running-badge" title={t("history.runningTitle")}>
+                    <span
+                      className="history-running-badge"
+                      title={
+                        runningModel
+                          ? t("history.runningTitleWithModel", {
+                              model: runningModel,
+                              depth: runningDepth,
+                            })
+                          : t("history.runningTitle")
+                      }
+                    >
+                      {/* The model keeps its own conversation visible here: a
+                          turn running in the background is not using whatever
+                          model this window has selected. */}
+                      {runningModel && (
+                        <span className="history-running-model">{runningModel}</span>
+                      )}
                       {t("history.running")}
                       <span className="history-running-time">{formatUptime(runningSeconds)}</span>
                     </span>

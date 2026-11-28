@@ -410,6 +410,17 @@
   font-weight: 400;
 }
 
+/* The model the turn runs with. Truncated: the row also carries a message
+   count and a timestamp, and a long provider id must not push them out. */
+.history-running-model {
+  min-width: 0;
+  max-width: 88px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 400;
+}
+
 .history-created {
   flex-shrink: 0;
   white-space: nowrap;

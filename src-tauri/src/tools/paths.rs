@@ -265,11 +265,26 @@ pub(super) fn ensure_mutation_target_allowed(
     // The SQLite database is the one file inside `.data` that `file_actions`
     // cannot recreate: `write` truncates it and `delete` removes it, which
     // would destroy the chat history, the API monitor, the interaction log and
-    // the agent missions. Everything else under `.data` (memory, todos, skill
-    // status, skills) is part of the workspace and stays reachable.
+    // the agent missions.
     if is_workspace_database(path, workspace_dir) {
         return Err(
             "The workspace database (.data/chat.db) is managed by the application and cannot be modified or deleted."
+                .to_string(),
+        );
+    }
+
+    // Memory and todos are app-managed state: the `memory` / `todos` tools are
+    // the only writers, and a raw `write`/`delete` would corrupt their
+    // frontmatter and list files. Scratch, scripts, skills and deliverables
+    // under `.data` stay reachable.
+    if path_is_within_lenient(path, &crate::workspace::memory_root(workspace_dir)) {
+        return Err(format!(
+            "`.data/memory` is app-managed memory state; `{action}` is not allowed here. Use the `memory` tool (add/get/list/search/consolidate) instead."
+        ));
+    }
+    if path_is_within_lenient(path, &crate::workspace::todos_root(workspace_dir)) {
+        return Err(
+            "`.data/todos` is app-managed todo state; `file_actions` cannot modify it. Use the `todos` tool instead."
                 .to_string(),
         );
     }
