@@ -845,3 +845,98 @@ fn configured_load_migrates_inline_prompts_and_panel_reads_the_index() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+// ─── Deterministic judgement ─────────────────────────────────────────────────
+// Each of these replaced a prompt rule with code: the model no longer decides
+// concurrency, cwd safety or whether a request is worth a mission.
+
+fn plan_task(id: &str, dependencies: &[&str]) -> Task {
+    Task {
+        id: id.to_string(),
+        agent_id: "a".to_string(),
+        description: "x".to_string(),
+        context: String::new(),
+        cwd: None,
+        images: Vec::new(),
+        params: serde_json::Map::new(),
+        dependencies: dependencies.iter().map(|dep| dep.to_string()).collect(),
+    }
+}
+
+fn user_message(text: &str) -> crate::llm_client::ChatMessage {
+    crate::llm_client::ChatMessage {
+        role: "user".to_string(),
+        content: serde_json::json!(text),
+        reasoning_content: None,
+        loaded_skills: None,
+    }
+}
+
+#[test]
+fn execution_mode_follows_the_dependency_graph() {
+    // No dependencies at all: everything may start together.
+    assert_eq!(
+        derive_execution_mode(&[plan_task("t1", &[]), plan_task("t2", &[])]),
+        "parallel"
+    );
+    // A chain: every wave holds one task, so it can only run one at a time.
+    assert_eq!(
+        derive_execution_mode(&[
+            plan_task("t1", &[]),
+            plan_task("t2", &["t1"]),
+            plan_task("t3", &["t2"]),
+        ]),
+        "sequential"
+    );
+    // A diamond still has a wide wave, so it stays parallel.
+    assert_eq!(
+        derive_execution_mode(&[
+            plan_task("a", &[]),
+            plan_task("b", &["a"]),
+            plan_task("c", &["a"]),
+            plan_task("d", &["b", "c"]),
+        ]),
+        "parallel"
+    );
+    assert_eq!(derive_execution_mode(&[plan_task("solo", &[])]), "parallel");
+}
+
+#[test]
+fn an_escaping_cwd_is_cleared_at_parse_time() {
+    let raw = r#"{"tasks":[
+        {"id":"t1","agent_id":"a","description":"one","cwd":"../outside"},
+        {"id":"t2","agent_id":"a","description":"two","cwd":"/etc/passwd"},
+        {"id":"t3","agent_id":"a","description":"three","cwd":"apps/web"}
+    ]}"#;
+    let (decision, issues) = parse_task_plan(raw, &roster_ids(&["a"])).expect("plan parses");
+    let plan = expect_mission(decision);
+    assert_eq!(plan.tasks[0].cwd, None, "'../outside' must not survive");
+    assert_eq!(plan.tasks[1].cwd, None, "an absolute path must not survive");
+    assert_eq!(plan.tasks[2].cwd.as_deref(), Some("apps/web"));
+    assert_eq!(
+        issues.iter().filter(|issue| issue.contains("cwd")).count(),
+        2,
+        "both cleared paths are reported: {issues:?}"
+    );
+}
+
+#[test]
+fn delegation_hint_settles_only_the_clear_cases() {
+    let hint = |text: &str| delegation_hint(&[user_message(text)]);
+    // Short, single line, nothing to fetch or build.
+    assert_eq!(hint("解释一下什么是幂等"), DelegationHint::No);
+    // Anything with a path, a link or a fence stays with the model.
+    assert_eq!(hint("看下 src/app.tsx"), DelegationHint::Unsure);
+    assert_eq!(hint("打开 https://example.com"), DelegationHint::Unsure);
+    // Two links or two code blocks are plainly more than one job.
+    assert_eq!(
+        hint("对比 https://a.example 和 https://b.example"),
+        DelegationHint::Yes
+    );
+    assert_eq!(
+        hint("改这两段：\n```rust\nlet a = 1;\n```\n```rust\nlet b = 2;\n```"),
+        DelegationHint::Yes
+    );
+    // No text at all is not a decision the gate may make.
+    assert_eq!(hint("   "), DelegationHint::Unsure);
+}
+

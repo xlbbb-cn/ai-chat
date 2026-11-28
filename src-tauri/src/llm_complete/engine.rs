@@ -384,8 +384,9 @@ fn build_prompt_bundle(
         system_content.push_str(&agents_sys_msg);
     }
 
-    // A declined selection is not a ban — just a hint that the cheap path is to
-    // answer directly. Keep it short so it does not become a second policy.
+    // A declined turn is not a ban — just a hint that the cheap path is to
+    // answer directly. Reached by the delegation gate (deterministic) and by a
+    // planner that declined; both mean "one direct answer is enough".
     if matches!(
         orchestration
             .as_ref()
@@ -396,7 +397,7 @@ fn build_prompt_bundle(
             system_content.push_str("\n\n");
         }
         system_content.push_str(
-            "The orchestrator decided this request needs no sub-agents. Answer directly; delegate only if the request clearly requires it.",
+            "This request was judged to need no sub-agents. Answer directly; delegate only if it clearly requires it.",
         );
     }
 
@@ -1630,8 +1631,19 @@ pub(crate) async fn run_chat_turn(
     let subagents_enabled = use_agents.unwrap_or(false);
     // Two separate switches: the sub-agent system gates `call_subagent`, the
     // planning switch gates the automatic selection + task plan that runs
-    // before every answer. Planning needs agents to exist, so it is ANDed.
-    let planning_enabled = subagents_enabled && auto_plan.unwrap_or(true);
+    // before every answer. `OrchestrationMode` is the only place that combines
+    // them (plus the roster and the bus switch) into what this turn does.
+    let orchestration_mode = if subagents_enabled {
+        let agents_cfg = agents::load_configured_agents(&state.agents_config_path);
+        agents::resolve_orchestration_mode(
+            true,
+            auto_plan.unwrap_or(true),
+            agents_cfg.agents.iter().any(|a| a.enabled),
+            agents_cfg.orchestration.mbus_enabled,
+        )
+    } else {
+        agents::OrchestrationMode::Off
+    };
     log_event(
         &state,
         "INFO",
@@ -1649,54 +1661,59 @@ pub(crate) async fn run_chat_turn(
     // advertises the agents picked for this turn (soft narrowing: every enabled
     // agent stays callable through `call_subagent`).
     let mut orchestration: Option<agents::OrchestrationOutcome> = None;
-    if planning_enabled {
-        let agents_cfg = agents::load_configured_agents(&state.agents_config_path);
-        let has_enabled = agents_cfg.agents.iter().any(|a| a.enabled);
-        if has_enabled {
-            turn.set_phase("planning");
-            match agents::orchestrate(
-                &app,
+    log_event(
+        &state,
+        "INFO",
+        format!(
+            "orchestration mode: {} (session_id={})",
+            orchestration_mode.label(),
+            session_id
+        ),
+    );
+    if orchestration_mode.plans() {
+        turn.set_phase("planning");
+        match agents::orchestrate(
+            &app,
+            &state,
+            &config,
+            &messages,
+            &session_id,
+            turn_cancelled.clone(),
+        )
+        .await
+        {
+            Ok(outcome) => orchestration = Some(outcome),
+            Err(err) => log_event(
                 &state,
-                &config,
-                &messages,
-                &session_id,
-                turn_cancelled.clone(),
-            )
-            .await
-            {
-                Ok(outcome) => orchestration = Some(outcome),
-                Err(err) => log_event(
-                    &state,
-                    "WARN",
-                    format!("agent orchestration skipped, answering directly: {err}"),
-                ),
-            }
-            // "Stop" pressed during planning/execution ends the whole turn: the
-            // in-flight sub-agents tore themselves down (cli/cloud kill their
-            // process trees, the executor skipped the remaining tasks), so the
-            // final answer must not run — and the turn flag must NOT be reset
-            // here, or the rest of the turn would keep working after the user
-            // asked it to stop.
-            if turn_cancelled.load(Ordering::SeqCst) {
-                log_event(
-                    &state,
-                    "INFO",
-                    format!(
-                        "agent orchestration stopped by user: session_id={}",
-                        session_id
-                    ),
-                );
-                // `emit_done` closes the injection window before announcing
-                // the end, so nothing accepted after this point is stranded.
-                turn.emit_done();
-                return Ok(());
-            }
+                "WARN",
+                format!("agent orchestration skipped, answering directly: {err}"),
+            ),
+        }
+        // "Stop" pressed during planning/execution ends the whole turn: the
+        // in-flight sub-agents tore themselves down (cli/cloud kill their
+        // process trees, the executor skipped the remaining tasks), so the
+        // final answer must not run — and the turn flag must NOT be reset
+        // here, or the rest of the turn would keep working after the user
+        // asked it to stop.
+        if turn_cancelled.load(Ordering::SeqCst) {
             log_event(
                 &state,
                 "INFO",
-                format!("agent orchestration finished: session_id={}", session_id),
+                format!(
+                    "agent orchestration stopped by user: session_id={}",
+                    session_id
+                ),
             );
+            // `emit_done` closes the injection window before announcing
+            // the end, so nothing accepted after this point is stranded.
+            turn.emit_done();
+            return Ok(());
         }
+        log_event(
+            &state,
+            "INFO",
+            format!("agent orchestration finished: session_id={}", session_id),
+        );
     }
 
     let prompt = build_prompt_bundle(

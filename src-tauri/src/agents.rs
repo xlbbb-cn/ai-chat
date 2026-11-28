@@ -34,12 +34,14 @@ mod config;
 mod execution;
 mod helper;
 mod mission;
+mod mode;
 mod planning;
 
 pub use self::config::*;
 pub(crate) use self::execution::*;
 pub(crate) use self::helper::*;
 pub use self::mission::*;
+pub use self::mode::*;
 pub(crate) use self::planning::*;
 
 // ─── Selection & orchestration outcome ────────────────────────────────────────

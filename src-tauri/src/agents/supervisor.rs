@@ -133,6 +133,14 @@ pub async fn run_planner_supervisor(
             || (heartbeat_due && stalled(&bus));
 
         if trigger {
+            // Nothing left to supervise: every task is already terminal, so no
+            // supervision decision can change the outcome. Settle without
+            // paying for a model call.
+            if settled(&bus) {
+                final_status = "done";
+                final_note = "all tasks settled".to_string();
+                break;
+            }
             activation = activation.saturating_add(1);
             let inbox = bus.take_inbox(PLANNER_ID, mbus::MAX_DELIVERIES_PER_ROUND);
             // Everything up to this point is represented in the prompt (status
@@ -489,6 +497,16 @@ async fn run_activation(
                 )
             } else if action_label == "finish" {
                 (mbus::handle_tool(app, bus, PLANNER_ID, &parsed, true), true)
+            } else if action_label == "send"
+                && repeated_message(notes, parsed["message"].as_str().unwrap_or(""))
+            {
+                (
+                    format!(
+                        "Error: this exact message was already sent earlier in the mission (target \
+                         {target}). Do not repeat guidance — send something new, or finish."
+                    ),
+                    false,
+                )
             } else {
                 (
                     mbus::handle_tool(app, bus, PLANNER_ID, &parsed, true),
@@ -783,6 +801,46 @@ fn stalled(bus: &MissionBus) -> bool {
     bus.status()
         .iter()
         .any(|peer| peer.state == "running" && peer.last_activity_ms >= STALL_MS)
+}
+
+/// Every task reached a terminal state: supervision has nothing left to decide.
+fn settled(bus: &MissionBus) -> bool {
+    let statuses = bus.status();
+    !statuses.is_empty()
+        && statuses
+            .iter()
+            .all(|peer| peer.state != "pending" && peer.state != "running")
+}
+
+/// Chars compared when looking for a repeated message; the prompt already asks
+/// the planner not to repeat itself, the tool refuses it instead of trusting.
+const REPEAT_CHECK_CHARS: usize = 120;
+
+fn head(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+        .chars()
+        .take(REPEAT_CHECK_CHARS)
+        .collect()
+}
+
+/// Only "sent to <target>: <text>" notes are bus messages; the planner's own
+/// prose notes are not, so they can never block a later send.
+fn sent_body(note: &str) -> Option<&str> {
+    let rest = note.split_once(": ")?.1;
+    let rest = rest.strip_prefix("sent to ")?;
+    rest.split_once(": ").map(|(_, body)| body)
+}
+
+fn repeated_message(notes: &[String], message: &str) -> bool {
+    let wanted = head(message);
+    wanted.chars().count() >= 8
+        && notes
+            .iter()
+            .filter_map(|note| sent_body(note))
+            .any(|sent| head(sent) == wanted)
 }
 
 fn emit_state(

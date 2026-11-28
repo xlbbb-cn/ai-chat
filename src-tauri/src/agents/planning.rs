@@ -10,6 +10,64 @@ const SKILLS_CLAUSE: &str = "`skills=` is configuration metadata (the agent's al
 list) — no skill content is auto-injected for a sub-agent; it reaches skill files only through \
 its `tools=` (e.g. `file_actions`). Match on `tools=` and `mcp=` first.";
 
+// ─── Deterministic delegation gate ────────────────────────────────────────────
+
+/// Chars below which a single-line request is treated as self-contained.
+const DELEGATION_HINT_SHORT_CHARS: usize = 160;
+/// Phrases that name more than one piece of work in one request.
+const MULTI_WORK_MARKERS: [&str; 12] = [
+    "分别", "各自", "同时", "并行", "批量", "两个", "多个", "三步", "然后", "in parallel",
+    "separately", "both ",
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DelegationHint {
+    /// One direct answer is enough; no model call is needed to know that.
+    No,
+    /// More than one workstream; the roster needs no narrowing.
+    Yes,
+    /// Ask the model.
+    Unsure,
+}
+
+/// Deterministic pre-gate in front of selection and planning.
+///
+/// It only settles the clear cases. A wrong `No` costs the parallelism of a
+/// sub-agent run, never a tool — the main agent keeps its own — so that branch
+/// is deliberately narrow: short, single-line, no link, no path, no code and
+/// no "more than one thing" marker.
+pub(crate) fn delegation_hint(messages: &[crate::llm_client::ChatMessage]) -> DelegationHint {
+    let text = messages
+        .last()
+        .map(|message| content_to_text(&message.content))
+        .unwrap_or_default();
+    let text = text.trim();
+    if text.is_empty() {
+        return DelegationHint::Unsure;
+    }
+    let lower = text.to_lowercase();
+    let links = lower.matches("http://").count() + lower.matches("https://").count();
+    let fences = lower.matches("```").count() / 2;
+    let multi = MULTI_WORK_MARKERS
+        .iter()
+        .any(|marker| lower.contains(marker));
+    if links >= 2 || fences >= 2 || (multi && text.chars().count() >= 80) {
+        return DelegationHint::Yes;
+    }
+    let self_contained = text.chars().count() < DELEGATION_HINT_SHORT_CHARS
+        && links == 0
+        && fences == 0
+        && !multi
+        && !text
+            .chars()
+            .any(|character| matches!(character, '\n' | '/' | '\\' | '`'));
+    if self_contained {
+        DelegationHint::No
+    } else {
+        DelegationHint::Unsure
+    }
+}
+
 // ─── LLM helpers ──────────────────────────────────────────────────────────────
 
 /// Non-streaming LLM call; returns the raw text content.
@@ -391,7 +449,18 @@ pub(crate) fn parse_task_plan(raw: &str, roster: &[String]) -> Result<(PlanDecis
         task.description = task.description.trim().to_string();
         task.context = task.context.trim().to_string();
         // The planner may write "", "." or "./" for "the workspace root".
-        task.cwd = normalize_task_cwd(task.cwd.as_deref());
+        // A path that leaves the workspace is not sandboxable, so it is cleared
+        // here instead of failing the task once the mission already runs.
+        task.cwd = match normalize_task_cwd(task.cwd.as_deref()) {
+            Some(dir) if !is_safe_relative_dir(&dir) => {
+                issues.push(format!(
+                    "cleared cwd '{dir}' on task '{}': not a workspace-relative path",
+                    task.id
+                ));
+                None
+            }
+            cwd => cwd,
+        };
         task.images = sanitize_task_images(&task.images);
         task.params = sanitize_task_params(&task.params)
             .into_iter()
@@ -451,10 +520,21 @@ pub(crate) fn parse_task_plan(raw: &str, roster: &[String]) -> Result<(PlanDecis
         });
     }
 
+    // Concurrency follows from the graph the executor already schedules in
+    // waves: a chain runs one task at a time, a wide wave may run together.
+    // The planner's own answer is reported when it disagrees, never obeyed.
+    let derived_mode = derive_execution_mode(&tasks);
+    if !plan.execution_mode.trim().is_empty() && plan.execution_mode.trim() != derived_mode {
+        issues.push(format!(
+            "planner said execution_mode='{}', derived '{derived_mode}' from the dependency graph",
+            plan.execution_mode.trim()
+        ));
+    }
+
     Ok((
         PlanDecision::Mission(TaskPlan {
             tasks,
-            execution_mode: plan.execution_mode,
+            execution_mode: derived_mode.to_string(),
             delegate: Some(true),
             why: plan.why,
         }),
@@ -462,6 +542,66 @@ pub(crate) fn parse_task_plan(raw: &str, roster: &[String]) -> Result<(PlanDecis
     ))
 }
 
+/// Whether a workspace-relative directory string stays inside the workspace.
+/// Purely lexical — the sandbox check runs again when the path is resolved —
+/// but it catches an escaping `cwd` while the plan can still be repaired.
+pub(crate) fn is_safe_relative_dir(value: &str) -> bool {
+    let path = Path::new(value);
+    !value.starts_with(['/', '\\'])
+        && !path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+}
+
+/// Concurrency is a property of the dependency graph, not a judgement. The
+/// executor starts every ready task of a wave together, so the plan is
+/// `sequential` only when no two tasks can ever be ready at the same time.
+pub(crate) fn derive_execution_mode(tasks: &[Task]) -> &'static str {
+    use std::collections::HashMap;
+
+    if tasks.iter().all(|task| task.dependencies.is_empty()) {
+        return "parallel";
+    }
+    let index: HashMap<&str, usize> = tasks
+        .iter()
+        .enumerate()
+        .map(|(position, task)| (task.id.as_str(), position))
+        .collect();
+    // Longest-path levels; cycles were broken above, so this converges.
+    let mut level = vec![0usize; tasks.len()];
+    for _ in 0..tasks.len() {
+        let mut changed = false;
+        for (position, task) in tasks.iter().enumerate() {
+            let mut want = 0;
+            for dependency in &task.dependencies {
+                if let Some(&dep) = index.get(dependency.as_str()) {
+                    want = want.max(level[dep] + 1);
+                }
+            }
+            if want > level[position] {
+                level[position] = want;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    let widest = (0..=level.iter().copied().max().unwrap_or(0))
+        .map(|wave| level.iter().filter(|&&value| value == wave).count())
+        .max()
+        .unwrap_or(1);
+    if widest <= 1 {
+        "sequential"
+    } else {
+        "parallel"
+    }
+}
 /// Announces the selector's decision to the UI (chip above the answer).
 pub(crate) fn emit_agent_selection(app: &AppHandle, session_id: &str, selection: &AgentSelection) {
     let _ = app.emit(
@@ -521,9 +661,37 @@ pub async fn orchestrate(
     // the user's custom headers, so planning calls reach the same gateway.
     let headers = upstream_request_headers(config, session_id);
 
+    // The clear cases are settled without a model: a short, self-contained
+    // request never becomes a mission, and an obviously multi-part one needs no
+    // roster narrowing. Only the ambiguous middle asks both questions.
+    let hint = delegation_hint(messages);
+    if hint == DelegationHint::No {
+        log_agent_event(
+            app,
+            "INFO",
+            "delegation hint: no — selector and planner skipped for a short, self-contained request"
+                .to_string(),
+        );
+        let declined = AgentSelection {
+            delegate: false,
+            confidence: 1.0,
+            choices: Vec::new(),
+        };
+        if enabled.len() > 1 {
+            emit_agent_selection(app, session_id, &declined);
+        }
+        return Ok(OrchestrationOutcome {
+            report: None,
+            selection: Some(declined),
+        });
+    }
+
     // Step 1: one selection call decides who takes part in this turn. With the
     // switch off every enabled agent takes part, exactly like before.
-    let (working_agents, selection) = if orchestration.auto_configure {
+    let (working_agents, selection) = if hint == DelegationHint::Yes {
+        let roster = full_roster_selection(&enabled, 1.0, "delegation hint: multi-part request");
+        (roster.agents, Some(roster.selection))
+    } else if orchestration.auto_configure {
         match select_agents(
             app,
             &client,
@@ -551,16 +719,6 @@ pub async fn orchestrate(
     } else {
         (enabled.clone(), None)
     };
-
-    // The selector can decide the request needs no sub-agents at all. Skipping
-    // planning here saves a full LLM round trip and keeps simple questions on
-    // the direct-answer path.
-    if matches!(&selection, Some(selection) if !selection.delegate) {
-        return Ok(OrchestrationOutcome {
-            report: None,
-            selection,
-        });
-    }
 
     // Step 2: Plan. Stop pressed between steps aborts the mission here, before
     // any sub-agent is launched.
@@ -844,12 +1002,29 @@ pub(crate) fn full_roster_selection(existing: &[SubAgent], confidence: f32, why:
     }
 }
 
+/// What an agent can actually do, for "is this roster a real choice?".
+/// Name, description and model are deliberately excluded: they do not change
+/// which task the agent can take.
+fn capability_signature(agent: &SubAgent) -> String {
+    let mut tools = agent.allowed_tools.clone();
+    tools.sort();
+    let mut skills = agent.allowed_skills.clone();
+    skills.sort();
+    format!(
+        "{}|{}|{}|{}",
+        normalize_agent_type(&agent.agent_type),
+        tools.join(","),
+        skills.join(","),
+        agent.enable_mcp
+    )
+}
+
 /// One non-streaming LLM call that decides which agents take part in this turn.
 ///
 /// The answer is a *proposal*: ids are validated against the live roster, the
 /// list is capped, and every failure widens back to the full roster instead of
-/// failing the mission. `delegate: false` is a first-class outcome — it skips
-/// planning entirely.
+/// failing the mission. Which agents participate is the only thing asked here:
+/// whether the request needs sub-agents at all is the planner's call.
 pub(crate) async fn select_agents(
     app: &AppHandle,
     client: &Client,
@@ -866,6 +1041,21 @@ pub(crate) async fn select_agents(
             existing,
             1.0,
             "the only enabled agent",
+        ));
+    }
+
+    // Agents that differ only in name, description or model are not a choice:
+    // the selector would pick arbitrarily and the planner would see the same
+    // capabilities whichever way it went.
+    let signature = capability_signature(&existing[0]);
+    if existing
+        .iter()
+        .all(|agent| capability_signature(agent) == signature)
+    {
+        return Ok(full_roster_selection(
+            existing,
+            1.0,
+            "every enabled agent has the same capabilities",
         ));
     }
 
@@ -929,14 +1119,13 @@ pub(crate) async fn select_agents(
          Existing agents:\n{catalogue}\n\n\
          Note: {SKILLS_CLAUSE}\n\n\
          Rules:\n\
-         - Smallest set that can do the job: 0 to {MAX_SELECTED_AGENTS} agents.\n\
+         - Smallest set that can do the job: 1 to {MAX_SELECTED_AGENTS} agents.\n\
          - `llm` for reasoning, analysis and writing; `cli` for large code changes in the workspace; `cloud` for long remote jobs.\n\
-         - Match capabilities, not domains: live web/browser/API data needs `mcp=enabled` or browser/network tools. If no agent has that data channel, return delegate=false so the main agent (which has MCP/browser tools) does the fetch.\n\
-         - If no agent fits, or the request can be answered directly, return delegate=false.\n\
+         - Match capabilities, not domains: live web/browser/API data needs `mcp=enabled` or browser/network tools. A fetch no listed agent can make is left to the main agent (which has MCP/browser tools).\n\
+         - If no agent fits, return an empty list — the planner decides whether the main agent answers alone.\n\
          - Copy ids exactly from the list above; never invent one.\n\n\
          Return ONLY one JSON object — no markdown, no commentary:\n\
-         {{\"delegate\":true,\"confidence\":0.0,\"agents\":[{{\"id\":\"<id>\",\"role\":\"<short role>\",\"why\":\"<one sentence>\"}}]}}\n\
-         or {{\"delegate\":false,\"confidence\":0.0,\"why\":\"<one sentence>\"}}",
+         {{\"confidence\":0.0,\"agents\":[{{\"id\":\"<id>\",\"role\":\"<short role>\",\"why\":\"<one sentence>\"}}]}}",
     );
 
     let raw = call_llm_once(
@@ -962,29 +1151,19 @@ pub(crate) async fn select_agents(
     })?;
     let parsed: SelectionResponse = serde_json::from_str(&repair_json(json))
         .map_err(|e| format!("selection parse error: {e}"))?;
-    // A model that lists agents but forgets `delegate` still meant to delegate;
-    // an explicit `false` always wins. A missing confidence is treated as
-    // "reasonably sure" — otherwise every terse answer would widen the roster.
-    let delegate = parsed.delegate.unwrap_or(!parsed.agents.is_empty());
+    // A missing confidence is treated as "reasonably sure" — otherwise every
+    // terse answer would widen the roster. `delegate` is not this call's
+    // decision: a model that still answers it is acknowledged, then ignored.
     let confidence = parsed.confidence.unwrap_or(0.7).clamp(0.0, 1.0);
-
-    if !delegate {
+    if parsed.delegate == Some(false) {
         log_agent_event(
             app,
             "INFO",
             format!(
-                "agent selection declined delegation (confidence {confidence:.2}): {}",
+                "agent selection suggested declining delegation; the planner decides: {}",
                 preview_text(parsed.why.trim(), 200)
             ),
         );
-        return Ok(SelectionResult {
-            agents: Vec::new(),
-            selection: AgentSelection {
-                delegate: false,
-                confidence,
-                choices: Vec::new(),
-            },
-        });
     }
 
     let mut choices: Vec<AgentChoice> = Vec::new();
@@ -1131,11 +1310,11 @@ pub(crate) async fn plan_tasks(
         or\n\
         {{\"delegate\":true,\"tasks\":[{{\"id\":\"t1\",\"agent_id\":\"<id>\",\"description\":\"...\",\
           \"context\":\"...\",\"cwd\":\"<workspace-relative dir, omit for root>\",\
-          \"images\":[],\"params\":{{}},\"dependencies\":[]}}],\
-          \"execution_mode\":\"parallel\"}}\n\
+          \"images\":[],\"params\":{{}},\"dependencies\":[]}}]}}\n\
         Rules:\n\
-        - execution_mode: \"parallel\" for independent tasks, \"sequential\" when order matters; \
-        dependencies lists the task ids that must finish first\n\
+        - At most {MAX_PLAN_TASKS} tasks — merge anything beyond that into an existing task.\n\
+        - Order is expressed by `dependencies` alone (the ids that must finish first); concurrency \
+        is derived from that graph, so do not state it.\n\
         - Every agent_id must be exactly one of: {roster}\n\
         - Match capabilities to the task: live web/browser/API collection needs `mcp=enabled` or \
         browser/network tools — never assign it to a file-only agent (mcp=none), which would burn \
@@ -1201,5 +1380,49 @@ pub(crate) async fn plan_tasks(
         }
     }
 
-    Err(format!("Plan parse error after 2 attempts: {last_error}"))
+    // Two unusable answers must not lose the mission: run the request as one
+    // task on the most capable agent, the same "widen instead of fail" rule the
+    // selector and every other planner fallback already follow.
+    let Some(agent) = most_capable_agent(agents) else {
+        return Err(format!("Plan parse error after 2 attempts: {last_error}"));
+    };
+    log_agent_event(
+        app,
+        "WARN",
+        format!(
+            "planner produced no usable plan after 2 attempts ({last_error}); \
+             running the request as one task on agent '{}'",
+            agent.id
+        ),
+    );
+    let request = messages
+        .last()
+        .map(|message| content_to_text(&message.content))
+        .unwrap_or_default();
+    Ok(PlanDecision::Mission(TaskPlan {
+        tasks: vec![Task {
+            id: "t1".to_string(),
+            agent_id: agent.id.clone(),
+            description: preview_text(request.trim(), 200),
+            context: "The planner produced no usable plan; execute the request directly."
+                .to_string(),
+            cwd: None,
+            images: Vec::new(),
+            params: serde_json::Map::new(),
+            dependencies: Vec::new(),
+        }],
+        execution_mode: "parallel".to_string(),
+        delegate: Some(true),
+        why: "fallback plan".to_string(),
+    }))
+}
+
+/// The agent with the widest capability surface, for deterministic fallbacks.
+fn most_capable_agent(agents: &[SubAgent]) -> Option<&SubAgent> {
+    agents.iter().max_by_key(|agent| {
+        (
+            agent.enable_mcp,
+            agent.allowed_tools.len() + agent.allowed_skills.len(),
+        )
+    })
 }
