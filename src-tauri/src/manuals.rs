@@ -81,8 +81,9 @@ impl Manual {
             ),
             Manual::SetupEnv => (
                 "Environment bootstrap",
-                "build the per-host Python 3.13 venv in app data and write the completion \
-                flag — announced only while that environment is pending",
+                "build the per-host environment in app data (the 3.13 venv, tools you install, \
+                the `ready.json` inventory) and keep it complete — announced only while that \
+                environment is pending",
             ),
         }
     }
