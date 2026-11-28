@@ -31,7 +31,12 @@ export default defineConfig(async () => ({
   server: {
     port: 1420,
     strictPort: true,
-    host: host || false,
+    // Bind both families. `host: false` left Vite on `[::1]:1420` only, while
+    // the WebKitGTK webview resolves `localhost` (the `devUrl`) to `127.0.0.1`
+    // and never falls back — the window then shows "Could not connect to
+    // localhost: Connection refused" with nothing wrong in the app itself.
+    // `::` is dual-stack here (`net.ipv6.bindv6only=0`), so IPv4 stays served.
+    host: host || "::",
     hmr: host
       ? {
           protocol: "ws",
