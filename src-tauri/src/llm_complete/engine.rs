@@ -258,6 +258,22 @@ fn build_prompt_bundle(
         system_content.push_str(&figures_context);
     }
 
+    // ── Host Python environment (app data) ──────────────────────────────────
+    // The recommended 3.13 venv lives in app data — a venv carries absolute
+    // host paths, so it must not travel with the workspace. While the
+    // completion flag is missing the pointer block announces the `setup-env`
+    // manual; once it is valid only this one-line note remains (`env.rs`).
+    let env_context = crate::env::prompt_block(
+        state.instance.data_dir(),
+        &workspace_dir_for_roots,
+    );
+    if !env_context.is_empty() {
+        if !system_content.is_empty() {
+            system_content.push_str("\n\n");
+        }
+        system_content.push_str(&env_context);
+    }
+
     // Sub-agents (`llm`, `cli`, `cloud`) are only reachable when the sub-agent
     // system is enabled (`use_agents`). With it off the main agent answers
     // directly: `call_subagent` is neither advertised in the system prompt nor

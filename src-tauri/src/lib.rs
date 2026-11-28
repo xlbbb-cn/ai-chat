@@ -18,6 +18,7 @@ pub mod agents;
 mod background;
 mod backup;
 mod db;
+mod env;
 mod events;
 mod executable;
 mod evolution_maintenance;
@@ -1898,6 +1899,11 @@ pub fn run() {
                 None => instance::Instance::claim(data_dir.clone()),
             };
             let swept = instance::collect_garbage(&data_dir);
+            // The per-host Python environment lives in app data (a venv cannot
+            // travel with the workspace). Export its root so every child
+            // process — shell scripts, plugins, MCP servers — can find the
+            // interpreter without a baked-in absolute path (`env.rs`).
+            env::publish(instance.data_dir());
             // Reported to the dated `app-*.log` below — the logger does not exist yet.
             let mut prepare_error: Option<String> = None;
             let config_path = instance.prepare().unwrap_or_else(|err| {

@@ -62,12 +62,110 @@ pub fn enhanced_figures_manual() -> String {
     )
 }
 
+/// `setup-env` manual: prepare the per-host Python environment in app data.
+///
+/// Announced only while `<app_data>/env/ready.json` is missing or does not
+/// point at a real interpreter (`env.rs`), so the setup cost is paid once per
+/// host instead of riding in every system prompt.
+pub fn env_manual() -> String {
+    r#"# Preparing the host Python environment (app data)
+
+Third-party packages must not be installed into the system interpreter, and a venv must not
+live in the workspace: a workspace is copied to other machines, while a venv is host-bound
+(absolute shebangs, per-OS layout). The app therefore keeps one Python 3.13 environment per
+host under **app data**, and this manual is announced only while that environment is missing
+or broken. Once the completion flag is valid the system prompt stops listing this manual and
+injects a one-line environment note instead — that switch is the whole point of the flag.
+
+## Where it lives
+
+- Env root: `<app_data>/env`. The **absolute** path of this host is printed in the
+  `ENVIRONMENT` block of the system prompt (the block that pointed you here); `<env root>` in
+  this manual always means that path. Never write it into a skill, MCP server or plugin: it is
+  per-host data, not part of the workspace.
+- Interpreter: `<env root>/py313/bin/python` (POSIX) or `<env root>/py313/Scripts/python.exe`
+  (Windows) — a venv built from uv-managed CPython 3.13.
+- Flag: `<env root>/ready.json`.
+- Children inherit `AI_CHAT_ENV_ROOT=<env root>` from the app, so code can find the venv at
+  runtime without any baked-in path.
+
+## Build it
+
+`uv` is the installer to use; uv-managed Pythons keep the system interpreter clean:
+
+```bash
+uv python install 3.13                      # uv-managed CPython 3.13, once per host
+uv venv --python 3.13 "<env root>/py313"    # the venv itself
+"<env root>/py313/bin/python" -V            # must print Python 3.13.x
+```
+
+Windows uses the native path and `Scripts\python.exe`, same three steps. When `uv` is missing,
+install it first (`python3 -m pip install --user uv`, or the standalone installer) — do not
+substitute `python -m venv` from a 3.14 system interpreter, 3.13 is the point.
+
+## Install packages — a uv venv has no pip
+
+`uv venv` seeds nothing, so `python -m pip` fails inside the venv by design:
+
+```bash
+uv pip install --python "<env root>/py313/bin/python" <packages>
+uv pip list --python "<env root>/py313/bin/python"
+```
+
+## Write the flag — this is what changes the prompt
+
+When `-V` reports 3.13, write `<env root>/ready.json`:
+
+```json
+{"python": "<env root>/py313/bin/python", "version": "3.13.13",
+ "uv": "<absolute path of uv>", "created": "<ISO-8601 timestamp>"}
+```
+
+Then re-read the file and run `<env root>/py313/bin/python -V` once more. The app counts the
+environment as complete only when the flag parses **and** its `python` names a real file; only
+then does the pointer block shrink to the one-line `ENVIRONMENT` note. An unreadable flag, or
+one pointing at a missing interpreter, keeps this manual in place: fix the venv or rewrite the
+flag. Deleting the flag to "retry" is pointless — its absence is the pending state.
+
+## Keep artifacts independent of it
+
+Skill scripts, MCP servers and plugins stay **stdlib-only and 3.9+ compatible** (see the
+create-skill / create-mcp-server / create-plugin manuals). When one genuinely needs 3.13,
+derive the interpreter from `AI_CHAT_ENV_ROOT` at runtime, check `is_file()`, and fall back to
+the host `python` / `python3` when it is absent — a missing venv degrades a feature, it never
+breaks startup.
+"#
+        .to_string()
+}
+
+/// Lead line of the pending environment block; the `setup-env` manual pointer
+/// follows it (`env.rs`).
+pub fn env_pending_block(root_display: &str, reason: &str) -> String {
+    format!(
+        "ENVIRONMENT (pending): the per-host Python 3.13 environment lives in app data \
+         (`{root_display}` on this host) and is not prepared yet ({reason}). Read \
+         `{}/setup-env.md` before the first script that needs a third-party package; once \
+         `{root_display}/ready.json` exists this pointer gives way to a one-line environment \
+         note.",
+        MANUALS_DIR
+    )
+}
+
+/// One-line environment note injected once the completion flag is valid.
+pub fn env_ready_block(python: &str, version: &str) -> String {
+    format!(
+        "ENVIRONMENT: Python 3.13 venv ready at `{python}` (CPython {version}), living in app \
+         data — host scoped, never copied into an artifact; `AI_CHAT_ENV_ROOT` points there for \
+         every child process. The host `python`/`python3` stays the default for stdlib-only work."
+    )
+}
+
 /// Shared "language" section appended to the three authoring manuals
 /// (`create-skill`, `create-mcp-server`, `create-plugin`): Python is the
 /// recommended language, the uv-managed 3.13 environment is installed per
 /// host, and the portable `use_venv()` hop keeps an artifact runnable after a
 /// host swap.
-const PYTHON_SECTION: &str = r#"## Language: Python first — 3.13 through uv
+const PYTHON_SECTION: &str = r#"## Language: Python first
 
 Write the artifact in Python (`runtime: python` / a `.py` entry / a script run with
 `run_shell`). It is the one runtime that needs no build step, no lockfile and no third-party
@@ -80,97 +178,81 @@ Hard rule: the artifact must start on a machine where nothing was installed — 
 3.9+ syntax**. A third-party package belongs behind `try: import …` with a degraded branch,
 never in the import header.
 
-### The 3.13 + uv environment (one per host — already set up on this one)
+### The 3.13 environment lives in app data, not in the workspace
 
-- `uv` 0.11.6 at `~/.local/bin/uv` (found through the login-shell PATH the app uses).
-- `uv python install 3.13` → uv-managed CPython **3.13.13**, exposed as
-  `~/.local/bin/python3.13`; the real interpreter lives under
-  `~/.local/share/uv/python/cpython-3.13-linux-x86_64-gnu/`.
-- Workspace venv **`.data/venv/py313`** — `bin/python` on POSIX, `Scripts/python.exe` on
-  Windows; verified to report `3.13.13`.
-- The host default is *not* it: `python3` here is 3.14 (Fedora 43). Use the 3.13 venv when a
-  package's wheels lag behind 3.14; the plain `python`/`python3` resolution stays the default
-  and must keep working.
+`<app_data>/env/py313` is a uv venv built from uv-managed CPython 3.13 (POSIX `bin/python`,
+Windows `Scripts/python.exe`), with `<app_data>/env/ready.json` beside it as the completion
+flag. Host-scoped on purpose: a venv carries absolute paths, so it must not travel with a
+workspace copied to another machine, and it must not pollute the system interpreter (this
+host's `python3` is 3.14 — reach for the 3.13 venv when a package's wheels lag behind 3.14).
 
-```bash
-uv venv --python 3.13 .data/venv/py313                      # (re)create the venv
-uv pip install --python .data/venv/py313/bin/python <pkg>   # add a package
-uv run --python 3.13 script.py                              # one-off, no venv needed
-.data/venv/py313/bin/python -V                              # → Python 3.13.13
-```
+- The absolute path is printed in the `ENVIRONMENT` block of the system prompt and exported to
+  every child process as **`AI_CHAT_ENV_ROOT`** — never write either into an artifact.
+- A uv venv seeds no `pip`: inside it `python -m pip …` fails. Install with
+  `uv pip install --python "<venv python>" <pkg>`, inspect with `uv pip list --python …`.
+- Creating or repairing the environment, and writing the flag, is the job of the `setup-env`
+  manual — announced only while the environment is pending, so there is no reason to repeat
+  the build steps here.
 
-`uv venv` seeds no `pip`: inside the venv `python -m pip …` fails, so
-`uv pip install --python <venv python> …` is the only package path, and
-`uv pip list --python .data/venv/py313/bin/python` inspects it.
-
-### The venv is host-bound — code must never hard-code it
-
-`pyvenv.cfg` and the `bin/` shims store absolute host paths, so `.data/venv` does not
-travel: after a host or OS change, delete it and re-run the two commands above. Any code you
-hand over derives the workspace root at runtime (`PLUGIN_WORKSPACE`, `Path(__file__).resolve()`,
-the cwd) and hops into the venv only when it is really there:
+### Optional 3.13 hop, for code that must also run under a bare `python3`
 
 ```python
 import os, sys
 from pathlib import Path
+from typing import Optional
 
-def workspace_of(start: Path) -> Path:
-    """Nearest ancestor that holds `.data/` — correct at any nesting depth."""
-    for parent in [start, *start.parents]:
-        if (parent / ".data").is_dir():
-            return parent
-    raise SystemExit("workspace root with .data/ not found")
-
-WORKSPACE = Path(os.environ.get("PLUGIN_WORKSPACE") or workspace_of(Path(__file__).resolve()))
-PY = WORKSPACE / ".data" / "venv" / "py313" / (
-    "Scripts/python.exe" if os.name == "nt" else "bin/python"
-)
+def venv_python() -> Optional[Path]:
+    """The host 3.13 interpreter from AI_CHAT_ENV_ROOT, or None when absent."""
+    root = os.environ.get("AI_CHAT_ENV_ROOT")
+    if not root:
+        return None
+    py = Path(root) / "py313" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    return py if py.is_file() else None
 
 def use_venv() -> None:
     """Optional upgrade: run under 3.13 when the host interpreter is older."""
-    if sys.version_info >= (3, 13) or not PY.is_file():
-        return                              # no venv on this host → stdlib code still runs
+    py = venv_python()
+    if py is None or sys.version_info >= (3, 13):
+        return                       # no venv on this host → stdlib-only code still runs
     if os.environ.get("X_REEXEC") == "1":
         raise SystemExit("re-exec loop")   # guard: never hop twice
     os.environ["X_REEXEC"] = "1"
-    os.execv(str(PY), [str(PY), str(Path(__file__).resolve()), *sys.argv[1:]])
+    os.execv(str(py), [str(py), str(Path(__file__).resolve()), *sys.argv[1:]])
 ```
 
-Verified: `execv` inherits the parent's stdin/stdout, so a line protocol survives the hop —
-a probe started with the system 3.14 answered `initialize` / `tools/list` from 3.13.13.
-
-Call it before the first byte written to stdout: `execv` replaces the process image and drops
-unflushed buffered output (verified — a `print` before the hop never reached the parent's
-stdout). `mcp_self` launches `python3 server.py` *without* `-u` (plugin children do get `-u`),
-so the hop belongs at import time, before the reply loop exists.
+Call it before the first byte written to stdout — `execv` replaces the process image and drops
+unflushed buffered output (verified: a `print` before the hop never reached the parent's
+stdout). `mcp_self` launches `python3 server.py` without `-u` (plugins get `-u`), so a stdio
+server hops at import time, before its reply loop exists. Verified end to end: after the hop
+the inherited stdin/stdout pipes still carried `initialize` / `tools/list`, answered by 3.13.
 "#;
 
 /// Skill-only tail: helper scripts that ship inside a skill folder.
 const SKILL_SCRIPTS_SECTION: &str = r#"## Scripts that belong to a skill
 
 A skill's helper script is Python too, run through `run_shell` / `run_cmd`: stdlib only,
-workspace root from the nearest ancestor holding `.data/` (or `parents[3]` from
-`.data/skills/<name>/script.py`), scratch files into `.data/tmp/`, final artifacts into the
-project folder. When a skill truly needs a package, write the exact
-`uv pip install --python .data/venv/py313/bin/python <pkg>` line into the skill body and call
-the script as `.data/venv/py313/bin/python script.py` — never assume bare `python` is the
-venv, and never leave the skill broken on a host without it.
+workspace root from the nearest ancestor holding `.data/` (or `Path(__file__).resolve()
+.parents[3]` for `.data/skills/<name>/script.py`), scratch files into `.data/tmp/`, final
+artifacts into the project folder. When a skill truly needs a package, install it into the
+app-data venv (`uv pip install --python "<venv python>" <pkg>`, see the `ENVIRONMENT` block)
+and write that exact line into the skill body; the skill then runs the script through the
+venv interpreter it names, and degrades to `python` when `AI_CHAT_ENV_ROOT` is absent instead
+of claiming the package is there.
 "#;
 
 /// MCP-only tail: how the stdio server's interpreter is resolved and re-resolved.
 const MCP_INTERPRETER_SECTION: &str = r#"## Interpreter, host swaps and 3.13
 
 `mcp_self` takes no command: on POSIX it resolves `python3`, on Windows `python`, and the
-stdio child is launched through the user's login shell, so the shell PATH applies. The
-roster therefore stores a concrete name — after a host or OS change re-run `mcp_self` `write`
-with the same `name` (it updates in place instead of creating `<slug>-2`) so the interpreter
-is re-resolved, then confirm with `test`.
+stdio child is launched through the user's login shell, so the shell PATH applies. The roster
+therefore stores a concrete name — after a host or OS change re-run `mcp_self` `write` with
+the same `name` (it updates in place instead of creating `<slug>-2`) so the interpreter is
+re-resolved, then confirm with `test`.
 
 Keep `server.py` stdlib-only and portable (`pathlib`, explicit `encoding="utf-8"`, `\n`
-lines). When it genuinely needs 3.13 or a wheel 3.14 lacks, put the shared `workspace_of()`
-and `use_venv()` hop at the top of the file (`.data/mcp/<slug>/server.py` sits three levels
-below the workspace root): a host without `.data/venv/py313` keeps running on its own
-interpreter, which is exactly the portability the roster needs.
+lines). When it genuinely needs 3.13 or a wheel 3.14 lacks, put the `use_venv()` hop from the
+shared section at the top of the file and let it read `AI_CHAT_ENV_ROOT`: a host without the
+venv keeps running on its own interpreter, which is exactly the portability the roster needs.
 "#;
 
 /// Plugin-only tail: language choice plus the cross-host portability contract.
@@ -186,7 +268,8 @@ place for a host-specific absolute interpreter path.
 
 The plugin is copied to another machine — Windows, macOS, another Python, no packages — so:
 - **No absolute paths, no hand-written separators** — `PLUGIN_DIR` / `PLUGIN_WORKSPACE` /
-  `__file__` + `pathlib`; never `/tmp`, `~/.local`, `/usr/bin`, `C:\…`.
+  `__file__` + `pathlib`; never `/tmp`, `~/.local`, `/usr/bin`, `C:\…`, and never the app-data
+  venv path.
 - **No shell strings** — `subprocess.run([...], check=True)`, never `shell=True`; branch on
   `os.name` / `sys.platform` only where behavior truly differs, and keep one code path.
 - **3.9+ syntax only** — no `match`, no `X | Y` annotations, no `tomllib`, no
@@ -198,8 +281,9 @@ The plugin is copied to another machine — Windows, macOS, another Python, no p
   `fork`, `fcntl`, `select` on fds are out; threads are fine, orphan daemons are not.
 - **No install at startup** — no `pip install`, no download; an absent optional package
   yields a degraded answer, never a crash.
-- **`.data/venv` never travels** — the optional 3.13 hop (`use_venv()`) checks `PY.is_file()`
-  first, so a machine without the venv still runs.
+- **The venv never travels** — it lives in app data as `AI_CHAT_ENV_ROOT`; the optional
+  `use_venv()` hop checks `is_file()` first, so a machine without it still runs.
+
 "#;
 
 /// `create-skill` manual: how to author/edit a workspace skill by hand.

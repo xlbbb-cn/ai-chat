@@ -30,6 +30,12 @@ pub enum Manual {
     CreateSubagent,
     /// Authoring a workspace plugin (manifest, stdio protocol, service attach).
     CreatePlugin,
+    /// Preparing the per-host Python environment in app data (`env.rs`).
+    ///
+    /// Unlike the authoring manuals this one is conditional: `env.rs` announces
+    /// it only while `<app_data>/env/ready.json` is missing or broken, and drops
+    /// it from the pointer block once the flag is valid.
+    SetupEnv,
 }
 
 impl Manual {
@@ -41,6 +47,7 @@ impl Manual {
             Manual::CreateMcpServer => "create-mcp-server",
             Manual::CreateSubagent => "create-subagent",
             Manual::CreatePlugin => "create-plugin",
+            Manual::SetupEnv => "setup-env",
         }
     }
 
@@ -72,6 +79,11 @@ impl Manual {
                 "plugin folder + `plugin.json`, the stdio protocol, service attach and \
                  `config.schema.yaml` — read before writing a plugin",
             ),
+            Manual::SetupEnv => (
+                "Environment bootstrap",
+                "build the per-host Python 3.13 venv in app data and write the completion \
+                flag — announced only while that environment is pending",
+            ),
         }
     }
 
@@ -83,6 +95,7 @@ impl Manual {
             Manual::CreateMcpServer => prompt::mcp_manual(),
             Manual::CreateSubagent => prompt::subagent_manual(),
             Manual::CreatePlugin => prompt::plugin_manual(),
+            Manual::SetupEnv => prompt::env_manual(),
         }
     }
 }
@@ -191,6 +204,7 @@ mod tests {
             Manual::CreateMcpServer,
             Manual::CreateSubagent,
             Manual::CreatePlugin,
+            Manual::SetupEnv,
         ] {
             let line = {
                 let (title, description) = manual.title_and_description();
