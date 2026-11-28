@@ -3632,9 +3632,10 @@ button.rabbit-hop-bunny:focus-visible {
   z-index: 2;
 }
 
-/* Disclosure row that opens a compact block of settings — the Tools footer's
-   auto-accept list and the Sub Agents panel's orchestration settings. One
-   primitive for both, so the target, weight and chevron cannot drift apart. */
+/* Full-width disclosure row that opens a compact block of settings. The Sub
+   Agents panel folds its orchestration rows with the inline variant instead
+   (shared `.inline-edit-btn` plus this chevron, see DESIGN.md §Disclosure row);
+   the chevron class is shared, so the glyph cannot drift apart. */
 .section-toggle {
   display: flex;
   align-items: center;
@@ -3908,6 +3909,47 @@ button.rabbit-hop-bunny:focus-visible {
   background: var(--c-surface-2);
   border-color: var(--c-muted);
   color: var(--c-text);
+}
+
+/* Borderless text action: a word that behaves like a control ("More settings",
+   "Show all"). No frame at rest — the accent label *is* the affordance — and a
+   `--c-accent-soft` fill on hover, the same fill-is-state language the nav
+   buttons use. 12px/500 keeps it a notch quieter than the row it sits in. */
+.text-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 6px;
+  border: none;
+  background: none;
+  color: var(--c-accent-text);
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: background-color var(--t-dur) var(--t-ease),
+    color var(--t-dur) var(--t-ease);
+}
+
+.text-btn:hover:not(:disabled) {
+  background: var(--c-accent-soft);
+}
+
+.text-btn:disabled {
+  color: var(--c-muted);
+  cursor: not-allowed;
+}
+
+.text-btn:focus-visible {
+  outline: 1px solid var(--c-accent-text);
+  outline-offset: 1px;
+}
+
+/* A glyph inside a text action tracks the label instead of its own muted ink. */
+.text-btn .section-toggle-chevron {
+  color: currentColor;
 }
 
 /* Shared compact search field used by side panels. */

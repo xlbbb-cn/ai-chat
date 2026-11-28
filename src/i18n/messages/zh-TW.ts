@@ -731,6 +731,7 @@ const zhTW: Messages = {
         title: "子代理",
         orchestration: "協調設定",
         enableMode: "子代理系統",
+        moreSettings: "更多設定",
         autoPlan: "自動規劃",
         autoPlanHint:
             "每則訊息先規劃再回答；關閉則直接回答。",

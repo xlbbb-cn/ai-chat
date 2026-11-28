@@ -580,15 +580,34 @@ change or an underline.
 4px radius. Hover → `--c-hover` fill + `--c-text`. Destructive variant →
 `--c-danger-soft` fill + `--c-danger` glyph.
 
+### Text action
+
+`.text-btn` — a word that behaves like a control ("More settings", "Show all").
+Transparent with **no frame at rest**: the `--c-accent-text` label at 12px/500,
+4px radius, `padding: 1px 6px` (plus a 6px gap before a trailing glyph), is the
+whole affordance. Because the accent is doing the work here, a text action never
+shares its row with a second accent. Hover → `--c-accent-soft` fill and nothing
+else: the label keeps `--c-accent-text`, which is that hue's legible form
+(玫瑰粉 7.1:1 on white, against 4.6:1 for its `--c-accent` fill twin). Focus →
+1px `--c-accent-text` outline at a 1px offset. A glyph inside it takes
+`currentColor`, never `--c-muted`. One line tall (~21px) — that is what makes it
+usable inside a 13px settings row.
+
 ### Disclosure row
 
-`.section-toggle` folds a compact settings block (Tools → auto-accept, Sub
-Agents → orchestration settings): a full-width transparent button with a
+`.section-toggle` is the full-panel fold: a full-width transparent button with a
 14px/500 `--c-text` label on the left and an 11px `--c-muted` chevron on the
 right, plus `aria-expanded` and a 1px `--c-accent-text` focus outline. The body
 is rendered only while expanded. A collapsed section must never hide its master
 control — the primary switch of the section stays outside the fold, so the
 collapsed state still tells the user whether the feature is on.
+
+When the fold belongs to a *single settings row* rather than to the whole panel
+(Sub Agents → orchestration settings), the trigger is the inline variant: the
+borderless `.text-btn` reading "More settings", placed directly after the row's
+13px label, carrying an 11px chevron in `currentColor` so it matches the accent
+label, plus `aria-expanded` / `aria-controls`; the row's master switch keeps the
+far right end. The folded body renders below the row.
 
 ### Inputs, textareas, selects
 

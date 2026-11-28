@@ -797,6 +797,7 @@ const en = {
         title: "Sub Agents",
         orchestration: "Orchestration settings",
         enableMode: "Sub-agent system",
+        moreSettings: "More settings",
         autoPlan: "Automatic planning",
         autoPlanHint:
             "Plan every message before answering; off answers directly.",

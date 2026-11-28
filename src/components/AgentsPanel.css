@@ -17,8 +17,8 @@
 }
 
 /* Advanced rows of the orchestration disclosure. The section starts folded in
-   AgentsPanel.tsx, so the agent list keeps the panel's height while the
-   disclosure label and the master switch stay visible. */
+   AgentsPanel.tsx, so the agent list keeps the panel's height while the master
+   row (label, "More settings" trigger, master switch) stays visible. */
 .orch-body {
     display: flex;
     flex-direction: column;
@@ -32,6 +32,21 @@
     gap: 12px;
     font-size: 13px;
     color: var(--c-text);
+}
+
+/* Master row of the orchestration block: the label and its inline disclosure
+   trigger share the left edge, the master switch stays at the row's right end.
+   The trigger is the shared borderless `.text-btn` (accent label, no frame), so
+   this sheet only keeps it from shrinking — never a frame of its own. */
+.orch-master-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.orch-more {
+    flex-shrink: 0;
 }
 
 /* The execution-mode picker is the shared dropdown primitive, which asks for

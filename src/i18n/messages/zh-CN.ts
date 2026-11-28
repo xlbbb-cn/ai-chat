@@ -731,6 +731,7 @@ const zhCN: Messages = {
         title: "子智能体",
         orchestration: "编排设置",
         enableMode: "子智能体系统",
+        moreSettings: "更多设置",
         autoPlan: "自动规划",
         autoPlanHint:
             "每条消息先规划再回答；关闭则直接回答。",

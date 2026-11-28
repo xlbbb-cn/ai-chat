@@ -319,7 +319,8 @@ export function AgentsPanel({
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   /**
    * Advanced orchestration rows are folded by default so the agent list keeps
-   * the panel's height; the master "Enable mode" switch stays visible.
+   * the panel's height; the master row — label, inline "More settings" trigger
+   * and the switch itself — stays outside the fold.
    */
   const [orchestrationExpanded, setOrchestrationExpanded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -1253,20 +1254,26 @@ export function AgentsPanel({
         <>
           {/* ── Orchestration Settings ── */}
           <div className="orchestration-settings">
-            <button
-              type="button"
-              className="section-toggle"
-              onClick={() => setOrchestrationExpanded((expanded) => !expanded)}
-              aria-expanded={orchestrationExpanded}
-            >
-              <span>{t("agents.orchestration")}</span>
-              <span className="section-toggle-chevron">
-                <FontAwesomeIcon icon={orchestrationExpanded ? faChevronUp : faChevronDown} />
-              </span>
-            </button>
-
+            {/* The master switch owns the row; the fold's trigger sits right
+                after its label, so the collapsed state still says whether the
+                feature is on (DESIGN.md §Disclosure row). */}
             <div className="orch-row">
-              <span>{t("agents.enableMode")}</span>
+              <span className="orch-master-label">
+                {t("agents.enableMode")}
+                <button
+                  type="button"
+                  className="text-btn orch-more"
+                  onClick={() => setOrchestrationExpanded((expanded) => !expanded)}
+                  aria-expanded={orchestrationExpanded}
+                  aria-controls="agents-orchestration-advanced"
+                  title={t("agents.orchestration")}
+                >
+                  {t("agents.moreSettings")}
+                  <span className="section-toggle-chevron">
+                    <FontAwesomeIcon icon={orchestrationExpanded ? faChevronUp : faChevronDown} />
+                  </span>
+                </button>
+              </span>
               <label className="toggle-switch">
                 <input
                   type="checkbox"
@@ -1282,7 +1289,7 @@ export function AgentsPanel({
             </div>
 
             {orchestrationExpanded && (
-              <div className="orch-body">
+              <div className="orch-body" id="agents-orchestration-advanced">
                 {/* Planning and selection are their own switches inside the
                     disclosure: with planning off `call_subagent` stays and the
                     main agent delegates by hand instead of every turn running
