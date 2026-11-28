@@ -1,0 +1,186 @@
+/* Ambient field behind the empty-state face: growth rings, not particles.
+   Geometry and the genomes live in AmbientField.tsx; this file owns the two inks
+   and the two loops — one life for a layer, one arrival for everything inside it.
+
+   Timeline of a single layer (66s, six layers staggered by 11s):
+     0%   born at the face, accent-coloured, invisible
+     8%   visible — the new generation is the brightest thing on screen
+    14%+  its nodes arrive one by one, each chord with the later of its two ends
+    26–52% it settles: the accent hands back to the neutral ring ink
+    100%  it reaches the rim, fades out, and is born again with a new genome */
+.ambient-field {
+  position: absolute;
+  /* The face is 48px tall and sits at the top of `.empty-state`, so 24px is
+     its centre. The SVG is centred on the same point by negative margins. */
+  left: 50%;
+  top: 24px;
+  width: 560px;
+  height: 280px;
+  margin-left: -280px;
+  margin-top: -140px;
+  z-index: -1;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.ambient-field svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* One layer = one generation. The group owns the life loop so its ring, trace,
+   nodes and chords can never drift out of step: they scale, fade and settle as a
+   single body. The origin is `0 0` of the layer's own space, which the parent
+   `<g translate>` puts exactly on the face's centre; a percentage origin is not
+   usable here, because this WebView resolves `center` against the view-box size
+   while ignoring the view-box origin (see AmbientField.tsx).
+   The two custom properties are the frozen state — with the loops disabled they
+   are what the layer falls back to. */
+.ambient-layer {
+  --ambient-born-scale: 0.18;
+  --ambient-life: 66s;
+  transform-box: view-box;
+  transform-origin: 0 0;
+  transform: scale(var(--ambient-rest-scale, 1));
+  opacity: var(--ambient-rest-opacity, 0.6);
+  fill: none;
+  stroke: var(--c-ambient-ring);
+  stroke-width: 1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  animation: ambient-layer-life var(--ambient-life) linear var(--ambient-born, 0s) infinite;
+}
+
+/* A layer is scaled up to six times over its life, so a hairline must not scale
+   with it — `non-scaling-stroke` keeps every stroke at 1px from birth to rim,
+   dotted rings included. */
+.ambient-ring,
+.ambient-trace,
+.ambient-chord {
+  vector-effect: non-scaling-stroke;
+}
+
+/* Solid rings and dotted rings alternate by slot: the alternation is a rhythm
+   between neighbouring generations, not a hierarchy. */
+.ambient-ring--dotted {
+  stroke-dasharray: 1 6;
+}
+
+/* The growth trace: the path this generation took on its way out. Dotted so it
+   reads as a trajectory, and quiet enough that the ring stays the structure. */
+.ambient-trace {
+  opacity: 0.5;
+  stroke-dasharray: 2 4;
+}
+
+/* Everything inside a layer appears when its turn comes, on the layer's own
+   clock: the delay is the layer's birth offset plus the node's arrival fraction,
+   so the constellation assembles itself in step with the growth, generation
+   after generation, without a single timer of its own. */
+.ambient-node,
+.ambient-chord {
+  animation-duration: var(--ambient-life, 66s);
+  animation-delay: calc(var(--ambient-born, 0s) + var(--ambient-arrive, 0s));
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  animation-fill-mode: both;
+}
+
+.ambient-node {
+  fill: var(--c-ambient-node);
+  /* The group animates `stroke` for the birth colour; a node must not inherit
+     it, or every node would grow a 1px outline. */
+  stroke: none;
+  animation-name: ambient-node-arrive;
+}
+
+/* The last node of a generation keeps the accent for its whole life: the marker
+   that this layer is a different variant from the one below it. */
+.ambient-node--accent {
+  fill: var(--c-ambient-signal);
+}
+
+.ambient-chord {
+  animation-name: ambient-chord-arrive;
+  opacity: 0.38;
+}
+
+@keyframes ambient-layer-life {
+  0% {
+    opacity: 0;
+    transform: scale(var(--ambient-born-scale));
+    stroke: var(--c-ambient-signal);
+  }
+
+  8% {
+    opacity: 0.86;
+  }
+
+  26% {
+    stroke: var(--c-ambient-signal);
+  }
+
+  52% {
+    opacity: 0.55;
+    stroke: var(--c-ambient-ring);
+  }
+
+  84% {
+    opacity: 0.26;
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(1);
+    stroke: var(--c-ambient-ring);
+  }
+}
+
+@keyframes ambient-node-arrive {
+  0% {
+    opacity: 0;
+  }
+
+  7% {
+    opacity: 1;
+  }
+
+  90% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes ambient-chord-arrive {
+  0% {
+    opacity: 0;
+  }
+
+  7% {
+    opacity: 0.38;
+  }
+
+  90% {
+    opacity: 0.38;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Frozen, not hidden: the loops stop and each layer rests at the scale and
+   opacity it carries inline, with every node of every generation in place — a
+   still stack of growth rings, as if the motion had been paused. */
+@media (prefers-reduced-motion: reduce) {
+  .ambient-layer,
+  .ambient-node,
+  .ambient-chord {
+    animation: none;
+  }
+}

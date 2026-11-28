@@ -71,12 +71,26 @@
   --c-reason-b: #D0D1D2;
   --c-toolbar: rgba(255, 255, 255, 0.62);
   /* frosted-glass nav */
-  /* Ambient empty-state particles: muted ink from the active palette, never
-     the accent. The dark block raises the alpha so the dots stay visible on
-     the canvas; both are derived, so every palette follows automatically. */
-  --c-particle: color-mix(in srgb, var(--c-muted) 42%, transparent);
-  /* Proximity links are quieter than the dots themselves. */
-  --c-particle-line: color-mix(in srgb, var(--c-muted) 20%, transparent);
+  /* Ambient empty-state field (see AmbientField.tsx). Two inks, one job each:
+     a generation of the field — its ring, trace, chords, plain dots — is
+     neutral, and the accent carries only what has just evolved: a layer is
+     born accent-coloured, settles to neutral as it grows out, and one dot per
+     generation keeps the accent for life as that generation's marker. This is
+     the one sanctioned decorative use of the accent: an empty chat has no
+     primary action for it to compete with, the ink never fills a shape or
+     carries a label, and it stays well below a legible weight. The ring ink
+     mixes a little accent into the muted grey so the whole field runs cool
+     instead of grey; every value is derived, so each palette re-hues the field
+     on its own. */
+  /* The nested mix is not a simplification waiting to happen: WebView2 rejects
+     a three-colour `color-mix(…, A 14%, B 26%, transparent)` (the third stop is
+     fine, the `transparent` stop next to it is not), so the ink is mixed first
+     and only then thinned. */
+  --c-ambient-ring: color-mix(in srgb, color-mix(in srgb, var(--c-accent) 55%, var(--c-muted)) 34%, transparent);
+  /* The dots carry the same cool cast at a stronger alpha, so the field reads
+     tinted rather than grey even before the signal moves through it. */
+  --c-ambient-node: color-mix(in srgb, color-mix(in srgb, var(--c-accent) 24%, var(--c-muted)) 46%, transparent);
+  --c-ambient-signal: color-mix(in srgb, var(--c-accent) 70%, transparent);
 
   /* Accent — Electric Blue, primary calls to action only */
   --c-accent: #3E6AE1;
@@ -317,8 +331,11 @@
   --c-reason: rgba(255, 255, 255, 0.04);
   --c-reason-b: rgba(255, 255, 255, 0.14);
   --c-toolbar: rgba(23, 26, 32, 0.62);
-  --c-particle: color-mix(in srgb, var(--c-muted) 55%, transparent);
-  --c-particle-line: color-mix(in srgb, var(--c-muted) 28%, transparent);
+  /* Same three inks on a Carbon Dark canvas: every alpha is lifted, because a
+     34% hairline that reads on white disappears on #171A20. */
+  --c-ambient-ring: color-mix(in srgb, color-mix(in srgb, var(--c-accent) 45%, var(--c-muted)) 42%, transparent);
+  --c-ambient-node: color-mix(in srgb, color-mix(in srgb, var(--c-accent) 20%, var(--c-muted)) 62%, transparent);
+  --c-ambient-signal: color-mix(in srgb, var(--c-accent) 80%, transparent);
   /* A busier photo needs a denser veil over a dark canvas to keep 13px text
      at the same contrast as the plain theme. */
   --chat-bg-scrim: color-mix(in srgb, var(--c-bg) 92%, transparent);
@@ -1752,7 +1769,7 @@ html[data-chat-bg] .messages {
   margin: auto;
   text-align: center;
   color: var(--c-muted);
-  /* Isolation keeps the particle layer behind the face without dropping it
+  /* Isolation keeps the ambient field behind the face without dropping it
      under the transcript's own background. */
   position: relative;
   isolation: isolate;
@@ -1772,7 +1789,7 @@ html[data-chat-bg] .messages {
 }
 
 /* Randomly rotating feature tip under the face. Transparent — no surface,
-   outline, tail, shadow or accent — so the particle field and the chat
+   outline, tail, shadow or accent — so the ambient field and the chat
    background show through; the text sits directly on them. It slides down
    into place, dwells, then slides further down and out before the next tip
    is mounted. No hover/focus state: only the timer ever changes it. */
@@ -1780,7 +1797,7 @@ html[data-chat-bg] .messages {
   width: min(420px, calc(100vw - 48px));
   margin: 10px auto 0;
   padding: 8px 12px;
-  /* Reserve two lines of height: the face and the particle field are anchored
+  /* Reserve two lines of height: the face and the ambient field are anchored
      to the top of .empty-state, so a tip rewrapping from one line to two must
      not change the block's height and shift either animation. One line sits
      centred in the same box as two. */

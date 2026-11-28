@@ -128,8 +128,9 @@ All tokens live in `src/App.css`. Nothing else may define colour/radius/motion.
 | `--c-hover` | `rgba(23,26,32,.04)` | `rgba(255,255,255,.06)` | Hover fill |
 | `--c-active` | `rgba(23,26,32,.07)` | `rgba(255,255,255,.10)` | Pressed fill |
 | `--c-toolbar` | `rgba(255,255,255,.62)` | `rgba(23,26,32,.62)` | Frosted bars: toolbar and input area |
-| `--c-particle` | `color-mix(in srgb, var(--c-muted) 42%, transparent)` | `color-mix(in srgb, var(--c-muted) 55%, transparent)` | Ambient empty-state dots; derived from the palette's muted ink, never the accent |
-| `--c-particle-line` | `color-mix(in srgb, var(--c-muted) 20%, transparent)` | `color-mix(in srgb, var(--c-muted) 28%, transparent)` | Proximity links between those dots; quieter than the dots themselves |
+| `--c-ambient-ring` | `color-mix(in srgb, color-mix(in srgb, var(--c-accent) 55%, var(--c-muted)) 34%, transparent)` | `color-mix(in srgb, color-mix(in srgb, var(--c-accent) 45%, var(--c-muted)) 42%, transparent)` | Ambient empty-state structure (rings, chords, minor nodes) — the muted ink cooled with the accent. Nested on purpose: WebView2 rejects a three-colour mix ending in `transparent` |
+| `--c-ambient-node` | `color-mix(in srgb, color-mix(in srgb, var(--c-accent) 24%, var(--c-muted)) 46%, transparent)` | `color-mix(in srgb, color-mix(in srgb, var(--c-accent) 20%, var(--c-muted)) 62%, transparent)` | The plain nodes of a generation; one step stronger than the hairline and faintly tinted, so the field reads cool before anything evolves |
+| `--c-ambient-signal` | `color-mix(in srgb, var(--c-accent) 70%, transparent)` | `color-mix(in srgb, var(--c-accent) 80%, transparent)` | The *new* thing: a layer's birth colour and the last node of every generation. The one sanctioned decorative use of the accent — see *Ambient field* |
 
 #### Frosted glass (`--glass-*`)
 
@@ -496,10 +497,11 @@ in a keyboard-driven tool. The curve is a fast-out / slow-in ease (Out Quad). Th
 only sanctioned deviation is `box-shadow 0.25s var(--t-ease)` on the inset
 focus/active ring of primary buttons.
 
-Ambient decoration is the one other exception: the empty-state particle layer
-uses a *slow* damped random walk rather than a transition — a tiny impulse fed
-into a high-inertia velocity, with no easing token or period to reuse.
-`prefers-reduced-motion` freezes the field.
+Ambient decoration is the one other exception: the empty-state field
+(`src/components/AmbientField.tsx`) runs two loops of its own — a layer's life
+(66s) and the arrival of everything inside it — both linear and both on the same
+clock. A period that long has nothing to do with an interaction, so they never
+use `--t-dur` / `--t-ease`; `prefers-reduced-motion` freezes both.
 
 ### Legacy aliases that must stay
 
@@ -939,32 +941,67 @@ motion is the eye blink.
   breathing-less, eyes stay closed, the ticker is static and the `z`s are
   visible at their offset positions.
 
-#### Ambient floating particles
+#### Ambient field
 
-While the transcript is empty, a quiet particle layer sits behind the face and
-the tip bubble. Dots are spread with a golden-angle spiral and drift between
-two bounds by a slow damped random walk — a very small impulse into a
-high-inertia velocity, so paths bend in long, gentle arcs instead of turning
-sharply; they never assemble into a shape. When two dots come within the link
-distance, a faint hairline joins them, so the field
-reads as a few quiet connections rather than a mesh. It is background motion,
-never a second focus target: 2–3px dots, no glow, no shadow, no pointer events,
-`aria-hidden`, and no layout box of its own.
+While the transcript is empty, a quiet field sits behind the face and the tip
+bubble, and it is made of **generations**, not of particles. A layer is born at
+the face every 11s, grows from the core to the rim over 66s and dies at the
+edge, so six layers are always in flight at staggered sizes — growth rings,
+laid down by the thing in the middle. A generation does not arrive finished: it
+is born carrying its ring and its growth trace, assembles itself node by node as
+it lives, and settles from accent to neutral once it has matured. The genome
+that decides its node count and their seats is re-rolled between births, so the
+stack reads as a line of generations that differ from one another — the field is
+not looping, it is inheriting with a variation. An empty chat is the one screen
+with no primary action, so this layer carries the first impression on its own:
+it reads as something evolving, never as falling snow. It is background motion,
+never a second focus target: 1–2px nodes, 1px hairlines, no fill, no glow, no
+shadow, no pointer events, `aria-hidden`, and no layout box of its own.
 
-- **Colour:** `--c-particle` for the dots and `--c-particle-line` for the links,
-  both derived from the palette's `--c-muted` with a higher alpha on dark. Never
-  `--c-accent`: the accent marks the primary action of a view, it is not
-  decoration.
-- **Motion:** each dot keeps a high-inertia velocity that receives a tiny
-  random impulse — the path drifts in gentle arcs rather than turning on a
-  dime — and reflects at the field's edge. Links are recomputed with the dots
-  every frame and fade out as their endpoints drift apart. Under
-  `prefers-reduced-motion: reduce` the loop stops and the field, including its
-  links, stays still.
-- **Links:** pairs within 58 viewBox units get a 1px `--c-particle-line`
-  hairline; a 180-segment pool covers the field, and the closest pairs win if
-  the field ever gets crowded. The line opacity fades with distance — there is
-  no snap at the threshold.
+- **Two inks, one job each.** `--c-ambient-ring` draws a generation's structure
+  (its ring, trace, chords, plain nodes) and `--c-ambient-node` fills the plain
+  nodes — both are
+  the palette's muted ink, both cooled with a little accent so the field has
+  a temperature instead of being grey. `--c-ambient-signal` is the accent
+  itself, at decoration alpha, and it marks only what is *new*: a layer is born
+  accent-coloured, the last node of every generation is accent for life, and
+  maturity hands the rest back to the neutral ink. Colour therefore means
+  "this has just evolved" and nothing else.
+- **The one decorative accent.** The accent marks the primary action of a view
+  (non-negotiable 2); on an empty chat there is no primary action to compete
+  with, so this layer is the sanctioned exception. Its guardrails: the accent
+  never fills a shape, never carries a label, and never reaches a legible text
+  weight. All three tokens are mixed from the palette's own `--c-accent` /
+  `--c-muted`, with every alpha lifted on dark — Default and Cream run blue,
+  Macaron runs rose, and no palette block has to repeat them.
+- **Growth, in one loop.** A layer's whole life is one keyframe set on its group
+  (scale `0.18 → 1`, opacity, and the accent-to-neutral settle), 66s linear,
+  with six negative delays doing the staggering. Because the ring, trace, nodes
+  and chords are children of that group, they can never drift out of step with
+  the growth, and nothing has to be measured.
+- **Assembly, on the same clock.** Everything inside a layer arrives when its
+  turn comes: a node's `animation-delay` is the layer's birth offset *plus* its
+  arrival fraction of the same 66s, so a constellation assembles itself in step
+  with the growth without a timer of its own. A chord carries the later of its
+  two ends' arrivals, which is what makes the web grow link by link instead of
+  appearing whole; the accent node is always the last to land.
+- **Genomes.** Node count (2–4), their seats on the ellipse, the accent seat and
+  the trace's start angle all derive from a deterministic hash of the seed,
+  never `Math.random`, so a re-render cannot reshuffle the layer. The seed is
+  stepped by a small LCG when the layer is reborn, and the reborn layer is at
+  opacity 0 at that instant — so a mutation is never seen swapping in.
+- **Motion is the only thing JavaScript touches.** React listens to
+  `animationiteration` on each layer and rolls that layer's next genome; there
+  is no per-frame work, no `requestAnimationFrame`, nothing measured.
+- **`transform-origin` is `0 0`, not `center`.** This WebView resolves a
+  percentage origin against the view-box *size* while ignoring the view-box
+  origin, so `center` makes every layer scale about the bottom-right corner of
+  the box. The SVG's viewBox therefore starts at `0 0` and a parent
+  `<g translate>` moves the content onto the face; with an origin of `0 0` both
+  readings agree. Do not "fix" the viewBox back to a centred one.
+- **`prefers-reduced-motion: reduce`:** both loops stop, and each layer rests at
+  the scale and opacity it carries inline, with every node of every generation
+  in place — a still stack of growth rings, not six ellipses piled up.
 - **Placement:** anchored at the face's centre inside `.empty-state`, behind
   the face and bubble via an isolated stacking context. It scrolls with the
   empty state and disappears the moment a conversation starts.
@@ -984,12 +1021,12 @@ state.
 
 - **Surface:** transparent — no surface, radius, outline, tail, shadow or
   accent; `min(420px, calc(100vw - 48px))` wide, centred directly below the
-  face, so the particle field, glass and chat background show through. Tip text
+  face, so the ambient field, glass and chat background show through. Tip text
   is 13px `--c-muted` / 1.55 with `overflow-wrap: anywhere`.
 - **Layout stability:** the bubble reserves two lines of height
   (`min-height: calc(3.1em + 16px)`) and centres its text in that box. Whether a
   tip wraps to one line or two, the empty state keeps the same height, so the
-  face's blink and the anchored particle field never shift. New tips are
+  face's blink and the anchored ambient field never shift. New tips are
   written to fit two lines in every language; a longer string would grow the
   box and move those anchors.
 - **Interaction:** none. There is no hover or focus state, no click handler and
