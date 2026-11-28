@@ -208,12 +208,13 @@ The assistant can draw, and a drawing arrives as a card in the transcript:
 
 | Kind | Fence | Notes |
 | --- | --- | --- |
+| Diagram | `mermaid` | Flowchart, sequence, class, state, ER, gantt, pie, mindmap and timeline source, rendered by the transcript; the fence line becomes the caption |
 | Flow chart | `flow` | JSON nodes/edges; the layout is computed (dagre) and colours come from the interface tokens, so light/dark and every accent follow |
 | 3D scene | `carve` | Boxes, spheres, cylinders, planes, edges and labels with real shading and a contact shadow; drag to orbit |
 | 2D SVG | `svg` | Inline vector diagram using the UI tokens |
 | Dynamic figure | `html-fig` | A sandboxed frame for anything that needs motion or interaction; it is CSP-restricted, has no network access and only runs after you accept the execution gate |
 
-- With the enhanced drawing toggle off, Mermaid is used for diagrams instead.
+- With the enhanced drawing toggle off, no drawing instructions are injected: the assistant stops drawing on its own, but a `mermaid` block you paste yourself still renders.
 - Flow charts can animate (`flow` sends a packet along each edge, `step` reveals ranks in order) without running a script, and `prefers-reduced-motion` is honoured twice — at build time and inside the emitted style.
 - Every figure has a save button: static drawings save as PNG, dynamic ones as HTML.
 - A drawing never leaks into the code path: it is rendered in the card, not in a code block above the answer.

@@ -478,7 +478,7 @@ const zhTW: Messages = {
             dsFormatAuto: "{model} 已自動開啟：DeepSeek 系模型一律使用 DS-Format，reasoning_content 會自動回傳。",
             enhancedFigures: "增強畫圖",
             enhancedFiguresHint:
-                "讓助理自己畫 SVG 圖（每張都有儲存按鈕，PNG 存到 figures/，3D 場景還能拖曳旋轉），以及動態 HTML5 圖（`html-fig`：動畫與互動在沙箱裡執行，儲存為 .html 檔案），而不是寫 Mermaid 圖表。關閉後助理改用 ```mermaid 程式碼區塊，由對話介面渲染成圖表。",
+                "讓助理畫圖——Mermaid 圖表、自己畫的 SVG 圖（每張都有儲存按鈕，PNG 存到 figures/，3D 場景還能拖曳旋轉），以及動態 HTML5 圖（`html-fig`：動畫與互動在沙箱裡執行，儲存為 .html 檔案）。關閉後提示詞裡不再有任何畫圖說明，助理不會主動畫圖；你自己貼上的 Mermaid 程式碼區塊仍會渲染。",
             memoryHint: "在使用者輸入上附帶記憶提示",
             memoryHintHint:
                 "在最新的使用者訊息最前面加一行提示（不足 200 字元），列出關鍵字比對到的記憶，依置信度排序。它只是線索而不是全文：助理仍需檢索對應作用域才能取得完整條目。提示只存在於送給模型的請求裡，存下來的訊息仍是使用者原話。",

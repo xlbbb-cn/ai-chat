@@ -1,9 +1,10 @@
 //! Figures (`<svg>` / `<carve>` / `flow`) that the assistant draws, saved as
 //! PNG (or `.html` for a dynamic figure).
 //!
-//! The plain drawing mode in [`mermaid_prompt_block`] swaps the hand-written
-//! markup for a fenced `mermaid` block, which the transcript renders on its own
-//! (no backend involvement) — the toggle only changes the prompt.
+//! `enhanced_figures` decides whether [`prompt_block`] is injected at all: with
+//! it off the model is not asked to draw. The transcript still renders
+//! `mermaid` fences on its own (no backend involvement), so a diagram pasted by
+//! a user keeps working either way.
 //!
 //! The webview is the only place these figures exist as pixels: a 2D figure is
 //! an SVG rasterised through a canvas, a 3D one is a three.js canvas, and both
@@ -302,22 +303,6 @@ pub fn prompt_block() -> String {
         .to_string()
 }
 
-/// System-prompt block for the plain drawing mode: Mermaid instead of a
-/// hand-written `<svg>` / `carve` scene.
-///
-/// The transcript renders a fenced `mermaid` block itself, so this is the cheap
-/// path — a few lines of Mermaid source the webview themes, instead of SVG the
-/// model has to get right by hand. Static like [`prompt_block`], for the same
-/// prompt-caching reason.
-pub fn mermaid_prompt_block() -> String {
-    "Diagrams: use a fenced `mermaid` block (rendered in transcript).\n\
-     - Supported: `flowchart`, `sequenceDiagram`, `classDiagram`, `stateDiagram-v2`, `erDiagram`, `gantt`, `pie`, `mindmap`, `timeline`. \
-     Example: ```mermaid / `flowchart LR` / `  A[request] --> B[gateway]```.\n\
-     - Fence title becomes caption (e.g. `mermaid Request flow`). Keep labels short; quote labels with `()[]/`, e.g. `A[\"GET /v1/chat (stream)\"]`.\n\
-     - Do not hand-write `<svg>` or `carve`; use Mermaid for diagrams."
-        .to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -452,19 +437,5 @@ mod tests {
         assert!(check_html_document("<div>hi</div>").is_err());
         let huge = format!("<!DOCTYPE html>{}", "x".repeat(MAX_HTML_BYTES));
         assert!(check_html_document(&huge).is_err());
-    }
-
-    #[test]
-    fn mermaid_prompt_block_asks_for_mermaid() {
-        let block = mermaid_prompt_block();
-        assert!(block.contains("mermaid"));
-        assert!(block.contains("flowchart"));
-        // The caption convention has to survive: it is what titles the card.
-        assert!(block.contains("caption"));
-    }
-
-    #[test]
-    fn prompt_blocks_differ() {
-        assert_ne!(prompt_block(), mermaid_prompt_block());
     }
 }

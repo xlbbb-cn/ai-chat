@@ -234,22 +234,23 @@ fn build_prompt_bundle(
     }
 
     // ── Figures ─────────────────────────────────────────────────────────────
-    // The transcript renders `svg` / `carve` blocks and `mermaid` blocks; the
-    // model only uses them if it is told they exist. `enhanced_figures`
-    // (Settings → Advanced, on by default) picks the hand-drawn SVG path; with
-    // it off the model writes Mermaid instead. Static text either way, so it
+    // The transcript renders `svg` / `carve` / `mermaid` blocks, but the model
+    // only uses them if it is told they exist — and the toggle is the only
+    // thing that tells it. With `enhanced_figures` (Settings → Advanced, on by
+    // default) off nothing is injected: the model is not asked to draw, while
+    // the renderer keeps working for a `mermaid` fence the user pastes in.
+    // The block follows the manuals design (`manuals.rs`): the system prompt
+    // only announces the draw-syntax manual, the model reads
+    // `.data/manuals/enhanced-figures.md` before its first figure, and that
+    // manual lists `mermaid` first as the cheap option. Static text, so it
     // stays a stable prefix.
-    // Enhanced mode follows the manuals design (`manuals.rs`): the system
-    // prompt only announces the draw-syntax manual; the model reads
-    // `.data/manuals/enhanced-figures.md` before its first figure. Plain
-    // Mermaid mode keeps its short inline block — it needs no manual.
     let figures_context = if config.enhanced_figures {
         crate::manuals::pointer_for(
             &workspace_dir_for_roots,
             &[crate::manuals::Manual::EnhancedFigures],
         )
     } else {
-        crate::figures::mermaid_prompt_block()
+        String::new()
     };
     if !figures_context.is_empty() {
         if !system_content.is_empty() {

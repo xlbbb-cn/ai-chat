@@ -1,11 +1,11 @@
 /**
  * Mermaid diagrams in a reply.
  *
- * The plain drawing mode (`enhanced_figures` off) asks the model for a fenced
- * `mermaid` block instead of hand-written `<svg>` / `carve` markup. Rendering
- * follows the figure pipeline in `figures.ts` / `figureCard.ts`, for the same
- * reason: the transcript renders markdown with `html: false`, so a block is cut
- * out *before* markdown-it runs and replaced by a slot token, and
+ * Rendering is independent of the `enhanced_figures` toggle: the enhanced manual
+ * advertises `mermaid` as the cheap option, and a diagram the user pasted draws
+ * too. Rendering follows the figure pipeline in `figures.ts` / `figureCard.ts`,
+ * for the same reason: the transcript renders markdown with `html: false`, so a
+ * block is cut out *before* markdown-it runs and replaced by a slot token, and
  * `mountDiagrams` swaps each token for a card once `innerHTML` is committed.
  *
  * Two differences from a drawn figure:

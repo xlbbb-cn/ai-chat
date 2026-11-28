@@ -528,7 +528,7 @@ const en = {
             dsFormatAuto: "Always on for {model}: DeepSeek-family models get DS-Format automatically, so reasoning_content is always passed back.",
             enhancedFigures: "Enhanced drawing",
             enhancedFiguresHint:
-                "Let the assistant draw its own SVG figures — every one gets a save button and lands in figures/ as a PNG, and 3D scenes can be orbited — plus dynamic HTML5 figures (`html-fig`: animation and interaction inside a sandboxed frame, saved as a .html file), instead of writing Mermaid diagrams. Off: the assistant writes fenced `mermaid` blocks, which the transcript renders as themed diagrams.",
+                "Let the assistant draw — Mermaid diagrams, hand-written SVG figures (every one gets a save button and lands in figures/ as a PNG, 3D scenes can be orbited) and dynamic HTML5 figures (`html-fig`: animation and interaction inside a sandboxed frame, saved as a .html file). Off: the prompt carries no drawing instructions at all, so the assistant does not draw — a `mermaid` fence you paste yourself still renders.",
             memoryHint: "Memory hint on user input",
             memoryHintHint:
                 "Prefix the newest user message with a hint (under 200 characters) of the memories whose keywords match it, ranked by confidence. It is a pointer, not the full record: the assistant still searches a scope for the whole entry. The hint exists only in the request — the stored message keeps the user's own text.",

@@ -609,10 +609,11 @@ pub struct AppConfig {
     /// until a started task delivers its result or is cancelled.
     #[serde(default = "update::default_true")]
     pub background_tools: bool,
-    /// Draw with `svg` / `carve` figures instead of Mermaid diagrams
-    /// (Settings → Advanced, on by default). Off means the system prompt asks
-    /// for a fenced `mermaid` block, which the transcript renders itself; the
-    /// rasterise-and-save path (and 3D scenes) stay unused.
+    /// Draw figures — `mermaid` first as the cheap option, then `flow` /
+    /// `svg` / `carve` / `html-fig` (Settings → Advanced, on by default). Off
+    /// injects no drawing block at all, so the model is not asked to draw and
+    /// the rasterise-and-save path stays unused; the transcript still renders a
+    /// `mermaid` fence the user pastes itself.
     #[serde(default = "update::default_true")]
     pub enhanced_figures: bool,
     /// Prefix the newest user message with a ≤200-character, confidence-ranked

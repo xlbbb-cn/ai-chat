@@ -441,9 +441,9 @@ export interface AppConfig {
    */
   background_tools?: boolean;
   /**
-   * Draw with `svg` / `carve` figures (saved as PNG, plus 3D scenes) instead of
-   * Mermaid diagrams. Defaults to on; when off the system prompt asks for a
-   * fenced `mermaid` block, which the transcript renders itself.
+   * Draw figures — `mermaid` first, then `svg` / `carve` / `html-fig` (saved as
+   * PNG, plus 3D scenes). Defaults to on; when off the system prompt carries no
+   * drawing block, while the transcript still renders pasted `mermaid` fences.
    */
   enhanced_figures?: boolean;
   /**

@@ -478,7 +478,7 @@ const zhCN: Messages = {
             dsFormatAuto: "{model} 已自动开启：DeepSeek 系模型始终使用 DS-Format，reasoning_content 会自动回传。",
             enhancedFigures: "增强画图",
             enhancedFiguresHint:
-                "让助手自己画 SVG 图（每张都有保存按钮，PNG 存到 figures/，3D 场景还能拖动旋转），以及动态 HTML5 图（`html-fig`：动画与交互在沙箱里运行，保存为 .html 文件），而不是写 Mermaid 图表。关闭后助手改用 ```mermaid 代码块，由对话界面渲染成图表。",
+                "让助手画图——Mermaid 图表、自己画的 SVG 图（每张都有保存按钮，PNG 存到 figures/，3D 场景还能拖动旋转），以及动态 HTML5 图（`html-fig`：动画与交互在沙箱里运行，保存为 .html 文件）。关闭后提示词里不再有任何画图说明，助手不会主动画图；你自己粘贴的 Mermaid 代码块仍会渲染。",
             memoryHint: "在用户输入上附带记忆提示",
             memoryHintHint:
                 "在最新的用户消息最前面加一行提示（不足 200 字符），列出关键词匹配到的记忆，按置信度排序。它只是线索而不是全文：助手仍需检索对应作用域才能拿到完整条目。提示只存在于发给模型的请求里，存下来的消息仍是用户原话。",
