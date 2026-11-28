@@ -24,6 +24,7 @@ use tauri::{AppHandle, Emitter};
 
 use super::exchange::{format_size, DeliverTarget};
 use super::{resolve_agent_timeout, KeyValue, SubAgent};
+use crate::http::AGENT_USER_AGENT;
 
 /// Timeout for the panel's connectivity probe.
 const PROBE_TIMEOUT_SECS: u64 = 30;
@@ -736,6 +737,7 @@ pub async fn probe(
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(PROBE_TIMEOUT_SECS))
+        .user_agent(AGENT_USER_AGENT)
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -806,6 +808,7 @@ pub async fn run(
     };
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(request_timeout))
+        .user_agent(AGENT_USER_AGENT)
         .build()
         .map_err(|e| e.to_string())?;
 

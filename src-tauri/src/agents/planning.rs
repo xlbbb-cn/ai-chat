@@ -2,6 +2,7 @@
 //! points that pick agents and build the plan.
 
 use super::*;
+use crate::http::build_agent_client;
 
 /// One wording for the `skills=` clarification shared by the selection prompt
 /// and the planning prompt, so the two entry points cannot drift apart.
@@ -502,8 +503,10 @@ pub async fn orchestrate(
 
     // Streaming client (planning calls are streamed too): adds the connect +
     // read timeouts `Client::new()` has none of, so a stalled gateway fails
-    // and retries instead of hanging the whole turn.
-    let client = build_stream_client()?;
+    // and retries instead of hanging the whole turn. The agent UA rides on it:
+    // every sub-agent request (selection, plan, tasks, supervisor) clones this
+    // one client.
+    let client = build_agent_client()?;
     let url = format!(
         "{}/chat/completions",
         config.api_base_url.trim_end_matches('/')
