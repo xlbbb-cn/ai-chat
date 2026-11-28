@@ -18,14 +18,34 @@
     line-height: 1.5;
 }
 
-.tool-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
+/* Two columns: the switch, then the name column. The unfolded auto-confirm
+   block lives in the name column's second row, so the switch is centred in the
+   first row only and never shifts when the block opens. */
+.tools-list .tool-item {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 8px;
+    row-gap: 4px;
+    align-items: start;
+}
+
+.tools-list .tool-item > .toggle-switch {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: center;
+}
+
+.tools-list .tool-item > .tool-info {
+    grid-column: 2;
+    grid-row: 1;
+}
+
+.tools-list .tool-item > .tool-auto-accept {
+    grid-column: 2;
+    grid-row: 2;
 }
 
 .tool-info {
-    flex: 1;
     display: flex;
     flex-direction: column;
     gap: 2px;
@@ -36,6 +56,7 @@
     font-size: 14px;
     font-weight: 500;
     color: var(--c-text);
+    min-width: 0;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -72,62 +93,67 @@
     letter-spacing: normal;
 }
 
-.tool-actions {
-    display: flex;
-    align-items: center;
-    gap: 0;
-    flex-shrink: 0;
+/* A switched-off tool fades its row only: the auto-confirm block nested under
+   Run Shell describes how approvals work, not whether the tool is on. */
+.tool-item.disabled .tool-title,
+.tool-item.disabled .tool-transport,
+.tool-item.disabled > .toggle-switch {
+    opacity: 0.55;
 }
 
-.tool-action-btn {
+/* The title line carries the fold affordance, so a collapsed row is exactly as
+   tall as a row without one. */
+.tool-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.tool-fold-btn {
+    flex-shrink: 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 24px;
-    height: 24px;
+    width: 16px;
+    height: 16px;
     padding: 0;
-    border: none;
-    border-radius: var(--r-sm);
-    background: transparent;
+    border: 0;
+    border-radius: 4px;
+    background: none;
     color: var(--c-muted);
-    font-size: 12px;
-    font-family: inherit;
-    line-height: 1;
+    font-size: 10px;
     cursor: pointer;
-    transition: background-color var(--t-dur) var(--t-ease),
-        color var(--t-dur) var(--t-ease);
+    transition: color var(--t-dur) var(--t-ease), background-color var(--t-dur) var(--t-ease);
 }
 
-.tool-action-btn:hover {
-    background: var(--c-hover);
+.tool-fold-btn:hover {
     color: var(--c-text);
+    background: var(--c-hover);
 }
 
-.tool-action-btn:focus-visible {
-    outline: 1px solid var(--c-accent-text);
-    outline-offset: 0;
+/* ---- Auto-confirm mode ----
+   Folded out under the row whose executions raise the confirmations. It shares
+   the name column, so it lines up with the tool name. */
+.tool-auto-accept {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-top: 6px;
+    border-top: 1px dashed var(--c-border-s);
 }
 
-.tool-action-btn.danger:hover {
-    background: var(--c-danger-soft);
-    color: var(--c-danger);
-}
-
-.tool-action-btn:disabled {
-    opacity: 0.4;
-    cursor: default;
-}
-
-.tool-desc-expanded {
-    font-size: 12px;
+.tool-auto-accept-title {
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 15px;
     color: var(--c-muted);
-    padding: 8px 10px;
-    margin-top: 4px;
-    line-height: 1.5;
-    white-space: pre-line;
-    background: var(--c-surface-2);
-    border-radius: var(--r-sm);
-    border: 1px solid var(--c-border-s);
+    letter-spacing: normal;
+}
+
+.tool-auto-accept .auto-accept-list {
+    padding-top: 2px;
+    max-height: none;
 }
 
 .tools-footer-section {

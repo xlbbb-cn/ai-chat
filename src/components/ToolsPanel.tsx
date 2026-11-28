@@ -140,8 +140,7 @@ function sanitizeAutoAcceptKinds(values: readonly string[] | undefined): AutoAcc
 export function ToolsPanel({ onClose, onToolsChange }: Props) {
     const { t } = useI18n();
     const [config, setConfig] = useState<AppConfig | null>(null);
-    const [expandedTool, setExpandedTool] = useState<string | null>(null);
-    const [autoAcceptExpanded, setAutoAcceptExpanded] = useState(true);
+    const [autoAcceptExpanded, setAutoAcceptExpanded] = useState(false);
     // Raw text of the parallel-count field while it is being edited: clamping
     // on every keystroke would turn "delete, type 6" into 4 → 46 → 8.
     const [parallelCountDraft, setParallelCountDraft] = useState<string | null>(null);
@@ -156,7 +155,6 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                     auto_accept_confirm_kinds: sanitizeAutoAcceptKinds(cfg.auto_accept_confirm_kinds),
                 };
                 setConfig(sanitized);
-                setAutoAcceptExpanded(false);
                 onToolsChange(selected);
             })
             .catch(console.error);
@@ -287,26 +285,26 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                             key={tool.id}
                             className={`tool-item ${!enabled ? "disabled" : ""}`}
                         >
-                            <div className="tool-row">
-                                <label
-                                    className="toggle-switch"
-                                    title={
-                                        locked
-                                            ? lockReason(tool.id)
-                                            : enabled
-                                                ? t("common.disable")
-                                                : t("common.enable")
-                                    }
-                                >
-                                    <input
-                                        type="checkbox"
-                                        checked={enabled}
-                                        disabled={locked}
-                                        onChange={() => toggleTool(tool.id)}
-                                    />
-                                    <span className="toggle-switch-slider" />
-                                </label>
-                                <div className="tool-info">
+                            <label
+                                className="toggle-switch"
+                                title={
+                                    locked
+                                        ? lockReason(tool.id)
+                                        : enabled
+                                            ? t("common.disable")
+                                            : t("common.enable")
+                                }
+                            >
+                                <input
+                                    type="checkbox"
+                                    checked={enabled}
+                                    disabled={locked}
+                                    onChange={() => toggleTool(tool.id)}
+                                />
+                                <span className="toggle-switch-slider" />
+                            </label>
+                            <div className="tool-info">
+                                <div className="tool-title">
                                     <span
                                         className="tool-name"
                                         onClick={() => toggleTool(tool.id)}
@@ -316,85 +314,69 @@ export function ToolsPanel({ onClose, onToolsChange }: Props) {
                                             <span className="tool-locked">{t("tools.lockedBadge")}</span>
                                         )}
                                     </span>
-                                    <span className="tool-transport">
-                                        {t(tool.descriptionKey).split("\n")[0]}
-                                    </span>
+                                    {tool.id === "run_shell" && (
+                                        <button
+                                            type="button"
+                                            className="tool-fold-btn"
+                                            onClick={() => setAutoAcceptExpanded((expanded) => !expanded)}
+                                            aria-expanded={autoAcceptExpanded}
+                                            aria-label={t("tools.autoAccept")}
+                                            title={t("tools.autoAccept")}
+                                        >
+                                            <FontAwesomeIcon icon={autoAcceptExpanded ? faChevronUp : faChevronDown} />
+                                        </button>
+                                    )}
                                 </div>
-                                <div className="tool-actions">
-                                    <button
-                                        className="tool-action-btn"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            setExpandedTool(expandedTool === tool.id ? null : tool.id);
-                                        }}
-                                    >
-                                        <FontAwesomeIcon
-                                            icon={expandedTool === tool.id ? faChevronUp : faChevronDown}
-                                        />
-                                    </button>
-                                </div>
-                            </div>
-                            {expandedTool === tool.id && (
-                                <div className="tool-desc-expanded">
+                                <span className="tool-transport">
                                     {t(tool.descriptionKey)}
+                                </span>
+                            </div>
+                            {/* Approvals come from what this row runs, so the
+                                options unfold under the row itself. */}
+                            {tool.id === "run_shell" && autoAcceptExpanded && (
+                                <div className="tool-auto-accept">
+                                    <span className="tool-auto-accept-title">{t("tools.autoAccept")}</span>
+                                    <div className="auto-accept-list">
+                                        <label
+                                            className="auto-accept-option auto-accept-option-all"
+                                            title={t("tools.autoAcceptItems.all.description")}
+                                        >
+                                            <input
+                                                className="auto-accept-checkbox"
+                                                type="checkbox"
+                                                checked={allAutoAcceptEnabled}
+                                                onChange={() => void toggleAutoAcceptAll()}
+                                            />
+                                            <div className="auto-accept-option-body">
+                                                <span className="auto-accept-name">{t("tools.autoAcceptItems.all.label")}</span>
+                                            </div>
+                                        </label>
+                                        {AUTO_ACCEPT_OPTIONS.map((option) => {
+                                            const checked = isAutoAcceptEnabled(option.kind);
+                                            return (
+                                                <label
+                                                    key={option.kind}
+                                                    className="auto-accept-option"
+                                                    title={t(option.descriptionKey)}
+                                                >
+                                                    <input
+                                                        className="auto-accept-checkbox"
+                                                        type="checkbox"
+                                                        checked={checked}
+                                                        onChange={() => void toggleAutoAccept(option.kind)}
+                                                    />
+                                                    <div className="auto-accept-option-body">
+                                                        <span className="auto-accept-name">{t(option.labelKey)}</span>
+                                                    </div>
+                                                </label>
+                                            );
+                                        })}
+                                    </div>
                                 </div>
                             )}
                         </div>
                     );
                 })}
-            </div>
-
-            <div className="tools-footer-section">
-                <button
-                    type="button"
-                    className="section-toggle"
-                    onClick={() => setAutoAcceptExpanded((expanded) => !expanded)}
-                    aria-expanded={autoAcceptExpanded}
-                >
-                    <span>{t("tools.autoAccept")}</span>
-                    <span className="section-toggle-chevron">
-                        <FontAwesomeIcon icon={autoAcceptExpanded ? faChevronUp : faChevronDown} />
-                    </span>
-                </button>
-
-                {autoAcceptExpanded && (
-                    <div className="auto-accept-list">
-                        <label
-                            className="auto-accept-option auto-accept-option-all"
-                            title={t("tools.autoAcceptItems.all.description")}
-                        >
-                            <input
-                                className="auto-accept-checkbox"
-                                type="checkbox"
-                                checked={allAutoAcceptEnabled}
-                                onChange={() => void toggleAutoAcceptAll()}
-                            />
-                            <div className="auto-accept-option-body">
-                                <span className="auto-accept-name">{t("tools.autoAcceptItems.all.label")}</span>
-                            </div>
-                        </label>
-                        {AUTO_ACCEPT_OPTIONS.map((option) => {
-                            const checked = isAutoAcceptEnabled(option.kind);
-                            return (
-                                <label
-                                    key={option.kind}
-                                    className="auto-accept-option"
-                                    title={t(option.descriptionKey)}
-                                >
-                                    <input
-                                        className="auto-accept-checkbox"
-                                        type="checkbox"
-                                        checked={checked}
-                                        onChange={() => void toggleAutoAccept(option.kind)}
-                                    />
-                                    <div className="auto-accept-option-body">
-                                        <span className="auto-accept-name">{t(option.labelKey)}</span>
-                                    </div>
-                                </label>
-                            );
-                        })}
-                    </div>
-                )}
             </div>
 
             {/* Parallel tool calls live with the tools themselves: the switch is

@@ -3713,7 +3713,6 @@ button.rabbit-hop-bunny:focus-visible {
 }
 
 .skill-item.disabled,
-.tool-item.disabled,
 .mcp-server-item.disabled {
   opacity: 0.55;
 }
