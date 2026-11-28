@@ -227,6 +227,8 @@ const en = {
         contextUsageWithCache: "Context usage: {percent}% · cache hit {cachePercent}%",
 
         generationStopped: "[Generation stopped]",
+        turnLostEvent:
+            "This turn ended in the backend without a terminal event, so it was closed here. What had already been generated is kept.",
 
         notify: {
             doneTitle: "Task completed",

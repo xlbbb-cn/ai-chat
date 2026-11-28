@@ -198,6 +198,8 @@ const zhTW: Messages = {
         contextUsageWithCache: "上下文用量：{percent}% · 快取命中 {cachePercent}%",
 
         generationStopped: "[生成已停止]",
+        turnLostEvent:
+            "這一輪對話在後台已結束，但沒有收到結束通知，已在此收尾；已經生成的內容已保留。",
 
         notify: {
             doneTitle: "任務已完成",

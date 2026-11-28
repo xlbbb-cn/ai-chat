@@ -12,6 +12,14 @@ use tauri::{AppHandle, Emitter, Manager};
 use super::LlmTurn;
 use crate::{events, AppState};
 
+use std::sync::Arc;
+
+/// The failure a turn reports when it dies without announcing its end. It is
+/// the one string the foreground settles on in that case, so it says what
+/// happened in the user's terms: the turn is over, whatever arrived is kept.
+const TURN_INTERRUPTED: &str =
+    "the turn ended without a terminal event (it was interrupted before it could finish)";
+
 fn log(state: &AppState, level: &str, message: String) {
     let _ = state.logger.lock().map(|logger| logger.log(level, &message));
 }
@@ -111,32 +119,27 @@ pub(crate) async fn end_turn_cleanup(app: &AppHandle, turn: &LlmTurn) {
 /// dead base forever — the History panel showed a permanent Running badge,
 /// Stop set a cancel flag nobody read any more, and the conversation produced
 /// no output at all until the app restarted.
+///
+/// Not having a base in the registry is only half of what the webview needs:
+/// the foreground settles its composer on a terminal `chat-done` /
+/// `chat-error`, so a turn that unwinds without announcing one leaves it
+/// streaming forever (no request, no Stop that can do anything, sleep no
+/// longer blocked). The backstop therefore also announces the failure itself
+/// when the base says nothing ever left.
 pub(crate) struct TurnEndGuard {
     app: AppHandle,
-    session_id: String,
-    turn_id: String,
-    started_at_ms: i64,
-    model: String,
-    window_id: u64,
+    /// The base this guard ends. Everything the terminal `turn-state` carries
+    /// lives on it, and `turn.announced()` is the only record of whether the
+    /// webview was ever told the turn ended.
+    turn: Arc<LlmTurn>,
     finished: bool,
 }
 
 impl TurnEndGuard {
-    pub(crate) fn new(
-        app: AppHandle,
-        session_id: &str,
-        turn_id: &str,
-        started_at_ms: i64,
-        model: &str,
-        window_id: u64,
-    ) -> Self {
+    pub(crate) fn new(app: AppHandle, turn: Arc<LlmTurn>) -> Self {
         Self {
             app,
-            session_id: session_id.to_string(),
-            turn_id: turn_id.to_string(),
-            started_at_ms,
-            model: model.to_string(),
-            window_id,
+            turn,
             finished: false,
         }
     }
@@ -148,15 +151,18 @@ impl TurnEndGuard {
             return;
         }
         self.finished = true;
-        self.app.state::<AppState>().turns.remove_if(self.window_id);
+        self.app
+            .state::<AppState>()
+            .turns
+            .remove_if(self.turn.window_id);
         let _ = self.app.emit(
             events::TURN_STATE,
             events::TurnState {
-                session_id: self.session_id.clone(),
-                turn_id: self.turn_id.clone(),
+                session_id: self.turn.session_id.clone(),
+                turn_id: self.turn.turn_id.clone(),
                 running: false,
-                started_at_ms: self.started_at_ms,
-                model: self.model.clone(),
+                started_at_ms: self.turn.started_at_ms,
+                model: self.turn.model.clone(),
             },
         );
     }
@@ -164,6 +170,22 @@ impl TurnEndGuard {
 
 impl Drop for TurnEndGuard {
     fn drop(&mut self) {
+        // A turn that unwinds without announcing its end is invisible to the
+        // webview: `streaming` stays set, the Stop button cancels nothing, the
+        // conversation makes no request ever again — while the sleep lock the
+        // turn held is already released. Announce the failure here, before the
+        // base is unpublished, so the foreground settles instead of hanging.
+        if !self.turn.announced() {
+            log(
+                &self.app.state::<AppState>(),
+                "WARN",
+                format!(
+                    "turn ended without a terminal event, announcing a failure: session_id={}",
+                    self.turn.session_id
+                ),
+            );
+            self.turn.emit_error(TURN_INTERRUPTED);
+        }
         self.finish();
     }
 }

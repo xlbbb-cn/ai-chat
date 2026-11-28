@@ -280,7 +280,6 @@ pub(crate) async fn chat_completion(
         .unwrap_or(&config.model)
         .to_string();
     let turn = state.begin_turn(app.clone(), &session_id, &turn_id, &model, config)?;
-    let window_turn_id = turn.window_id;
 
     // The user's own turn always wins over the background evolution
     // maintenance pass: stop it before this turn starts working. The
@@ -364,14 +363,7 @@ pub(crate) async fn chat_completion(
     // Backstop for the unpublish + terminal emit below: a panic in the turn
     // unwinds past them, and the registry entry would outlive its work forever
     // (permanent Running badge, Stop into the void, no output).
-    let mut end_guard = crate::turn::TurnEndGuard::new(
-        app.clone(),
-        &session_id,
-        &turn_id,
-        started_at_ms,
-        &model,
-        window_turn_id,
-    );
+    let mut end_guard = crate::turn::TurnEndGuard::new(app.clone(), turn.clone());
 
     let result = run_chat_turn(
         app.clone(),
@@ -384,6 +376,13 @@ pub(crate) async fn chat_completion(
         state,
     )
     .await;
+
+    // A `Err` here rejects the `chat_completion` invoke, and the frontend
+    // settles the turn on that rejection: record it, so the guard's backstop
+    // does not announce a second failure for a turn the user already saw fail.
+    if result.is_err() {
+        turn.mark_announced();
+    }
 
     crate::turn::end_turn_cleanup(&app, &turn).await;
     // Unpublish the base only after cleanup: a newer turn of the same session

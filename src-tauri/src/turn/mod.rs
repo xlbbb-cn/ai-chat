@@ -75,6 +75,12 @@ pub struct LlmTurn {
     progress: Arc<Mutex<TurnProgress>>,
     inbox: Mutex<Inbox>,
     budget: Mutex<TurnBudget>,
+    /// Whether the turn's end ever left for the webview — a terminal
+    /// `chat-done` / `chat-error`, or the rejected invoke the frontend settles
+    /// on. `TurnEndGuard` reads it on the unwind path: a turn that dies
+    /// without announcing leaves the foreground waiting for an event that can
+    /// never arrive, and nothing else would ever clear its streaming state.
+    announced: AtomicBool,
     /// Private MCP stdio pool: this turn's server processes are never shared
     /// with another turn (or with the panel's warmup pool). Spawned lazily on
     /// the first `tools/list` / `tools/call`, killed at turn-end cleanup;
@@ -140,6 +146,7 @@ impl LlmTurn {
                 items: Vec::new(),
             }),
             budget: Mutex::new(budget),
+            announced: AtomicBool::new(false),
             mcp: tokio::sync::Mutex::new(crate::mcp::McpSession::new()),
         }
     }
@@ -247,6 +254,7 @@ impl LlmTurn {
     /// accepted after this point could reach another request.
     pub fn emit_done(&self) {
         self.close_inbox();
+        self.announced.store(true, Ordering::SeqCst);
         let _ = self.app.emit(
             events::CHAT_DONE,
             events::ChatTurn {
@@ -259,6 +267,7 @@ impl LlmTurn {
     /// announcement, so the inbox closes before the UI drops the row.
     pub fn emit_error(&self, error: &str) {
         self.close_inbox();
+        self.announced.store(true, Ordering::SeqCst);
         let _ = self.app.emit(
             events::CHAT_ERROR,
             events::ChatError {
@@ -266,6 +275,20 @@ impl LlmTurn {
                 error: error.to_string(),
             },
         );
+    }
+
+    /// True once this turn's end was announced to the webview. The guard that
+    /// closes a turn reads it to tell "ended" from "died without a word".
+    pub fn announced(&self) -> bool {
+        self.announced.load(Ordering::SeqCst)
+    }
+
+    /// Record that the frontend was told this turn ended through another
+    /// channel — the rejected `chat_completion` invoke — so the end-of-turn
+    /// backstop does not report a second failure for a turn the user already
+    /// saw fail.
+    pub fn mark_announced(&self) {
+        self.announced.store(true, Ordering::SeqCst);
     }
 
     // ── Budget ──────────────────────────────────────────────────────────────

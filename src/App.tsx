@@ -990,6 +990,14 @@ export default function App() {
   /** True while a file is dragged over the window (native drag-drop). */
   const [dropActive, setDropActive] = useState(false);
   const cleanupRef = useRef<(() => void) | null>(null);
+  /**
+   * Closes the visible turn locally when the backend no longer owns it. Its
+   * whole settle path is the one terminal event the listener receives; if that
+   * event never comes, `streaming` stays set forever (no request, a Stop that
+   * cancels nothing), so the reconcile sweep needs a way to close it itself
+   * (see `armForegroundAbandon`).
+   */
+  const abandonTurnRef = useRef<((err: string) => void) | null>(null);
   const themeRef = useRef<ThemeMode>("auto");
   const paletteRef = useRef<Palette>("default");
   /** Blob URL of the configured chat background (Settings thumbnail + preview). */
@@ -1088,6 +1096,8 @@ export default function App() {
   }, [streaming]);
   /** Serialises reconcile sweeps (focus + mount + switch can overlap). */
   const reconcilingRef = useRef(false);
+  /** Pending grace timer for the foreground abandon check. */
+  const abandonTimerRef = useRef<number | null>(null);
 
   /**
    * Load the workspace skill status and derive the enabled list.
@@ -1685,6 +1695,46 @@ export default function App() {
     [driverHost, wireDriver, dropRunningSession]
   );
 
+  const disarmForegroundAbandon = useCallback(() => {
+    if (abandonTimerRef.current !== null) {
+      window.clearTimeout(abandonTimerRef.current);
+      abandonTimerRef.current = null;
+    }
+  }, []);
+
+  /**
+   * Settle the visible turn when the backend has really lost it.
+   *
+   * A foreground turn is owned by this webview — a driver never takes it over —
+   * so its whole settle path is the one terminal `chat-done` / `chat-error` its
+   * listener receives. That event can be lost: a webview reload dropped the
+   * listener, a turn that unwound without announcing emitted none, a throttled
+   * webview missed one. Nothing else clears `streaming` then — the composer
+   * keeps showing Stop, no request is ever made again, and `ensureDriverFor`
+   * refuses the session while `streaming` is set, so the usual heal could not
+   * run either. One absence from the registry is not proof (the base is
+   * unpublished a few milliseconds before its event reaches the webview), so
+   * the check asks again after a grace period, by turn id.
+   */
+  const armForegroundAbandon = useCallback(
+    (turnId: string) => {
+      if (abandonTimerRef.current !== null) return;
+      abandonTimerRef.current = window.setTimeout(() => {
+        abandonTimerRef.current = null;
+        void (async () => {
+          if (!streamingRef.current || currentTurnIdRef.current !== turnId) return;
+          const snapshot = await getTurnSnapshot(sessionIdRef.current).catch(() => null);
+          if (snapshot?.turn_id === turnId) return;
+          const abandon = abandonTurnRef.current;
+          if (!abandon) return;
+          console.warn("turn ended without a terminal event, settling it locally", turnId);
+          abandon(t("app.turnLostEvent"));
+        })();
+      }, 8000);
+    },
+    [t]
+  );
+
   /**
    * Make the local turn bookkeeping agree with the backend, the only authority
    * on what still runs.
@@ -1719,6 +1769,19 @@ export default function App() {
         }
         return next;
       });
+      // The visible session's turn has no driver, so a terminal event that was
+      // lost leaves it streaming with nothing behind it. Same rule as the
+      // drivers get: absent from the registry (re-checked after a grace
+      // period) means the turn is gone and this webview must settle it.
+      const foregroundTurnId = currentTurnIdRef.current;
+      if (streamingRef.current && foregroundTurnId) {
+        const visible = live.get(sessionIdRef.current);
+        if (!visible || visible.turn_id !== foregroundTurnId) {
+          armForegroundAbandon(foregroundTurnId);
+        } else {
+          disarmForegroundAbandon();
+        }
+      }
       // A driver whose turn the backend no longer runs can never receive its
       // terminal event: settle it so its reply is persisted and the composer
       // returns from Stop to Send. A driver that just heard from its turn is
@@ -1740,7 +1803,7 @@ export default function App() {
     } finally {
       reconcilingRef.current = false;
     }
-  }, [ensureDriverFor]);
+  }, [ensureDriverFor, armForegroundAbandon, disarmForegroundAbandon]);
 
   // The registry seed and the reload re-attach used to run in their own effect,
   // racing their own listener: a turn that ended between the snapshot and the
@@ -1797,6 +1860,18 @@ export default function App() {
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [reconcileTurns]);
+
+  // A foreground turn that lost its terminal event looks exactly like a slow
+  // one (a tool can take minutes), so the sweep also runs on its own while a
+  // turn streams: waiting for focus, mount or a session switch would leave the
+  // composer stuck on Stop until the user clicked something — and if the user
+  // is watching a turn that will never answer, that click is the only thing
+  // that could have helped.
+  useEffect(() => {
+    if (!streaming) return;
+    const id = window.setInterval(() => void reconcileTurns(), 10000);
+    return () => window.clearInterval(id);
+  }, [streaming, reconcileTurns]);
 
   // Context menu is now allowed so users can right-click to copy/paste.
 
@@ -3746,6 +3821,7 @@ export default function App() {
     }, useAgentsEnabled, autoPlanEnabled, embeddedAgentIds, currentTurnIdRef);
 
     cleanupRef.current = cleanup;
+    abandonTurnRef.current = cleanup.abandon;
   }, [input, messages, streaming, backupExporting, activeSkillIds, sessionId, selectedModel, selectedMetadata, useAgentsEnabled, autoPlanEnabled, embeddedAgents, t, flushUndeliveredInjections, beginTurnStats, settleTurnStats]);
 
   /**
@@ -4191,6 +4267,7 @@ export default function App() {
     }, useAgentsEnabled, autoPlanEnabled, undefined, currentTurnIdRef);
 
     cleanupRef.current = cleanup;
+    abandonTurnRef.current = cleanup.abandon;
   }, [messages, streaming, pendingRetryMessageId, activeSkillIds, sessionId, selectedModel, useAgentsEnabled, autoPlanEnabled, t, flushUndeliveredInjections, beginTurnStats, settleTurnStats]);
 
   const handleDeleteMessage = useCallback(async (messageId: string) => {

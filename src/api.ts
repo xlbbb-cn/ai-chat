@@ -759,6 +759,20 @@ function newTurnId(): string {
   return `turn-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
+/**
+ * Handle for one foreground turn.
+ *
+ * Callable exactly like the old unlisten cleanup: it marks the turn closed and
+ * drops the listeners, so a late event or invoke rejection cannot settle it a
+ * second time. `abandon` is for the case the caller is stuck in — the backend
+ * no longer owns the turn, so no terminal event will ever arrive, and the
+ * foreground has to settle its own state instead of waiting forever.
+ */
+export type TurnHandle = (() => void) & {
+  /** Settle the turn locally as failed. No-op once it already settled. */
+  abandon: (err: string) => void;
+};
+
 export async function chatCompletion(
   messages: {
     role: Message["role"];
@@ -790,7 +804,7 @@ export async function chatCompletion(
    * into the background driver so the running turn can be re-attached later.
    */
   turnIdHolder?: { current: string | null },
-): Promise<UnlistenFn> {
+): Promise<TurnHandle> {
   const unlisteners: UnlistenFn[] = [];
 
   // One id for this turn: the backend echoes it on every `chat-*` payload, so
@@ -893,10 +907,15 @@ export async function chatCompletion(
 
   // Mark the turn closed before removing listeners: a late invoke rejection
   // after Stop must not run the error path (and persist a second partial row).
-  return () => {
+  const handle = (() => {
     settled = true;
     cleanup();
-  };
+  }) as TurnHandle;
+  // Settles the foreground from outside the event stream: the reconcile sweep
+  // calls it when the backend has no turn with this id any more, because in
+  // that case `chat-done` / `chat-error` is never going to arrive.
+  handle.abandon = (err: string) => finish(err);
+  return handle;
 }
 
 export async function saveHistory(
