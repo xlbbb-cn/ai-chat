@@ -64,7 +64,7 @@ pub fn get_all_tools(
             "type": "function",
             "function": {
                 "name": "run_cmd",
-                "description": "Execute a program or a workspace script under tiered risk assessment: L0-L3 need the user's confirmation with the risk score; L4-L6 run directly (L4 is a sensitive read, L5/L6 are safe/read-only); syntax errors are rejected with a detailed report. Returns the result or the rejection reason.\n\n`action: \"run\"` (default) runs `command`. The first word is a script name in the library `<workspace>/.data/scripts` (extension optional, e.g. `build-frontend`, `deploy.py`) or a bare program name resolved through PATH (`python`, `git`, `node`); the library is prepended to the child's PATH, so a script wins over a same-named program. Children also run on the app-data environment (`<env root>/bin`, `uv` and the venv named in `ready.json`), `run_shell` too — minus the library. Absolute and relative paths are refused, and shell interpreters (`bash`, `sh`, `csh`, `zsh`, `cmd`, `powershell`, …) are refused too — their arguments would bypass the script audit. Write the script with `file_actions` and hand it to `run_shell`, or save it in the library and run it by name.\n\n`action: \"list\"` lists the library with its `@description` / `@usage` header, interpreter and use count, and executes nothing. Scripts are plain files in that folder: write them with `file_actions` and give them `@description` / `@usage` header comments.",
+                "description": "Run a program or workspace script directly, without a shell. The process starts in the workspace root.\n\n`action: \"run\"` (default) takes `command`: its first word is a script name in the library `.data/scripts` (extension optional, e.g. `build-frontend`) or a bare program name resolved through PATH (`python`, `git`, `node`). Absolute and relative paths are refused, and so are shell interpreters (`bash`, `sh`, `cmd`, `powershell`, …) — their arguments would bypass the script audit. Risk tiers: L0-L3 need the user's confirmation with the risk score, L4-L6 run directly; syntax errors are rejected.\n\n`action: \"list\"` shows the library scripts with their `@description` / `@usage` header, interpreter and use count.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -101,12 +101,10 @@ pub fn get_all_tools(
             "function": {
                 "name": "run_shell",
                 "description": format!(
-                    "Execute or manage a shell script under the same risk assessment and confirmation rules as `run_cmd`.\n\n\
-                     This machine runs {machine}. The shell is fixed for this build: write {language} scripts (there is no shell-type argument to choose).\n\n\
-                     The script starts in the working directory (the workspace root for the main chat, the task directory inside a sub-agent mission) but may `cd` and run anything — pipes, loops, redirections, absolute paths. Use it when a PATH-resolved program is not enough.\n\n\
-                     Scripts run on the app-data environment (`<env root>/bin`, `uv` and the venv named in `ready.json`), so `python`, `uv` and anything installed there answer without a full path. Only the workspace script library stays `run_cmd`'s — a script in `.data/scripts` is addressed by path here.\n\n\
-                     The script runs headless (no terminal): interactive elevation — a `sudo` password prompt or a UAC dialog — is not available. If a step needs it, tell the user to run that step themselves.\n\n\
-                     `run_type: \"direct\"` (default) runs to completion and returns the output. `run_type: \"serve\"` starts a long-lived child (HTTP service, watcher…) and returns a `serve_id`; then `action: \"list\"` shows the processes and `action: \"stop\"` kills one id (or `serve_id: \"all\"`). Serve processes die with this chat turn and at app exit."
+                    "Execute or manage a shell script under the same risk and confirmation rules as `run_cmd`.\n\n\
+                     This machine runs {machine}. The shell is fixed for this build: write {language} scripts (no shell-type argument). The script starts in the working directory but may `cd` and run anything — pipes, loops, absolute paths — on the app-data environment, so `python` and `uv` answer without a full path.\n\n\
+                     It runs headless: interactive elevation (a `sudo` prompt or a UAC dialog) is not available — tell the user to run that step themselves.\n\n\
+                     `run_type: \"direct\"` (default) returns the output; `serve` starts a long-lived child and returns a `serve_id` (`action: \"list\"` / `\"stop\"`), which dies with this turn and at app exit.\n"
                 ),
                 "parameters": {
                     "type": "object",
@@ -146,7 +144,7 @@ pub fn get_all_tools(
             "type": "function",
             "function": {
                 "name": "file_actions",
-                "description": "File operations strictly inside the workspace. Use `./...` paths (e.g. `./src/App.tsx`) or `.` for the root; absolute paths inside the workspace work, anything resolving outside is rejected — use `run_shell` only when external access is genuinely required. `.data` is part of the workspace and writable: skills under `./.data/skills/...`, the `run_cmd` script library under `./.data/scripts/...`, memory/todos/status — everything except `.data/chat.db`. Scratch output belongs in `./.data/tmp/` (the PDF cache and composer pastes live there; every plain file sitting directly in it expires after a day). Reports and files the user is meant to keep go into the project folder of the workspace — `./<project>/...`, the folder the task is about, or one you create — NEVER into `.data/tmp`, which is scratch. Sub-agent deliverables are written to `./.data/deliver/<session-id>/` by the runtime. An `@path` mention in a user message was already inlined at send time — the `<details><summary>Attached File: … — already provided below` block holds those bytes — so read the file only for the parts that are missing (other lines, other files), never to re-check what the user already sent. Protected self-evolution targets get an automatic `.bak.<n>` backup before mutation.",
+                "description": "File operations strictly inside the workspace: `read` / `write` / `list` / `search` / `mkdir` / `patch` / `diff` / `rename` / `move` / `delete`. Use `./...` paths, or `.` for the root; anything resolving outside is refused. `.data` is writable (skills, scripts, memory, todos) — everything except `.data/chat.db`. Keep scratch in `.data/tmp/`; files the user keeps go in `./<project>/...`.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -257,7 +255,7 @@ pub fn get_all_tools(
             "type": "function",
             "function": {
                 "name": "memory",
-                "description": format!("Manage persistent memory in these scopes:\n- `session`: in-memory, cleared at app restart — task context and in-progress notes.\n- `user`: file-backed, cross-session — preferences, patterns, general insights.\n- `repo`: file-backed, repository-scoped — conventions, build commands, project facts.{evolution_scope}\n\n`scope: \"all\"` runs get/list/search over every scope at once (read-only); add/delete need one concrete scope. `user`/`repo` are markdown files in the workspace `.data/memory` (app-managed — never edit them with file tools).{hint_clause} Evolution entries are structured (key, title, kind, tags, importance, confidence, evidence); `search` matches keywords with a title > tags > body priority and returns the strongest hits first (hit tier, then how many keywords matched) — keep each to one dense fact. `consolidate` folds a large evolution cluster into a skill archive: `phase: \"plan\"` first, then `phase: \"apply\"` with the full `skill_md` and the same `keys`.\n\nTRUST CALIBRATION (evolution): a fact you retrieved is a claim, not the truth. When the real result disagrees with it, immediately `add` the same key with `conflict: true` — plus the corrected `content` if you know it, and a one-line `note` — so the entry is rewritten in that same call and its confidence drops to 1. When it matched, a plain re-add raises confidence by one. Entries at confidence 2 or below (and anything recently contradicted) must be re-verified against the real environment before you rely on them."),
+                "description": format!("Manage persistent memory:\n- `session`: in-memory, cleared at app restart — task context and in-progress notes.\n- `user`: file-backed, cross-session — preferences, patterns, insights.\n- `repo`: file-backed, repository-scoped — conventions, build commands, project facts.{evolution_scope}\n\n`scope: \"all\"` reads every scope at once; add/delete need one concrete scope. `user`/`repo` are app-managed files in `.data/memory` — never edit them with file tools.{hint_clause} Keep each entry to one dense fact. `consolidate` archives an evolution cluster into a skill: `plan` first, then `apply` with the full `skill_md` and the same `keys`.\n\nTRUST CALIBRATION (evolution): a retrieved fact is a claim, not the truth. When the real result disagrees, `add` the same key with `conflict: true` (plus the corrected `content`) — the entry is rewritten and its confidence drops to 1; a plain re-add raises it by one. Re-verify anything at confidence 2 or below before relying on it."),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -370,7 +368,7 @@ pub fn get_all_tools(
             "type": "function",
             "function": {
                 "name": "todos",
-                "description": "Manage this session's todo list (the `file_actions` counterpart for plans). Call 'list' first — the list is long-running session state shared with every parallel agent and the UI mirrors every change live. 'add' appends an item, 'update_status' moves one through pending → in_progress → completed/cancelled, 'clear_completed' removes finished items, 'archive' starts a fresh list. 'ask' opens an interactive question form in the UI (one card per question, selectable options or free text) and BLOCKS until the user submits answers — use it when a decision needs the user's choice (approach, naming, trade-offs) instead of guessing; do not ask what the conversation already answers.",
+                "description": "Manage this session's todo list. Call 'list' first. 'add' appends an item, 'update_status' moves one (pending -> in_progress -> completed/cancelled), 'clear_completed' drops finished items, 'archive' starts a fresh list. 'ask' shows a question form in the UI and blocks until the user answers — use it for decisions that need their choice, not for what the conversation already answers.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -447,7 +445,7 @@ pub fn get_all_tools(
             "type": "function",
             "function": {
                 "name": "timer_set",
-                "description": "Schedule a one-shot delay timer that resumes this conversation later (see the TIMER policy). Start the slow work first, then arm the timer, tell the user and END YOUR TURN: the app injects `message` into this chat as a new user turn, with the full history.",
+                "description": "One-shot delay timer that resumes this conversation later. Start the slow work first, then arm it, tell the user and END YOUR TURN: the message arrives as a new user turn with the full history.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -474,7 +472,7 @@ pub fn get_all_tools(
             "type": "function",
             "function": {
                 "name": "timer_list",
-                "description": "List pending timers (id, label, fire time, remaining seconds, message) — check before arming a duplicate, or to find a timer id to cancel.",
+                "description": "List pending timers (id, label, fire time, remaining seconds, message).",
                 "parameters": {
                     "type": "object",
                     "properties": {}
@@ -506,17 +504,16 @@ pub fn get_all_tools(
         // it unconditionally. `run_shell` is mentioned only when selected, so
         // the model is never pointed at a tool it does not have.
         let shell_fallback = if selected_tools.iter().any(|t| t == "run_shell") {
-            " For larger computations the grammar cannot express — library functions, scripts, batch data, date arithmetic — run the calculation with `run_cmd` or `run_shell` (for example a short python / node snippet) instead."
+            " For what the grammar cannot express, run a short python / node snippet with `run_cmd` or `run_shell` instead."
         } else {
-            " For larger computations the grammar cannot express — library functions, scripts, batch data, date arithmetic — run the calculation with `run_cmd` (for example a short python / node snippet) instead."
+            " For what the grammar cannot express, run a short python / node snippet with `run_cmd` instead."
         };
         let description = concat!(
             "Evaluate a mathematical expression and return the numeric result.\n\n",
-            "Use this tool for any computation whose result you report: multi-step arithmetic, powers, roots, unit conversions, percentages, statistics, date arithmetic, and any figure that must be exact. A single obvious mental step (e.g. `12*3`) may be stated directly. NEVER guess a number or recall one from memory — when in doubt, call the tool.\n\n",
-            "Operators (lowest to highest precedence): `|` (bitwise OR), `^^` or `xor` (bitwise XOR), `&` or `and` (bitwise AND), `<<` / `>>` (shifts), `+` / `-`, `*` / `/` / `%`, unary `+` / `-` / `~`, `^` or `**` (exponentiation, right-associative: `2^3^2 = 512`; `^-2` and `^0.5` work), postfix `!` (factorial, max 20!). Parentheses nest and implicit multiplication is accepted: `2(3+4)`, `2pi`, `(1+2)(3+4)`.\n\n",
-            "Numbers: decimal and scientific (`1.5e3`), hex `0xFF`, binary `0b1010`, octal `0o17`, `_` separators. Constants: `pi`, `e`, `tau`.\n\n",
-            "Functions: `sqrt abs exp ln log log10 log2 sin cos tan asin acos atan atan2 sinh cosh tanh floor ceil round trunc sign min max pow hypot fact factorial not and or xor shl shr`.\n\n",
-            "`^` is exponentiation, NOT XOR — use `^^` / `xor(...)` for XOR. Bitwise operators, shifts and factorial require integer operands and return exact 64-bit integers; all other math is f64. Division by zero, non-real results (`sqrt(-1)`, `log(0)`), `NaN`/overflow and syntax errors return an `Error:` message with the offending position."
+            "Use this tool for any computation whose result you report: arithmetic, powers, roots, unit conversions, percentages, statistics, date arithmetic, any exact figure. A single obvious mental step may be stated directly. NEVER guess a number — when in doubt, call the tool.\n\n",
+            "Operators (lowest to highest): `|` (OR), `^^` / `xor` (XOR), `&` / `and` (AND), `<<` / `>>` (shifts), `+` `-`, `*` `/` `%`, unary `+` `-` `~`, `^` / `**` (exponentiation, right-associative; `^-2` and `^0.5` work), postfix `!` (factorial, max 20!). Parentheses nest; implicit multiplication works (`2(3+4)`, `2pi`).\n\n",
+            "Numbers: decimal and scientific, `0x` / `0b` / `0o`, `_` separators. Constants: `pi`, `e`, `tau`. Functions: `sqrt abs exp ln log log10 log2 sin cos tan asin acos atan atan2 sinh cosh tanh floor ceil round trunc sign min max pow hypot fact factorial not and or xor shl shr`.\n\n",
+            "`^` is exponentiation — XOR is `^^` / `xor(...)`. Bitwise operators, shifts and factorial require integers and return exact 64-bit values; the rest is f64. Invalid input returns an `Error:` message with the position."
         );
         let description = format!("{description}{shell_fallback}");
         tools.push(json!({
@@ -566,7 +563,7 @@ pub fn get_all_tools(
             "type": "function",
             "function": {
                 "name": "background_task",
-                "description": "Manage background tasks started with `run_in_background`:\n- `list`: running and finished tasks of this session (id, tool, status, elapsed).\n- `wait`: block until the given tasks (or every task) finish, up to `timeout_seconds`; returns the results that became available.\n- `get`: full result of one finished task.\n- `cancel`: stop a task (or all) — the process tree is killed and the result discarded.\n\nA finished task's result is also delivered automatically before your next request, so `wait` is only needed when you cannot proceed without it.",
+                "description": "Manage background tasks started with `run_in_background`: `list` (running and finished, with elapsed), `wait` (block up to `timeout_seconds`), `get` (one finished result), `cancel` (kill the tree). A finished result is delivered automatically before your next request, so `wait` is only needed when you cannot proceed.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -625,8 +622,8 @@ pub fn get_skill_read_tool() -> Value {
         "type": "function",
         "function": {
             "name": "skill_read",
-            "description": "Read, list or search files inside an active skill's directory — supplementary material (templates, configs, data, examples) that accompanies its SKILL.md. Paths are relative to the skill root.",
-            "parameters": {
+            "description": "Read, list or search files inside an active skill's directory — templates, configs, data, examples that accompany its SKILL.md. Paths are relative to the skill root.",
+                "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {
@@ -711,7 +708,7 @@ pub fn get_agent_task_tools() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "add_task",
-                "description": "Add a new task to the current autonomous mission. Use this instead of relying on chat history to remember future work. This is a mission task, not the user-visible todo list.",
+                "description": "Add a task to the current autonomous mission — mission state, not the user-visible todo list.",
                 "parameters": {
                     "type": "object",
                     "properties": {

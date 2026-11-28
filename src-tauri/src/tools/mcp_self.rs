@@ -89,24 +89,7 @@ pub fn schema() -> Value {
         "type": "function",
         "function": {
             "name": TOOL_NAME,
-            "description": "Build and run your own MCP servers (self-evolution mode only). \
-    A server is a small stdio program speaking line-delimited JSON-RPC 2.0: answer `initialize`, \
-    then `tools/list` with your schemas, then `tools/call` returning \
-    `content: [{type: \"text\", text: ...}]`. Write ONLY JSON-RPC to stdout — nothing else, and \
-    log to stderr.\n\n\
-    The script lives at `<workspace>/.data/mcp/<slug>/server.<ext>`, registered in \
-    `<workspace>/.data/mcp.conf` (YAML, `source: \"self-evolution\"`) and merged with the app-data \
-    `mcp_servers.json` that the user's panel owns — never write that file. The backend resolves \
-    the interpreter from `runtime`, never an arbitrary command; stdio children start in the \
-    workspace root, so workspace-relative paths work — write any scratch data a server needs to \
-    `.data/tmp/` (`utf-8` JSON/CSV, never credentials) instead of the workspace root.\n\n\
-    Workflow: `write` (create/update, optionally enable, returns the tool names) → use the tools → \
-    `logs` on failure (`write` re-tests, so `test` is for diagnosis). `write`, `enable` and `remove` \
-    ask the user once (`user_software`); new tools are callable from your next request in the same \
-    turn. Rules: no credentials in a script (use the environment or an app tool); one job and a few \
-    tools per server; prefer `python` unless the task needs Node; a server whose `tools/list` fails \
-    stays disabled so it cannot stall later requests. A running server keeps the code it started \
-    with — after editing it with `file_actions`, `restart` (or `write` again).",
+            "description": "Build and run your own MCP servers (self-evolution mode only): a small stdio program speaking line-delimited JSON-RPC 2.0 — answer `initialize`, then `tools/list`, then `tools/call` returning `content: [{type: \"text\", text: ...}]`. Write only JSON-RPC to stdout, log to stderr.\n\nThe script lives in `.data/mcp/<slug>/` and is registered in `.data/mcp.conf` (`source: \"self-evolution\"`); the app-data `mcp_servers.json` is never written here. Children start in the workspace root; keep scratch data in `.data/tmp/` (utf-8, never credentials).\n\nWorkflow: `write` (create/update, returns the tool names) → use the tools → `logs` on failure. A running server keeps the code it started with — `restart` after editing it. No credentials in a script; one job and a few tools per server; prefer `python` unless the task needs Node.",
             "parameters": {
                 "type": "object",
                 "properties": {

@@ -20,17 +20,7 @@ pub(crate) fn tool_definition() -> Value {
         "type": "function",
         "function": {
             "name": "experience",
-            "description": "Global experience packages (app-data, survives every workspace switch). \
-                A package is a portable folder holding a method (`guide.md`), optional skill/script/\
-                MCP parts, and the environment it needs; this tool never runs it. \
-                Use `search` before solving a problem from scratch, `load` to read the method, \
-                `install` to copy the parts into this workspace — then run them with the ordinary \
-                tools: `use_skill` loads the skill part (where `use_skill` is not offered, read \
-                its `.data/skills/<slug>/skill.md` with `file_actions`), \
-                `run_shell`/`run_cmd` run the scripts, and the MCP part is served by the main \
-                agent's `mcp_self`. `pack` snapshots workspace artifacts into a package, \
-                `distill` folds several packages into one, `forget` archives one. \
-                Available only while self-evolution mode is on.",
+            "description": "Global experience packages (app-data, survives every workspace switch): a portable folder with a `guide.md` method, optional skill/script/MCP parts and the environment it needs; this tool never runs it. Use `search` before solving a familiar problem from scratch, `load` to read the method, `install` to copy the parts into this workspace — then run them with the ordinary tools (`use_skill`, `run_cmd` / `run_shell`, `mcp_self`). `pack` snapshots workspace artifacts into a package, `distill` folds several into one, `forget` archives one. Available only while self-evolution mode is on.",
             "parameters": {
                 "type": "object",
                 "properties": {
