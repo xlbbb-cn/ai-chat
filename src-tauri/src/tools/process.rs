@@ -329,40 +329,36 @@ pub(crate) fn looks_like_windows_path(value: &str) -> bool {
 
 /// Extra environment mounted into a child this module launches.
 ///
-/// Both entries are optional and independent:
+/// Every entry is optional and independent:
 ///
 /// - `scripts` — the workspace script library; prepended to the child's `PATH`
 ///   so `run_cmd` resolves library scripts (and programs they spawn) there.
+///   `run_shell` leaves it unset: a free-form script addresses a program or a
+///   path, not a library entry.
+/// - `env_dirs` — the host environment root from app data (`env/bin`, for
+///   tools the assistant installed), mounted right behind the script library.
 /// - `venv` — the host Python venv (`<app data>/env/py313`); its `bin/`
 ///   (`Scripts/` on Windows) joins the child's `PATH` right behind the script
 ///   library, and `VIRTUAL_ENV` names it, so `python` / `python3` inside a
-///   `run_cmd` child is the 3.13 interpreter and `sys.prefix` points at the
-///   venv. `run_shell` deliberately passes `Mounts::default()`: an arbitrary
-///   shell script keeps the host interpreter.
+///   child is the 3.13 interpreter and `sys.prefix` points at the venv.
+///
+/// `run_cmd` and `run_shell` (including its `serve` processes) both pass the
+/// host environment; only `run_cmd` passes the script library.
 #[derive(Clone, Copy, Default)]
 pub(crate) struct Mounts<'a> {
     pub scripts: Option<&'a Path>,
     /// Host directories from app data `env/` (e.g. `env/bin` for tools the
-    /// assistant installed), mounted behind the script library — `run_cmd`
-    /// passes `env::tool_path_dirs`, `run_shell` passes nothing.
+    /// assistant installed), mounted behind the script library — both
+    /// `run_cmd` and `run_shell` pass `env::tool_path_dirs`.
     pub env_dirs: &'a [PathBuf],
     /// The 3.13 venv `VIRTUAL_ENV` names and whose `bin/` goes on `PATH`.
     pub venv: Option<&'a Path>,
 }
 
-/// Build a command for `cmd_type` rooted at `cwd`, without running it.
-/// Used by `run_command` (synchronous) and by `serve` (long-lived children).
-pub(crate) fn build_command(
-    cmd_type: &str,
-    code: &str,
-    cwd: Option<PathBuf>,
-) -> Result<tokio::process::Command, String> {
-    build_command_with_path(cmd_type, code, cwd, Mounts::default())
-}
-
-/// Like [`build_command`], but with the [`Mounts`] the caller wants in the
-/// child's environment. `run_cmd` mounts the script library and the host venv;
-/// every other caller passes `Mounts::default()`.
+/// Build a command for `cmd_type` rooted at `cwd`, without running it, with the
+/// [`Mounts`] the caller wants in the child's environment: `run_cmd` mounts the
+/// script library and the host environment, `run_shell` (and its `serve`
+/// processes) the host environment alone, every other caller `Mounts::default()`.
 pub(crate) fn build_command_with_path(
     cmd_type: &str,
     code: &str,
@@ -570,7 +566,7 @@ pub async fn run_command(
 /// app exit use.
 ///
 /// `mounts` is what `run_cmd` passes (the script library and the host venv);
-/// `run_shell` passes `Mounts::default()` and keeps the host interpreter.
+/// `run_shell` passes the host environment alone (no script library).
 pub(crate) async fn run_command_timed(
     cmd_type: String,
     code: String,

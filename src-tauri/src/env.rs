@@ -26,13 +26,15 @@
 //!
 //! The absolute root is exported to every child process as
 //! [`ENV_ROOT_VAR`] (`env::publish`), so a script can find the venv at
-//! runtime instead of baking a host-specific path into an artifact.
+//! runtime instead of baking a host-specific path into an artifact, and
+//! [`PYTHON_VAR`] carries the interpreter itself so a re-exec needs no parsing.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tauri::{AppHandle, Manager};
 
 use crate::manuals::{self, Manual};
@@ -46,9 +48,16 @@ pub const VENV_DIR: &str = "py313";
 pub const READY_FILE: &str = "ready.json";
 /// Exported to every child process so scripts can locate the venv.
 pub const ENV_ROOT_VAR: &str = "AI_CHAT_ENV_ROOT";
+/// Exported to every child process: the venv interpreter the shells mount, so
+/// an artifact can re-exec under 3.13 instead of parsing the flag itself.
+pub const PYTHON_VAR: &str = "AI_CHAT_PYTHON";
 
 /// Contents of `<env root>/ready.json` — the flag and the facts the prompt
 /// quotes back once the environment is ready.
+///
+/// This is the shape [`Ready`] *writes*. Reading is lenient
+/// ([`read_ready`]): the same facts may arrive as a richer object, and the
+/// interpreter that matters is whichever path the flag names.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ready {
     /// Absolute path of the venv interpreter this flag vouches for.
@@ -111,18 +120,27 @@ pub fn venv_bin_dir(venv: &Path) -> PathBuf {
     }
 }
 
+/// The launcher name a venv exposes on this platform.
+fn python_file_name() -> &'static str {
+    if cfg!(windows) {
+        "python.exe"
+    } else {
+        "python"
+    }
+}
+
 /// The interpreter a venv exposes on this platform.
 pub fn venv_python(env_root: &Path) -> PathBuf {
-    let name = if cfg!(windows) { "python.exe" } else { "python" };
-    venv_bin_dir(&venv_dir(env_root)).join(name)
+    venv_bin_dir(&venv_dir(env_root)).join(python_file_name())
 }
 
 /// The version recorded in the venv's `pyvenv.cfg` (`version_info = 3.13.13`).
 ///
 /// A cheap file read instead of spawning the interpreter. It decides whether
-/// the venv may be mounted into `run_cmd` children and whether [`auto_flag`]
-/// may vouch for it: a venv whose base Python is not 3.13 must not silently
-/// become the `python` of every `run_cmd` child.
+/// a conventional venv may be mounted into the shells' children and whether
+/// [`auto_flag`] may vouch for it: a venv whose base Python is not 3.13 must
+/// not silently become the `python` of every shell child. A venv the flag names
+/// is mounted without this check — the flag is the verified record.
 pub fn venv_version(env_root: &Path) -> Option<String> {
     let cfg = fs::read_to_string(venv_dir(env_root).join("pyvenv.cfg")).ok()?;
     let mut version = None;
@@ -153,14 +171,51 @@ fn probe_version(python: &Path) -> Option<String> {
     (!version.is_empty()).then_some(version)
 }
 
-/// The venv `run_cmd` mounts into its children, when this host has a usable
-/// 3.13 environment: the interpreter exists and `pyvenv.cfg` reports 3.13.
+/// The venv the completion flag describes, when the interpreter it names is
+/// really there: `<venv>/bin/python` (`Scripts/python.exe` on Windows) → the
+/// venv root.
 ///
-/// The completion flag is deliberately **not** required here — a workspace that
-/// just gained a venv should already get it inside `run_cmd`, before the flag
-/// (and with it the prompt note) is written. The version check keeps a stray
-/// 3.14 venv from quietly taking over every `run_cmd` child's `python`.
+/// The flag is what the shells prefer, because it can name a layout the
+/// convention does not (`env/alt`, a uv-managed venv elsewhere under the env
+/// root): whoever wrote it verified that interpreter, so the mount follows the
+/// JSON instead of guessing `<env root>/py313`.
+pub fn flagged_venv(data_dir: &Path) -> Option<PathBuf> {
+    let ready = read_ready(data_dir)?;
+    let python = PathBuf::from(ready.python.trim());
+    if python.as_os_str().is_empty() || !python.is_file() {
+        return None;
+    }
+    let bin = python.parent()?;
+    let name = bin.file_name()?.to_str()?;
+    if !name.eq_ignore_ascii_case("Scripts") && name != "bin" {
+        return None;
+    }
+    bin.parent().map(Path::to_path_buf)
+}
+
+/// The `uv` the flag records, when the file is still there — its directory is
+/// mounted too, so `uv` runs by bare name inside a shell script.
+pub fn flagged_uv_dir(data_dir: &Path) -> Option<PathBuf> {
+    let ready = read_ready(data_dir)?;
+    let uv = PathBuf::from(ready.uv.trim());
+    if uv.as_os_str().is_empty() || !uv.is_file() {
+        return None;
+    }
+    uv.parent().map(Path::to_path_buf)
+}
+
+/// The venv the shells (`run_cmd` and `run_shell`) mount into their children.
+///
+/// `ready.json` wins: an environment the flag describes is the one that was
+/// actually prepared on this host, whatever its layout. Without a usable flag
+/// the conventional `<env root>/py313` still counts — a workspace that just
+/// gained a venv should get it inside the shells *before* the flag (and with it
+/// the prompt note) is written — but only when `pyvenv.cfg` reports 3.13, which
+/// keeps a stray 3.14 venv from quietly taking over every child's `python`.
 pub fn mounted_venv(data_dir: &Path) -> Option<PathBuf> {
+    if let Some(venv) = flagged_venv(data_dir) {
+        return Some(venv);
+    }
     let env_root = root(data_dir);
     if !venv_python(&env_root).is_file() {
         return None;
@@ -208,17 +263,87 @@ pub fn status(data_dir: &Path) -> Status {
     Status::Ready(Ready { python, ..ready })
 }
 
+/// The trimmed string at `path` inside `value`, when there is one.
+fn string_at(value: &Value, path: &[&str]) -> Option<String> {
+    let mut current = value;
+    for key in path {
+        current = current.get(*key)?;
+    }
+    let text = current.as_str()?.trim();
+    (!text.is_empty()).then(|| text.to_string())
+}
+
+/// Read a flag object without insisting on one exact shape.
+///
+/// Two layouts exist in practice, and both mean the same thing:
+///
+/// - flat: `{"python": "<interpreter>", "version": "3.13.13", "uv": "<path>", …}`
+///   (what [`Ready`] serializes and what the `setup-env` manual writes)
+/// - described: `{"python": {"exe": "<interpreter>", "venv": "<dir>",
+///   "version": "3.13.17"}, "env_root": …, "tools": […], "description": …}`
+///   (a richer flag an earlier turn may have written)
+///
+/// Fields are read one by one and a missing key is not an error, so an
+/// environment that is really there never stays pending because of a key this
+/// build does not know.
+fn ready_from_value(value: &Value) -> Ready {
+    let python = string_at(value, &["python"])
+        .or_else(|| string_at(value, &["python", "exe"]))
+        .or_else(|| string_at(value, &["python", "path"]))
+        .or_else(|| {
+            // A flag that names the venv but not the launcher: derive the
+            // platform launcher inside it.
+            let venv = string_at(value, &["python", "venv"])?;
+            Some(
+                venv_bin_dir(&PathBuf::from(venv))
+                    .join(python_file_name())
+                    .display()
+                    .to_string(),
+            )
+        })
+        .unwrap_or_default();
+    Ready {
+        python,
+        version: string_at(value, &["version"])
+            .or_else(|| string_at(value, &["python", "version"]))
+            .unwrap_or_default(),
+        uv: string_at(value, &["uv"]).unwrap_or_default(),
+        created: string_at(value, &["created"])
+            .or_else(|| string_at(value, &["created_at"]))
+            .unwrap_or_default(),
+        description: string_at(value, &["description"]).unwrap_or_default(),
+    }
+}
+
 /// Parse `<env root>/ready.json`, if it exists and is valid JSON.
+///
+/// Any JSON object parses: see [`ready_from_value`] for the shapes (and why a
+/// richer flag must not read as "unreadable"). A file that is not an object is
+/// no flag.
 pub fn read_ready(data_dir: &Path) -> Option<Ready> {
     let raw = fs::read_to_string(ready_path(&root(data_dir))).ok()?;
-    serde_json::from_str(&raw).ok()
+    let value: Value = serde_json::from_str(&raw).ok()?;
+    if !value.is_object() {
+        return None;
+    }
+    Some(ready_from_value(&value))
 }
 
 /// Export the environment root to child processes (scripts, plugins, MCP
-/// servers). Called once at startup: the flag, not this variable, decides what
-/// the prompt says, so exporting it before the venv exists is harmless.
+/// servers): [`ENV_ROOT_VAR`] always, and [`PYTHON_VAR`] once the flag names a
+/// venv whose interpreter is really there — so an artifact can re-exec under
+/// 3.13 without parsing `ready.json` itself. Called at startup and on every
+/// prompt build, because the venv may appear mid-session and the variable must
+/// vanish again when the flag does.
 pub fn publish(data_dir: &Path) {
     std::env::set_var(ENV_ROOT_VAR, root(data_dir).as_os_str());
+    let python = mounted_venv(data_dir)
+        .map(|venv| venv_bin_dir(&venv).join(python_file_name()))
+        .filter(|python| python.is_file());
+    match python {
+        Some(python) => std::env::set_var(PYTHON_VAR, python.as_os_str()),
+        None => std::env::remove_var(PYTHON_VAR),
+    }
 }
 
 /// Self-check: when the venv is there and reports 3.13 (`pyvenv.cfg`, or `-V`
@@ -280,6 +405,7 @@ pub fn prompt_block(data_dir: &Path, workspace: &Path, shells: bool) -> String {
     }
     let root = root(data_dir);
     auto_flag(data_dir);
+    publish(data_dir);
     match status(data_dir) {
         Status::Ready(ready) => prompt::env_ready_block(
             &ready.python,
@@ -299,17 +425,27 @@ pub fn prompt_block(data_dir: &Path, workspace: &Path, shells: bool) -> String {
     }
 }
 
-/// Directories from the host environment that `run_cmd` mounts on a child's
-/// `PATH`, in order: `<env root>/bin` (tools the assistant installed there) and
-/// the venv's `bin/` (`Scripts/` on Windows) when it really is a 3.13 one.
+/// Directories from the host environment that the shells (`run_cmd` and
+/// `run_shell`) mount on a child's `PATH`, in order: `<env root>/bin` (tools the
+/// assistant installed there), the directory of the `uv` the flag records, and
+/// the venv's `bin/` (`Scripts/` on Windows) — the one the flag names when it
+/// is valid, else the conventional 3.13 `<env root>/py313`.
 pub fn tool_path_dirs(data_dir: &Path) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     let bin = root(data_dir).join("bin");
     if bin.is_dir() {
         dirs.push(bin);
     }
+    if let Some(uv_dir) = flagged_uv_dir(data_dir) {
+        if uv_dir.is_dir() && !dirs.contains(&uv_dir) {
+            dirs.push(uv_dir);
+        }
+    }
     if let Some(venv) = mounted_venv(data_dir) {
-        dirs.push(venv_bin_dir(&venv));
+        let bin = venv_bin_dir(&venv);
+        if !dirs.contains(&bin) {
+            dirs.push(bin);
+        }
     }
     dirs
 }
@@ -487,8 +623,8 @@ mod tests {
         let _ = fs::remove_dir_all(&data);
     }
 
-    /// `run_cmd` mounts the venv only when it is a 3.13 one: a stray 3.14 venv
-    /// must not become every `run_cmd` child's `python`.
+    /// An unflagged venv is mounted only when it is a 3.13 one: a stray 3.14
+    /// venv must not become every shell child's `python`.
     #[test]
     fn only_a_3_13_venv_is_mounted() {
         let data = scratch("mount");
@@ -585,6 +721,104 @@ mod tests {
             tool_path_dirs(&data),
             vec![env_root.join("bin"), venv_bin_dir(&venv)]
         );
+        let _ = fs::remove_dir_all(&data);
+    }
+
+    /// `ready.json` wins over the `<env root>/py313` convention: the shells
+    /// mount the venv the flag names, plus the `uv` it records.
+    #[test]
+    fn the_flag_names_the_venv_and_uv_the_shells_mount() {
+        let data = scratch("flagvenv");
+        let env_root = root(&data);
+        let venv = env_root.join("alt");
+        let bin = venv_bin_dir(&venv);
+        fs::create_dir_all(&bin).unwrap();
+        let python = bin.join(if cfg!(windows) { "python.exe" } else { "python" });
+        fs::write(&python, "").unwrap();
+        let uv = env_root.join("uvbin").join(if cfg!(windows) { "uv.exe" } else { "uv" });
+        fs::create_dir_all(uv.parent().unwrap()).unwrap();
+        fs::write(&uv, "").unwrap();
+        write_flag(
+            &data,
+            &Ready {
+                python: python.display().to_string(),
+                version: "3.13.13".to_string(),
+                uv: uv.display().to_string(),
+                ..Ready::default()
+            },
+        );
+
+        assert_eq!(flagged_venv(&data), Some(venv.clone()));
+        assert_eq!(mounted_venv(&data), Some(venv.clone()));
+        let dirs = tool_path_dirs(&data);
+        assert!(dirs.contains(&bin), "the flagged venv must be mounted: {dirs:?}");
+        assert!(
+            dirs.contains(&uv.parent().unwrap().to_path_buf()),
+            "the recorded uv must be mounted: {dirs:?}"
+        );
+        let _ = fs::remove_dir_all(&data);
+    }
+
+    /// A flag whose interpreter is gone mounts nothing from it — the
+    /// conventional 3.13 venv (when there is one) keeps working.
+    #[test]
+    fn a_stale_flag_falls_back_to_the_conventional_venv() {
+        let data = scratch("staleflag");
+        let env_root = root(&data);
+        let venv = venv_dir(&env_root);
+        fs::create_dir_all(venv_bin_dir(&venv)).unwrap();
+        fs::write(venv_python(&env_root), "").unwrap();
+        fs::write(venv.join("pyvenv.cfg"), "version_info = 3.13.13\n").unwrap();
+        write_flag(
+            &data,
+            &Ready {
+                python: env_root.join("gone/bin/python").display().to_string(),
+                version: "3.13.13".to_string(),
+                ..Ready::default()
+            },
+        );
+
+        assert_eq!(flagged_venv(&data), None);
+        assert_eq!(mounted_venv(&data), Some(venv));
+        let _ = fs::remove_dir_all(&data);
+    }
+
+    /// A richer flag — `python` as an object, `created_at`, `tools` — must read
+    /// as the environment it describes, never as "unreadable": the shells mount
+    /// that venv and the prompt stops announcing the setup manual.
+    #[test]
+    fn a_richer_flag_is_read_by_fields() {
+        let data = scratch("richflag");
+        let env_root = root(&data);
+        let venv = env_root.join("py313");
+        let bin = venv_bin_dir(&venv);
+        fs::create_dir_all(&bin).unwrap();
+        let python = bin.join(if cfg!(windows) { "python.exe" } else { "python" });
+        fs::write(&python, "").unwrap();
+        let flag = serde_json::json!({
+            "schema_version": 1,
+            "created_at": "2026-11-28T08:59:51Z",
+            "description": "Python 3.13.17 venv (pip 26.3) plus uv 0.13.5",
+            "env_root": env_root.display().to_string(),
+            "python": {
+                "version": "3.13.17",
+                "exe": python.display().to_string(),
+                "venv": venv.display().to_string(),
+                "bin": bin.display().to_string(),
+            },
+            "tools": ["uv 0.13.5"],
+            "notes": "an unknown key must not matter",
+        });
+        fs::write(ready_path(&env_root), flag.to_string()).unwrap();
+
+        let ready = read_ready(&data).expect("a described flag parses");
+        assert_eq!(ready.python, python.display().to_string());
+        assert_eq!(ready.version, "3.13.17");
+        assert_eq!(ready.created, "2026-11-28T08:59:51Z");
+        assert!(ready.description.contains("3.13.17"));
+        assert!(status(&data).is_ready(), "the described environment is ready");
+        assert_eq!(flagged_venv(&data), Some(venv.clone()));
+        assert_eq!(mounted_venv(&data), Some(venv));
         let _ = fs::remove_dir_all(&data);
     }
 

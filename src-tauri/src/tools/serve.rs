@@ -23,7 +23,9 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
-use super::process::{build_command, decode_hint_for_shell, decode_process_bytes};
+use super::process::{
+    build_command_with_path, decode_hint_for_shell, decode_process_bytes, Mounts,
+};
 use crate::process_guard;
 use crate::util::truncate_with_trailing_ellipsis;
 
@@ -452,18 +454,25 @@ fn verify_trees_exited(targets: &[(String, u32)]) -> Vec<String> {
 /// Start a long-lived child for `code` and return the tool result immediately.
 /// `session_id` marks the owning turn: turn-end cleanup stops only that
 /// session's processes.
+///
+/// `mounts` is what `run_shell` passes: the app-data environment (its `bin/`,
+/// the `uv` the flag names and the venv), so a serve process — a dev server, a
+/// watcher — runs on the same toolchain as the shell scripts that started it.
+/// The workspace script library is not part of it; that stays `run_cmd`'s.
 pub async fn start(
     app: &AppHandle,
     shell_type: &str,
     code: &str,
     scoped_code: String,
     cwd: PathBuf,
+    mounts: Mounts<'_>,
     session_id: &str,
 ) -> String {
-    let mut command = match build_command(shell_type, &scoped_code, Some(cwd.clone())) {
-        Ok(command) => command,
-        Err(err) => return format!("Error: {err}"),
-    };
+    let mut command =
+        match build_command_with_path(shell_type, &scoped_code, Some(cwd.clone()), mounts) {
+            Ok(command) => command,
+            Err(err) => return format!("Error: {err}"),
+        };
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -698,7 +707,7 @@ mod tests {
         assert_eq!(buffer.chars().count(), MAX_OUTPUT_CHARS);
     }
 
-    /// The serve path uses `build_command` + `process_guard`: the child must be
+    /// The serve path uses `build_command_with_path` + `process_guard`: the child must be
     /// killed as a tree, and the registry entry must disappear with the guard.
     #[tokio::test]
     async fn spawned_process_is_killed_and_untracked() {
@@ -707,7 +716,8 @@ mod tests {
         #[cfg(not(windows))]
         let sleep_code = "sleep 30";
 
-        let mut command = build_command("bash", sleep_code, None).expect("build sleep command");
+        let mut command = build_command_with_path("bash", sleep_code, None, Mounts::default())
+            .expect("build sleep command");
         command
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -737,7 +747,8 @@ mod tests {
         #[cfg(not(windows))]
         let sleep_code = "sleep 30";
 
-        let mut command = build_command("bash", sleep_code, None).expect("build sleep command");
+        let mut command = build_command_with_path("bash", sleep_code, None, Mounts::default())
+            .expect("build sleep command");
         command
             .stdin(Stdio::null())
             .stdout(Stdio::null())

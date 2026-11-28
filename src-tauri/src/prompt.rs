@@ -90,13 +90,10 @@ enabled, because a prompt without shell tools has nothing to run.
 - Interpreter: `<env root>/py313/bin/python` (POSIX) or `<env root>/py313/Scripts/python.exe`
   (Windows) — a venv built from uv-managed CPython 3.13.
 - Flag: `<env root>/ready.json`.
-- Children inherit `AI_CHAT_ENV_ROOT=<env root>` from the app, so code can find the venv at
-  runtime without any baked-in path.
-- `run_cmd` mounts this root itself: every child gets `<env root>/bin` plus the venv's `bin/`
-  (`Scripts` on Windows) on `PATH`, and `VIRTUAL_ENV` names the venv — so a tool installed in
-  `<env root>/bin` runs by bare name and `run_cmd {"command":"python …"}` (or a `.py` library
-  script) already runs under 3.13. `run_shell` mounts nothing: an arbitrary shell script sees
-  the host `python`.
+- Children inherit `AI_CHAT_ENV_ROOT=<env root>` from the app and, once the flag is valid,
+  `AI_CHAT_PYTHON=<venv interpreter>` — read those at runtime, never bake a path in.
+- The flag decides which venv is meant: a venv anywhere under the root is fine, `python` only
+  has to name its interpreter.
 
 ## Build it
 
@@ -137,11 +134,14 @@ prompt verbatim (keep it to short single lines, no ANSI), and only while `run_cm
 are enabled. **Every install updates it** — append an entry and keep the existing ones; a stale
 inventory is worse than an empty one, because the next turn trusts it.
 
-Then re-read the file and run `<env root>/py313/bin/python -V` once more. The app counts the
-environment as complete only when the flag parses **and** its `python` names a real file; only
-then does the pointer block shrink to the one-line `ENVIRONMENT` note. An unreadable flag, or
-one pointing at a missing interpreter, keeps this manual in place: fix the venv or rewrite the
-flag. Deleting the flag to "retry" is pointless — its absence is the pending state.
+Only `python` matters: it has to name a real interpreter. Fields are read by name, so a richer
+flag is fine — `python` may be an object (`{"exe": …, "venv": …, "version": …}`), `created_at`
+may stand in for `created`, and keys the app does not know (`env_root`, `tools`, `packages`,
+`notes`) are ignored.
+
+Then re-read the file and run `<env root>/py313/bin/python -V` once more. The flag only counts
+when its `python` names a real file — otherwise fix the venv or rewrite it, and never delete the
+flag to "retry": its absence is the pending state.
 
 Writing the flag by hand is the fast path, not a requirement: the app also self-checks on the
 next turn, and when `<env root>/py313` exists and `-V` prints `3.13` it writes the flag itself.
@@ -153,10 +153,10 @@ that is already there — it never wipes the inventory.
 
 Skill scripts, MCP servers and plugins stay **stdlib-only and 3.9+ compatible** (see the
 create-skill / create-mcp-server / create-plugin manuals). When one genuinely needs 3.13,
-derive the interpreter from `AI_CHAT_ENV_ROOT` at runtime, check `is_file()`, and fall back to
-the host `python` / `python3` when it is absent — a missing venv degrades a feature, it never
-breaks startup. The same holds for anything else you installed: `<env root>` is per-host state,
-so an artifact may look for it through `AI_CHAT_ENV_ROOT` but must not require it.
+read `AI_CHAT_PYTHON` at runtime, check `is_file()`, and fall back to the host `python` /
+`python3` when it is absent — a missing venv degrades a feature, it never breaks startup. The
+same holds for anything else you installed: the root is per-host state, so an artifact may look
+for it through `AI_CHAT_ENV_ROOT` but must not require it.
 "#
         .to_string()
 }
@@ -169,8 +169,7 @@ pub fn env_pending_block(root_display: &str, reason: &str) -> String {
          this host) and no working Python 3.13 venv is prepared yet ({reason}). Everything you \
          install for your own use belongs under that root — never in the workspace (it travels) \
          and never in the system. Read `{}/setup-env.md` before the first script that needs a \
-         third-party package; once `{root_display}/ready.json` is valid this pointer gives way \
-         to a short note plus the inventory recorded there.",
+         third-party package.",
         MANUALS_DIR
     )
 }
@@ -189,9 +188,8 @@ pub fn env_ready_block(python: &str, version: &str, root_display: &str, installe
     };
     format!(
         "ENVIRONMENT: Python 3.13 venv at `{python}` (CPython {version}) in app data — host \
-         scoped, never copied into an artifact; `AI_CHAT_ENV_ROOT` names that root for every \
-         child process, and `run_cmd` mounts `{root_display}/bin` plus the venv's `bin/` on \
-         PATH. The host `python`/`python3` stays the default for stdlib-only work.\n{inventory}"
+         scoped, never copied into an artifact; software you install belongs under \
+         `{root_display}` and is recorded in `{root_display}/ready.json`.\n{inventory}"
     )
 }
 
@@ -219,58 +217,45 @@ never in the import header.
 uv-managed CPython 3.13 (POSIX `bin/python`, Windows `Scripts/python.exe`), and `ready.json`
 beside it is the completion flag with the inventory of what is installed. Host-scoped on
 purpose: a venv carries absolute paths, so it must not travel with a workspace copied to
-another machine, and it must not pollute the system interpreter (this host's `python3` is
-3.14 — reach for the 3.13 venv when a wheel lags behind the system interpreter).
+another machine, and it must not pollute the system interpreter.
 
-- The absolute path is printed in the `ENVIRONMENT` block of the system prompt and exported to
-  every child process as **`AI_CHAT_ENV_ROOT`** — never write either into an artifact.
+- A child process finds it through **`AI_CHAT_ENV_ROOT`** (the root) and **`AI_CHAT_PYTHON`**
+  (the 3.13 interpreter) — read those, never write a host path into an artifact.
 - **Software you install goes there too**: `python -m venv "<env root>/…"`, a downloaded
   binary into `<env root>/bin`, `uv pip install --python …` for packages — never into the
   workspace, never into the system. Record each install in `ready.json`'s `description`; the
   prompt quotes that inventory (only while `run_cmd` / `run_shell` are enabled) and a stale
   list is worse than none.
-- `run_cmd` children get it without asking: `<env root>/bin` and the venv's `bin/` (`Scripts/`
-  on Windows) join the child's `PATH` behind the script library and `VIRTUAL_ENV` names the
-  venv, so a tool installed in `<env root>/bin` runs by bare name and `python`, `python3`, a
-  `.py` library script already run under 3.13. `run_shell` keeps the host interpreter on
-  purpose.
 - A uv venv seeds no `pip`: inside it `python -m pip …` fails. Install with
   `uv pip install --python "<venv python>" <pkg>`, inspect with `uv pip list --python …`.
 - Creating or repairing the environment, writing the flag and maintaining the inventory is the
-  job of the `setup-env` manual — announced only while the environment is pending, so there is
-  no reason to repeat the build steps here.
+  job of the `setup-env` manual — no reason to repeat the build steps here.
 
-### Optional 3.13 hop, for code that must also run under a bare `python3`
+### Optional 3.13 hop, for code launched outside the shells
+
+A shell child already runs on the venv; a server or plugin spawned by the app does not, and a
+`python3` on `PATH` may be older. Re-exec only when `AI_CHAT_PYTHON` is there:
 
 ```python
 import os, sys
 from pathlib import Path
-from typing import Optional
-
-def venv_python() -> Optional[Path]:
-    """The host 3.13 interpreter from AI_CHAT_ENV_ROOT, or None when absent."""
-    root = os.environ.get("AI_CHAT_ENV_ROOT")
-    if not root:
-        return None
-    py = Path(root) / "py313" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    return py if py.is_file() else None
 
 def use_venv() -> None:
     """Optional upgrade: run under 3.13 when the host interpreter is older."""
-    py = venv_python()
-    if py is None or sys.version_info >= (3, 13):
+    py = os.environ.get("AI_CHAT_PYTHON")
+    if not py or sys.version_info >= (3, 13) or not Path(py).is_file():
         return                       # no venv on this host → stdlib-only code still runs
     if os.environ.get("X_REEXEC") == "1":
         raise SystemExit("re-exec loop")   # guard: never hop twice
     os.environ["X_REEXEC"] = "1"
-    os.execv(str(py), [str(py), str(Path(__file__).resolve()), *sys.argv[1:]])
+    os.execv(py, [py, str(Path(__file__).resolve()), *sys.argv[1:]])
 ```
 
 Call it before the first byte written to stdout — `execv` replaces the process image and drops
 unflushed buffered output (verified: a `print` before the hop never reached the parent's
-stdout). `mcp_self` launches `python3 server.py` without `-u` (plugins get `-u`), so a stdio
-server hops at import time, before its reply loop exists. Verified end to end: after the hop
-the inherited stdin/stdout pipes still carried `initialize` / `tools/list`, answered by 3.13.
+stdout), so a stdio server hops at import time, before its reply loop exists. Verified end to
+end: after the hop the inherited stdin/stdout pipes still carried `initialize` / `tools/list`,
+answered by 3.13.
 "#;
 
 /// Skill-only tail: helper scripts that ship inside a skill folder.
@@ -282,7 +267,7 @@ workspace root from the nearest ancestor holding `.data/` (or `Path(__file__).re
 artifacts into the project folder. When a skill truly needs a package, install it into the
 app-data venv (`uv pip install --python "<venv python>" <pkg>`, see the `ENVIRONMENT` block)
 and write that exact line into the skill body; the skill then runs the script through the
-venv interpreter it names, and degrades to `python` when `AI_CHAT_ENV_ROOT` is absent instead
+venv interpreter it names, and degrades to `python` when `AI_CHAT_PYTHON` is absent instead
 of claiming the package is there.
 "#;
 
@@ -297,7 +282,7 @@ re-resolved, then confirm with `test`.
 
 Keep `server.py` stdlib-only and portable (`pathlib`, explicit `encoding="utf-8"`, `\n`
 lines). When it genuinely needs 3.13 or a wheel 3.14 lacks, put the `use_venv()` hop from the
-shared section at the top of the file and let it read `AI_CHAT_ENV_ROOT`: a host without the
+shared section at the top of the file and let it read `AI_CHAT_PYTHON`: a host without the
 venv keeps running on its own interpreter, which is exactly the portability the roster needs.
 "#;
 

@@ -77,6 +77,26 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
         return "Error: run_shell requires a non-empty 'code' argument.".to_string();
     }
 
+    // ── The host environment rides along ──────────────────────────────
+    // Same mounts as `run_cmd`, minus the workspace script library:
+    // `<env root>/bin` and the 3.13 venv's `bin/` (`Scripts/` on Windows)
+    // join the child's `PATH` in front of the inherited one, and
+    // `VIRTUAL_ENV` names the venv — so a tool the assistant installed in
+    // app data, and `python` itself, answer from the environment instead of
+    // from the system. A `.ps1` script that shells out to `python`, `rg` or
+    // `uv` therefore sees the same toolchain as `run_cmd`.
+    let data_dir = crate::env::data_dir_from_app(app);
+    let env_dirs = data_dir
+        .as_deref()
+        .map(crate::env::tool_path_dirs)
+        .unwrap_or_default();
+    let mounted_venv = data_dir.as_deref().and_then(crate::env::mounted_venv);
+    let mounts = process::Mounts {
+        scripts: None,
+        env_dirs: &env_dirs,
+        venv: mounted_venv.as_deref(),
+    };
+
     // ── Patent-compliant risk assessment ──────────────────────────────
     let request_id = format!(
         "req-{}",
@@ -171,18 +191,25 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
             .clamp(1, 3600) as u64;
 
         if run_type == "serve" {
-            return serve::start(app, &shell_type, &code, scoped_code, command_cwd, session_id.unwrap_or("")).await;
+            return serve::start(
+                app,
+                &shell_type,
+                &code,
+                scoped_code,
+                command_cwd,
+                mounts,
+                session_id.unwrap_or(""),
+            )
+            .await;
         }
 
-        // No `Mounts`: an arbitrary shell script keeps the host interpreter —
-        // `run_cmd` is the tool that mounts the script library and the venv.
         return process::run_command_timed(
             shell_type,
             scoped_code,
             Some(command_cwd),
             timeout_secs,
             cancel.cloned(),
-            process::Mounts::default(),
+            mounts,
         )
         .await;
     }
@@ -248,7 +275,16 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
         .clamp(1, 3600) as u64;
 
     if run_type == "serve" {
-        return serve::start(app, &shell_type, &code, scoped_code, command_cwd, session_id.unwrap_or("")).await;
+        return serve::start(
+            app,
+            &shell_type,
+            &code,
+            scoped_code,
+            command_cwd,
+            mounts,
+            session_id.unwrap_or(""),
+        )
+        .await;
     }
 
     process::run_command_timed(
@@ -257,7 +293,7 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
         Some(command_cwd),
         timeout_secs,
         cancel.cloned(),
-        process::Mounts::default(),
+        mounts,
     )
     .await
 }
