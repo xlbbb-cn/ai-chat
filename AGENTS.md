@@ -17,6 +17,7 @@ normative — the split is by topic, not by importance.
 | [`docs/agents/modules.md`](docs/agents/modules.md) | touch a feature and need its files | `src/` and `src-tauri/` file by file, the skills path-isolation rule, the tool family and dangerous commands, turn guards / parallel calls / turn identity, composer attachments |
 | [`docs/agents/workflow.md`](docs/agents/workflow.md) | ship, publish or debug a trap | the release pipeline and its git-tag rule, Microsoft Store (MSIX), the GitHub Pages site (including `docs/site/assets/site.css`, which mirrors the tokens), and the gotcha list |
 | [`docs/DESIGN.md`](docs/DESIGN.md) | make any visual decision | colours, typography, spacing, components, motion, both themes — the single source of truth |
+| [`docs/desktop-pet-proposal.md`](docs/desktop-pet-proposal.md) | touch the companion window or the desktop pet | the design record shipped in PATCH v1.10: the audit of what `notify` already had, the two-face geometry, the platform risks (macOS transparency, Wayland placement, click-through) and the phased plan, with the browser prototype `docs/pet-prototype.html` beside it. The normative rules are in `docs/DESIGN.md` and `docs/agents/architecture.md` |
 
 `docs/agents/` and `docs/DESIGN.md` are developer documentation; only
 `docs/site/` is published to Pages (`.github/workflows/pages.yml`).

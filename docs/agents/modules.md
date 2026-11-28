@@ -124,6 +124,11 @@ src-tauri/
   src/figures.rs           # assistant figures: `<workspace>/figures/*.png`,
                            #   PNG magic + slug validation, figure / mermaid
                            #   prompt blocks (`prompt_block_for(enhanced)`)
+  src/notify.rs            # the companion window (`notify`): one webview, two
+                           #   faces — the notification card and the desktop pet
+                           #   (`Mode`, pet anchor/scale + drag persistence, the
+                           #   card-covers-pet resize, backdrop clearing, the
+                           #   single-instance gate on the pet)
   src/process_guard.rs     # app-wide child registry + process-tree kill / Windows job
   src/tools/               # tool executor, split by feature:
     mod.rs                 #   dispatch/schemas/shared helpers (+ tests)

@@ -1634,6 +1634,46 @@ page.
 
 ---
 
+## PATCH v1.10 — the desktop pet
+
+The companion window (`notify`) gained a second face: a small transparent square
+holding the app's rabbit, so the notification card is no longer the only thing
+that can appear on the desktop. It is the same character as the empty-state nap
+face and it is drawn the same way — one fill, two eye holes — with one deliberate
+difference and one deliberate exception.
+
+**The difference: the eyes are cut out, not filled.** The nap face paints its
+eyes `--c-bg` because it sits on the app's own page, where the page *is* what
+shows through. A desktop pet has no page behind it: whatever wallpaper the user
+has is what must show through the eyes, so they are an SVG `mask` hole in the
+silhouette. The silhouette is `--c-muted` — one token, no second colour, no
+outline. On macOS, where the window cannot be transparent without the private
+API, the document paints `--c-bg` and the square wears a `--c-border` hairline at
+`--r-sm` instead of pretending to be a hole.
+
+**The exception: the pet moves.** `### Motion` keeps the interface still, and the
+nap face is explicitly forbidden to travel or tilt — its only idle motion is the
+blink. The pet is the one surface whose job is to be alive away from the window,
+so it may loop off its origin: breathing around its feet (3.6 s), the blink
+(4.6 s), a two-beat hop when a reply lands, a droop when a turn fails, an ear
+wave while the app waits for an answer, and `z`s once it has dozed off. All of it
+is `transform` / `opacity` only, all of it stops under `prefers-reduced-motion`
+(the pet stays visible, still and awake), and each mood is a one-word state
+(`data-mood`) that decays back to `idle` on its own timer rather than an
+animation the app starts.
+
+| Tempting | Here, and why |
+|---|---|
+| fill the pet's eyes with `--c-bg`, like the nap face | **refused.** `--c-bg` is the app's canvas; on the desktop it would paint two opaque dots over the user's wallpaper — a second colour the system does not have, and it reads as googly eyes |
+| give the pet `--c-surface` + hairline + shadow so it survives any wallpaper | **refused.** A shadow is elevation, which the app does not have, and a filled square turns a companion into a widget. A busy wallpaper is answered by the silhouette's own contrast |
+| let the pet travel inside the app window too, for consistency | **refused.** The nap face is 64 px in a 34 px-ruled transcript; a moving object there competes with the reply, which is exactly what the no-travel rule protects |
+| draw the pet as a sprite sheet or a Lottie file | **refused.** The character is already 12 SVG ellipses; a binary animation needs a player, a licence and a second art style, and would not follow `prefers-reduced-motion` for free |
+| keep the pet always on top of the app by default | **refused.** Default is "appears when the app loses the focus, hides when it gets it back" — the pet is for the moments the window is not in front. Pinning it over the app is Run → *Keep it on screen while this window is focused*, a choice, not the default |
+| give the pet its own window so a card and a pet can be up together | **refused.** Two webviews, two backdrops and a z-order race to express "the card covers the pet". One window, two faces, one anchor makes the covering a fact of the geometry |
+| let the pet run without single-instance mode | **refused.** Each instance would raise its own animal at the same corner. The switch stays locked until *Run a single instance* is on, and `pet_settings` gates on the same field so the config cannot smuggle one in |
+
+---
+
 ## Do's and Don'ts
 
 ### Do

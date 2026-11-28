@@ -1,0 +1,705 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>桌面宠物原型 · Rabbit Chat Studio</title>
+    <!--
+      桌面宠物形态原型（配套 docs/desktop-pet-proposal.md，第 8 节）。
+
+      这里只验证“看得见的部分”：宠物形态与状态语言、动画节奏、
+      通知卡片盖住宠物的时序、以及几何（锚点 / 窗口尺寸）。
+      透明窗口、置顶、不抢焦点、拖拽持久化、退出路径属于 Tauri 侧，
+      只能在 P0 spike 里用真实窗口验证。
+
+      本文件是设计原型，不是产品代码：token 值刻意与 src/App.css 对齐，
+      但写在自身 :root 里，落地时全部换回仓库 token。
+    -->
+    <style>
+      :root {
+        /* —— light（与 src/App.css 的 :root 对齐）—— */
+        --c-bg: #ffffff;
+        --c-surface: #ffffff;
+        --c-text: #171a20;
+        --c-body: #393c41;
+        --c-muted: #5c5e62;
+        --c-border: #e8e8e8;
+        --c-border-i: #d0d1d2;
+        --c-danger: #c0392b;
+        --c-warning: #b07500;
+        --c-accent: #3457c4;
+        --c-accent-soft: rgba(52, 87, 196, 0.1);
+        --c-hover: rgba(0, 0, 0, 0.04);
+        --c-field: #f5f5f6;
+        --glass: rgba(255, 255, 255, 0.72);
+        --wall-1: #d9dde3;
+        --wall-2: #b8bfc9;
+        --r-sm: 4px;
+        --r-toast: 8px;
+        --t-dur: 0.18s;
+        --t-ease: cubic-bezier(0.25, 1, 0.5, 1);
+        --pet-fill: var(--c-muted);
+        --pet-size: 120px;
+      }
+      [data-theme="dark"] {
+        --c-bg: #171a20;
+        --c-surface: #1e2127;
+        --c-text: #f4f4f4;
+        --c-body: #d0d1d2;
+        --c-muted: #8e8e93;
+        --c-border: rgba(255, 255, 255, 0.08);
+        --c-border-i: rgba(255, 255, 255, 0.16);
+        --c-danger: #e5655c;
+        --c-warning: #e0a33c;
+        --c-accent: #6f8dff;
+        --c-accent-soft: rgba(111, 141, 255, 0.14);
+        --c-hover: rgba(255, 255, 255, 0.06);
+        --c-field: #23262c;
+        --glass: rgba(30, 33, 39, 0.72);
+        --wall-1: #262a31;
+        --wall-2: #14161a;
+        --pet-fill: var(--c-muted);
+      }
+
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        display: grid;
+        grid-template-columns: 336px 1fr;
+        font: 13px/1.5 -apple-system, "Segoe UI", "Noto Sans SC", system-ui, sans-serif;
+        color: var(--c-text);
+        background: var(--c-bg);
+        overflow: hidden;
+      }
+
+      /* ── 左侧控制面板 ───────────────────────────────────────────────── */
+      .panel {
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+        padding: 20px;
+        background: var(--c-surface);
+        border-right: 1px solid var(--c-border);
+        overflow-y: auto;
+      }
+      .panel h1 { margin: 0; font-size: 15px; font-weight: 500; letter-spacing: normal; }
+      .panel .sub { margin: 4px 0 0; font-size: 12px; color: var(--c-muted); }
+      .group { display: flex; flex-direction: column; gap: 8px; }
+      .group > .label {
+        font-size: 11px;
+        color: var(--c-muted);
+        letter-spacing: normal;
+      }
+      .row { display: flex; flex-wrap: wrap; gap: 6px; }
+      button {
+        font: inherit;
+        font-size: 12px;
+        padding: 5px 10px;
+        border-radius: var(--r-sm);
+        border: 1px solid var(--c-border-i);
+        background: transparent;
+        color: var(--c-text);
+        cursor: pointer;
+        transition: background-color var(--t-dur) var(--t-ease),
+          border-color var(--t-dur) var(--t-ease),
+          color var(--t-dur) var(--t-ease);
+      }
+      button:hover { background: var(--c-hover); }
+      button[aria-pressed="true"] {
+        background: var(--c-accent-soft);
+        border-color: var(--c-accent);
+        color: var(--c-accent);
+      }
+      button.primary {
+        background: var(--c-accent-soft);
+        border-color: var(--c-accent);
+        color: var(--c-accent);
+        padding: 7px 12px;
+      }
+      label.check {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        color: var(--c-body);
+        cursor: pointer;
+      }
+      label.check input { accent-color: var(--c-accent); margin: 0; }
+
+      .readout {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11px;
+        color: var(--c-muted);
+        background: var(--c-field);
+        border: 1px solid var(--c-border);
+        border-radius: var(--r-sm);
+        padding: 8px 10px;
+        min-height: 46px;
+        white-space: pre-line;
+      }
+      .notes { margin: 0; padding-left: 16px; font-size: 11px; color: var(--c-muted); }
+      .notes li { margin: 3px 0; }
+      .notes b { color: var(--c-body); font-weight: 500; }
+
+      /* ── 右侧“桌面”舞台 ─────────────────────────────────────────────── */
+      .stage {
+        position: relative;
+        overflow: hidden;
+        background:
+          radial-gradient(120% 90% at 20% 0%, var(--wall-1), transparent 60%),
+          linear-gradient(160deg, var(--wall-1), var(--wall-2));
+      }
+      /* 一粒粒的“桌面图标”质感，纯装饰 */
+      .stage::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background-image: radial-gradient(var(--c-border-i) 1px, transparent 1px);
+        background-size: 22px 22px;
+        opacity: 0.35;
+        pointer-events: none;
+      }
+      /* 一块“别的应用窗口”，说明宠物永远压在它上面 */
+      .mock-app {
+        position: absolute;
+        left: 7%;
+        top: 12%;
+        width: 58%;
+        height: 56%;
+        background: var(--c-surface);
+        border: 1px solid var(--c-border);
+        border-radius: var(--r-toast);
+        opacity: 0.92;
+        overflow: hidden;
+      }
+      .mock-app .bar {
+        height: 30px;
+        border-bottom: 1px solid var(--c-border);
+        background: var(--c-field);
+      }
+      .mock-app .lines { padding: 16px; display: grid; gap: 9px; }
+      .mock-app .lines i {
+        display: block;
+        height: 8px;
+        border-radius: var(--r-sm);
+        background: var(--c-border);
+      }
+      .mock-app .lines i:nth-child(1) { width: 46%; background: var(--c-border-i); }
+      .mock-app .lines i:nth-child(3) { width: 84%; }
+      .mock-app .lines i:nth-child(5) { width: 62%; }
+
+      /* 窗口（模拟 120×120 的透明 webview，右下角锚定） */
+      .dock {
+        position: absolute;
+        right: 24px;
+        bottom: 24px;
+        width: var(--pet-size);
+        height: var(--pet-size);
+        transition: width 120ms var(--t-ease), height 120ms var(--t-ease);
+        /* 原型里给个虚线，说明这是一块透明窗口；落地时没有它 */
+        outline: 1px dashed var(--c-border-i);
+        outline-offset: 0;
+      }
+      .dock::after {
+        content: "webview";
+        position: absolute;
+        left: 2px;
+        top: 2px;
+        font: 10px/1 ui-monospace, monospace;
+        color: var(--c-muted);
+        opacity: 0.5;
+      }
+
+      /* ── 宠物 ──────────────────────────────────────────────────────── */
+      .pet {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        width: var(--pet-size);
+        height: var(--pet-size);
+        cursor: grab;
+        touch-action: none;
+        transition: transform var(--t-dur) var(--t-ease), opacity var(--t-dur) var(--t-ease);
+        will-change: transform;
+      }
+      .pet:active { cursor: grabbing; }
+      /* 通知到来：先下潜，再让窗口长成卡片 —— 否则宠物会露在卡片上方 8px */
+      .pet.is-duck { transform: translateY(34px); opacity: 0; }
+      .pet.is-pop { animation: pet-pop 0.32s var(--t-ease); }
+
+      .pet-svg { display: block; width: 100%; height: 100%; color: var(--pet-fill); }
+      .pet-body { transform-box: fill-box; transform-origin: 50% 100%; }
+      .pet-eye {
+        transform-box: fill-box;
+        transform-origin: 50% 50%;
+        animation: pet-blink 4.6s linear infinite;
+      }
+
+      /* 空闲：呼吸 + 眨眼（沿用空状态脸 4.6s 的眨眼节奏） */
+      .pet[data-mood="idle"] .pet-body { animation: pet-breathe 3.6s var(--t-ease) infinite alternate; }
+
+      /* 思考：起身 + 呼吸更快，卡片上的三点由 .pet-dots 负责 */
+      .pet[data-mood="thinking"] .pet-body { animation: pet-bob 0.9s ease-in-out infinite; }
+      .pet[data-mood="thinking"] .pet-eye { animation-duration: 2.4s; }
+      .pet[data-mood="thinking"] { color: var(--c-text); }
+
+      /* 完成：两下小跳 */
+      .pet[data-mood="done"] .pet-body { animation: pet-hop 0.62s var(--t-ease) 2; }
+      .pet[data-mood="done"] { color: var(--c-text); }
+
+      /* 出错：垂下、闭眼、语义色 */
+      .pet[data-mood="error"] { color: var(--c-danger); }
+      .pet[data-mood="error"] .pet-body {
+        animation: none;
+        transform: translateY(3px) rotate(-5deg);
+        transition: transform var(--t-dur) var(--t-ease);
+      }
+      .pet[data-mood="error"] .pet-eye,
+      .pet[data-mood="sleeping"] .pet-eye,
+      .pet[data-mood="dreaming"] .pet-eye {
+        animation: none;
+        transform: scaleY(0.12);
+        transition: transform var(--t-dur) var(--t-ease);
+      }
+
+      /* 提问：一只耳朵招手 + 轻微起伏 */
+      .pet[data-mood="ask"] .pet-body { animation: pet-bob 1.2s ease-in-out infinite; }
+      .pet[data-mood="ask"] .pet-ear-l { animation: pet-wave 0.9s ease-in-out infinite; }
+
+      /* 睡觉 / 整理记忆：闭眼 + 慢呼吸 + z */
+      .pet[data-mood="sleeping"] .pet-body { animation: pet-breathe 5.2s var(--t-ease) infinite alternate; }
+      .pet[data-mood="dreaming"] .pet-body { animation: pet-breathe 4.2s var(--t-ease) infinite alternate; }
+
+      .pet-dots,
+      .pet-zzz { position: absolute; opacity: 0; transition: opacity var(--t-dur) var(--t-ease); }
+      .pet-dots {
+        right: 2px;
+        top: 10%;
+        display: flex;
+        gap: 3px;
+      }
+      .pet-dots span {
+        width: 4px;
+        height: 4px;
+        border-radius: var(--r-sm);
+        background: var(--c-muted);
+        animation: pet-dot 1.2s linear infinite;
+      }
+      .pet-dots span:nth-child(2) { animation-delay: 0.2s; }
+      .pet-dots span:nth-child(3) { animation-delay: 0.4s; }
+      .pet[data-mood="thinking"] .pet-dots { opacity: 1; }
+
+      .pet-zzz {
+        right: 6%;
+        top: 6%;
+        display: grid;
+        gap: 1px;
+        color: var(--c-muted);
+        font-family: ui-monospace, monospace;
+      }
+      .pet-zzz span { display: block; animation: pet-zzz 2.6s linear infinite; }
+      .pet-zzz span:nth-child(1) { font-size: 13px; }
+      .pet-zzz span:nth-child(2) { font-size: 11px; animation-delay: 0.8s; }
+      .pet-zzz span:nth-child(3) { font-size: 9px; animation-delay: 1.6s; }
+      .pet[data-mood="sleeping"] .pet-zzz,
+      .pet[data-mood="dreaming"] .pet-zzz { opacity: 1; }
+
+      /* ── 通知卡片（348×112，从同一右下角锚点长出）──────────────────── */
+      .card {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        width: 348px;
+        height: 112px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px;
+        background: var(--glass);
+        backdrop-filter: blur(20px) saturate(180%);
+        -webkit-backdrop-filter: blur(20px) saturate(180%);
+        border: 1px solid var(--c-border);
+        border-radius: var(--r-toast);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity var(--t-dur) var(--t-ease), border-color var(--t-dur) var(--t-ease);
+        cursor: pointer;
+      }
+      .card.is-shown { opacity: 1; pointer-events: auto; }
+      .card:hover { border-color: var(--c-border-i); }
+      /* 卡片美术：内联 SVG 取代 355KB 的 notice1.png（见提案 §5.5） */
+      .card-art {
+        flex: 0 0 auto;
+        width: 64px;
+        height: 88px;
+        display: grid;
+        place-items: center;
+        color: var(--c-muted);
+        -webkit-mask-image: radial-gradient(circle 30px at 50% 50%, #000 91%, transparent 100%);
+        mask-image: radial-gradient(circle 30px at 50% 50%, #000 91%, transparent 100%);
+      }
+      .card-art svg { width: 52px; height: 52px; display: block; }
+      .card-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+      .card-title { font-size: 13px; font-weight: 500; color: var(--c-text); }
+      .card-body {
+        font-size: 12px;
+        color: var(--c-muted);
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+
+      /* ── 关键帧 ─────────────────────────────────────────────────────── */
+      @keyframes pet-blink {
+        0%, 91%, 100% { transform: scaleY(1); }
+        94.5% { transform: scaleY(0.1); }
+        98% { transform: scaleY(1); }
+      }
+      @keyframes pet-breathe {
+        from { transform: scale(1.02, 0.97); }
+        to { transform: scale(0.98, 1.02); }
+      }
+      @keyframes pet-bob {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-2px); }
+      }
+      @keyframes pet-hop {
+        0% { transform: translateY(0); }
+        35% { transform: translateY(-9px); }
+        70% { transform: translateY(0); }
+        85% { transform: translateY(-3px); }
+        100% { transform: translateY(0); }
+      }
+      @keyframes pet-wave {
+        0%, 100% { transform: rotate(0deg); }
+        50% { transform: rotate(-16deg); }
+      }
+      @keyframes pet-pop {
+        from { transform: scale(0.92); opacity: 0.4; }
+        to { transform: scale(1); opacity: 1; }
+      }
+      @keyframes pet-dot {
+        0%, 100% { opacity: 0.25; }
+        50% { opacity: 1; }
+      }
+      @keyframes pet-zzz {
+        0% { opacity: 0; transform: translate(0, 2px) scale(0.9); }
+        20% { opacity: 0.9; }
+        100% { opacity: 0; transform: translate(6px, -14px) scale(1.1); }
+      }
+
+      /* 减少动效：与产品一致的“静止但可见” */
+      .no-motion *, .no-motion *::before, .no-motion *::after {
+        animation: none !important;
+        transition: none !important;
+      }
+      .no-motion .pet[data-mood="error"] .pet-eye,
+      .no-motion .pet[data-mood="sleeping"] .pet-eye,
+      .no-motion .pet[data-mood="dreaming"] .pet-eye { transform: scaleY(0.12); }
+      .no-motion .pet[data-mood="thinking"] .pet-dots,
+      .no-motion .pet[data-mood="sleeping"] .pet-zzz,
+      .no-motion .pet[data-mood="dreaming"] .pet-zzz { opacity: 1; }
+
+      /* hairline 轮廓：桌面壁纸很花时给宠物一个 1px 的边（可关） */
+      .hairline .pet-silhouette ellipse { stroke: var(--c-border-i); stroke-width: 0.8; }
+    </style>
+  </head>
+  <body>
+    <aside class="panel">
+      <div>
+        <h1>桌面宠物 · 形态原型</h1>
+        <p class="sub">notify 窗口的双形态：PET ↔ CARD。拖动宠物，再点「模拟通知」看卡片怎么盖住它。</p>
+      </div>
+
+      <div class="group">
+        <span class="label">宠物状态 companion-state</span>
+        <div class="row" id="moods">
+          <button data-mood="idle" aria-pressed="true">空闲</button>
+          <button data-mood="thinking">思考</button>
+          <button data-mood="done">完成</button>
+          <button data-mood="error">出错</button>
+          <button data-mood="ask">提问</button>
+          <button data-mood="sleeping">睡觉</button>
+          <button data-mood="dreaming">整理记忆</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <span class="label">通知</span>
+        <div class="row">
+          <button class="primary" id="notify">模拟通知（6s 自动消失）</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <span class="label">宠物尺寸 desktop_pet_scale</span>
+        <div class="row" id="sizes">
+          <button data-size="s">S · 96</button>
+          <button data-size="m" aria-pressed="true">M · 120</button>
+          <button data-size="l">L · 160</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <span class="label">显示</span>
+        <label class="check"><input type="checkbox" id="theme" checked />深色</label>
+        <label class="check"><input type="checkbox" id="motion" checked />允许动效</label>
+        <label class="check"><input type="checkbox" id="hairline" />hairline 轮廓</label>
+      </div>
+
+      <div class="group">
+        <span class="label">几何（对照提案 §3.2）</span>
+        <div class="readout" id="readout" aria-live="polite"></div>
+      </div>
+
+      <ul class="notes">
+        <li><b>宠物先下潜、窗口后变大</b>：卡片 112 高 &lt; 宠物 120，反序会露出头顶 8px。</li>
+        <li><b>同一锚点</b>：宠物被拖到哪，卡片就从它的右下角向左上长出，所以永远盖得住。</li>
+        <li><b>单击宠物</b> = 聚焦主窗（原型只打印一行提示）。悬停卡片会暂停自动消失。</li>
+        <li>透明窗口、置顶、不抢焦点、拖拽持久化只能在 Tauri 侧验证（提案 P0 清单）。</li>
+      </ul>
+    </aside>
+
+    <main class="stage" id="stage">
+      <div class="mock-app" aria-hidden="true">
+        <div class="bar"></div>
+        <div class="lines"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
+
+      <div class="dock" id="dock">
+        <!-- 宠物层：120×120 的透明窗口内容 -->
+        <div class="pet" id="pet" data-mood="idle" role="button" tabindex="0" aria-label="桌面宠物">
+          <svg class="pet-svg" viewBox="0 0 64 64" aria-hidden="true">
+            <defs>
+              <mask id="pet-eye-cut" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64">
+                <rect x="0" y="0" width="64" height="64" fill="#fff" />
+                <ellipse class="pet-eye" cx="26" cy="31.5" rx="2.4" ry="5" fill="#000" />
+                <ellipse class="pet-eye" cx="38" cy="31.5" rx="2.4" ry="5" fill="#000" />
+              </mask>
+            </defs>
+            <g class="pet-body">
+              <g class="pet-silhouette" mask="url(#pet-eye-cut)">
+                <ellipse class="pet-ear-l" cx="24.2" cy="15.5" rx="4.4" ry="11.6" transform="rotate(-8 24.2 27)" fill="currentColor" />
+                <ellipse class="pet-ear-r" cx="39.8" cy="15.5" rx="4.4" ry="11.6" transform="rotate(8 39.8 27)" fill="currentColor" />
+                <ellipse cx="25.5" cy="52" rx="5.2" ry="3.1" fill="currentColor" />
+                <ellipse cx="38.5" cy="52" rx="5.2" ry="3.1" fill="currentColor" />
+                <ellipse cx="32" cy="34.5" rx="16.5" ry="14.5" fill="currentColor" />
+              </g>
+            </g>
+          </svg>
+          <div class="pet-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+          <div class="pet-zzz" aria-hidden="true"><span>z</span><span>z</span><span>z</span></div>
+        </div>
+
+        <!-- 卡片层：348×112，同一锚点 -->
+        <div class="card" id="card" role="button" tabindex="-1" aria-label="回合已完成">
+          <div class="card-art" aria-hidden="true">
+            <svg viewBox="0 0 40 40">
+              <defs>
+                <mask id="card-eye-cut" maskUnits="userSpaceOnUse" x="0" y="0" width="40" height="40">
+                  <rect x="0" y="0" width="40" height="40" fill="#fff" />
+                  <ellipse cx="14" cy="19" rx="2" ry="4.2" fill="#000" />
+                  <ellipse cx="26" cy="19" rx="2" ry="4.2" fill="#000" />
+                </mask>
+              </defs>
+              <g mask="url(#card-eye-cut)" fill="currentColor">
+                <ellipse cx="9" cy="7" rx="3.4" ry="9" transform="rotate(-8 9 16)" />
+                <ellipse cx="31" cy="7" rx="3.4" ry="9" transform="rotate(8 31 16)" />
+                <ellipse cx="20" cy="21" rx="13" ry="11.5" />
+              </g>
+            </svg>
+          </div>
+          <div class="card-text">
+            <span class="card-title" id="card-title">回合已完成</span>
+            <span class="card-body" id="card-body">这一段是回复首行，最多三行，超出省略。点卡片 = 回到主窗口。</span>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      const SIZES = { s: 96, m: 120, l: 160 };
+      const CARD_W = 348;
+      const CARD_H = 112;
+
+      const stage = document.getElementById("stage");
+      const dock = document.getElementById("dock");
+      const pet = document.getElementById("pet");
+      const card = document.getElementById("card");
+      const readout = document.getElementById("readout");
+      const moodButtons = [...document.querySelectorAll("#moods button")];
+      const sizeButtons = [...document.querySelectorAll("#sizes button")];
+
+      let size = "m";
+      let mode = "pet";
+      let margin = { right: 24, bottom: 24 };
+      let cardTimer = null;
+      let doneTimer = null;
+
+      function petPx() {
+        return SIZES[size];
+      }
+
+      function layout() {
+        const w = mode === "card" ? CARD_W : petPx();
+        const h = mode === "card" ? CARD_H : petPx();
+        dock.style.width = w + "px";
+        dock.style.height = h + "px";
+        dock.style.right = margin.right + "px";
+        dock.style.bottom = margin.bottom + "px";
+        document.documentElement.style.setProperty("--pet-size", petPx() + "px");
+        readout.textContent =
+          `锚点 右-${Math.round(margin.right)} / 下-${Math.round(margin.bottom)}\n` +
+          `形态 ${mode.toUpperCase()} · 窗口 ${w}×${h}`;
+      }
+
+      // ── 状态 ──────────────────────────────────────────────────────────
+      function setMood(mood) {
+        pet.dataset.mood = mood;
+        moodButtons.forEach((b) =>
+          b.setAttribute("aria-pressed", String(b.dataset.mood === mood))
+        );
+        clearTimeout(doneTimer);
+        // “完成”是瞬时动作：跳完回到空闲
+        if (mood === "done") {
+          doneTimer = setTimeout(() => setMood("idle"), 1500);
+        }
+      }
+      moodButtons.forEach((b) =>
+        b.addEventListener("click", () => setMood(b.dataset.mood))
+      );
+
+      // ── 尺寸 ──────────────────────────────────────────────────────────
+      sizeButtons.forEach((b) =>
+        b.addEventListener("click", () => {
+          if (mode !== "pet") return;
+          size = b.dataset.size;
+          sizeButtons.forEach((x) =>
+            x.setAttribute("aria-pressed", String(x === b))
+          );
+          layout();
+        })
+      );
+
+      // ── 通知：宠物下潜 → 窗口长成卡片 → 盖住宠物 ───────────────────
+      function armCardTimer() {
+        clearTimeout(cardTimer);
+        cardTimer = setTimeout(dismissCard, 6000);
+      }
+
+      function simulateNotify() {
+        if (mode !== "pet") return;
+        pet.classList.add("is-duck");
+        setTimeout(() => {
+          pet.style.display = "none";
+          pet.classList.remove("is-duck");
+          mode = "card";
+          layout();
+          card.classList.add("is-shown");
+          armCardTimer();
+        }, 180);
+      }
+
+      function dismissCard() {
+        if (mode !== "card") return;
+        clearTimeout(cardTimer);
+        card.classList.remove("is-shown");
+        setTimeout(() => {
+          mode = "pet";
+          layout();
+          pet.style.display = "";
+          pet.classList.add("is-pop");
+          setTimeout(() => pet.classList.remove("is-pop"), 340);
+        }, 180);
+      }
+
+      document.getElementById("notify").addEventListener("click", simulateNotify);
+      card.addEventListener("mouseenter", () => clearTimeout(cardTimer));
+      card.addEventListener("mouseleave", () => {
+        if (mode === "card") armCardTimer();
+      });
+      card.addEventListener("click", () => {
+        dismissCard();
+        readout.textContent += "\n点击卡片 → focus_main_window()";
+      });
+
+      // ── 拖动宠物：卡片依然从它的右下角长出 ──────────────────────────
+      let drag = null;
+
+      function clampMargin(next) {
+        const maxRight = stage.clientWidth - dock.offsetWidth - 8;
+        const maxBottom = stage.clientHeight - dock.offsetHeight - 8;
+        return {
+          right: Math.min(Math.max(next.right, 8), Math.max(maxRight, 8)),
+          bottom: Math.min(Math.max(next.bottom, 8), Math.max(maxBottom, 8)),
+        };
+      }
+
+      pet.addEventListener("pointerdown", (e) => {
+        if (mode !== "pet") return;
+        pet.setPointerCapture(e.pointerId);
+        drag = {
+          startX: e.clientX,
+          startY: e.clientY,
+          right: margin.right,
+          bottom: margin.bottom,
+          moved: false,
+        };
+      });
+
+      pet.addEventListener("pointermove", (e) => {
+        if (!drag) return;
+        const dx = e.clientX - drag.startX;
+        const dy = e.clientY - drag.startY;
+        if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+        drag.moved = true;
+        margin = clampMargin({
+          right: drag.right - dx,
+          bottom: drag.bottom - dy,
+        });
+        layout();
+      });
+
+      pet.addEventListener("pointerup", (e) => {
+        if (!drag) return;
+        pet.releasePointerCapture(e.pointerId);
+        const wasClick = !drag.moved;
+        drag = null;
+        if (wasClick) {
+          // 产品里：focus_main_from_notify（主窗 unminimize + show + focus）
+          readout.textContent += "\n单击宠物 → focus_main_window()";
+        } else {
+          readout.textContent += "\n拖动结束 → 去抖 800ms 后写回 desktop_pet_anchor";
+        }
+      });
+
+      // 键盘可达性：回车 = 单击
+      pet.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          readout.textContent += "\n单击宠物 → focus_main_window()";
+        }
+      });
+
+      // ── 主题 / 动效 / 轮廓 ────────────────────────────────────────────
+      document.getElementById("theme").addEventListener("change", (e) => {
+        document.documentElement.dataset.theme = e.target.checked ? "dark" : "light";
+      });
+      document.getElementById("motion").addEventListener("change", (e) => {
+        document.documentElement.classList.toggle("no-motion", !e.target.checked);
+      });
+      document.getElementById("hairline").addEventListener("change", (e) => {
+        document.documentElement.classList.toggle("hairline", e.target.checked);
+      });
+
+      window.addEventListener("resize", () => {
+        margin = clampMargin(margin);
+        layout();
+      });
+
+      layout();
+    </script>
+  </body>
+</html>
