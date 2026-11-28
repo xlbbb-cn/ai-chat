@@ -127,6 +127,7 @@ ai-chat/
 │  ├─ api.ts                    invoke/listen 封装
 │  ├─ types.ts                  共享 TS 类型
 │  ├─ fileMention.ts            `@文件` 弹窗查询/打分（行区间）
+│  ├─ pathRef.ts                `&路径` 引用语法（不附加内容）
 │  ├─ slashMention.ts           `/技能` 弹窗查询/打分
 │  ├─ attachments.ts            发送时把 `@路径` 提及落成附件
 │  ├─ components/               Chat/History/Settings/Skills/Tools/MCP/Agents/

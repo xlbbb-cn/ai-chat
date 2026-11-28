@@ -124,15 +124,16 @@ Long thinking streams are not killed by a wall clock: requests run without a tot
 - a stream that closes without `finish_reason`/`[DONE]` is treated as an error, not as a finished answer;
 - after three attempts the turn fails with the error visible in the transcript.
 
-## Composer mentions (`@file`, `/skill`)
+## Composer mentions (`@file`, `&path`, `/skill`)
 
-The composer has two inline pickers; they replaced the old paperclip button:
+The composer has three inline pickers; they replaced the old paperclip button:
 
 - **`@` — reference a file.** Typing `@` at a word boundary opens a popup listing the files the model could be shown: workspace files, hidden and `.gitignore`-excluded paths skipped, capped at 20 000 entries. `↑`/`↓` move, `Enter`/`Tab` accept, `Esc` closes; the popup never takes focus. Accepting inserts `@path` into the text.
+- **`&` — reference a path, without the bytes.** The same popup, the same keys, the same list — but accepting inserts `&path` and **no file content is sent**: the model sees the path and opens the file itself with a tool when it needs to. Three consequences follow: no `#` line range (nothing is sliced), no filtering by what the model can read (a model without support for a format can still be pointed at it), and a path holding a space, `#`, `@` or `&` is not offered, because the token could not represent it. This is the one picker that also works while a reply streams — an injected `&path` is plain text.
 - **`/` — reference a skill.** Typing `/` lists the workspace skills (`.data/skills`). Accepting inserts the plain text `/skill-name` into the message — nothing is attached; the model resolves the token with its `use_skill` tool at run time.
 - **`@@` — address a temp file.** Files under `.data/tmp` (pastes and drops) are reachable as `@@name`, so a long path never has to be typed.
 - **`+` — embed a sub-agent role.** In a new conversation, `+agent` starts the turn with that sub-agent's role, without opening the Agents panel.
-- Only one popup is open at a time: inside a word the `@` and `/` grammars are mutually exclusive, so no stacking rule is needed.
+- Only one popup is open at a time: inside a word the `@`, `&` and `/` grammars are mutually exclusive, so no stacking rule is needed.
 
 ### Line ranges
 

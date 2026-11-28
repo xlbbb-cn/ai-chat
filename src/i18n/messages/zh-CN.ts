@@ -150,6 +150,11 @@ const zhCN: Messages = {
             handoffNote:
                 "【附件转交——当前模型无法直接读取这些格式，本条消息里没有它们的字节内容】{files}。路径是唯一的线索，不要猜测内容：先检查并解析每个文件（例如用 `run_shell` 调用对应格式的解析器：xlsx 用 python/pandas、docx 解压 OOXML、pdf 用 pdftotext、压缩包用 tar/7z；机器上没有就先装一个转换工具），再用解析结果继续完成工作。",
         },
+        pathRef: {
+            title: "插入文件路径引用",
+            hint: "↑↓ 选择 · Enter/Tab 插入 · 只插入路径，不发送文件内容",
+            noMatches: "没有匹配“{query}”的文件 —— 含空格、#、@ 或 & 的路径无法引用。",
+        },
         slashMention: {
             title: "插入技能引用",
             hint: "↑↓ 选择 · Enter/Tab 插入 · Esc 关闭",
@@ -177,11 +182,11 @@ const zhCN: Messages = {
             dropFailed: "无法加入拖入的文件：{error}",
         },
         messageRenderFailed: "这条消息无法渲染：{error}",
-        inputPlaceholder: "输入消息…（@ 引用文件，/ 调用技能，Enter 发送）",
+        inputPlaceholder: "输入消息…（@ 引用文件，& 引用路径，/ 调用技能，Enter 发送）",
         injections: {
             title: "本轮内追加",
             queued: "等待送达",
-            placeholder: "助手正在工作，输入新信息即可追加给它（Enter 追加）",
+            placeholder: "助手正在工作，输入新信息即可追加给它（Enter 追加，& 可引用文件路径）",
         },
         selectModel: "选择模型",
         modelFilterPlaceholder: "筛选模型…",

@@ -28,7 +28,7 @@ See [Quick Start](Quick-Start) for the full first-run walkthrough.
 | --- | --- |
 | Install, configure an API, first chat | [Quick Start](Quick-Start) |
 | Build from source, package, publish | [Installation and Build](Installation-and-Build) |
-| Chat, model parameters, `@file` / `/skill` mentions, reasoning, context, drawings, PDF export | [Interface and Chat](Interface-and-Chat) |
+| Chat, model parameters, `@file` / `&path` / `/skill` mentions, reasoning, context, drawings, PDF export | [Interface and Chat](Interface-and-Chat) |
 | New/search/favorite/archive/fork sessions | [Sessions and History](Sessions-and-History) |
 | Switch away while a reply is still streaming, then come back to that turn | [Sessions and History](Sessions-and-History#a-reply-keeps-running-in-the-background) |
 | Switch workspaces, understand `.data` and app data | [Workspace and Data](Workspace-and-Data) |

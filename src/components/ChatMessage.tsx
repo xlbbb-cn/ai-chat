@@ -445,6 +445,57 @@ function highlightFileMentions(root: HTMLElement) {
 }
 
 /**
+ * Wrap `&path` references in the body with the same accent span `@file`
+ * mentions wear — both name a workspace file, and which of the two promises the
+ * bytes is the popup's business, not the transcript's.
+ *
+ * Mirrors `activePathRefQuery` in `pathRef.ts`: the `&` must open the line or
+ * follow whitespace, and the token ends at whitespace or at one of the
+ * grammar's stop characters — so `R&D`, `A & B` and a shell's `&&` stay prose.
+ * Trailing punctuation belongs to the sentence, not to the path.
+ */
+function highlightPathRefs(root: HTMLElement) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode as Text);
+
+  const token = /&[^\s&@#<>]+/g;
+
+  for (const node of nodes) {
+    const text = node.data;
+    if (!text.includes("&")) continue;
+    // Already wrapped tokens are skipped, which keeps a re-run idempotent.
+    if (node.parentElement?.closest("pre, code, a, .katex, button, .file-mention-token")) continue;
+
+    const fragment = document.createDocumentFragment();
+    let cursor = 0;
+    let found = false;
+    token.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = token.exec(text)) !== null) {
+      // Only a token that opens the line or follows whitespace is a reference.
+      if (match.index > 0 && !/\s/.test(text[match.index - 1])) continue;
+      const raw = match[0].replace(/[.,;:!?，。；：！？)\]}"']+$/, "");
+      if (raw.length < 2) continue;
+      found = true;
+      if (match.index > cursor) {
+        fragment.appendChild(document.createTextNode(text.slice(cursor, match.index)));
+      }
+      const span = document.createElement("span");
+      span.className = "file-mention-token";
+      span.textContent = raw;
+      fragment.appendChild(span);
+      cursor = match.index + raw.length;
+    }
+    if (!found) continue;
+    if (cursor < text.length) {
+      fragment.appendChild(document.createTextNode(text.slice(cursor)));
+    }
+    node.replaceWith(fragment);
+  }
+}
+
+/**
  * Wrap `/skill-name` mentions in the body with the same accent span `@file`
  * mentions wear — a slash token is a reference to a workspace skill, not prose.
  *
@@ -1000,6 +1051,8 @@ function ChatMessageRow({ message, showRetry = false, onRetry, onNotice, onDelet
       if (isUser) {
         try {
           highlightFileMentions(el);
+          // `&path` is the sibling reference: same accent, no attachment.
+          highlightPathRefs(el);
         } catch (error) {
           console.error("Mention highlighting failed", error);
         }

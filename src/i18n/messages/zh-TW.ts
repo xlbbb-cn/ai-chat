@@ -150,6 +150,11 @@ const zhTW: Messages = {
             handoffNote:
                 "【附件轉交——目前模型無法直接讀取這些格式，本訊息裡沒有它們的位元組內容】{files}。路徑是唯一的線索，不要猜測內容：先檢查並解析每個檔案（例如用 `run_shell` 呼叫對應格式的解析器：xlsx 用 python/pandas、docx 解壓 OOXML、pdf 用 pdftotext、壓縮檔用 tar/7z；機器上沒有就先裝一個轉換工具），再用解析結果繼續完成工作。",
         },
+        pathRef: {
+            title: "插入檔案路徑參照",
+            hint: "↑↓ 選擇 · Enter/Tab 插入 · 只插入路徑，不傳送檔案內容",
+            noMatches: "沒有符合“{query}”的檔案 —— 含空白、#、@ 或 & 的路徑無法參照。",
+        },
         slashMention: {
             title: "插入技能參照",
             hint: "↑↓ 選擇 · Enter/Tab 插入 · Esc 關閉",
@@ -177,11 +182,11 @@ const zhTW: Messages = {
             dropFailed: "無法加入拖入的檔案：{error}",
         },
         messageRenderFailed: "這則訊息無法渲染：{error}",
-        inputPlaceholder: "輸入訊息…（@ 引用檔案，/ 呼叫技能，Enter 送出）",
+        inputPlaceholder: "輸入訊息…（@ 引用檔案，& 參照路徑，/ 呼叫技能，Enter 送出）",
         injections: {
             title: "本輪內追加",
             queued: "等待送達",
-            placeholder: "助理正在工作，輸入新資訊即可追加給它（Enter 追加）",
+            placeholder: "助理正在工作，輸入新資訊即可追加給它（Enter 追加，& 可參照檔案路徑）",
         },
         selectModel: "選擇模型",
         modelFilterPlaceholder: "篩選模型…",

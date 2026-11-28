@@ -176,6 +176,12 @@ const en = {
             handoffNote:
                 "[Attachment handoff — the current model cannot read these formats directly, so this message carries no bytes of them] {files}. Those paths are all you have: never guess the content. Inspect and parse each file first (e.g. `run_shell` with a parser for the format: python/pandas for xlsx, `unzip` for docx/ooxml, `pdftotext` for pdf, `tar`/`7z` for archives — install a converter when the machine has none), then continue the task with what you extracted.",
         },
+        pathRef: {
+            title: "Insert file path reference",
+            hint: "↑↓ choose · Enter/Tab insert · path only, no file content is sent",
+            noMatches:
+                "No file matches “{query}” — a path with a space, #, @ or & cannot be referenced.",
+        },
         slashMention: {
             title: "Insert skill reference",
             hint: "↑↓ choose · Enter/Tab insert · Esc close",
@@ -204,12 +210,12 @@ const en = {
             dropFailed: "Could not attach the dropped file: {error}",
         },
         messageRenderFailed: "This message could not be rendered: {error}",
-        inputPlaceholder: "Type a message… (@ file, / skill, Enter to send)",
+        inputPlaceholder: "Type a message… (@ file, & path, / skill, Enter to send)",
         injections: {
             title: "Added mid-turn",
             queued: "Waiting to be delivered",
             placeholder:
-                "The assistant is working — type an update to add it mid-turn (Enter to add)",
+                "The assistant is working — type an update to add it mid-turn (Enter to add; & names a file path)",
         },
         selectModel: "Select model",
         modelFilterPlaceholder: "Filter models…",

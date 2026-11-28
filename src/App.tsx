@@ -55,6 +55,12 @@ import type {
 import { supportsMentionName } from "./attachments";
 import { activeMentionQuery, resolveFileMentions, scoreWorkspaceFile } from "./fileMention";
 import type { MentionProgress, MentionResolution } from "./fileMention";
+import {
+  activePathRefQuery,
+  isPathRefExpressible,
+  pathRefTokenFor,
+  PATH_REF_STOP,
+} from "./pathRef";
 import { partsForContent } from "./messageParts";
 import {
   canonicalTmpMentions,
@@ -569,6 +575,12 @@ const WORKSPACE_FILES_TTL_MS = 15_000;
 /** Rows the `@file` popup shows at once — enough to be useful, short enough
  *  that arrow-key navigation stays predictable. */
 const MENTION_MAX_ITEMS = 8;
+
+/** Move a popup cursor by `delta` inside `size` rows, wrapping both ways. */
+function wrapIndex(value: number, size: number): number {
+  return ((value % size) + size) % size;
+}
+
 /** How long the `/skill` popup trusts its cached skill list. */
 const SKILL_MENTIONS_TTL_MS = 15_000;
 /** How long the `+agent` popup trusts its cached sub-agent roster. */
@@ -664,6 +676,19 @@ export default function App() {
   /** Timestamped cache, so the roster is read at most every 15s. */
   const agentMentionRef = useRef<{ at: number; options: AgentMentionOption[] } | null>(null);
   const agentMentionPendingRef = useRef(false);
+  /**
+   * Composer `&file` popup, the fourth trigger of the same surface: it names a
+   * workspace file in the message **without** attaching it. `start` is the
+   * index of the `&` that opened it — the whole token is replaced when an item
+   * is accepted. The listing and its 15 s cache are shared with `@file`
+   * (`workspaceFiles` below), so switching triggers costs no second walk.
+   */
+  const [pathRefState, setPathRefState] = useState<{
+    open: boolean;
+    query: string;
+    start: number;
+  }>({ open: false, query: "", start: 0 });
+  const [pathRefIndex, setPathRefIndex] = useState(0);
   const [embeddedAgents, setEmbeddedAgents] = useState<AgentMentionOption[]>([]);
   /**
    * Drop the pending `+agent` selections. Called whenever the session changes
@@ -1983,6 +2008,7 @@ export default function App() {
         setInput("");
         setMentionState({ open: false, query: "", start: 0 });
         setSlashState({ open: false, query: "", start: 0 });
+        setPathRefState({ open: false, query: "", start: 0 });
         setTimerNotice(null);
         setPendingAutoPrompts([]);
         await applyConfigToUi();
@@ -3534,6 +3560,7 @@ export default function App() {
       setMentionState({ open: false, query: "", start: 0 });
       setSlashState({ open: false, query: "", start: 0 });
       setAgentMentionState({ open: false, query: "", start: 0 });
+      setPathRefState({ open: false, query: "", start: 0 });
     }
     setStreaming(true);
     setError(null);
@@ -4323,48 +4350,75 @@ export default function App() {
     // the popup is often open while an IME is active.
     if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
 
-    // An open mention popup (`@file`, `/skill` or `+agent`) owns the arrow
-    // keys, Enter/Tab and Escape while it is visible. Their token grammars are
-    // mutually exclusive, so at most one is open and it decides which list,
-    // index and accept handler the keys act on.
-    if (mentionState.open || slashState.open || agentMentionState.open) {
-      const rowCount = mentionState.open
-        ? mentionItems.length
-        : slashState.open
-          ? slashItems.length
-          : agentMentionItems.length;
+    // An open composer popup (`&file`, `@file`, `/skill` or `+agent`) owns the
+    // arrow keys, Enter/Tab and Escape while it is visible. Their token
+    // grammars are mutually exclusive (no trigger character can appear inside
+    // another token), so at most one is open and it decides which list, index
+    // and accept handler the keys act on. One table instead of a branch per
+    // popup, so a fifth trigger cannot forget a key.
+    const popups = [
+      {
+        open: pathRefState.open,
+        count: pathRefItems.length,
+        move: (delta: number) =>
+          setPathRefIndex((prev) => wrapIndex(prev + delta, pathRefItems.length)),
+        accept: () => {
+          const item = pathRefItems[pathRefActiveIndex];
+          if (item) acceptPathRef(item);
+        },
+      },
+      {
+        open: mentionState.open,
+        count: mentionItems.length,
+        move: (delta: number) =>
+          setMentionIndex((prev) => wrapIndex(prev + delta, mentionItems.length)),
+        accept: () => {
+          const item = mentionItems[mentionActiveIndex];
+          if (item) acceptMention(item);
+        },
+      },
+      {
+        open: slashState.open,
+        count: slashItems.length,
+        move: (delta: number) =>
+          setSlashIndex((prev) => wrapIndex(prev + delta, slashItems.length)),
+        accept: () => {
+          const item = slashItems[slashActiveIndex];
+          if (item) acceptSlash(item);
+        },
+      },
+      {
+        open: agentMentionState.open,
+        count: agentMentionItems.length,
+        move: (delta: number) =>
+          setAgentMentionIndex((prev) =>
+            wrapIndex(prev + delta, agentMentionItems.length),
+          ),
+        accept: () => {
+          const item = agentMentionItems[agentMentionActiveIndex];
+          if (item) acceptAgentMention(item);
+        },
+      },
+    ];
+    const popup = popups.find((candidate) => candidate.open);
+    if (popup) {
       if (e.key === "Escape") {
         e.preventDefault();
+        closePathRef();
         closeMention();
         closeSlash();
         closeAgentMention();
         return;
       }
-      if (rowCount > 0) {
+      if (popup.count > 0) {
         if (e.key === "ArrowDown" || e.key === "ArrowUp") {
           e.preventDefault();
-          const delta = e.key === "ArrowDown" ? 1 : -1;
-          if (mentionState.open) {
-            setMentionIndex((prev) => (prev + delta + rowCount) % rowCount);
-          } else if (slashState.open) {
-            setSlashIndex((prev) => (prev + delta + rowCount) % rowCount);
-          } else {
-            setAgentMentionIndex((prev) => (prev + delta + rowCount) % rowCount);
-          }
+          popup.move(e.key === "ArrowDown" ? 1 : -1);
           return;
         }
         if (e.key === "Enter" || e.key === "Tab") {
           e.preventDefault();
-          if (mentionState.open) {
-            const item = mentionItems[mentionActiveIndex];
-            if (item) acceptMention(item);
-          } else if (slashState.open) {
-            const item = slashItems[slashActiveIndex];
-            if (item) acceptSlash(item);
-          } else {
-            const item = agentMentionItems[agentMentionActiveIndex];
-            if (item) acceptAgentMention(item);
-          }
+          popup.accept();
           return;
         }
       }
@@ -4910,6 +4964,105 @@ export default function App() {
       });
     },
     [closeMention, input, mentionState.start],
+  );
+
+  // ─── Composer `&file` path references ─────────────────────────────────────
+
+  /**
+   * Files the `&file` popup offers: the whole workspace listing, ranked exactly
+   * like `@file` (name first, path second, then the shorter path).
+   *
+   * Two deliberate differences from `@file`. No capability filter: nothing is
+   * attached, so a model that cannot read a format can still be pointed at the
+   * path and parse it with a tool. And no inexpressible path: a file whose path
+   * holds whitespace or a stop character cannot be written as a single token
+   * (`isPathRefExpressible`), so offering it would insert a reference that
+   * points somewhere else.
+   */
+  const pathRefItems = useMemo(() => {
+    if (!pathRefState.open || !workspaceFiles) return [];
+    const scored: { item: WorkspaceFileEntry; score: number }[] = [];
+    for (const file of workspaceFiles) {
+      if (!isPathRefExpressible(file.path)) continue;
+      const score = scoreWorkspaceFile(file, pathRefState.query);
+      if (score === null) continue;
+      scored.push({ item: file, score });
+    }
+    scored.sort(
+      (a, b) =>
+        a.score - b.score ||
+        a.item.path.length - b.item.path.length ||
+        a.item.path.localeCompare(b.item.path),
+    );
+    return scored.slice(0, MENTION_MAX_ITEMS).map((entry) => entry.item);
+  }, [pathRefState.open, pathRefState.query, workspaceFiles]);
+
+  /** Index stays valid while the filtered list shrinks under the cursor. */
+  const pathRefActiveIndex = Math.min(
+    pathRefIndex,
+    Math.max(0, pathRefItems.length - 1),
+  );
+
+  const closePathRef = useCallback(() => {
+    setPathRefState((prev) => (prev.open ? { open: false, query: "", start: 0 } : prev));
+  }, []);
+
+  /**
+   * Open/close the `&file` popup for the token under the caret. Only a real
+   * user edit reaches this — accepting an item inserts text programmatically,
+   * which must not immediately reopen the popup.
+   *
+   * Unlike `@` / `/` / `+`, this one stays available while a reply streams: the
+   * composer is then an injection channel, and an injected `&path` is plain
+   * text — there is no attachment it could promise and then lose.
+   */
+  const syncPathRefFromInput = useCallback(
+    (value: string, caret: number) => {
+      if (backupExporting) {
+        closePathRef();
+        return;
+      }
+      const active = activePathRefQuery(value, caret);
+      if (!active) {
+        closePathRef();
+        return;
+      }
+      setPathRefState((prev) =>
+        prev.open && prev.start === active.start && prev.query === active.query
+          ? prev
+          : { open: true, query: active.query, start: active.start },
+      );
+      setPathRefIndex(0);
+      void ensureWorkspaceFiles();
+    },
+    [backupExporting, closePathRef, ensureWorkspaceFiles],
+  );
+
+  /**
+   * Insert `&<path>` for `item`, replacing the whole `&query` run and leaving
+   * the caret right behind the token. Unlike `@`, there is no `#` range to type
+   * afterwards: nothing is sliced out of the file.
+   */
+  const acceptPathRef = useCallback(
+    (item: WorkspaceFileEntry) => {
+      const el = textareaRef.current;
+      const token = pathRefTokenFor(item.path);
+      const start = pathRefState.start;
+      // Replace the run rather than only the part before the caret: a click or
+      // an arrow key can leave the caret inside the token.
+      let end = start + 1;
+      while (end < input.length && !PATH_REF_STOP.test(input[end])) end += 1;
+      const before = input.slice(0, start);
+      const after = input.slice(end);
+      setInput(`${before}${token}${after}`);
+      closePathRef();
+      requestAnimationFrame(() => {
+        const position = before.length + token.length;
+        el?.focus();
+        el?.setSelectionRange(position, position);
+      });
+    },
+    [closePathRef, input, pathRefState.start],
   );
 
   // ─── Composer `/skill` mentions ───────────────────────────────────────────
@@ -6169,6 +6322,18 @@ export default function App() {
               onHover={setMentionIndex}
               onSelect={acceptMention}
             />
+            {/* Same surface, opposite promise: this one inserts `&path` and
+                sends no file content, so its header says so. */}
+            <FileMentionPopup
+              mode="path"
+              open={pathRefState.open}
+              items={pathRefItems}
+              activeIndex={pathRefActiveIndex}
+              loading={workspaceFilesLoading}
+              query={pathRefState.query}
+              onHover={setPathRefIndex}
+              onSelect={acceptPathRef}
+            />
             <textarea
               ref={textareaRef}
               className="chat-input"
@@ -6181,6 +6346,7 @@ export default function App() {
                 syncMentionFromInput(value, caret);
                 syncSlashFromInput(value, caret);
                 syncAgentMentionFromInput(value, caret);
+                syncPathRefFromInput(value, caret);
               }}
               onKeyDown={handleKeyDown}
               onFocus={requestTranscriptChunk}
@@ -6192,6 +6358,7 @@ export default function App() {
                 closeMention();
                 closeSlash();
                 closeAgentMention();
+                closePathRef();
               }}
               placeholder={composerBusy ? t("app.injections.placeholder") : t("app.inputPlaceholder")}
               // Stays usable while a reply streams: Enter then adds the text to

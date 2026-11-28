@@ -131,7 +131,9 @@ export function activeMentionQuery(
   // completed from the workspace listing, so the popup stays closed.
   if (previous && !/\s/.test(previous)) return null;
   const query = before.slice(at + 1);
-  if (/[\s@#]/.test(query)) return null;
+  // `&` also ends the query: it opens the sibling `&path` picker
+  // (`pathRef.ts`), and two popups must never be open at once.
+  if (/[\s@#&]/.test(query)) return null;
   return { start: at, query };
 }
 

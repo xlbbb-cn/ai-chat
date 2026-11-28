@@ -127,6 +127,7 @@ ai-chat/
 │  ├─ api.ts                    invoke/listen wrappers
 │  ├─ types.ts                  shared TS types
 │  ├─ fileMention.ts            `@file` popup query/scoring (line ranges)
+│  ├─ pathRef.ts                `&path` reference grammar (no attachment)
 │  ├─ slashMention.ts           `/skill` popup query/scoring
 │  ├─ attachments.ts            materializes `@path` mentions on send
 │  ├─ components/               Chat/History/Settings/Skills/Tools/MCP/Agents/
