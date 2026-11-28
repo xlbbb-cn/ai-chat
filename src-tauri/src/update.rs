@@ -10,6 +10,7 @@
 //! to the OS.
 
 use crate::AppState;
+use crate::http::APP_USER_AGENT;
 use futures_util::StreamExt;
 use serde::Serialize;
 use std::cmp::Ordering;
@@ -23,8 +24,6 @@ const REPO_SLUG: &str = "xlbbb-cn/ai-chat";
 const RELEASES_URL: &str = "https://api.github.com/repos/xlbbb-cn/ai-chat/releases?per_page=20";
 /// Only these URLs may be handed to the OS by `open_release_page`.
 const RELEASE_URL_PREFIX: &str = "https://github.com/xlbbb-cn/ai-chat/";
-/// GitHub rejects requests without a User-Agent.
-const USER_AGENT: &str = "rabbit-chat-studio-desktop";
 /// Emit at most one progress event per this many downloaded bytes.
 const PROGRESS_STEP: u64 = 256 * 1024;
 /// Assets scoring at or above this value are marked as recommended for this machine.
@@ -73,7 +72,9 @@ pub struct UpdateDownloadProgress {
 
 fn build_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
-        .user_agent(USER_AGENT)
+        // GitHub rejects requests without a User-Agent; the shared one names
+        // the release that asked (`rabbit-chat-studio/<version>`).
+        .user_agent(APP_USER_AGENT)
         .connect_timeout(Duration::from_secs(12))
         .timeout(Duration::from_secs(120))
         .build()

@@ -6,15 +6,17 @@
 use reqwest::{Client, ClientBuilder};
 use std::time::Duration;
 
-/// Identifying `User-Agent` for cloud-agent and sub-agent traffic.
+/// The app's identifying `User-Agent`: `rabbit-chat-studio/<version>`.
 ///
-/// `rabbit-chat-studio/<version>`, lowercase ASCII per HTTP convention. The
-/// version is baked in from `Cargo.toml` at build time, so it always matches
-/// the binary that sent the request. Only the agent paths use it: the chat
-/// stream keeps reqwest's default (no header), since a gateway that wants to
-/// tell background agent traffic apart from the conversation can only do that
-/// when the two differ.
-pub(crate) const AGENT_USER_AGENT: &str = concat!("rabbit-chat-studio/", env!("CARGO_PKG_VERSION"));
+/// Lowercase ASCII by HTTP convention (the display name stays `Rabbit Chat
+/// Studio`). The version is baked in from `Cargo.toml` at build time, so it
+/// always matches the binary that sent the request — there is no runtime
+/// "unknown version" case to fall back on. Used by the cloud-agent /
+/// sub-agent clients ([`build_agent_client`]) and by the update check
+/// (`crate::update`). The chat stream deliberately keeps reqwest's default
+/// (no header): a gateway can only tell background agent traffic apart from
+/// the conversation when the two differ.
+pub(crate) const APP_USER_AGENT: &str = concat!("rabbit-chat-studio/", env!("CARGO_PKG_VERSION"));
 
 /// Transport policy shared by the two streaming clients below: no total
 /// request timeout (see [`build_stream_client`]), liveness per read, and
@@ -58,27 +60,27 @@ pub(crate) fn build_stream_client() -> Result<Client, String> {
 /// capability checks).
 ///
 /// Same transport policy as [`build_stream_client`] — sub-agent calls are
-/// streamed too — plus [`AGENT_USER_AGENT`] so a provider or gateway sees who
+/// streamed too — plus [`APP_USER_AGENT`] so a provider or gateway sees who
 /// sent the request instead of a nameless reqwest client.
 pub(crate) fn build_agent_client() -> Result<Client, String> {
-    stream_policy(Client::builder().user_agent(AGENT_USER_AGENT))
+    stream_policy(Client::builder().user_agent(APP_USER_AGENT))
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {e}"))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::AGENT_USER_AGENT;
+    use super::APP_USER_AGENT;
 
     /// Lowercase ASCII and versioned: a gateway log line stays readable, and the
     /// version identifies the release that sent the request.
     #[test]
-    fn agent_user_agent_is_versioned_ascii() {
+    fn app_user_agent_is_versioned_ascii() {
         assert_eq!(
-            AGENT_USER_AGENT,
+            APP_USER_AGENT,
             format!("rabbit-chat-studio/{}", env!("CARGO_PKG_VERSION"))
         );
-        assert!(AGENT_USER_AGENT.is_ascii());
-        assert!(!AGENT_USER_AGENT.chars().any(|c| c.is_ascii_uppercase()));
+        assert!(APP_USER_AGENT.is_ascii());
+        assert!(!APP_USER_AGENT.chars().any(|c| c.is_ascii_uppercase()));
     }
 }
