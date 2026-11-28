@@ -72,7 +72,7 @@ const en = {
         workspacePickTitle: "Choose a workspace folder",
         workspaceBusy: "A reply is still streaming — switch when the turn ends.",
         workspaceShadowNote:
-            "This window keeps its own settings; the workspace history is shared.",
+            "This window keeps its own settings; the history is shared.",
 
         dream: {
             hint: "Click to let me take a short nap",
@@ -94,35 +94,35 @@ const en = {
 
         tip: {
             organizeMemory:
-                "Use the Memory tool to save reusable facts, then open Settings → Debug to review and consolidate them.",
+                "Save facts with the memory tool; review them in Settings → Debug.",
             archiveExperience:
-                "In Self-evolution mode, ask the assistant to pack a finished workflow into an experience you can install in any workspace.",
+                "In self-evolution mode, ask the assistant to pack a workflow as an experience.",
             skills:
-                "Enable a skill in the Skills panel, then type /skill in the composer to load it on demand.",
+                "Enable a skill in the Skills panel, then type /skill to load it.",
             subAgents:
-                "Type +agent in a fresh conversation to embed a sub-agent's role into this session.",
+                "Type +agent in a new chat to embed a sub-agent's role.",
             fileMentions:
-                "Type @ in the composer to attach a workspace file — PDFs are converted to Markdown automatically.",
+                "Type @ in the composer to attach a file; PDFs become Markdown.",
             figures:
-                "Ask for a diagram and it becomes an interactive figure card; drag 3D scenes to orbit them.",
+                "Ask for a diagram to get a figure card; drag 3D scenes to orbit.",
             maintenance:
-                "Turn on Self-evolution mode and click the face above to tidy skills and memory while you wait.",
+                "Turn on self-evolution mode, then click the face to tidy skills and memory.",
             backup:
-                "Use the titlebar ⋯ menu to export a backup — config, skills, memory and chat history in one zip.",
+                "Titlebar ⋯ menu exports config, skills, memory and history as one zip.",
             createSkill:
-                "Skills panel → + New Skill: name it, add a one-line description and system prompt, save, then enable and load it with /skill.",
+                "Skills panel → + New Skill, then load it with /skill.",
             mcpSetup:
-                "MCP panel → + Add Server: stdio needs a command, args and env vars; SSE/HTTP needs a URL and token — test with the bolt icon.",
+                "MCP panel → + Add Server: command for stdio, URL and token for SSE.",
             subAgentCreate:
-                "Agents panel → + New Agent: name it, describe it, write its system prompt; enable it, then embed it with +agent.",
+                "Agents panel → + New Agent, enable it, then embed it with +agent.",
             scriptLibrary:
-                "Ask the assistant to save a proven command as a script — run_cmd then runs it by name, no retyping.",
+                "Ask the assistant to save a command as a script; run_cmd runs it by name.",
             modelDepth:
-                "Switch models any time from the toolbar picker; reasoning models also offer a thinking-depth control.",
+                "Switch models from the toolbar; reasoning models add a depth control.",
             workspaceSwitch:
-                "Click the workspace name in the titlebar to switch — each workspace keeps its own history, skills, memory and todos.",
+                "Click the workspace name in the titlebar to switch workspace.",
             timerBackground:
-                "Let the assistant wait with a timer for slow work; turn on Background execution to keep commands running while you chat.",
+                "Let the assistant wait on a timer; enable background execution too.",
         },
 
         backupExportLabel: "Exporting and compressing the backup...",
@@ -137,7 +137,7 @@ const en = {
         toolDisabledNotice:
             "`{tool}` failed {limit} times in a row — disabled for this session.",
         budgetExhaustedNotice:
-            "Tool budget spent ({rounds} rounds, {toolCalls} tool calls) — the assistant is wrapping up with the material it already has.",
+            "Tool budget spent ({rounds} rounds, {toolCalls} calls) — wrapping up with what it has.",
 
         timers: {
             title: "Timers",
@@ -151,7 +151,7 @@ const en = {
             sleepLock: "Sleep blocked",
             sleepLockRunning: "Sleep blocked · turn {time}",
             sleepLockHint:
-                "A timer is pending or this turn is still running, so the system is kept awake.",
+                "Keeps the machine awake while a timer or a turn is pending.",
         },
 
         background: {
@@ -193,7 +193,7 @@ const en = {
             listFailed: "Could not list sub-agents: {error}",
         },
         attachmentUnsupported:
-            "{names}: {model} cannot read this format directly — the file stays in the workspace and only its path is handed to the assistant, which parses it with tools.",
+            "{names}: {model} cannot read this format; only the path is handed over.",
         composer: {
             dropHint: "Drop to attach — copied to .data/tmp (or referenced in place) and inserted as @",
             busy: "The assistant is replying: add files once this turn ends.",
@@ -204,7 +204,7 @@ const en = {
             dropFailed: "Could not attach the dropped file: {error}",
         },
         messageRenderFailed: "This message could not be rendered: {error}",
-        inputPlaceholder: "Type a message… (@ to reference a file, / for a skill, Enter to send)",
+        inputPlaceholder: "Type a message… (@ file, / skill, Enter to send)",
         injections: {
             title: "Added mid-turn",
             queued: "Waiting to be delivered",
@@ -275,11 +275,11 @@ const en = {
             usernamePlaceholder: "leave blank for current user",
             password: "Password",
             passwordPlaceholder: "required",
-            sudoHint: "This will run with elevated privileges and may modify your system.",
+            sudoHint: "Runs with elevated privileges and may change your system.",
             elevationHint:
-                "This will request administrator elevation (UAC) and may modify system settings.",
+                "Asks for admin elevation (UAC); may change system settings.",
             externalAgentHint:
-                "This CLI / cloud agent runs outside the app: a CLI runs with your user permissions in the workspace, a cloud agent runs the task on a remote endpoint. It is approved once per agent for this app run.",
+                "This agent runs outside the app, with your permissions in the workspace.",
             deny: "Deny",
             allow: "Allow",
         },
@@ -418,7 +418,7 @@ const en = {
         plugins: {
             enable: "Enable the plugin system",
             enableHint:
-                "Gives the model the plugin tool and one tool per plugin capability. Off: the plugin manager is hidden and the model cannot call any plugin.",
+                "Give the model the plugin tool and one tool per plugin capability.",
             manager: "Plugin manager",
         },
         appearance: {
@@ -438,11 +438,11 @@ const en = {
             glassSubtle: "Subtle",
             glassStandard: "Standard",
             glassStrong: "Strong",
-  glassHint: "Blur strength for the titlebar, toolbar and panel headers. Off makes those bars opaque instead of blurred — cheaper on weak GPUs and remote sessions. The level also makes the window frame translucent: over the blurred desktop where the system provides a backdrop (Acrylic on Windows), and elsewhere over a soft backdrop the app draws itself. The transcript stays solid unless a background photo is set.",
+  glassHint: "Blur the titlebar, toolbar and panel headers; off makes them opaque.",
             language: "Language",
             languageHint: "Applies immediately and is stored in your configuration.",
             chatBackground: "Chat background",
-            chatBackgroundHint: "A photo behind the messages only. It is copied into the app data folder when chosen, so the original can be moved or deleted afterwards.",
+            chatBackgroundHint: "Photo behind the messages; copied into app data when chosen.",
             chatBackgroundChoose: "Choose photo…",
             chatBackgroundReplace: "Replace photo…",
             chatBackgroundDefault: "Use default wallpaper",
@@ -468,10 +468,10 @@ const en = {
             contextWindow: "Context window for “{model}” (tokens)",
             contextPlaceholder: "auto (provider-reported or default)",
             contextHint:
-                "Auto-filled when the API reports a context window (OpenRouter, Groq, vLLM…), and otherwise from the matched capability catalogue entry. OpenAI-compatible endpoints that expose neither can be configured manually here — the value is used for agent context budgeting.",
+                "Auto-filled from the API or model catalogue; used for context budgeting.",
             capabilities: "Model capabilities",
             capabilitiesEmpty:
-                "No capability data for “{model}” yet — use “Fetch Models From API” to load it.",
+                "No capability data for {model} yet — use Fetch Models From API.",
             capabilitiesMatched: "matched “{name}” · {percent}% similar",
             capabilitiesSummary: "Capability metadata matched for {matched}/{total} models.",
             capabilitiesError: "Capability metadata unavailable: {error}",
@@ -486,10 +486,10 @@ const en = {
             capabilityMaxOutput: "{tokens} max output",
             conversationHeader: "Conversation ID header",
             conversationHeaderHint:
-                "Header name that carries the chat session id in every request. Leave empty to use the default “x-conversation-id”.",
+                "Header carrying the session id. Empty = x-conversation-id.",
             customHeaders: "Custom request headers",
             customHeadersHint:
-                "Extra headers sent with every model request — chat turns, sub-agent planning and the model listing. Blank rows are ignored, invalid names or values are skipped, and an “Authorization” row replaces the API key.",
+                "Extra headers on every request; an Authorization row replaces the API key.",
             customHeaderName: "Header name",
             customHeaderValue: "Value",
             addHeader: "Add header",
@@ -498,7 +498,7 @@ const en = {
 
         system: {
             title: "System Message",
-            subtitle: "Instructions sent to the model at the start of every conversation.",
+            subtitle: "Instructions sent at the start of every conversation.",
             content: "Content",
             placeholder: "You are a helpful assistant…",
         },
@@ -513,74 +513,74 @@ const en = {
             placeholderDefaultLimit: "default limit",
             maxRounds: "Max rounds per turn",
             maxRoundsHint:
-                "Model requests one chat turn may make. 0 = unlimited (hard cap 1000). When the budget is spent the turn sends a final request without tools, so the assistant answers with what it already has.",
+                "Model requests per turn. 0 = unlimited (max 1000).",
             maxToolCalls: "Max tool calls per turn",
             maxToolCallsHint:
-                "Tool calls executed in one chat turn. 0 = unlimited (hard cap 5000). Calls beyond it are answered with a notice instead of running.",
+                "Tool calls per turn. 0 = unlimited (max 5000).",
             toolFailureLimit: "Disable a tool after N failures",
             toolFailureLimitHint:
-                "A tool (MCP tools included) that fails this many times in a row is disabled for the rest of the session and the model is told to switch approach. 0 = never disable (hard cap 50). One successful call resets the count.",
+                "Disable a tool after this many failures in a row. 0 = never (max 50).",
             maxConcurrentTurns: "Max concurrent sessions",
             maxConcurrentTurnsHint:
-                "How many conversations may run a turn at the same time in one window. 0 = unlimited (hard cap 16). A new chat while a reply streams keeps the old turn running in the background; this bounds the parallel API and tool load.",
+                "Turns that may run at once in one window. 0 = unlimited (max 16).",
             dsFormat: "DS-Format (DeepSeek)",
-            dsFormatHint: "Pass reasoning_content back on assistant messages as DeepSeek-family thinking models require. DeepSeek-family models enable this automatically; turn it on only for other endpoints that need the same pass-through.",
-            dsFormatAuto: "Always on for {model}: DeepSeek-family models get DS-Format automatically, so reasoning_content is always passed back.",
+            dsFormatHint: "Send reasoning_content back on assistant messages, as some endpoints require.",
+            dsFormatAuto: "Always on for {model}: reasoning_content is always passed back.",
             enhancedFigures: "Enhanced drawing",
             enhancedFiguresHint:
-                "Let the assistant draw — Mermaid diagrams, hand-written SVG figures (every one gets a save button and lands in figures/ as a PNG, 3D scenes can be orbited) and dynamic HTML5 figures (`html-fig`: animation and interaction inside a sandboxed frame, saved as a .html file). Off: the prompt carries no drawing instructions at all, so the assistant does not draw — a `mermaid` fence you paste yourself still renders.",
+                "Let the assistant draw Mermaid, SVG and HTML figures, saved to figures/.",
             memoryHint: "Memory hint on user input",
             memoryHintHint:
-                "Prefix the newest user message with a hint (under 200 characters) of the memories whose keywords match it, ranked by confidence. It is a pointer, not the full record: the assistant still searches a scope for the whole entry. The hint exists only in the request — the stored message keeps the user's own text.",
+                "Add keyword-matched memory titles (under 200 chars) to the newest message.",
         },
 
         run: {
             title: "Run",
-            subtitle: "How turns execute: background tools, notifications, window behavior and the self-evolution mode.",
+            subtitle: "How turns run: background tools, notifications, window behavior.",
             backgroundTools: "Background execution",
             backgroundToolsHint:
-                "Let the assistant run slow tools as background tasks (`run_in_background: true`): `run_cmd`, `run_shell`, `file_actions` search, every MCP tool and `call_subagent`. The result is delivered automatically before the next request and the turn stays open until it arrives. Sub-agents never receive the flag.",
+                "Run slow tools in the background; the result arrives before the next request.",
             allowNotifications: "Allow notifications",
             allowNotificationsHint:
-                "Play a sound cue when a turn settles — the message sound for a failure, the session-finished sound for a success — and, while the window is minimized or another application holds the focus, show the desktop notification card with the reply's first line (or the error text). A turn the user stopped never notifies.",
+                "Sound and desktop notifications when a turn ends; stopped turns stay quiet.",
             singleInstance: "Run a single instance",
             singleInstanceHint:
-                "Launching Rabbit Chat Studio again brings the running window to the front instead of opening a second copy. When off, every launch gets its own window on a temporary copy of this configuration. Applies after restarting the app.",
+                "A second launch focuses the running window instead of opening a copy.",
             selfEvolution: "Enable Self-Evolution Mode",
             selfEvolutionHint:
-                "Let the assistant evolve its own skills inside the workspace. The file actions and memory tools stay enabled while the mode is on, and the assistant keeps verified facts (runtime environment, correct tool usage, file locations) in a dedicated evolution memory. The assistant may also build its own MCP servers (`mcp_self`) — scripts under .data/mcp, started as local processes after your confirmation.",
+                "Let the assistant write its own skills, memory and MCP servers here.",
         },
 
         debug: {
             title: "Debug",
-            subtitle: "Where log lines go and how long they are kept, plus the monitors that read them.",
+            subtitle: "Where logs go, how long they are kept, and the monitors.",
             loggerOutput: "Logger output",
             loggerFile: "Write to app-<date>.log",
             loggerPrintln: "Print to terminal (println)",
-            loggerOutputHint: "Only a debug build writes log lines; a release build ignores this choice.",
+            loggerOutputHint: "Only a debug build writes log lines.",
             retention: "Log retention (days)",
             retentionHint:
-                "Request and interaction logs older than this are deleted at startup and by the Interaction Monitor's “Compact DB”. 0 keeps logs forever. Chat history is never pruned. Change it and press Save to apply.",
+                "Delete logs older than this at startup and on Compact DB. 0 = keep forever.",
             monitors: "Monitors",
-            monitorsHint: "Each row opens a read-only dialog over this sheet. A running turn is read only after it ends.",
+            monitorsHint: "Each row opens a read-only dialog; a running turn shows after it ends.",
             interactionMonitor: "Interaction monitor",
             agentMissions: "Agent missions monitor",
             evolutionMemory: "Evolution memory",
             experiences: "Experience packages",
             launchMonitor: "Launch Monitor",
-            monitorsEmpty: "No monitor is available here: the interaction and agent-missions monitors need an open session, and the evolution monitors need Self-Evolution Mode (in Run).",
+            monitorsEmpty: "No monitor here: open a session, or turn on self-evolution mode.",
         },
 
         about: {
             title: "About & Updates",
-            subtitle: "Running version, plus update checks against this repository's GitHub releases.",
+            subtitle: "Version, plus update checks against GitHub releases.",
             currentVersion: "Current version",
             checkOnStartup: "Check for updates on startup",
             checkOnStartupHint:
-                "Queries the GitHub Releases API once per launch and shows a banner when a newer version exists.",
+                "Check GitHub releases at launch and show a banner for new versions.",
             prerelease: "Include pre-releases",
             prereleaseHint:
-                "Also consider releases flagged as pre-release. Draft releases are never visible to the API.",
+                "Also offer pre-releases; drafts stay invisible to the API.",
             updates: "Updates",
             checkNow: "Check for updates…",
             links: "Links",
@@ -604,7 +604,7 @@ const en = {
         summary: "{count} entries · {injected} in the top tier",
         budget: "{chars} / {budget} chars in top-tier facts",
         loading: "Loading…",
-        empty: "No evolution memories yet. They are recorded while self-evolution mode is on.",
+        empty: "No evolution memories yet; recorded while self-evolution mode is on.",
         pinned: "pinned",
         auto: "auto",
         confidence: "trust {value}/5",
@@ -622,7 +622,7 @@ const en = {
         summary: "{count} packages",
         loading: "Loading…",
         empty:
-            "No experience package yet. One is created by the `experience` tool's pack action while self-evolution mode is on; these are not skills and never appear in the skills folder.",
+            "No experience package yet; create one with the experience tool's pack action.",
         loadFailed: "Could not read the experience list.",
         toolCount: "{count} tools",
         noTools: "no tools",
@@ -690,49 +690,23 @@ const en = {
         items: {
             fileActions: {
                 name: "File Actions",
-                description: [
-                    "Read, write, list, search, patch, rename, move, create, and delete files only inside the current workspace root — including the `.data` state folder (skills, scripts, memory, todos).",
-                    "Use `./...` paths such as `./src/App.tsx`, `./.data/skills/demo/skill.md`, or `.` for the workspace root.",
-                    "Paths such as `workspace/...` and `../...` are rejected. The workspace database (`.data/chat.db`) is managed by the app and cannot be modified through this tool.",
-                ].join("\n"),
+                description: "Read and edit workspace files",
             },
             runCmd: {
                 name: "Run Command",
-                description: [
-                    "Run a program or a workspace script directly (without a shell). The process starts in the workspace root.",
-                    "Action `run` (default) executes `command`. Its first word is resolved against the workspace script library `./.data/scripts` by bare name with the extension optional (`build-frontend`, `deploy.py`); otherwise it must be a bare program name that PATH resolves (`python`, `git`, `curl`). The library is prepended to the child's PATH, so a script wins over a program with the same name. Absolute and relative paths are rejected; use Run Shell when a path is really needed.",
-                    "Action `list` shows the library scripts with their interpreter, `@description`, `@usage` and use count. Description and usage are read only from header comments (`#`, `//`, `REM` or `::`). A script whose body contains destructive or sensitive patterns asks for confirmation once; the approval is remembered for that exact content until the file changes.",
-                    "Privileged operations and dangerous commands require explicit confirmation.",
-                ].join("\n"),
+                description: "Run a command or workspace script",
             },
             runShell: {
                 name: "Run Shell",
-                description: [
-                    "Execute a script in a shell (PowerShell or Bash). The script has full freedom: it starts in the workspace root but may change directory anywhere and run anything, and every script is audited by the risk engine before it runs.",
-                    "Supports pipes, loops, variables, and other shell features. `direct` blocks until the script exits and returns its output; `serve` starts a long-lived background process (for example an HTTP server), returns its id immediately, and supports list / stop, with automatic cleanup when the app exits.",
-                    "Privileged operations and dangerous commands require explicit confirmation.",
-                ].join("\n"),
+                description: "Run PowerShell / Bash scripts",
             },
             calculator: {
                 name: "Calculator",
-                description: [
-                    "Evaluate mathematical expressions: + - * / %, exponentiation `^` / `**` (right-associative, negative and fractional exponents), parentheses, unary + - ~, factorial `!`, bitwise `&` / `|` / `^^` (XOR) / `~` / `<<` / `>>`, the constants pi, e and tau, common functions (sqrt, sin, cos, ln, log, min, max, pow, …), implicit multiplication (`2(3+4)`, `2pi`) and 0x / 0b / 0o literals.",
-                    "Use it whenever exactness matters instead of doing arithmetic in your head. Bitwise operators and factorial require integer operands and return exact 64-bit integers; everything else is f64. `^` is exponentiation — XOR is `^^` or `xor(...)`.",
-                    "Depends on Run Command (run_cmd): enabling the calculator enables it automatically. Computations the expression grammar cannot express (library functions, scripts, batch data, date arithmetic) fall back to it.",
-                ].join("\n"),
+                description: "Exact calculations",
             },
             memory: {
                 name: "Memory",
-                description: [
-                    "Persistent memory system with three scopes for storing notes and information across conversations.",
-                    "",
-                    "**session** — Short-term, in-memory only. Survives for the current chat session. Use for task-specific context and in-progress notes.",
-                    "**user** — Long-term, file-backed. Cross-session persistent. Use for user preferences, patterns, and general insights.",
-                    "**repo** — Long-term, file-backed. Repository-scoped. Use for codebase conventions, build commands, and project facts.",
-                    "**evolution** — Long-term, file-backed. The self-evolution area, available while self-evolution mode is on. Use for verified facts that must survive across sessions: the default interpreter and runtime environment, the correct way to operate a tool, the file locations you use often. Each entry carries a title, kind, tags, importance and an evidence count, and the scope is queried on demand in ranked order — a hint of the matching entries (under 200 characters, ranked by confidence) rides along with the newest user message, the full entries come from a search. Keep each entry to one dense fact.",
-                    "",
-                    "Supports add, get, list, search, delete, and consolidate. `consolidate` folds a large related cluster of evolution entries into a skill archive (plan first, then apply with the full skill markdown and the same keys).",
-                ].join("\n"),
+                description: "Remember facts across chats",
             },
             todoList: {
                 name: "Todo List",
@@ -741,11 +715,7 @@ const en = {
             },
             timer: {
                 name: "Timer",
-                description: [
-                    "Schedule a one-shot delay timer so the assistant resumes a task later instead of polling for it.",
-                    "Use it when a step must wait for something slow — a 30-minute log collection, a long build or download, an external job.",
-                    "When the timer fires, its message is injected into the same chat as a new user turn, so the assistant continues with the full conversation history. Pending timers show up above the input box with a countdown and a cancel button.",
-                ].join("\n"),
+                description: "Resume a task later",
             },
         },
         autoAcceptItems: {
@@ -786,7 +756,7 @@ const en = {
         empty: "No servers configured yet.",
         selfBuilt: "self-built",
         selfBuiltHint:
-            "Built by the assistant in self-evolution mode. Stored in the workspace roster .data/mcp.conf, merged with this list. Script: {path}",
+            "Built by the assistant; stored in .data/mcp.conf. Script: {path}",
         addServer: "+ Add Server",
         name: "Name",
         namePlaceholder: "My MCP Server",
@@ -827,20 +797,20 @@ const en = {
         enableMode: "Sub-agent system",
         autoPlan: "Automatic planning",
         autoPlanHint:
-            "Start every message with a planner pass (agent selection + task plan) and answer with the results. Off answers directly, and the main agent can still delegate by hand with call_subagent.",
+            "Plan every message before answering; off answers directly.",
         autoConfigure: "Smart agent selection",
         autoConfigureHint:
-            "One model call picks the agents for this turn before planning. Off means every enabled agent takes part and the planner decides.",
+            "Pick agents for each turn with one model call; off uses all enabled.",
         plannerModel: "Planner model",
         plannerModelInherit: "Follow the main model ({model})",
         plannerModelHint:
-            "Used for agent selection, the task plan and mbus supervision. Empty follows the main chat model; each sub-agent keeps its own model.",
+            "Model for agent selection and planning; empty = main chat model.",
         mbus: "Mission bus (mbus)",
         mbusHint:
-            "Let the planner supervise dispatched sub-agents and let agents exchange messages. Adds planner model calls while tasks run.",
+            "Let the planner supervise sub-agents, and agents message each other.",
         mbusPairLimit: "Messages per agent pair",
         mbusPairLimitHint:
-            "Both directions combined. When two agents reach this limit they can no longer message each other and the planner is asked to coordinate them (0 = no limit).",
+            "Messages between two agents, both directions. 0 = no limit.",
         executionMode: "Execution mode",
         modeParallel: "Parallel",
         modeSequential: "Sequential",
@@ -852,7 +822,7 @@ const en = {
         typeCli: "CLI",
         typeCloud: "Cloud",
         typeHint:
-            "LLM runs an autonomous tool-using loop inside the app. CLI launches a headless coding CLI installed on this machine. Cloud sends the task to a remote HTTP endpoint.",
+            "LLM runs in-app, CLI runs a local CLI, Cloud calls a remote endpoint.",
         searchPlaceholder: "Search agents by name, role or category",
         filterByStatus: "Filter agents by enablement",
         filterAll: "All",
@@ -866,17 +836,17 @@ const en = {
         noResults: "No agents match these filters.",
         sourceFile: "Definition file: agents/{file}",
         definitionStorageHint:
-            "LLM agent definitions live in app_data/agents — name, description, emoji, color and the prompt are read from the .md file; runtime settings stay in sub_agents.json.",
+            "Prompts live in app_data/agents/*.md; runtime settings in sub_agents.json.",
         emoji: "Emoji",
         emojiHint:
-            "Stored in the frontmatter and shown next to the name (content, not a UI icon).",
+            "Stored in the frontmatter and shown next to the name.",
         color: "Color",
         colorHint: "Stored in the frontmatter; not painted as a UI accent.",
         enableMcp: "MCP tools",
         enableMcpHint:
-            "Inject the tools of every enabled MCP server. This agent starts its own server processes for the task and stops them when the task ends (never shared with the main agent).",
+            "Inject the tools of every enabled MCP server; processes belong to the task.",
         typeLockedHint:
-            "The agent type is fixed after creation; create a new agent to use another backend.",
+            "The type is fixed after creation; create a new agent to change it.",
         deleteCustomConfirm:
             'Delete agent "{name}"? Its markdown file is removed from agents/custom (a .bak copy is kept).',
         parseError: "Definition error: {error}",
@@ -893,14 +863,14 @@ const en = {
         contextWindow: "Context window (tokens)",
         contextWindowPlaceholder: "Default 131072",
         contextWindowHint:
-            "Stored per model id and shared with the main chat. Empty = default (131072 for agents). The conversation is compressed at 80% of this value.",
+            "Context window per model id; empty = 131072. Compresses at 80% of it.",
         maxTokens: "Max completion tokens",
         maxTokensPlaceholder: "Default completion limit 8192",
         temperature: "Temperature",
         temperaturePlaceholder: "Inherit default",
         maxIterations: "Max iter",
         maxIterationsHint:
-            "0 (default) means no iteration limit; mission completion is controlled by external task state.",
+            "0 = no iteration limit; external task state decides completion.",
         capabilities: "Capabilities",
         allowedTools: "Allowed tools",
         statusRunning: "Running",
@@ -916,7 +886,7 @@ const en = {
             runCmd: "Execute a single command or workspace script with risk assessment",
             runShell: "Run PowerShell / bash scripts (direct or background serve)",
             todos:
-                "The session todo list via the `todos` tool (list / add / update_status / clear_completed / archive). The plan is shared with the chat session and every parallel agent.",
+                "Session todo list: add, update, clear and archive items.",
             memory: "Shared session / user / repo memory store (every sub-agent reads and writes the same one)",
         },
 
@@ -925,24 +895,24 @@ const en = {
         cliCommand: "Command",
         cliCommandPlaceholder: "opencode",
         cliCommandHint:
-            "Executable name (searched on PATH) or a full path. Windows .cmd/.bat/.ps1 launchers are handled automatically.",
+            "Executable name or full path; Windows .cmd launchers are handled.",
         cliArgs: "Arguments — one per line",
         cliArgsHint:
-            "One argument per line; placeholders: {prompt}, {cwd}, {agent_name}. Example: `run` + `{prompt}` runs `opencode run \"…\"`. If {prompt} is missing, the prompt is appended as the last argument. Leave empty to use the built-in headless form (opencode: `run`, claude/gemini/cursor-agent/copilot: `-p`, codex/droid: `exec`, crush: `run`, amp: `-x`).",
+            "One argument per line. Placeholders: {prompt}, {cwd}, {agent_name}. Empty = default.",
         cliPromptVia: "Prompt delivery",
         cliPromptViaArg: "As an argument ({prompt})",
         cliPromptViaStdin: "Through stdin",
         cliPromptViaHint:
-            "Use stdin for CLIs that read piped input, and on Windows when a prompt could contain %VAR% text.",
+            "Use stdin for CLIs that read piped input or prompts with %VAR%.",
         cliModelArgs: "Model arguments — one per line",
         cliModelArgsHint:
-            "Appended to every run, after the arguments above. One argument per line — put the flag and its value on separate lines, e.g. `-m` then `opencode-go/deepseek-v4.1-flash`. The model is not inherited from the main config.",
+            "Extra arguments for every run, one per line, e.g. -m then the model id.",
         cliEnv: "Environment — KEY=VALUE per line",
         cliEnvHint:
-            "ANSI colour codes are stripped from captured output. Children start with NO_COLOR=1, CLICOLOR=0, CLICOLOR_FORCE=0, FORCE_COLOR=0 and TERM=dumb; entries above override those defaults.",
+            "Environment for the run; colour output is stripped automatically.",
         timeout: "Timeout (seconds)",
         timeoutHint:
-            "0 = no timeout: the run keeps going until it finishes, the turn is stopped, or the app exits. Positive values are capped at 7200 seconds. Leaving the field empty keeps the default (600).",
+            "0 = no timeout; runs are capped at 7200 s. Empty keeps 600.",
         noCommand: "No command configured",
         inheritModel: "Inherits the main model",
 
@@ -956,13 +926,13 @@ const en = {
         cloudHeaders: "Extra headers — KEY=VALUE per line",
         cloudBodyTemplate: "Request body template (JSON)",
         cloudBodyTemplateHint:
-            "JSON sent as the POST body. {prompt}, {agent_name} and {cwd} are inserted already JSON-escaped; {image_b64} / {image_data_url} / {images_data_urls} inject the delegating call's input images; any other {key} comes from its params.",
+            "JSON POST body; {prompt}, {agent_name}, {cwd} and image keys are filled in.",
         cloudResultPath: "Result path",
         cloudResultPathHint:
-            "Dot path into the response holding the agent's text, e.g. `choices.0.message.content` or `result.output`.",
+            "Dot path into the response that holds the text.",
         cloudPollUrl: "Poll URL (optional)",
         cloudPollUrlHint:
-            "For asynchronous jobs: poll this URL (use `{id}` for the job id) until the status matches. Leave empty for a single response.",
+            "Poll this URL for async jobs; {id} is the job id. Empty = one response.",
         cloudPollIdPath: "Job id path",
         cloudPollStatusPath: "Status path",
         cloudPollInterval: "Poll interval (s)",
@@ -972,18 +942,18 @@ const en = {
         cloudPollFailedValues: "Failed status values — one per line",
         cloudUnreachable: "unreachable",
         cloudTimeoutHint:
-            "0 = no overall timeout: polling continues until the job finishes or the turn is stopped. Leaving the field empty keeps the default (1800).",
+            "Timeout for the whole job; empty = 1800 s.",
         cloudRequestTimeout: "Request timeout (s)",
         cloudRequestTimeoutHint:
-            "Cap for each HTTP request (the POST, poll queries and media downloads). 0 = the built-in 600 s — synchronous image APIs at high quality / 4K can take 3–5 minutes, so keep this at or above 360.",
+            "Timeout per HTTP request. 0 = 600 s; image APIs need 360 or more.",
 
         // ── shared ──
         requireApproval: "Ask before running",
         requireApprovalHint:
-            "When on, this agent asks for approval on its first run per app session; off means the enabled switch is the standing authorization.",
+            "Ask for approval on this agent's first run in each app session.",
         probe: "Test",
         probing: "Running…",
-        probeCliHint: "Runs `<command> --version` to verify the executable resolves.",
+        probeCliHint: "Runs <command> --version to check the executable.",
         probeCloudHint: "Sends a GET request to check the endpoint is reachable.",
         noEndpoint: "No endpoint configured",
     },
@@ -1057,7 +1027,7 @@ const en = {
         compacting: "Compacting…",
         compactTitle: "Delete logs older than 90 days and reclaim disk space",
         compactConfirm:
-            "Compact the database? Logs older than the retention window (Settings → Debug) are deleted and the file is rewritten to reclaim space. Chat history is kept.",
+            "Delete logs older than the retention window? Chat history is kept.",
         compacting2: "Compacting… this can take a few seconds",
         interactions: "Interactions ({count})",
         cacheChip: "Cache {percent}%",
@@ -1089,7 +1059,7 @@ const en = {
         report: {
             aria: "Session report",
             title: "Session report",
-            hint: "Aggregated from this session's request and interaction logs",
+            hint: "Aggregated from this session's logs.",
             empty: "No requests recorded for this session yet",
             totalTokens: "Total tokens",
             tokenSplit: "{prompt} prompt · {completion} completion",
@@ -1117,20 +1087,20 @@ const en = {
     plugins: {
         windowTitle: "Plugins",
         subtitle:
-            "Plugins add tools served over a message bus: the model calls a tool, the tool publishes on the bus, and one of the plugin's instances answers.",
+            "Plugins add tools that the model calls over a message bus.",
         refresh: "Refresh",
         reload: "Reload manifests",
         openManager: "Open plugin manager",
         endpoint: "Service endpoint",
         endpointHint:
-            "A service plugin (Rust, Node, Python, …) dials this address and presents the token to join the bus. Every connection becomes one instance.",
+            "Address a service plugin dials with its token to join the bus.",
         token: "Token",
         copy: "Copy",
         copied: "Copied",
         issues: "Manifests that could not be loaded",
         empty: "No plugins installed",
         emptyHint:
-            "Add a folder with a plugin.json under .data/plugins and reload the manifests.",
+            "Add a folder with a plugin.json under .data/plugins, then reload.",
         search: "Filter plugins",
         searchEmpty: "No plugin matches “{query}”.",
         count: "{shown} of {total}",
@@ -1151,7 +1121,7 @@ const en = {
             exportedNoSettings: "settings stayed in this workspace",
             exportedSettingsSkipped: "settings stayed here: {reason}",
             hint:
-                "A package is one plugin folder as a .zip: plugin.json at its root, plus its scripts and settings schema.",
+                "A package is one plugin folder as a .zip with plugin.json at its root.",
         },
         transportSpawn: "Spawned",
         transportService: "Service",
@@ -1194,24 +1164,24 @@ const en = {
             title: "Creating a plugin",
             close: "Close",
             intro:
-                "A plugin is a workspace folder that becomes tools the model can call: the tool publishes on the message bus, and one of the plugin's instances answers.",
+                "A plugin is a folder whose tools the model calls over the message bus.",
             folder: "1 · Folder shape",
             folderBody:
-                "The folder name is the plugin id. Everything the plugin needs lives inside it.",
+                "The folder name is the plugin id; everything lives inside it.",
             manifest: "2 · Manifest",
             manifestBody:
-                "plugin.json declares the runtime, the entry and the tools; each declared tool reaches the model as plugin_<id>_<tool>.",
+                "plugin.json declares runtime, entry and tools (plugin_<id>_<tool>).",
             protocol: "3 · Protocol",
             protocolBody:
-                "Line-delimited JSON over stdin and stdout: answer hello with ready, then reply to every request with the same id.",
+                "Line-delimited JSON on stdin and stdout; reply with the same id.",
             service: "4 · Or attach as a service",
             serviceBody:
-                'transport: "service" means the process is started elsewhere and dials the endpoint above with the token. One connection = one instance.',
+                "The process is started elsewhere and dials the endpoint above.",
             settings: "5 · Settings page",
             settingsBody:
-                "config.schema.yaml becomes a form in this window; the values are saved to config.yaml and pushed to the running instances.",
+                "config.schema.yaml becomes this form; values are saved and pushed live.",
             agent:
-                "Let the agent build one: in self-evolution mode it reads .data/manuals/create-plugin.md and writes the whole folder for you.",
+                "In self-evolution mode the agent builds the whole folder for you.",
         },
     },
 
@@ -1219,12 +1189,12 @@ const en = {
         aria: "Mission monitor",
         title: "Mission Monitor",
         subtitle:
-            "Track external mission state, active tasks, and episodic summaries for this chat session.",
+            "Mission state, active tasks and summaries for this session.",
         autoRefresh: "Auto refresh",
         refresh: "Refresh",
         openDeliverablesFolder: "Deliverables folder",
         openDeliverablesFolderHint:
-            "Open this chat's deliverable folder (.data/deliver/<session>) — deleting the chat deletes it.",
+            "Open this chat's deliverable folder (.data/deliver/<session>).",
         deliverables: "Deliverables",
         deliverablesEmpty: "No deliverable files in this session yet.",
         deliverablesFiles: { one: "{count} file", other: "{count} files" },

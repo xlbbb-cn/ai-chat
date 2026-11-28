@@ -62,7 +62,7 @@ const zhTW: Messages = {
         workspacePickOther: "選擇其他資料夾…",
         workspacePickTitle: "選擇工作區資料夾",
         workspaceBusy: "回覆仍在進行，回合結束後可切換。",
-        workspaceShadowNote: "此視窗使用獨立的設定副本，工作區歷史共用。",
+        workspaceShadowNote: "本視窗用自己的設定，歷史記錄共用。",
 
         dream: {
             hint: "點擊讓我小憩一下",
@@ -84,24 +84,24 @@ const zhTW: Messages = {
 
         tip: {
             organizeMemory:
-                "用「記憶」工具記下可重複使用的事實，再到「設定 → 偵錯」整理與合併記憶。",
+                "用記憶工具記下事實，在設定 → 偵錯裡查看。",
             archiveExperience:
-                "開啟「自我進化模式」後，請助手把成熟的流程打包成經驗，就能在其他工作區一鍵安裝。",
-            skills: "在「技能」面板啟用技能後，在輸入框輸入 /skill 即可按需載入。",
-            subAgents: "在新對話裡輸入 +代理程式，可把子代理程式的角色直接嵌入本次工作階段。",
+                "在自我演化模式下，讓助理把一套流程打包成經驗。",
+            skills: "在技能面板啟用技能，然後輸入 /skill 載入。",
+            subAgents: "在新對話輸入 +代理程式 嵌入子代理程式的角色。",
             fileMentions:
-                "在輸入框輸入 @ 引用工作區檔案；PDF 會自動轉換為 Markdown 供模型閱讀。",
-            figures: "請助手畫一張圖，回覆裡會出現可互動的圖表卡片，3D 場景還能拖曳旋轉。",
+                "在輸入框輸入 @ 附加檔案；PDF 會自動轉成 Markdown。",
+            figures: "要一張圖就會得到圖卡；3D 場景可以拖曳旋轉。",
             maintenance:
-                "開啟「自我進化模式」後，點擊上方的笑臉，助手會在你等待時整理技能與記憶。",
-            backup: "用標題列的 ⋯ 選單匯出備份，設定、技能、記憶和聊天記錄會一起打包。",
-            createSkill: "「技能」面板 → + 新增技能：填名稱、一句描述和系統提示，儲存後啟用，輸入 /skill 按需載入。",
-            mcpSetup: "「MCP」面板 → + 新增伺服器：stdio 填指令、參數和環境變數；SSE/HTTP 填 URL 與驗證權杖，儲存後用閃電按鈕測試連線。",
-            subAgentCreate: "「代理程式」面板 → + 新增代理：填名稱、描述和系統提示，儲存並啟用後，在新對話輸入 +代理程式 嵌入角色。",
-            scriptLibrary: "請助手把跑通的指令存成腳本，之後 run_cmd 按腳本名直接執行，無需重複輸入。",
-            modelDepth: "工具列的模型選擇器可隨時切換模型；支援推理的模型還能調整思考深度。",
-            workspaceSwitch: "點擊標題列的工作區名稱即可切換；每個工作區各有獨立的紀錄、技能、記憶和待辦。",
-            timerBackground: "慢任務請助手用計時器等待；開啟「背景執行」後，指令還能放到背景繼續跑。",
+                "開啟自我演化模式後點一下上方的臉，趁等待整理技能與記憶。",
+            backup: "標題列 ⋯ 選單可匯出一個 zip：設定、技能、記憶與聊天記錄。",
+            createSkill: "技能面板 → + 新增技能，再用 /skill 載入。",
+            mcpSetup: "MCP 面板 → + 新增伺服器：stdio 填指令，SSE 填位址與 token。",
+            subAgentCreate: "代理程式面板 → + 新增代理，啟用後用 +代理程式 嵌入。",
+            scriptLibrary: "請助理把驗證過的指令存成腳本，之後 run_cmd 直接按名稱執行。",
+            modelDepth: "在工具列切換模型；推理模型還有思考深度。",
+            workspaceSwitch: "點一下標題列的工作區名稱即可切換。",
+            timerBackground: "讓助理用計時器等待；還需開啟背景執行。",
         },
 
         backupExportLabel: "正在匯出並壓縮備份…",
@@ -115,7 +115,7 @@ const zhTW: Messages = {
         noticeDismiss: "關閉提示",
         toolDisabledNotice: "`{tool}` 連續失敗 {limit} 次 —— 本工作階段內已停用。",
         budgetExhaustedNotice:
-            "本輪工具預算已用盡（{rounds} 輪 / {toolCalls} 次工具呼叫）—— 助手將以現有資訊收尾。",
+            "工具預算用完（{rounds} 輪、{toolCalls} 次呼叫），助理用現有材料收尾。",
 
         timers: {
             title: "計時器",
@@ -127,7 +127,7 @@ const zhTW: Messages = {
             dismiss: "略過",
             sleepLock: "已阻止休眠",
             sleepLockRunning: "已阻止休眠 · 本輪 {time}",
-            sleepLockHint: "有計時器在等待或本輪對話仍在執行，系統將保持喚醒。",
+            sleepLockHint: "有計時器或回合在等，系統會保持喚醒。",
         },
 
         background: {
@@ -166,7 +166,7 @@ const zhTW: Messages = {
             listFailed: "無法列出子 agent：{error}",
         },
         attachmentUnsupported:
-            "{names}：{model} 無法直接讀取該格式，檔案保留在工作區，只會把路徑交給助手，由它用工具解析。",
+            "{names}：{model} 讀不了這種格式，只把路徑交給助理。",
         composer: {
             dropHint: "放開即可加入對話（檔案存入 .data/tmp 並插入 @ 引用）",
             busy: "助理正在回覆：等這一輪結束再加入檔案。",
@@ -177,7 +177,7 @@ const zhTW: Messages = {
             dropFailed: "無法加入拖入的檔案：{error}",
         },
         messageRenderFailed: "這則訊息無法渲染：{error}",
-        inputPlaceholder: "輸入訊息…（@ 引用檔案，/ 引用技能，Enter 送出，Shift+Enter 換行）",
+        inputPlaceholder: "輸入訊息…（@ 引用檔案，/ 呼叫技能，Enter 送出）",
         injections: {
             title: "本輪內追加",
             queued: "等待送達",
@@ -243,10 +243,10 @@ const zhTW: Messages = {
             usernamePlaceholder: "留空則使用目前使用者",
             password: "密碼",
             passwordPlaceholder: "必填",
-            sudoHint: "此操作將以較高權限執行，可能會變更你的系統。",
-            elevationHint: "此操作將要求系統管理員提高權限（UAC），可能會變更系統設定。",
+            sudoHint: "以提權方式執行，可能修改系統。",
+            elevationHint: "將請求管理員權限（UAC），可能修改系統設定。",
             externalAgentHint:
-                "此 CLI / 雲端代理在應用程式之外執行：CLI 以你的使用者權限在工作區內執行，雲端代理把任務送到遠端端點。每個代理在本次應用程式執行中只需核准一次。",
+                "此代理在應用程式之外執行，以你的權限存取工作區。",
             deny: "拒絕",
             allow: "允許",
         },
@@ -373,7 +373,7 @@ const zhTW: Messages = {
         plugins: {
             enable: "啟用外掛系統",
             enableHint:
-                "啟用後模型會拿到 plugin 工具，以及每個外掛能力對應的獨立工具；關閉時隱藏外掛管理員，模型無法呼叫任何外掛。",
+                "給模型外掛工具，以及每個能力一個工具。",
             manager: "外掛管理員",
         },
         appearance: {
@@ -393,11 +393,11 @@ const zhTW: Messages = {
             glassSubtle: "輕",
             glassStandard: "標準",
             glassStrong: "強",
-  glassHint: "標題列、工具列與面板標頭的模糊強度。選「關閉」時這些列改為不透明，可減輕低階顯示卡與遠端桌面的負擔。這個檔位也讓視窗外框變透明：系統提供背板時透出模糊的桌面（Windows 的 Acrylic），其他平台則透出應用程式自繪的柔和底紋。對話內容預設維持實底，設定背景照片時則取而代之。",
+  glassHint: "標題列、工具列與面板標頭的模糊強度；關閉則改為不透明。",
             language: "語言",
             languageHint: "立即生效，並儲存至設定檔中。",
             chatBackground: "聊天區背景",
-            chatBackgroundHint: "只鋪在訊息區域，不影響工具列與輸入框。選好後會複製到應用程式資料目錄，之後移動或刪除原檔都不受影響。",
+            chatBackgroundHint: "只在訊息後面顯示照片；選擇後會複製到應用資料目錄。",
             chatBackgroundChoose: "選擇照片…",
             chatBackgroundReplace: "更換照片…",
             chatBackgroundDefault: "使用預設桌布",
@@ -423,9 +423,9 @@ const zhTW: Messages = {
             contextWindow: "「{model}」的上下文視窗（tokens）",
             contextPlaceholder: "自動（由服務端回報或使用預設值）",
             contextHint:
-                "當 API 回報上下文視窗時會自動填入（OpenRouter、Groq、vLLM 等），否則使用符合到的能力目錄資料。兩者都沒有的 OpenAI 相容端點可在此手動設定 —— 該值用於代理的上下文預算。",
+                "由 API 或模型目錄自動填入，用於上下文預算。",
             capabilities: "模型能力",
-            capabilitiesEmpty: "尚無「{model}」的能力資料，請點擊「從 API 取得模型」載入。",
+            capabilitiesEmpty: "還沒有 {model} 的能力資料 — 用「從 API 取得模型」載入。",
             capabilitiesMatched: "符合到「{name}」· 相似度 {percent}%",
             capabilitiesSummary: "已為 {matched}/{total} 個模型符合能力中繼資料。",
             capabilitiesError: "能力中繼資料無法取得：{error}",
@@ -440,10 +440,10 @@ const zhTW: Messages = {
             capabilityMaxOutput: "{tokens} 輸出上限",
             conversationHeader: "工作階段 ID 標頭",
             conversationHeaderHint:
-                "每個請求中攜帶聊天工作階段 ID 的標頭名稱。留空則使用預設的「x-conversation-id」。",
+                "攜帶工作階段 ID 的標頭。留空 = x-conversation-id。",
             customHeaders: "自訂請求標頭",
             customHeadersHint:
-                "附加到每個模型請求的額外標頭 —— 對話、子代理規劃與模型清單。空白列會被忽略，無效的名稱或值會被略過；設定「Authorization」會取代 API 金鑰。",
+                "每個請求附帶的額外標頭；Authorization 列會取代 API Key。",
             customHeaderName: "標頭名稱",
             customHeaderValue: "值",
             addHeader: "新增標頭",
@@ -452,7 +452,7 @@ const zhTW: Messages = {
 
         system: {
             title: "系統訊息",
-            subtitle: "每次對話開始時傳送給模型的指示。",
+            subtitle: "每次對話開始時送給模型的說明。",
             content: "內容",
             placeholder: "你是一個樂於助人的助理…",
         },
@@ -466,68 +466,68 @@ const zhTW: Messages = {
             placeholderDefault: "預設",
             placeholderDefaultLimit: "預設上限",
             maxRounds: "單輪最大輪數",
-            maxRoundsHint: "一次對話中最多送出多少次模型請求。0 = 不限（硬上限 1000）。用盡後會送出一輪不帶工具的收尾請求，讓助理以現有資訊作答。",
+            maxRoundsHint: "每回合的模型請求數。0 = 不限制（上限 1000）。",
             maxToolCalls: "單輪最大工具呼叫次數",
-            maxToolCallsHint: "一次對話中最多執行多少次工具呼叫。0 = 不限（硬上限 5000）。超出的呼叫只回覆提示而不執行。",
+            maxToolCallsHint: "每回合的工具呼叫次數。0 = 不限制（上限 5000）。",
             toolFailureLimit: "工具連續失敗次數上限",
-            toolFailureLimitHint: "同一個工具（含 MCP 工具）連續失敗達到此次數後，本工作階段內停用該工具並提示模型改用其他方案。0 = 不啟用（硬上限 50）。成功呼叫一次即歸零。",
+            toolFailureLimitHint: "工具連續失敗這麼多次後停用。0 = 從不停用（上限 50）。",
             maxConcurrentTurns: "最大並行工作階段數",
-            maxConcurrentTurnsHint: "同一視窗內允許同時處於回覆生成中的工作階段數量。0 = 不限制（硬上限 16）。新開工作階段不會打斷正在生成的回覆——舊回覆轉入背景繼續；此上限約束並行的 API 與工具負載。",
+            maxConcurrentTurnsHint: "單一視窗內可同時執行的回合數。0 = 不限制（上限 16）。",
             dsFormat: "DS-Format（DeepSeek 格式）",
-            dsFormatHint: "按 DeepSeek 系思考模式模型的要求，在回傳 assistant 訊息時攜帶 reasoning_content。DeepSeek 系模型會自動開啟；僅當其他供應商同樣需要時才手動開啟。",
-            dsFormatAuto: "{model} 已自動開啟：DeepSeek 系模型一律使用 DS-Format，reasoning_content 會自動回傳。",
+            dsFormatHint: "在助理訊息上回傳 reasoning_content，部分端點需要。",
+            dsFormatAuto: "{model} 固定開啟：reasoning_content 一律回傳。",
             enhancedFigures: "增強畫圖",
             enhancedFiguresHint:
-                "讓助理畫圖——Mermaid 圖表、自己畫的 SVG 圖（每張都有儲存按鈕，PNG 存到 figures/，3D 場景還能拖曳旋轉），以及動態 HTML5 圖（`html-fig`：動畫與互動在沙箱裡執行，儲存為 .html 檔案）。關閉後提示詞裡不再有任何畫圖說明，助理不會主動畫圖；你自己貼上的 Mermaid 程式碼區塊仍會渲染。",
+                "讓助理畫圖：Mermaid、SVG 與 HTML 圖，儲存到 figures/。",
             memoryHint: "在使用者輸入上附帶記憶提示",
             memoryHintHint:
-                "在最新的使用者訊息最前面加一行提示（不足 200 字元），列出關鍵字比對到的記憶，依置信度排序。它只是線索而不是全文：助理仍需檢索對應作用域才能取得完整條目。提示只存在於送給模型的請求裡，存下來的訊息仍是使用者原話。",
+                "在最新訊息前加上關鍵字相符的記憶標題（200 字元內）。",
         },
 
         run: {
             title: "執行",
-            subtitle: "回合如何執行：背景工具、通知、視窗行為與自我演化模式。",
+            subtitle: "回合如何執行：背景工具、通知與視窗行為。",
             backgroundTools: "背景執行",
             backgroundToolsHint:
-                "允許助手把耗時工具放到背景執行（`run_in_background: true`）：`run_cmd`、`run_shell`、`file_actions` 搜尋、所有 MCP 工具和 `call_subagent`。結果會在下一個請求前自動送達，本輪保持開啟直到結果到齊；子代理不會收到該參數。",
+                "讓耗時工具在背景執行，結果在下次請求前送達。",
             allowNotifications: "允許通知",
             allowNotificationsHint:
-                "回合結束時播放提示音：失敗為訊息音，成功為會話結束音；視窗最小化或焦點在其他應用時，同時彈出桌面通知卡片，顯示回覆首行（或錯誤訊息）。使用者主動停止的回合不會通知。",
+                "回合結束時播放提示音與桌面通知；手動停止的回合不通知。",
             singleInstance: "單實例執行",
             singleInstanceHint:
-                "再次啟動時聚焦已執行的視窗，而不是開啟第二個實例。關閉此選項後，每次啟動都會開啟獨立視窗，並使用本設定的臨時副本。重新啟動應用程式後生效。",
+                "再次啟動時聚焦已開啟的視窗，不再開新副本。",
             selfEvolution: "啟用自我演化模式",
-            selfEvolutionHint: "允許助理在工作區內自行演化技能。開啟期間「檔案操作」與「記憶」工具會強制啟用並鎖定，助理還會把已驗證的關鍵事實（執行環境、正確的工具用法、常用檔案位置）記錄到專屬的自我演化記憶區。助理也可以自建 MCP 伺服器（`mcp_self`）：腳本存放在 .data/mcp，經你確認後作為本機行程啟動。",
+            selfEvolutionHint: "允許助理在工作區內自建技能、記憶與 MCP 伺服器。",
         },
 
         debug: {
             title: "偵錯",
-            subtitle: "日誌寫到何處、保留多久，以及讀取這些日誌的監視器。",
+            subtitle: "日誌寫到哪、保留多久，以及讀取日誌的監視器。",
             loggerOutput: "日誌輸出",
             loggerFile: "寫入 app-日期.log",
             loggerPrintln: "輸出到終端機（println）",
-            loggerOutputHint: "僅偵錯組建會寫入日誌，正式組建下此選項不生效。",
+            loggerOutputHint: "只有偵錯版會寫日誌。",
             retention: "日誌保留天數",
             retentionHint:
-                "早於此期限的請求日誌與互動日誌會在啟動時以及由互動監視器執行「壓縮資料庫」時刪除。0 表示永久保留。聊天歷史不會被清理。修改後請按儲存以生效。",
+                "啟動時與壓縮資料庫時刪除更早的日誌。0 = 永久保留。",
             monitors: "監視器",
-            monitorsHint: "每一列都會在設定頁上開啟一個唯讀對話框；正在執行的回合要等結束後才會被讀取。",
+            monitorsHint: "每一列開啟唯讀對話框；執行中的回合在結束後可讀。",
             interactionMonitor: "互動監視器",
             agentMissions: "代理任務監視器",
             evolutionMemory: "自我演化記憶",
             experiences: "全域經驗包",
             launchMonitor: "開啟監視器",
-            monitorsEmpty: "目前沒有可用的監視器：互動監視器與代理任務監視器需要先開啟一個工作階段，自我演化相關的監視器需要在「執行」裡開啟自我演化模式。",
+            monitorsEmpty: "這裡沒有可用的監視器：開啟工作階段，或開啟自我演化模式。",
         },
 
         about: {
             title: "關於與更新",
-            subtitle: "目前版本，以及針對本儲存庫 GitHub Release 的更新檢查。",
+            subtitle: "版本資訊，以及對 GitHub 發佈的更新檢查。",
             currentVersion: "目前版本",
             checkOnStartup: "啟動時檢查更新",
-            checkOnStartupHint: "每次啟動查詢一次 GitHub Releases API，發現新版本時顯示提示列。",
+            checkOnStartupHint: "啟動時查詢 GitHub 發佈頁，有新版本就顯示橫幅。",
             prerelease: "包含發行前版本",
-            prereleaseHint: "同時考慮標記為發行前的版本。草稿版本對 API 永遠不可見。",
+            prereleaseHint: "也考慮預發佈版本；草稿版本 API 看不到。",
             updates: "更新",
             checkNow: "檢查更新…",
             links: "連結",
@@ -551,7 +551,7 @@ const zhTW: Messages = {
         summary: "{count} 條經驗 · {injected} 條位於高優先層",
         budget: "高優先層 {chars} / {budget} 字元",
         loading: "正在讀取…",
-        empty: "尚無自我演化記憶。開啟自我演化模式後會自動記錄。",
+        empty: "還沒有自我演化記憶；開啟自我演化模式後才會記錄。",
         pinned: "常駐",
         auto: "自動",
         confidence: "信任度 {value}/5",
@@ -568,7 +568,7 @@ const zhTW: Messages = {
         title: "全域經驗包",
         summary: "{count} 個經驗包",
         loading: "正在讀取…",
-        empty: "尚無經驗包。自我演化模式下由 experience 工具的 pack 動作建立；它們不是技能，不會出現在技能目錄裡。",
+        empty: "還沒有經驗包；用 experience 工具的 pack 操作建立。",
         loadFailed: "無法讀取經驗包清單。",
         toolCount: "{count} 個工具",
         noTools: "無工具",
@@ -633,49 +633,23 @@ const zhTW: Messages = {
         items: {
             fileActions: {
                 name: "檔案操作",
-                description: [
-                    "僅在目前工作區根目錄內讀取、寫入、列出、搜尋、修補、重新命名、移動、建立與刪除檔案——`.data` 狀態目錄（技能、指令碼、記憶、待辦）也在其中。",
-                    "使用 `./...` 形式的路徑，例如 `./src/App.tsx`、`./.data/skills/demo/skill.md`，或以 `.` 表示工作區根目錄。",
-                    "`workspace/...`、`../...` 等路徑會被拒絕。工作區資料庫（`.data/chat.db`）由應用程式管理，不能透過此工具修改。",
-                ].join("\n"),
+                description: "讀寫與搜尋工作區檔案",
             },
             runCmd: {
                 name: "執行命令",
-                description: [
-                    "直接執行程式或工作區指令碼（不經過 shell）。程序會在工作區根目錄啟動。",
-                    "`action: \"run\"`（預設）執行 `command`：第一個詞先以裸名稱到工作區指令碼庫 `./.data/scripts` 中解析（副檔名可省略，例如 `build-frontend`、`deploy.py`）；找不到時才是由系統透過 PATH 解析的裸程式名稱（例如 `python`、`git`、`curl`）。指令碼庫會前置到子程序的 PATH，同名指令碼優先於系統程式。絕對路徑與相對路徑會被拒絕；確實需要路徑時請使用「執行指令碼」。",
-                    "`action: \"list\"` 列出指令碼庫中的指令碼及其解譯器、`@description`、`@usage` 與使用次數。說明與用法只從指令碼開頭註解讀取（`#`、`//`、`REM` 或 `::`）。指令碼內容命中破壞性/敏感模式時，首次執行會詢問一次；批准結果依內容雜湊記住，檔案內容變更後需要重新確認。",
-                    "特權操作與危險命令需要明確確認。",
-                ].join("\n"),
+                description: "執行指令或工作區指令碼",
             },
             runShell: {
                 name: "執行指令碼",
-                description: [
-                    "在 shell（PowerShell 或 Bash）中執行指令碼。指令碼擁有完全的自由：在工作區根目錄啟動，但可以切換到任意目錄、執行任意內容，每個指令碼執行前都會經過風險引擎稽核。",
-                    "支援管線、迴圈、變數等 shell 功能。`direct` 模式會等待指令碼結束並回傳輸出；`serve` 模式會在背景啟動長期程序（例如 HTTP 服務）並立即回傳程序 ID，可隨時 list / stop，退出應用程式時自動清理。",
-                    "特權操作與危險命令需要明確確認。",
-                ].join("\n"),
+                description: "執行 PowerShell 或 Bash 指令碼",
             },
             calculator: {
                 name: "計算器",
-                description: [
-                    "計算數學表達式：四則運算 `+ - * / %`、冪運算 `^` / `**`（右結合，支援負指數與分數指數）、括號、一元 `+ - ~`、階乘 `!`、位運算 `&` / `|` / `^^`（異或）/ `~` / `<<` / `>>`、常數 pi、e、tau、常用數學函式（sqrt、sin、cos、ln、log、min、max、pow……）、隱式乘法（`2(3+4)`、`2pi`）以及 0x / 0b / 0o 字面量。",
-                    "需要精確結果時優先使用它，而不是心算。位運算與階乘要求整數運算元，回傳精確的 64 位元整數；其餘運算為 f64 浮點。注意 `^` 是冪運算，異或請用 `^^` 或 `xor(...)`。",
-                    "依賴「執行命令」（run_cmd）：啟用計算機時會自動一併啟用；表達式表達不了的計算（函式庫、指令碼、批次資料、日期運算）會回退到它執行。",
-                ].join("\n"),
+                description: "精確計算數學運算式",
             },
             memory: {
                 name: "記憶",
-                description: [
-                    "持久化記憶系統，提供三種作用域，可跨對話儲存筆記與資訊。",
-                    "",
-                    "**session** —— 短期，僅存於記憶體，在目前聊天工作階段中有效。用於任務相關的上下文與進行中的筆記。",
-                    "**user** —— 長期，以檔案為後端，跨工作階段持久。用於使用者偏好、常用模式與通用經驗。",
-                    "**repo** —— 長期，以檔案為後端，限定於目前儲存庫。用於程式庫慣例、建置命令與專案事實。",
-                    "**evolution** —— 長期，以檔案為後端。自我演化專屬區域，開啟自我演化模式後可用。用於必須跨工作階段保留的已驗證事實：預設直譯器與執行環境、正確的工具操作方式、常用的檔案位置。每條記錄帶有標題、類別、標籤、重要度與證據次數，依排名按需查詢；最新的使用者訊息開頭會附帶一行命中提示（不足 200 字元、依置信度排序），完整條目仍需檢索——請讓每條只表達一個高密度事實。",
-                    "",
-                    "支援新增、取得、列出、搜尋、刪除與整理歸檔。`consolidate` 會把一大簇相關的自我演化記憶凝聚成一個技能歸檔（先 plan，再帶上完整技能 markdown 與相同 keys 執行 apply）。",
-                ].join("\n"),
+                description: "跨對話記住結論與事實",
             },
             todoList: {
                 name: "待辦清單",
@@ -684,11 +658,7 @@ const zhTW: Messages = {
             },
             timer: {
                 name: "計時器",
-                description: [
-                    "設定一次性延遲計時器，讓助理稍後自動繼續任務，而不是反覆輪詢。",
-                    "適用於需要等待較慢步驟的情境——例如 30 分鐘的日誌收集、耗時的建置或下載、外部任務等。",
-                    "計時結束後，計時器訊息會以新的使用者輸入注入同一工作階段，助理將帶著完整歷史繼續任務。待觸發的計時器會顯示在輸入框上方，包含倒數與取消按鈕。",
-                ].join("\n"),
+                description: "稍後自動繼續這項任務",
             },
         },
         autoAcceptItems: {
@@ -723,7 +693,7 @@ const zhTW: Messages = {
         empty: "尚未設定任何伺服器。",
         selfBuilt: "自建",
         selfBuiltHint:
-            "助理在進化模式下自建的伺服器，設定存放在工作區 .data/mcp.conf 並與本清單合併。腳本：{path}",
+            "由助理建立，記錄在 .data/mcp.conf。腳本：{path}",
         addServer: "+ 新增伺服器",
         name: "名稱",
         namePlaceholder: "我的 MCP 伺服器",
@@ -761,19 +731,19 @@ const zhTW: Messages = {
         enableMode: "子代理系統",
         autoPlan: "自動規劃",
         autoPlanHint:
-            "每則訊息先由規劃器選出 agent 並拆分任務，再結合執行結果作答。關閉後主代理直接回答，仍可主動呼叫 call_subagent 手動委派。",
+            "每則訊息先規劃再回答；關閉則直接回答。",
         autoConfigure: "智慧選擇 agent",
         autoConfigureHint:
-            "規劃前先用一次模型呼叫挑選本輪參與的 agent；關閉則所有已啟用 agent 全部參與，由規劃器自行取捨。",
+            "用一次模型呼叫選出本回合的 agent；關閉則啟用全部。",
         plannerModel: "規劃器模型",
         plannerModelInherit: "跟隨主模型（{model}）",
         plannerModelHint:
-            "用於 agent 選擇、任務計畫與 mbus 監督。留空則跟隨主對談模型；子 agent 各自的模型不受影響。",
+            "用於選 agent 與規劃；留空跟隨主模型。",
         mbus: "任務訊息匯流排（mbus）",
-        mbusHint: "讓規劃器在任務執行期間監控子 agent，並允許 agent 之間互相傳訊息；會增加規劃器模型呼叫。",
+        mbusHint: "讓規劃器監管子代理，並允許 agent 之間互相通訊。",
         mbusPairLimit: "每對 agent 的訊息上限",
         mbusPairLimitHint:
-            "雙向合計。兩個 agent 達到此上限後不能再互傳訊息，改由規劃器介入協調（0 = 不限制）。",
+            "兩個 agent 之間的雙向訊息上限。0 = 不限制。",
         executionMode: "執行方式",
         modeParallel: "平行",
         modeSequential: "循序",
@@ -785,7 +755,7 @@ const zhTW: Messages = {
         typeCli: "CLI",
         typeCloud: "雲端",
         typeHint:
-            "LLM：在應用程式內執行自主工具迴圈；CLI：啟動本機安裝的無介面編碼 CLI；雲端：把任務送到遠端 HTTP 端點。",
+            "LLM 在應用內執行，CLI 呼叫本機命令列，雲端送往遠端端點。",
         searchPlaceholder: "搜尋名稱、職責或分類",
         filterByStatus: "依啟用狀態篩選代理",
         filterAll: "全部",
@@ -799,15 +769,15 @@ const zhTW: Messages = {
         noResults: "沒有符合篩選條件的代理。",
         sourceFile: "定義檔案：agents/{file}",
         definitionStorageHint:
-            "LLM 代理的定義保存在 app_data/agents 下的 md 檔案中（名稱、說明、emoji、顏色與提示詞），此處只把執行設定寫入 sub_agents.json。",
+            "提示詞在 app_data/agents/*.md，執行設定存在 sub_agents.json。",
         emoji: "Emoji",
-        emojiHint: "保存在 md frontmatter 中，作為內容顯示在名稱旁（不是介面圖示）。",
+        emojiHint: "存在 frontmatter 裡，顯示在名稱旁。",
         color: "顏色標記",
         colorHint: "保存在 md frontmatter 中，不用作介面強調色。",
         enableMcp: "MCP 工具",
         enableMcpHint:
-            "注入所有已啟用 MCP server 的工具。此代理會為目前任務啟動獨立的 MCP server 程序，任務結束後自動結束（不與主代理共用程序）。",
-        typeLockedHint: "代理建立後無法變更類型；如需其他後端請新建代理。",
+            "注入所有已啟用 MCP 伺服器的工具；行程隨任務啟動，不與主助理共用。",
+        typeLockedHint: "建立後類型固定，換後端需新建代理。",
         deleteCustomConfirm:
             "刪除代理「{name}」？將移除 agents/custom 下的定義檔案（會保留 .bak 備份）。",
         parseError: "定義解析失敗：{error}",
@@ -824,13 +794,13 @@ const zhTW: Messages = {
         contextWindow: "上下文視窗（tokens）",
         contextWindowPlaceholder: "預設 131072",
         contextWindowHint:
-            "依模型 id 儲存，與主聊天共用。留空使用預設值（代理 131072）；對話達到此值的 80% 時壓縮。",
+            "依模型 ID 儲存的上下文視窗；留空 = 131072，用到 80% 時壓縮。",
         maxTokens: "最大補完 tokens",
         maxTokensPlaceholder: "預設補完上限 8192",
         temperature: "溫度",
         temperaturePlaceholder: "繼承預設值",
         maxIterations: "最大迭代次數",
-        maxIterationsHint: "0（預設）表示不限制迭代次數；任務是否完成由外部任務狀態控制。",
+        maxIterationsHint: "0 = 不限迭代；是否完成由外部任務狀態決定。",
         capabilities: "能力",
         allowedTools: "允許的工具",
         statusRunning: "執行中",
@@ -846,7 +816,7 @@ const zhTW: Messages = {
             runCmd: "執行單一命令或工作區指令碼並附帶風險評估",
             runShell: "執行 PowerShell / bash 指令碼（direct / serve 背景程序）",
             todos:
-                "透過 `todos` 工具管理工作階段待辦清單（list / add / update_status / clear_completed / archive）。此計畫與聊天工作階段及所有平行代理共用。",
+                "工作階段待辦：新增、更新、清除與封存。",
             memory: "共用的工作階段 / 使用者 / 儲存庫記憶儲存（所有子 agent 讀寫同一份）",
         },
 
@@ -855,24 +825,24 @@ const zhTW: Messages = {
         cliCommand: "命令",
         cliCommandPlaceholder: "opencode",
         cliCommandHint:
-            "可執行檔名稱（在 PATH 中尋找）或完整路徑。Windows 的 .cmd/.bat/.ps1 啟動器會自動處理。",
+            "可執行檔名或完整路徑；Windows 的 .cmd 啟動器會自動處理。",
         cliArgs: "參數 —— 每行一個",
         cliArgsHint:
-            "每行一個參數；可用佔位符：{prompt}、{cwd}、{agent_name}。範例：一行寫 `run`，下一行寫 `{prompt}`，等同於 `opencode run \"…\"`。若沒有任何位置使用 {prompt}，提示詞會附加為最後一個參數。留空會自動使用內建的無頭呼叫形式（opencode：`run`，claude/gemini/cursor-agent/copilot：`-p`，codex/droid：`exec`，crush：`run`，amp：`-x`）。",
+            "一行一個參數。佔位符：{prompt}、{cwd}、{agent_name}；留空用內建形式。",
         cliPromptVia: "提示詞傳遞方式",
         cliPromptViaArg: "作為參數（{prompt}）",
         cliPromptViaStdin: "透過 stdin",
         cliPromptViaHint:
-            "適合從管線讀取輸入的 CLI；在 Windows 上，當提示詞可能包含 %VAR% 形式的內容時也建議使用。",
+            "CLI 讀取管線輸入時用 stdin；Windows 上提示詞含 %VAR% 時也用它。",
         cliModelArgs: "模型參數 —— 每行一個",
         cliModelArgsHint:
-            "每次執行都會附加在上面的參數之後。每行一個參數——把開關和值分成兩行，例如一行 -m、一行 opencode-go/deepseek-v4.1-flash。模型不會從主設定繼承。",
+            "每次執行追加的參數，一行一個，先寫 -m 再寫模型 ID。",
         cliEnv: "環境變數 —— 每行一個 KEY=VALUE",
         cliEnvHint:
-            "擷取的輸出會自動移除 ANSI 顏色控制符。子行程預設帶有 NO_COLOR=1、CLICOLOR=0、CLICOLOR_FORCE=0、FORCE_COLOR=0 和 TERM=dumb，此處填寫同名變數可覆寫。",
+            "執行時的環境變數；彩色輸出會自動去除。",
         timeout: "逾時（秒）",
         timeoutHint:
-            "0 = 不限制逾時：執行會持續到完成、手動停止目前回合或結束應用程式。正數上限 7200 秒；留空維持預設值 600。",
+            "0 = 不限時，最長 7200 秒；留空用預設 600。",
         noCommand: "尚未設定命令",
         inheritModel: "繼承主模型",
 
@@ -886,13 +856,13 @@ const zhTW: Messages = {
         cloudHeaders: "附加標頭 —— 每行一個 KEY=VALUE",
         cloudBodyTemplate: "請求主體範本（JSON）",
         cloudBodyTemplateHint:
-            "作為 POST 主體送出的 JSON。{prompt}、{agent_name}、{cwd} 會被取代並以 JSON 轉義；{image_b64}、{image_data_url}、{images_data_urls} 注入呼叫方傳入的輸入圖片；其餘 {key} 來自 params。",
+            "POST 的 JSON 主體；{prompt}、{agent_name}、{cwd} 與圖片欄位會自動填入。",
         cloudResultPath: "結果路徑",
         cloudResultPathHint:
-            "從回應中取出文字的路徑，例如 `choices.0.message.content` 或 `result.output`。",
+            "回應中存放文字的路徑。",
         cloudPollUrl: "輪詢 URL（選填）",
         cloudPollUrlHint:
-            "用於非同步工作：輪詢此 URL（可用 `{id}` 代表工作 id），直到狀態符合為止。留空表示單次回應。",
+            "非同步任務輪詢這個位址，{id} 是任務 ID；留空表示單次回應。",
         cloudPollIdPath: "工作 id 路徑",
         cloudPollStatusPath: "狀態路徑",
         cloudPollInterval: "輪詢間隔（秒）",
@@ -902,18 +872,18 @@ const zhTW: Messages = {
         cloudPollFailedValues: "失敗狀態值 —— 每行一個",
         cloudUnreachable: "無法連線",
         cloudTimeoutHint:
-            "0 = 不限制總逾時：輪詢會持續到工作完成或手動停止；留空維持預設值 1800。",
+            "整個任務的逾時；留空 = 1800 秒。",
         cloudRequestTimeout: "單次請求逾時（秒）",
         cloudRequestTimeoutHint:
-            "每次 HTTP 請求（提交、輪詢、媒體下載）的逾時上限。0 = 內建 600 秒——同步生圖介面在高畫質 / 4K 下可能需要 3–5 分鐘，建議不低於 360。",
+            "每個 HTTP 請求的逾時。0 = 600 秒；圖像 API 建議 360 以上。",
 
         // ── 共用 ──
         requireApproval: "執行前需確認",
         requireApprovalHint:
-            "開啟時，此代理在每次應用程式執行中的首次執行會要求確認；關閉則代表「啟用開關」即為長期授權。",
+            "在每個應用工作階段首次執行時請求確認。",
         probe: "測試",
         probing: "正在執行…",
-        probeCliHint: "執行 `<命令> --version` 以驗證可執行檔能否被解析。",
+        probeCliHint: "執行 <command> --version 檢查可執行檔。",
         probeCloudHint: "送出一個 GET 請求檢查端點是否可連線。",
         noEndpoint: "尚未設定端點",
     },
@@ -986,7 +956,7 @@ const zhTW: Messages = {
         compacting: "壓縮中…",
         compactTitle: "刪除超過 90 天的日誌並回收磁碟空間",
         compactConfirm:
-            "壓縮資料庫？超過保留期限（設定 → 偵錯）的日誌將被刪除，並重寫檔案以回收空間。聊天歷史會保留。",
+            "刪除超過保留期的日誌？聊天記錄會保留。",
         compacting2: "正在壓縮…可能需要幾秒鐘",
         interactions: "互動記錄（{count}）",
         cacheChip: "快取 {percent}%",
@@ -1015,7 +985,7 @@ const zhTW: Messages = {
         report: {
             aria: "工作階段報告",
             title: "工作階段報告",
-            hint: "彙整本工作階段的請求與互動日誌",
+            hint: "彙整自本工作階段的請求與互動日誌。",
             empty: "本工作階段尚無請求記錄",
             totalTokens: "總 token",
             tokenSplit: "輸入 {prompt} · 輸出 {completion}",
@@ -1043,19 +1013,19 @@ const zhTW: Messages = {
     plugins: {
         windowTitle: "外掛",
         subtitle:
-            "外掛透過訊息匯流排提供工具：模型呼叫工具，工具向匯流排發布訊息，由外掛的某個實例應答。",
+            "外掛為模型提供經訊息匯流排呼叫的工具。",
         refresh: "重新整理",
         reload: "重新載入清單",
         openManager: "開啟外掛管理",
         endpoint: "服務接入點",
         endpointHint:
-            "服務型外掛（Rust、Node、Python 等）連線此位址並出示權杖即可接入匯流排，每條連線就是一個實例。",
+            "服務型外掛帶 token 撥入這個位址即可加入匯流排。",
         token: "權杖",
         copy: "複製",
         copied: "已複製",
         issues: "無法載入的清單",
         empty: "尚未安裝外掛",
-        emptyHint: "在 .data/plugins 下放入含 plugin.json 的資料夾，然後重新載入清單。",
+        emptyHint: "在 .data/plugins 下加一個含 plugin.json 的資料夾，然後重新載入。",
         search: "篩選外掛",
         searchEmpty: "沒有符合「{query}」的外掛。",
         count: "{shown} / {total}",
@@ -1076,7 +1046,7 @@ const zhTW: Messages = {
             exportedNoSettings: "設定保留在本工作區",
             exportedSettingsSkipped: "設定未隨包匯出：{reason}",
             hint:
-                "外掛包是一個外掛資料夾的 .zip：根目錄含 plugin.json，以及指令碼與設定架構；匯入時沿用清單裡的外掛 id。",
+                "安裝包就是一個外掛資料夾打成的 .zip，根目錄有 plugin.json。",
         },
         transportSpawn: "子行程",
         transportService: "服務",
@@ -1118,34 +1088,34 @@ const zhTW: Messages = {
             title: "建立外掛",
             close: "關閉",
             intro:
-                "外掛是工作區裡的一個資料夾，它變成模型可以呼叫的工具：工具向訊息匯流排發佈，由外掛的某個實例應答。",
+                "外掛是提供工具的資料夾，模型透過訊息匯流排呼叫。",
             folder: "1 · 目錄結構",
-            folderBody: "資料夾名稱就是外掛 id，外掛需要的一切都放在這個資料夾裡。",
+            folderBody: "資料夾名稱就是外掛 ID，外掛所需的一切都在裡面。",
             manifest: "2 · 清單",
             manifestBody:
-                "plugin.json 宣告執行環境、入口和工具；每個宣告的工具都會以 plugin_<id>_<tool> 出現在模型手上。",
+                "plugin.json 宣告執行環境、入口與工具（plugin_<id>_<tool>）。",
             protocol: "3 · 協定",
             protocolBody:
-                "stdin / stdout 上的逐行 JSON：收到 hello 回 ready，之後每個 request 用同一個 id 回 reply。",
+                "stdin/stdout 上的行式 JSON，用相同 id 回覆。",
             service: "4 · 或以服務方式接入",
             serviceBody:
-                "transport: \"service\" 表示行程由別處啟動，用權杖連線上面的接入點；一條連線就是一個實例。",
+                "行程在別處啟動，撥上上面的位址加入匯流排。",
             settings: "5 · 設定頁面",
             settingsBody:
-                "config.schema.yaml 會在本視窗渲染成表單，值儲存到 config.yaml 並熱推給執行中的實例。",
+                "config.schema.yaml 變成這個表單，儲存後推送給執行中的實例。",
             agent:
-                "也可以讓 agent 代勞：自我演化模式下它會讀 .data/manuals/create-plugin.md，把整個資料夾寫好。",
+                "自我演化模式下可以讓助理把整個資料夾建好。",
         },
     },
 
     mission: {
         aria: "任務監視器",
         title: "任務監視器",
-        subtitle: "追蹤目前聊天工作階段的外部任務狀態、進行中的任務與階段性摘要。",
+        subtitle: "本工作階段的任務狀態、進行中的任務與摘要。",
         autoRefresh: "自動重新整理",
         refresh: "重新整理",
         openDeliverablesFolder: "交付物資料夾",
-        openDeliverablesFolderHint: "開啟本對話的交付物目錄（.data/deliver/<對話>），刪除對話時會一併刪除。",
+        openDeliverablesFolderHint: "開啟本工作階段的交付資料夾（.data/deliver/<session>）。",
         deliverables: "交付物",
         deliverablesEmpty: "本對話尚無交付物檔案。",
         deliverablesFiles: "{count} 個檔案",

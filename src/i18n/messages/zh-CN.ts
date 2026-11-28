@@ -62,7 +62,7 @@ const zhCN: Messages = {
         workspacePickOther: "选择其他文件夹…",
         workspacePickTitle: "选择工作区文件夹",
         workspaceBusy: "回复仍在进行，回合结束后可切换。",
-        workspaceShadowNote: "此窗口使用独立的设置副本，工作区历史共用。",
+        workspaceShadowNote: "本窗口用自己的设置，历史记录共用。",
 
         dream: {
             hint: "点击让我小憩一下",
@@ -84,24 +84,24 @@ const zhCN: Messages = {
 
         tip: {
             organizeMemory:
-                "用「记忆」工具记下可复用的事实，再到「设置 → 调试」里整理与合并记忆。",
+                "用记忆工具保存事实，在设置 → 调试里查看。",
             archiveExperience:
-                "开启「自我进化模式」后，让助手把成熟的流程打包成经验，就能在其他工作区一键安装。",
-            skills: "在「技能」面板启用技能后，在输入框输入 /skill 即可按需加载。",
-            subAgents: "在新对话里输入 +智能体，可把子智能体的角色直接嵌入本次会话。",
+                "在自我进化模式下，让助手把一套流程打包成经验。",
+            skills: "在技能面板启用技能，然后输入 /skill 加载。",
+            subAgents: "在新会话输入 +智能体 嵌入子智能体的角色。",
             fileMentions:
-                "在输入框输入 @ 引用工作区文件；PDF 会自动转换为 Markdown 供模型阅读。",
-            figures: "让助手画一张图，回复里会出现可交互的图表卡片，3D 场景还能拖动旋转。",
+                "在输入框输入 @ 附加文件；PDF 会自动转成 Markdown。",
+            figures: "要一张图就会得到图卡；3D 场景可以拖动旋转。",
             maintenance:
-                "开启「自我进化模式」后，点击上方的笑脸，助手会在你等待时整理技能与记忆。",
-            backup: "用标题栏的 ⋯ 菜单导出备份，配置、技能、记忆和聊天记录会一起打包。",
-            createSkill: "「技能」面板 → + 新建技能：填名称、一句描述和系统提示，保存后启用，输入 /skill 按需加载。",
-            mcpSetup: "「MCP」面板 → + 添加服务器：stdio 填命令、参数和环境变量；SSE/HTTP 填 URL 与令牌，保存后用闪电按钮测试连接。",
-            subAgentCreate: "「智能体」面板 → + 新建智能体：填名称、描述和系统提示，保存并启用后，在新对话输入 +智能体 嵌入角色。",
-            scriptLibrary: "让助手把跑通的命令存成脚本，之后 run_cmd 按脚本名直接执行，无需重复输入。",
-            modelDepth: "工具栏的模型选择器可随时切换模型；支持推理的模型还能调整思考深度。",
-            workspaceSwitch: "点击标题栏的工作区名称即可切换；每个工作区各有独立的记录、技能、记忆和待办。",
-            timerBackground: "慢任务让助手用定时器等待；开启「后台执行」后，命令还能放到后台继续跑。",
+                "开启自我进化模式后点击上方的笑脸，趁等待整理技能和记忆。",
+            backup: "标题栏 ⋯ 菜单可导出一个 zip：配置、技能、记忆和聊天记录。",
+            createSkill: "技能面板 → + 新建技能，然后用 /skill 加载。",
+            mcpSetup: "MCP 面板 → + 添加服务器：stdio 填命令，SSE 填地址和 token。",
+            subAgentCreate: "智能体面板 → + 新建智能体，启用后用 +智能体 嵌入。",
+            scriptLibrary: "让助手把验证过的命令存成脚本，之后 run_cmd 直接按名字运行。",
+            modelDepth: "在工具栏切换模型；推理模型还有思考深度。",
+            workspaceSwitch: "点击标题栏的工作区名称即可切换。",
+            timerBackground: "让助手用定时器等待；还需开启后台执行。",
         },
 
         backupExportLabel: "正在导出并压缩备份…",
@@ -115,7 +115,7 @@ const zhCN: Messages = {
         noticeDismiss: "关闭提示",
         toolDisabledNotice: "`{tool}` 连续失败 {limit} 次 —— 本会话内已禁用。",
         budgetExhaustedNotice:
-            "本轮工具预算已用尽（{rounds} 轮 / {toolCalls} 次工具调用）—— 助手将用已有信息收尾。",
+            "工具预算用完（{rounds} 轮、{toolCalls} 次调用），助手用现有材料收尾。",
 
         timers: {
             title: "定时器",
@@ -127,7 +127,7 @@ const zhCN: Messages = {
             dismiss: "忽略",
             sleepLock: "已阻止休眠",
             sleepLockRunning: "已阻止休眠 · 本轮 {time}",
-            sleepLockHint: "有定时器在等待或本轮对话仍在运行，系统将保持唤醒。",
+            sleepLockHint: "有定时器或回合在等，系统会保持唤醒。",
         },
 
         background: {
@@ -166,7 +166,7 @@ const zhCN: Messages = {
             listFailed: "无法列出子 agent：{error}",
         },
         attachmentUnsupported:
-            "{names}：{model} 无法直接读取该格式，文件保留在工作区，只会把路径交给助手，由它用工具解析。",
+            "{names}：{model} 读不了这种格式，只把路径交给助手。",
         composer: {
             dropHint: "松开即可加入对话（文件存入 .data/tmp 并插入 @ 引用）",
             busy: "助手正在回复：等这一轮结束再添加文件。",
@@ -177,7 +177,7 @@ const zhCN: Messages = {
             dropFailed: "无法加入拖入的文件：{error}",
         },
         messageRenderFailed: "这条消息无法渲染：{error}",
-        inputPlaceholder: "输入消息…（@ 引用文件，/ 引用技能，Enter 发送，Shift+Enter 换行）",
+        inputPlaceholder: "输入消息…（@ 引用文件，/ 调用技能，Enter 发送）",
         injections: {
             title: "本轮内追加",
             queued: "等待送达",
@@ -243,10 +243,10 @@ const zhCN: Messages = {
             usernamePlaceholder: "留空则使用当前用户",
             password: "密码",
             passwordPlaceholder: "必填",
-            sudoHint: "该操作将以提升的权限运行，可能会修改你的系统。",
-            elevationHint: "该操作将请求管理员提权（UAC），可能会修改系统设置。",
+            sudoHint: "以提权方式运行，可能修改系统。",
+            elevationHint: "将请求管理员权限（UAC），可能修改系统设置。",
             externalAgentHint:
-                "该 CLI / 云端智能体在应用之外执行：CLI 以你的用户权限在工作区内运行，云端智能体把任务发送到远程端点。每个智能体在本次应用运行中只需批准一次。",
+                "该智能体在应用之外运行，以你的权限访问工作区。",
             deny: "拒绝",
             allow: "允许",
         },
@@ -373,7 +373,7 @@ const zhCN: Messages = {
         plugins: {
             enable: "启用插件系统",
             enableHint:
-                "启用后模型会拿到 plugin 工具，以及每个插件能力对应的独立工具；关闭时隐藏插件管理器，模型无法调用任何插件。",
+                "给模型插件工具，以及每个能力一个工具。",
             manager: "插件管理器",
         },
         appearance: {
@@ -393,11 +393,11 @@ const zhCN: Messages = {
             glassSubtle: "轻",
             glassStandard: "标准",
             glassStrong: "强",
-  glassHint: "标题栏、工具栏与面板头部的模糊强度。选「关闭」时这些条改为不透明，可减轻低配显卡和远程桌面的负担。这一档位也让窗框变透明：系统提供背板时透出模糊的桌面（Windows 的 Acrylic），其他平台则透出应用自绘的柔和底纹。对话正文默认保持实底，设置了背景照片时则取而代之。",
+  glassHint: "标题栏、工具栏和面板头部的模糊强度；关闭则不透明。",
             language: "语言",
             languageHint: "立即生效，并保存到配置中。",
             chatBackground: "聊天区背景",
-            chatBackgroundHint: "只铺在消息区域，不影响工具栏和输入框。选好后会复制到应用数据目录，之后移动或删除原图都没有影响。",
+            chatBackgroundHint: "只在消息后面显示照片；选择后会复制到应用数据目录。",
             chatBackgroundChoose: "选择照片…",
             chatBackgroundReplace: "更换照片…",
             chatBackgroundDefault: "使用默认壁纸",
@@ -423,9 +423,9 @@ const zhCN: Messages = {
             contextWindow: "“{model}” 的上下文窗口（tokens）",
             contextPlaceholder: "自动（由服务端报告或使用默认值）",
             contextHint:
-                "当 API 报告上下文窗口时会自动填充（OpenRouter、Groq、vLLM 等），否则使用匹配到的能力目录数据。两者都没有的 OpenAI 兼容接口可在此手动配置 —— 该值用于智能体的上下文预算。",
+                "由 API 或模型目录自动填入，用于上下文预算。",
             capabilities: "模型能力",
-            capabilitiesEmpty: "暂无 “{model}” 的能力数据，请点击“从 API 获取模型”加载。",
+            capabilitiesEmpty: "还没有 {model} 的能力数据 — 用「从 API 获取模型」加载。",
             capabilitiesMatched: "匹配到 “{name}” · 相似度 {percent}%",
             capabilitiesSummary: "已为 {matched}/{total} 个模型匹配能力元数据。",
             capabilitiesError: "能力元数据不可用：{error}",
@@ -440,10 +440,10 @@ const zhCN: Messages = {
             capabilityMaxOutput: "{tokens} 输出上限",
             conversationHeader: "会话 ID 请求头",
             conversationHeaderHint:
-                "每个请求中携带聊天会话 ID 的请求头名称。留空则使用默认的 “x-conversation-id”。",
+                "携带会话 ID 的请求头。留空 = x-conversation-id。",
             customHeaders: "自定义请求头",
             customHeadersHint:
-                "附加到每个模型请求的额外请求头 —— 对话、子智能体规划与模型列表。空行会被忽略，非法的名称或值会被跳过；设置 “Authorization” 会替代 API 密钥。",
+                "每个请求附带的额外请求头；Authorization 行会替换 API Key。",
             customHeaderName: "请求头名称",
             customHeaderValue: "值",
             addHeader: "添加请求头",
@@ -452,7 +452,7 @@ const zhCN: Messages = {
 
         system: {
             title: "系统消息",
-            subtitle: "每次对话开始时发送给模型的指令。",
+            subtitle: "每次对话开始时发给模型的说明。",
             content: "内容",
             placeholder: "你是一个乐于助人的助手…",
         },
@@ -466,68 +466,68 @@ const zhCN: Messages = {
             placeholderDefault: "默认",
             placeholderDefaultLimit: "默认上限",
             maxRounds: "单轮最大轮数",
-            maxRoundsHint: "一次对话中最多发起多少次模型请求。0 = 不限（硬上限 1000）。用尽后会发出一轮不带工具的收尾请求，让助手用已有信息作答。",
+            maxRoundsHint: "每回合的模型请求数。0 = 不限制（上限 1000）。",
             maxToolCalls: "单轮最大工具调用次数",
-            maxToolCallsHint: "一次对话中最多执行多少次工具调用。0 = 不限（硬上限 5000）。超出的调用只返回提示而不执行。",
+            maxToolCallsHint: "每回合的工具调用次数。0 = 不限制（上限 5000）。",
             toolFailureLimit: "工具连续失败次数上限",
-            toolFailureLimitHint: "同一工具（含 MCP 工具）连续失败达到此次数后，本会话内禁用该工具并提示模型换方案。0 = 不启用（硬上限 50）。成功调用一次即清零。",
+            toolFailureLimitHint: "工具连续失败这么多次后停用。0 = 从不停用（上限 50）。",
             maxConcurrentTurns: "最大并行会话数",
-            maxConcurrentTurnsHint: "同一窗口内允许同时处于回复生成中的会话数量。0 = 不限制（硬上限 16）。新开会话不会打断正在生成的回复——旧回复转入后台继续；此上限约束并行的 API 与工具负载。",
+            maxConcurrentTurnsHint: "单个窗口内可同时运行的回合数。0 = 不限制（上限 16）。",
             dsFormat: "DS-Format（DeepSeek 格式）",
-            dsFormatHint: "按 DeepSeek 系思考模式模型的要求，在回传 assistant 消息时携带 reasoning_content。DeepSeek 系模型会自动开启；仅当其他服务商同样需要时才手动打开。",
-            dsFormatAuto: "{model} 已自动开启：DeepSeek 系模型始终使用 DS-Format，reasoning_content 会自动回传。",
+            dsFormatHint: "在助手消息上回传 reasoning_content，部分端点需要。",
+            dsFormatAuto: "{model} 固定开启：reasoning_content 始终回传。",
             enhancedFigures: "增强画图",
             enhancedFiguresHint:
-                "让助手画图——Mermaid 图表、自己画的 SVG 图（每张都有保存按钮，PNG 存到 figures/，3D 场景还能拖动旋转），以及动态 HTML5 图（`html-fig`：动画与交互在沙箱里运行，保存为 .html 文件）。关闭后提示词里不再有任何画图说明，助手不会主动画图；你自己粘贴的 Mermaid 代码块仍会渲染。",
+                "让助手画图：Mermaid、SVG 和 HTML 图，保存到 figures/。",
             memoryHint: "在用户输入上附带记忆提示",
             memoryHintHint:
-                "在最新的用户消息最前面加一行提示（不足 200 字符），列出关键词匹配到的记忆，按置信度排序。它只是线索而不是全文：助手仍需检索对应作用域才能拿到完整条目。提示只存在于发给模型的请求里，存下来的消息仍是用户原话。",
+                "在最新消息前加上关键词匹配的记忆标题（200 字符内）。",
         },
 
         run: {
             title: "运行",
-            subtitle: "回合如何执行：后台工具、通知、窗口行为与自我进化模式。",
+            subtitle: "回合如何执行：后台工具、通知与窗口行为。",
             backgroundTools: "后台执行",
             backgroundToolsHint:
-                "允许助手把耗时工具放到后台运行（`run_in_background: true`）：`run_cmd`、`run_shell`、`file_actions` 搜索、所有 MCP 工具和 `call_subagent`。结果会在下一个请求前自动送达，本轮保持开启直到结果到齐；子代理不会收到该参数。",
+                "让耗时工具在后台运行，结果在下次请求前送达。",
             allowNotifications: "允许通知",
             allowNotificationsHint:
-                "回合结束时播放提示音：失败为信息音，成功为会话结束音；窗口最小化或焦点在其他应用时，同时弹出桌面通知卡片，显示回复首行（或错误信息）。用户主动停止的回合不会通知。",
+                "回合结束时发出提示音和桌面通知；手动停止的回合不通知。",
             singleInstance: "单实例运行",
             singleInstanceHint:
-                "再次启动时聚焦已运行的窗口，而不是打开第二个实例。关闭该选项后，每次启动都会打开独立窗口，并使用本配置的临时副本。重启应用后生效。",
+                "再次启动时聚焦已有窗口，不再开新副本。",
             selfEvolution: "启用自我进化模式",
-            selfEvolutionHint: "允许助手在工作区内自行演进技能。开启期间“文件操作”和“记忆”工具会强制启用并锁定，助手还会把已验证的关键事实（运行环境、正确的工具用法、常用文件位置）记录到专属的自进化记忆区。助手还可以自建 MCP 服务器（`mcp_self`）：脚本存放在 .data/mcp，经你确认后作为本地进程启动。",
+            selfEvolutionHint: "允许助手在工作区内自建技能、记忆和 MCP 服务器。",
         },
 
         debug: {
             title: "调试",
-            subtitle: "日志写到何处、保留多久，以及读取这些日志的监视器。",
+            subtitle: "日志写到哪、保留多久，以及读取日志的监视器。",
             loggerOutput: "日志输出",
             loggerFile: "写入 app-日期.log",
             loggerPrintln: "输出到终端（println）",
-            loggerOutputHint: "仅调试构建会写入日志，正式构建下该选项不生效。",
+            loggerOutputHint: "只有调试版会写日志。",
             retention: "日志保留天数",
             retentionHint:
-                "早于该时限的请求日志与交互日志会在启动时以及由交互监视器执行“压缩数据库”时删除。0 表示永久保留。聊天历史不会被清理。修改后请点击保存生效。",
+                "启动时和压缩数据库时删除更早的日志。0 = 永久保留。",
             monitors: "监视器",
-            monitorsHint: "每行都会在设置页上打开一个只读对话框；正在运行的回合要等结束后才会被读取。",
+            monitorsHint: "每行打开只读对话框；运行中的回合在结束后可读。",
             interactionMonitor: "交互监视器",
             agentMissions: "智能体任务监视器",
             evolutionMemory: "自进化记忆",
             experiences: "全局经验包",
             launchMonitor: "打开监视器",
-            monitorsEmpty: "当前没有可用的监视器：交互监视器与智能体任务监视器需要先打开一个会话，自进化相关的监视器需要在「运行」里开启自我进化模式。",
+            monitorsEmpty: "这里没有可用的监视器：打开会话，或开启自我进化模式。",
         },
 
         about: {
             title: "关于与更新",
-            subtitle: "当前版本，以及针对本仓库 GitHub Release 的更新检查。",
+            subtitle: "版本信息，以及对 GitHub 发布的更新检查。",
             currentVersion: "当前版本",
             checkOnStartup: "启动时检查更新",
-            checkOnStartupHint: "每次启动查询一次 GitHub Releases API，发现新版本时显示提示条。",
+            checkOnStartupHint: "启动时查询 GitHub 发布页，有新版本就显示横幅。",
             prerelease: "包含预发布版本",
-            prereleaseHint: "同时考虑标记为预发布的版本。草稿版本对 API 始终不可见。",
+            prereleaseHint: "也考虑预发布版本；草稿版本 API 看不到。",
             updates: "更新",
             checkNow: "检查更新…",
             links: "链接",
@@ -551,7 +551,7 @@ const zhCN: Messages = {
         summary: "{count} 条经验 · {injected} 条位于高优先层",
         budget: "高优先层 {chars} / {budget} 字符",
         loading: "正在读取…",
-        empty: "还没有自进化记忆。开启自进化模式后会自动记录。",
+        empty: "还没有自进化记忆；开启自我进化模式后才会记录。",
         pinned: "常驻",
         auto: "自动",
         confidence: "信任度 {value}/5",
@@ -568,7 +568,7 @@ const zhCN: Messages = {
         title: "全局经验包",
         summary: "{count} 个经验包",
         loading: "正在读取…",
-        empty: "还没有经验包。自进化模式下由 experience 工具的 pack 动作创建；它们不是技能，不会出现在技能目录里。",
+        empty: "还没有经验包；用 experience 工具的 pack 操作创建。",
         loadFailed: "无法读取经验包列表。",
         toolCount: "{count} 个工具",
         noTools: "无工具",
@@ -633,49 +633,23 @@ const zhCN: Messages = {
         items: {
             fileActions: {
                 name: "文件操作",
-                description: [
-                    "仅在当前工作区根目录内读取、写入、列出、搜索、修补、重命名、移动、创建和删除文件——`.data` 状态目录（技能、脚本、记忆、待办）也在其中。",
-                    "使用 `./...` 形式的路径，例如 `./src/App.tsx`、`./.data/skills/demo/skill.md`，或用 `.` 表示工作区根目录。",
-                    "`workspace/...`、`../...` 等路径会被拒绝。工作区数据库（`.data/chat.db`）由应用管理，不能通过此工具修改。",
-                ].join("\n"),
+                description: "读写与检索工作区文件",
             },
             runCmd: {
                 name: "运行命令",
-                description: [
-                    "直接运行程序或工作区脚本（不经过 shell）。进程在工作区根目录启动。",
-                    "`action: \"run\"`（默认）执行 `command`：第一个词先按裸名称到工作区脚本库 `./.data/scripts` 中解析（扩展名可省略，例如 `build-frontend`、`deploy.py`）；找不到时才是由系统通过 PATH 解析的裸程序名（例如 `python`、`git`、`curl`）。脚本库会被前置到子进程的 PATH，同名脚本优先于系统程序。绝对路径和相对路径会被拒绝；确实需要路径时请使用“运行脚本”。",
-                    "`action: \"list\"` 列出脚本库中的脚本及其解释器、`@description`、`@usage` 和使用次数。说明与用法只从脚本头部注释读取（`#`、`//`、`REM` 或 `::`）。脚本正文命中破坏性/敏感模式时首次运行会弹一次确认；批准结果按内容哈希记住，文件内容变化后需要重新确认。",
-                    "特权操作和危险命令需要显式确认。",
-                ].join("\n"),
+                description: "运行命令或工作区脚本",
             },
             runShell: {
                 name: "运行脚本",
-                description: [
-                    "在 shell（PowerShell 或 Bash）中执行脚本。脚本拥有完全的自由：在工作区根目录启动，但可以切换到任意目录、执行任意内容，每个脚本执行前都会经过风险引擎审计。",
-                    "支持管道、循环、变量等 shell 特性。`direct` 模式等待脚本结束并返回输出；`serve` 模式在后台启动长期进程（例如 HTTP 服务）并立即返回进程 ID，可随时 list / stop，退出应用时自动清理。",
-                    "特权操作和危险命令需要显式确认。",
-                ].join("\n"),
+                description: "运行 PowerShell 或 Bash 脚本",
             },
             calculator: {
                 name: "计算器",
-                description: [
-                    "计算数学表达式：四则运算 `+ - * / %`、幂运算 `^` / `**`（右结合，支持负指数与分数指数）、括号、一元 `+ - ~`、阶乘 `!`、位运算 `&` / `|` / `^^`（异或）/ `~` / `<<` / `>>`、常量 pi、e、tau、常用数学函数（sqrt、sin、cos、ln、log、min、max、pow……）、隐式乘法（`2(3+4)`、`2pi`）以及 0x / 0b / 0o 字面量。",
-                    "需要精确结果时优先使用它，而不是心算。位运算与阶乘要求整数操作数，返回精确的 64 位整数；其余运算为 f64 浮点。注意 `^` 是幂运算，异或请用 `^^` 或 `xor(...)`。",
-                    "依赖「运行命令」（run_cmd）：启用计算器时会自动一并启用；表达式表达不了的计算（库函数、脚本、批量数据、日期运算）会回退到它执行。",
-                ].join("\n"),
+                description: "精确计算数学表达式",
             },
             memory: {
                 name: "记忆",
-                description: [
-                    "持久化记忆系统，提供三种作用域，可跨对话保存笔记与信息。",
-                    "",
-                    "**session** —— 短期，仅存于内存，在当前聊天会话中有效。用于任务相关的上下文和进行中的笔记。",
-                    "**user** —— 长期，基于文件，跨会话持久。用于用户偏好、常用模式与通用经验。",
-                    "**repo** —— 长期，基于文件，限定于当前仓库。用于代码库约定、构建命令与项目事实。",
-                    "**evolution** —— 长期，基于文件。自进化专属区域，开启自进化模式后可用。用于必须跨会话保留的已验证事实：默认解释器与运行环境、正确的工具操作方式、常用的文件位置。每条记录带有标题、类别、标签、重要度和证据次数，按排名按需查询；最新的用户消息开头会附带一行命中提示（不足 200 字符、按置信度排序），完整条目仍需检索——请保持每条只表达一个高密度事实。",
-                    "",
-                    "支持添加、获取、列出、搜索、删除和整理归档。`consolidate` 会把一大簇相关的自进化记忆凝聚成一个技能归档（先 plan，再带上完整技能 markdown 与相同 keys 执行 apply）。",
-                ].join("\n"),
+                description: "跨会话记住结论与事实",
             },
             todoList: {
                 name: "待办清单",
@@ -684,11 +658,7 @@ const zhCN: Messages = {
             },
             timer: {
                 name: "定时器",
-                description: [
-                    "设置一次性延时定时器，让助手稍后自动继续任务，而不是反复轮询。",
-                    "适用于需要等待较慢步骤的场景——例如 30 分钟的日志收集、耗时的构建或下载、外部任务等。",
-                    "计时结束后，定时器消息会作为新的用户输入注入同一会话，助手将携带完整历史继续任务。待触发的定时器会显示在输入框上方，包含倒计时与取消按钮。",
-                ].join("\n"),
+                description: "稍后自动继续这项任务",
             },
         },
         autoAcceptItems: {
@@ -723,7 +693,7 @@ const zhCN: Messages = {
         empty: "尚未配置任何服务器。",
         selfBuilt: "自建",
         selfBuiltHint:
-            "助手在进化模式下自建的服务器，配置存放在工作区 .data/mcp.conf 并与本列表合并。脚本：{path}",
+            "由助手创建，记录在 .data/mcp.conf。脚本：{path}",
         addServer: "+ 添加服务器",
         name: "名称",
         namePlaceholder: "我的 MCP 服务器",
@@ -761,19 +731,19 @@ const zhCN: Messages = {
         enableMode: "子智能体系统",
         autoPlan: "自动规划",
         autoPlanHint:
-            "每条消息先由规划器选出 agent 并拆分任务，再结合执行结果作答。关闭后主智能体直接回答，仍可主动调用 call_subagent 手动委派。",
+            "每条消息先规划再回答；关闭则直接回答。",
         autoConfigure: "智能选择 agent",
         autoConfigureHint:
-            "规划前先用一次模型调用挑选本轮参与的 agent；关闭则所有已启用 agent 全部参与，由规划器自行取舍。",
+            "用一次模型调用选出本回合的智能体；关闭则启用全部。",
         plannerModel: "规划器模型",
         plannerModelInherit: "跟随主模型（{model}）",
         plannerModelHint:
-            "用于 agent 选择、任务计划与 mbus 监督。留空则跟随主对话模型；子 agent 各自的模型不受影响。",
+            "用于选智能体和规划；留空跟随主模型。",
         mbus: "任务消息总线（mbus）",
-        mbusHint: "让规划器在任务运行期间监控子 agent，并允许 agent 之间互相发消息；会增加规划器模型调用。",
+        mbusHint: "让规划器监管子智能体，并允许它们互相通信。",
         mbusPairLimit: "每对 agent 的消息上限",
         mbusPairLimitHint:
-            "双向合计。两个 agent 达到该上限后不能再互发消息，改由规划器介入协调（0 = 不限制）。",
+            "两个 agent 之间的双向消息上限。0 = 不限制。",
         executionMode: "执行方式",
         modeParallel: "并行",
         modeSequential: "串行",
@@ -785,7 +755,7 @@ const zhCN: Messages = {
         typeCli: "CLI",
         typeCloud: "云端",
         typeHint:
-            "LLM：在应用内运行自主工具循环；CLI：启动本机安装的无界面编码 CLI；云端：把任务发送到远程 HTTP 端点。",
+            "LLM 在应用内运行，CLI 调用本机命令行，云端发到远程端点。",
         searchPlaceholder: "搜索名称、职责或分类",
         filterByStatus: "按启用状态筛选智能体",
         filterAll: "全部",
@@ -799,15 +769,15 @@ const zhCN: Messages = {
         noResults: "没有符合筛选条件的智能体。",
         sourceFile: "定义文件：agents/{file}",
         definitionStorageHint:
-            "LLM 智能体的定义保存在 app_data/agents 下的 md 文件中（名称、描述、emoji、颜色和提示词），此处只把运行配置写入 sub_agents.json。",
+            "提示词在 app_data/agents/*.md，运行设置存在 sub_agents.json。",
         emoji: "Emoji",
-        emojiHint: "保存在 md frontmatter 中，作为内容显示在名称旁（不是界面图标）。",
+        emojiHint: "存在 frontmatter 里，显示在名称旁。",
         color: "颜色标记",
         colorHint: "保存在 md frontmatter 中，不用作界面强调色。",
         enableMcp: "MCP 工具",
         enableMcpHint:
-            "注入所有已启用 MCP server 的工具。该智能体会为当前任务启动独立的 MCP server 进程，任务结束后自动退出（不与主智能体共用进程）。",
-        typeLockedHint: "智能体创建后不能修改类型；如需其他后端请新建智能体。",
+            "注入所有已启用 MCP 服务器的工具；进程随任务启动，不与主助手共用。",
+        typeLockedHint: "创建后类型固定，换后端需新建智能体。",
         deleteCustomConfirm:
             "删除智能体“{name}”？将移除 agents/custom 下的定义文件（会保留 .bak 备份）。",
         parseError: "定义解析失败：{error}",
@@ -824,13 +794,13 @@ const zhCN: Messages = {
         contextWindow: "上下文窗口（tokens）",
         contextWindowPlaceholder: "默认 131072",
         contextWindowHint:
-            "按模型 id 保存，与主聊天共用。留空使用默认值（智能体 131072）；对话达到该值的 80% 时压缩。",
+            "按模型 ID 保存的上下文窗口；留空 = 131072，用到 80% 时压缩。",
         maxTokens: "最大补全 tokens",
         maxTokensPlaceholder: "默认补全上限 8192",
         temperature: "温度",
         temperaturePlaceholder: "继承默认值",
         maxIterations: "最大迭代次数",
-        maxIterationsHint: "0（默认）表示不限制迭代次数；任务完成与否由外部任务状态控制。",
+        maxIterationsHint: "0 = 不限迭代；是否完成由外部任务状态决定。",
         capabilities: "能力",
         allowedTools: "允许的工具",
         statusRunning: "运行中",
@@ -846,7 +816,7 @@ const zhCN: Messages = {
             runCmd: "执行单条命令或工作区脚本并附带风险评估",
             runShell: "运行 PowerShell / bash 脚本（direct / serve 后台进程）",
             todos:
-                "通过 `todos` 工具管理会话待办清单（list / add / update_status / clear_completed / archive）。该计划与聊天会话及所有并行智能体共享。",
+                "会话待办：添加、更新、清理和归档。",
             memory: "共享的会话 / 用户 / 仓库记忆存储（所有子 agent 读写同一份）",
         },
 
@@ -855,24 +825,24 @@ const zhCN: Messages = {
         cliCommand: "命令",
         cliCommandPlaceholder: "opencode",
         cliCommandHint:
-            "可执行文件名（在 PATH 中查找）或完整路径。Windows 的 .cmd/.bat/.ps1 启动器会自动处理。",
+            "可执行名或完整路径；Windows 的 .cmd 启动器会自动处理。",
         cliArgs: "参数 —— 每行一个",
         cliArgsHint:
-            "每行一个参数；可用占位符：{prompt}、{cwd}、{agent_name}。示例：一行写 `run`，下一行写 `{prompt}`，等价于 `opencode run \"…\"`。若没有任何位置使用 {prompt}，提示词会追加为最后一个参数。留空会自动使用内置的无头调用形式（opencode：`run`，claude/gemini/cursor-agent/copilot：`-p`，codex/droid：`exec`，crush：`run`，amp：`-x`）。",
+            "一行一个参数。占位符：{prompt}、{cwd}、{agent_name}；留空用内置形式。",
         cliPromptVia: "提示词传递方式",
         cliPromptViaArg: "作为参数（{prompt}）",
         cliPromptViaStdin: "通过 stdin",
         cliPromptViaHint:
-            "适合从管道读取输入的 CLI；在 Windows 上，当提示词可能包含 %VAR% 形式的内容时也建议使用。",
+            "CLI 读取管道输入时用 stdin；Windows 上提示词含 %VAR% 时也用它。",
         cliModelArgs: "模型参数 —— 每行一个",
         cliModelArgsHint:
-            "每次运行都会追加到上面的参数之后。每行一个参数——把开关和值分成两行，例如一行 -m、一行 opencode-go/deepseek-v4.1-flash。模型不会从主配置继承。",
+            "每次运行追加的参数，一行一个，先写 -m 再写模型 ID。",
         cliEnv: "环境变量 —— 每行一个 KEY=VALUE",
         cliEnvHint:
-            "捕获的输出会自动移除 ANSI 颜色控制符。子进程默认带有 NO_COLOR=1、CLICOLOR=0、CLICOLOR_FORCE=0、FORCE_COLOR=0 和 TERM=dumb，此处填写同名变量可覆盖。",
+            "运行时的环境变量；彩色输出会被自动去掉。",
         timeout: "超时（秒）",
         timeoutHint:
-            "0 = 不限制超时：运行会持续到完成、手动停止当前回合或退出应用。正数上限 7200 秒；留空保持默认值 600。",
+            "0 = 不限时，最长 7200 秒；留空用默认 600。",
         noCommand: "未配置命令",
         inheritModel: "继承主模型",
 
@@ -886,13 +856,13 @@ const zhCN: Messages = {
         cloudHeaders: "附加请求头 —— 每行一个 KEY=VALUE",
         cloudBodyTemplate: "请求体模板（JSON）",
         cloudBodyTemplateHint:
-            "作为 POST 请求体发送的 JSON。{prompt}、{agent_name}、{cwd} 会被替换并按 JSON 转义；{image_b64}、{image_data_url}、{images_data_urls} 注入调用方传入的输入图片；其余 {key} 来自 params。",
+            "POST 的 JSON 主体；{prompt}、{agent_name}、{cwd} 和图片字段会自动填入。",
         cloudResultPath: "结果路径",
         cloudResultPathHint:
-            "从响应中提取文本的点号路径，例如 `choices.0.message.content` 或 `result.output`。",
+            "响应中存放文本的点路径。",
         cloudPollUrl: "轮询 URL（可选）",
         cloudPollUrlHint:
-            "用于异步任务：轮询该 URL（可用 `{id}` 表示任务 id），直到状态匹配为止。留空表示一次性返回。",
+            "异步任务轮询这个地址，{id} 是任务 ID；留空表示单次响应。",
         cloudPollIdPath: "任务 id 路径",
         cloudPollStatusPath: "状态路径",
         cloudPollInterval: "轮询间隔（秒）",
@@ -902,18 +872,18 @@ const zhCN: Messages = {
         cloudPollFailedValues: "失败状态值 —— 每行一个",
         cloudUnreachable: "无法连接",
         cloudTimeoutHint:
-            "0 = 不限制总超时：轮询会持续到任务完成或手动停止；留空保持默认值 1800。",
+            "整个任务的超时；留空 = 1800 秒。",
         cloudRequestTimeout: "单次请求超时（秒）",
         cloudRequestTimeoutHint:
-            "每次 HTTP 请求（提交、轮询、媒体下载）的超时上限。0 = 内置 600 秒——同步生图接口在高画质 / 4K 下可能需要 3–5 分钟，建议不低于 360。",
+            "每个 HTTP 请求的超时。0 = 600 秒；图像 API 建议 360 以上。",
 
         // ── 通用 ──
         requireApproval: "运行前需确认",
         requireApprovalHint:
-            "开启时，该智能体在每次应用运行中的首次执行会请求确认；关闭则视为「启用开关」即为长期授权。",
+            "在每个应用会话首次运行时请求确认。",
         probe: "测试",
         probing: "正在运行…",
-        probeCliHint: "运行 `<命令> --version` 以验证可执行文件能否被解析。",
+        probeCliHint: "运行 <command> --version 检查可执行文件。",
         probeCloudHint: "发送一个 GET 请求检测端点是否可达。",
         noEndpoint: "未配置端点",
     },
@@ -986,7 +956,7 @@ const zhCN: Messages = {
         compacting: "压缩中…",
         compactTitle: "删除超过 90 天的日志并回收磁盘空间",
         compactConfirm:
-            "压缩数据库？超过保留时限（设置 → 调试）的日志将被删除，并重写文件以回收空间。聊天历史会保留。",
+            "删除超过保留期的日志？聊天记录会保留。",
         compacting2: "正在压缩…可能需要几秒钟",
         interactions: "交互记录（{count}）",
         cacheChip: "缓存 {percent}%",
@@ -1015,7 +985,7 @@ const zhCN: Messages = {
         report: {
             aria: "会话报告",
             title: "会话报告",
-            hint: "汇总本会话的请求与交互日志",
+            hint: "汇总自本会话的请求与交互日志。",
             empty: "本会话暂无请求记录",
             totalTokens: "总 token",
             tokenSplit: "输入 {prompt} · 输出 {completion}",
@@ -1043,19 +1013,19 @@ const zhCN: Messages = {
     plugins: {
         windowTitle: "插件",
         subtitle:
-            "插件通过消息总线提供工具：模型调用工具，工具向总线发布消息，由插件的某个实例应答。",
+            "插件为模型提供经消息总线调用的工具。",
         refresh: "刷新",
         reload: "重新加载清单",
         openManager: "打开插件管理",
         endpoint: "服务接入点",
         endpointHint:
-            "服务型插件（Rust、Node、Python 等）连接该地址并出示令牌即可接入总线，每条连接就是一个实例。",
+            "服务型插件带 token 拨入这个地址即可加入总线。",
         token: "令牌",
         copy: "复制",
         copied: "已复制",
         issues: "无法加载的清单",
         empty: "尚未安装插件",
-        emptyHint: "在 .data/plugins 下放入含 plugin.json 的文件夹，然后重新加载清单。",
+        emptyHint: "在 .data/plugins 下加一个含 plugin.json 的文件夹，然后重载。",
         search: "筛选插件",
         searchEmpty: "没有匹配“{query}”的插件。",
         count: "{shown} / {total}",
@@ -1076,7 +1046,7 @@ const zhCN: Messages = {
             exportedNoSettings: "设置保留在本工作区",
             exportedSettingsSkipped: "设置未随包导出：{reason}",
             hint:
-                "插件包是一个插件文件夹的 .zip：根目录含 plugin.json，以及脚本与设置架构；导入时沿用清单里的插件 id。",
+                "安装包就是一个插件文件夹打成的 .zip，根目录有 plugin.json。",
         },
         transportSpawn: "子进程",
         transportService: "服务",
@@ -1118,34 +1088,34 @@ const zhCN: Messages = {
             title: "创建插件",
             close: "关闭",
             intro:
-                "插件是工作区里的一个文件夹，它变成模型可以调用的工具：工具向消息总线发布，由插件的某个实例应答。",
+                "插件是提供工具的文件夹，模型通过消息总线调用。",
             folder: "1 · 目录结构",
-            folderBody: "文件夹名就是插件 id，插件需要的一切都放在这个文件夹里。",
+            folderBody: "文件夹名就是插件 ID，插件所需的一切都在里面。",
             manifest: "2 · 清单",
             manifestBody:
-                "plugin.json 声明运行时、入口和工具；每个声明的工具都会以 plugin_<id>_<tool> 出现在模型手里。",
+                "plugin.json 声明运行时、入口和工具（plugin_<id>_<tool>）。",
             protocol: "3 · 协议",
             protocolBody:
-                "stdin / stdout 上的逐行 JSON：收到 hello 回 ready，之后每个 request 用同一个 id 回 reply。",
+                "stdin/stdout 上的行式 JSON，用相同 id 回复。",
             service: "4 · 或者以服务方式接入",
             serviceBody:
-                "transport: \"service\" 表示进程由别处启动，用令牌连接上面的接入点；一条连接就是一个实例。",
+                "进程在别处启动，拨上上面的地址加入总线。",
             settings: "5 · 设置页面",
             settingsBody:
-                "config.schema.yaml 会在本窗口渲染成表单，值保存到 config.yaml 并热推给运行中的实例。",
+                "config.schema.yaml 变成这个表单，保存后推给运行中的实例。",
             agent:
-                "也可以让 agent 代劳：自进化模式下它会读 .data/manuals/create-plugin.md，把整个文件夹写好。",
+                "自我进化模式下可以让助手把整个文件夹建好。",
         },
     },
 
     mission: {
         aria: "任务监视器",
         title: "任务监视器",
-        subtitle: "跟踪当前聊天会话的外部任务状态、进行中的任务与阶段性摘要。",
+        subtitle: "本会话的任务状态、进行中的任务与摘要。",
         autoRefresh: "自动刷新",
         refresh: "刷新",
         openDeliverablesFolder: "交付物文件夹",
-        openDeliverablesFolderHint: "打开本会话的交付物目录（.data/deliver/<会话>），删除会话时会一并删除。",
+        openDeliverablesFolderHint: "打开本会话的交付文件夹（.data/deliver/<session>）。",
         deliverables: "交付物",
         deliverablesEmpty: "本会话暂无交付物文件。",
         deliverablesFiles: "{count} 个文件",
