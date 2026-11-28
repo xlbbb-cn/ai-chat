@@ -217,7 +217,9 @@
 .tool-call-entry {
     display: grid;
     grid-template-columns: auto 1fr 16px auto;
-    grid-template-rows: auto auto auto;
+    /* 1 name + description, 2 summary / error, 3 outcome metrics,
+       4 mission-bus counts, 5 expandable output head. */
+    grid-template-rows: auto auto auto auto auto;
     column-gap: 6px;
     row-gap: 1px;
     align-items: start;
@@ -275,9 +277,22 @@
     color: var(--c-danger);
 }
 
+/* What the call produced: `lines 40–80 · 1.2 KB · 0.8s`. Metadata, so the
+   same muted 11px as the summary line — a word, never a pill, a fill or the
+   accent colour (see the metadata rule in docs/DESIGN.md). */
+.tool-call-entry-meta {
+    grid-row: 3;
+    grid-column: 1 / -1;
+    font-size: 11px;
+    color: var(--c-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* Mission-bus (mbus) activity for this task: counts + last note. */
 .tool-call-entry-mbus {
-    grid-row: 3;
+    grid-row: 4;
     grid-column: 1 / -1;
     display: flex;
     gap: 6px;
@@ -286,6 +301,40 @@
     color: var(--c-muted);
     overflow: hidden;
     white-space: nowrap;
+}
+
+/* Head of the tool's own output, closed by default: the row *is* the summary,
+   and a transcript full of build logs is unreadable. */
+.tool-call-entry-output {
+    grid-row: 5;
+    grid-column: 1 / -1;
+    font-size: 11px;
+    color: var(--c-muted);
+}
+
+.tool-call-entry-output>summary {
+    width: fit-content;
+    cursor: pointer;
+}
+
+.tool-call-entry-output>summary:hover {
+    color: var(--c-text);
+}
+
+.tool-call-entry-output>pre {
+    margin: 4px 0 2px;
+    padding: 6px 8px;
+    border: 1px solid var(--c-border);
+    border-radius: 4px;
+    background: var(--c-bg);
+    color: var(--c-text);
+    font-size: 11px;
+    line-height: 1.5;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    max-height: 320px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
 .tool-call-entry-mbus-count {

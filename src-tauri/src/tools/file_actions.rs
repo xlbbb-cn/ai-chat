@@ -55,9 +55,21 @@ pub(super) async fn handle_file_actions(
     let locks = &app.state::<crate::AppState>().file_locks;
     match action {
         "read" => {
-            let _ = emit_tool_progress(app, mission_id, session_id, call_id, format!("*Reading {}*\n\n", path_str));
             let start_line = args["start_line"].as_i64();
             let end_line = args["end_line"].as_i64();
+            // The range belongs in the label: "Reading a file" says nothing
+            // about *which* part of it this call was asked for.
+            let _ = emit_tool_progress(
+                app,
+                mission_id,
+                session_id,
+                call_id,
+                format!(
+                    "*Reading {}{}*\n\n",
+                    path_str,
+                    super::outcome::line_range_suffix(start_line, end_line)
+                ),
+            );
             match resolve_file_action_path(path_str, &root_dir, true) {
                 Ok(p) => {
                     match fs::metadata(&p) {
@@ -275,9 +287,15 @@ pub(super) async fn handle_file_actions(
                 session_id,
                 call_id,
                 format!(
-                    "*Searching {} for {}*\n\n",
+                    "*Searching {} for {}{}*\n\n",
                     path_str,
-                    serde_json::to_string(&query).unwrap_or_else(|_| query.to_string())
+                    serde_json::to_string(&query).unwrap_or_else(|_| query.to_string()),
+                    // A capped search explains a short list; say so up front
+                    // instead of leaving the row looking complete.
+                    args["max_results"]
+                        .as_u64()
+                        .map(|value| format!(" (max {value})"))
+                        .unwrap_or_default()
                 ),
             );
 

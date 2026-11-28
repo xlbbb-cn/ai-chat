@@ -17,6 +17,7 @@ mod file_actions;
 pub(crate) mod file_locks;
 pub(crate) mod memory;
 pub(crate) mod mcp_self;
+pub(crate) mod outcome;
 pub(crate) mod skill_admin;
 mod patch;
 pub(crate) mod paths;
@@ -118,12 +119,18 @@ pub(crate) fn emit_tool_progress<'a>(
 /// yet. A sub-agent mission never reaches here (its row is settled by
 /// `agent-task-done`), and neither does a blocked call: those emit their own
 /// "not executed" line.
+///
+/// `outcome` is what the call produced (see [`outcome::measure`]). It travels
+/// with the settlement because the result string itself never leaves the turn:
+/// the row's line count, exit code, error line and output preview all come from
+/// here, and nothing else in the UI can compute them.
 pub(crate) fn emit_tool_call_done(
     app: &AppHandle,
     session_id: Option<&str>,
     call_id: &str,
     name: &str,
     ok: bool,
+    outcome: &outcome::ToolOutcome,
 ) {
     let _ = app.emit(
         crate::events::TOOL_CALL,
@@ -133,6 +140,7 @@ pub(crate) fn emit_tool_call_done(
             "phase": "done",
             "ok": ok,
             "text": format!("*{name}*"),
+            "outcome": outcome,
         }),
     );
 }

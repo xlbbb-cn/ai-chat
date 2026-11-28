@@ -1229,6 +1229,22 @@ struct ToolRound<'a> {
     budget_stop: &'a mut Option<turn_guard::BudgetStop>,
 }
 
+/// Await one tool call and report how long it took.
+///
+/// A free function rather than a block inside the dispatch loop: the calls
+/// borrow the turn's `&mut` accumulators, so each future has to borrow on
+/// creation (`FnMut`, one at a time) instead of moving the reference into an
+/// `async move`. Timing here — rather than around `join_all` — is what keeps a
+/// concurrent segment from charging every call for the slowest sibling.
+async fn timed<F>(future: F) -> (String, u64)
+where
+    F: std::future::Future<Output = String>,
+{
+    let started = std::time::Instant::now();
+    let result = future.await;
+    (result, started.elapsed().as_millis() as u64)
+}
+
 /// Plan and execute one tool-call round, then settle its results in
 /// `tool_calls` order. Blocked calls (disabled tool / spent budget) are
 /// answered with their notice, so every `tool_call_id` still gets one `tool`
@@ -1267,6 +1283,10 @@ async fn run_tool_round(round: ToolRound<'_>, sr: &StreamResult, all_messages: &
         /// Classification only, so a blocked call never splits a segment
         /// it would not have run in anyway.
         concurrent: bool,
+        /// Single-line `tool · arguments` label. Emitted as the round starts so
+        /// the row shows its parameters even when the tool reports no progress
+        /// of its own, and reused as the snapshot row's description.
+        label: String,
     }
 
     let mut planned: Vec<PlannedCall> = Vec::with_capacity(sr.tool_calls.len());
@@ -1286,6 +1306,7 @@ async fn run_tool_round(round: ToolRound<'_>, sr: &StreamResult, all_messages: &
                 None => None,
             },
         };
+        let label = tools::outcome::call_label(name, &parsed);
         if let Some(notice) = &blocked {
             let reason = if notice.starts_with("Error: TOOL DISABLED") {
                 "disabled for this session"
@@ -1302,6 +1323,7 @@ async fn run_tool_round(round: ToolRound<'_>, sr: &StreamResult, all_messages: &
                     call_id: Some(id.clone()),
                     phase: Some("done".to_string()),
                     ok: Some(false),
+                    outcome: None,
                     text: format!("*{name}* — not executed ({reason})"),
                 },
             );
@@ -1313,6 +1335,29 @@ async fn run_tool_round(round: ToolRound<'_>, sr: &StreamResult, all_messages: &
                     session_id, name, reason
                 ),
             );
+        } else {
+            // A runnable call opens its row now, arguments included: a tool that
+            // reports no progress of its own (`memory`, `todos`, `calculator`)
+            // would otherwise appear only once it finished, as a bare name, and
+            // a parallel round could not be followed at all. A tool with a line
+            // of its own overwrites this one a moment later.
+            //
+            // Two kinds of call are skipped: a background-routed call owns the
+            // background panel's row, and a sub-agent owns its task row — their
+            // settlement never comes through `tool-call`, so a row opened here
+            // would sit "running" for the rest of the turn.
+            let backgrounded = config.background_tools
+                && background_requested(&parsed)
+                && name != "call_subagent";
+            if !backgrounded && name != "call_subagent" {
+                tools::emit_tool_progress(
+                    &app,
+                    None,
+                    Some(session_id),
+                    Some(id.as_str()),
+                    format!("*{label}*"),
+                );
+            }
         }
 
         let concurrent = matches!(
@@ -1326,6 +1371,7 @@ async fn run_tool_round(round: ToolRound<'_>, sr: &StreamResult, all_messages: &
             parsed,
             blocked,
             concurrent,
+            label,
         });
     }
 
@@ -1338,6 +1384,10 @@ async fn run_tool_round(round: ToolRound<'_>, sr: &StreamResult, all_messages: &
     // by index, so the `tool` messages below keep the order the model
     // emitted whatever order the calls finished in.
     let mut results: Vec<Option<String>> = vec![None; planned.len()];
+    // Per-call time. A concurrent segment would otherwise charge every call for
+    // the slowest sibling, and the row would report a duration the tool never
+    // took.
+    let mut elapsed_ms: Vec<u64> = vec![0; planned.len()];
     let max_parallel = if config.parallel_tools {
         config
             .max_parallel_tools
@@ -1375,6 +1425,7 @@ async fn run_tool_round(round: ToolRound<'_>, sr: &StreamResult, all_messages: &
         if runnable.len() == 1 || max_parallel == 1 {
             for &index in &runnable {
                 let call = &planned[index];
+                let started = std::time::Instant::now();
                 let result = if call.name == "use_skill" {
                     let (text, context) = load_skill_for_call(
                         &app,
@@ -1415,6 +1466,7 @@ async fn run_tool_round(round: ToolRound<'_>, sr: &StreamResult, all_messages: &
                     )
                     .await
                 };
+                elapsed_ms[index] = started.elapsed().as_millis() as u64;
                 results[index] = Some(result);
             }
             continue;
@@ -1423,31 +1475,32 @@ async fn run_tool_round(round: ToolRound<'_>, sr: &StreamResult, all_messages: &
         for chunk in runnable.chunks(max_parallel) {
             let futures = chunk.iter().map(|&index| {
                 let call = &planned[index];
-                run_tool_call(
-                    &app,
-                    state,
-                    &config,
-                    &session_id,
-                    &workspace_dir,
-                    ToolCall {
-                        id: &call.id,
-                        name: &call.name,
-                        args: &call.args,
-                        parsed: &call.parsed,
-                    },
-                    &skill_allowed_commands,
-                    skill_evolution_root.as_deref(),
-                    &active_skill_dirs,
-                    &mcp_tool_map,
-                    &enabled_agents,
-                    subagents_enabled,
-                    &turn_cancelled,
-                    turn,
-                )
+                timed(run_tool_call(
+                        &app,
+                        state,
+                        &config,
+                        &session_id,
+                        &workspace_dir,
+                        ToolCall {
+                            id: &call.id,
+                            name: &call.name,
+                            args: &call.args,
+                            parsed: &call.parsed,
+                        },
+                        &skill_allowed_commands,
+                        skill_evolution_root.as_deref(),
+                        &active_skill_dirs,
+                        &mcp_tool_map,
+                        &enabled_agents,
+                        subagents_enabled,
+                        &turn_cancelled,
+                        turn,
+                    ))
             });
             let finished = futures_util::future::join_all(futures).await;
-            for (index, result) in chunk.iter().zip(finished) {
+            for (index, (result, elapsed)) in chunk.iter().zip(finished) {
                 results[*index] = Some(result);
+                elapsed_ms[*index] = elapsed;
             }
         }
     }
@@ -1464,6 +1517,12 @@ async fn run_tool_round(round: ToolRound<'_>, sr: &StreamResult, all_messages: &
         let Some(mut result) = results[index].take().or_else(|| call.blocked.clone()) else {
             break;
         };
+
+        // Measured before anything below appends to `result`: the failure
+        // notice is prose about the turn's budget, not the tool's output, and
+        // must not become the row's error line.
+        let outcome =
+            tools::outcome::measure(&call.name, &call.parsed, &result, elapsed_ms[index]);
 
         let mut settled_ok = call.blocked.is_none();
         // A sub-agent owns its own task row (`agent-task-*`); a generic
@@ -1511,7 +1570,14 @@ async fn run_tool_round(round: ToolRound<'_>, sr: &StreamResult, all_messages: &
             // background-routed call owns one too — the `background-task-state`
             // row — so it must not gain a settled "tool" twin.
             if !backgrounded && call.name != "call_subagent" {
-                tools::emit_tool_call_done(&app, Some(&session_id), &call.id, &call.name, !failed);
+                tools::emit_tool_call_done(
+                    &app,
+                    Some(&session_id),
+                    &call.id,
+                    &call.name,
+                    !failed,
+                    &outcome,
+                );
             }
         }
 
@@ -1520,14 +1586,19 @@ async fn run_tool_round(round: ToolRound<'_>, sr: &StreamResult, all_messages: &
         // `tool-call` events; sub-agent / background calls own their own rows
         // and are skipped here for the same reason as above.
         if !backgrounded && call.name != "call_subagent" {
-            turn.record_tool_row(json!({
+            let mut row = json!({
                 "task_id": &call.id,
                 "agent_name": &call.name,
                 "kind": "tool",
-                "description": &call.name,
+                "description": &call.label,
                 "status": if settled_ok { "done" } else { "error" },
                 "summary": crate::util::truncate_with_trailing_ellipsis(&result, 400),
-            }));
+                "outcome": &outcome,
+            });
+            if let Some(error) = &outcome.error {
+                row["error"] = json!(error);
+            }
+            turn.record_tool_row(row);
         }
 
         all_messages.push(json!({

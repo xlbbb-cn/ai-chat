@@ -347,6 +347,16 @@ const zhCN: Messages = {
         confirmTitle: "允许执行此 Shell 命令？",
         rejected: "用户已拒绝",
         mbusCounts: "消息总线 · 发送 {sent} · 接收 {received}",
+        metrics: {
+            lines: "{count} 行",
+            linesRange: "第 {from}–{to} 行",
+            matches: "{count} 处匹配 · {files} 个文件",
+            truncated: "已截断",
+        },
+        output: {
+            show: "查看输出",
+            showError: "查看错误",
+        },
     },
 
     backgroundGroup: {

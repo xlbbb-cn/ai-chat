@@ -1,8 +1,11 @@
 import type { Message, ToolCallEntry } from "../types";
 import { useEffect, useState } from "react";
-import { useI18n } from "../i18n";
+import { useI18n, type MessageKey, type TranslateVars } from "../i18n";
 import { FontAwesomeIcon, faChevronRight, faTriangleExclamation } from "../icons";
+import { formatBytes } from "../utils/format";
 import "./ToolCallGroup.css";
+
+type Translate = (key: MessageKey, vars?: TranslateVars) => string;
 
 interface Props {
   message: Message;
@@ -41,6 +44,59 @@ function AgentLabel({ entry }: { entry: ToolCallEntry }) {
       {entry.agent_name}
     </>
   );
+}
+
+/** `812ms` / `0.8s` / `12s` — a call's own time, never a raw millisecond count. */
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.round(ms / 1000)}s`;
+}
+
+/**
+ * What the call produced, as one muted line under the row:
+ * `lines 40–80 · 0.8s`, `18 matches · 3 files`, `+42 −3`.
+ *
+ * Only what the backend measured is rendered — an absent field shows nothing
+ * rather than a zero — and the wording stays here: the Rust side sends numbers,
+ * never "40 行". A failure renders its error line instead of these, because a
+ * count of the error message says nothing.
+ */
+function metricsFor(entry: ToolCallEntry, t: Translate): string {
+  const outcome = entry.outcome;
+  if (!outcome || entry.status === "error") return "";
+  const parts: string[] = [];
+  // A search's hit count is the interesting figure; the rows it came back as
+  // would only repeat it.
+  if (outcome.matches != null) {
+    parts.push(
+      t("toolGroup.metrics.matches", {
+        count: outcome.matches,
+        files: outcome.files ?? 0,
+      }),
+    );
+  } else if (outcome.lines != null && (outcome.line_from == null || outcome.line_from <= 1)) {
+    parts.push(t("toolGroup.metrics.lines", { count: outcome.lines }));
+  } else if (
+    outcome.line_from != null &&
+    outcome.line_to != null &&
+    outcome.line_to > outcome.line_from
+  ) {
+    parts.push(
+      t("toolGroup.metrics.linesRange", { from: outcome.line_from, to: outcome.line_to }),
+    );
+  }
+  if (outcome.added != null || outcome.removed != null) {
+    parts.push(`+${outcome.added ?? 0} −${outcome.removed ?? 0}`);
+  }
+  // A size carries the shape of the result when there is no line count to do
+  // it — a `write` reports the bytes it wrote, not its one-line reply.
+  if (outcome.bytes != null && outcome.lines == null) {
+    parts.push(formatBytes(outcome.bytes));
+  }
+  if (outcome.truncated) parts.push(t("toolGroup.metrics.truncated"));
+  if (outcome.duration_ms > 0) parts.push(formatDuration(outcome.duration_ms));
+  return parts.join(" · ");
 }
 
 export function ToolCallGroup({ message, onConfirm, onCancelBackground }: Props) {
@@ -89,7 +145,11 @@ export function ToolCallGroup({ message, onConfirm, onCancelBackground }: Props)
       const activity = (entry.activity ?? "").trim();
       if (activity) return activity;
     }
-    const text = (entry.summary ?? entry.error ?? "").trim();
+    // A finished failure states its reason first: what it attempted is already
+    // on row 1, and the reason it broke is what a reader needs.
+    const failure = (entry.error ?? "").trim();
+    if (failure) return failure;
+    const text = (entry.summary ?? "").trim();
     if (text) return text;
     if (entry.status === "running" && entry.started_at) {
       return t("toolGroup.waitingOutput", {
@@ -107,7 +167,12 @@ export function ToolCallGroup({ message, onConfirm, onCancelBackground }: Props)
     entries.find((e) => e.status === "running" && e.kind === "agent") ??
     runningEntry ??
     entries[entries.length - 1];
-  const previewSub = detailFor(previewEntry);
+  // The collapsed card reports the outcome too (`✓ lines 40–80 · 0.8s`): the
+  // row that just finished is the one the user is waiting to hear about, and
+  // opening the group to check it would defeat the preview.
+  const previewResult =
+    previewEntry.status === "running" ? "" : metricsFor(previewEntry, t);
+  const previewSub = [detailFor(previewEntry), previewResult].filter(Boolean).join(" · ");
   const previewSubClass = previewSub
     ? "tool-call-preview-row tool-call-preview-sub"
     : "tool-call-preview-row tool-call-preview-sub tool-call-preview-sub--empty";
@@ -175,16 +240,30 @@ export function ToolCallGroup({ message, onConfirm, onCancelBackground }: Props)
                 <AgentLabel entry={entry} />
               </span>
               <span className="tool-call-entry-desc">{entry.description}</span>
+              {/* Row 2 is either the reason a call failed or what it was
+                  doing. Both at once would fight for the same grid cell, and
+                  the failure text is the one a reader came for. */}
+              {entry.error ? (
+                <span className="tool-call-entry-error" title={entry.error}>
+                  {entry.error}
+                </span>
+              ) : (
+                (() => {
+                  const detail = detailFor(entry);
+                  if (!entry.cwd && !detail) return null;
+                  return (
+                    <span className="tool-call-entry-summary">
+                      {entry.cwd ? `in ${entry.cwd}` : ""}
+                      {entry.cwd && detail ? " · " : ""}
+                      {detail}
+                    </span>
+                  );
+                })()
+              )}
               {(() => {
-                const detail = detailFor(entry);
-                if (!entry.cwd && !detail) return null;
-                return (
-                  <span className="tool-call-entry-summary">
-                    {entry.cwd ? `in ${entry.cwd}` : ""}
-                    {entry.cwd && detail ? " · " : ""}
-                    {detail}
-                  </span>
-                );
+                const metrics = metricsFor(entry, t);
+                if (!metrics) return null;
+                return <span className="tool-call-entry-meta">{metrics}</span>;
               })()}
               {entry.mbus && (entry.mbus.sent > 0 || entry.mbus.received > 0) && (
                 <span className="tool-call-entry-mbus">
@@ -202,9 +281,25 @@ export function ToolCallGroup({ message, onConfirm, onCancelBackground }: Props)
                   )}
                 </span>
               )}
-              {entry.error && (
-                <span className="tool-call-entry-error">{entry.error}</span>
-              )}
+              {/* The head of the result, on demand: the row stays one line, and
+                  the full error / output is one click away instead of in the
+                  transcript. */}
+              {(() => {
+                const output = entry.outcome?.preview ?? entry.outcome?.error;
+                if (!output) return null;
+                return (
+                  <details className="tool-call-entry-output">
+                    <summary>
+                      {t(
+                        entry.status === "error"
+                          ? "toolGroup.output.showError"
+                          : "toolGroup.output.show",
+                      )}
+                    </summary>
+                    <pre>{output}</pre>
+                  </details>
+                );
+              })()}
               {entry.background && entry.status === "running" && onCancelBackground && (
                 <button
                   type="button"

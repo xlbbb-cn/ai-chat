@@ -160,6 +160,11 @@ pub struct ToolCall {
     pub phase: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ok: Option<bool>,
+    /// What the finished call produced (line counts, exit code, error line,
+    /// clipped preview). Only on `phase: "done"`: a progress line has nothing
+    /// to report yet. See `tools::outcome`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<serde_json::Value>,
     pub text: String,
 }
 

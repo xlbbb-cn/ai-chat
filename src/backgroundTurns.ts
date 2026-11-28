@@ -136,6 +136,10 @@ export class BackgroundTurnDriver {
       description: tc.description,
       status: tc.status,
       summary: tc.summary,
+      // A re-attached row must not lose what it measured: the snapshot carries
+      // the same outcome the live `tool-call` event did.
+      ...(tc.error ? { error: tc.error } : {}),
+      ...(tc.outcome ? { outcome: tc.outcome } : {}),
       started_at: snapshot.started_at_ms,
     }));
     const injections: ChatInjection[] = snapshot.injections.map((item) => ({

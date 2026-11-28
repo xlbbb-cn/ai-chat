@@ -35,6 +35,7 @@ import type {
   TodoListSummary,
   TodoAskAnswer,
   TodoAskRequest,
+  ToolCallOutcome,
   TurnUsageMeta,
   UpdateInfo,
   UpdateDownloadProgress,
@@ -572,6 +573,10 @@ export interface TurnSnapshot {
     description: string;
     status: "done" | "error";
     summary: string;
+    /** Failure line, measured when the call settled. */
+    error?: string;
+    /** Result metrics, so a re-attached row shows them like a live one. */
+    outcome?: ToolCallOutcome;
   }>;
   injections: Array<{
     id: string;

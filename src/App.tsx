@@ -36,6 +36,7 @@ import type {
   AgentPlannerActionEvent,
   ChatInjection,
   ToolCallEntry,
+  ToolCallOutcome,
   MessageContent,
   ModelMetadata,
   Palette,
@@ -2855,6 +2856,8 @@ export default function App() {
         phase?: "progress" | "done";
         /** Only on `done`: false marks the row as failed. */
         ok?: boolean;
+        /** Only on `done`: what the call produced (see `tools/outcome.rs`). */
+        outcome?: ToolCallOutcome | null;
         text: string;
       }>("tool-call", (e) => {
         // Route by session: a winding-down turn's tool step must not settle
@@ -2889,10 +2892,21 @@ export default function App() {
           const existing = currentToolCallsRef.current.some((tc) => tc.task_id === callId);
           if (phase === "done") {
             const status = e.payload.ok === false ? ("error" as const) : ("done" as const);
+            // The backend measured the result when it settled; without it a
+            // failed call was only ever a red dot, because the tool's output
+            // never reaches this side of the bridge.
+            const outcome = e.payload.outcome ?? undefined;
+            const failure = outcome?.error;
             currentToolCallsRef.current = existing
               ? currentToolCallsRef.current.map((tc) =>
                   tc.task_id === callId
-                    ? { ...tc, status, summary: tc.summary ?? detail }
+                    ? {
+                        ...tc,
+                        status,
+                        outcome: outcome ?? tc.outcome,
+                        error: failure ?? tc.error,
+                        summary: tc.summary ?? detail,
+                      }
                     : tc
                 )
               : [
@@ -2904,6 +2918,8 @@ export default function App() {
                     description: label,
                     status,
                     summary: detail,
+                    outcome,
+                    error: failure,
                   },
                 ];
           } else {

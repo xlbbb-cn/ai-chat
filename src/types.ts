@@ -64,6 +64,49 @@ export interface ToolCallEntry {
    * it is persisted with the tool-call entry.
    */
   mbus?: ToolCallMbus;
+  /**
+   * What the call produced, measured by the backend when it settled (see
+   * `tools/outcome.rs`). The transcript's row renders it as numbers and a
+   * preview; absent on rows from before this channel existed, which must keep
+   * rendering exactly as they did.
+   */
+  outcome?: ToolCallOutcome;
+}
+
+/**
+ * Structured result of one tool call.
+ *
+ * The tool's output never reaches the frontend — it is the model's context —
+ * so line counts, exit codes and the failure line are measured in Rust and
+ * arrive as numbers. Words stay here: every field is rendered through i18n,
+ * never as a pre-formatted string from the backend.
+ */
+export interface ToolCallOutcome {
+  /** Raw tool name (`run_shell`, `file_actions`). */
+  tool: string;
+  /** First line of a failure, clipped. Present only when the call failed. */
+  error?: string;
+  /** Process exit code (`run_cmd` / `run_shell`). */
+  exit_code?: number;
+  /** First/last line `file_actions read` returned (1-based, inclusive). */
+  line_from?: number;
+  line_to?: number;
+  /** Lines in the result body. */
+  lines?: number;
+  /** Bytes of the result body, or of the content a `write` wrote. */
+  bytes?: number;
+  /** The result was clipped before the model saw it. */
+  truncated?: boolean;
+  /** `file_actions search` hits and the files they came from. */
+  matches?: number;
+  files?: number;
+  /** Lines a patch / diff added and removed. */
+  added?: number;
+  removed?: number;
+  /** Wall-clock time the call took; 0 when it was never timed. */
+  duration_ms: number;
+  /** Head of the result (≤ 12 lines / 800 chars), for the expander. */
+  preview?: string;
 }
 
 /** One sub-agent ↔ planner / peer message summary shown on a task row. */

@@ -393,6 +393,19 @@ const en = {
         confirmTitle: "Allow this shell command?",
         rejected: "Rejected by user",
         mbusCounts: "mbus · {sent} sent · {received} received",
+        metrics: {
+            lines: { one: "{count} line", other: "{count} lines" },
+            linesRange: "lines {from}–{to}",
+            matches: {
+                one: "{count} match · {files} file",
+                other: "{count} matches · {files} files",
+            },
+            truncated: "truncated",
+        },
+        output: {
+            show: "Show output",
+            showError: "Show error",
+        },
     },
 
     backgroundGroup: {

@@ -347,6 +347,16 @@ const zhTW: Messages = {
         confirmTitle: "允許執行此 Shell 命令？",
         rejected: "使用者已拒絕",
         mbusCounts: "訊息匯流排 · 傳送 {sent} · 接收 {received}",
+        metrics: {
+            lines: "{count} 行",
+            linesRange: "第 {from}–{to} 行",
+            matches: "{count} 處符合 · {files} 個檔案",
+            truncated: "已截斷",
+        },
+        output: {
+            show: "檢視輸出",
+            showError: "檢視錯誤",
+        },
     },
 
     backgroundGroup: {
