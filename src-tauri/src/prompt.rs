@@ -62,9 +62,149 @@ pub fn enhanced_figures_manual() -> String {
     )
 }
 
+/// Shared "language" section appended to the three authoring manuals
+/// (`create-skill`, `create-mcp-server`, `create-plugin`): Python is the
+/// recommended language, the uv-managed 3.13 environment is installed per
+/// host, and the portable `use_venv()` hop keeps an artifact runnable after a
+/// host swap.
+const PYTHON_SECTION: &str = r#"## Language: Python first — 3.13 through uv
+
+Write the artifact in Python (`runtime: python` / a `.py` entry / a script run with
+`run_shell`). It is the one runtime that needs no build step, no lockfile and no third-party
+toolchain: `json`, `urllib.request`, `subprocess`, `pathlib`, `sqlite3` cover nearly every
+job, and the app resolves an interpreter on every platform (`python` → `python3` → `py`).
+Choose `node` only when the job needs a JS-only library, `shell` only when the program must
+already exist on the host.
+
+Hard rule: the artifact must start on a machine where nothing was installed — **stdlib only,
+3.9+ syntax**. A third-party package belongs behind `try: import …` with a degraded branch,
+never in the import header.
+
+### The 3.13 + uv environment (one per host — already set up on this one)
+
+- `uv` 0.11.6 at `~/.local/bin/uv` (found through the login-shell PATH the app uses).
+- `uv python install 3.13` → uv-managed CPython **3.13.13**, exposed as
+  `~/.local/bin/python3.13`; the real interpreter lives under
+  `~/.local/share/uv/python/cpython-3.13-linux-x86_64-gnu/`.
+- Workspace venv **`.data/venv/py313`** — `bin/python` on POSIX, `Scripts/python.exe` on
+  Windows; verified to report `3.13.13`.
+- The host default is *not* it: `python3` here is 3.14 (Fedora 43). Use the 3.13 venv when a
+  package's wheels lag behind 3.14; the plain `python`/`python3` resolution stays the default
+  and must keep working.
+
+```bash
+uv venv --python 3.13 .data/venv/py313                      # (re)create the venv
+uv pip install --python .data/venv/py313/bin/python <pkg>   # add a package
+uv run --python 3.13 script.py                              # one-off, no venv needed
+.data/venv/py313/bin/python -V                              # → Python 3.13.13
+```
+
+`uv venv` seeds no `pip`: inside the venv `python -m pip …` fails, so
+`uv pip install --python <venv python> …` is the only package path, and
+`uv pip list --python .data/venv/py313/bin/python` inspects it.
+
+### The venv is host-bound — code must never hard-code it
+
+`pyvenv.cfg` and the `bin/` shims store absolute host paths, so `.data/venv` does not
+travel: after a host or OS change, delete it and re-run the two commands above. Any code you
+hand over derives the workspace root at runtime (`PLUGIN_WORKSPACE`, `Path(__file__).resolve()`,
+the cwd) and hops into the venv only when it is really there:
+
+```python
+import os, sys
+from pathlib import Path
+
+def workspace_of(start: Path) -> Path:
+    """Nearest ancestor that holds `.data/` — correct at any nesting depth."""
+    for parent in [start, *start.parents]:
+        if (parent / ".data").is_dir():
+            return parent
+    raise SystemExit("workspace root with .data/ not found")
+
+WORKSPACE = Path(os.environ.get("PLUGIN_WORKSPACE") or workspace_of(Path(__file__).resolve()))
+PY = WORKSPACE / ".data" / "venv" / "py313" / (
+    "Scripts/python.exe" if os.name == "nt" else "bin/python"
+)
+
+def use_venv() -> None:
+    """Optional upgrade: run under 3.13 when the host interpreter is older."""
+    if sys.version_info >= (3, 13) or not PY.is_file():
+        return                              # no venv on this host → stdlib code still runs
+    if os.environ.get("X_REEXEC") == "1":
+        raise SystemExit("re-exec loop")   # guard: never hop twice
+    os.environ["X_REEXEC"] = "1"
+    os.execv(str(PY), [str(PY), str(Path(__file__).resolve()), *sys.argv[1:]])
+```
+
+Verified: `execv` inherits the parent's stdin/stdout, so a line protocol survives the hop —
+a probe started with the system 3.14 answered `initialize` / `tools/list` from 3.13.13.
+
+Call it before the first byte written to stdout: `execv` replaces the process image and drops
+unflushed buffered output (verified — a `print` before the hop never reached the parent's
+stdout). `mcp_self` launches `python3 server.py` *without* `-u` (plugin children do get `-u`),
+so the hop belongs at import time, before the reply loop exists.
+"#;
+
+/// Skill-only tail: helper scripts that ship inside a skill folder.
+const SKILL_SCRIPTS_SECTION: &str = r#"## Scripts that belong to a skill
+
+A skill's helper script is Python too, run through `run_shell` / `run_cmd`: stdlib only,
+workspace root from the nearest ancestor holding `.data/` (or `parents[3]` from
+`.data/skills/<name>/script.py`), scratch files into `.data/tmp/`, final artifacts into the
+project folder. When a skill truly needs a package, write the exact
+`uv pip install --python .data/venv/py313/bin/python <pkg>` line into the skill body and call
+the script as `.data/venv/py313/bin/python script.py` — never assume bare `python` is the
+venv, and never leave the skill broken on a host without it.
+"#;
+
+/// MCP-only tail: how the stdio server's interpreter is resolved and re-resolved.
+const MCP_INTERPRETER_SECTION: &str = r#"## Interpreter, host swaps and 3.13
+
+`mcp_self` takes no command: on POSIX it resolves `python3`, on Windows `python`, and the
+stdio child is launched through the user's login shell, so the shell PATH applies. The
+roster therefore stores a concrete name — after a host or OS change re-run `mcp_self` `write`
+with the same `name` (it updates in place instead of creating `<slug>-2`) so the interpreter
+is re-resolved, then confirm with `test`.
+
+Keep `server.py` stdlib-only and portable (`pathlib`, explicit `encoding="utf-8"`, `\n`
+lines). When it genuinely needs 3.13 or a wheel 3.14 lacks, put the shared `workspace_of()`
+and `use_venv()` hop at the top of the file (`.data/mcp/<slug>/server.py` sits three levels
+below the workspace root): a host without `.data/venv/py313` keeps running on its own
+interpreter, which is exactly the portability the roster needs.
+"#;
+
+/// Plugin-only tail: language choice plus the cross-host portability contract.
+const PLUGIN_PORTABILITY_SECTION: &str = r#"## Language and portability (the plugin must survive a host swap)
+
+`runtime: "python"` (or `auto` with a `.py` entry) is the portable choice: the app resolves
+`python` → `python3` → `py` per host and adds `-u` itself. The child starts in the plugin
+folder with `PLUGIN_ID`, `PLUGIN_DIR`, `PLUGIN_WORKSPACE`, `PLUGIN_INSTANCE(S)` in the
+environment plus `PYTHONIOENCODING=utf-8` / `PYTHONUNBUFFERED=1`; take paths from those and
+`__file__` only. `command` + `args` is an escape hatch (the entry is appended as the last
+argument and the automatic `-u` disappears — you must pass `"args": ["-u"]`); it is not a
+place for a host-specific absolute interpreter path.
+
+The plugin is copied to another machine — Windows, macOS, another Python, no packages — so:
+- **No absolute paths, no hand-written separators** — `PLUGIN_DIR` / `PLUGIN_WORKSPACE` /
+  `__file__` + `pathlib`; never `/tmp`, `~/.local`, `/usr/bin`, `C:\…`.
+- **No shell strings** — `subprocess.run([...], check=True)`, never `shell=True`; branch on
+  `os.name` / `sys.platform` only where behavior truly differs, and keep one code path.
+- **3.9+ syntax only** — no `match`, no `X | Y` annotations, no `tomllib`, no
+  `str.removeprefix`; gate anything newer behind `sys.version_info`.
+- **UTF-8 explicit** — `open(..., encoding="utf-8")`; non-ASCII paths and Windows console
+  encodings are the normal case, not the exception.
+- **`\n` only** — one protocol line per write, `flush=True`; a stray `\r\n` corrupts a frame.
+- **No POSIX-only tricks** — `runtime: "exec"` needs the exec bit (unavailable on Windows),
+  `fork`, `fcntl`, `select` on fds are out; threads are fine, orphan daemons are not.
+- **No install at startup** — no `pip install`, no download; an absent optional package
+  yields a degraded answer, never a crash.
+- **`.data/venv` never travels** — the optional 3.13 hop (`use_venv()`) checks `PY.is_file()`
+  first, so a machine without the venv still runs.
+"#;
+
 /// `create-skill` manual: how to author/edit a workspace skill by hand.
 pub fn skill_manual() -> String {
-    "# Creating / editing a skill (self-evolution)\n\n\
+    let mut body = "# Creating / editing a skill (self-evolution)\n\n\
      The ONE skill directory is `<workspace>/.data/skills` (workspace-relative \
      `./.data/skills`) — never create or look for a second one, and never write outside the \
      workspace.\n\n\
@@ -103,12 +243,17 @@ pub fn skill_manual() -> String {
      - Deleting a skill: `file_actions` `delete` on the folder, then remove its entry from \
      `skills.status`.\n\
      - Never claim a skill exists without having written AND registered it."
-        .to_string()
+        .to_string();
+    body.push_str("\n\n");
+    body.push_str(PYTHON_SECTION);
+    body.push_str("\n");
+    body.push_str(SKILL_SCRIPTS_SECTION);
+    body
 }
 
 /// `create-mcp-server` manual: building a self-owned MCP server with `mcp_self`.
 pub fn mcp_manual() -> String {
-    "# Creating a self-built MCP server (`mcp_self`)\n\n\
+    let mut body = "# Creating a self-built MCP server (`mcp_self`)\n\n\
      A server is a small stdio program speaking line-delimited JSON-RPC 2.0. One job and a \
      few tools per server; prefer `python` unless the task needs Node; never put credentials \
      in a script (use the environment or an app tool).\n\n\
@@ -139,7 +284,12 @@ pub fn mcp_manual() -> String {
      - `test` is for diagnosis only; `remove` stops the process, deletes the folder and \
      drops the registry entry.\n\
      - Keep servers small and focused; drop the ones no longer needed."
-        .to_string()
+        .to_string();
+    body.push_str("\n\n");
+    body.push_str(PYTHON_SECTION);
+    body.push_str("\n");
+    body.push_str(MCP_INTERPRETER_SECTION);
+    body
 }
 
 /// `create-subagent` manual: the reference the main agent reads when it
@@ -197,7 +347,7 @@ pub fn subagent_manual() -> String {
 
 /// `create-plugin` manual: a workspace plugin and the message bus behind it.
 pub fn plugin_manual() -> String {
-    r#"# Creating a plugin (plugin message bus)
+    let mut body = r#"# Creating a plugin (plugin message bus)
 
 A plugin is a workspace folder that becomes tools the model can call: the tool publishes on
 the plugin message bus, the bus routes the message to one of the plugin's instances, and the
@@ -295,7 +445,12 @@ to its own HTML. Values reach the plugin in `welcome.config` and again as
 - One plugin, one purpose. Its tools share the instance pool and the settings page.
 - A reply is text the model reads: keep it small, structured, free of ANSI noise.
 "#
-        .to_string()
+        .to_string();
+    body.push_str("\n");
+    body.push_str(PYTHON_SECTION);
+    body.push_str("\n");
+    body.push_str(PLUGIN_PORTABILITY_SECTION);
+    body
 }
 
 // ─── Tool description ────────────────────────────────────────────────────────
