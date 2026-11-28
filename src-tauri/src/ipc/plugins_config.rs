@@ -94,8 +94,10 @@ pub(crate) async fn reset_plugin_config(
 }
 
 /// Label of the plugin manager webview (`plugin-manager.html`). Its own
-/// capability file (`capabilities/plugin-manager.json`) grants nothing but
-/// `core:default`, so the window can only listen and call app commands.
+/// capability file (`capabilities/plugin-manager.json`) grants `core:default`
+/// plus the native open/save dialogs the package pickers use — no fs, no
+/// shell — so the window can only listen, ask the user for a file and call
+/// app commands.
 pub const MANAGER_WINDOW: &str = "plugin-manager";
 
 #[tauri::command]

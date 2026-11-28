@@ -2401,6 +2401,8 @@ pub fn run() {
             ipc::plugins::clear_plugin_logs,
             ipc::plugins::get_plugin_bus_records,
             ipc::plugins::get_plugin_events,
+            ipc::plugins::export_plugin_package,
+            ipc::plugins::import_plugin_package,
             // Sub-agents and missions.
             ipc::agents::list_sub_agents,
             ipc::agents::list_agent_mentions,

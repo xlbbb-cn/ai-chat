@@ -819,6 +819,33 @@ export interface PluginEntry extends PluginView {
   running: number;
 }
 
+/** What one export wrote (mirrors `PluginExportReport` in Rust). */
+export interface PluginExportReport {
+  id: string;
+  /** Absolute path of the archive the user picked. */
+  path: string;
+  /** Files written, the manifest included. */
+  files: number;
+  /** Size of the archive on disk, in bytes. */
+  bytes: number;
+  /** Files left out: hidden ones, editor backups, settings without a schema. */
+  skipped: number;
+  /** Secret values removed from the packed config.yaml. */
+  secrets_removed: number;
+  /** Whether the archive carries the plugin's settings at all. */
+  settings_exported: boolean;
+}
+
+/** What one import installed (mirrors `PluginImportReport` in Rust). */
+export interface PluginImportReport {
+  plugin: PluginView;
+  dir: string;
+  files: number;
+  bytes: number;
+  /** Where the copy this import replaced was moved; `null` for a fresh install. */
+  replaced: string | null;
+}
+
 export type PluginInstanceState = "starting" | "ready" | "failed" | "stopped";
 
 /** One long-lived plugin instance (a spawned child or an attached service). */

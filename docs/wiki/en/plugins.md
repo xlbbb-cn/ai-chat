@@ -8,7 +8,7 @@ The chain is fixed: the model calls a tool → the tool publishes on the **plugi
 | --- | --- |
 | Settings → Run → **Enable the plugin system** | `config.plugins_enabled`, off by default. Only then does the model receive the `plugin` tool and every declared `plugin_<id>_<tool>` |
 | Settings → Run → **Plugin manager** | Opens a **separate window** (not a section inside the settings sheet); the row is hidden while the plugin system is off |
-| Inside the manager | Plugin list, instance table, settings form, log tail, bus audit strip; the book icon next to the title opens "Creating a plugin" |
+| Inside the manager | Plugin list with a filter box, instance table, settings form, log tail, bus audit strip; the book icon next to the title opens "Creating a plugin", **Export** sits beside Start / Stop and **Import package** in the toolbar (see *Export and import*) |
 
 The **service endpoint** (`127.0.0.1:<port>`) and **token** a service plugin needs live in the manager window too, each with a copy button.
 
@@ -59,6 +59,18 @@ Plugins are **workspace content**: switching the workspace switches the whole se
 | `config_page` | HTML file for a bespoke settings page (instead of the schema form) |
 
 A broken manifest never takes the whole load down: that plugin becomes an entry under "Manifests that could not be loaded" and the others keep working.
+
+## Export and import
+
+The manager moves a plugin between workspaces as **one `.zip`**:
+
+| Action | What happens |
+| --- | --- |
+| **Export** (beside Start / Stop) | Packs the selected plugin: `plugin.json` at the archive root, then the entry script, the schema and its assets. Hidden files, `*.bak.*`, `node_modules/` and the cache folders stay out. `config.yaml` travels only when the plugin declares a `config.schema.yaml`, and every `secret` field is removed first — re-enter a token after importing |
+| **Import package** (toolbar) | Takes a `.zip` — a package from this app, or a folder zipped by hand holding one `plugin.json` — unpacks it into the workspace and selects the new plugin. Importing over an installed plugin stops its instances and moves the old folder to `.data/plugin-backups/<id>-<timestamp>/` |
+| Refused, nothing written | An archive with no `plugin.json`, two plugins in one archive, a declared `entry` or `config_schema` the archive does not carry, or a workspace already holding 32 plugins |
+
+A package is the migration path: [Configuration and Backup](Configuration-and-Backup) does not include `.data/plugins`, so export the plugins you need before moving a workspace.
 
 ## Protocol
 
@@ -165,7 +177,7 @@ Workflow:
 - A `.js` entry inside a `"type": "module"` workspace is ESM — name it `server.mjs`, or use CommonJS with `server.cjs`.
 - One plugin, one purpose: its tools share one instance pool and one settings page.
 - A reply is text the model reads: keep it small, structured and free of ANSI noise.
-- **Backups do not include `.data/plugins` yet**: a full export/import has no entry for it, so copy the folder by hand when migrating.
+- **Backups do not include `.data/plugins`**: export the plugins you need as packages before migrating a workspace (see *Export and import*).
 
 ## FAQ
 

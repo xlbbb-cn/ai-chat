@@ -71,7 +71,7 @@ export function PluginHelpSheet({ onClose }: Props) {
                         <h2>{t("plugins.help.title")}</h2>
                         <button
                             type="button"
-                            className="pm-icon-button"
+                            className="close-btn"
                             onClick={onClose}
                             aria-label={t("plugins.help.close")}
                         >

@@ -1,11 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "plugin-manager",
-  "description": "The plugin manager window (plugins/manager.rs) — reads plugin state, instances, logs and bus traffic, edits per-plugin settings. Every window action runs through app commands; the webview itself gets no fs/shell capability.",
+  "description": "The plugin manager window (plugins/manager.rs) — reads plugin state, instances, logs and bus traffic, edits per-plugin settings, and picks the files its plugin packages are written to and read from. Every window action runs through app commands; the webview itself gets no fs/shell capability, only the native open/save dialogs.",
   "windows": [
     "plugin-manager"
   ],
   "permissions": [
-    "core:default"
+    "core:default",
+    "dialog:allow-open",
+    "dialog:allow-save"
   ]
 }

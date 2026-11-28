@@ -13,11 +13,14 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
+    exportPluginPackage,
     getPluginBusRecords,
     getPluginConfig,
     getPluginLogs,
     getPluginManagerState,
+    importPluginPackage,
     reloadPlugins,
     resetPluginConfig,
     savePluginConfig,
@@ -36,7 +39,7 @@ import type {
     PluginTransport,
 } from "../types";
 import { useI18n, type MessageKey } from "../i18n";
-import { FontAwesomeIcon, faBookOpen } from "../icons";
+import { FontAwesomeIcon, faBookOpen, faBoxOpen, faFileArrowDown } from "../icons";
 import { PluginHelpSheet } from "./PluginHelpSheet";
 import "./PluginManagerPanel.css";
 
@@ -101,7 +104,15 @@ export function PluginManagerPanel() {
     const [helpOpen, setHelpOpen] = useState(false);
     const [notice, setNotice] = useState<string | null>(null);
     const [copied, setCopied] = useState<string | null>(null);
+    const [search, setSearch] = useState("");
+    const [noticeTone, setNoticeTone] = useState<"info" | "error">("info");
     const logTail = useRef<HTMLDivElement | null>(null);
+
+    /** One notice line, coloured by whether it reports success or failure. */
+    function notify(message: string, tone: "info" | "error" = "info") {
+        setNotice(message);
+        setNoticeTone(tone);
+    }
 
     const refresh = useCallback(async () => {
         try {
@@ -118,7 +129,7 @@ export function PluginManagerPanel() {
                     : next.plugins[0]?.id ?? null
             );
         } catch (err) {
-            setNotice(String(err));
+            notify(String(err), "error");
         }
     }, []);
 
@@ -173,7 +184,7 @@ export function PluginManagerPanel() {
                 setLogs(entries);
             })
             .catch((err) => {
-                if (!disposed) setNotice(String(err));
+                if (!disposed) notify(String(err), "error");
             });
         return () => {
             disposed = true;
@@ -193,6 +204,21 @@ export function PluginManagerPanel() {
         () => state?.instances.filter((instance) => instance.plugin_id === selected) ?? [],
         [state, selected]
     );
+    // The column is short, but a workspace may hold a few dozen plugins once
+    // they are importable; filtering by name, id, description or tool name
+    // finds one faster than reading the list.
+    const filtered = useMemo(() => {
+        const list = state?.plugins ?? [];
+        const query = search.trim().toLowerCase();
+        if (!query) return list;
+        return list.filter(
+            (entry) =>
+                entry.name.toLowerCase().includes(query) ||
+                entry.id.toLowerCase().includes(query) ||
+                entry.description.toLowerCase().includes(query) ||
+                entry.tools.some((tool) => tool.toLowerCase().includes(query))
+        );
+    }, [state, search]);
 
     const setValue = useCallback((key: string, value: unknown) => {
         setDraft((prev) => ({ ...prev, [key]: value }));
@@ -207,12 +233,13 @@ export function PluginManagerPanel() {
             setConfig(view);
             setErrors(view.errors ?? []);
             setDraft(valuesFromForm(view));
-            setNotice(view.errors?.length ? null : t("plugins.saved"));
+            if (view.errors?.length) setNotice(null);
+            else notify(t("plugins.saved"));
             await refresh();
         } catch (err) {
             // A validation failure arrives as `[{ key, message }]`.
             if (Array.isArray(err)) setErrors(err as PluginFieldError[]);
-            else setNotice(String(err));
+            else notify(String(err), "error");
         } finally {
             setBusy(null);
         }
@@ -227,10 +254,10 @@ export function PluginManagerPanel() {
             setConfig(view);
             setDraft(valuesFromForm(view));
             setErrors([]);
-            setNotice(t("plugins.saved"));
+            notify(t("plugins.saved"));
             await refresh();
         } catch (err) {
-            setNotice(String(err));
+            notify(String(err), "error");
         } finally {
             setBusy(null);
         }
@@ -245,7 +272,75 @@ export function PluginManagerPanel() {
             else await reloadPlugins();
             await refresh();
         } catch (err) {
-            setNotice(String(err));
+            notify(String(err), "error");
+        } finally {
+            setBusy(null);
+        }
+    }
+
+    /**
+     * Import a `.zip` package. The backend stages the folder, validates the
+     * manifest, stops the instances of a plugin it replaces and keeps the old
+     * copy under `.data/plugin-backups/` — the window only reports it.
+     */
+    async function handleImport() {
+        setBusy("import");
+        setNotice(null);
+        try {
+            const picked = await openDialog({
+                multiple: false,
+                directory: false,
+                title: t("plugins.package.importTitle"),
+                filters: [{ name: t("plugins.package.filter"), extensions: ["zip"] }],
+            });
+            if (!picked || Array.isArray(picked)) return;
+            const report = await importPluginPackage(picked);
+            await refresh();
+            setSelected(report.plugin.id);
+            const parts = [
+                t("plugins.package.imported", {
+                    name: report.plugin.name || report.plugin.id,
+                    files: report.files,
+                }),
+            ];
+            if (report.replaced) {
+                parts.push(t("plugins.package.importReplace", { dir: report.replaced }));
+            }
+            notify(parts.join(" · "));
+        } catch (err) {
+            notify(t("plugins.package.importFailed", { message: String(err) }), "error");
+        } finally {
+            setBusy(null);
+        }
+    }
+
+    /** Export the selected plugin to the `.zip` the user names. */
+    async function handleExport() {
+        if (!plugin) return;
+        setBusy("export");
+        setNotice(null);
+        try {
+            const picked = await saveDialog({
+                title: t("plugins.package.exportTitle", { name: plugin.name }),
+                defaultPath: `${plugin.id}-${plugin.version || "0.0.0"}.zip`,
+                filters: [{ name: t("plugins.package.filter"), extensions: ["zip"] }],
+            });
+            if (!picked || Array.isArray(picked)) return;
+            const report = await exportPluginPackage(plugin.id, picked);
+            const parts = [
+                t("plugins.package.exported", { files: report.files, path: report.path }),
+            ];
+            if (report.secrets_removed > 0) {
+                parts.push(
+                    t("plugins.package.exportedSecrets", { count: report.secrets_removed })
+                );
+            }
+            if (!report.settings_exported) {
+                parts.push(t("plugins.package.exportedNoSettings"));
+            }
+            notify(parts.join(" · "));
+        } catch (err) {
+            notify(t("plugins.package.exportFailed", { message: String(err) }), "error");
         } finally {
             setBusy(null);
         }
@@ -257,7 +352,7 @@ export function PluginManagerPanel() {
             setCopied(tag);
             window.setTimeout(() => setCopied(null), 1200);
         } catch {
-            setNotice(text);
+            notify(text);
         }
     }
 
@@ -272,7 +367,7 @@ export function PluginManagerPanel() {
                         <h1>{t("plugins.windowTitle")}</h1>
                         <button
                             type="button"
-                            className="pm-icon-button"
+                            className="close-btn"
                             onClick={() => setHelpOpen(true)}
                             aria-label={t("plugins.help.open")}
                             title={t("plugins.help.open")}
@@ -285,7 +380,19 @@ export function PluginManagerPanel() {
                 <div className="pm-header-actions">
                     <button
                         type="button"
-                        className="pm-button"
+                        className="btn-secondary pm-action"
+                        onClick={() => void handleImport()}
+                        disabled={busy !== null}
+                        title={t("plugins.package.hint")}
+                    >
+                        <FontAwesomeIcon icon={faBoxOpen} aria-hidden="true" />
+                        {busy === "import"
+                            ? t("plugins.package.importing")
+                            : t("plugins.package.import")}
+                    </button>
+                    <button
+                        type="button"
+                        className="btn-secondary pm-action"
                         onClick={() => void refresh()}
                         disabled={busy !== null}
                     >
@@ -293,7 +400,7 @@ export function PluginManagerPanel() {
                     </button>
                     <button
                         type="button"
-                        className="pm-button"
+                        className="btn-secondary pm-action"
                         onClick={() => void handleLifecycle("reload")}
                         disabled={busy !== null}
                     >
@@ -347,17 +454,45 @@ export function PluginManagerPanel() {
                 </div>
             )}
 
-            {notice && <div className="pm-notice">{notice}</div>}
+            {notice && (
+                <div
+                    className={`pm-notice pm-notice-${noticeTone}`}
+                    role={noticeTone === "error" ? "alert" : "status"}
+                >
+                    {notice}
+                </div>
+            )}
 
             <div className="pm-body">
                 <aside className="pm-list" aria-label={t("plugins.windowTitle")}>
+                    <div className="pm-list-head">
+                        <input
+                            className="panel-search-input"
+                            type="search"
+                            value={search}
+                            onChange={(event) => setSearch(event.target.value)}
+                            placeholder={t("plugins.search")}
+                            aria-label={t("plugins.search")}
+                        />
+                        <span className="pm-list-count">
+                            {t("plugins.count", {
+                                shown: filtered.length,
+                                total: state?.plugins.length ?? 0,
+                            })}
+                        </span>
+                    </div>
                     {state?.plugins.length === 0 && (
                         <div className="pm-empty">
                             <strong>{t("plugins.empty")}</strong>
                             <span>{t("plugins.emptyHint")}</span>
                         </div>
                     )}
-                    {state?.plugins.map((entry) => (
+                    {state && state.plugins.length > 0 && filtered.length === 0 && (
+                        <div className="pm-empty">
+                            <span>{t("plugins.searchEmpty", { query: search.trim() })}</span>
+                        </div>
+                    )}
+                    {filtered.map((entry) => (
                         <PluginRow
                             key={entry.id}
                             entry={entry}
@@ -394,7 +529,7 @@ export function PluginManagerPanel() {
                                         so a live plugin says what the click actually does. */}
                                     <button
                                         type="button"
-                                        className="pm-button pm-button-primary"
+                                        className="btn-primary pm-action"
                                         onClick={() => void handleLifecycle("start")}
                                         disabled={busy !== null || !plugin.enabled}
                                     >
@@ -404,11 +539,23 @@ export function PluginManagerPanel() {
                                     </button>
                                     <button
                                         type="button"
-                                        className="pm-button"
+                                        className="btn-secondary pm-action"
                                         onClick={() => void handleLifecycle("stop")}
                                         disabled={busy !== null}
                                     >
                                         {t("plugins.stop")}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="btn-secondary pm-action"
+                                        onClick={() => void handleExport()}
+                                        disabled={busy !== null}
+                                        title={t("plugins.package.hint")}
+                                    >
+                                        <FontAwesomeIcon icon={faFileArrowDown} aria-hidden="true" />
+                                        {busy === "export"
+                                            ? t("plugins.package.exporting")
+                                            : t("plugins.package.export")}
                                     </button>
                                 </div>
                             </div>
@@ -495,7 +642,7 @@ export function PluginManagerPanel() {
                                         <div className="pm-form-actions">
                                             <button
                                                 type="button"
-                                                className="pm-button pm-button-primary"
+                                                className="btn-primary pm-action"
                                                 onClick={() => void handleSave()}
                                                 disabled={busy !== null}
                                             >
@@ -503,7 +650,7 @@ export function PluginManagerPanel() {
                                             </button>
                                             <button
                                                 type="button"
-                                                className="pm-button"
+                                                className="btn-secondary pm-action"
                                                 onClick={() => void handleReset()}
                                                 disabled={busy !== null}
                                             >

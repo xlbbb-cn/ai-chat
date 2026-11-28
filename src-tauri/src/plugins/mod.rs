@@ -35,6 +35,7 @@ pub mod config;
 pub mod instance;
 pub mod link;
 pub mod manager;
+pub mod package;
 #[cfg(test)]
 mod tests;
 pub mod tool;

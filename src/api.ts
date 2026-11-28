@@ -44,6 +44,8 @@ import type {
   RequestHeader,
   PluginView,
   PluginManagerState,
+  PluginExportReport,
+  PluginImportReport,
   PluginConfigView,
   PluginLogEntry,
   PluginBusRecord,
@@ -1146,6 +1148,29 @@ export async function startPlugin(id: string): Promise<number> {
 
 export async function stopPlugin(id: string): Promise<number> {
   return invoke("stop_plugin", { id });
+}
+
+/**
+ * Pack one plugin into the `.zip` path the user picked.
+ *
+ * Settings the schema marks `secret` are stripped before packing, so an
+ * archive can be shared without carrying a token.
+ */
+export async function exportPluginPackage(
+  id: string,
+  path: string,
+): Promise<PluginExportReport> {
+  return invoke("export_plugin_package", { id, path });
+}
+
+/**
+ * Install a plugin package.
+ *
+ * A plugin the archive replaces is stopped first: its instances still run the
+ * code that was just removed from disk.
+ */
+export async function importPluginPackage(path: string): Promise<PluginImportReport> {
+  return invoke("import_plugin_package", { path });
 }
 
 export async function reloadPlugins(): Promise<void> {

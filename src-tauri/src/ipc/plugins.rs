@@ -6,6 +6,7 @@
 
 use crate::plugins;
 use crate::AppState;
+use std::path::Path;
 use tauri::State;
 
 #[tauri::command]
@@ -132,4 +133,56 @@ pub(crate) fn get_plugin_events(
         .plugins
         .sink()
         .events(&plugin_id, drain.unwrap_or(false))
+}
+
+/// Pack one installed plugin into the `.zip` path the caller picked.
+///
+/// Secrets the plugin's settings schema declares are stripped before packing
+/// (`plugins::package`), so an archive can be shared without carrying a token.
+#[tauri::command]
+pub(crate) fn export_plugin_package(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+) -> Result<plugins::package::PluginExportReport, String> {
+    let workspace = state.workspace_dir.lock().unwrap().clone();
+    plugins::package::export_plugin(&workspace, &id, Path::new(&path))
+}
+
+/// Install a package the caller picked.
+///
+/// The plugin the archive replaces is retired *before* its folder is touched:
+/// an instance keeps the old directory open, and Windows refuses the rename
+/// while it does. Stopping it afterwards covers a package whose id only the
+/// import could resolve.
+#[tauri::command]
+pub(crate) async fn import_plugin_package(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<plugins::package::PluginImportReport, String> {
+    let workspace = state.workspace_dir.lock().unwrap().clone();
+    let source = Path::new(&path);
+    let replaced = plugins::package::package_id(source);
+    let was_running = match replaced.as_deref() {
+        Some(id) => state.plugins.stop(id).await > 0,
+        None => false,
+    };
+    let report = match plugins::package::import_plugin(&workspace, source) {
+        Ok(report) => report,
+        Err(err) => {
+            // An import that failed must not also leave offline the plugin it
+            // could not replace.
+            if was_running {
+                let registry = plugins::load_plugins(&workspace);
+                if let Some(plugin) = replaced.as_deref().and_then(|id| registry.get(id)) {
+                    let _ = state.plugins.start(plugin).await;
+                    state.plugins.bump_revision();
+                }
+            }
+            return Err(err);
+        }
+    };
+    state.plugins.stop(&report.plugin.id).await;
+    state.plugins.bump_revision();
+    Ok(report)
 }

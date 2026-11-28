@@ -30,7 +30,7 @@
     max-height: calc(100vh - 48px);
     overflow: auto;
     border: 1px solid var(--c-border);
-    border-radius: 10px;
+    border-radius: var(--r-sm);
     background: var(--c-surface);
     color: var(--c-body);
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -39,34 +39,12 @@
     white-space: pre-wrap;
 }
 
-/* ── Title row + icon button ─────────────────────────────────────────────── */
+/* ── Title row ─────────────────────────────────────────────── */
 
 .pm-title-row {
     display: flex;
     align-items: center;
     gap: 8px;
-}
-
-.pm-icon-button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 26px;
-    height: 26px;
-    padding: 0;
-    border: 1px solid transparent;
-    border-radius: 7px;
-    background: none;
-    color: var(--c-muted);
-    font-size: 13px;
-    cursor: pointer;
-    transition: background var(--t-dur, 120ms) var(--t-ease, ease),
-        color var(--t-dur, 120ms) var(--t-ease, ease);
-}
-
-.pm-icon-button:hover {
-    background: var(--c-hover);
-    color: var(--c-text);
 }
 
 /* ── "How to create a plugin" sheet ──────────────────────────────────────── */
@@ -79,8 +57,9 @@
     align-items: center;
     justify-content: center;
     padding: 28px;
-    background: rgba(0, 0, 0, 0.42);
-    backdrop-filter: blur(2px);
+    background: color-mix(in srgb, var(--c-bg) 68%, transparent);
+    -webkit-backdrop-filter: blur(var(--glass-blur-scrim));
+    backdrop-filter: blur(var(--glass-blur-scrim));
 }
 
 .pm-sheet {
@@ -89,10 +68,10 @@
     width: min(720px, 100%);
     max-height: 100%;
     overflow: hidden;
-    border: 1px solid var(--c-border);
-    border-radius: 14px;
+    border: 1px solid var(--c-border-i);
+    border-radius: var(--r-sm);
     background: var(--c-surface);
-    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+    box-shadow: var(--shadow-lg);
 }
 
 .pm-sheet-head {
@@ -144,7 +123,7 @@
     padding: 10px 12px;
     overflow: auto;
     border: 1px solid var(--c-border);
-    border-radius: 9px;
+    border-radius: var(--r-sm);
     background: var(--c-code);
     color: var(--c-body);
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -194,39 +173,6 @@
 
 /* ── Buttons ─────────────────────────────────────────────────────────────── */
 
-.pm-button {
-    padding: 7px 14px;
-    border: 1px solid var(--c-border-i);
-    border-radius: 8px;
-    background: var(--c-surface);
-    color: var(--c-text);
-    font-family: inherit;
-    font-size: 13px;
-    cursor: pointer;
-    transition: background var(--t-dur, 120ms) var(--t-ease, ease),
-        border-color var(--t-dur, 120ms) var(--t-ease, ease);
-}
-
-.pm-button:hover:not(:disabled) {
-    background: var(--c-hover);
-}
-
-.pm-button:disabled {
-    opacity: 0.45;
-    cursor: default;
-}
-
-.pm-button-primary {
-    background: var(--c-accent);
-    border-color: var(--c-accent);
-    color: var(--c-on-accent);
-}
-
-.pm-button-primary:hover:not(:disabled) {
-    background: var(--c-accent-hover);
-    border-color: var(--c-accent-hover);
-}
-
 .pm-link {
     border: none;
     background: none;
@@ -273,7 +219,7 @@
     color: var(--c-text);
     background: var(--c-code);
     padding: 3px 7px;
-    border-radius: 6px;
+    border-radius: var(--r-sm);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -287,14 +233,14 @@
 .pm-notice {
     margin: 10px 22px 0;
     padding: 9px 12px;
-    border-radius: 8px;
+    border-radius: var(--r-sm);
     font-size: 12px;
     line-height: 1.5;
 }
 
 .pm-issues {
-    border: 1px solid color-mix(in srgb, #D9534F 35%, transparent);
-    background: color-mix(in srgb, #D9534F 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--c-danger) 35%, transparent);
+    background: color-mix(in srgb, var(--c-danger) 8%, transparent);
     color: var(--c-text);
 }
 
@@ -340,13 +286,13 @@
     width: 100%;
     padding: 9px 10px;
     border: none;
-    border-radius: 8px;
+    border-radius: var(--r-sm);
     background: none;
     color: inherit;
     font-family: inherit;
     text-align: left;
     cursor: pointer;
-    transition: background var(--t-dur, 120ms) var(--t-ease, ease);
+    transition: background var(--t-dur) var(--t-ease);
 }
 
 .pm-row:hover {
@@ -394,11 +340,9 @@
 .pm-chip {
     padding: 1px 6px;
     border: 1px solid var(--c-border);
-    border-radius: 999px;
+    border-radius: var(--r-sm);
     font-size: 10px;
     color: var(--c-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
 }
 
 .pm-dot {
@@ -410,7 +354,7 @@
 }
 
 .pm-dot-on {
-    background: #3FA34D;
+    background: var(--c-success);
 }
 
 .pm-empty {
@@ -459,14 +403,14 @@
 .pm-badge {
     padding: 1px 7px;
     border: 1px solid var(--c-border-i);
-    border-radius: 999px;
+    border-radius: var(--r-sm);
     font-size: 11px;
     color: var(--c-muted);
 }
 
 .pm-badge-on {
-    border-color: color-mix(in srgb, #3FA34D 45%, transparent);
-    color: #2F7F3B;
+    border-color: color-mix(in srgb, var(--c-success) 45%, transparent);
+    color: var(--c-success-text);
 }
 
 .pm-plugin-desc {
@@ -531,19 +475,19 @@
 }
 
 .pm-state-ready {
-    color: #2F7F3B;
+    color: var(--c-success-text);
 }
 
 .pm-state-failed {
-    color: #C0392B;
+    color: var(--c-danger);
 }
 
 .pm-fail {
-    color: #C0392B;
+    color: var(--c-danger);
 }
 
 .pm-ok {
-    color: #2F7F3B;
+    color: var(--c-success-text);
 }
 
 /* ── Settings form ───────────────────────────────────────────────────────── */
@@ -591,15 +535,16 @@
 .pm-field select,
 .pm-field textarea {
     width: 100%;
-    padding: 7px 10px;
+    min-height: 34px;
+    padding: 6px 10px;
     border: 1px solid var(--c-border-i);
-    border-radius: 8px;
+    border-radius: var(--r-sm);
     background: var(--c-surface);
     color: var(--c-text);
     font-family: inherit;
     font-size: 13px;
     outline: none;
-    transition: border-color var(--t-dur, 120ms) var(--t-ease, ease);
+    transition: border-color var(--t-dur) var(--t-ease);
 }
 
 .pm-field textarea {
@@ -625,12 +570,12 @@
 .pm-field-error input,
 .pm-field-error select,
 .pm-field-error textarea {
-    border-color: #C0392B;
+    border-color: var(--c-danger);
 }
 
 .pm-field-error-text {
     font-size: 11px;
-    color: #C0392B;
+    color: var(--c-danger);
 }
 
 .pm-advanced {
@@ -657,7 +602,7 @@
     overflow-y: auto;
     padding: 8px 10px;
     border: 1px solid var(--c-border);
-    border-radius: 8px;
+    border-radius: var(--r-sm);
     background: var(--c-code);
     font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
     font-size: 11.5px;
@@ -673,12 +618,12 @@
 
 .pm-log-warn .pm-log-level,
 .pm-log-warn .pm-log-msg {
-    color: #B07A16;
+    color: var(--c-warning);
 }
 
 .pm-log-error .pm-log-level,
 .pm-log-error .pm-log-msg {
-    color: #C0392B;
+    color: var(--c-danger);
 }
 
 .pm-log-ts {
@@ -690,7 +635,6 @@
     width: 42px;
     flex-shrink: 0;
     color: var(--c-muted);
-    text-transform: uppercase;
     font-size: 10px;
     padding-top: 2px;
 }
@@ -713,8 +657,6 @@
 .pm-bus h3 {
     font-size: 11px;
     font-weight: 500;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
     color: var(--c-muted);
     margin-bottom: 6px;
 }
@@ -763,16 +705,57 @@
     width: 56px;
     flex-shrink: 0;
     font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
     color: var(--c-muted);
 }
 
 .pm-kind-reply {
-    color: #2F7F3B;
+    color: var(--c-success-text);
 }
 
 .pm-kind-timeout,
 .pm-kind-rejected {
-    color: #C0392B;
+    color: var(--c-danger);
+}
+
+/* ── Toolbar actions ─────────────────────────────────────────────────────── */
+
+/* The window renders the shared CTAs from App.css (`.btn-primary` /
+   `.btn-secondary`); this modifier only sizes them for the 34px compact zone
+   and keeps a row of them from stretching. */
+.pm-action {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 34px;
+    padding: 0 12px;
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+/* ── List header: filter + count ─────────────────────────────────────────── */
+
+.pm-list-head {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 2px 2px 8px;
+}
+
+.pm-list-count {
+    font-size: 12px;
+    color: var(--c-muted);
+}
+
+/* ── Notice tones ────────────────────────────────────────────────────────── */
+
+/* A confirmation keeps the accent tint; a failure wears the danger tint. Both
+   are a fill only — no border, no icon, no second colour. */
+.pm-notice-info {
+    background: var(--c-accent-soft);
+}
+
+.pm-notice-error {
+    background: var(--c-danger-soft);
 }
