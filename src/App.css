@@ -1339,6 +1339,14 @@ body {
   background-image: var(--c-bg-image);
   background-size: 100vw 100%;
   background-repeat: no-repeat;
+  /* Rounded outer edge (experiment). The dock reads as a sheet lying over the
+     chat instead of a slab cut out of the window; the left edge stays square
+     because it *is* the window's edge, and the window frame already rounds
+     that side. `--r-side` is the only knob — 8px is the DWM window radius,
+     12px the current flavour. `overflow: hidden` clips the wash and every row
+     to the new silhouette for free. */
+  --r-side: 12px;
+  border-radius: 0 var(--r-side) var(--r-side) 0;
   /* GPU hints: the entrance spring animates `transform`, so the panel stays on
      its own compositor layer instead of repainting the chat beside it on every
      frame of the glide. */
@@ -1355,11 +1363,14 @@ body {
 .sidebar::after {
   content: '';
   position: absolute;
-  top: var(--panel-header-h);
-  right: 0;
-  bottom: 0;
-  width: 1px;
-  background: var(--c-border);
+  inset: 0;
+  /* The hairline is a border on the panel's own silhouette, so it follows the
+     rounded outer edge around the bottom corner instead of ending dead where
+     the curve starts. `clip-path` keeps the header band free of it (see
+     above) — the same straight cut the old `top` offset made. */
+  border-right: 1px solid var(--c-border);
+  border-radius: inherit;
+  clip-path: inset(var(--panel-header-h) 0 0 0);
   pointer-events: none;
 }
 
