@@ -1074,6 +1074,7 @@ const zhCN: Messages = {
             exported: "已导出 {files} 个文件到 {path}",
             exportedSecrets: "已移除 {count} 个密钥值",
             exportedNoSettings: "设置保留在本工作区",
+            exportedSettingsSkipped: "设置未随包导出：{reason}",
             hint:
                 "插件包是一个插件文件夹的 .zip：根目录含 plugin.json，以及脚本与设置架构；导入时沿用清单里的插件 id。",
         },

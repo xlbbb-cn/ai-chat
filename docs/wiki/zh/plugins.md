@@ -124,6 +124,42 @@ node -> {"type":"reply","id":"r1","ok":false,"error":"失败原因"}
 | 声明式表单 | 放一个 `config.schema.yaml`（`sections[] → fields[]`） | 管理器按字段类型渲染：`text` / `multiline` / `number` / `integer` / `boolean` / `enum` / `path` / `secret` / `json`，支持 `default`、`required`、`min` / `max` / `max_length`、`options`、`advanced`、`reveal_when` |
 | 自带页面 | 清单里写 `config_page` 指向插件目录里的 HTML | 管理器内嵌该页面 |
 
+**每个 section 和每个 field 都要写 `key`**：它是存进 `config.yaml` 的名字，也是表单里的锚点；`title` 才是用户读到的文字。下面这个形状是能加载的：
+
+```yaml
+title: 时钟设置                # 可选：表单标题
+sections:
+  - key: main                  # section 必填
+    title: 时钟
+    fields:
+      - key: timezone          # field 必填 —— 存进 config.yaml 的名字
+        type: text
+        title: 时区
+        default: UTC
+      - key: format
+        type: enum
+        title: 制式
+        options:
+          - { value: 24h, label: 24 小时 }
+          - { value: 12h, label: 12 小时 }
+      - key: token
+        type: secret           # 表单里打码，导出插件包时被剔除
+        title: API 令牌
+        advanced: true
+```
+
+schema 解析失败时，管理器会把解析器原文显示在表单的位置上，插件本身照常运行。报错带的是精确路径（按 `sections[<i>].fields[<j>]` 读）：
+
+| 报错 | 含义 |
+| --- | --- |
+| `sections[0]: missing field 'key'` | 第一个 section 对象少了 `key:` 一行 |
+| `sections[1].fields[2]: missing field 'key'` | 该 field 少了 `key`；只有 `title` 不算有身份 |
+| `... .type: unknown variant 'textbox'` | `type` 不是上面九种之一 |
+| `... .options: invalid type: string` | `options` 是 `{value, label}` 映射的列表，不能写成裸字符串 |
+| `did not find expected key` | YAML 缩进问题：每级两空格，`fields:` 挂在它的 section 下，不要用 Tab |
+
+`label` / `help` 可以作为 `title` / `description` 的别名。
+
 - 值存在插件目录的 `config.yaml` 里，插件因此是**自包含、可整体复制**的；
 - `secret` 字段保存后只回显掩码，填同一掩码表示「不修改」；
 - 保存时逐字段校验，失败把字段级错误还给表单；

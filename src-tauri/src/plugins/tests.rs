@@ -26,7 +26,10 @@ fn topic_wildcards_follow_mqtt_rules() {
 
 #[test]
 fn normalize_topic_rejects_junk() {
-    assert_eq!(bus::normalize_topic(" Clock/Tick ", false).unwrap(), "clock/tick");
+    assert_eq!(
+        bus::normalize_topic(" Clock/Tick ", false).unwrap(),
+        "clock/tick"
+    );
     assert!(bus::normalize_topic("", false).is_err());
     assert!(bus::normalize_topic("clock//tick", false).is_err());
     assert!(bus::normalize_topic("clock/*", false).is_err());
@@ -45,7 +48,10 @@ fn manifest_defaults_are_conservative() {
     assert!(manifest.auto_start);
     assert_eq!(manifest.instance_count(), 1);
     assert_eq!(manifest.resolved_runtime(), PluginRuntime::Node);
-    assert_eq!(manifest.call_timeout(), Duration::from_millis(DEFAULT_CALL_TIMEOUT_MS));
+    assert_eq!(
+        manifest.call_timeout(),
+        Duration::from_millis(DEFAULT_CALL_TIMEOUT_MS)
+    );
     assert_eq!(manifest.effective_subscriptions(), vec!["/#".to_string()]);
 }
 
@@ -91,7 +97,10 @@ fn manifest_needs_an_entry_or_a_command() {
 #[test]
 fn adapted_tool_names_are_stable_and_reversible() {
     assert_eq!(adapt_tool_name("clock", "now"), "plugin_clock_now");
-    assert_eq!(adapt_tool_name("My Plugin", "Get-Time"), "plugin_my_plugin_get_time");
+    assert_eq!(
+        adapt_tool_name("My Plugin", "Get-Time"),
+        "plugin_my_plugin_get_time"
+    );
     assert_eq!(slugify_segment("  a  b  "), "a_b");
 
     let registry = PluginRegistry {
@@ -209,7 +218,11 @@ fn instance_events_queue_and_drain() {
     let peeked = host.sink().events("echo", false);
     assert_eq!(peeked.len(), 2);
     assert_eq!(peeked[1].instance, "echo#1");
-    assert_eq!(host.sink().events("echo", false).len(), 2, "peek keeps the queue");
+    assert_eq!(
+        host.sink().events("echo", false).len(),
+        2,
+        "peek keeps the queue"
+    );
 
     let drained = host.sink().events("echo", true);
     assert_eq!(drained.len(), 2);
@@ -368,4 +381,26 @@ async fn a_real_plugin_answers_over_the_bus() {
     host.stop("echo").await;
     assert!(host.status().await.is_empty());
     let _ = std::fs::remove_dir_all(&root);
+}
+
+/// The creation manual's settings example has to load: a doc that does not
+/// parse is exactly how `missing field 'key'` reaches a user.
+#[test]
+fn the_creation_manual_settings_example_parses() {
+    let manual = crate::prompt::plugin_manual();
+    let example = manual
+        .split("```yaml")
+        .nth(1)
+        .and_then(|rest| rest.split("```").next())
+        .expect("the manual carries a yaml example");
+    let schema: config::ConfigSchema =
+        serde_yaml::from_str(example).unwrap_or_else(|err| panic!("manual example: {err}"));
+    assert!(!schema.sections.is_empty());
+    for section in &schema.sections {
+        assert!(!section.key.is_empty(), "a section needs a key");
+        assert!(!section.fields.is_empty(), "a section needs fields");
+        for field in &section.fields {
+            assert!(!field.key.is_empty(), "a field needs a key");
+        }
+    }
 }

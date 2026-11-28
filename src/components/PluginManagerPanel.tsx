@@ -335,7 +335,11 @@ export function PluginManagerPanel() {
                     t("plugins.package.exportedSecrets", { count: report.secrets_removed })
                 );
             }
-            if (!report.settings_exported) {
+            if (report.settings_note) {
+                parts.push(
+                    t("plugins.package.exportedSettingsSkipped", { reason: report.settings_note })
+                );
+            } else if (!report.settings_exported) {
                 parts.push(t("plugins.package.exportedNoSettings"));
             }
             notify(parts.join(" · "));

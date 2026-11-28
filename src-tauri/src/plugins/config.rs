@@ -60,9 +60,12 @@ pub struct Field {
     pub key: String,
     #[serde(default, rename = "type")]
     pub kind: FieldKind,
-    #[serde(default)]
+    /// Label under the input. `label:` reads the same: schemas are written by
+    /// hand, and an alias beats a silently empty label.
+    #[serde(default, alias = "label")]
     pub title: String,
-    #[serde(default)]
+    /// Hint line under the label; `help:` reads the same.
+    #[serde(default, alias = "help")]
     pub description: String,
     #[serde(default)]
     pub placeholder: String,
@@ -91,6 +94,9 @@ pub struct Field {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Section {
+    /// Anchor and form id — not user text. `load_schema` derives one from the
+    /// title when a hand-written schema leaves it out.
+    #[serde(default)]
     pub key: String,
     #[serde(default)]
     pub title: String,
@@ -175,14 +181,41 @@ pub fn load_schema(dir: &Path, file: &str) -> Result<Option<ConfigSchema>, Strin
     if !path.is_file() {
         return Ok(None);
     }
-    let raw = std::fs::read_to_string(&path)
-        .map_err(|e| format!("read {}: {e}", path.display()))?;
-    let mut schema: ConfigSchema = serde_yaml::from_str(&raw)
-        .map_err(|e| format!("parse {}: {e}", path.display()))?;
+    let raw =
+        std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let mut schema: ConfigSchema =
+        serde_yaml::from_str(&raw).map_err(|e| format!("parse {}: {e}", path.display()))?;
     if schema.title.is_empty() {
         schema.title = "Settings".to_string();
     }
+    normalize_section_keys(&mut schema);
     Ok(Some(schema))
+}
+
+/// Give every section a unique, non-empty key.
+///
+/// The key is an anchor rather than plugin content, so a schema that omits it —
+/// or repeats one — still loads: the title seeds it, and a title without ASCII
+/// letters falls back to the section's position.
+fn normalize_section_keys(schema: &mut ConfigSchema) {
+    let mut taken: Vec<String> = Vec::new();
+    for (index, section) in schema.sections.iter_mut().enumerate() {
+        let mut seeded = super::slugify_segment(&section.key);
+        if seeded.is_empty() {
+            seeded = super::slugify_segment(&section.title);
+        }
+        if seeded.is_empty() {
+            seeded = format!("section_{}", index + 1);
+        }
+        let mut key = seeded.clone();
+        let mut attempt = 2;
+        while taken.contains(&key) {
+            key = format!("{seeded}_{attempt}");
+            attempt += 1;
+        }
+        taken.push(key.clone());
+        section.key = key;
+    }
 }
 
 /// Read the stored values (missing file = empty).
@@ -207,7 +240,11 @@ pub fn write_values(dir: &Path, values: &Map<String, Value>) -> Result<(), Strin
 
 /// Declared fields, in schema order.
 pub fn fields(schema: &ConfigSchema) -> Vec<&Field> {
-    schema.sections.iter().flat_map(|s| s.fields.iter()).collect()
+    schema
+        .sections
+        .iter()
+        .flat_map(|s| s.fields.iter())
+        .collect()
 }
 
 /// Declared keys with their defaults, before stored values are applied.
@@ -353,19 +390,23 @@ fn coerce(field: &Field, raw: &Value) -> Result<Value, String> {
         FieldKind::Enum => {
             let text = raw.as_str().ok_or_else(|| "expected text".to_string())?;
             if !field.options.is_empty() && !field.options.iter().any(|o| o.value == text) {
-                return Err(format!("not one of: {}", field
-                    .options
-                    .iter()
-                    .map(|o| o.value.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")));
+                return Err(format!(
+                    "not one of: {}",
+                    field
+                        .options
+                        .iter()
+                        .map(|o| o.value.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
             }
             Value::String(text.to_string())
         }
         FieldKind::Json => match raw {
             Value::String(text) if text.trim().is_empty() => return Ok(Value::Null),
-            Value::String(text) => serde_json::from_str::<Value>(text)
-                .map_err(|e| format!("invalid JSON: {e}"))?,
+            Value::String(text) => {
+                serde_json::from_str::<Value>(text).map_err(|e| format!("invalid JSON: {e}"))?
+            }
             other => other.clone(),
         },
         FieldKind::Text | FieldKind::Multiline | FieldKind::Path | FieldKind::Secret => {
@@ -435,5 +476,52 @@ pub fn form(schema: &ConfigSchema, stored: &Map<String, Value>) -> ConfigForm {
         title: schema.title.clone(),
         description: schema.description.clone(),
         sections,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(yaml: &str) -> ConfigSchema {
+        serde_yaml::from_str(yaml).unwrap_or_else(|err| panic!("{err}"))
+    }
+
+    #[test]
+    fn a_section_without_a_key_gets_one_from_its_title() {
+        let mut schema =
+            parse("sections:\n  - title: Message home\n  - title: Message home\n  - title: 消息\n");
+        normalize_section_keys(&mut schema);
+        assert_eq!(schema.sections[0].key, "message_home");
+        assert_eq!(schema.sections[1].key, "message_home_2");
+        assert_eq!(schema.sections[2].key, "section_3");
+    }
+
+    #[test]
+    fn a_declared_section_key_is_kept() {
+        let mut schema = parse("sections:\n  - key: Advanced\n    title: Advanced\n");
+        normalize_section_keys(&mut schema);
+        assert_eq!(schema.sections[0].key, "advanced");
+    }
+
+    #[test]
+    fn label_and_help_read_as_title_and_description() {
+        let schema = parse(
+            "sections:\n  - key: main\n    fields:\n      - key: prefix\n        label: Prefix\n        help: Printed first.\n",
+        );
+        let field = &schema.sections[0].fields[0];
+        assert_eq!(field.title, "Prefix");
+        assert_eq!(field.description, "Printed first.");
+    }
+
+    #[test]
+    fn a_field_without_a_key_is_still_refused() {
+        // A field key is a storage name: guessing one would orphan a saved value.
+        let err = serde_yaml::from_str::<ConfigSchema>(
+            "sections:\n  - key: main\n    fields:\n      - type: text\n",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("missing field `key`"), "{err}");
     }
 }

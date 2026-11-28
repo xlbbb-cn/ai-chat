@@ -60,6 +60,8 @@ pub struct PluginExportReport {
     pub secrets_removed: usize,
     /// Whether the archive carries settings at all.
     pub settings_exported: bool,
+    /// Why the settings stayed behind, when the schema could not be read.
+    pub settings_note: Option<String>,
 }
 
 /// What one import installed.
@@ -117,8 +119,8 @@ fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
         let entry = entry.map_err(|err| format!("read {}: {err}", dir.display()))?;
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().to_string();
-        let meta = fs::symlink_metadata(&path)
-            .map_err(|err| format!("stat {}: {err}", path.display()))?;
+        let meta =
+            fs::symlink_metadata(&path).map_err(|err| format!("stat {}: {err}", path.display()))?;
         // A symlink can point outside the plugin; packing it would smuggle that in.
         if meta.file_type().is_symlink() {
             continue;
@@ -137,15 +139,20 @@ fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
 
 /// `config.yaml` with the schema's secrets removed, ready to pack.
 ///
-/// `Ok((None, ..))` means "keep the settings at home": no schema to tell a
-/// secret from a preference, or nothing but secrets left after stripping.
-fn exportable_settings(plugin: &Plugin) -> Result<(Option<String>, usize), String> {
-    let Some(schema) = config::load_schema(&plugin.dir, plugin.manifest.schema_file())? else {
-        return Ok((None, 0));
+/// `(None, ..)` means "keep the settings at home": no schema to tell a secret
+/// from a preference, nothing but secrets left after stripping, or a schema that
+/// does not parse — the last case carries the parser's message, because an
+/// export must never leak a value it cannot prove safe, and must never fail
+/// over settings either.
+fn exportable_settings(plugin: &Plugin) -> (Option<String>, usize, Option<String>) {
+    let schema = match config::load_schema(&plugin.dir, plugin.manifest.schema_file()) {
+        Ok(Some(schema)) => schema,
+        Ok(None) => return (None, 0, None),
+        Err(err) => return (None, 0, Some(err)),
     };
     let mut values = config::load_values(&plugin.dir);
     if values.is_empty() {
-        return Ok((None, 0));
+        return (None, 0, None);
     }
     let secrets: Vec<String> = config::fields(&schema)
         .iter()
@@ -159,11 +166,12 @@ fn exportable_settings(plugin: &Plugin) -> Result<(Option<String>, usize), Strin
         }
     }
     if values.is_empty() {
-        return Ok((None, removed));
+        return (None, removed, None);
     }
-    let text = serde_yaml::to_string(&serde_json::Value::Object(values))
-        .map_err(|err| format!("serialize settings: {err}"))?;
-    Ok((Some(text), removed))
+    match serde_yaml::to_string(&serde_json::Value::Object(values)) {
+        Ok(text) => (Some(text), removed, None),
+        Err(err) => (None, removed, Some(format!("serialize settings: {err}"))),
+    }
 }
 
 fn backup_path_for(workspace: &Path, id: &str) -> PathBuf {
@@ -194,14 +202,14 @@ pub fn export_plugin(
     let manifest_path = plugin.dir.join(MANIFEST_FILE);
     let manifest_text = fs::read_to_string(&manifest_path)
         .map_err(|err| format!("read {}: {err}", manifest_path.display()))?;
-    let (settings, secrets_removed) = exportable_settings(plugin)?;
+    let (settings, secrets_removed, settings_note) = exportable_settings(plugin);
 
     let mut paths = Vec::new();
     collect_files(&plugin.dir, &mut paths)?;
     let mut payload: Vec<(String, PathBuf)> = Vec::new();
     let mut skipped = 0usize;
-    let mut unpacked = manifest_text.len() as u64
-        + settings.as_ref().map(|text| text.len() as u64).unwrap_or(0);
+    let mut unpacked =
+        manifest_text.len() as u64 + settings.as_ref().map(|text| text.len() as u64).unwrap_or(0);
     for path in paths {
         let relative = path
             .strip_prefix(&plugin.dir)
@@ -279,6 +287,7 @@ pub fn export_plugin(
         skipped,
         secrets_removed,
         settings_exported: settings.is_some(),
+        settings_note,
     })
 }
 
@@ -362,8 +371,8 @@ fn extract(
             .map_err(|err| format!("read entry '{name}': {err}"))?;
         let mut out = fs::File::create(&target)
             .map_err(|err| format!("create {}: {err}", target.display()))?;
-        bytes += std::io::copy(&mut entry, &mut out)
-            .map_err(|err| format!("unpack '{name}': {err}"))?;
+        bytes +=
+            std::io::copy(&mut entry, &mut out).map_err(|err| format!("unpack '{name}': {err}"))?;
         if bytes > MAX_PACKAGE_BYTES {
             return Err(format!(
                 "the archive unpacks to more than {} MB",
@@ -459,7 +468,12 @@ fn derive_id(prefix: &str, manifest: &PluginManifest, source: &Path) -> String {
     if !from_folder.is_empty() {
         return from_folder;
     }
-    slugify_segment(source.file_stem().and_then(|stem| stem.to_str()).unwrap_or(""))
+    slugify_segment(
+        source
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or(""),
+    )
 }
 
 /// The id an archive would install as, without writing anything.
@@ -474,7 +488,6 @@ pub fn package_id(source: &Path) -> Option<String> {
     let id = derive_id(&prefix, &manifest, source);
     (!id.is_empty()).then_some(id)
 }
-
 
 pub fn import_plugin(workspace: &Path, source: &Path) -> Result<PluginImportReport, String> {
     let mut archive = open_archive(source)?;
@@ -518,7 +531,8 @@ pub fn import_plugin(workspace: &Path, source: &Path) -> Result<PluginImportRepo
             fs::create_dir_all(parent)
                 .map_err(|err| format!("create {}: {err}", parent.display()))?;
         }
-        fs::rename(&target, &path).map_err(|err| format!("move the installed copy aside: {err}"))?;
+        fs::rename(&target, &path)
+            .map_err(|err| format!("move the installed copy aside: {err}"))?;
         Some(path)
     } else {
         None
@@ -640,10 +654,16 @@ mod tests {
             &dir.join("config.schema.yaml"),
             "sections:\n  - key: main\n    fields:\n      - key: token\n        type: secret\n      - key: region\n        type: text\n",
         );
-        write(&dir.join("config.yaml"), "token: super-secret\nregion: eu\n");
+        write(
+            &dir.join("config.yaml"),
+            "token: super-secret\nregion: eu\n",
+        );
         write(&dir.join(".env"), "TOKEN=super-secret\n");
         write(&dir.join("main.py.bak.1"), "old\n");
-        write(&dir.join("node_modules/dep/index.js"), "module.exports = 1;\n");
+        write(
+            &dir.join("node_modules/dep/index.js"),
+            "module.exports = 1;\n",
+        );
         dir
     }
 
@@ -682,7 +702,12 @@ mod tests {
         assert!(report.files >= 4);
 
         let names = zip_names(&dest);
-        for expected in [MANIFEST_FILE, "main.py", "lib/util.py", "config.schema.yaml"] {
+        for expected in [
+            MANIFEST_FILE,
+            "main.py",
+            "lib/util.py",
+            "config.schema.yaml",
+        ] {
             assert!(
                 names.iter().any(|name| name == expected),
                 "missing {expected}"
@@ -818,8 +843,12 @@ mod tests {
         let file = fs::File::create(&source).unwrap();
         let mut zip = ZipWriter::new(file);
         zip.start_file(MANIFEST_FILE, zip_options()).unwrap();
-        zip.write_all(json!({ "id": "broken", "entry": "main.py" }).to_string().as_bytes())
-            .unwrap();
+        zip.write_all(
+            json!({ "id": "broken", "entry": "main.py" })
+                .to_string()
+                .as_bytes(),
+        )
+        .unwrap();
         zip.finish().unwrap();
 
         let err = import_plugin(&workspace, &source).unwrap_err();
@@ -838,5 +867,30 @@ mod tests {
         assert!(safe_join(root, "../escape.py").is_none());
         assert!(safe_join(root, "lib/../../escape.py").is_none());
         assert!(safe_join(root, "/etc/passwd").is_none());
+    }
+
+    /// A schema this build cannot read must not block the export: the code still
+    /// travels, the settings stay home, and the report says why.
+    #[test]
+    fn export_keeps_settings_home_when_the_schema_does_not_parse() {
+        let workspace = workspace("broken-schema");
+        let dir = demo_plugin(&workspace);
+        write(
+            &dir.join("config.schema.yaml"),
+            "sections:\n  - key: main\n    fields: 3\n",
+        );
+
+        let dest = workspace.join("broken.zip");
+        let report = export_plugin(&workspace, "demo", &dest).unwrap();
+
+        assert!(!report.settings_exported);
+        assert!(report.settings_note.is_some(), "the report explains why");
+        assert_eq!(report.secrets_removed, 0);
+        let names = zip_names(&dest);
+        assert!(names.iter().any(|name| name == "main.py"));
+        assert!(
+            !names.iter().any(|name| name == "config.yaml"),
+            "an unreadable schema cannot prove a value safe: {names:?}"
+        );
     }
 }

@@ -834,6 +834,8 @@ export interface PluginExportReport {
   secrets_removed: number;
   /** Whether the archive carries the plugin's settings at all. */
   settings_exported: boolean;
+  /** Why the settings stayed behind, when the schema could not be read. */
+  settings_note: string | null;
 }
 
 /** What one import installed (mirrors `PluginImportReport` in Rust). */

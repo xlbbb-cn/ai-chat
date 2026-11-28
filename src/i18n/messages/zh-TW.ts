@@ -1074,6 +1074,7 @@ const zhTW: Messages = {
             exported: "已匯出 {files} 個檔案到 {path}",
             exportedSecrets: "已移除 {count} 個權杖值",
             exportedNoSettings: "設定保留在本工作區",
+            exportedSettingsSkipped: "設定未隨包匯出：{reason}",
             hint:
                 "外掛包是一個外掛資料夾的 .zip：根目錄含 plugin.json，以及指令碼與設定架構；匯入時沿用清單裡的外掛 id。",
         },

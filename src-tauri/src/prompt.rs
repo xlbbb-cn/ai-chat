@@ -546,14 +546,79 @@ Every connection becomes one instance — connect N times for N workers, and a d
 only removes that instance. The app answers `{"type":"welcome","instance":"clock#link0",
 "config":{…}}`, then speaks the same protocol as above.
 
-## Settings
+## Settings (config.schema.yaml)
 
-`config.schema.yaml` (`sections[]` → `fields[]`; types `text` / `multiline` / `number` /
-`integer` / `boolean` / `enum` / `path` / `secret` / `json`; `default`, `required`, `min`,
-`max`, `max_length`, `options`, `advanced`, `reveal_when`) makes the manager render a generic
-form; values live in `config.yaml` beside it. A plugin needing a bespoke UI sets `config_page`
-to its own HTML. Values reach the plugin in `welcome.config` and again as
-`{"type":"config","config":{…}}` on every save — hot reload, no restart.
+The manager turns this file into a form; values are written to `config.yaml` beside it and
+pushed to the instances — `welcome.config` first, then `{"type":"config","config":{…}}` on
+every save, so a change lands without a restart. It is YAML with two levels, `sections[]` →
+`fields[]`, and **every section and every field carries `key`**: `key` is the storage name and
+the form anchor, `title` is the text a user reads.
+
+```yaml
+title: Clock settings
+description: How clock answers calls
+sections:
+  - key: main                 # required on the section
+    title: Clock
+    description: One line under the section title
+    fields:
+      - key: timezone         # required on the field — the name stored in config.yaml
+        type: text
+        title: Time zone
+        description: IANA name, for example Europe/Berlin.
+        placeholder: Europe/Berlin
+        default: UTC
+        required: true
+      - key: format
+        type: enum
+        title: Format
+        default: 24h
+        options:
+          - { value: 24h, label: 24-hour }
+          - { value: 12h, label: 12-hour }
+      - key: limit
+        type: integer
+        title: Items per reply
+        default: 20
+        min: 1
+        max: 100
+      - key: token
+        type: secret            # masked in the form, stripped from an exported package
+        title: API token
+        advanced: true          # folded behind "Advanced"
+      - key: webhook
+        type: text
+        title: Webhook
+        reveal_when: { key: format, equals: 12h }
+```
+
+| Key | Meaning |
+| --- | --- |
+| `key` | **Required** on a section and on a field. Storage name in `config.yaml`, anchor in the form — snake_case, no spaces, unique per plugin |
+| `type` | `text` (default) / `multiline` / `number` / `integer` / `boolean` / `enum` / `path` / `secret` / `json` |
+| `title` / `description` | Label and hint line; `label` / `help` are accepted aliases |
+| `default` / `placeholder` / `required` | Pre-filled value, grey placeholder, must-be-set |
+| `min` / `max` / `step` / `max_length` / `unit` | Bounds, spinner step, suffix after a number |
+| `options` | `[{value, label}]` for `enum`; an enum without options renders an empty select |
+| `advanced` | Fold the field into the "Advanced" group |
+| `reveal_when` | `{key: <sibling field>, equals: <value>}` — shown only while that sibling holds the value |
+
+### When it does not parse
+
+The manager shows the parser's message instead of the form and the plugin keeps running. The
+message names the exact path — read it as `sections[<i>].fields[<j>]`:
+
+| Message | Fix |
+| --- | --- |
+| `sections[0]: missing field 'key'` | The first section object has no `key:` line; add `key: main` under the `- ` |
+| `sections[1].fields[2]: missing field 'key'` | That field has no `key` — `title` alone is not an identity |
+| `sections[0].fields[1].type: unknown variant 'textbox'` | `type` must be one of the nine above |
+| `sections[0].fields[0].options: invalid type: string` | `options` is a list of `{value, label}` mappings, not bare strings |
+| `did not find expected key` / `mapping values are not allowed` | YAML indentation: two spaces per level, `fields:` under its section, `- key:` is one list item, never a tab |
+
+Renaming a field orphans its stored value: it stays in `config.yaml` but no longer reaches the
+plugin, because only declared keys are passed on. A plugin that wants its own page instead
+declares `config_page` — the schema still owns defaults and validation.
 
 ## Workflow
 

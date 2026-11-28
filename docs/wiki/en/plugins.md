@@ -124,6 +124,42 @@ Two ways, pick one:
 | Declarative form | Add `config.schema.yaml` (`sections[] → fields[]`) | The manager renders the field types: `text` / `multiline` / `number` / `integer` / `boolean` / `enum` / `path` / `secret` / `json`, with `default`, `required`, `min` / `max` / `max_length`, `options`, `advanced`, `reveal_when` |
 | Custom page | Set `config_page` to an HTML file in the plugin folder | The manager embeds that page |
 
+**Every section and every field carries `key`** — it is the name stored in `config.yaml` and the anchor in the form; `title` is the text a user reads. This is a shape that loads:
+
+```yaml
+title: Clock settings          # optional form header
+sections:
+  - key: main                  # required on the section
+    title: Clock
+    fields:
+      - key: timezone          # required on the field — the name in config.yaml
+        type: text
+        title: Time zone
+        default: UTC
+      - key: format
+        type: enum
+        title: Format
+        options:
+          - { value: 24h, label: 24-hour }
+          - { value: 12h, label: 12-hour }
+      - key: token
+        type: secret           # masked in the form, stripped from an exported package
+        title: API token
+        advanced: true
+```
+
+A schema that does not parse is shown **verbatim** in the manager instead of the form, and the plugin keeps running. The message names the exact path (`sections[<i>].fields[<j>]`):
+
+| Message | Meaning |
+| --- | --- |
+| `sections[0]: missing field 'key'` | The first section object has no `key:` line |
+| `sections[1].fields[2]: missing field 'key'` | That field has no `key`; `title` alone is not an identity |
+| `... .type: unknown variant 'textbox'` | `type` is not one of the nine above |
+| `... .options: invalid type: string` | `options` is a list of `{value, label}` mappings |
+| `did not find expected key` | YAML indentation: two spaces per level, `fields:` under its section, no tabs |
+
+`label` / `help` are accepted as aliases of `title` / `description`.
+
 - Values live in `config.yaml` inside the plugin folder, so a plugin stays **self-contained and copyable**;
 - a `secret` field reads back as a mask after saving; submitting the same mask means "unchanged";
 - a save validates field by field and hands field-level errors back to the form;

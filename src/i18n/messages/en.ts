@@ -1149,6 +1149,7 @@ const en = {
             exported: "Exported {files} files to {path}",
             exportedSecrets: "{count} secret value(s) removed",
             exportedNoSettings: "settings stayed in this workspace",
+            exportedSettingsSkipped: "settings stayed here: {reason}",
             hint:
                 "A package is one plugin folder as a .zip: plugin.json at its root, plus its scripts and settings schema.",
         },
