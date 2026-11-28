@@ -262,10 +262,18 @@ fn build_prompt_bundle(
     // The recommended 3.13 venv lives in app data — a venv carries absolute
     // host paths, so it must not travel with the workspace. While the
     // completion flag is missing the pointer block announces the `setup-env`
-    // manual; once it is valid only this one-line note remains (`env.rs`).
+    // manual; once it is valid only a short note plus the `ready.json`
+    // inventory remains (`env.rs`). The block is gated on a shell tool: with
+    // neither `run_cmd` nor `run_shell` there is nothing to run, and the
+    // inventory would be prompt noise.
+    let shell_tools_enabled = config
+        .selected_tools
+        .iter()
+        .any(|tool| tool == "run_cmd" || tool == "run_shell");
     let env_context = crate::env::prompt_block(
         state.instance.data_dir(),
         &workspace_dir_for_roots,
+        shell_tools_enabled,
     );
     if !env_context.is_empty() {
         if !system_content.is_empty() {

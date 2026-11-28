@@ -68,30 +68,35 @@ pub fn enhanced_figures_manual() -> String {
 /// point at a real interpreter (`env.rs`), so the setup cost is paid once per
 /// host instead of riding in every system prompt.
 pub fn env_manual() -> String {
-    r#"# Preparing the host Python environment (app data)
+    r#"# Preparing the host environment (app data)
 
 Third-party packages must not be installed into the system interpreter, and a venv must not
 live in the workspace: a workspace is copied to other machines, while a venv is host-bound
-(absolute shebangs, per-OS layout). The app therefore keeps one Python 3.13 environment per
-host under **app data**, and this manual is announced only while that environment is missing
-or broken. Once the completion flag is valid the system prompt stops listing this manual and
-injects a one-line environment note instead — that switch is the whole point of the flag.
+(absolute shebangs, per-OS layout). The app therefore keeps one environment root per host under
+**app data**, and this manual is announced only while that environment is missing or broken.
+Once `ready.json` is valid the system prompt stops listing this manual and injects a short note
+plus the `description` recorded in that flag — and only while `run_cmd` / `run_shell` are
+enabled, because a prompt without shell tools has nothing to run.
 
 ## Where it lives
 
-- Env root: `<app_data>/env`. The **absolute** path of this host is printed in the
-  `ENVIRONMENT` block of the system prompt (the block that pointed you here); `<env root>` in
-  this manual always means that path. Never write it into a skill, MCP server or plugin: it is
-  per-host data, not part of the workspace.
+- Env root: `<app_data>/env` — the home for **everything you install**: the Python venv
+  (`<env root>/py313`), command-line tools (`<env root>/bin/…`), extra venvs, downloaded
+  binaries. Never the workspace (it is copied to other machines), never the system interpreter
+  or `/usr/local` (other apps share those). The **absolute** path of this host is printed in
+  the `ENVIRONMENT` block of the system prompt (the block that pointed you here); `<env root>`
+  in this manual always means that path. Never write it into a skill, MCP server or plugin: it
+  is per-host data, not part of the workspace.
 - Interpreter: `<env root>/py313/bin/python` (POSIX) or `<env root>/py313/Scripts/python.exe`
   (Windows) — a venv built from uv-managed CPython 3.13.
 - Flag: `<env root>/ready.json`.
 - Children inherit `AI_CHAT_ENV_ROOT=<env root>` from the app, so code can find the venv at
   runtime without any baked-in path.
-- `run_cmd` mounts the venv itself: every child it launches gets the venv's `bin/` (`Scripts`
-  on Windows) on `PATH` plus `VIRTUAL_ENV` naming it, so `run_cmd {"command":"python …"}` and
-  a `.py` library script already run under 3.13. `run_shell` mounts neither — an arbitrary
-  shell script sees the host `python`.
+- `run_cmd` mounts this root itself: every child gets `<env root>/bin` plus the venv's `bin/`
+  (`Scripts` on Windows) on `PATH`, and `VIRTUAL_ENV` names the venv — so a tool installed in
+  `<env root>/bin` runs by bare name and `run_cmd {"command":"python …"}` (or a `.py` library
+  script) already runs under 3.13. `run_shell` mounts nothing: an arbitrary shell script sees
+  the host `python`.
 
 ## Build it
 
@@ -122,8 +127,15 @@ When `-V` reports 3.13, write `<env root>/ready.json`:
 
 ```json
 {"python": "<env root>/py313/bin/python", "version": "3.13.13",
- "uv": "<absolute path of uv>", "created": "<ISO-8601 timestamp>"}
+ "uv": "<absolute path of uv>", "created": "<ISO-8601 timestamp>",
+ "description": "- <env root>/py313 — CPython 3.13.13 (uv venv), httpx, pillow\n- <env root>/bin/rg — ripgrep 14.1"}
 ```
+
+`description` is the inventory of what lives under the root: one entry per line, each naming the
+path and its version, so a later turn knows what it can already use. It is quoted into the
+prompt verbatim (keep it to short single lines, no ANSI), and only while `run_cmd` / `run_shell`
+are enabled. **Every install updates it** — append an entry and keep the existing ones; a stale
+inventory is worse than an empty one, because the next turn trusts it.
 
 Then re-read the file and run `<env root>/py313/bin/python -V` once more. The app counts the
 environment as complete only when the flag parses **and** its `python` names a real file; only
@@ -134,7 +146,8 @@ flag. Deleting the flag to "retry" is pointless — its absence is the pending s
 Writing the flag by hand is the fast path, not a requirement: the app also self-checks on the
 next turn, and when `<env root>/py313` exists and `-V` prints `3.13` it writes the flag itself.
 An interpreter that answers anything else (that 3.14 you were told not to use) stays pending,
-so the check cannot paper over a wrong version.
+so the check cannot paper over a wrong version. A self-written flag keeps the `description`
+that is already there — it never wipes the inventory.
 
 ## Keep artifacts independent of it
 
@@ -142,7 +155,8 @@ Skill scripts, MCP servers and plugins stay **stdlib-only and 3.9+ compatible** 
 create-skill / create-mcp-server / create-plugin manuals). When one genuinely needs 3.13,
 derive the interpreter from `AI_CHAT_ENV_ROOT` at runtime, check `is_file()`, and fall back to
 the host `python` / `python3` when it is absent — a missing venv degrades a feature, it never
-breaks startup.
+breaks startup. The same holds for anything else you installed: `<env root>` is per-host state,
+so an artifact may look for it through `AI_CHAT_ENV_ROOT` but must not require it.
 "#
         .to_string()
 }
@@ -151,21 +165,33 @@ breaks startup.
 /// follows it (`env.rs`).
 pub fn env_pending_block(root_display: &str, reason: &str) -> String {
     format!(
-        "ENVIRONMENT (pending): the per-host Python 3.13 environment lives in app data \
-         (`{root_display}` on this host) and is not prepared yet ({reason}). Read \
-         `{}/setup-env.md` before the first script that needs a third-party package; once \
-         `{root_display}/ready.json` exists this pointer gives way to a one-line environment \
-         note.",
+        "ENVIRONMENT (pending): the per-host environment lives in app data (`{root_display}` on \
+         this host) and no working Python 3.13 venv is prepared yet ({reason}). Everything you \
+         install for your own use belongs under that root — never in the workspace (it travels) \
+         and never in the system. Read `{}/setup-env.md` before the first script that needs a \
+         third-party package; once `{root_display}/ready.json` is valid this pointer gives way \
+         to a short note plus the inventory recorded there.",
         MANUALS_DIR
     )
 }
 
 /// One-line environment note injected once the completion flag is valid.
-pub fn env_ready_block(python: &str, version: &str) -> String {
+pub fn env_ready_block(python: &str, version: &str, root_display: &str, installed: &str) -> String {
+    let inventory = installed.trim();
+    let inventory = if inventory.is_empty() {
+        format!(
+            "Installed in `{root_display}`: only the venv so far — install software you need \
+             there (`{root_display}/bin`, or another venv) and record it in \
+             `{root_display}/ready.json` so a later turn sees it."
+        )
+    } else {
+        format!("Installed in `{root_display}`:\n{inventory}")
+    };
     format!(
-        "ENVIRONMENT: Python 3.13 venv ready at `{python}` (CPython {version}), living in app \
-         data — host scoped, never copied into an artifact; `AI_CHAT_ENV_ROOT` points there for \
-         every child process. The host `python`/`python3` stays the default for stdlib-only work."
+        "ENVIRONMENT: Python 3.13 venv at `{python}` (CPython {version}) in app data — host \
+         scoped, never copied into an artifact; `AI_CHAT_ENV_ROOT` names that root for every \
+         child process, and `run_cmd` mounts `{root_display}/bin` plus the venv's `bin/` on \
+         PATH. The host `python`/`python3` stays the default for stdlib-only work.\n{inventory}"
     )
 }
 
@@ -187,25 +213,32 @@ Hard rule: the artifact must start on a machine where nothing was installed — 
 3.9+ syntax**. A third-party package belongs behind `try: import …` with a degraded branch,
 never in the import header.
 
-### The 3.13 environment lives in app data, not in the workspace
+### The environment lives in app data, not in the workspace
 
-`<app_data>/env/py313` is a uv venv built from uv-managed CPython 3.13 (POSIX `bin/python`,
-Windows `Scripts/python.exe`), with `<app_data>/env/ready.json` beside it as the completion
-flag. Host-scoped on purpose: a venv carries absolute paths, so it must not travel with a
-workspace copied to another machine, and it must not pollute the system interpreter (this
-host's `python3` is 3.14 — reach for the 3.13 venv when a package's wheels lag behind 3.14).
+`<app_data>/env` is the host's install root. `py313` inside it is a uv venv built from
+uv-managed CPython 3.13 (POSIX `bin/python`, Windows `Scripts/python.exe`), and `ready.json`
+beside it is the completion flag with the inventory of what is installed. Host-scoped on
+purpose: a venv carries absolute paths, so it must not travel with a workspace copied to
+another machine, and it must not pollute the system interpreter (this host's `python3` is
+3.14 — reach for the 3.13 venv when a wheel lags behind the system interpreter).
 
 - The absolute path is printed in the `ENVIRONMENT` block of the system prompt and exported to
   every child process as **`AI_CHAT_ENV_ROOT`** — never write either into an artifact.
-- `run_cmd` children get it without asking: the venv's `bin/` (`Scripts/` on Windows) joins the
-  child's `PATH` behind the script library and `VIRTUAL_ENV` names it, so `python`, `python3`
-  and a `.py` library script already run under 3.13. `run_shell` keeps the host interpreter on
+- **Software you install goes there too**: `python -m venv "<env root>/…"`, a downloaded
+  binary into `<env root>/bin`, `uv pip install --python …` for packages — never into the
+  workspace, never into the system. Record each install in `ready.json`'s `description`; the
+  prompt quotes that inventory (only while `run_cmd` / `run_shell` are enabled) and a stale
+  list is worse than none.
+- `run_cmd` children get it without asking: `<env root>/bin` and the venv's `bin/` (`Scripts/`
+  on Windows) join the child's `PATH` behind the script library and `VIRTUAL_ENV` names the
+  venv, so a tool installed in `<env root>/bin` runs by bare name and `python`, `python3`, a
+  `.py` library script already run under 3.13. `run_shell` keeps the host interpreter on
   purpose.
 - A uv venv seeds no `pip`: inside it `python -m pip …` fails. Install with
   `uv pip install --python "<venv python>" <pkg>`, inspect with `uv pip list --python …`.
-- Creating or repairing the environment, and writing the flag, is the job of the `setup-env`
-  manual — announced only while the environment is pending, so there is no reason to repeat
-  the build steps here.
+- Creating or repairing the environment, writing the flag and maintaining the inventory is the
+  job of the `setup-env` manual — announced only while the environment is pending, so there is
+  no reason to repeat the build steps here.
 
 ### Optional 3.13 hop, for code that must also run under a bare `python3`
 

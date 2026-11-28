@@ -7,6 +7,14 @@
 //! per-OS layout. So the app keeps exactly one 3.13 venv per host under
 //! `<app_data>/env`, with `<app_data>/env/ready.json` as the completion flag.
 //!
+//! That root is not only a venv: anything the assistant installs for its own
+//! use — a CLI tool, a second venv, a downloaded binary — belongs under
+//! `<app_data>/env` too. Never the workspace (it travels to other machines),
+//! never the system interpreter or `/usr/local` (other apps share it). The
+//! `description` field of `ready.json` records what is installed there, and the
+//! prompt quotes it back — but only while a shell tool is enabled, because a
+//! model that cannot run anything has no use for the list.
+//!
 //! That flag is the single switch in the system prompt: while it is missing,
 //! unreadable, or points at a file that is gone, the pointer block announces
 //! the `setup-env` manual (the model reads it, builds the venv, verifies, and
@@ -53,6 +61,13 @@ pub struct Ready {
     /// ISO-8601 timestamp of the verification.
     #[serde(default)]
     pub created: String,
+    /// What lives in `<env root>` besides the venv — free-form, one entry per
+    /// line (e.g. `- <env root>/bin/rg (ripgrep 14.1)\n- <env root>/py313
+    /// (CPython 3.13.13 + httpx, pillow)`). Quoted in the prompt while a shell
+    /// tool is enabled, so a later turn knows it does not have to install the
+    /// same thing twice.
+    #[serde(default)]
+    pub description: String,
 }
 
 /// What the prompt should say about this host.
@@ -174,13 +189,11 @@ pub fn data_dir_from_app(app: &AppHandle) -> Option<PathBuf> {
 /// what makes a broken flag self-healing instead of silently accepted.
 pub fn status(data_dir: &Path) -> Status {
     let flag = ready_path(&root(data_dir));
-    let raw = match fs::read_to_string(&flag) {
-        Ok(raw) => raw,
-        Err(_) => return Status::Pending("the completion flag is missing".to_string()),
-    };
-    let ready: Ready = match serde_json::from_str(&raw) {
-        Ok(ready) => ready,
-        Err(_) => return Status::Pending("the completion flag is unreadable".to_string()),
+    if !flag.is_file() {
+        return Status::Pending("the completion flag is missing".to_string());
+    }
+    let Some(ready) = read_ready(data_dir) else {
+        return Status::Pending("the completion flag is unreadable".to_string());
     };
     // A flag that omits the interpreter still counts when the conventional
     // `<env root>/py313` interpreter is there.
@@ -193,6 +206,12 @@ pub fn status(data_dir: &Path) -> Status {
         return Status::Pending("the flag names an interpreter that is not there".to_string());
     }
     Status::Ready(Ready { python, ..ready })
+}
+
+/// Parse `<env root>/ready.json`, if it exists and is valid JSON.
+pub fn read_ready(data_dir: &Path) -> Option<Ready> {
+    let raw = fs::read_to_string(ready_path(&root(data_dir))).ok()?;
+    serde_json::from_str(&raw).ok()
 }
 
 /// Export the environment root to child processes (scripts, plugins, MCP
@@ -230,11 +249,15 @@ pub fn auto_flag(data_dir: &Path) -> bool {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|since| since.as_secs().to_string())
         .unwrap_or_default();
+    // Rewriting the flag must not throw away what an earlier turn recorded
+    // about the software installed here.
+    let previous = read_ready(data_dir).unwrap_or_default();
     let ready = Ready {
         python: python.display().to_string(),
         version,
-        uv: String::new(),
+        uv: previous.uv,
         created,
+        description: previous.description,
     };
     let Ok(body) = serde_json::to_string_pretty(&ready) else {
         return false;
@@ -246,12 +269,24 @@ pub fn auto_flag(data_dir: &Path) -> bool {
 }
 
 /// The prompt block for this host: the `setup-env` manual while the
-/// environment is pending, the one-line note once the flag is valid.
-pub fn prompt_block(data_dir: &Path, workspace: &Path) -> String {
+/// environment is pending, the one-line note plus the installed-software list
+/// once the flag is valid.
+///
+/// `shells` is whether `run_cmd` / `run_shell` are enabled: the whole block is
+/// about running things, so it stays out of a prompt whose model cannot.
+pub fn prompt_block(data_dir: &Path, workspace: &Path, shells: bool) -> String {
+    if !shells {
+        return String::new();
+    }
     let root = root(data_dir);
     auto_flag(data_dir);
     match status(data_dir) {
-        Status::Ready(ready) => prompt::env_ready_block(&ready.python, &ready.version),
+        Status::Ready(ready) => prompt::env_ready_block(
+            &ready.python,
+            &ready.version,
+            &root.display().to_string(),
+            &ready.description,
+        ),
         Status::Pending(reason) => {
             let lead = prompt::env_pending_block(&root.display().to_string(), &reason);
             let pointer = manuals::pointer_for(workspace, &[Manual::SetupEnv]);
@@ -262,6 +297,21 @@ pub fn prompt_block(data_dir: &Path, workspace: &Path) -> String {
             }
         }
     }
+}
+
+/// Directories from the host environment that `run_cmd` mounts on a child's
+/// `PATH`, in order: `<env root>/bin` (tools the assistant installed there) and
+/// the venv's `bin/` (`Scripts/` on Windows) when it really is a 3.13 one.
+pub fn tool_path_dirs(data_dir: &Path) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    let bin = root(data_dir).join("bin");
+    if bin.is_dir() {
+        dirs.push(bin);
+    }
+    if let Some(venv) = mounted_venv(data_dir) {
+        dirs.push(venv_bin_dir(&venv));
+    }
+    dirs
 }
 
 #[cfg(test)]
@@ -344,16 +394,19 @@ mod tests {
                 version: "3.13.13".to_string(),
                 uv: String::new(),
                 created: "2026-11-28T00:00:00Z".to_string(),
+                description: String::new(),
             },
         );
         assert!(matches!(status(&data), Status::Ready(_)));
 
-        let block = prompt_block(&data, &workspace);
+        let block = prompt_block(&data, &workspace, true);
         assert!(block.starts_with("ENVIRONMENT:"), "{block}");
         assert!(block.contains("3.13.13"), "{block}");
         assert!(!block.contains("MANUALS"), "ready must not announce a manual: {block}");
         // Nothing is seeded while the environment is complete.
         assert!(!workspace.join(prompt::MANUALS_DIR).exists());
+        // An empty inventory still says where installed software belongs.
+        assert!(block.contains("only the venv so far"), "{block}");
         let _ = fs::remove_dir_all(&data);
     }
 
@@ -361,7 +414,7 @@ mod tests {
     fn pending_block_points_at_the_manual_and_seeds_it() {
         let data = scratch("announce");
         let workspace = data.join("workspace");
-        let block = prompt_block(&data, &workspace);
+        let block = prompt_block(&data, &workspace, true);
         assert!(block.contains("(pending)"), "{block}");
         assert!(
             block.contains(".data/manuals/setup-env.md"),
@@ -471,4 +524,95 @@ mod tests {
         }
         let _ = fs::remove_dir_all(&data);
     }
+
+    /// Without `run_cmd` / `run_shell` the whole block is prompt noise: nothing
+    /// can be run, and the inventory would only cost tokens.
+    #[test]
+    fn nothing_is_injected_without_a_shell_tool() {
+        let data = scratch("nogate");
+        let workspace = scratch("nogate-ws");
+        assert_eq!(prompt_block(&data, &workspace, false), "");
+        assert!(prompt_block(&data, &workspace, true).contains("ENVIRONMENT (pending)"));
+        let _ = fs::remove_dir_all(&data);
+        let _ = fs::remove_dir_all(&workspace);
+    }
+
+    /// The flag's `description` is the inventory the prompt quotes back — and
+    /// only then, once a shell tool is enabled.
+    #[test]
+    fn the_inventory_is_quoted_in_the_ready_note() {
+        let data = scratch("inventory");
+        let workspace = scratch("inventory-ws");
+        let env_root = root(&data);
+        let venv = venv_dir(&env_root);
+        fs::create_dir_all(venv_bin_dir(&venv)).unwrap();
+        let python = venv_python(&env_root);
+        fs::write(&python, "").unwrap();
+        let ready = Ready {
+            python: python.display().to_string(),
+            version: "3.13.13".to_string(),
+            uv: "/usr/local/bin/uv".to_string(),
+            created: "0".to_string(),
+            description: "- <env root>/bin/rg — ripgrep 14.1".to_string(),
+        };
+        fs::write(ready_path(&env_root), serde_json::to_string(&ready).unwrap()).unwrap();
+
+        let block = prompt_block(&data, &workspace, true);
+        assert!(block.contains("ENVIRONMENT:"), "unexpected block: {block}");
+        assert!(
+            block.contains("ripgrep 14.1"),
+            "the inventory must reach the prompt: {block}"
+        );
+        assert_eq!(prompt_block(&data, &workspace, false), "");
+        let _ = fs::remove_dir_all(&data);
+        let _ = fs::remove_dir_all(&workspace);
+    }
+
+    /// `<env root>/bin` is mounted for installed tools, ahead of the venv, and
+    /// only when it exists.
+    #[test]
+    fn installed_tools_get_their_bin_on_the_path() {
+        let data = scratch("bindir");
+        let env_root = root(&data);
+        let venv = venv_dir(&env_root);
+        fs::create_dir_all(venv_bin_dir(&venv)).unwrap();
+        fs::write(venv_python(&env_root), "").unwrap();
+        fs::write(venv.join("pyvenv.cfg"), "version_info = 3.13.13\n").unwrap();
+        assert_eq!(tool_path_dirs(&data), vec![venv_bin_dir(&venv)]);
+
+        fs::create_dir_all(env_root.join("bin")).unwrap();
+        assert_eq!(
+            tool_path_dirs(&data),
+            vec![env_root.join("bin"), venv_bin_dir(&venv)]
+        );
+        let _ = fs::remove_dir_all(&data);
+    }
+
+    /// Rewriting the flag (the self-check path) keeps what an earlier turn
+    /// recorded about the installed software.
+    #[test]
+    fn the_self_check_keeps_the_inventory() {
+        let data = scratch("keepinv");
+        let env_root = root(&data);
+        let venv = venv_dir(&env_root);
+        fs::create_dir_all(venv_bin_dir(&venv)).unwrap();
+        let python = venv_python(&env_root);
+        fs::write(&python, "").unwrap();
+        fs::write(venv.join("pyvenv.cfg"), "version_info = 3.13.13\n").unwrap();
+        let stale = Ready {
+            python: "/gone/python".to_string(),
+            version: "3.13.13".to_string(),
+            uv: "/usr/local/bin/uv".to_string(),
+            created: "0".to_string(),
+            description: "- <env root>/bin/rg — ripgrep".to_string(),
+        };
+        fs::write(ready_path(&env_root), serde_json::to_string(&stale).unwrap()).unwrap();
+
+        assert!(auto_flag(&data), "a broken python path must be re-flagged");
+        let ready = read_ready(&data).expect("flag parses");
+        assert!(ready.description.contains("ripgrep"));
+        assert!(ready.python.contains("py313"));
+        let _ = fs::remove_dir_all(&data);
+    }
+
 }

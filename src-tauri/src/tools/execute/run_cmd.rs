@@ -53,13 +53,18 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
     }
 
     let scripts_dir = crate::workspace::scripts_root(&workspace_dir);
-    // The host Python venv rides along in every `run_cmd` child: its `bin/`
-    // joins the child's `PATH` right behind the script library and
-    // `VIRTUAL_ENV` names it, so `python` / `python3` — including the
-    // interpreter of a `.py` library script — is the 3.13 one. `run_shell`
-    // keeps the host interpreter on purpose.
-    let mounted_venv = crate::env::data_dir_from_app(app)
-        .and_then(|data_dir| crate::env::mounted_venv(&data_dir));
+    // The host environment rides along in every `run_cmd` child: `<env root>/bin`
+    // and the venv's `bin/` join the child's `PATH` right behind the script
+    // library, and `VIRTUAL_ENV` names the venv — so a tool the assistant
+    // installed in the environment root runs by bare name, and `python` /
+    // `python3` (including the interpreter of a `.py` library script) is the
+    // 3.13 one. `run_shell` keeps the host interpreter on purpose.
+    let data_dir = crate::env::data_dir_from_app(app);
+    let env_dirs = data_dir
+        .as_deref()
+        .map(crate::env::tool_path_dirs)
+        .unwrap_or_default();
+    let mounted_venv = data_dir.as_deref().and_then(crate::env::mounted_venv);
     let resolved = match scripts::resolve(&workspace_dir, program) {
         Ok(resolved) => resolved,
         Err(err) => return format!("Error: {err}"),
@@ -267,6 +272,7 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
             command_cwd,
             timeout_secs,
             cancel.cloned(),
+            &env_dirs,
             mounted_venv.as_deref(),
         )
         .await;
@@ -394,6 +400,7 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
         command_cwd,
         timeout_secs,
         cancel.cloned(),
+        &env_dirs,
         mounted_venv.as_deref(),
     )
     .await
@@ -406,7 +413,7 @@ pub(super) async fn handle(ctx: &ToolContext<'_>, args: &Value) -> String {
 /// `Command` argument and never re-parsed as shell syntax. Anything else goes
 /// through the historical `direct` command path. Both get the same
 /// [`process::Mounts`]: the script library and, when this host has one, the
-/// Python 3.13 venv.
+/// app-data environment (its `bin/` and the 3.13 venv).
 #[allow(clippy::too_many_arguments)]
 async fn run_run_cmd(
     workspace_dir: &Path,
@@ -417,10 +424,12 @@ async fn run_run_cmd(
     cwd: PathBuf,
     timeout_secs: u64,
     cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    env_dirs: &[std::path::PathBuf],
     venv: Option<&Path>,
 ) -> String {
     let mounts = process::Mounts {
         scripts: Some(scripts_dir),
+        env_dirs,
         venv,
     };
     match resolved {

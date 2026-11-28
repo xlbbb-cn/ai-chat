@@ -342,6 +342,11 @@ pub(crate) fn looks_like_windows_path(value: &str) -> bool {
 #[derive(Clone, Copy, Default)]
 pub(crate) struct Mounts<'a> {
     pub scripts: Option<&'a Path>,
+    /// Host directories from app data `env/` (e.g. `env/bin` for tools the
+    /// assistant installed), mounted behind the script library — `run_cmd`
+    /// passes `env::tool_path_dirs`, `run_shell` passes nothing.
+    pub env_dirs: &'a [PathBuf],
+    /// The 3.13 venv `VIRTUAL_ENV` names and whose `bin/` goes on `PATH`.
     pub venv: Option<&'a Path>,
 }
 
@@ -464,16 +469,22 @@ fn finish_command(
     }
 
     // Mounted in order: the script library first (a library script beats a
-    // same-named program), then the venv's `bin/`, then the inherited `PATH`.
+    // same-named program), then the app-data environment directories
+    // (`<env root>/bin`, the venv's `bin/`), then the inherited `PATH`.
+    // `prepend_to_path` de-duplicates, so a directory named twice is harmless.
     let mut mounted: Vec<PathBuf> = Vec::new();
     if let Some(dir) = mounts.scripts {
         mounted.push(dir.to_path_buf());
     }
+    mounted.extend(mounts.env_dirs.iter().cloned());
     if let Some(venv) = mounts.venv {
         mounted.push(crate::env::venv_bin_dir(venv));
         // A venv on `PATH` without `VIRTUAL_ENV` is half an activation: tools
         // that resolve their environment from it would still see the host.
         cmd.env("VIRTUAL_ENV", venv);
+        // `PYTHONHOME` overrides the venv's own prefix, so the "mounted" python
+        // would silently load the host stdlib — a real activation clears it.
+        cmd.env_remove("PYTHONHOME");
     }
     if !mounted.is_empty() {
         let dirs: Vec<&Path> = mounted.iter().map(PathBuf::as_path).collect();
@@ -504,6 +515,16 @@ fn finish_command(
 /// a directory containing `;` or spaces is passed through correctly.
 fn prepend_to_path(dirs: &[&Path]) -> std::ffi::OsString {
     use std::ffi::OsString;
+
+    // Callers assemble the mounts from several sources (script library, the
+    // environment root, the venv) and may name the same directory twice.
+    let mut unique: Vec<&Path> = Vec::new();
+    for dir in dirs {
+        if !unique.iter().any(|seen| seen == dir) {
+            unique.push(dir);
+        }
+    }
+    let dirs = unique.as_slice();
 
     let mut paths: Vec<PathBuf> = std::env::split_paths(
         &std::env::var_os("PATH").unwrap_or_else(OsString::new),
@@ -819,6 +840,7 @@ mod tests {
             None,
             super::Mounts {
                 scripts: Some(&scripts_dir),
+                env_dirs: &[],
                 venv: None,
             },
         )
@@ -878,6 +900,7 @@ mod tests {
             None,
             super::Mounts {
                 scripts: None,
+                env_dirs: &[],
                 venv: Some(&venv),
             },
         )
