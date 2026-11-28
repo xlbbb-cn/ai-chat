@@ -9,6 +9,27 @@ npm run changelog -- --from <上一个 tag> --to <本次 tag> --details --write
 条目按 Conventional Commits 的类型分组，作用域加粗；工作区里提交标题是英文、正文是中文，
 所以带 `--details` 时是中英对照。
 
+## [v3.9.2](https://github.com/xlbbb-cn/ai-chat/releases/tag/v3.9.2) — 2026-11-29
+
+### 新增
+
+- **tools,chat**: 提示词下沉收尾与会话级模型设置 ([`508d163`](https://github.com/xlbbb-cn/ai-chat/commit/508d163c2fc69d1a63b78bfef4854a44ae106549))
+  - schema：压缩复述代码已强制事实的 7 段描述
+  - memory：consolidate 的 apply 校验 keys 属于本次会话的 plan，且要求用户 明确要求整理记忆；.data/memory 由 file_actions 写保护
+  - file_actions：.data/todos 同样写保护；patch 前校验本会话已读（未读返回 文件头）；写入 .data/tmp 时提示交付物应放项目目录
+  - timer：同会话同 label/message 的 pending 定时器直接复用
+  - run_cmd/scripts：脚本库策略段压缩；同一命令第二次成功时提示存成脚本
+  - engine：{skill:<name>} 自动加载；显式调用语法仅在用户消息命中时注入； TODOS 段瘦身；回合尾“只写 tmp 未交付”提醒一次
+  - 后台轮次运行期间切走再切回，工具栏恢复该轮实际使用的模型与思考深度
+  - 后端在 turn-state / list_active_turns / get_turn_snapshot 上补 reasoning_effort
+  - 运行中的轮次锁定模型与深度控件
+
+### 杂项
+
+- bump version to 3.9.2 ([`60b9091`](https://github.com/xlbbb-cn/ai-chat/commit/60b9091a5719b95ffb64502ee831a766638a293f))
+
+**完整对比**：[v3.9.1...v3.9.2](https://github.com/xlbbb-cn/ai-chat/compare/v3.9.1...v3.9.2)
+
 ## [v3.9.1](https://github.com/xlbbb-cn/ai-chat/releases/tag/v3.9.1) — 2026-11-28
 
 ### 新增
