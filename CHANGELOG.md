@@ -9,6 +9,132 @@ npm run changelog -- --from <上一个 tag> --to <本次 tag> --details --write
 条目按 Conventional Commits 的类型分组，作用域加粗；工作区里提交标题是英文、正文是中文，
 所以带 `--details` 时是中英对照。
 
+## [v3.9.1](https://github.com/xlbbb-cn/ai-chat/releases/tag/v3.9.1) — 2026-11-28
+
+### 新增
+
+- **tools**: 工具调用行显示参数、结果与错误 ([`c48db41`](https://github.com/xlbbb-cn/ai-chat/commit/c48db4181d9d6e15a2fd64eae8508d9f7687343d))
+  - `tools/outcome.rs`（新）是唯一的测量点：`measure()` 把工具结果折成行数 / 行区间 / 退出码 / 匹配数 / 错误首行 / 耗时 / 输出首段，`call_label()` 给出单行参数标签。四十多个工具共用这一处，加新工具不需要动 UI。
+  - `engine.rs` 结算处把 outcome 同时写进 `tool-call` 事件（`events.rs` 新增可选字段）和 `record_tool_row` 快照，重挂载不退化；新增 `timed()` 按调用计时，并发段里各算各的，不互相冒领耗时。
+  - 计划阶段为每个会执行的调用先发一条带参数的标签行：没写进度行的工具（`memory`、`todos`、`calculator`）不再只剩一个工具名。后台任务与 `call_subagent` 跳过——它们有自己的行、结算不走 `tool-call`，提前建行会留下永久 running。`file_actions` 的读取行补 `(lines 40–80)`、搜索行补 `(max N)`。
+  - 前端修掉 `ToolCallEntry.error` 从不赋值：`App.tsx` 的 done 分支只改 `status`，所以失败行永远只有一个红点，`detailFor` 的 `summary ?? error` 也就永远取不到错误。现在 outcome 的失败首行落到 `error`，行内直接显示，折叠卡片也显示最新一步的失败原因。
+  - 指标行是 11px `--c-muted` 的分隔文本（`DESIGN.md` 的元数据规则：不做 pill、不填色、不用强调色），失败行不显示指标只显示错误；每行的输出预览按需展开（`<details>` + `pre`，上限 320px）。没有 outcome 的历史行渲染完全不变。
+  - 三语补 `toolGroup.metrics.*` / `toolGroup.output.*`；计划与实施状态记在 `docs/tool-call-outcome-plan.md`。
+- **chat**: 输入框加 &path 引用，只带路径不带文件内容 ([`455fc5d`](https://github.com/xlbbb-cn/ai-chat/commit/455fc5d25d721c43ba46a9f9575ff5f1ddca4a80))
+  - `src/pathRef.ts`（新）：`&` 必须在行首或空白之后，终止集是空白 / `&` / `@` / `#` / `<` / `>`，所以 `R&D`、`A & B`、`cmd &&x` 都不触发；`isPathRefExpressible` 把含空格或终止字符的路径挡在列表外（插进去会指向另一个文件）。`activeMentionQuery` 的终止集补 `&`——否则 `@a&b` 会让 `@` 弹窗留在打开态，破坏「最多一个弹窗」的契约。
+  - `FileMentionPopup` 加 `mode="path"`：同一个外壳、同一套键盘契约，只换 aria/header 文案，并把行内图标改成中性色（path 模式不过滤能力，图标不该再暗示"这个模型能不能吃这个格式"）。没有新增组件，也没有新增 CSS。
+  - `App.tsx` 复用 `ensureWorkspaceFiles` 的 15s 缓存，两个弹窗共享一次工作区遍历；`handleKeyDown` 里三段 ternary 改写成一张四弹窗的表（`open/count/move/accept`），加第五个触发器时不会再漏掉 ↑↓ / Enter / Tab / Esc。`&` 是唯一在回复进行中仍保留的弹窗：注入的文本不携带附件，`&path` 只是文本。
+  - 发送链路零改动就达成了"不附加内容"：`MENTION_RE` 只匹配 `@`，`resolveFileMentions` 看不到 `&` token，`partsForContent` 收到的附件列表为空，请求里没有 file/image part，也没有 handoffNote。`ChatMessage` 只补一层 `highlightPathRefs`，沿用 `.file-mention-token` 强调色——两者都是"指向一个工作区文件"，差别由弹窗解释，不该由正文颜色承担。
+  - 三语补 `app.pathRef.{title,hint,noMatches}`，placeholder 与注入态提示加 `&`；文档：`modules.md` 记下这个 token 永不进附件管线及由此推出的三条结论，`DESIGN.md` 从三个 trigger 改为四个并写明 `&` 的注入例外，wiki 中英两页与模块树同步。
+- **agents**: 编排设置收进子智能体行，展开入口改成无框文字 ([`2a5a8ef`](https://github.com/xlbbb-cn/ai-chat/commit/2a5a8efadaac7ce64588717e80c15b163cc0cbca))
+  - 触发器去掉框：新增共享原语 `.text-btn`（透明、`border: none`、`--c-accent-text` 12px/500 标签、`--r-sm` 圆角），不再借用 `.inline-edit-btn` 的框体；组件样式表只留 `flex-shrink: 0`，不覆盖原语的框。
+  - hover 走 `--c-accent-soft` 填充而不换字色：玫瑰粉 palette 的 `--c-accent-text` 在纸面上 7.1:1，换成 `--c-accent` 只剩 4.6:1，12px 的文字不能这样掉对比。
+  - 触发器高度从 28px 回到 20px，与其余设置行齐平；chevron 取 `currentColor` 跟随 accent 标签，不再是 `--c-muted`。`aria-expanded` / `aria-controls` 保留。
+  - 三语补 `agents.moreSettings`；原 `agents.orchestration` 文案转作按钮的 `title`，key 不删。DESIGN.md 新增「Text action」小节，并改写 §Disclosure row 的行内变体。
+- **chat**: 空态背景改为逐代生长的年轮 ([`ad332d6`](https://github.com/xlbbb-cn/ai-chat/commit/ad332d683d70f524ad7b46298d229425724e8bca))
+- **sidebar**: 侧栏外缘跟随窗口圆角 ([`3fbea59`](https://github.com/xlbbb-cn/ai-chat/commit/3fbea596fbc3dc6343b23ea7cd288bc8d8fbd16f))
+- **tools**: 工具项不再折叠，自动确认模式挂到运行脚本行上 ([`77f1d91`](https://github.com/xlbbb-cn/ai-chat/commit/77f1d91222ae23af254f504eed20bcc03591324f))
+  - 工具描述已是单行，去掉每一项的展开箭头与折叠描述框（`expandedTool` 状态、 `.tool-actions` / `.tool-action-btn*` / `.tool-desc-expanded` 一并删除）。
+  - 「自动确认模式」从面板底部的独立分组挪进「运行脚本」这一项：标题行尾部是折叠 箭头，展开后 4 类确认与「全部自动获批」在名称列下方展开，左边线与工具名对齐； 默认收起（`useState(false)`，不再有加载完成后再收起的闪动）。
+  - 工具项改成两列网格（`.tools-list .tool-item`）：开关固定在第 1 列第 1 行并垂直 居中，`.tool-info` 在第 2 列第 1 行，展开块在第 2 列第 2 行，所以展开与收起时 开关坐标完全相同；对应删除 `.tool-row` 包裹层、`:has` 两条对齐补丁和 `.tool-info` 的 `flex: 1`。
+  - 关闭态变灰只作用于标题、说明和开关（从 `App.css` 的共享规则里移除 `.tool-item.disabled`），展开的确认选项仍可读可点。
+  - 验证：`tsc --noEmit` 与 `vite build` 通过。本机没有可用的无头浏览器 （node_modules 无 playwright/puppeteer，`msedge --dump-dom` 返回空），布局按 盒模型与网格行核对，未截图验证。
+- **tools**: 精简模型侧工具描述，去掉示例只留约束 ([`0eb06f2`](https://github.com/xlbbb-cn/ai-chat/commit/0eb06f2e7b3e1753d2477266fad95c897aef2faa))
+  - `src-tauri/src/tools/{schema,experience,mcp_self,skill_admin}.rs` 的工具描述 合计约 9.5k → 5.8k 字符：`run_cmd` 1349→744、`run_shell` 1361→768、 `file_actions` 1286→409、`memory` 1509→979、`todos` 701→406、 `experience` 810→604、`skill_merge` 555→388、`mcp_self` 约 1.8k→0.8k。
+  - 保留会让调用直接出错的那几条：`run_cmd` 的脚本库 / 裸程序解析与拒绝路径和 shell 解释器，`run_shell` 的本机 shell 与无 UAC，`file_actions` 的 `./` 路径与 `.data/chat.db` 只读，`memory` 的作用域和 TRUST CALIBRATION（含 `tests.rs` 锁定的 "is prepended to that message" 与 `conflict: true` 措辞），计算器的 "NEVER guess a number" 及 `run_cmd` / `run_shell` 兜底分支。示例、教程式的 分步说明移交给 `.data/manuals`。
+  - 参数描述保持原样：模型靠它们决定参数形状。
+  - 验证：`cargo check --manifest-path src-tauri/Cargo.toml --lib --tests` 通过； 测试二进制在本机仍以 0xc0000139 起不来（改动前即如此，与本次无关）。
+- **i18n**: 说明性文案压成一行，工具说明压到 10–30 字符 ([`8109788`](https://github.com/xlbbb-cn/ai-chat/commit/8109788adaf49f5cd7d5f5754a69693ccd90bdc0))
+  - 三语 `src/i18n/messages/{en,zh-CN,zh-TW}.ts` 共 96 条说明性文案（hint、副标题、 空状态、tip）改写成一句话：英文平均 144 → 64 字符，中文 59 → 27 字符。占位符 （`{prompt}` `{cwd}` `{model}` `{rounds}` 等）与各语言既有术语保留：zh-CN 用 智能体 / 自我进化 / 插件，zh-TW 用代理程式 / 自我演化 / 外掛，`+智能体` 与 `+代理程式` 这类本地化触发词照旧。
+  - 模型侧文案不在此列：`app.fileMention.handoffNote`、`agents.toolHints.*` 原样 保留，只动界面上的说明文字。
+  - 工具面板的 7 条 `tools.items.*.description` 由多段（最长 600 字符）压成单行 10–30 字符，只留"做什么"；细节仍由工具 schema 提供给模型。
+  - 验证：`node node_modules/typescript/bin/tsc --noEmit` 与 `node node_modules/vite/bin/vite.js build` 通过。
+- **prompt**: inject no drawing block when enhanced figures is off ([`f8e8dee`](https://github.com/xlbbb-cn/ai-chat/commit/f8e8dee6ee9e269a208fddf48f2faa366c67ff44))
+  - 关闭「增强画图」后提示词里不再有任何画图说明：`mermaid` 从关闭路径上撤掉， 画图提示只存在于增强画图手册体（`figures::prompt_block()`）里，`mermaid` 仍排在 `flow` / `svg` / `carve` / `html-fig` 前面当最便宜的选项。
+  - 删除 `figures::mermaid_prompt_block()` 与两个只服务于它的单测 (`mermaid_prompt_block_asks_for_mermaid` / `prompt_blocks_differ`)； `engine.rs` 的关闭分支改成空串。`prompt_block_names_every_markup` 继续覆盖 mermaid / caption。
+  - 渲染不变：`mermaid` 围栏（含用户自己粘贴的）仍由 `mermaidDiagrams.ts` 画成卡片， 与开关无关。
+  - 文档与界面说明同步：`lib.rs` / `types.ts` 字段注释、三语 `enhancedFiguresHint`、 DESIGN.md、workflow.md、wiki 中英文绘图表（新增 Mermaid 行）。
+  - 验证：`node node_modules/typescript/bin/tsc --noEmit` 与 `cargo check --manifest-path src-tauri/Cargo.toml --lib --tests` 通过；运行中的应用 占着 target 锁，`cargo test` 二进制仍以 0xc0000139 起不来。
+- **prompt**: list Mermaid in the enhanced figures manual, and gate background_task on a usable flag ([`8cb82f9`](https://github.com/xlbbb-cn/ai-chat/commit/8cb82f9cfd31e2a4d5608da7b63c78c5e600f3eb))
+  - 增强画图提示词：`figures::prompt_block()` 增加 `mermaid` 一条（支持的图表类型、caption 约定、含 `()[]/` 的标签要加引号），并把 `flow` 的取舍改成“需要配色或边动画时才优先”；手册指针描述同步写成 `mermaid` / `flow` / `svg` / `carve` / `html-fig`。手册体在 `.data/manuals/enhanced-figures.md`，指纹变化后下次注入自动刷新并留备份。
+  - 后台执行：`run_in_background` 由三处加上（本地工具、MCP 工具、`call_subagent`），所以新增 `tools::advertises_background` 与 `tools::prune_unreachable_background_control`，由 `build_turn_tools` 在整份工具表组装完成后调用——表里没有任何一个工具带这个参数时，`background_task` 不再插进提示词，避免模型面对一个什么都管不了的控制工具。
+  - 文档同步：`docs/agents/workflow.md`、`docs/DESIGN.md`、wiki 中英文工具表。
+  - 测试：新增 `background_control_tool_needs_a_tool_that_accepts_the_flag`，`prompt_block_names_every_markup` 增加 mermaid / caption 断言。本机运行中的应用会让测试二进制以 0xc0000139 起不来，改以 `cargo check --lib --tests` 验证编译。
+- **env**: mount the app-data environment in run_shell too, and read whatever ready.json describes ([`5fef9cf`](https://github.com/xlbbb-cn/ai-chat/commit/5fef9cfd9c33c119540f88b9541132de9b403c63))
+  - run_shell (and its `serve` processes) now mount the host environment like run_cmd: `<env root>/bin`, the uv directory the flag names and the venv's `bin/` (`Scripts/`) join the child's PATH, VIRTUAL_ENV names the venv. The workspace script library stays run_cmd's alone.
+  - read_ready() takes the fields by name instead of a fixed struct, so a flag that spells `python` as an object (`{exe, venv, version}`), `created_at` and unknown keys (`schema_version`, `tools`, `notes`) is understood rather than read as unreadable. flagged_venv() derives the venv from the flagged interpreter and wins over the `<env root>/py313` + pyvenv.cfg convention.
+  - publish() also exports AI_CHAT_PYTHON (the venv interpreter, when the flag names one) and refreshes on every prompt build, so an artifact re-execs under 3.13 without parsing the flag itself.
+  - The prompts and tool descriptions stop explaining what the tool now does on its own: the ENVIRONMENT note, the setup-env manual and PYTHON_SECTION keep only what the model must decide (install there, record the inventory, stay stdlib-only), and use_venv() shrinks to a read of AI_CHAT_PYTHON.
+  - process::build_command had only serve's tests left as callers; serve builds through build_command_with_path directly.
+- **env**: install assistant software under app data/env and inventory it in ready.json ([`ffd192a`](https://github.com/xlbbb-cn/ai-chat/commit/ffd192a8cfa1fc295e1252eacabb42d772bda8a6))
+  - `ready.json` 新增 `description`：每个安装项一行（路径 + 版本），提示词按原文引用； 自检重写 flag 时保留该字段，不会把清单清空。
+  - 环境块只在 `run_cmd` / `run_shell` 开启时注入——没有 shell 工具就没有可运行的东西， 清单只会变成提示词噪声（关闭时返回空串，有测试）。
+  - `setup-env` 与三本 create-* 手册改写：app data 是宿主安装根，装完必须更新 `description`；`AI_CHAT_ENV_ROOT` 仍是运行时入口。
+  - 审查前 5 个提交时发现的同类问题一并修掉：挂载 venv 需清除 `PYTHONHOME`； 手册里「3.14」的表述改成与宿主无关的说法。
+- **run_cmd**: mount the app-data Python 3.13 venv in its children ([`b18daa3`](https://github.com/xlbbb-cn/ai-chat/commit/b18daa35934a1c91659c4c483c751a85d547e371))
+- **env**: self-check an existing venv and write the completion flag ([`d0c0f10`](https://github.com/xlbbb-cn/ai-chat/commit/d0c0f103072b85a022a9cf83eed8da95bec817f7))
+- **env**: keep the host Python environment in app data behind a completion flag ([`fa4dfc1`](https://github.com/xlbbb-cn/ai-chat/commit/fa4dfc1883c25d9c70dee8e33259f0b19d923267))
+- **prompt**: recommend Python plus a uv-managed 3.13 environment in the authoring manuals ([`6a0f529`](https://github.com/xlbbb-cn/ai-chat/commit/6a0f5298419f0974d278f305566b6f35c4573727))
+- **agents**: identify sub-agent and cloud-agent traffic with a User-Agent ([`35923b0`](https://github.com/xlbbb-cn/ai-chat/commit/35923b08997079861243f5654732344b47932939))
+  - `http.rs` 新增 `AGENT_USER_AGENT` 与 `build_agent_client()`；两个流式客户 端共用的超时策略抽成 `stream_policy()`，`build_stream_client` 行为不变。
+  - `agents/planning.rs` 的 `build_agent_client()` 是全部子 Agent 请求的唯一 客户端（选择器、规划、任务执行、supervisor 都是 clone 它），一处改动覆盖 整条链路；顺带清掉 `agents.rs` 里随之失效的 `build_stream_client` 导入。
+  - `agents/cloud.rs` 的面板探活 `probe` 与 `run` 两个客户端都带同一 UA，成果 媒体下载复用 `run` 的客户端，因此也带。
+  - 单测锁定格式：小写、ASCII、版本等于 `CARGO_PKG_VERSION`。
+
+### 修复
+
+- **turn**: 一轮若从未发出终止事件，前后端各自收尾 ([`ad622c5`](https://github.com/xlbbb-cn/ai-chat/commit/ad622c5d62d202b2c92ceceb02919ff53b873680))
+  - `LlmTurn` 新增 `announced`：`emit_done` / `emit_error` 置位；`chat_completion` 在 invoke 直接返回 `Err` 时 `mark_announced()`，因为前台已按 rejection 收尾，backstop 不该再为同一次失败报第二遍。
+  - `TurnEndGuard` 改为持有 `Arc<LlmTurn>`，不再复制那一堆散字段。清理时若这一轮从未 announce，guard 自己发一条终止失败（`TURN_INTERRUPTED`），而不只是把自己从 registry 摘掉。
+  - `chatCompletion` 返回 `TurnHandle`：调用方式与原来的 unlisten 完全一致，多一个 `abandon` 供对账使用。registry 里已经没有这一轮（按 turn id、宽限期后复查一次，因为 base 会先于事件被 unpublish 几毫秒）时，前台自己收尾；新增三语文案 `app.turnLostEvent`。
+  - streaming 期间每 10s 主动对账一次：丢了终止事件的一轮和"很慢的一轮"看起来一模一样，只在 focus / 挂载 / 切会话时才对账，会把 Stop 一直卡在界面上，而用户盯着的那一轮正是唯一能靠这一眼救回来的情况。
+- **dev**: 让 Vite 监听双栈地址，WebKitGTK 才能连上 devUrl ([`0e7b9b1`](https://github.com/xlbbb-cn/ai-chat/commit/0e7b9b1166a956e13d5e3470d49fa219ddff4b93))
+
+### 重构
+
+- **agents**: 把编排判断下沉成确定性代码 ([`7d54154`](https://github.com/xlbbb-cn/ai-chat/commit/7d541542ee0cd27e5ac80f7b93a563a5183e5a0c))
+  - `OrchestrationMode`（新增 `agents/mode.rs`）：开关 × roster × bus 的组合只在一处判定，`engine` 用它替掉原来的 `planning_enabled` 与内层 `has_enabled` 两层嵌套，并在日志里直接给出本轮模式。
+  - `execution_mode` 由依赖图派生：按最长路径分层，最宽的一层只有一个任务才判 sequential。模型填的值只在冲突时记一条 issue，不再采信——执行器本来按 wave 调度，让模型决定并发只会把菱形图的并行波一起杀掉。
+  - `delegation_hint`：短、单行、无链接/路径/代码块的请求判 `No`，直接直答（省掉选择器与规划两次调用）；两个以上链接、成对代码块或多工标记判 `Yes`，跳过选择器用全量 roster；其余仍问模型。判 `No` 代价有限：主智能体自己握着全部工具，丢的只是并行度。
+  - 选择器只回答"谁参与"，不再回答"要不要派"（老模型仍返回 `delegate` 时记 INFO 后忽略）；roster 内所有 agent 的能力签名完全相同时不调模型——那种选择没有信息量。
+  - 规划两次解析失败时回落到单任务（能力最全的 agent），不再把整轮静默降级成直答；`MAX_PLAN_TASKS` 渲染进提示词，原来模型不知道上限、多出来的任务被静默截断。
+  - `cwd` 在解析期做词法校验，越界路径清空并记 issue（不校验存在性：既有语义允许任务 scaffold 新目录）。
+  - 监督器：所有任务已是终态时直接收工，不调模型；重复的 `mbus send` 由工具拒绝，那条"不要重复之前的指导"从请求变成强制。
+  - 文档：`docs/prompt-sinking-review.md`（提示词层评审）、`docs/model-judgment-plan.md`（21 项全景清单、逐项改法与落地状态）。
+
+### 文档
+
+- **manuals**: describe the environment root as the install home, not only a venv ([`6afc3e3`](https://github.com/xlbbb-cn/ai-chat/commit/6afc3e3e3d75aa50cb32694fb8ba68635d37d130))
+
+### 杂项
+
+- bump version to 3.9.1 ([`4de9ce6`](https://github.com/xlbbb-cn/ai-chat/commit/4de9ce6aa14c9f9e57750236b1595aceb886b1cc))
+
+### 其它
+
+- Plugin creation manual: document the settings schema, and stop punishing a miss ([`cebbc3c`](https://github.com/xlbbb-cn/ai-chat/commit/cebbc3c887ade914efecd0d69379ab7e3e2e828e))
+  - `create-plugin` 手册的「设置」从一段括号清单改成一节完整参考：`sections[] → fields[]` 两级、**section 与 field 都必须写 `key`**、可直接复制的 `config.schema.yaml` 示例（text / enum / integer / secret / advanced / reveal_when）、字段表，以及「解析失败怎么办」——把 `sections[0]: missing field 'key'`、`unknown variant`、`options: invalid type`、缩进类报错逐条对上修法。创建插件时反复踩的就是这一类：手册原先只列类型名，既没有示例，也没说 `key` 是必填。
+  - 同样的示例进了 `docs/wiki/{en,zh}/plugins.md` 的「设置」小节（各 +36 行），那是面向用户的一份。
+  - 手册里的 YAML 示例现在有测试兜底：`plugins::tests::the_creation_manual_settings_example_parses` 从 `prompt::plugin_manual()` 取出 ```yaml 块按 `ConfigSchema` 解析，并断言每个 section / field 都有 `key`，文档不会再漂成一份加载不了的形状。
+  - 解析器对「差一点」的 schema 不再直接翻脸：`sections[].key` 可以省略（用标题 slug 派生，重名追加 `_2`，无 ASCII 的标题退化为 `section_<n>`），`label` / `help` 读作 `title` / `description` 的别名 —— 手写 schema 最容易漏这两处，而漏 `label` 从前只会静默变成空标签。字段缺 `key` 仍然报错：它是存储名，猜一个会让已存的值变孤儿。
+  - 导出不再被坏 schema 卡死：`config.yaml` 留在工作区，`PluginExportReport.settings_note` 带解析器原文，前端提示改成「设置未随包导出：<原因>」。读不懂 schema 就无法证明哪个值是 secret，那就一个值都不打包 —— 不泄漏，也不阻断。
+  - `docs/agents/architecture.md`：包与设置两条 bullet 补上 `settings_note` 以及 key / 别名的规则。
+- Plugin manager: export and import plugin packages ([`256c0ba`](https://github.com/xlbbb-cn/ai-chat/commit/256c0ba4113501ce8394a700f5957e14beb29707))
+  - 新增 `plugins/package.rs`：`export_plugin_package` 把单个插件文件夹打成 `.zip`（根目录 `plugin.json`），跳过隐藏文件、`*.bak.*`、`node_modules/` 与各类缓存目录；仅当插件声明 `config.schema.yaml` 时才带上 `config.yaml`，且先按 schema 删掉所有 `secret` 字段的值。`import_plugin_package` 接受这一格式或手工打的单层文件夹 zip，从清单推导 id，先解到 `.data/plugin-backups/.staging-<uuid>/`，校验清单与声明过的 `entry` / `config_schema`，把已安装副本移到 `.data/plugin-backups/<id>-<ms>/` 后再就位；加载器拒绝的清单会回滚整次导入。`safe_join` 防 zip-slip，`MAX_PACKAGE_FILES` / `MAX_PACKAGE_BYTES` 防 zip 炸弹；清单只从已读文本写一次，包里不会出现两个 `plugin.json`。
+  - 重装运行中的插件：导入前先用 `package_id()`（只读中央目录与清单，不落盘）取出包要安装的 id 并停掉其实例，因为 Windows 不允许重命名仍被进程占用的目录；导入失败时把原先运行的插件重新拉起。为此 `package.rs` 抽出 `open_archive` / `survey` / `read_archive_manifest` / `derive_id`，由 `import_plugin` 与 `package_id` 共用。
+  - 插件管理窗：工具栏新增“导入插件包”，Start/Stop 旁新增“导出”，保存对话框预填 `<id>-<version>.zip`。提示区分成功与失败，并报告文件数、旧副本位置、移除的密钥数、设置是否随包走；插件列表新增过滤框与 `shown of total` 计数，列表本身只留清单，不再放按钮。新增 `PluginExportReport` / `PluginImportReport` 类型与 `exportPluginPackage` / `importPluginPackage` 封装，三语文案补齐。
+  - `PluginManagerPanel.css` 回归设计契约：删掉自建的 `.pm-button*` / `.pm-icon-button`，改用共享的 `.btn-primary` / `.btn-secondary` / `.close-btn` / `.panel-search-input`（只留 34px 的 `.pm-action` 尺寸修饰），字面色值换成 `--c-success` / `--c-danger` / `--c-warning`，6–14px 圆角与胶囊换成 `var(--r-sm)`，投影换成 `var(--shadow-lg)`，对话框面回到 `--c-surface` + `--c-border-i`，遮罩换成 `--c-bg` 混合加 `--glass-blur-scrim`，去掉全大写与字距，控件统一 34px。
+  - `capabilities/plugin-manager.json` 增加 `dialog:allow-open` / `dialog:allow-save`：该窗口此前只有 `core:default`，包的打开/保存对话框在运行时被拒（`dialog.open not allowed on window "plugin-manager"`）。只多这两项，仍未授予任何 fs/shell 能力（`notify.json` 保持原样）。
+  - 文档：`docs/agents/architecture.md`、`docs/wiki/{en,zh}/plugins.md` 记录包格式、密钥策略、备份目录、重装时先停实例与新的 IPC。
+  - 验证：`cargo test --lib plugins::` 22 项通过，`cargo check --lib` 通过，`npx tsc --noEmit` 与 `npx vite build` 通过。
+- Identify outbound requests as Rabbit Chat Studio with version ([`41cdac1`](https://github.com/xlbbb-cn/ai-chat/commit/41cdac15858563dd4e29052e544703f8e94f90e5))
+  - 常量从 agent 专用提升为应用级出站身份 `rabbit-chat-studio/<版本>`， 版本仍由 `Cargo.toml` 编译期注入，测试锁定形态（小写 ASCII + 含版本）。
+  - `update::build_client` 改用共享常量，GitHub 拒绝无 UA 的约束保留在注释里。
+  - 云 Agent / 子 Agent 客户端沿用同一常量；聊天主链路依旧不发 UA， 网关才能区分后台 agent 流量与对话流量。
+  - 模型目录（独立 crate）的 `rabbit-chat-studio-catalog/<版本>` 保持不动， 该后缀标识的是另一个子系统。
+
+**完整对比**：[v3.9.0...v3.9.1](https://github.com/xlbbb-cn/ai-chat/compare/v3.9.0...v3.9.1)
+
 ## [v3.9.0](https://github.com/xlbbb-cn/ai-chat/releases/tag/v3.9.0) — 2026-11-27
 
 ### 新增
