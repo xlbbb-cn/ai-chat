@@ -12,6 +12,9 @@
 //! the `setup-env` manual (the model reads it, builds the venv, verifies, and
 //! writes the flag); once it is valid only the one-line `ENVIRONMENT` note is
 //! injected. Preparing the environment is therefore a one-time cost per host.
+//! The model is not the only writer: [`auto_flag`] verifies a venv that already
+//! exists (`-V` must answer 3.13) and writes the flag itself, so building the
+//! venv is enough and a forgotten flag is not a dead end.
 //!
 //! The absolute root is exported to every child process as
 //! [`ENV_ROOT_VAR`] (`env::publish`), so a script can find the venv at
@@ -19,6 +22,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
@@ -119,10 +123,57 @@ pub fn publish(data_dir: &Path) {
     std::env::set_var(ENV_ROOT_VAR, root(data_dir).as_os_str());
 }
 
+/// Self-check: when the venv is there and its interpreter reports 3.13, write
+/// the completion flag instead of insisting on a manual step.
+///
+/// Called from [`prompt_block`], so it costs one `-V` spawn at most — and only
+/// while the environment is pending **and** the interpreter file exists. An
+/// interpreter that reports anything but 3.13 (a 3.14 system venv, a broken
+/// wrapper) leaves the flag alone, which keeps the `setup-env` manual in the
+/// prompt instead of silently answering "ready" to a mismatch.
+pub fn auto_flag(data_dir: &Path) -> bool {
+    if matches!(status(data_dir), Status::Ready(_)) {
+        return false;
+    }
+    let root = root(data_dir);
+    let python = venv_python(&root);
+    if !python.is_file() {
+        return false;
+    }
+    let out = match Command::new(&python).arg("-V").output() {
+        Ok(out) if out.status.success() => out,
+        _ => return false,
+    };
+    let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+    text.push_str(&String::from_utf8_lossy(&out.stderr));
+    let version = text.trim().trim_start_matches("Python ").trim().to_string();
+    if !version.starts_with("3.13") {
+        return false;
+    }
+    let created = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| since.as_secs().to_string())
+        .unwrap_or_default();
+    let ready = Ready {
+        python: python.display().to_string(),
+        version,
+        uv: String::new(),
+        created,
+    };
+    let Ok(body) = serde_json::to_string_pretty(&ready) else {
+        return false;
+    };
+    if fs::create_dir_all(&root).is_err() {
+        return false;
+    }
+    fs::write(ready_path(&root), body).is_ok()
+}
+
 /// The prompt block for this host: the `setup-env` manual while the
 /// environment is pending, the one-line note once the flag is valid.
 pub fn prompt_block(data_dir: &Path, workspace: &Path) -> String {
     let root = root(data_dir);
+    auto_flag(data_dir);
     match status(data_dir) {
         Status::Ready(ready) => prompt::env_ready_block(&ready.python, &ready.version),
         Status::Pending(reason) => {
@@ -244,6 +295,47 @@ mod tests {
             workspace.join(".data/manuals/setup-env.md").is_file(),
             "the announced manual must exist as a file"
         );
+        let _ = fs::remove_dir_all(&data);
+    }
+
+    /// A venv nobody flagged still counts once its interpreter answers 3.13.
+    #[cfg(unix)]
+    #[test]
+    fn self_check_writes_the_flag_for_a_working_venv() {
+        let data = scratch("selfcheck");
+        let python = venv_python(&root(&data));
+        fs::create_dir_all(python.parent().unwrap()).unwrap();
+        fs::write(&python, "#!/bin/sh\necho 'Python 3.13.9'\n").unwrap();
+        let mut perms = fs::metadata(&python).unwrap().permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+        fs::set_permissions(&python, perms).unwrap();
+
+        assert!(auto_flag(&data), "a 3.13 venv must get a flag");
+        match status(&data) {
+            Status::Ready(ready) => {
+                assert_eq!(ready.version, "3.13.9");
+                assert_eq!(ready.python, python.display().to_string());
+            }
+            Status::Pending(reason) => panic!("the flag should be ready: {reason}"),
+        }
+        let _ = fs::remove_dir_all(&data);
+    }
+
+    /// An older interpreter must not be auto-flagged — the manual terms are
+    /// still true, so the `setup-env` pointer has to stay.
+    #[cfg(unix)]
+    #[test]
+    fn self_check_refuses_another_version() {
+        let data = scratch("wrongver");
+        let python = venv_python(&root(&data));
+        fs::create_dir_all(python.parent().unwrap()).unwrap();
+        fs::write(&python, "#!/bin/sh\necho 'Python 3.14.2'\n").unwrap();
+        let mut perms = fs::metadata(&python).unwrap().permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+        fs::set_permissions(&python, perms).unwrap();
+
+        assert!(!auto_flag(&data), "3.14 must not be flagged as the 3.13 env");
+        assert!(matches!(status(&data), Status::Pending(_)));
         let _ = fs::remove_dir_all(&data);
     }
 }

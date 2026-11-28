@@ -127,6 +127,11 @@ then does the pointer block shrink to the one-line `ENVIRONMENT` note. An unread
 one pointing at a missing interpreter, keeps this manual in place: fix the venv or rewrite the
 flag. Deleting the flag to "retry" is pointless — its absence is the pending state.
 
+Writing the flag by hand is the fast path, not a requirement: the app also self-checks on the
+next turn, and when `<env root>/py313` exists and `-V` prints `3.13` it writes the flag itself.
+An interpreter that answers anything else (that 3.14 you were told not to use) stays pending,
+so the check cannot paper over a wrong version.
+
 ## Keep artifacts independent of it
 
 Skill scripts, MCP servers and plugins stay **stdlib-only and 3.9+ compatible** (see the
